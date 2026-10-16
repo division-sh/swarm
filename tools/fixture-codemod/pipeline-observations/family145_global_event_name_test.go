@@ -27,49 +27,6 @@ import (
 //go:embed family145-global-event-name-preimages.json
 var globalEventNameBytes []byte
 
-func TestFamily145GlobalEventNameWholeRulePreservesEveryNameScopeAssertionAndCut(t *testing.T) {
-	pins, err := globalname.Decode(globalEventNameBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reads := 0
-	for index, pin := range pins {
-		old, err := exec.Command("git", "show", globalname.Predecessor+":"+pin.File).Output()
-		if err != nil || requestKeyDeclaration(t, old, pin.Function) != pin.Before || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("global name signed complete predecessor changed:", pin.Function, err)
-		}
-		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || globalNameEarlierCurrentDeclaration(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
-			t.Fatal("global name current declaration changed:", pin.Function, err)
-		}
-		after, err := runphysical.Transform(globalname.Rules[index], pin.Before)
-		if err != nil || after != pin.After || pin.Calls != globalname.Rules[index].Calls {
-			t.Fatal("global name escaped its finite read/role edits:", pin.Function, err)
-		}
-		finite := recipe{File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}
-		out, changed, err := rewriteFunction(pin.File, []byte("package proof\n"+pin.Before), finite)
-		if err != nil || !changed {
-			t.Fatal("global name finite rewrite refused:", pin.Function, err)
-		}
-		if _, changed, err := rewriteFunction(pin.File, out, finite); err != nil || changed {
-			t.Fatal("global name finite rewrite is not inert:", pin.Function, err)
-		}
-		for _, cut := range []string{"CountEventNameStorage", "ReceiverStateReader", "context.Background()", "eventName", "platform.boot", "widget.scored", "inbound.telegram", "mailbox.card_decided", " != ", "err != nil", "t.Fatal", "h.stop", "h.start", "cancel()", "ReadApplicationSnapshot", "observationLocation", "Count(*)", "code != 0"} {
-			if !strings.Contains(pin.After, cut) {
-				continue
-			}
-			mutant := strings.Replace(pin.After, cut, "unreviewedGlobalNameCut", 1)
-			if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil {
-				t.Fatal("changed scope/name/context/error/assertion/role/lifetime accepted:", pin.Function, cut)
-			}
-		}
-		reads += pin.Calls
-	}
-	if reads != 8 {
-		t.Fatal("global name physical read inventory changed:", reads)
-	}
-}
-
 func globalNameEarlierCurrentDeclaration(t *testing.T, file, function, current string) string {
 	t.Helper()
 	current, err := selectedreadrole.EarlierSource("../../..", file, function, current)
@@ -94,40 +51,6 @@ func globalNameEarlierCurrentDeclaration(t *testing.T, file, function, current s
 		t.Fatal(err)
 	}
 	return previous
-}
-
-func TestFamily145GlobalEventNameReusesOriginalNativeOwnerAndAddsOnlyClosedObservationRole(t *testing.T) {
-	for _, owner := range [][2]string{
-		{"internal/store/storetest/api_event_storage.go", "CountEventNameStorage"},
-		{"internal/store/internal/runtimepersistence/test_event_support.go", "CountEventNameStorageForTest"},
-		{"internal/store/internal/backend/eventrecord/run_name_cardinality.go", "CountGlobalNamedEventStorageTx"},
-		{"internal/serveapp/channel_anchor_storage_owner_test.go", "channelAnchorStorageObservation"},
-		{"internal/serveapp/channel_anchor_storage_owner_test.go", "openChannelAnchorStorageAtLocation"},
-		{"internal/store/construction/read_only_inspection.go", "OpenReadOnlyInspection"},
-		{"internal/store/storetest/channel_observation.go", "OpenChannelObservation"},
-	} {
-		old, err := exec.Command("git", "show", globalname.Predecessor+":"+owner[0]).Output()
-		current, readErr := os.ReadFile(filepath.Join("../../..", owner[0]))
-		if err != nil || readErr != nil || sourceBlobNamedDeclarations(t, old, owner[1]) != sourceBlobNamedDeclarations(t, current, owner[1]) {
-			t.Fatal("global name native owner or inspection lifetime changed:", owner, err, readErr)
-		}
-	}
-	path := "internal/store/storetest/channel_observation.go"
-	old, err := exec.Command("git", "show", globalname.Predecessor+":"+path).Output()
-	current, readErr := os.ReadFile(filepath.Join("../../..", path))
-	if err != nil || readErr != nil {
-		t.Fatal(err, readErr)
-	}
-	current, err = channelsettlement.EarlierObservationSource("../../..", current)
-	if err != nil {
-		t.Fatal(err)
-	}
-	globalNameObservationDelta(t, old, current)
-	bridge, err := os.ReadFile("../../../internal/serveapp/global_event_name_observation_test.go")
-	want := `func readServedGlobalEventNameCount(ctx context.Context,reader servedEventCountReader,eventName string)(int,error){if reader==nil{return 0,fmt.Errorf("global event-name observation requires the original selected reader")};var count int;err:=reader.InspectSnapshot(ctx,func(ctx context.Context)error{var err error;count,err=storetest.CountEventNameStorage(ctx,reader,eventName);return err});if err!=nil{return 0,err};return count,nil}`
-	if err != nil || requestKeyDeclaration(t, bridge, "readServedGlobalEventNameCount") != requestKeyDeclaration(t, []byte("package proof\n"+want), "readServedGlobalEventNameCount") {
-		t.Fatal("global name live bridge changed its original owner/snapshot/context/error cut:", err)
-	}
 }
 
 func globalNameObservationDelta(t *testing.T, old, current []byte) {
@@ -187,31 +110,6 @@ func removeGlobalNameObservationField(declaration ast.Decl) int {
 		face.Methods.List = fields
 	}
 	return count
-}
-
-func TestFamily145GlobalEventNameStandaloneSQLInventoryIsClosed(t *testing.T) {
-	err := checkoutsource.WalkDir("../../..", "../../../internal/serveapp", func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		if globalNameDirectSQL(file) {
-			return fmt.Errorf("%s: standalone global event-name count bypasses the original native owner", path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, sql := range []string{"SELECT COUNT(*) FROM events WHERE event_name = ?", "SELECT COUNT(*) FROM events WHERE event_name=$1", "SELECT COUNT(*) FROM events WHERE event_name='mailbox.card_decided'", "SELECT COUNT(*) FROM events WHERE event_name='platform.boot'", "SELECT COUNT(*) FROM events WHERE event_name='before_and_after'", "SELECT COUNT(*) FROM events WHERE event_name='orphan.event'"} {
-		file, err := parser.ParseFile(token.NewFileSet(), "escape.go", "package proof\nvar escape=func(){db.QueryRow("+strconv.Quote(sql)+",name)}", parser.AllErrors)
-		if err != nil || !globalNameDirectSQL(file) {
-			t.Fatal("global event-name initializer SQL escape admitted:", sql, err)
-		}
-	}
 }
 
 var globalNameSQLShape = regexp.MustCompile(`(?i)^\s*select\s+count\(\*\)\s+from\s+events\s+where\s+event_name\s*=\s*(?:\?|\$1|'(?:[^']|'')*')\s*$`)

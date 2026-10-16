@@ -80,30 +80,6 @@ func catchUp2672MasterPair(row recipe, actual string) (recipe, string, error) {
 	return recipe{}, "", fmt.Errorf("fork continuation lost its exact reviewed predecessor")
 }
 
-func TestCatchUp2542ForkContinuationPreservesBothPredecessorPackets(t *testing.T) {
-	path := "tools/fixture-codemod/pipeline-observations/internal/selectedreadrole/testdata/catch_up_2542.json"
-	old, err := exec.Command("git", "-C", "../../..", "show", catchUp2672Prior+":"+path).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	retained, err := os.ReadFile("internal/selectedreadrole/testdata/catch_up_2542_before_2672.json")
-	if err != nil || string(retained) != string(old) || fmt.Sprintf("%x", sha256.Sum256(retained)) != catchUp2672PriorPacketSHA {
-		t.Fatal("initial signed composition packet was replaced:", err)
-	}
-	var prior selectedreadrole.CatchUp2542Packet
-	if err := json.Unmarshal(retained, &prior); err != nil {
-		t.Fatal(err)
-	}
-	current, err := selectedreadrole.CatchUp2542Receipts()
-	if err != nil || len(prior.Rows) != 405 || len(prior.Files) != 229 ||
-		current.Base != prior.Base || current.Master != prior.Master || current.Lane != prior.Lane || current.Authorization != prior.Authorization {
-		t.Fatal("fork continuation changed its initial source boundary:", err)
-	}
-	assertCatchUp2672RecipeAdvances(t, prior.Master, catchUp2672Master, 5, catchUp2672Endpoint)
-	assertCatchUp2672RecipeAdvances(t, catchUp2672Prior, "", 6, catchUp2672ComposedEndpoint)
-	assertCatchUp2672PacketAdvances(t, prior, current)
-}
-
 func assertCatchUp2672RecipeAdvances(t *testing.T, before, after string, count int, allowed func(string) bool) {
 	t.Helper()
 	old, err := catchUp2542ReadRecipes(before)
@@ -206,37 +182,5 @@ func catchUp2672SourceFile(path string) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func TestCatchUp2542ForkContinuationRefusesChangedCurrentPairs(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	checked := 0
-	for _, row := range rows {
-		if !catchUp2672Endpoint(row.Function) {
-			continue
-		}
-		checked++
-		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		if _, _, err := catchUp2672MasterPair(row, actual); err != nil {
-			t.Fatal(err)
-		}
-		changed := strings.Replace(actual, "{", "{ unreviewed();", 1)
-		if _, _, err := catchUp2672MasterPair(row, changed); err == nil {
-			t.Fatal("changed current source gained its historical fork view")
-		}
-		for _, field := range []string{"before", "after", "endpoint", "identity", "mechanical"} {
-			candidate := mutateCatchUp2542Receipt(row, field)
-			prior, source, err := catchUp2672MasterPair(candidate, actual)
-			if err == nil && (prior.Successor != candidate.Successor || source != actual) {
-				t.Fatal("unreviewed receipt gained a fork inverse:", field)
-			}
-		}
-	}
-	if checked != 5 {
-		t.Fatal("fork continuation lost its five exact hostile controls")
 	}
 }

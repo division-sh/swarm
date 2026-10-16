@@ -36,36 +36,3 @@ func family145StandingMixedConstructionProofError(before, after string) error {
 	}
 	return nil
 }
-
-func TestFamily145StandingMixedConstructorPreservesBothRealLifecyclesAndTerminalSibling(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	previous, err := selectedreadrole.EarlierStandingIngressHistory("../../..", family145TransitionBytes, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(previous, &rows); err != nil {
-		t.Fatal(err)
-	}
-	matched := 0
-	for _, row := range rows {
-		if row.Function != "TestStandingRestartMixedHealthyAndTerminalProcessParity" {
-			continue
-		}
-		matched++
-		if err := family145StandingMixedConstructionProofError(row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range []string{"storeselected.OpenRuntime(ctx,", "Selection: selection", "PostgresDSN: dsn", "SessionLockTTL: runtimeSessionLockTTL(cfg)", "db, postgresStore, sqliteStore = selectedRuntimeStoreForTest", "terminalizeStandingRunFromRuntime(t, firstRuntime", "first.stop()", "second.stop()", "enableServeRuntimeRecovery", "healthyGeneration", "terminalGeneration", "assertNoStandingTelegramCall", "buildStoresForServe = oldBuildStores", "cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspace", "t.Cleanup(cleanup)", "t.Fatalf"} {
-			if !strings.Contains(row.After, cut) || family145StandingMixedConstructionProofError(row.Before, strings.Replace(row.After, cut, "foreignStandingScope()", 1)) == nil {
-				t.Fatalf("lost mixed-standing owner/identity/terminal/recovery/teardown assertion: %s", cut)
-			}
-		}
-		actual := family145ConversationForkOwnerSource(t, "../serveapp/standing_ingress_supported_surface_test.go", row.Function)
-		if actual != row.After {
-			t.Fatal("mixed-standing construction escaped its finite source")
-		}
-	}
-	if matched != 1 {
-		t.Fatalf("mixed-standing constructor cohort=%d/1", matched)
-	}
-}

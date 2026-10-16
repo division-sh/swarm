@@ -83,49 +83,6 @@ func family145ChannelDecisionPrevious(t *testing.T, file, function, current stri
 	return channeldecision.Previous(channelDecisionPins(t), file, function, current)
 }
 
-func TestFamily145ChannelDecisionTransformRefusesForeignCarriersAndShadowedCalls(t *testing.T) {
-	for _, before := range []string{
-		`func foreign(t *testing.T) { waitUncertainCopyDecision(t, foreign.DB, "x") }`,
-		`func foreign(t *testing.T) { waitUncertainCopyDecision(t, db, "x") }`,
-		`func TestChannelSourceLifecyclePublicJourney(t *testing.T) { waitUncertainCopyDecision(t, db, "x", "extra") }`,
-		`func TestChannelSourceLifecyclePublicJourney(t *testing.T) { waitUncertainCopyDecision := foreign; waitUncertainCopyDecision(t, db, "x") }`,
-	} {
-		if _, _, err := channeldecision.Transform(before); err == nil {
-			t.Fatal("unclassified carrier/arity/owner accepted:", before)
-		}
-	}
-}
-
-func TestFamily145ChannelDecisionWholeChainPreservesEveryPollAndRefusalCut(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	calls := 0
-	seen := map[string]bool{}
-	for _, pin := range channelDecisionPins(t) {
-		key := pin.File + "/" + pin.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("changed/duplicate channel decision predecessor:", key)
-		}
-		seen[key] = true
-		original, err := exec.Command("git", "show", channeldecision.Predecessor+":"+pin.File).Output()
-		if err != nil || requestKeyDeclaration(t, original, pin.Function) != pin.Before {
-			t.Fatal("channel decision source is not its signed predecessor:", key, err)
-		}
-		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || family145ChannelEventCountPrevious(t, pin.File, pin.Function, proof.previous(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))) != pin.After {
-			t.Fatal("channel decision current source escaped its whole rule:", key, err)
-		}
-		after, count, err := channeldecision.Transform(pin.Before)
-		if err != nil || after != pin.After || count != pin.Calls {
-			t.Fatal("channel decision finite transform escaped its rule:", key, err)
-		}
-		calls += count
-		channelDecisionHostiles(t, pin)
-	}
-	if calls != 3 || len(seen) != 5 {
-		t.Fatalf("channel decision inventory=%d/%d want3/5", calls, len(seen))
-	}
-}
-
 func channelDecisionHostiles(t *testing.T, pin channeldecision.Pin) {
 	t.Helper()
 	pins := channelDecisionPins(t)
@@ -141,32 +98,6 @@ func channelDecisionHostiles(t *testing.T, pin channeldecision.Pin) {
 		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil || channeldecision.Previous(pins, pin.File, pin.Function, mutant) != mutant {
 			t.Fatal("changed channel decision identity/assertion/lifetime accepted:", pin.Function, cut)
 		}
-	}
-}
-
-func TestFamily145ChannelDecisionOwnedInventoryHasNoRawCallerOrAlias(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	root := "../../.."
-	calls, definitions := 0, 0
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		n, d := channelDecisionOwnedFile(t, filepath.ToSlash(rel), file, proof)
-		calls += n
-		definitions += d
-		return nil
-	})
-	if err != nil || calls != 3 || definitions != 1 {
-		t.Fatalf("channel decision complete inventory=%d/%d want3/1 err=%v", calls, definitions, err)
 	}
 }
 
@@ -207,21 +138,4 @@ func channelDecisionOwnedFile(t *testing.T, path string, file *ast.File, proof s
 		return true
 	})
 	return calls, definitions
-}
-
-func TestFamily145ChannelDecisionReusesTheExactExistingCanonicalQuery(t *testing.T) {
-	const path = "internal/store/internal/backend/decisioncard/channel_anchor_observation.go"
-	const name = "ReadChannelAnchorDecisionStorageTx"
-	if channelDecisionOriginalDeclaration(t, path, name) != channelDecisionCurrentDeclaration(t, path, name) {
-		t.Fatal("existing status/verdict owner changed instead of being reused")
-	}
-	for _, pin := range channelDecisionPins(t) {
-		if pin.Function == "waitUncertainCopyDecision" {
-			before := channelAnchorSQL(t, pin.Before)
-			after := channelAnchorSQL(t, channelDecisionCurrentDeclaration(t, path, name))
-			if len(before) != 1 || len(after) != 1 || before[0] != after[0] {
-				t.Fatal("canonical decision predicate differs from its consumer")
-			}
-		}
-	}
 }

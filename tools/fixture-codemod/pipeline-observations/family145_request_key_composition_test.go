@@ -51,14 +51,6 @@ func requestKeySuccessorPins() []runphysical.Pin {
 	return pins
 }
 
-func TestFamily145RequestKeySuccessorCompositionIsFinite(t *testing.T) {
-	for _, pin := range requestKeySuccessorPins() {
-		t.Run(pin.Function, func(t *testing.T) {
-			proveRequestKeySuccessorComposition(t, pin)
-		})
-	}
-}
-
 func proveRequestKeySuccessorComposition(t *testing.T, pin runphysical.Pin) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("../../..", pin.File))

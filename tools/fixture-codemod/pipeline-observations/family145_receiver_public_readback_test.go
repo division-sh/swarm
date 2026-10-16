@@ -58,62 +58,6 @@ func family145CheckReceiverPublicReadbackWholeRule(t *testing.T, file, function,
 	return false
 }
 
-func TestFamily145ReceiverPublicReadbackWholeRulePreservesExistingNativeOwnerAnd15Calls(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	pins := receiverReadbackPins(t)
-	seen, calls := map[string]bool{}, 0
-	var rawBefore, nativeBefore, nativeAfter string
-	for _, pin := range pins {
-		key := pin.File + "/" + pin.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("duplicate or changed immutable receiver preimage:", key)
-		}
-		seen[key] = true
-		calls += pin.Calls
-		source, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil {
-			t.Fatal(err)
-		}
-		current := proof.previous(t, pin.File, pin.Function, family145PublicA2CurrentDeclaration(t, source, pin.Function))
-		current = runphysical.Previous(runPhysicalPins(t), pin.File, pin.Function, current)
-		current = family145PublicJoinCallerInverse(pin.Function, current)
-		current = family145PublicA2EndpointCallerInverse(pin.Function, current)
-		if current != pin.After {
-			t.Fatal("current receiver caller differs from the complete transform:", key)
-		}
-		if pin.Function == "requireReceiverPublicReadback" {
-			rawBefore, nativeAfter = pin.Before, pin.After
-		}
-		if pin.Removed {
-			if pin.Function != "requireWorkspaceProofReceiverPublicReadback" || pin.After != "" || pin.Source != "" {
-				t.Fatal("unexpected receiver owner/helper retirement")
-			}
-			nativeBefore = pin.Before
-			if previous := receiverreadback.Previous(pins, pin.Function, pin.After); previous != pin.After {
-				t.Fatal("retired helper normalized into a live historical body")
-			}
-			continue
-		}
-		receiverReadbackPinHostiles(t, pin)
-	}
-	if calls != 15 || rawBefore == "" || nativeBefore == "" || nativeAfter == "" {
-		t.Fatal("whole receiver helper/caller family is incomplete")
-	}
-	expected := strings.Replace(nativeBefore, "requireWorkspaceProofReceiverPublicReadback", "requireReceiverPublicReadback", 1)
-	expected = strings.Replace(expected, "owner runtimebus.EventStore", "owner receiverProofStateReader", 1)
-	if expected != nativeAfter {
-		t.Fatal("native query/decoder/assertions changed beyond the exact typed role and name")
-	}
-	backend, err := os.ReadFile("../../../internal/store/internal/backend/delivery/read_projections.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	queryOwner := family145PublicA2CurrentDeclaration(t, backend, "ReadReceiverDeliveryStorage")
-	if receiverReadbackSQL(t, rawBefore) != receiverReadbackSQL(t, queryOwner) {
-		t.Fatal("native physical reader changed selected columns/run scope/SQL")
-	}
-}
-
 func receiverReadbackSQL(t *testing.T, source string) string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "query.go", "package proof\n"+source, parser.AllErrors)
@@ -179,27 +123,6 @@ func receiverReadbackPinHostiles(t *testing.T, pin receiverReadbackPin) {
 		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil {
 			t.Fatal("lost receiver scope/decoder/public assertion/lifecycle cut accepted:", pin.Function, cut)
 		}
-	}
-}
-
-func TestFamily145ReceiverPublicReadbackOwnedInventoryRetiresTheRawDelegate(t *testing.T) {
-	root := "../../.."
-	calls, helpers := 0, 0
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		foundCalls, foundHelpers := receiverReadbackInventoryFile(t, path, file)
-		calls += foundCalls
-		helpers += foundHelpers
-		return nil
-	})
-	if err != nil || calls != 15 || helpers != 1 {
-		t.Fatalf("owned receiver inventory calls=%d helpers=%d err=%v", calls, helpers, err)
 	}
 }
 

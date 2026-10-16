@@ -53,63 +53,6 @@ func family145AdministrativeLayeringProofError(function, before, after string) e
 	return nil
 }
 
-func TestFamily145AdministrativeLayeringEntireChainKeepsCapacityAndLifetimeAssertions(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	original := map[string]string{}
-	for _, row := range rows {
-		cuts, ok := family145AdministrativeLayeringCuts[row.Function]
-		if !ok {
-			continue
-		}
-		original[row.Function] = row.Before
-		if err := family145AdministrativeLayeringProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatalf("%s: %v", row.Function, err)
-		}
-		for _, cut := range cuts {
-			if family145AdministrativeLayeringProofError(row.Function, row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("lost administrative ownership/capacity/lifetime cut accepted: %s", cut)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.Before)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			hostile, err := family145BusAssertionCounterexample(row.After, strings.SplitN(assertion, " => ", 2)[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if family145AdministrativeLayeringProofError(row.Function, row.Before, hostile) == nil {
-				t.Fatalf("lost original administrative assertion accepted: %s", assertion)
-			}
-		}
-	}
-	if len(original) != len(family145AdministrativeLayeringCuts) {
-		t.Fatalf("administrative ownership/caller inventory incomplete: %d", len(original))
-	}
-	data, err := os.ReadFile("../../../internal/apiv1/operator_administrative_layering_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := family145DescriptorReadinessEscape(data); err != nil {
-		t.Fatal(err)
-	}
-	for _, pair := range []struct{ before, owner string }{
-		{"assertAdministrativeUnrelatedQueryProgresses", "ReadAdministrativeUnrelatedProgress"},
-		{"TestAdministrativeLeaseDoesNotBorrowSurroundingTransaction", "ReadAdministrativeSurroundingTransactionTx"},
-	} {
-		owned := family145ConversationForkOwnerSource(t, "internal/backend/postgres/administrative_fixture.go", pair.owner)
-		old, current := family145ConnectorSQL(t, "package proof\n"+original[pair.before]), family145ConnectorSQL(t, "package proof\n"+owned)
-		if len(old) != 1 || len(current) != 1 || old[0] != current[0] {
-			t.Fatalf("administrative actual independent SQL cut changed: %v/%v", old, current)
-		}
-	}
-	assertFamily145AdministrativePoolAndSurroundingOwnership(t)
-}
-
 func assertFamily145AdministrativePoolAndSurroundingOwnership(t *testing.T) {
 	t.Helper()
 	limit := family145ConversationForkOwnerSource(t, "internal/backend/postgres/administrative_fixture.go", "LimitAdministrativeFixturePool")

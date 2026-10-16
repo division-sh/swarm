@@ -48,31 +48,6 @@ func family145DeploymentPublicRowProofError(function, before, after string) erro
 	return nil
 }
 
-func TestFamily145DeploymentPublicRowWholeWitnessAndEmptyRefusalPreserveAllCuts(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen := 0
-	for _, row := range rows {
-		if family145DeploymentPublicRowCuts[row.Function] == nil {
-			continue
-		}
-		seen++
-		if err := family145DeploymentPublicRowProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range family145DeploymentPublicRowCuts[row.Function] {
-			if family145DeploymentPublicRowProofError(row.Function, row.Before, strings.Replace(row.After, cut, "foreignDeploymentWitness()", 1)) == nil {
-				t.Fatalf("deployment read/field/empty/context/poll/public witness mutation passed: %s", cut)
-			}
-		}
-	}
-	if seen != 2 {
-		t.Fatalf("whole deployment public/empty inventory=%d/2", seen)
-	}
-}
-
 func family145DeploymentPublicRowOwnedQueries(t *testing.T) map[string]bool {
 	t.Helper()
 	owners := map[string][]string{

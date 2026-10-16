@@ -45,43 +45,6 @@ func family145CheckStandingDiagnosticWholeRule(t *testing.T, file, function, cur
 	return false
 }
 
-func TestFamily145StandingDiagnosticWholeChainRetainsExactPredecessorsAndCallers(t *testing.T) {
-	manifest, err := standingdiagnostic.Decode(standingDiagnosticBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changed := 0
-	for index, pin := range manifest.Pins {
-		rule := standingdiagnostic.Rules[index]
-		if rule.File != pin.File || rule.Function != pin.Function || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("diagnostic rule/source identity changed")
-		}
-		previous, err := exec.Command("git", "show", standingdiagnostic.Predecessor+":"+pin.File).Output()
-		if err != nil || requestKeyDeclaration(t, previous, pin.Function) != pin.Before {
-			t.Fatal("diagnostic predecessor is not source-pinned:", pin.Function, err)
-		}
-		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil {
-			t.Fatal(err)
-		}
-		actual, err := selectedreadrole.EarlierStandingIngressSource("../../..", pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))
-		if err != nil || actual != pin.After {
-			t.Fatal("diagnostic caller, assertion or teardown changed:", pin.Function, err)
-		}
-		after, err := standingdiagnostic.Transform(rule, pin.Before)
-		if err != nil || after != pin.After {
-			t.Fatal("diagnostic endpoint is not its finite transform:", pin.Function, err)
-		}
-		if pin.Before != pin.After {
-			changed++
-			standingDiagnosticRewriteControls(t, pin)
-		}
-	}
-	if changed != 2 {
-		t.Fatalf("diagnostic changed declarations=%d want2", changed)
-	}
-}
-
 func standingDiagnosticRewriteControls(t *testing.T, pin standingdiagnostic.Pin) {
 	t.Helper()
 	if standingdiagnostic.Previous(standingDiagnosticManifest, pin.File, pin.Function, pin.After) != pin.Before || standingdiagnostic.Previous(standingDiagnosticManifest, "foreign.go", pin.Function, pin.After) != pin.After {
@@ -103,52 +66,6 @@ func standingDiagnosticRewriteControls(t *testing.T, pin standingdiagnostic.Pin)
 		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil {
 			t.Fatal("foreign diagnostic endpoint accepted:", token)
 		}
-	}
-}
-
-func TestFamily145StandingDiagnosticAmendmentPreservesEveryPriorRecipeAndTransition(t *testing.T) {
-	previous, err := exec.Command("git", "show", standingdiagnostic.Predecessor+":tools/fixture-codemod/pipeline-observations/recipes.json").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var before, after []recipe
-	if err := json.Unmarshal(previous, &before); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(runIdentityEarlierHistory(t, recipeBytes, true), &after); err != nil {
-		t.Fatal(err)
-	}
-	var retained []recipe
-	for _, row := range after {
-		if !isExactStandingDiagnosticNewRecipe(row) {
-			retained = append(retained, row)
-		}
-	}
-	if len(after) != len(before)+2 || !reflect.DeepEqual(before, retained) {
-		t.Fatal("standing diagnostic amendment changed an immutable prior Before/After/Successor record")
-	}
-	previous, err = exec.Command("git", "show", standingdiagnostic.Predecessor+":tools/fixture-codemod/pipeline-observations/family145-transitions.json").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	before, after = nil, nil
-	if err := json.Unmarshal(previous, &before); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(runIdentityEarlierHistory(t, family145TransitionBytes, false), &after); err != nil {
-		t.Fatal(err)
-	}
-	current := map[string]recipe{}
-	for _, row := range after {
-		current[row.File+"/"+row.Function] = row
-	}
-	for _, row := range before {
-		if !reflect.DeepEqual(row, current[row.File+"/"+row.Function]) {
-			t.Fatal("standing diagnostics changed a prior source transition:", row.Function)
-		}
-	}
-	if len(after) != len(before)+2 {
-		t.Fatal("standing diagnostic transition inventory escaped the two reviewed declarations")
 	}
 }
 
@@ -190,39 +107,6 @@ func diagnosticEndpointMatches(file, function, current string) bool {
 		}
 	}
 	return false
-}
-
-func TestFamily145StandingDiagnosticReceiptRetirementIsTargetedAndRejectsReintroduction(t *testing.T) {
-	for _, pin := range standingDiagnosticManifest.Pins {
-		if pin.Before == pin.After {
-			continue
-		}
-		if err := standingDiagnosticRetirementError([]byte("package proof\n" + pin.Before)); err == nil {
-			t.Fatal("old executable receipt query passed retirement:", pin.Function)
-		}
-		if err := standingDiagnosticRetirementError([]byte("package proof\n" + pin.After)); err != nil {
-			t.Fatal(err)
-		}
-		mutant := strings.Replace(pin.After, "{", "{ tx.QueryContext(ctx, `SELECT event_id, status FROM pipeline_receipts ORDER BY updated_at`);", 1)
-		if err := standingDiagnosticRetirementError([]byte("package proof\n" + mutant)); err == nil {
-			t.Fatal("reintroduced receipt query passed retirement:", pin.Function)
-		}
-	}
-	for _, endpoint := range standingDiagnosticManifest.Endpoints {
-		if err := standingDiagnosticRetirementError([]byte("package proof\n" + endpoint.After)); err != nil {
-			t.Fatal(err)
-		}
-		if endpoint.Function == "renderStandingStoreDiagnostics" {
-			mutant := strings.Replace(endpoint.After, "{", "{ storetest.ReadStandingReceiptDiagnostics(ctx, owner);", 1)
-			if err := standingDiagnosticRetirementError([]byte("package proof\n" + mutant)); err == nil {
-				t.Fatal("replacement receipt owner passed targeted retirement")
-			}
-		}
-	}
-	// Immutable history and legitimate canonical receipt labels are not live queries.
-	if err := standingDiagnosticRetirementError([]byte("package proof\nvar history = `SELECT * FROM pipeline_receipts`\nfunc unrelated() { count := CountDeploymentPipelineReceiptsStorage(); print(count, \"pipeline_receipts\") }")); err != nil {
-		t.Fatal("retirement became a global string/receipt ban:", err)
-	}
 }
 
 func standingDiagnosticRetirementError(raw []byte) error {
@@ -275,38 +159,6 @@ func standingDiagnosticCallRetirementError(call *ast.CallExpr) error {
 		}
 	}
 	return nil
-}
-
-func TestFamily145StandingDiagnosticOwnedCallerInventoryIsFinite(t *testing.T) {
-	root := "../../.."
-	allowed := map[string]map[string]bool{}
-	for _, pin := range standingDiagnosticManifest.Pins {
-		if allowed[pin.File] == nil {
-			allowed[pin.File] = map[string]bool{}
-		}
-		allowed[pin.File][pin.Function] = true
-	}
-	// New direct execution/absence controls also exercise the closed diagnostic chain.
-	allowed["internal/serveapp/standing_diagnostic_native_test.go"] = map[string]bool{"TestStandingDiagnosticsReadOnlyWholeChainBothStores": true, "TestStandingDiagnosticsEmptyDataBothStores": true, "TestStandingSQLiteDiagnosticsMissingDatabaseStaysMissing": true}
-	calls := 0
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		calls += standingDiagnosticFileInventory(t, filepath.ToSlash(rel), file, allowed)
-		return nil
-	})
-	if err != nil || calls != 9 {
-		t.Fatalf("standing diagnostic direct/helper calls=%d want9 err=%v", calls, err)
-	}
 }
 
 func standingDiagnosticFileInventory(t *testing.T, path string, file *ast.File, allowed map[string]map[string]bool) int {

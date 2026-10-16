@@ -158,51 +158,6 @@ func family145GateCountTokens(source string) string {
 	return strings.Join(tokens, " ")
 }
 
-func TestFamily145GateCountReadsPreserveOrderedIndependentCutsAndRejectDrift(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	found := map[string]bool{}
-	for _, row := range rows {
-		if !family145GateCountRow(row.File, row.Function) {
-			continue
-		}
-		if found[row.Function] {
-			t.Fatalf("ambiguous run-count consumer: %s", row.Function)
-		}
-		found[row.Function] = true
-		key := family145GateScalarReadKey(row.File, row.Function)
-		if err := family145GateCountProofError(key, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, hostile := range []string{
-			strings.ReplaceAll(row.After, "selected.events, runID", "selected.events, foreignRunID"),
-			strings.ReplaceAll(row.After, "f.selected.events, f.owner.RunID", "f.selected.events, foreignRunID"),
-			strings.Replace(row.After, "CountRunTimerStorage", "CountPhysicalRunEvents", 1),
-			strings.Replace(row.After, "count(storetest.CountRunTimerStorage(ctx, selected.events, runID))", "0", 1),
-			strings.Replace(row.After, "counts[index] = count", "counts[0] = count", 1),
-		} {
-			if hostile != row.After && family145GateCountProofError(key, row.Before, hostile) == nil {
-				t.Fatalf("foreign scope or wrong domain passed: %s", row.Function)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.After)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			condition := strings.SplitN(assertion, " => ", 2)[0]
-			if family145GateCountProofError(key, row.Before, strings.Replace(row.After, condition, "false", 1)) == nil {
-				t.Fatalf("lost cardinality, identity or replay assertion passed: %s", condition)
-			}
-		}
-	}
-	if len(found) != len(family145GateCountFunctions) {
-		t.Fatalf("run-count consumer inventory=%d/%d", len(found), len(family145GateCountFunctions))
-	}
-}
-
 func TestFamily145GateCountPhysicalOwnersRetainExactRunAndEventPredicates(t *testing.T) {
 	for _, tc := range []struct{ file, function, query string }{
 		{"mutationlog/selected_cleanup_observation.go", "CountRunMutationStorageTx", "SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1"},

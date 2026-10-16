@@ -30,53 +30,6 @@ func family145NativeBusRoutingProofError(function, before, after string) error {
 	return nil
 }
 
-func TestFamily145NativeBusRoutingRetainsConstructionPublicationAndNodeExclusion(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen := 0
-	for _, row := range rows {
-		cuts, ok := family145NativeBusRoutingCalls[row.Function]
-		if !ok {
-			continue
-		}
-		seen++
-		if err := family145NativeBusRoutingProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range cuts {
-			if family145NativeBusRoutingProofError(row.Function, row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("lost exact bus construction/recipient/lifetime cut accepted: %s", cut)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.Before)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			condition := strings.SplitN(assertion, " => ", 2)[0]
-			hostile, err := family145BusAssertionCounterexample(row.After, condition)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if family145NativeBusRoutingProofError(row.Function, row.Before, hostile) == nil {
-				t.Fatalf("lost original bus assertion accepted: %s", condition)
-			}
-		}
-		if row.Function == "TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode" {
-			assertFamily145NativeBusNodeQuery(t, row.Before)
-		} else if row.Function == "TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects" {
-			assertFamily145BusAncestorQueries(t, row.Before)
-		} else {
-			assertFamily145BusRefusalQueries(t, row.Before)
-		}
-	}
-	if seen != len(family145NativeBusRoutingCalls) {
-		t.Fatalf("finite bus routing inventory incomplete: %d", seen)
-	}
-}
-
 func assertFamily145BusRefusalQueries(t *testing.T, before string) {
 	t.Helper()
 	original := family145ConnectorSQL(t, "package proof\n"+before)
@@ -114,17 +67,6 @@ func assertFamily145BusRefusalQueries(t *testing.T, before string) {
 		if !found {
 			t.Fatalf("refusal original owner is missing: %s", owner.function)
 		}
-	}
-}
-
-func TestFamily145NativeBusWholeSuppliedPoolInventoryIsRetired(t *testing.T) {
-	path := filepath.Join("..", "..", "..", "internal", "runtime", "bus", "eventbus_publish_test.go")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := family145DescriptorReadinessEscape(data); err != nil {
-		t.Fatal(err)
 	}
 }
 

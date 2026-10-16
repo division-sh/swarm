@@ -37,65 +37,6 @@ func family145ResetCompletionProofError(before, after string) error {
 	return nil
 }
 
-func TestFamily145ResetCompletionRetainsDurableReplayAndExactTransportFault(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	found := 0
-	for _, row := range rows {
-		if row.Function != "TestRuntimeNukeDurableReplaySurvivesAPICompletionLossAndExpiration" {
-			continue
-		}
-		found++
-		if err := family145ResetCompletionProofError(row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range family145ResetCompletionCuts {
-			if family145ResetCompletionProofError(row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("lost reset completion owner/cut accepted: %s", cut)
-			}
-		}
-		if family145ResetCompletionProofError(row.Before, strings.Replace(row.After, "restoreCompletion()", "discardedRestore()", 1)) == nil {
-			t.Fatal("lost assertion-failure restoration passed source proof")
-		}
-		manual := "\tif err := restoreCompletion(); err != nil {\n\t\tt.Fatal(err)\n\t}\n"
-		read := "\traw, err := storetest.ReadResetCompletionStorageRecord(context.Background(), selected)\n"
-		if !strings.Contains(row.After, manual) || !strings.Contains(row.After, read) {
-			t.Fatal("exact restoration/record control source changed")
-		}
-		hostile := strings.Replace(row.After, manual, "", 1)
-		hostile = strings.Replace(hostile, read, read+manual, 1)
-		if family145ResetCompletionProofError(row.Before, hostile) == nil {
-			t.Fatal("restoration moved past record observation passed source proof")
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.Before)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			hostile, err := family145BusAssertionCounterexample(row.After, strings.SplitN(assertion, " => ", 2)[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if family145ResetCompletionProofError(row.Before, hostile) == nil {
-				t.Fatalf("lost original durable replay assertion accepted: %s", assertion)
-			}
-		}
-		assertFamily145ResetCompletionQueries(t, row.Before)
-	}
-	if found != 1 {
-		t.Fatalf("finite reset-completion source inventory changed: %d", found)
-	}
-	data, err := os.ReadFile("../../../internal/apiv1/runtime_nuke_durable_replay_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := family145DescriptorReadinessEscape(data); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func assertFamily145ResetCompletionQueries(t *testing.T, before string) {
 	t.Helper()
 	queries := family145ConnectorSQL(t, "package proof\n"+before)

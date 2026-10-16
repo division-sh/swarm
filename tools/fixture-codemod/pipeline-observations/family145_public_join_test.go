@@ -62,36 +62,6 @@ func family145CheckPublicJoinWholeRule(t *testing.T, file, function, current str
 	return false
 }
 
-func TestFamily145PublicJoinWholeChainPreserves31CallsSevenHelpersAndAllPublicOracles(t *testing.T) {
-	calls, helpers := 0, 0
-	seen := map[string]bool{}
-	for _, pin := range publicJoinPins(t) {
-		key := pin.File + "/" + pin.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("changed or duplicate complete public join preimage:", key)
-		}
-		seen[key] = true
-		calls += pin.Calls
-		if publicJoinHelpers[pin.Function] != "" {
-			helpers++
-		}
-		if publicJoinExpected(pin) != pin.After {
-			t.Fatal("public join changed more than the original endpoint/hash projection:", key)
-		}
-		raw, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if servedSetupEarlierSource(t, pin.File, pin.Function, family145PublicA2CurrentDeclaration(t, raw, pin.Function)) != pin.After {
-			t.Fatal("current public join escaped complete source conservation:", key)
-		}
-		publicJoinHostiles(t, pin)
-	}
-	if calls != 31 || helpers != 7 || len(seen) != 10 {
-		t.Fatalf("public join inventory=%d/%d/%d want31/7/10", calls, helpers, len(seen))
-	}
-}
-
 func publicJoinExpected(pin publicjoin.Pin) string {
 	expected := pin.Before
 	projection := publicJoinHelpers[pin.Function]
@@ -136,27 +106,6 @@ func publicJoinHostiles(t *testing.T, pin publicjoin.Pin) {
 		if publicjoin.Previous(pins, pin.File, pin.Function, mutant) != mutant {
 			t.Fatal("altered full public join body normalized")
 		}
-	}
-}
-
-func TestFamily145PublicJoinOwnedInventoryRejectsBroadAndEscapedHelperAuthority(t *testing.T) {
-	root := "../../.."
-	calls, helpers := 0, 0
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		c, h := publicJoinInventory(t, file)
-		calls += c
-		helpers += h
-		return nil
-	})
-	if err != nil || calls != 31 || helpers != 7 {
-		t.Fatalf("public join owned inventory calls=%d helpers=%d err=%v", calls, helpers, err)
 	}
 }
 

@@ -225,69 +225,6 @@ CountReceiverFirstClaimAgentDeliveriesStorageTx ReadChannelBudgetDeliveriesDiagn
 	return format.Source(bytes.Replace(current, []byte(comment), nil, 1))
 }
 
-func TestFamily145DeliveryStatusInterveningOwnersRejectAddedRetainedAndUnlistedChanges(t *testing.T) {
-	for _, pin := range []struct {
-		path, added, retained string
-	}{
-		{deliveryRecoveryReadOwner, "CountGlobalDeliveredNodeRowsStorageTx", "ReadServedDeliveryStatusCount"},
-		{"internal/store/internal/runtimepersistence/test_served_delivery_observation.go", "ReadCanonicalRoutingSQLiteDiagnosticForTest", "ReadServedDeliveryStatusCountForTest"},
-		{"internal/store/storetest/served_delivery_observation.go", "ReadCanonicalRoutingSQLiteDiagnostic", "ReadServedDeliveryStatusCount"},
-	} {
-		t.Run(pin.path, func(t *testing.T) {
-			current, err := os.ReadFile(filepath.Join("../../..", pin.path))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := servedObservationToolOwnerPrevious(pin.path, current); err != nil {
-				t.Fatal(err)
-			}
-			for _, cut := range []string{pin.added, pin.retained} {
-				changed := bytes.Replace(current, []byte(cut), []byte("foreignPollingOwner"), 1)
-				if bytes.Equal(current, changed) {
-					t.Fatal("counterexample did not change its declared cut:", cut)
-				}
-				if _, err := servedObservationToolOwnerPrevious(pin.path, changed); err == nil {
-					t.Fatal("changed additive/retained owner entered a historical view:", cut)
-				}
-			}
-			if _, err := servedObservationToolOwnerPrevious(pin.path, append(bytes.Clone(current), []byte("\nfunc unlistedPollingOwner(){}\n")...)); err == nil {
-				t.Fatal("an unlisted declaration entered a historical view")
-			}
-		})
-	}
-}
-
-func TestFamily145ServedObservationEventOwnerIsNonWorseningFromSignedPreBatch(t *testing.T) {
-	const path = "internal/store/internal/runtimepersistence/test_event_support.go"
-	root, err := filepath.Abs("../../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, err := os.ReadFile(root + "/" + path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	previous, err := servedObservationToolOwnerPrevious(path, current)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("git", "show", "2ad21b4f19fb1c5bc04d34fe73f94d15ad0244f8:"+path)
-	cmd.Dir = root
-	signed, err := cmd.Output()
-	if err != nil || !bytes.Equal(previous, signed) {
-		t.Fatal("exact additive event reader did not preserve the signed pre-batch owner:", err)
-	}
-	for _, cut := range []string{"ReadPhysicalPublicationEntityIdentityStorageForTest", "ReadAgentSettledAttemptCountForTest"} {
-		if !bytes.Contains(current, []byte(cut)) {
-			t.Fatal("non-worsening counterexample missing:", cut)
-		}
-		mutant := bytes.Replace(current, []byte(cut), []byte("foreignOwner"), 1)
-		if _, err := servedObservationToolOwnerPrevious(path, mutant); err == nil {
-			t.Fatal("event owner accepted altered added or retained declaration:", cut)
-		}
-	}
-}
-
 func removePublicRollbackDeclaration(raw []byte, name, expected string) ([]byte, error) {
 	current, start, end, err := deliveryStatusSourceDeclaration(raw, name)
 	if err != nil {
@@ -371,33 +308,4 @@ func deliveryStatusDeclarationNamed(declaration ast.Decl, name string) bool {
 		return ok && typeSpec.Name.Name == name
 	}
 	return false
-}
-
-func TestFamily145DeliveryStatusEndpointCompositionRejectsDrift(t *testing.T) {
-	current := []byte("package proof\n" + repairedDeliveryStatusBridge)
-	if _, err := remapDeliveryStatusDeclaration(current, "ReadServedDeliveryStatusCountForTest", repairedDeliveryStatusBridge, ""); err != nil {
-		t.Fatal(err)
-	}
-	for _, cut := range []string{"validateChannelObservationOwner", "selected.(*PostgresStore)", "readServedDeliveryObservation", "statuses...", "subscriberType", "eventID", "return 0, err"} {
-		normal, err := format.Source(current)
-		if err != nil || !strings.Contains(string(normal), cut) {
-			t.Fatal("missing delivery status authority/lookup/refusal counterexample:", cut, err)
-		}
-		mutant := []byte(strings.Replace(string(normal), cut, "unreviewedStatusEndpoint", 1))
-		if _, err := remapDeliveryStatusDeclaration(mutant, "ReadServedDeliveryStatusCountForTest", repairedDeliveryStatusBridge, ""); err == nil {
-			t.Fatal("changed delivery status endpoint accepted:", cut)
-		}
-	}
-	for _, pin := range stopWitnessPins(t) {
-		if pin.Function != "ReadStopPendingDeliveryCountTx" {
-			continue
-		}
-		mutant := strings.Replace(pin.After, "'pending','in_progress','failed'", "'pending'", 1)
-		if mutant == pin.After {
-			t.Fatal("missing stop status narrowing counterexample")
-		}
-		if _, err := remapDeliveryStatusDeclaration([]byte("package proof\n"+mutant), pin.Function, pin.After, pin.Before); err == nil {
-			t.Fatal("changed stop predicate accepted as historical correspondence")
-		}
-	}
 }

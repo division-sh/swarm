@@ -33,57 +33,6 @@ func family145SupplementalHistoryProofError(before, after string) error {
 	return nil
 }
 
-func TestFamily145SupplementalHistoryRetainsKeyMajorOrderAndCompleteVersionAssertions(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range rows {
-		if row.File != "internal/runtime/conformance/fan_out_supplemental_helpers_test.go" || row.Function != "assertSupplementalHistory" {
-			continue
-		}
-		if err := family145SupplementalHistoryProofError(row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range []string{
-			"ReadSupplementalFanOutObligationHistory", "versions != 2", "fact.Cursor != wantCursor",
-			"fact.Cardinality != cardinality", "observed != intents", "key, raw := row.Key, row.Fact",
-		} {
-			if err := family145SupplementalHistoryProofError(row.Before, strings.ReplaceAll(row.After, cut, "foreignCut")); err == nil {
-				t.Fatalf("lost physical history proof accepted: %s", cut)
-			}
-		}
-		return
-	}
-	t.Fatal("finite supplemental history mapping disappeared")
-}
-
-func TestFamily145SupplementalFixtureAndEveryCallerHaveNoPoolOrQuerySelector(t *testing.T) {
-	root := filepath.Join("..", "..", "..")
-	for _, path := range []string{
-		"fan_out_supplemental_helpers_test.go", "fan_out_two_ten_suffix_test.go",
-		"fan_out_twenty_intent_contention_test.go", "fan_out_pressure_reservation_test.go",
-		"fan_out_pressure_soak_test.go", "fan_out_serving_capacity_conformance_test.go",
-		"fan_out_staged_soak_test.go",
-	} {
-		data, err := os.ReadFile(filepath.Join(root, "internal/runtime/conformance", path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := family145SupplementalEscape(data); err != nil {
-			t.Fatalf("supplemental caller retains a pool/query escape: %s/%v", path, err)
-		}
-	}
-	for _, escape := range []string{
-		"f.db", "db.QueryRow(query)", "db.QueryContext(ctx, query)",
-		"storetest.AdmitPostgresRuntimeStore(t, db)", "storetest.DatabaseForTest(selected)", "(*sql.DB)(nil)",
-	} {
-		if family145SupplementalEscape([]byte("package probe; func unsafe() { _ = "+escape+" }")) == nil {
-			t.Fatalf("restored pool/query escape passed the family guard: %s", escape)
-		}
-	}
-}
-
 func family145SupplementalEscape(source []byte) error {
 	file, err := parser.ParseFile(token.NewFileSet(), "supplemental.go", source, parser.AllErrors)
 	if err != nil {

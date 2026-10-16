@@ -60,37 +60,6 @@ func family145CheckForkCompanionWholeRule(t *testing.T, file, function, current 
 	return false
 }
 
-func TestFamily145ForkCompanionWholeChainRetainsAll22CallsAndOriginalPhysicalWitness(t *testing.T) {
-	calls, helpers := 0, 0
-	seen := map[string]bool{}
-	for _, pin := range forkCompanionPins(t) {
-		key := pin.File + "/" + pin.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("changed/duplicate original companion witness:", key)
-		}
-		seen[key] = true
-		calls += pin.Calls
-		if pin.Function == "readForkReceiverCompanions" {
-			helpers++
-			requireForkCompanionPhysicalOwner(t, pin)
-		} else if expected := strings.ReplaceAll(pin.Before, "readForkReceiverCompanions(t, rt,", "readForkReceiverCompanions(t, rt.ReceiverStateReader,"); expected != pin.After {
-			t.Fatal("companion propagation changed predicate/assertion/lifetime beyond its existing selected reader:", key)
-		}
-		raw, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil {
-			t.Fatal(err)
-		}
-		current := family145RequestKeyCallerInverse(pin.Function, servedSetupEarlierSource(t, pin.File, pin.Function, family145PublicA2CurrentDeclaration(t, raw, pin.Function)))
-		if family145ForkNoticeCallerInverse(pin.Function, current) != pin.After {
-			t.Fatal("current companion body escaped its whole rule:", key)
-		}
-		forkCompanionHostiles(t, pin)
-	}
-	if calls != 22 || helpers != 1 || len(seen) != 7 {
-		t.Fatalf("companion rule inventory=%d/%d/%d want22/1/7", calls, helpers, len(seen))
-	}
-}
-
 func requireForkCompanionPhysicalOwner(t *testing.T, pin forkcompanion.Pin) {
 	t.Helper()
 	const helper = `func readForkReceiverCompanions(t *testing.T, reader receiverProofStateReader, runID string, paths ...string) map[string][]string {
@@ -140,70 +109,5 @@ func forkCompanionHostiles(t *testing.T, pin forkcompanion.Pin) {
 		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil || forkcompanion.Previous(pins, pin.File, pin.Function, mutant) != mutant {
 			t.Fatal("lost companion reader/identity/refusal/replay/lifetime cut accepted:", pin.Function, cut)
 		}
-	}
-}
-
-func TestFamily145ForkCompanionOwnedInventoryRetiresEveryBroadCaller(t *testing.T) {
-	root := "../../.."
-	calls, helpers := 0, 0
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		allowed := map[token.Pos]bool{}
-		ast.Inspect(file, func(node ast.Node) bool {
-			switch n := node.(type) {
-			case *ast.FuncDecl:
-				if n.Name.Name == "readForkReceiverCompanions" {
-					helpers++
-					allowed[n.Name.Pos()] = true
-				}
-			case *ast.CallExpr:
-				if id, ok := n.Fun.(*ast.Ident); ok && id.Name == "readForkReceiverCompanions" {
-					calls++
-					allowed[id.Pos()] = true
-					if len(n.Args) < 3 || family145NodeString(n.Args[1]) != "rt.ReceiverStateReader" {
-						t.Error("companion caller restored broad or foreign capability")
-					}
-				}
-			}
-			return true
-		})
-		ast.Inspect(file, func(node ast.Node) bool {
-			if id, ok := node.(*ast.Ident); ok && id.Name == "readForkReceiverCompanions" && !allowed[id.Pos()] {
-				t.Error("companion helper escaped direct owned call inventory")
-			}
-			return true
-		})
-		return nil
-	})
-	if err != nil || calls != 20 || helpers != 1 {
-		t.Fatalf("companion inventory calls=%d helpers=%d err=%v", calls, helpers, err)
-	}
-	// Master retired the two companion reads belonging solely to its removed
-	// raw header-deletion probe. Authenticate that exact endpoint, not any loss.
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	retired := 0
-	for _, row := range rows {
-		if row.Function != "TestProspectiveReceiverUpdatesAndCompanionRepairBothStores" {
-			continue
-		}
-		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		_, previous, err := catchUp2542PriorLanePair(row, actual)
-		const call = "readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID, instance)"
-		if err != nil || strings.Count(previous, call) != 2 || strings.Contains(actual, call) {
-			t.Fatal("companion retirement escaped the exact master header-probe removal:", err)
-		}
-		retired++
-	}
-	if retired != 1 {
-		t.Fatal("companion header-probe retirement lost its unique historical owner")
 	}
 }

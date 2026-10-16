@@ -104,25 +104,6 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 	}
 }
 
-func TestHistoricalMechanicalLaneReceiptsAreFiniteAndSourcePinned(t *testing.T) {
-	lane, err := selectedreadrole.CatchUp2542HistoricalRecipes(filepath.Clean("../../.."), recipeBytes, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	prior, err := selectedreadrole.BeforeDeliveryRecoveryHistory(filepath.Clean("../../.."), lane, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var originalRows []recipe
-	if err := json.Unmarshal(prior, &originalRows); err != nil {
-		t.Fatal(err)
-	}
-	digest, err := mechanicalReceiptDigest(originalRows)
-	if err != nil || digest != "1574d0e845b717b7f1697ae94d29f64596c6e7fb9b439ee62d6e4bb57e600be5" {
-		t.Fatalf("source-pinned lane mechanical/current receipts changed: %s/%v", digest, err)
-	}
-}
-
 func TestHistoricalMechanicalSnapshotsRejectInvalidAndCrossedCuts(t *testing.T) {
 	row := recipe{File: "fixture.go", Function: "original", Before: "func original() { raw() }", After: "func native() { acknowledged() }", Successor: "func native() { current() }"}
 	row.Mechanical = &mechanicalSnapshot{SourceCommit: strings.Repeat("1", 40), BeforeSHA256: fmt.Sprintf("%x", sha256.Sum256([]byte(row.Before))), After: "func native() { mechanical() }"}

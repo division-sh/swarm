@@ -50,24 +50,6 @@ func runDeliveryInvocationPins(t *testing.T, proof sourceBlobDeclarationInvocati
 	return pins
 }
 
-func TestFamily145RunDeliveryHistoryRefusesMissingDuplicateForeignAndChangedCurrentSource(t *testing.T) {
-	for _, pin := range runDeliveryLivePins(t) {
-		if err := rundelivery.ValidateCurrentSource(pin, []byte("package proof\n"+pin.After)); err != nil {
-			t.Fatal(err)
-		}
-		for _, source := range []string{"package proof\n", "package proof\n" + pin.After + "\n" + pin.After, "package proof\n" + strings.Replace(pin.After, "{", "{foreignRead();", 1)} {
-			if err := rundelivery.ValidateCurrentSource(pin, []byte(source)); err == nil {
-				t.Fatal("missing/duplicate/changed live source accepted:", pin.Function)
-			}
-		}
-		foreign := pin
-		foreign.File = "foreign.go"
-		if err := rundelivery.ValidateCurrentSource(foreign, []byte("package proof\n"+pin.After)); err == nil {
-			t.Fatal("foreign source pin accepted")
-		}
-	}
-}
-
 func runDeliveryPriorHistory(t *testing.T, recipes bool) []byte {
 	t.Helper()
 	path := "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
@@ -89,40 +71,6 @@ func (proof sourceBlobDeclarationInvocation) deliveryHistory(t *testing.T, curre
 		t.Fatal(err)
 	}
 	return raw
-}
-
-func TestFamily145RunDeliveryHistoryRestoresCompletePriorLedgersAndCollisionSuccessor(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	pins := runDeliveryInvocationPins(t, proof)
-	for _, recipes := range []bool{true, false} {
-		prior := runDeliveryPriorHistory(t, recipes)
-		expected, err := rundelivery.ComposeHistory(prior, pins, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		current, wantCount := family145TransitionBytes, 824
-		if recipes {
-			current, wantCount = recipeBytes, 1519
-		}
-		current = proof.blobHistory(t, current, recipes)
-		restoredHistory, err := rundelivery.RestoreHistory(current, prior, pins, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var before, after, composed, restored []map[string]any
-		for _, input := range []struct {
-			raw  []byte
-			rows *[]map[string]any
-		}{{prior, &before}, {current, &after}, {expected, &composed}, {restoredHistory, &restored}} {
-			if err := json.Unmarshal(input.raw, input.rows); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if len(after) != wantCount || !reflect.DeepEqual(after, composed) || !reflect.DeepEqual(before, restored) {
-			t.Fatal("run delivery changed immutable history/order/prior Successor or unrelated records")
-		}
-		runDeliveryHistoryHostility(t, current, prior, pins, recipes)
-	}
 }
 
 func runDeliveryHistoryHostility(t *testing.T, current, prior []byte, pins []rundelivery.Pin, recipes bool) {

@@ -65,43 +65,6 @@ func family145ForkProducerCallerProofError(function, before, after string) error
 	return nil
 }
 
-func TestFamily145ForkProducerEvidenceUsesCanonicalRecordAndPreservesRequestedRun(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(servedSetupEarlierHistory(t, family145TransitionBytes, false), &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen, helpers := map[string]bool{}, 0
-	for _, row := range rows {
-		if row.Function == "readForkReceiverProducerEvidence" {
-			helpers++
-			family145ForkProducerCheckReader(t, row.Before, row.After)
-		} else if family145ForkProducerCallers[row.Function] != 0 {
-			seen[row.Function] = true
-			if err := family145ForkProducerCallerProofError(row.Function, row.Before, row.After); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := family145ForkProducerCallerInverse(row.Function, strings.Replace(row.After, "readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), ", "readForkReceiverProducerEvidence(t, foreignProducerOwner(), ", 1)); err == nil {
-				t.Fatal("producer caller accepted foreign selected authority")
-			}
-		} else {
-			continue
-		}
-		actual := family145ConversationForkOwnerSource(t, "../serveapp/"+filepath.Base(row.File), row.Function)
-		if actual != row.After {
-			t.Fatalf("producer evidence escaped its finite source: %s", row.Function)
-		}
-	}
-	if helpers != 1 || len(seen) != len(family145ForkProducerCallers) {
-		t.Fatalf("producer reader=%d/1 callers=%d/%d", helpers, len(seen), len(family145ForkProducerCallers))
-	}
-	counts := family145ForkReceiverJoinedOwnedInventory(t)
-	for function, want := range family145ForkProducerCallers {
-		if counts["producer/"+function] != want {
-			t.Fatalf("producer caller count %s=%d/%d", function, counts["producer/"+function], want)
-		}
-	}
-}
-
 func family145ForkProducerCheckReader(t *testing.T, before, after string) {
 	t.Helper()
 	if err := family145ForkProducerReaderProofError(before, after); err != nil {

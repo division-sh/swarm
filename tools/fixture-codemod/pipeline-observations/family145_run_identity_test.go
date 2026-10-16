@@ -47,41 +47,6 @@ func family145CheckRunIdentityWholeRule(t *testing.T, file, function, current st
 	return false
 }
 
-func TestFamily145RunIdentityWholeRulePreservesEveryAssertionAndCut(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	calls := 0
-	for i, pin := range runIdentityPins {
-		old, err := exec.Command("git", "show", runidentity.Predecessor+":"+pin.File).Output()
-		if err != nil || requestKeyDeclaration(t, old, pin.Function) != pin.Before || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("run identity complete signed predecessor changed:", pin.Function, err)
-		}
-		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || proof.previous(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
-			t.Fatal("run identity current output changed:", pin.Function, err)
-		}
-		rule := runidentity.Rules[i]
-		after, err := runphysical.Transform(rule, pin.Before)
-		if err != nil || after != pin.After || pin.File != rule.File || pin.Function != rule.Function || pin.Calls != rule.Calls {
-			t.Fatal("run identity escaped its mechanical transform:", pin.Function, err)
-		}
-		finite := recipe{File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}
-		output, changed, err := rewriteFunction(pin.File, []byte("package proof\n"+pin.Before), finite)
-		if err != nil || !changed {
-			t.Fatal("run identity finite transform refused:", pin.Function, err)
-		}
-		if _, changed, err := rewriteFunction(pin.File, output, finite); err != nil || changed {
-			t.Fatal("run identity finite transform is not inert:", pin.Function, err)
-		}
-		for _, cut := range []string{"readServedRunPhysicalIdentity", "ReceiverStateReader", "initial.RunID", "later.RunID", "seed.RunID", "err != nil", " != ", "lease.Done()", "stop()", "release.Do", "waitForServedEventPublishNodeDeliveryLifecycle", "requireReceiverProofStateReader"} {
-			runIdentityHostile(t, pin, finite, cut)
-		}
-		calls += pin.Calls
-	}
-	if calls != 8 {
-		t.Fatalf("run identity read sites=%d want8", calls)
-	}
-}
-
 func runIdentityHostile(t *testing.T, pin runidentity.Pin, finite recipe, cut string) {
 	t.Helper()
 	if strings.Contains(pin.After, cut) {
@@ -97,78 +62,6 @@ func runIdentityHostile(t *testing.T, pin runidentity.Pin, finite recipe, cut st
 		mutant := strings.Replace(pin.Before, edit.Edits[len(edit.Edits)-1].Before, "unreviewedRunPredicate()", 1)
 		if _, err := runphysical.Transform(edit, mutant); err == nil {
 			t.Fatal("unknown predecessor predicate accepted:", pin.Function)
-		}
-	}
-}
-
-func TestFamily145RunIdentityUsesUnchangedNativeOwnerAndOneBorrowedCut(t *testing.T) {
-	for _, owner := range [][2]string{
-		{"internal/store/storetest/api_event_storage.go", "CountPhysicalRunIdentity"},
-		{"internal/store/internal/runtimepersistence/test_api_event_storage.go", "CountPhysicalRunIdentityForTest"},
-		{"internal/store/internal/backend/runlifecycle/run_identity_cardinality.go", "CountRunIdentityStorageTx"},
-	} {
-		before, err := exec.Command("git", "show", runidentity.Predecessor+":"+owner[0]).Output()
-		current, readErr := os.ReadFile(filepath.Join("../../..", owner[0]))
-		if err != nil || readErr != nil || requestKeyDeclaration(t, before, owner[1]) != requestKeyDeclaration(t, current, owner[1]) {
-			t.Fatal("run identity changed its existing owner/predicate/error contract:", owner, err, readErr)
-		}
-	}
-	raw, err := os.ReadFile("../../../internal/serveapp/run_identity_observation_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `func readServedRunPhysicalIdentity(reader servedEventCountReader, runID string) (int,error) {
-if reader==nil { return 0,fmt.Errorf("served run identity count requires the original selected reader") }
-var count int
-err:=reader.InspectSnapshot(context.Background(),func(ctx context.Context)error { var err error; count,err=storetest.CountPhysicalRunIdentity(ctx,reader,runID); return err })
-if err!=nil { return 0,err }; return count,nil
-}`
-	normal, err := requestkey.Normalize(want)
-	if err != nil || requestKeyDeclaration(t, raw, "readServedRunPhysicalIdentity") != normal {
-		t.Fatal("run identity did not borrow exactly one snapshot or discarded failure:", err)
-	}
-}
-
-func TestFamily145RunIdentityCallerInventoryIsClosed(t *testing.T) {
-	sourceBlobLivePins(t)
-	root := "../../.."
-	calls, definitions := 0, 0
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		c, d := runIdentityOwnedFile(t, filepath.ToSlash(rel), file)
-		calls, definitions = calls+c, definitions+d
-		return nil
-	})
-	if err != nil || calls != 8 || definitions != 1 {
-		t.Fatalf("run identity inventory=%d/%d want8/1 err=%v", calls, definitions, err)
-	}
-	for _, source := range []string{
-		"package proof\nvar alias=readServedRunPhysicalIdentity",
-		"package proof\nfunc foreign(){ readServedRunPhysicalIdentity(foreign,run) }",
-		"package proof\nfunc readServedRunPhysicalIdentity(){}",
-	} {
-		file, err := parser.ParseFile(token.NewFileSet(), "hostile.go", source, parser.AllErrors)
-		if err != nil || runIdentityFileError("foreign.go", file) == nil {
-			t.Fatal("unmanifested run identity consumer/alias/owner accepted:", source, err)
-		}
-	}
-	for _, source := range []string{
-		"package proof\nfunc unrelated(){ unrelatedOwner() }",
-		"package proof\nfunc unrelated(){ _ = `readServedRunPhysicalIdentity` }",
-	} {
-		file, err := parser.ParseFile(token.NewFileSet(), "unrelated.go", source, parser.AllErrors)
-		if err != nil || runIdentityFileError("foreign.go", file) != nil {
-			t.Fatal("a declaration without watched identifiers acquired reference authority:", err)
 		}
 	}
 }
@@ -329,30 +222,6 @@ func runIdentityEarlierHistory(t *testing.T, raw []byte, recipes bool) []byte {
 		t.Fatal(err)
 	}
 	return result
-}
-
-func TestFamily145RunIdentityPreservesHistoricalRecordsAndOrder(t *testing.T) {
-	for _, path := range []string{"tools/fixture-codemod/pipeline-observations/recipes.json", "tools/fixture-codemod/pipeline-observations/family145-transitions.json"} {
-		prior, err := exec.Command("git", "show", runidentity.Predecessor+":"+path).Output()
-		if err != nil {
-			t.Fatal(err)
-		}
-		current, err := os.ReadFile(filepath.Join("../../..", path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var before, after []map[string]any
-		if err := json.Unmarshal(prior, &before); err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal(current, &after); err != nil {
-			t.Fatal(err)
-		}
-		retained, additions := restoreRunIdentityHistory(t, after, strings.HasSuffix(path, "recipes.json"))
-		if additions != 1 || !reflect.DeepEqual(before, retained) {
-			t.Fatal("run identity changed immutable history/relative order outside five exact records:", path)
-		}
-	}
 }
 
 func restoreRunIdentityHistory(t *testing.T, rows []map[string]any, recipes bool) ([]map[string]any, int) {

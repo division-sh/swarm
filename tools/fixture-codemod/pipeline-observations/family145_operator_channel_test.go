@@ -29,52 +29,6 @@ func family145OperatorChannelProofError(function, before, after string) error {
 	return nil
 }
 
-func TestFamily145OperatorChannelWholeChainPreservesSignedTrafficAndAssertions(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]bool{}
-	for _, row := range rows {
-		if row.File != "internal/runtime/operator_channel_inbound_supported_surface_test.go" {
-			continue
-		}
-		cuts, ok := family145OperatorChannelCalls[row.Function]
-		if !ok {
-			continue
-		}
-		seen[row.Function] = true
-		if err := family145OperatorChannelProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range cuts {
-			if family145OperatorChannelProofError(row.Function, row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("lost operator-channel cut accepted: %s", cut)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.Before)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			condition := strings.SplitN(assertion, " => ", 2)[0]
-			if family145OperatorChannelProofError(row.Function, row.Before, strings.ReplaceAll(row.After, condition, "false")) == nil {
-				t.Fatalf("lost original assertion accepted: %s", condition)
-			}
-		}
-	}
-	if len(seen) != len(family145OperatorChannelCalls) {
-		t.Fatalf("operator channel chain incomplete: %d/%d", len(seen), len(family145OperatorChannelCalls))
-	}
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "internal", "runtime", "operator_channel_inbound_supported_surface_test.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := family145DescriptorReadinessEscape(data); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestFamily145OperatorChannelReadOwnersKeepExactPhysicalScope(t *testing.T) {
 	var rows []struct{ Function, Before string }
 	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {

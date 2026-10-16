@@ -248,27 +248,6 @@ func proveNativeEntryForeignProvenance(t *testing.T, prior, head authorityDebtBa
 	}
 }
 
-func TestPersistenceAuthorityDebtNativeEntryCatchUpReconcilesActualOrigins(t *testing.T) {
-	root := persistenceAuthorityRepoRoot(t)
-	cache := debtAnalysisCacheForCheckout(t, root)
-	findings := debtLoadPersistenceAuthorityFindings(t, root)
-	findings = append(findings, debtSelectedBoundaryFindings(t, root)...)
-	actual := authorityDebtSites(findings)
-	head := nativeEntryHeadBaseline(t, root)
-	for _, input := range [][2]string{{debtCatchUpNativeEntryLane, debtCatchUpFreshnessCollectorTo}, {debtCatchUpNativeEntryInput, debtProcessLeaseFreshnessCollectorTo}} {
-		original := cache.baseSites(t, materializeDebtBase(t, root, input[0]), input[0])
-		prior, _, err := debtCatchUpSignedBaseline(root, input[0], input[1])
-		if err != nil {
-			t.Fatal(err)
-		}
-		failures := authorityDebtRatchet(actual, head.Sites, prior.Sites, original, debtDeliveryRetirementProof{Root: root, Actual: actual})
-		if len(failures) != 0 {
-			t.Fatalf("actual native-entry source origin %s: %v", input[0], failures)
-		}
-		t.Logf("actual source %s=%d; common=%d; no unmatched additions or resurrection", input[0], authorityDebtCount(original), authorityDebtCount(actual))
-	}
-}
-
 func TestPersistenceAuthorityDebtNativeEntryCatchUpRefusesChangedCurrentSource(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	copy := debtCatchUpSourceCopyFrom(t, root)

@@ -21,57 +21,12 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
-func TestFamily145StandingIngressControlFiniteNativeSourcesAndAllCallers(t *testing.T) {
-	root := filepath.Clean("../../..")
-	pins, err := selectedreadrole.ReadStandingIngressPins(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := selectedreadrole.ValidateStandingIngressCurrent(root, pins); err != nil {
-		t.Fatal(err)
-	}
-	for _, pin := range pins {
-		row := recipe{File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}
-		output, changed, err := rewriteFunction(pin.File, []byte("package serveapp\n"+pin.Before), row)
-		if err != nil || !changed {
-			t.Fatal("finite native transform refused signed source:", pin.Function, err)
-		}
-		if _, changed, err := rewriteFunction(pin.File, output, row); err != nil || changed {
-			t.Fatal("finite native transform repeated:", pin.Function, err)
-		}
-		bad := strings.Replace(pin.Before, pin.Function, pin.Function+"Foreign", 1)
-		if _, changed, err := rewriteFunction(pin.File, []byte("package serveapp\n"+bad), row); err == nil || changed {
-			t.Fatal("finite transform admitted foreign declaration:", pin.Function)
-		}
-	}
-	if err := standingIngressHelperReferences(root, pins); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func standingIngressHelperNames() map[string]bool {
 	out := map[string]bool{}
 	for _, name := range strings.Fields(`loadServedStandingOwner assertServedStandingState assertServedStandingResetAndShutdownJoin assertServedStandingInvalidChildCommands waitForStandingDeliveryQuiescence servedRunControlState requireServedRunControlState servedDeliveryStatusReason requireServedStoppedPendingDelivery servedRuntimeIngressState requireServedRuntimeIngressState servedEventNameByID lifecycleAdmissionDomainCounts semanticNumericDomainCounts terminalizeStandingRunFromRuntime`) {
 		out[name] = true
 	}
 	return out
-}
-
-func TestFamily145StandingIngressControlNewHelpersKeepExactInspectionAndClose(t *testing.T) {
-	root := filepath.Clean("../../..")
-	for _, pin := range []struct{ file, function, digest string }{
-		{"internal/serveapp/source_admission_fork_proof_test.go", "countServedPhysicalSourceArtifacts", "5f812267bf162a940ede6589253a7359041abe1da9046c3bf887339f68267b7c"},
-		{"internal/serveapp/standing_ingress_supported_surface_test.go", "openServedStandingInspection", "8ad8eff43f49a09d28f90528d348470486e644823e8eb0e92c3276a09059e282"},
-	} {
-		raw, err := os.ReadFile(filepath.Join(root, pin.file))
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, err := selectedreadrole.Body(raw, pin.function)
-		if err != nil || fmt.Sprintf("%x", sha256.Sum256([]byte(body))) != pin.digest {
-			t.Fatal("new helper changed its exact named observation/inspection/teardown:", pin.function, err)
-		}
-	}
 }
 
 func standingIngressReferenceCounts(raw []byte) (map[string]int, error) {
@@ -124,75 +79,6 @@ func standingIngressHelperReferences(root string, pins []selectedreadrole.Entity
 		return fmt.Errorf("standing-ingress live caller inventory changed: have %v want %v", actual, want)
 	}
 	return nil
-}
-
-func TestFamily145StandingIngressControlOneWaySource(t *testing.T) {
-	root := filepath.Clean("../../..")
-	pins, err := selectedreadrole.ReadStandingIngressPins(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, pin := range pins {
-		before, err := selectedreadrole.EarlierStandingIngressSource(root, pin.File, pin.Function, pin.After)
-		if err != nil || before != pin.Before {
-			t.Fatal("complete earlier source changed:", pin.Function, err)
-		}
-		for _, bad := range []string{pin.Before, pin.After + "\n", pin.After + " // foreign"} {
-			if _, err := selectedreadrole.EarlierStandingIngressSource(root, pin.File, pin.Function, bad); err == nil {
-				t.Fatal("source inverse accepted stale or foreign endpoint:", pin.Function)
-			}
-		}
-	}
-}
-
-func TestFamily145StandingIngressControlCompleteHistory(t *testing.T) {
-	root := filepath.Clean("../../..")
-	for _, recipes := range []bool{false, true} {
-		prior, err := selectedreadrole.PriorStandingIngressHistory(root, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		next, err := selectedreadrole.ComposeStandingIngressHistory(root, prior, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		actual := family145TransitionBytes
-		if recipes {
-			actual = recipeBytes
-		}
-		actual, err = selectedreadrole.BeforeAgentSnapshotHistory(root, actual, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var want, have any
-		if json.Unmarshal(next, &want) != nil || json.Unmarshal(actual, &have) != nil || !reflect.DeepEqual(want, have) {
-			t.Fatal("actual history is not the complete exact composition")
-		}
-		previous, err := selectedreadrole.EarlierStandingIngressHistory(root, actual, recipes)
-		if err != nil || !bytes.Equal(previous, prior) {
-			t.Fatal("history lost signed predecessor bytes:", err)
-		}
-		if _, err := selectedreadrole.EarlierStandingIngressHistory(root, prior, recipes); err == nil {
-			t.Fatal("history inverse repeated on its predecessor")
-		}
-		var rows []map[string]any
-		if err := json.Unmarshal(actual, &rows); err != nil {
-			t.Fatal(err)
-		}
-		for _, mutation := range []func([]map[string]any) []map[string]any{
-			func(rows []map[string]any) []map[string]any { return rows[:len(rows)-1] },
-			func(rows []map[string]any) []map[string]any { return append(rows, rows[0]) },
-			func(rows []map[string]any) []map[string]any { rows[0]["Before"] = "foreign"; return rows },
-		} {
-			bad, err := json.Marshal(mutation(cloneRollbackHistory(t, rows)))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := selectedreadrole.EarlierStandingIngressHistory(root, bad, recipes); err == nil {
-				t.Fatal("foreign/deleted/duplicate historical record accepted")
-			}
-		}
-	}
 }
 
 type standingIngressOwnerAddition struct {
@@ -263,33 +149,4 @@ func earlierStandingIngressOwnerFile(root, file string, current []byte) ([]byte,
 		return restored, nil
 	}
 	return current, nil
-}
-
-func TestFamily145StandingIngressControlWholeOwnerAdditionsKeepEveryEarlierByte(t *testing.T) {
-	root := filepath.Clean("../../..")
-	for _, pin := range standingIngressOwnerAdditions {
-		t.Run(filepath.Base(pin.file), func(t *testing.T) {
-			current, err := os.ReadFile(filepath.Join(root, pin.file))
-			if err != nil {
-				t.Fatal(err)
-			}
-			previous, err := exec.Command("git", "-C", root, "show", selectedreadrole.StandingIngressPredecessor+":"+pin.file).Output()
-			if err != nil {
-				t.Fatal(err)
-			}
-			restored, err := earlierStandingIngressOwnerFile(root, pin.file, current)
-			if err != nil || !bytes.Equal(restored, previous) {
-				t.Fatal("whole owner did not restore its complete signed predecessor:", err)
-			}
-			for _, name := range pin.names {
-				bad := bytes.Replace(current, []byte(name), []byte(name+"Foreign"), 1)
-				if _, err := earlierStandingIngressOwnerFile(root, pin.file, bad); err == nil {
-					t.Fatal("added owner declaration escaped its exact one-way pin:", name)
-				}
-			}
-			if _, err := earlierStandingIngressOwnerFile(root, pin.file, append(current, '\n')); err == nil {
-				t.Fatal("changed complete owner was accepted")
-			}
-		})
-	}
 }

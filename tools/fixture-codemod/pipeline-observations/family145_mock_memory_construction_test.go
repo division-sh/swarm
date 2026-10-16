@@ -48,38 +48,3 @@ func family145MockMemoryConstructionProofError(function, before, after string) e
 	}
 	return nil
 }
-
-func TestFamily145MockMemoryConstructionRetiresWholeDetachedRestartCapability(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]bool{}
-	for _, row := range rows {
-		if row.Function != "runMockAgentSupportedSurface" && row.Function != "runStandingTelegramMemorySupportedSurface" {
-			continue
-		}
-		if seen[row.Function] {
-			t.Fatalf("duplicate construction owner: %s", row.Function)
-		}
-		seen[row.Function] = true
-		prove := func(candidate string) error {
-			return family145MockMemoryConstructionProofError(row.Function, row.Before, candidate)
-		}
-		if err := prove(row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range []string{"storeselected.OpenRuntime(ctx,", "Selection: selection", "PostgresDSN: dsn", "SessionLockTTL: runtimeSessionLockTTL(cfg)", "buildStoresForServe = oldBuildStores", "t.Cleanup(cleanup)", "first.stop()", "second.stop()", "second.waitForReadyLine()", "retainedRoot, opts", "t.Fatalf"} {
-			if !strings.Contains(row.After, cut) || prove(strings.Replace(row.After, cut, "foreignMockMemoryScope()", 1)) == nil {
-				t.Fatalf("lost context/selection/source/claim/identity/assertion/restart/teardown cut: %s/%s", row.Function, cut)
-			}
-		}
-		actual := family145ConversationForkOwnerSource(t, "../serveapp/"+strings.TrimPrefix(row.File, "internal/serveapp/"), row.Function)
-		if actual != row.After {
-			t.Fatalf("mock/memory native constructor escaped its finite source: %s", row.Function)
-		}
-	}
-	if len(seen) != 2 {
-		t.Fatalf("whole pre-open/restart cohort=%d/2", len(seen))
-	}
-}

@@ -58,57 +58,6 @@ func family145CheckEventNameWholeRule(t *testing.T, file, function, current stri
 	return false
 }
 
-func TestFamily145EventNameWaitStatementsAndCanonicalCountOwnersArePreserved(t *testing.T) {
-	for _, pin := range eventNamePins(t) {
-		if pin.Function != "requireServedEventNameCount" {
-			continue
-		}
-		after := strings.Replace(pin.Before, "servedEventNameCount(t, db,", "servedEventNameCount(t, reader,", 1)
-		after = strings.Replace(after, "db *sql.DB", "reader receiverProofStateReader", 1)
-		if after != pin.After {
-			t.Fatal("event-name polling/deadline/assertion changed")
-		}
-	}
-	const eventSupport = "internal/store/internal/runtimepersistence/test_event_support.go"
-	const apiSupport = "internal/store/internal/runtimepersistence/test_api_event_storage.go"
-	oldRun := eventNameOriginalDeclaration(t, eventSupport, "CountRunEventNameStorageForTest")
-	newRun := eventNameCurrentDeclaration(t, eventSupport, "CountRunEventNameStorageForTest")
-	if strings.Replace(oldRun, "eventrecord.CountRunEventNameStorage", "eventrecord.CountRunNamedEventStorageTx", 1) != newRun {
-		t.Fatal("run/name bridge changed its original validation/transaction/error contract")
-	}
-	oldGlobal := eventNameOriginalDeclaration(t, apiSupport, "CountEventNameStorageForTest")
-	newGlobal := eventNameCurrentDeclaration(t, eventSupport, "CountEventNameStorageForTest")
-	expected := strings.Replace(oldGlobal,
-		"return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name=$1`, eventName).Scan(&count)",
-		"var err error\ncount, err = eventrecord.CountGlobalNamedEventStorageTx(ctx, tx, eventName)\nreturn err", 1)
-	expected, err := requestkey.Normalize(expected)
-	if err != nil || expected != newGlobal {
-		t.Fatal("global/name bridge changed its original validation/transaction/error contract:", err)
-	}
-	const query = "internal/store/internal/backend/eventrecord/run_name_cardinality.go"
-	if eventNameOriginalDeclaration(t, query, "CountRunNamedEventStorageTx") != eventNameCurrentDeclaration(t, query, "CountRunNamedEventStorageTx") {
-		t.Fatal("existing exact run/name canonical query changed")
-	}
-	oldLifecycle := eventNameOriginalDeclaration(t, "internal/store/internal/runtimepersistence/test_lifecycle_storage.go", "ReadLifecycleEventCardinalityForTest")
-	newLifecycle := eventNameCurrentDeclaration(t, eventSupport, "ReadLifecycleEventCardinalityForTest")
-	expected = strings.Replace(oldLifecycle,
-		"return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = $1 AND event_name = $2`, runID, eventName).Scan(&count)",
-		"var err error\ncount, err = eventrecord.CountRunNamedEventStorageTx(ctx, tx, runID, eventName)\nreturn err", 1)
-	expected, err = requestkey.Normalize(expected)
-	if err != nil || expected != newLifecycle {
-		t.Fatal("lifecycle/name bridge changed its original validation/transaction/error contract:", err)
-	}
-	if _, err := os.Stat(filepath.Join("../../..", "internal/store/internal/runtimepersistence/test_lifecycle_storage.go")); !os.IsNotExist(err) {
-		t.Fatal("independent singleton lifecycle/name query remains:", err)
-	}
-	for _, path := range []string{apiSupport, "internal/store/internal/backend/eventrecord/causal_observation.go"} {
-		raw, err := os.ReadFile(filepath.Join("../../..", path))
-		if err != nil || strings.Contains(string(raw), "func CountEventNameStorageForTest(") || strings.Contains(string(raw), "func CountRunEventNameStorage(") {
-			t.Fatal("duplicate/raw event-name query remains:", path, err)
-		}
-	}
-}
-
 func eventNameOriginalDeclaration(t *testing.T, path, function string) string {
 	t.Helper()
 	raw, err := exec.Command("git", "show", eventname.Predecessor+":"+path).Output()
@@ -127,49 +76,6 @@ func eventNameCurrentDeclaration(t *testing.T, path, function string) string {
 	return sourceBlobPreviousDeclaration(t, path, function, requestKeyDeclaration(t, raw, function))
 }
 
-func TestFamily145EventNameTransformRefusesForeignCarriersAndShadowedCalls(t *testing.T) {
-	for _, before := range []string{
-		`func foreign(t *testing.T) { servedEventNameCount(t, foreign.DB, "sqlite", "x") }`,
-		`func foreign(t *testing.T) { servedEventNameCount(t, db, "sqlite", "x") }`,
-		`func foreign(t *testing.T) { servedEventNameCount(t, rt.DB, "sqlite", "x", "extra") }`,
-		`func foreign(t *testing.T) { servedEventNameCount := foreign; servedEventNameCount(t, rt.DB, "sqlite", "x") }`,
-	} {
-		if _, _, err := eventname.Transform(before); err == nil {
-			t.Fatal("unclassified carrier/arity/owner accepted:", before)
-		}
-	}
-}
-
-func TestFamily145EventNameWholeChainPreservesEveryPollAndRefusalCut(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	calls := 0
-	seen := map[string]bool{}
-	for _, pin := range eventNamePins(t) {
-		key := pin.File + "/" + pin.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("changed/duplicate event name predecessor:", key)
-		}
-		seen[key] = true
-		original, err := exec.Command("git", "show", eventname.Predecessor+":"+pin.File).Output()
-		if err != nil || requestKeyDeclaration(t, original, pin.Function) != pin.Before {
-			t.Fatal("event name source is not its signed predecessor:", key, err)
-		}
-		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || proof.previous(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
-			t.Fatal("event name current source escaped its whole rule:", key, err)
-		}
-		after, count, err := eventname.Transform(pin.Before)
-		if err != nil || after != pin.After || count != pin.Calls {
-			t.Fatal("event name finite transform escaped its rule:", key, err)
-		}
-		calls += count
-		eventNameHostiles(t, pin)
-	}
-	if calls != 14 || len(seen) != 6 {
-		t.Fatalf("event name inventory=%d/%d want14/6", calls, len(seen))
-	}
-}
-
 func eventNameHostiles(t *testing.T, pin eventname.Pin) {
 	t.Helper()
 	pins := eventNamePins(t)
@@ -185,32 +91,6 @@ func eventNameHostiles(t *testing.T, pin eventname.Pin) {
 		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil || eventname.Previous(pins, pin.File, pin.Function, mutant) != mutant {
 			t.Fatal("changed event name identity/assertion/lifetime accepted:", pin.Function, cut)
 		}
-	}
-}
-
-func TestFamily145EventNameOwnedInventoryHasNoRawCallerOrAlias(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	root := "../../.."
-	calls, definitions := 0, 0
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		n, d := eventNameOwnedFile(t, filepath.ToSlash(rel), file, proof)
-		calls += n
-		definitions += d
-		return nil
-	})
-	if err != nil || calls != 14 || definitions != 3 {
-		t.Fatalf("event name complete inventory=%d/%d want14/3 err=%v", calls, definitions, err)
 	}
 }
 

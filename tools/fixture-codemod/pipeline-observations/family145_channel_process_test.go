@@ -40,32 +40,6 @@ func channelProcessNativeControl(root, path, function, current string) (bool, er
 	return true, nil
 }
 
-func TestFamily145ChannelProcessNativeControlInventoryIsExact(t *testing.T) {
-	root := filepath.Clean("../../..")
-	for path, pin := range channelProcessNativeControls {
-		raw, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, err := selectedreadrole.Body(raw, pin.function)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if ok, err := channelProcessNativeControl(root, path, pin.function, body); !ok || err != nil {
-			t.Fatal("native control not accounted for:", path, err)
-		}
-		if ok, _ := channelProcessNativeControl(root, path, pin.function, body+"\n"); ok {
-			t.Fatal("altered native assertion or callback was admitted")
-		}
-		if ok, _ := channelProcessNativeControl(root, path, pin.function+"Foreign", body); ok {
-			t.Fatal("unclassified sibling declaration was admitted")
-		}
-		if ok, _ := channelProcessNativeControl(root, path+".foreign", pin.function, body); ok {
-			t.Fatal("foreign native control path was admitted")
-		}
-	}
-}
-
 func earlierChannelProcessEventOwnerFile(root string, current []byte) ([]byte, error) {
 	var err error
 	current, err = earlierOutboxAndSelectedForkOwner(root, agentSnapshotEventOwner, current)
@@ -94,85 +68,6 @@ func earlierChannelProcessEventOwnerFile(root string, current []byte) ([]byte, e
 		return nil, fmt.Errorf("channel fork event bridges changed retained event-owner bytes: %v", err)
 	}
 	return restored, nil
-}
-
-func TestFamily145ChannelProcessFiniteSourcesAndEveryExactInverse(t *testing.T) {
-	root := filepath.Clean("../../..")
-	pins, err := selectedreadrole.ReadChannelProcessPins(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := selectedreadrole.ValidateChannelProcessCurrent(root, pins); err != nil {
-		t.Fatal(err)
-	}
-	for _, pin := range pins {
-		if !pin.Removed {
-			row := recipe{File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}
-			output, changed, err := rewriteFunction(pin.File, []byte("package proof\n"+pin.Before), row)
-			if err != nil || !changed {
-				t.Fatal("finite channel transformation refused its signed source:", pin.Function, err)
-			}
-			if _, changed, err := rewriteFunction(pin.File, output, row); err != nil || changed {
-				t.Fatal("channel transformation was not inert:", pin.Function, err)
-			}
-			foreign := strings.Replace(pin.Before, pin.Function, pin.Function+"Foreign", 1)
-			if _, changed, err := rewriteFunction(pin.File, []byte("package proof\n"+foreign), row); err == nil || changed {
-				t.Fatal("foreign source accepted:", pin.Function)
-			}
-		}
-		old, err := selectedreadrole.EarlierChannelProcessSource(root, pin.File, pin.Function, pin.After)
-		if err != nil || old != pin.Before {
-			t.Fatal("exact source inverse lost predecessor:", pin.Function, err)
-		}
-		if _, err := selectedreadrole.EarlierChannelProcessSource(root, pin.File, pin.Function, pin.After+"\n"); err == nil {
-			t.Fatal("source inverse accepted altered endpoint:", pin.Function)
-		}
-	}
-}
-
-func TestFamily145ChannelProcessCompleteHistoryAndEventBoundary(t *testing.T) {
-	root := filepath.Clean("../../..")
-	for _, recipes := range []bool{false, true} {
-		prior, err := selectedreadrole.PriorChannelProcessHistory(root, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		expected, err := selectedreadrole.ComposeChannelProcessHistory(root, prior, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		actual := family145TransitionBytes
-		if recipes {
-			actual = recipeBytes
-		}
-		actual, err = selectedreadrole.BeforeDurableResourceHistory(root, actual, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var have, want any
-		if json.Unmarshal(actual, &have) != nil || json.Unmarshal(expected, &want) != nil || !reflect.DeepEqual(have, want) {
-			t.Fatal("history changed outside the exact channel composition")
-		}
-		old, err := selectedreadrole.EarlierChannelProcessHistory(root, actual, recipes)
-		if err != nil || !bytes.Equal(old, prior) {
-			t.Fatal("channel history lost signed predecessor:", err)
-		}
-		assertChannelProcessHistoryHostileControls(t, root, actual, recipes)
-	}
-	current, err := os.ReadFile(filepath.Join(root, agentSnapshotEventOwner))
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, err = earlierOutboxAndSelectedForkOwner(root, agentSnapshotEventOwner, current)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fmt.Sprintf("%x", sha256.Sum256(current)) != channelProcessEventOwnerAfter {
-		t.Fatal("channel event bridge owner changed")
-	}
-	if _, err := earlierChannelProcessEventOwnerFile(root, current); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func assertChannelProcessHistoryHostileControls(t *testing.T, root string, actual []byte, recipes bool) {

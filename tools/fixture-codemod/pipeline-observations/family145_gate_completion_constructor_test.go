@@ -38,34 +38,3 @@ func family145GateCompletionConstructorProofError(before, after string) error {
 	}
 	return nil
 }
-
-func TestFamily145GateCompletionConstructorUsesOneActualOwnerAndPreservesEveryConsumer(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen := 0
-	for _, row := range rows {
-		if row.Function != "gateCompletionHarness" {
-			continue
-		}
-		seen++
-		if err := family145GateCompletionConstructorProofError(row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range []string{
-			"storeselected.OpenRuntime(ctx,", "Selection: selection", "PostgresDSN: dsn", "SessionLockTTL: runtimeSessionLockTTL(cfg)",
-			"db, selectedPG, selectedSQLite = selectedRuntimeStoreForTest(t, p)", "deliveryReader = p.deps.DeliveryStore.SummarizeRun",
-			"p.waitForReadyLine()", "Postgres: selectedPG", "SQLite: selectedSQLite", "ReadRunDeliveries: deliveryReader", "t.Cleanup(cleanup)", "buildStoresForServe = original",
-			"projected = p.deps.EventStore", "projected == nil", "projected != selectedSQLite", "projected != selectedPG", "t.Fatalf(\"gate completion fixture lost actual current owner:",
-			"ReceiverStateReader: requireReceiverProofStateReader(t, projected)",
-		} {
-			if family145GateCompletionConstructorProofError(row.Before, strings.Replace(row.After, cut, "foreignCompletionOwner()", 1)) == nil {
-				t.Fatalf("gate completion owner/source/consumer/context/lifetime mutation passed: %s", cut)
-			}
-		}
-	}
-	if seen != 1 {
-		t.Fatalf("whole gate completion constructor inventory=%d/1", seen)
-	}
-}

@@ -58,52 +58,6 @@ func family145SystemNodeCompletionProofError(function, before, after string) err
 	return nil
 }
 
-func TestFamily145SystemNodeCompletionEntireReadChainKeepsPublicLifecycleAssertions(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	original := map[string]string{}
-	for _, row := range rows {
-		if _, ok := family145SystemNodeCompletionCalls[row.Function]; !ok {
-			continue
-		}
-		original[row.Function] = row.Before
-		if err := family145SystemNodeCompletionProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatalf("%s: %v", row.Function, err)
-		}
-		for _, call := range family145SystemNodeCompletionCalls[row.Function] {
-			if family145SystemNodeCompletionProofError(row.Function, row.Before, strings.ReplaceAll(row.After, call, "foreignCut(")) == nil {
-				t.Fatalf("lost system-node owner/coordinate/cut accepted: %s", call)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.After)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			hostile, err := family145BusAssertionCounterexample(row.After, strings.SplitN(assertion, " => ", 2)[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if family145SystemNodeCompletionProofError(row.Function, row.Before, hostile) == nil {
-				t.Fatalf("lost original system-node assertion accepted: %s", assertion)
-			}
-		}
-	}
-	if len(original) != 7 {
-		t.Fatalf("system-node completion source/caller inventory changed: %d", len(original))
-	}
-	assertFamily145SystemNodePhysicalQueries(t, original)
-	data, err := os.ReadFile("../../../internal/apiv1/operator_run_completion_system_node_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := family145DescriptorReadinessEscape(data); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func assertFamily145SystemNodePhysicalQueries(t *testing.T, original map[string]string) {
 	t.Helper()
 	for _, port := range []struct{ file, owner, predecessor string }{

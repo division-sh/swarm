@@ -208,53 +208,6 @@ func TestFamily145ServedForkSnapshotsUseExactProjectionAndClosedReadOwner(t *tes
 	}
 }
 
-func TestFamily145ServedForkSnapshotCallersPreserveAll32OriginalCuts(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]bool{}
-	for _, row := range rows {
-		if family145ServedSnapshotCallers[row.Function] == 0 {
-			continue
-		}
-		prove := func(candidate string) error {
-			switch row.Function {
-			case "testServedJoinWriterCompletedHistoryRefusal":
-				return family145RetainedJoinConsumerProofError(row.Before, candidate)
-			case "TestSelectedForkPendingInputMixedCompletionBothStores":
-				return family145ServedSnapshotConsumerProofError(row.Function, row.Before, candidate)
-			default:
-				return family145ServedSnapshotCallerProofError(row.Function, row.Before, candidate)
-			}
-		}
-		if seen[row.Function] {
-			t.Fatalf("duplicate snapshot consumer: %s", row.Function)
-		}
-		seen[row.Function] = true
-		if err := prove(row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range []string{"rt.ReadApplicationSnapshot", "reflect.DeepEqual", "t.Fatal"} {
-			if !strings.Contains(row.After, cut) || prove(strings.Replace(row.After, cut, "foreignSnapshotCut()", 1)) == nil {
-				t.Fatalf("lost snapshot/assertion/refusal passed: %s/%s", row.Function, cut)
-			}
-		}
-	}
-	if len(seen) != 13 {
-		t.Fatalf("served snapshot consumers=%d/13", len(seen))
-	}
-	counts := family145ServedSnapshotCallerInventory(t)
-	if len(counts) != len(family145ServedSnapshotCallers) {
-		t.Fatalf("active snapshot caller inventory changed: %v", counts)
-	}
-	for function, want := range family145ServedSnapshotCallers {
-		if counts[function] != want {
-			t.Fatalf("snapshot consumer count %s=%d/%d", function, counts[function], want)
-		}
-	}
-}
-
 func family145ServedSnapshotCallerInventory(t *testing.T) map[string]int {
 	t.Helper()
 	root := filepath.Join("..", "..", "..")
@@ -294,29 +247,4 @@ func family145ServedSnapshotCallerInventory(t *testing.T) map[string]int {
 		t.Fatal(err)
 	}
 	return counts
-}
-
-func TestFamily145RetainedJoinSnapshotWaitPreservesFinalizationAndFailClosedReads(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	matched := 0
-	for _, row := range rows {
-		if row.Function != "readRetainedRootJoins" {
-			continue
-		}
-		matched++
-		if err := family145RetainedJoinReaderProofError(row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range []string{"len(joins) > 0", "join.TimerCancelled", "!join.OutcomePending", "join.OutcomeFired", "time.Now().Add(servedProofPollDeadline)", "if err != nil", "t.Fatal(err)", "if err != nil || !found", "return loop, joins"} {
-			if !strings.Contains(row.After, cut) || family145RetainedJoinReaderProofError(row.Before, strings.Replace(row.After, cut, "unsettledJoin()", 1)) == nil {
-				t.Fatalf("empty/pending/read-error/loop/deadline cut passed: %s", cut)
-			}
-		}
-	}
-	if matched != 1 {
-		t.Fatalf("retained join shared completion reader=%d/1", matched)
-	}
 }

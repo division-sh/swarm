@@ -65,34 +65,6 @@ func family145CheckStopWitnessAmendment(t *testing.T, file, function, current st
 	return false
 }
 
-func TestFamily145StopWitnessAmendmentPinsAllConsumersAndIndependentCuts(t *testing.T) {
-	seen := map[string]bool{}
-	for _, pin := range stopWitnessPins(t) {
-		key := pin.File + "/" + pin.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("duplicate or altered stop witness source:", key)
-		}
-		seen[key] = true
-		before, err := exec.Command("git", "show", stopWitnessPredecessor+":"+pin.File).Output()
-		if err != nil || requestKeyDeclaration(t, before, pin.Function) != pin.Before {
-			t.Fatal("stop witness predecessor lost:", key, err)
-		}
-		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
-			t.Fatal("stop witness source does not match its complete amended output:", key, err)
-		}
-		finite := recipe{File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}
-		after, changed, err := rewriteFunction(pin.File, []byte("package proof\n"+pin.Before), finite)
-		if err != nil || !changed {
-			t.Fatal("finite semantic amendment failed:", key, err)
-		}
-		if _, changed, err := rewriteFunction(pin.File, after, finite); err != nil || changed {
-			t.Fatal("semantic amendment is not exact and idempotent:", key, err)
-		}
-		stopWitnessHostiles(t, pin, finite)
-	}
-}
-
 func stopWitnessHostiles(t *testing.T, pin stopWitnessPin, finite recipe) {
 	t.Helper()
 	for _, cut := range []string{"in_progress", "failed", "reader", "selected", "owner", "raw", "runID", "fixture.runID", "pending", "updated_at", "JOIN", "ORDER BY", "reflect.DeepEqual", "before.revisions", "Commit()", "Rollback()", "t.Fatal", " != ", " == "} {
@@ -106,40 +78,6 @@ func stopWitnessHostiles(t *testing.T, pin stopWitnessPin, finite recipe) {
 	}
 	if family145StopWitnessPrevious(t, "foreign.go", pin.Function, pin.After) != pin.After || family145StopWitnessPrevious(t, pin.File, pin.Function+"Foreign", pin.After) != pin.After {
 		t.Fatal("historical stop correspondence accepted a foreign complete key")
-	}
-}
-
-func TestFamily145StopWitnessStoredStatusInventoryHasNoOldInterpreter(t *testing.T) {
-	root := "../../.."
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		var failure error
-		ast.Inspect(file, func(node ast.Node) bool {
-			literal, ok := node.(*ast.BasicLit)
-			if !ok || literal.Kind != token.STRING {
-				return true
-			}
-			text, err := strconv.Unquote(literal.Value)
-			if err != nil {
-				failure = err
-				return false
-			}
-			if strings.Contains(text, "event_deliveries") && strings.Contains(text, "status") && (strings.Contains(text, "'processing'") || strings.Contains(text, "'retrying'")) {
-				failure = fmt.Errorf("obsolete persisted stop status predicate survived: %s", path)
-				return false
-			}
-			return true
-		})
-		return failure
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }
 

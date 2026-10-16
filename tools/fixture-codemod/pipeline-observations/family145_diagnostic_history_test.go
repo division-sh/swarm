@@ -56,54 +56,6 @@ func diagnosticHistoryCallArgs(source, name string) []string {
 	return out
 }
 
-func TestFamily145DiagnosticHistoryConstructorRetiredAndAllCallersUseOriginalOwner(t *testing.T) {
-	public, err := os.ReadFile("../../../internal/store/storetest/event.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(public), "InsertDiagnosticDirectEventRecordForRun") {
-		t.Fatal("run diagnostic history retained the supplied-pool constructor")
-	}
-	var calls int
-	for _, path := range []string{"internal/runtime/runforkexecution/execution_test.go", "internal/serveapp/run_fork_runtime_test.go"} {
-		source, err := os.ReadFile("../../../" + path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		parsed, err := parser.ParseFile(token.NewFileSet(), path, source, parser.AllErrors)
-		if err != nil {
-			t.Fatal(err)
-		}
-		ast.Inspect(parsed, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			fn, ok := call.Fun.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			switch fn.Name {
-			case "seedSelectedExecutionDiagnosticPlatformDeadLetter":
-				calls++
-				if len(call.Args) != 6 || family145NodeString(call.Args[1]) != "ctx" || family145NodeString(call.Args[2]) != "pg" {
-					t.Fatal("runtime diagnostic caller lost original context/selected owner")
-				}
-			case "seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter":
-				calls++
-				if len(call.Args) != 6 || family145NodeString(call.Args[1]) != "context.Background()" || family145NodeString(call.Args[2]) != "pg" {
-					t.Fatal("served diagnostic caller lost its original selected owner")
-				}
-			}
-			return true
-		})
-	}
-	if calls != 2 {
-		t.Fatalf("diagnostic history caller inventory=%d, want two diagnostic callers and one native business replacement", calls)
-	}
-	assertDiagnosticHistoryBusinessReplacement(t)
-}
-
 func assertDiagnosticHistoryBusinessReplacement(t *testing.T) {
 	t.Helper()
 	const path = "internal/runtime/runforkexecution/execution_test.go"

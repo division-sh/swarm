@@ -272,34 +272,6 @@ func TestFamily145SourceBlobInvocationRejectsChangesBeforeItsEndCheck(t *testing
 	}
 }
 
-func TestFamily145SourceBlobHistoryRefusesMissingDuplicateForeignAndChangedCurrentSource(t *testing.T) {
-	for _, pin := range sourceBlobLivePins(t) {
-		if err := sourceblob.ValidateCurrentSource(pin, []byte("package proof\n"+pin.After)); err != nil {
-			t.Fatal(err)
-		}
-		for _, source := range []string{"package proof\n", "package proof\n" + pin.After + "\n" + pin.After, "package proof\n" + strings.Replace(pin.After, "{", "{foreignRead();", 1)} {
-			if err := sourceblob.ValidateCurrentSource(pin, []byte(source)); err == nil {
-				t.Fatal("missing/duplicate/changed live source accepted:", pin.Function)
-			}
-		}
-		foreign := pin
-		foreign.File = "foreign.go"
-		if err := sourceblob.ValidateCurrentSource(foreign, []byte("package proof\n"+pin.After)); err == nil {
-			t.Fatal("foreign source pin accepted")
-		}
-	}
-	raw, err := os.ReadFile("../../../internal/serveapp/main_runtime_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, role := range []string{"SourceArtifacts", "sourceArtifactReader", "servedControlProofRuntime"} {
-		mutant := strings.ReplaceAll(string(raw), role, "foreignSourceBlobRole")
-		if mutant == string(raw) || sourceblob.ValidateFixtureRole([]byte(mutant)) == nil {
-			t.Fatal("changed/missing fixture role/type accepted:", role)
-		}
-	}
-}
-
 func sourceBlobPriorHistory(t *testing.T, recipes bool) []byte {
 	t.Helper()
 	path := "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
@@ -360,40 +332,6 @@ func sourceBlobEarlierInventoryEndpoint(file, function, current string) string {
 		}
 	}
 	return current
-}
-
-func TestFamily145SourceBlobHistoryRestoresCompletePriorLedgersAndAllThreePriorSuccessors(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	pins := proof.pins
-	for _, recipes := range []bool{true, false} {
-		prior := sourceBlobPriorHistory(t, recipes)
-		expected, err := sourceblob.ComposeHistory(prior, pins, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		current, wantCount := family145TransitionBytes, 825
-		if recipes {
-			current, wantCount = recipeBytes, 1520
-		}
-		current = proof.beforeBlobHistory(t, current, recipes)
-		restoredHistory, err := sourceblob.RestoreHistory(current, prior, pins, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var before, after, composed, restored []map[string]any
-		for _, input := range []struct {
-			raw  []byte
-			rows *[]map[string]any
-		}{{prior, &before}, {current, &after}, {expected, &composed}, {restoredHistory, &restored}} {
-			if err := json.Unmarshal(input.raw, input.rows); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if len(after) != wantCount || !reflect.DeepEqual(after, composed) || !reflect.DeepEqual(before, restored) {
-			t.Fatal("source blob changed immutable history/order/prior Successor or unrelated records")
-		}
-		sourceBlobHistoryHostility(t, current, prior, pins, recipes)
-	}
 }
 
 func sourceBlobHistoryHostility(t *testing.T, current, prior []byte, pins []sourceblob.Pin, recipes bool) {

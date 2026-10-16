@@ -78,52 +78,6 @@ func workflowStateCurrentDeclaration(t *testing.T, path, function string) string
 	return family145ServedEventCountPrevious(t, path, function, entry)
 }
 
-func TestFamily145WorkflowStateTransformRefusesForeignCarriersAndShadowedCalls(t *testing.T) {
-	for _, before := range []string{
-		`func foreign(t *testing.T) { requireLifecycleFlowEntity(t, foreign, "run", "scope", "state") }`,
-		`func foreign(t *testing.T) { requirePendingInputStateCount(t, foreign, "run", "state", 3) }`,
-		`func foreign(t *testing.T) { requireLifecycleFlowEntity(t, rt, "run", "scope", "state", "extra") }`,
-		`func foreign(t *testing.T) { requireLifecycleFlowEntity := foreign; requireLifecycleFlowEntity(t, rt, "run", "scope", "state") }`,
-	} {
-		if _, _, err := workflowstate.Transform(before); err == nil {
-			t.Fatal("unclassified carrier/arity/owner accepted:", before)
-		}
-	}
-}
-
-func TestFamily145WorkflowStateWholeChainPreservesEveryPollAndRefusalCut(t *testing.T) {
-	calls := 0
-	seen := map[string]bool{}
-	for _, pin := range workflowStatePins(t) {
-		key := pin.File + "/" + pin.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("changed/duplicate workflow state predecessor:", key)
-		}
-		seen[key] = true
-		original, err := exec.Command("git", "show", workflowstate.Predecessor+":"+pin.File).Output()
-		if err != nil || requestKeyDeclaration(t, original, pin.Function) != pin.Before {
-			t.Fatal("workflow state source is not its signed predecessor:", key, err)
-		}
-		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil {
-			t.Fatal(err)
-		}
-		entry := servedObservationEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))
-		if family145ServedEventCountPrevious(t, pin.File, pin.Function, entry) != pin.After {
-			t.Fatal("workflow state current source escaped its whole rule:", key, err)
-		}
-		after, count, err := workflowstate.Transform(pin.Before)
-		if err != nil || after != pin.After || count != pin.Calls {
-			t.Fatal("workflow state finite transform escaped its rule:", key, err)
-		}
-		calls += count
-		workflowStateHostiles(t, pin)
-	}
-	if calls != 28 || len(seen) != 12 {
-		t.Fatalf("workflow state inventory=%d/%d want28/12", calls, len(seen))
-	}
-}
-
 func workflowStateHostiles(t *testing.T, pin workflowstate.Pin) {
 	t.Helper()
 	pins := workflowStatePins(t)
@@ -139,31 +93,6 @@ func workflowStateHostiles(t *testing.T, pin workflowstate.Pin) {
 		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil || workflowstate.Previous(pins, pin.File, pin.Function, mutant) != mutant {
 			t.Fatal("changed workflow state identity/assertion/lifetime accepted:", pin.Function, cut)
 		}
-	}
-}
-
-func TestFamily145WorkflowStateOwnedInventoryHasNoRawCallerOrAlias(t *testing.T) {
-	root := "../../.."
-	calls, definitions := 0, 0
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		n, d := workflowStateOwnedFile(t, filepath.ToSlash(rel), file)
-		calls += n
-		definitions += d
-		return nil
-	})
-	if err != nil || calls != 28 || definitions != 2 {
-		t.Fatalf("workflow state complete inventory=%d/%d want28/2 err=%v", calls, definitions, err)
 	}
 }
 

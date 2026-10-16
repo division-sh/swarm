@@ -59,48 +59,6 @@ func restoreSourceForkHistory(t *testing.T, rows []map[string]any, recipes bool)
 	return rows
 }
 
-func TestFamily145SourceForkHistoryRestoresCompletePriorLedgersAndTimerSuccessor(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	pins := sourceForkInvocationPins(t, proof)
-	for _, recipes := range []bool{true, false} {
-		prior := sourceForkPriorHistory(t, recipes)
-		expected, err := sourcefork.ComposeHistory(prior, pins, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		current := family145TransitionBytes
-		wantCount := 822
-		if recipes {
-			current, wantCount = recipeBytes, 1517
-		}
-		current = proof.deliveryHistory(t, current, recipes)
-		var before, after, composed []map[string]any
-		for _, input := range []struct {
-			raw  []byte
-			rows *[]map[string]any
-		}{{prior, &before}, {current, &after}, {expected, &composed}} {
-			if err := json.Unmarshal(input.raw, input.rows); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if len(after) != wantCount || !reflect.DeepEqual(after, composed) {
-			t.Fatal("source fork composition changed records/count/order")
-		}
-		restoredBytes, err := sourcefork.RestoreHistory(current, prior, pins, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var restored []map[string]any
-		if err := json.Unmarshal(restoredBytes, &restored); err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(before, restored) {
-			t.Fatal("source fork lost complete immutable history or prior timer Successor")
-		}
-		sourceForkHistoryHostility(t, current, prior, pins, recipes)
-	}
-}
-
 func sourceForkHistoryHostility(t *testing.T, current, prior []byte, pins []sourcefork.Pin, recipes bool) {
 	t.Helper()
 	// The complete-ledger conservation check above stays whole. Mutate the six

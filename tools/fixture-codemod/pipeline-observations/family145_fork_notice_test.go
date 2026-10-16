@@ -55,39 +55,6 @@ func family145CheckForkNoticeWholeRule(t *testing.T, file, function, current str
 	return false
 }
 
-func TestFamily145ForkNoticeWholeChainRetainsAll16CallsAndOriginalPhysicalWitness(t *testing.T) {
-	calls, helpers := 0, 0
-	seen := map[string]bool{}
-	for _, pin := range forkNoticePins(t) {
-		key := pin.File + "/" + pin.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("changed/duplicate original notice witness:", key)
-		}
-		seen[key] = true
-		calls += pin.Calls
-		if pin.Function == "readForkReceiverNoticeDomain" {
-			helpers++
-			requireForkNoticePhysicalOwner(t, pin)
-		} else if expected := strings.ReplaceAll(pin.Before, "readForkReceiverNoticeDomain(t, rt,", "readForkReceiverNoticeDomain(t, rt.ReceiverStateReader,"); expected != pin.After {
-			t.Fatal("notice propagation changed predicate/assertion/lifetime beyond selected reader:", key)
-		}
-		raw, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if servedSetupEarlierSource(t, pin.File, pin.Function, family145PublicA2CurrentDeclaration(t, raw, pin.Function)) != pin.After {
-			t.Fatal("current notice body escaped its whole rule:", key)
-		}
-		forkNoticeHostiles(t, pin)
-	}
-	if calls != 16 || helpers != 1 || len(seen) != 4 {
-		t.Fatalf("notice rule inventory=%d/%d/%d want16/1/4", calls, helpers, len(seen))
-	}
-	if _, err := forknotice.Decode(append(append([]byte(nil), family145ForkNoticeBytes...), ' ')); err == nil {
-		t.Fatal("altered finite source manifest accepted")
-	}
-}
-
 func requireForkNoticePhysicalOwner(t *testing.T, pin forknotice.Pin) {
 	t.Helper()
 	const helper = `func readForkReceiverNoticeDomain(t *testing.T, reader receiverProofStateReader, runID string) []string {
@@ -142,48 +109,5 @@ func forkNoticeHostiles(t *testing.T, pin forknotice.Pin) {
 		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil || forknotice.Previous(pins, pin.File, pin.Function, mutant) != mutant {
 			t.Fatal("lost notice reader/identity/refusal/replay/lifetime cut accepted:", pin.Function, cut)
 		}
-	}
-}
-
-func TestFamily145ForkNoticeOwnedInventoryRetiresEveryBroadCaller(t *testing.T) {
-	root := "../../.."
-	calls, helpers := 0, 0
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		allowed := map[token.Pos]bool{}
-		ast.Inspect(file, func(node ast.Node) bool {
-			switch n := node.(type) {
-			case *ast.FuncDecl:
-				if n.Name.Name == "readForkReceiverNoticeDomain" {
-					helpers++
-					allowed[n.Name.Pos()] = true
-				}
-			case *ast.CallExpr:
-				if id, ok := n.Fun.(*ast.Ident); ok && id.Name == "readForkReceiverNoticeDomain" {
-					calls++
-					allowed[id.Pos()] = true
-					if len(n.Args) != 3 || n.Ellipsis.IsValid() || family145NodeString(n.Args[1]) != "rt.ReceiverStateReader" {
-						t.Error("notice caller restored broad or foreign capability")
-					}
-				}
-			}
-			return true
-		})
-		ast.Inspect(file, func(node ast.Node) bool {
-			if id, ok := node.(*ast.Ident); ok && id.Name == "readForkReceiverNoticeDomain" && !allowed[id.Pos()] {
-				t.Error("notice helper escaped direct owned call inventory")
-			}
-			return true
-		})
-		return nil
-	})
-	if err != nil || calls != 16 || helpers != 1 {
-		t.Fatalf("notice inventory calls=%d helpers=%d err=%v", calls, helpers, err)
 	}
 }

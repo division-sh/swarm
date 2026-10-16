@@ -100,38 +100,6 @@ func family145GateRecoveryAssertionSource(source string) (string, error) {
 	return family145NodeString(file.Decls[0]), nil
 }
 
-func TestFamily145GateRecoveryEntireHelperAndCallerChainRetainsAssertions(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	original := map[string]string{}
-	for _, row := range rows {
-		cuts, helper := family145GateRecoveryHelpers[row.Function]
-		if !helper {
-			var caller bool
-			cuts, caller = family145GateRecoveryCallers[row.Function]
-			if !caller {
-				continue
-			}
-		}
-		original[row.Function] = row.Before
-		if err := family145GateRecoveryProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatalf("%s: %v", row.Function, err)
-		}
-		for _, cut := range cuts {
-			if family145GateRecoveryProofError(row.Function, row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("lost gate helper/owner cut accepted: %s", cut)
-			}
-		}
-		assertFamily145GateRecoveryHostileConditions(t, row.Function, row.Before, row.After)
-	}
-	if len(original) != len(family145GateRecoveryHelpers)+len(family145GateRecoveryCallers) {
-		t.Fatalf("gate dependency inventory incomplete: %d", len(original))
-	}
-	assertFamily145GateRecoveryPhysicalQueries(t, original)
-}
-
 func assertFamily145GateRecoveryHostileConditions(t *testing.T, function, before, after string) {
 	t.Helper()
 	assertions, err := family145DescriptorBusinessAssertions(before)

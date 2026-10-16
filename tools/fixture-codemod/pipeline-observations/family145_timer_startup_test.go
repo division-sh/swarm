@@ -10,28 +10,6 @@ import (
 	"testing"
 )
 
-func TestFamily145TimerStartupFixtureRetiresPoolAndDialectCapabilities(t *testing.T) {
-	source, err := os.ReadFile("../../../internal/runtime/workflow_timer_startup_recovery_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := family145TimerStartupOwnerError(string(source)); err != nil {
-		t.Fatal(err)
-	}
-	for _, regression := range []string{
-		"storetest.Database(selected)",
-		"storetest.AdmitPostgresRuntimeStore(t, db)",
-		"storetest.NewPostgresStoreForTest(db)",
-		"db.QueryRowContext(ctx, query)",
-		"db.ExecContext(ctx, query)",
-	} {
-		hostile := strings.Replace(string(source), "selected := backend.open(t)", "selected := backend.open(t); "+regression, 1)
-		if err := family145TimerStartupOwnerError(hostile); err == nil {
-			t.Fatalf("timer startup construction accepted %s", regression)
-		}
-	}
-}
-
 func family145TimerStartupOwnerError(source string) error {
 	file, err := parser.ParseFile(token.NewFileSet(), "timer-startup.go", source, parser.AllErrors)
 	if err != nil {

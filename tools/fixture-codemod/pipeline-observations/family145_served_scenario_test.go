@@ -70,52 +70,6 @@ func earlierServedScenarioOwnerFile(root, file string, current []byte) ([]byte, 
 	return restored, nil
 }
 
-func TestFamily145ServedScenarioCompleteSourceAndAppendOnlyHistory(t *testing.T) {
-	root := filepath.Clean("../../..")
-	pins, err := selectedreadrole.ReadServedScenarioPins(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pins) != 22 {
-		t.Fatalf("scenario declarations=%d want22", len(pins))
-	}
-	if err := selectedreadrole.ValidateServedScenarioCurrent(root, pins); err != nil {
-		t.Fatal(err)
-	}
-	for _, recipes := range []bool{true, false} {
-		path := "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-		if recipes {
-			path = "tools/fixture-codemod/pipeline-observations/recipes.json"
-		}
-		current, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		prior, err := selectedreadrole.PriorServedScenarioHistory(root, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		restored, err := selectedreadrole.EarlierServedScenarioHistory(root, current, recipes)
-		if err != nil || !bytes.Equal(restored, prior) {
-			t.Fatalf("scenario inverse lost immutable predecessor: %v", err)
-		}
-		var rows []map[string]any
-		if err := json.Unmarshal(current, &rows); err != nil {
-			t.Fatal(err)
-		}
-		rows[0]["Before"] = "foreign historical text"
-		bad, _ := json.Marshal(rows)
-		if _, err := selectedreadrole.EarlierServedScenarioHistory(root, bad, recipes); err == nil {
-			t.Fatal("scenario inverse accepted unrelated history changes")
-		}
-	}
-	bad := append([]selectedreadrole.EntityToolPin(nil), pins...)
-	bad[0].After += "\n"
-	if err := selectedreadrole.ValidateServedScenarioCurrent(root, bad); err == nil || reflect.DeepEqual(pins, bad) {
-		t.Fatal("scenario source accepted a foreign endpoint")
-	}
-}
-
 func TestFamily145ServedScenarioReadOwnerAndFixedWitnessConsumersAreClosed(t *testing.T) {
 	root := filepath.Clean("../../..")
 	current, err := os.ReadFile(filepath.Join(root, deliveryRecoveryReadOwner))

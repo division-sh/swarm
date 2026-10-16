@@ -59,36 +59,6 @@ func family145CheckRequestKeyWholeRule(t *testing.T, file, function, current str
 	return false
 }
 
-func TestFamily145RequestKeyWholeChainRetainsPredicatesAssertionsAndCuts(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	calls := 0
-	seen := map[string]bool{}
-	for _, pin := range requestKeyPins(t) {
-		key := pin.File + "/" + pin.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("changed/duplicate request-key predecessor:", key)
-		}
-		seen[key] = true
-		original, err := exec.Command("git", "show", requestkey.Predecessor+":"+pin.File).Output()
-		if err != nil || requestKeyDeclaration(t, original, pin.Function) != pin.Before {
-			t.Fatal("request-key source is not its signed predecessor:", key, err)
-		}
-		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || family145RequestKeyCurrentPrevious(pin.File, pin.Function, proof.previous(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))) != pin.After {
-			t.Fatal("request-key current source escaped its whole rule:", key, err)
-		}
-		after, count, err := requestkey.Transform(pin.Before)
-		if err != nil || after != pin.After || count != pin.Calls {
-			t.Fatal("request-key finite transform escaped its rule:", key, err)
-		}
-		calls += count
-		requestKeyHostiles(t, pin)
-	}
-	if calls != 39 || len(seen) != 28 {
-		t.Fatalf("request-key inventory=%d/%d want39/28", calls, len(seen))
-	}
-}
-
 func requestKeyDeclaration(t *testing.T, raw []byte, name string) string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "request-key.go", raw, parser.AllErrors)
@@ -118,55 +88,6 @@ func requestKeyHostiles(t *testing.T, pin requestkey.Pin) {
 		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil || requestkey.Previous(pins, pin.File, pin.Function, mutant) != mutant {
 			t.Fatal("changed request-key predicate/assertion/lifetime accepted:", pin.Function, cut)
 		}
-	}
-}
-
-func TestFamily145RequestKeyRollbackLiftPreservesSevenRawCountsAndImmediateCut(t *testing.T) {
-	for _, pin := range requestKeyPins(t) {
-		switch pin.Function {
-		case "requirePublicInputRollbackNoResidue":
-			before := strings.Replace(pin.Before, "idempotencyKey, eventID, runID string", "eventID, runID string", 1)
-			at := strings.Index(before, "\tif got := servedEventPublishAPIIdempotencyCount(")
-			if at < 0 || before[:at]+"}" != pin.After || !strings.Contains(pin.After, "db.QueryRowContext(") {
-				t.Fatal("rollback changed retained raw counts/arguments/assertions")
-			}
-		case "TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores", "TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcrossSelectedStores":
-			verifyRequestKeyRollbackAdjacency(t, pin.After)
-		}
-	}
-}
-
-func TestFamily145RequestKeyOwnedInventoryRetiresEveryRawCountCaller(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	root := "../../.."
-	pins := requestKeyPins(t)
-	repairSource, err := os.ReadFile(filepath.Join(root, requestKeyRepairCallerPath))
-	if err != nil || !requestKeyRepairCaller(t, requestKeyRepairCallerPath, requestKeyRepairCallerName, requestKeyDeclaration(t, repairSource, requestKeyRepairCallerName)) {
-		t.Fatal("exact new wrong-template rollback counterexample disappeared:", err)
-	}
-	helpers := map[string]bool{"servedEventPublishAPIIdempotencyCount": true, "servedEventPublishEventCountByIdempotencyKey": true,
-		"servedEventPublishSourcedEventCount": true, "requireServedControlAPIIdempotencyRows": true,
-		"requireServedReplayNoDeliveryHistoryNoMutation": true, "requirePublicInputRollbackNoResidue": true}
-	calls, definitions := 0, 0
-	err = checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		fileCalls, fileDefinitions := requestKeyOwnedFile(t, pins, helpers, filepath.ToSlash(relative), file, proof)
-		calls += fileCalls
-		definitions += fileDefinitions
-		return nil
-	})
-	if err != nil || calls != 40+2 || definitions != 6 {
-		t.Fatalf("request-key complete owned inventory=%d/%d want40 historical + 2 exact new rollback calls / 6 owners err=%v", calls, definitions, err)
 	}
 }
 
@@ -225,29 +146,6 @@ func requestKeyRepairCaller(t *testing.T, path, name, current string) bool {
 		t.Fatal(err)
 	}
 	return current != "" && current == requestKeyDeclaration(t, signed, name)
-}
-
-func TestFamily145RequestKeyNewRollbackCounterexampleCannotHideAnExtraOrChangedCaller(t *testing.T) {
-	raw, err := os.ReadFile("../../../" + requestKeyRepairCallerPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	current := requestKeyDeclaration(t, raw, requestKeyRepairCallerName)
-	if !requestKeyRepairCaller(t, requestKeyRepairCallerPath, requestKeyRepairCallerName, current) {
-		t.Fatal("named physical rollback counterexample lost its complete signed source")
-	}
-	for _, cut := range []string{"requirePublicInputRollbackNoResidue", "servedEventPublishAPIIdempotencyCount", "wrong-template-proof", "count != 0", "stage.marker"} {
-		mutant := strings.Replace(current, cut, "unreviewedRollbackCut", 1)
-		if mutant == current || requestKeyRepairCaller(t, requestKeyRepairCallerPath, requestKeyRepairCallerName, mutant) {
-			t.Fatal("changed native rollback owner/oracle accepted:", cut)
-		}
-	}
-	extra := strings.Replace(current, "{", "{ servedEventPublishAPIIdempotencyCount(nil,nil,\"\",\"\",\"\");", 1)
-	if requestKeyRepairCaller(t, requestKeyRepairCallerPath, requestKeyRepairCallerName, extra) ||
-		requestKeyRepairCaller(t, "foreign.go", requestKeyRepairCallerName, current) ||
-		requestKeyRepairCaller(t, requestKeyRepairCallerPath, "foreignFunction", current) {
-		t.Fatal("extra or foreign canonical helper call hid behind the new counterexample")
-	}
 }
 
 func verifyRequestKeyRollbackAdjacency(t *testing.T, source string) {

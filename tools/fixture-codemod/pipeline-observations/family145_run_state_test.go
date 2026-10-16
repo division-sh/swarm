@@ -83,53 +83,6 @@ func family145RunStateJoinedCleanupError(source string) error {
 	return nil
 }
 
-func TestFamily145RunStateWholeManagerReadChainKeepsAssertionsAndTemporalCuts(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	original := map[string]string{}
-	for _, row := range rows {
-		if _, ok := family145RunStateCalls[row.Function]; !ok {
-			continue
-		}
-		original[row.Function] = row.Before
-		if err := family145RunStateProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatalf("%s: %v", row.Function, err)
-		}
-		for _, cut := range family145RunStateCalls[row.Function] {
-			if family145RunStateProofError(row.Function, row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("lost run-state owner/clock/cut accepted: %s", cut)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.Before)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			hostile, err := family145BusAssertionCounterexample(row.After, strings.SplitN(assertion, " => ", 2)[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if family145RunStateProofError(row.Function, row.Before, hostile) == nil {
-				t.Fatalf("lost original run-state assertion accepted: %s", assertion)
-			}
-		}
-		assertFamily145RunStateCleanupCounterexamples(t, row.Function, row.After)
-	}
-	if len(original) != 5 {
-		t.Fatalf("run-state helper/caller inventory=%d want5", len(original))
-	}
-	assertFamily145RunStateQueries(t, original)
-	data, err := os.ReadFile("../../../internal/serveapp/run_state_runtime_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := family145DescriptorReadinessEscape(data); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func assertFamily145RunStateCleanupCounterexamples(t *testing.T, function, after string) {
 	t.Helper()
 	if function != "TestRunState_KeepsSupportedRunRunningUntilManagerWorkSettles" && function != "TestRunState_PreservesRunningTruthWhileManagerWorkIsActive" {

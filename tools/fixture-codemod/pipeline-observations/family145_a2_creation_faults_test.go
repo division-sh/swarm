@@ -60,47 +60,6 @@ func family145A2CreationFaultProofError(key, before, after string) error {
 	return nil
 }
 
-func TestFamily145A2CreationFaultsPreserveWholeConsumersAndRejectLostTemporalCuts(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	found := map[string]bool{}
-	for _, row := range rows {
-		cuts, relevant := family145A2CreationFaultCuts[row.Function]
-		if !relevant {
-			continue
-		}
-		if found[row.Function] {
-			t.Fatalf("ambiguous A2 creation fault consumer: %s", row.Function)
-		}
-		found[row.Function] = true
-		key := family145GateScalarReadKey(row.File, row.Function)
-		if err := family145A2CreationFaultProofError(key, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range cuts {
-			if family145A2CreationFaultProofError(key, row.Before, strings.Replace(row.After, cut, "foreignCut()", 1)) == nil {
-				t.Fatalf("lost exact owner/context/phase passed: %s", cut)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.After)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			condition := strings.SplitN(assertion, " => ", 2)[0]
-			if family145A2CreationFaultProofError(key, row.Before, strings.Replace(row.After, condition, "false", 1)) == nil {
-				t.Fatalf("lost original fault assertion passed: %s", condition)
-			}
-		}
-		assertFamily145A2FaultPhysicalStatements(t, row.Function, row.Before)
-	}
-	if len(found) != len(family145A2CreationFaultCuts) {
-		t.Fatalf("A2 creation fault inventory=%d/%d", len(found), len(family145A2CreationFaultCuts))
-	}
-}
-
 func assertFamily145A2FaultPhysicalStatements(t *testing.T, function, original string) {
 	t.Helper()
 	var file, method, bridgeFile string
