@@ -46,8 +46,9 @@ specific executions, not credit inferred from sharing an owner.
   configuration and delivery claims, plus the real manager readiness finalizer.
   The no-op manager persistence and identity-only readiness substitute are
   deleted after their last consumers move. Joined runtime cleanup is registered
-  after capability setup and before materialization, retaining release-before-
-  join and coordinator-before-manager teardown on assertion failures.
+  after capability setup and before materialization, unblocking held work before
+  join and joining before capability release. Coordinator-before-manager
+  teardown is retained on assertion failures.
 - Managed channel transport explicitly admits its already-complete native
   actor/source setup. Its continuation surface uses the canonical projection
   against the issued grant while preserving callable tools and all source,
