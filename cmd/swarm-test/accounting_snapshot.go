@@ -624,6 +624,11 @@ func (snapshot accountingProofSnapshot) Close() error {
 	if snapshot.Root == "" {
 		return nil
 	}
+	if _, err := os.Lstat(snapshot.Root); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
 	permissionErr := filepath.WalkDir(snapshot.Root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err

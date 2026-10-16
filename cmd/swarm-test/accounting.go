@@ -485,7 +485,7 @@ func checkAccountingBase(ctx context.Context, root, base string, policy accounti
 		return fmt.Errorf("unbound accounting trusted base")
 	}
 	if _, err := accountingGit(ctx, root, "cat-file", "-e", policy.Commit+"^{commit}"); err != nil {
-		if _, err = accountingGit(ctx, root, "fetch", "--no-tags", "--depth=1", "https://github.com/"+accountingRepository+".git", policy.Commit); err != nil {
+		if err = fetchAccountingObject(ctx, root, policy.Commit); err != nil {
 			return fmt.Errorf("authenticated policy ancestry unavailable: %w", err)
 		}
 	}
