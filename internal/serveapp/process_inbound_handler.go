@@ -62,7 +62,7 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 			http.NotFound(w, r)
 			return
 		}
-		if required || h.publicRegistration.OwnsRoute(alias, provider) {
+		if required || h.publicRegistration.OwnsRoute(target.Alias, target.Provider) {
 			h.publicRegistration.Handler(forward).ServeHTTP(w, r)
 			return
 		}

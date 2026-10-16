@@ -19,27 +19,41 @@ import (
 )
 
 func TestPublicIngressClassificationUsesCompleteDeclaredAndLearnedOwners(t *testing.T) {
-	for _, mode := range []string{"author", "declared", "raw_declared", "learned", "prebinding"} {
+	for _, mode := range []string{"raw_author", "pack_unmanaged", "declared", "learned", "prebinding"} {
 		t.Run(mode, func(t *testing.T) {
 			use, target, _, _ := publicIngressRegistrationFixture(t, mode)
 			admitted, managed, err := use.AdmitPublicIngressTarget(target)
-			if err != nil || managed != (mode != "author") || admitted.registrationAdmission == nil {
+			wantManaged := mode != "raw_author" && mode != "pack_unmanaged"
+			if err != nil || managed != wantManaged || admitted.registrationAdmission == nil {
 				t.Fatalf("mode=%s managed=%t guard=%t err=%v", mode, managed, admitted.registrationAdmission != nil, err)
 			}
 			if err := admitted.registrationAdmission(t.Context()); err != nil {
 				t.Fatalf("exact admitted binding refused: %v", err)
 			}
-			if mode == "raw_declared" && admitted.AdmissionPlan.PolicySource() != providertriggers.PolicySourceRawDeclaration {
-				t.Fatal("explicit-registration control is not an actual raw declaration")
+			wantSource := providertriggers.PolicySourceVerifiedPack
+			if mode == "raw_author" {
+				wantSource = providertriggers.PolicySourceRawDeclaration
+			}
+			if got := admitted.AdmissionPlan.PolicySource(); got != wantSource {
+				t.Fatalf("policy source=%s want=%s", got, wantSource)
 			}
 		})
+	}
+}
+
+func TestPublicIngressRawRegistrationNamespaceCollisionIsRefused(t *testing.T) {
+	rt, _, _ := publicIngressRegistrationRuntime(t, "raw_declared")
+	targets, err := rt.PlanStandingTargets()
+	const want = `coordinator/schema.yaml: raw ingress alias "chat" provider "telegram" conflicts with installed pack "provider.telegram"; use pack admission or rename the intentional raw namespace to "telegram-raw"`
+	if err == nil || err.Error() != want || len(targets) != 0 {
+		t.Fatalf("raw registration namespace collision targets=%+v err=%v, want %q", targets, err, want)
 	}
 }
 
 func TestPublicIngressClassificationRejectsMissingAndForeignEvidence(t *testing.T) {
 	for _, mismatch := range []string{"missing_publication", "executable_publication", "foreign_publication", "foreign_bundle", "foreign_alias", "foreign_provider", "foreign_service", "foreign_run", "foreign_generation", "foreign_publication_sequence", "missing_credentials"} {
 		t.Run(mismatch, func(t *testing.T) {
-			use, target, _, _ := publicIngressRegistrationFixture(t, "author")
+			use, target, _, _ := publicIngressRegistrationFixture(t, "pack_unmanaged")
 			switch mismatch {
 			case "missing_publication":
 				use.Context.DeclaredChannelPublication = channelonboarding.ChannelActivationPublication{}
@@ -78,7 +92,7 @@ func TestPublicIngressClassificationRejectsMissingAndForeignEvidence(t *testing.
 }
 
 func TestPublicIngressCapturedClassificationFencesLearnedReplacementBeforePublication(t *testing.T) {
-	use, target, _, store := publicIngressRegistrationFixture(t, "author")
+	use, target, _, store := publicIngressRegistrationFixture(t, "pack_unmanaged")
 	admitted, managed, err := use.AdmitPublicIngressTarget(target)
 	if err != nil || managed {
 		t.Fatalf("author classification=%t err=%v", managed, err)
@@ -132,10 +146,41 @@ func TestPublicIngressMixedBindingsKeepAuthorAndManagedTargetsDistinct(t *testin
 // substitute for the served both-store runtime-use and publication proof.
 func publicIngressRegistrationFixture(t *testing.T, mode string) (*RuntimeContextUse, InboundTarget, *runtimecredentials.FileStore, *standingLearnedCredentialStore) {
 	t.Helper()
+	rt, file, store := publicIngressRegistrationRuntime(t, mode)
+	targets, err := rt.PlanStandingTargets()
+	wantTargets := 1
+	if mode == "mixed" {
+		wantTargets = 2
+	}
+	if err != nil || len(targets) != wantTargets {
+		t.Fatalf("standing target=%+v err=%v", targets, err)
+	}
+	target := targets[0]
+	for _, candidate := range targets {
+		if candidate.Provider == "telegram" {
+			target = candidate
+		}
+	}
+	use := &RuntimeContextUse{runtime: rt, Context: BundleContext{
+		SourceArtifactFact: rt.Options.SourceArtifactFact, Source: rt.Options.WorkflowModule.SemanticSource(), DeclaredChannelPublication: rt.Options.DeclaredChannelPublication, StandingTargets: targets,
+	}}
+	return use, InboundTarget{
+		BundleHash: target.BundleHash, ServiceID: target.ServiceID, FlowPath: target.FlowPath, Alias: target.Alias,
+		RunID: target.RunID, Generation: target.Generation, PublicationSequence: target.PublicationSequence,
+		Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
+	}, file, store
+}
+
+func publicIngressRegistrationRuntime(t *testing.T, mode string) (*Runtime, *runtimecredentials.FileStore, *standingLearnedCredentialStore) {
+	t.Helper()
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bundle, _ := semanticview.Bundle(source)
-	if mode == "raw_declared" {
+	if mode == "raw_author" || mode == "raw_declared" {
 		mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) {
+			if mode == "raw_author" {
+				schema.Ingress.Providers[0].Provider = "partner"
+				schema.Ingress.Providers[0].SigningSecret = "webhook_signing.partner"
+			}
 			schema.Ingress.Providers[0].Admission = runtimecontracts.ProjectFlowIngressAdmission{
 				Kind: "raw", Event: "inbound.telegram", Payload: "json",
 				Authentication: &runtimecontracts.ProjectFlowIngressAuthentication{Kind: "hmac_sha256", Header: "X-Signature", Encoding: "hex"},
@@ -168,7 +213,7 @@ func publicIngressRegistrationFixture(t *testing.T, mode string) (*RuntimeContex
 	if err != nil {
 		t.Fatal(err)
 	}
-	if mode == "mixed" {
+	if mode == "mixed" || mode == "raw_author" {
 		if err := file.Set(t.Context(), "webhook_signing.partner", "independent-author-secret"); err != nil {
 			t.Fatal(err)
 		}
@@ -239,26 +284,5 @@ func publicIngressRegistrationFixture(t *testing.T, mode string) (*RuntimeContex
 		ChannelPlans: projection.ChannelPlans, DeclaredChannelPublication: declared,
 		ProviderCredentials: file, ChannelOnboardingStore: store, SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
 	}}
-	targets, err := rt.PlanStandingTargets()
-	wantTargets := 1
-	if mode == "mixed" {
-		wantTargets = 2
-	}
-	if err != nil || len(targets) != wantTargets {
-		t.Fatalf("standing target=%+v err=%v", targets, err)
-	}
-	target := targets[0]
-	for _, candidate := range targets {
-		if candidate.Provider == "telegram" {
-			target = candidate
-		}
-	}
-	use := &RuntimeContextUse{runtime: rt, Context: BundleContext{
-		SourceArtifactFact: rt.Options.SourceArtifactFact, Source: source, DeclaredChannelPublication: declared, StandingTargets: targets,
-	}}
-	return use, InboundTarget{
-		BundleHash: target.BundleHash, ServiceID: target.ServiceID, FlowPath: target.FlowPath, Alias: target.Alias,
-		RunID: target.RunID, Generation: target.Generation, PublicationSequence: target.PublicationSequence,
-		Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
-	}, file, store
+	return rt, file, store
 }
