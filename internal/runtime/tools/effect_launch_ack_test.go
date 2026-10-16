@@ -113,7 +113,7 @@ func TestManagedToolLaunchPostCommitCleanupExecutesOnePrimitive(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			_, err = executor.doNormalizedSearch(ctx, req, "results", map[string]string{"title": "title", "url": "url", "snippet": "snippet"}, externalDispatchAdmissionPolicy{})
+			_, err = executor.doNormalizedSearch(ctx, req, "results", map[string]string{"title": "title", "url": "url", "snippet": "snippet"}, externalDispatchAdmissionPolicy{}, 0)
 			return err
 		}},
 		{name: "native_command", adapter: "native_bash", run: func(t *testing.T, ctx context.Context, calls *int) error {
