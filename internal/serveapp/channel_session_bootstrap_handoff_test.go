@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 )
@@ -87,25 +88,7 @@ func TestServeSessionOriginalConstructionConnectHandoffBothStores(t *testing.T) 
 				case <-caller.Done():
 					t.Fatal("original request did not connect within its existing bound")
 				}
-				tick := time.NewTicker(time.Millisecond)
-				defer tick.Stop()
-				for {
-					pairing, err := f.adapter.ReadSessionPairing(caller, f.op, f.principal)
-					if err != nil {
-						t.Fatal("original live request pairing readback refused", err)
-					}
-					if pairing.Status == "awaiting_qr" && pairing.Code != "" && pairing.ExpiresAt.After(time.Now()) {
-						if pairing.Paired || pairing.Connected {
-							t.Fatal("first QR invented paired or execution authority")
-						}
-						break
-					}
-					select {
-					case <-tick.C:
-					case <-caller.Done():
-						t.Fatal("original live request did not publish its first QR without retry")
-					}
-				}
+				requireConstructionHandoffFirstQR(t, caller, f.adapter, f.op, f.principal)
 				f.adapter.mu.Lock()
 				retained := f.adapter.connections[f.op.OperationID] == original
 				f.adapter.mu.Unlock()
@@ -248,6 +231,9 @@ func requireSessionConstructionHandoffRefusal(t *testing.T, backend, mode, cut s
 	if err := start(join, f.op, f.candidate); err != nil {
 		t.Fatal("later explicit request could not continue its retained original", err)
 	}
+	qr, stopQR := context.WithTimeout(join, 5*time.Second)
+	defer stopQR()
+	requireConstructionHandoffFirstQR(t, qr, f.adapter, f.op, f.principal)
 	f.adapter.mu.Lock()
 	retained := f.adapter.connections[f.op.OperationID] == original
 	f.adapter.mu.Unlock()
@@ -259,5 +245,30 @@ func requireSessionConstructionHandoffRefusal(t *testing.T, backend, mode, cut s
 	}
 	if err := original.connection.Close(join); err != nil || f.owner.ActiveCount() != 0 {
 		t.Fatal("continued original did not join all retained work", err, f.owner.ActiveCount())
+	}
+}
+
+func requireConstructionHandoffFirstQR(t *testing.T, ctx context.Context, adapter *serveSessionBootstrap, op channelonboarding.Operation, principal operatorchannel.Principal) {
+	t.Helper()
+	// Connect can finish before its peer publishes the first QR. Observe that
+	// actual SDK milestone before checking the peer's exact connection count.
+	tick := time.NewTicker(time.Millisecond)
+	defer tick.Stop()
+	for {
+		pairing, err := adapter.ReadSessionPairing(ctx, op, principal)
+		if err != nil {
+			t.Fatal("original live request pairing readback refused", err)
+		}
+		if pairing.Status == "awaiting_qr" && pairing.Code != "" && pairing.ExpiresAt.After(time.Now()) {
+			if pairing.Paired || pairing.Connected {
+				t.Fatal("first QR invented paired or execution authority")
+			}
+			return
+		}
+		select {
+		case <-tick.C:
+		case <-ctx.Done():
+			t.Fatal("original live request did not publish its first QR without retry")
+		}
 	}
 }
