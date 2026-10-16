@@ -259,7 +259,7 @@ func completionBudgetRaceAuthority(t *testing.T, fixture completionBudgetRaceFix
 		if fixture.sqlite {
 			source = seedSQLiteConversationForkSource(t, fixture.primary.(*SQLiteRuntimeStore), now)
 		} else {
-			source = seedConversationForkSource(t, fixture.db, now)
+			source = seedConversationForkSource(t, fixture.normal.store.(*PostgresStore), now)
 		}
 		fork, err := fixture.primary.CreateOperatorConversationFork(testAuthorActivityContext(), runfork.ConversationForkCreateRequest{
 			SourceSessionID: source.sessionID, ForkPoint: runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID}, CreatedBy: "budget-actor", Now: now,

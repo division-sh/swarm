@@ -176,6 +176,10 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 	lateDeliveryID := "00000000-0000-0000-0000-000000001402"
 	secondDeliveryID := "00000000-0000-0000-0000-000000001403"
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Minute)})
+	ctx = prepareAPIReadbackAgents(t, ctx, sqliteStore,
+		agentidentitytest.RuntimeForRun(t, runID, "agent-late", "observability-surface-test", "trace", "agent-late", "trace/agent-late"),
+		agentidentitytest.RuntimeForRun(t, runID, "agent-second", "observability-surface-test", "trace", "agent-second", "trace/agent-second"),
+	)
 	for _, fixture := range []struct {
 		id        string
 		eventType events.EventType
@@ -307,6 +311,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 		events.EventType("trace.visible"),
 		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now)
 	identity := agentidentitytest.RuntimeForRun(t, runID, "agent-1", "observability-surface-test", "trace", "agent-1", "trace/agent-1")
+	ctx = prepareAPIReadbackAgents(t, ctx, store, identity)
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: identity}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, store, event,
 		[]events.DeliveryRoute{route},
