@@ -46,6 +46,9 @@ func AdmitBody(body packartifact.ProviderBody) (Manifest, error) {
 		return Manifest{}, err
 	}
 	definition.Provider = body.ProviderKey()
+	if err := qualifyTriggerBodyNames(root, &definition); err != nil {
+		return Manifest{}, err
+	}
 	return freezeTriggerManifest(definition, root, body.Bytes())
 }
 

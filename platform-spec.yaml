@@ -12778,7 +12778,18 @@ tool_model:
       - provider setup/teardown, OAuth, connector tools, or provider action calls
       - arbitrary code/WASM before provider-trigger admission
     manifest_vocabulary:
-      provider: normalized provider token matched from `/webhooks/{alias}/{provider}` after alias resolves exactly one loaded standing ingress target
+      directory_body_admission: >
+        A trigger BODY is projected from the immutable admitted provider-directory role view and its captured lexical
+        source. The directory alone supplies the exact provider key; body provider fields are refused. Authored raw
+        literals and normalized event declarations use short local names, qualified once as inbound.<directory>.<local>.
+        Authored raw templates are exactly {event_type} or raw.{event_type}, qualified by that same directory. Qualified
+        inbound names, route paths, malformed names and whitespace aliases are refused with a teaching error at the
+        original source. Admission does not rewrite captured bytes or body hashes, signature recipes, payload values,
+        field paths or wire event-type conversion. Final compiled validation, typed schemas and output consumers share
+        the existing trigger owner; BODY presence alone grants no ingress, catalog generation or publication authority.
+      provider: >
+        Compiled-only exact provider-directory key matched from `/webhooks/{alias}/{provider}` after alias resolves
+        one loaded standing ingress target. An authored body `provider:` is refused; the directory supplies the key.
       payload_object_required: fail closed when the decoded request payload is not a JSON object
       payload_source: >
         Source for the provider payload embedded in the published normalized event. The default `payload` uses the decoded
