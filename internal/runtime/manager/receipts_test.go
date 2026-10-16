@@ -22,6 +22,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -315,10 +316,30 @@ func ProveNativeProcessEventConsumesDrainedCompletionObservationWithoutSecondRec
 			bus := &recordingReceiptBus{}
 			nativeDelivery := newNativeDelivery(t)
 			deliveryStore := nativeDelivery
-			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
-			evt := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, harness.Token.Identity.RunID, "", events.EventEnvelope{}, time.Now().UTC())
+			evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, harness.Token.Identity.RunID, events.EventEnvelope{}, time.Now().UTC())
 			agent := drainedCompletionObservationAgent{id: harness.Token.AgentID, withOutput: test.withOutput, bypassDisposition: test.withOutput}
+			am, admitted := newPreparedNativeReceiptManager(t, bus, nativeDelivery, agent, evt, AgentManagerOptions{})
+			identity := managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()).AgentIdentity
+			token, found := am.lifecycle.tokenIdentity(identity)
+			if !found {
+				t.Fatal("native drained-completion actor has no lifecycle token")
+			}
+			harness.Token = token
 			base := testAuthorActivityContext(harness.CompletionContext(t.Name()))
+			admission, found := managedexecution.FromContext(admitted)
+			if !found {
+				t.Fatal("native drained-completion actor has no issued execution admission")
+			}
+			base = managedexecution.WithAdmission(base, admission)
+			surface, found := managedcapabilities.FromContext(base)
+			if !found {
+				t.Fatal("drained-completion observation has no capability surface")
+			}
+			surface, err := surface.ProjectNormalContinuation(admission.ExecutionAuthorityID, surface.Authority.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			base = managedcapabilities.WithContext(base, surface)
 			nativeDelivery.seedClaim(t, base, evt, agent.ID())
 			ctx := managerClaimedDeliveryContext(t, am, base, evt, agent.ID())
 			claim, ok := runtimedelivery.ClaimFromContext(ctx)
