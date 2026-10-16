@@ -442,21 +442,11 @@ func overwriteProposedEffectAttemptMode(t *testing.T, ctx context.Context, cards
 	}
 }
 
-func proposedEffectTestJournal(t *testing.T, cards decisioncard.Store) *runtimepipeline.PipelineCoordinator {
+func proposedEffectTestJournal(t *testing.T, cards decisioncard.Store) runtimepipeline.ActivityAttemptJournal {
 	t.Helper()
-	var coordinator *runtimepipeline.PipelineCoordinator
-	switch selected := cards.(type) {
-	case *SQLiteRuntimeStore:
-		coordinator = newSQLiteWorkflowTestCoordinator(t, selected.backend.ConstructionHandle(), selected)
-	case *PostgresStore:
-		coordinator = newPostgresWorkflowTestCoordinator(t, selected.backend.ConstructionHandle(), selected)
-	default:
-		panic("unsupported proposed-effect test store")
-	}
-	if err := coordinator.InstallActivityJournal(captureActivityFixtureJournal(t, testAuthorActivityContext(), cards)); err != nil {
-		t.Fatal(err)
-	}
-	return coordinator
+	// These are explicit journal calls, not activity dispatch through a mutable
+	// coordinator slot. Keep the exact original native role for every callback.
+	return captureActivityFixtureJournal(t, testAuthorActivityContext(), cards)
 }
 
 func isProposedEffectFailureClass(err error, class runtimefailures.Class) bool {
