@@ -2,15 +2,19 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"os"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -119,6 +123,76 @@ func TestS1RunRootRevisionAndHistoryBothStores(t *testing.T) {
 			if err != nil || after.RootReference != before.RootReference || after.BundleHash != before.BundleHash || !after.Origin.Equal(before.Origin) {
 				t.Fatalf("content deletion lost historical root identity: %+v, %v", after, err)
 			}
+		})
+	}
+}
+
+func TestS1RunRootActiveAdmissionRejectsForeignContextBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			selected := selectedRootAdmissionStore(t, backend).(rootedRunStore)
+			writer := selectedAdmissionLifecycleWriter(selected)
+			sourceA, _ := admittedRootForStorage(t, "shop-a")
+			sourceB, _ := admittedRootForStorage(t, "shop-b")
+			ctx := testAuthorActivityContextForBundle(sourceA.Artifact().BundleHash())
+			for _, source := range []sourceartifact.RootedSource{sourceA, sourceB} {
+				if _, err := selected.EnsureRootedSource(ctx, source); err != nil {
+					t.Fatal(err)
+				}
+			}
+			request := rootedRunCreationRequest(sourceA)
+			if _, err := selected.CreateRun(ctx, request); err != nil {
+				t.Fatal(err)
+			}
+			rollback := errors.New("rollback rooted source admission proof")
+			err := runSelectedFixtureMutation(ctx, selected, "rooted active source admission", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+				admit := func(source sourceartifact.RootedSource, wantError bool) error {
+					bound := runtimecorrelation.WithRootAdmission(txctx, source.Admission())
+					return attempt.WithSQL(bound, func(bound context.Context, tx *sql.Tx) error {
+						fact, err := writer.RequireActiveSourceTx(bound, tx, request.RunID)
+						if wantError {
+							if err == nil || fact.Validate() == nil {
+								return fmt.Errorf("foreign source root obtained native admission: fact=%v err=%v", fact, err)
+							}
+							if attempt.RequireActiveRunSourceAdmission(bound, request.RunID, request.Source) == nil {
+								return errors.New("foreign source root obtained record authority")
+							}
+							return nil
+						}
+						if err != nil {
+							return err
+						}
+						if !fact.Matches(request.Source) {
+							return errors.New("root admission changed content identity")
+						}
+						return attempt.RequireActiveRunSourceAdmission(bound, request.RunID, fact)
+					})
+				}
+				// Reject foreign context on both an uncached lookup and a reused
+				// native admission, without corrupting the bound caller's evidence.
+				for _, source := range []sourceartifact.RootedSource{sourceB, sourceA, sourceB, sourceA} {
+					if err := admit(source, source.Admission().Equal(sourceB.Admission())); err != nil {
+						return err
+					}
+				}
+				if _, err := writer.ReviseSourceTx(runtimecorrelation.WithRootAdmission(txctx, sourceA.Admission()), attempt, runlifecycle.SourceRevisionRequest{
+					RunID: request.RunID, Source: request.Source, RootAdmission: sourceB.Admission(),
+				}); err != nil {
+					return err
+				}
+				// Same-content explicit revision invalidates the old pair before
+				// the new root can acquire record authority in this transaction.
+				for _, source := range []sourceartifact.RootedSource{sourceA, sourceB} {
+					if err := admit(source, source.Admission().Equal(sourceA.Admission())); err != nil {
+						return err
+					}
+				}
+				return rollback
+			})
+			if !errors.Is(err, rollback) {
+				t.Fatal(err)
+			}
+			requireRunRoot(t, ctx, selected, request.RunID, sourceA)
 		})
 	}
 }

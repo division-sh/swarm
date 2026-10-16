@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -202,6 +204,95 @@ func TestRunAdmissionMissingArtifactCannotMint(t *testing.T) {
 				})
 			})
 		})
+	}
+}
+
+func TestS1RunAdmissionRequiresRetainedRootOnEveryUse(t *testing.T) {
+	for _, postgres := range []bool{true, false} {
+		for _, cached := range []bool{false, true} {
+			t.Run(admissionTestDialect(postgres)+"/cached="+fmt.Sprint(cached), func(t *testing.T) {
+				db, mock := admissionTestSQLMock(t)
+				fact := admissionTestSource(t, admissionTestBundle)
+				mock.ExpectBegin()
+				mock.ExpectQuery(admissionTestRunSQL(postgres, false)).WithArgs(admissionTestRunID).
+					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", admissionTestBundle, "fixture"))
+				if cached {
+					mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
+						WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+					admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
+				}
+				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
+					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+				admissionTestExpectRoot(mock, postgres, admissionTestBundle, false)
+				admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+					return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+						if cached {
+							if _, err := admissionTestLoadSource(ctx, tx, postgres, false, true); err != nil {
+								return err
+							}
+						}
+						got, err := admissionTestLoadSource(ctx, tx, postgres, false, true)
+						if !errors.Is(err, sourceartifact.ErrRootAdmissionMissing) || got.Validate() == nil {
+							t.Fatalf("missing retained pair returned executable source: fact=%v err=%v", got, err)
+						}
+						if !cached && attempt.RequireActiveRunSourceAdmission(ctx, admissionTestRunID, fact) == nil {
+							t.Fatal("missing retained pair minted a new active-run admission")
+						}
+						return nil
+					})
+				})
+			})
+		}
+	}
+}
+
+func TestS1RunAdmissionFreezesContextRootOnFreshAndCachedReads(t *testing.T) {
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	foreign, _ := sourceartifactfixture.Rooted(t, "another-root", rooted.Artifact())
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
+	for _, postgres := range []bool{true, false} {
+		for _, cached := range []bool{false, true} {
+			t.Run(admissionTestDialect(postgres)+"/cached="+fmt.Sprint(cached), func(t *testing.T) {
+				db, mock := admissionTestSQLMock(t)
+				mock.ExpectBegin()
+				mock.ExpectQuery(admissionTestRunSQL(postgres, false)).WithArgs(admissionTestRunID).
+					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", fact.BundleHash(), "fixture"))
+				if cached {
+					mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(fact.BundleHash()).
+						WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+					admissionTestExpectRoot(mock, postgres, fact.BundleHash(), true)
+				} else {
+					mock.ExpectQuery(admissionTestRunSQL(postgres, false)).WithArgs(admissionTestRunID).
+						WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", fact.BundleHash(), "fixture"))
+				}
+				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(fact.BundleHash()).
+					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+				admissionTestExpectRoot(mock, postgres, fact.BundleHash(), true)
+				admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+					ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, fact), rooted.Admission())
+					return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+						if cached {
+							if _, err := admissionTestLoadSource(ctx, tx, postgres, false, true); err != nil {
+								return err
+							}
+						}
+						wrongRoot := runtimecorrelation.WithRootAdmission(ctx, foreign.Admission())
+						got, err := admissionTestLoadSource(wrongRoot, tx, postgres, false, true)
+						if err == nil || got.Validate() == nil {
+							t.Fatalf("same-content foreign root obtained source admission: fact=%v err=%v", got, err)
+						}
+						if attempt.RequireActiveRunSourceAdmission(wrongRoot, admissionTestRunID, fact) == nil {
+							t.Fatal("foreign root obtained mutation record authority")
+						}
+						got, err = admissionTestLoadSource(ctx, tx, postgres, false, true)
+						if err != nil {
+							return err
+						}
+						return attempt.RequireActiveRunSourceAdmission(ctx, admissionTestRunID, got)
+					})
+				})
+			})
+		}
 	}
 }
 
