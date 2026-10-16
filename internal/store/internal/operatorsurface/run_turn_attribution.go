@@ -21,12 +21,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/tools"
+	privatedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	storecapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 )
 
-func loadRunTurnAttributions(ctx context.Context, q eventReadQueryer, postgres bool, runID string, publications PipelineObligationSource, deliveries []deliverylifecycle.Snapshot, byPath map[string]int, facts *operatorread.RunOperationalFacts) (err error) {
-	byID := make(map[string]deliverylifecycle.Snapshot, len(deliveries))
+func loadRunTurnAttributions(ctx context.Context, q eventReadQueryer, postgres bool, runID string, publications PipelineObligationSource, deliveries []privatedelivery.RunOperationalFact, byPath map[string]int, facts *operatorread.RunOperationalFacts) (err error) {
+	byID := make(map[string]privatedelivery.RunOperationalFact, len(deliveries))
 	for _, delivery := range deliveries {
 		byID[delivery.DeliveryID] = delivery
 	}
@@ -60,13 +61,7 @@ func loadRunTurnAttributions(ctx context.Context, q eventReadQueryer, postgres b
 		if !found {
 			return fmt.Errorf("settled origin activity has no owning delivery")
 		}
-		path := delivery.Route.Target.Route().FlowInstance
-		if delivery.SubscriberClass == deliverylifecycle.SubscriberAgent {
-			_, _, path, err = delivery.Route.AgentIdentity.ExecutionCoordinates()
-			if err != nil {
-				return err
-			}
-		}
+		path := delivery.FlowInstance
 		i, found := byPath[path]
 		if !found {
 			continue
@@ -96,7 +91,7 @@ func loadAttributionEvent(ctx context.Context, q eventReadQueryer, postgres bool
 	return loadSQLiteEventIdentity(ctx, q, eventID)
 }
 
-func loadDeliveryTurnAttribution(ctx context.Context, q eventReadQueryer, postgres bool, publications PipelineObligationSource, delivery deliverylifecycle.Snapshot, deliveries []deliverylifecycle.Snapshot, path string) (operatorread.RunTurnAttribution, error) {
+func loadDeliveryTurnAttribution(ctx context.Context, q eventReadQueryer, postgres bool, publications PipelineObligationSource, delivery privatedelivery.RunOperationalFact, deliveries []privatedelivery.RunOperationalFact, path string) (operatorread.RunTurnAttribution, error) {
 	out := operatorread.RunTurnAttribution{
 		FlowInstance: path, AgentID: delivery.SubscriberID, EventID: delivery.EventID, DeliveryID: delivery.DeliveryID,
 		Emission: operatorread.RunEmissionUnknown, ProviderTurns: []string{}, GrantedEmitTools: []string{}, EmittedEvents: []operatorread.RunAcceptedEmission{},
@@ -153,22 +148,21 @@ func loadDeliveryTurnAttribution(ctx context.Context, q eventReadQueryer, postgr
 	return out, nil
 }
 
-func loadDeliveryCompletionEvidence(ctx context.Context, q eventReadQueryer, delivery deliverylifecycle.Snapshot, out *operatorread.RunTurnAttribution) (_ map[string]string, complete bool, nativeCLI map[string]bool, err error) {
+func loadDeliveryCompletionEvidence(ctx context.Context, q eventReadQueryer, delivery privatedelivery.RunOperationalFact, out *operatorread.RunTurnAttribution) (_ map[string]string, complete bool, nativeCLI map[string]bool, err error) {
 	rows, err := q.QueryContext(ctx, `SELECT CAST(t.turn_id AS TEXT),CAST(t.session_id AS TEXT),
 		CAST(t.run_id AS TEXT),t.agent_id,t.agent_name_owner,t.agent_name_source,t.agent_route_presence,t.flow_scope_key,t.flow_instance_id,t.flow_instance,
 		CAST(t.trigger_event_id AS TEXT),t.trigger_event_type,s.surface,
-		CAST(a.operation_id AS TEXT),a.adapter,a.state,COALESCE(a.completion_projection_phase,''),a.completion_continuation_active,a.evidence,o.request_fingerprint,
+		CAST(a.operation_id AS TEXT),CAST(a.attempt_id AS TEXT),a.adapter,a.state,COALESCE(a.completion_projection_phase,''),a.completion_continuation_active,a.evidence,o.request_fingerprint,
 		(o.authority_kind='normal_agent' AND o.effect_kind='provider_turn' AND o.agent_run_id=t.run_id AND o.agent_id=t.agent_id
 		AND o.agent_name_owner=t.agent_name_owner AND o.agent_name_source=t.agent_name_source AND o.agent_route_presence=t.agent_route_presence
 		AND o.flow_scope_key=t.flow_scope_key AND o.flow_instance_id=t.flow_instance_id AND o.flow_instance=t.flow_instance
 		AND a.origin_run_id=t.run_id AND a.origin_route_identity=$2 AND a.origin_subscriber_type='agent' AND a.origin_subscriber_id=t.agent_id
 		AND a.capability_surface_id=t.capability_surface_id),
-		EXISTS(SELECT 1 FROM event_delivery_attempts d WHERE d.delivery_id=a.origin_delivery_id AND d.claim_version=a.origin_claim_version AND d.claim_token=a.origin_claim_token),
 		EXISTS(SELECT 1 FROM runtime_provider_attempt_drains d WHERE d.attempt_id=a.attempt_id)
 		FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 		JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id
 		JOIN managed_agent_capability_surfaces s ON s.surface_id=t.capability_surface_id
-		WHERE a.origin_kind='delivery' AND a.origin_delivery_id=$1`, delivery.DeliveryID, events.EncodeDeliveryRouteIdentity(delivery.RouteIdentity))
+		WHERE a.origin_kind='delivery' AND a.origin_delivery_id=$1`, delivery.DeliveryID, delivery.RouteIdentity)
 	if err != nil {
 		return nil, false, nil, err
 	}
@@ -182,13 +176,14 @@ func loadDeliveryCompletionEvidence(ctx context.Context, q eventReadQueryer, del
 		var row completionAttributionRow
 		if err := rows.Scan(&row.turnID, &row.sessionID, &row.identity.RunID, &row.identity.AgentID, &row.identity.NameOwner, &row.identity.NameSource,
 			&row.identity.RoutePresence, &row.identity.FlowScopeKey, &row.identity.FlowInstanceID, &row.identity.FlowInstancePath,
-			&row.eventID, &row.eventType, &row.surface, &row.operationID, &row.adapter, &row.state, &row.phase, &row.active, &row.evidence, &row.fingerprint, &row.paired, &row.claimKnown, &row.drained); err != nil {
+			&row.eventID, &row.eventType, &row.surface, &row.operationID, &row.attemptID, &row.adapter, &row.state, &row.phase, &row.active, &row.evidence, &row.fingerprint, &row.paired, &row.drained); err != nil {
 			return nil, false, nil, err
 		}
 		count++
 		if row.active {
 			activeHeads++
 		}
+		row.claimKnown = delivery.KnownCompletionAttempts[row.attemptID]
 		closed, err := row.addEvidence(delivery, out, candidates, nativeCLI)
 		if err != nil {
 			return nil, false, nil, err
@@ -209,18 +204,19 @@ func loadDeliveryCompletionEvidence(ctx context.Context, q eventReadQueryer, del
 }
 
 type completionAttributionRow struct {
+	attemptID                                                                              string
 	turnID, sessionID, eventID, eventType, operationID, adapter, state, phase, fingerprint string
 	identity                                                                               agentidentity.StorageFields
 	surface, evidence                                                                      []byte
 	active, paired, claimKnown, drained                                                    bool
 }
 
-func (r completionAttributionRow) deliverySurface(delivery deliverylifecycle.Snapshot, eventType string) (managedcapabilities.Surface, error) {
+func (r completionAttributionRow) deliverySurface(delivery privatedelivery.RunOperationalFact, eventType string) (managedcapabilities.Surface, error) {
 	identity, err := agentidentity.FromStorageFields(r.identity)
 	if err != nil {
 		return managedcapabilities.Surface{}, err
 	}
-	equal, err := agentidentity.Equal(identity, delivery.Route.AgentIdentity)
+	equal, err := agentidentity.Equal(identity, delivery.AgentIdentity)
 	if err != nil || !equal || !r.paired || !r.claimKnown || r.eventID != delivery.EventID || r.eventType != eventType {
 		return managedcapabilities.Surface{}, fmt.Errorf("completion evidence contradicts exact delivery origin: %w", errors.Join(err, errors.New("origin mismatch")))
 	}
@@ -234,7 +230,7 @@ func (r completionAttributionRow) deliverySurface(delivery deliverylifecycle.Sna
 	return surface, nil
 }
 
-func (r completionAttributionRow) addEvidence(delivery deliverylifecycle.Snapshot, out *operatorread.RunTurnAttribution, candidates map[string]string, nativeCLI map[string]bool) (bool, error) {
+func (r completionAttributionRow) addEvidence(delivery privatedelivery.RunOperationalFact, out *operatorread.RunTurnAttribution, candidates map[string]string, nativeCLI map[string]bool) (bool, error) {
 	surface, err := r.deliverySurface(delivery, out.EventType)
 	if err != nil {
 		return false, err
@@ -273,7 +269,7 @@ func (r completionAttributionRow) addEvidence(delivery deliverylifecycle.Snapsho
 	return closed, nil
 }
 
-func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, postgres bool, publications PipelineObligationSource, delivery deliverylifecycle.Snapshot, deliveries []deliverylifecycle.Snapshot, candidates map[string]string, nativeCLI map[string]bool) (_ []operatorread.RunAcceptedEmission, ambiguous bool, err error) {
+func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, postgres bool, publications PipelineObligationSource, delivery privatedelivery.RunOperationalFact, deliveries []privatedelivery.RunOperationalFact, candidates map[string]string, nativeCLI map[string]bool) (_ []operatorread.RunAcceptedEmission, ambiguous bool, err error) {
 	matchingOrigins := countDeliveryPublicationOrigins(delivery, deliveries)
 	rows, err := q.QueryContext(ctx, `SELECT CAST(event_id AS TEXT) FROM events WHERE run_id=$1 AND source_event_id=$2 AND produced_by_type='agent' AND produced_by=$3`, delivery.RunID, delivery.EventID, delivery.SubscriberID)
 	if err != nil {
@@ -303,7 +299,7 @@ func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, post
 		if err != nil {
 			return nil, false, err
 		}
-		request, matched, uncertain, err := matchDeliveryEmissionOrigin(admitted.Event(), delivery.Route.AgentIdentity, candidates, nativeCLI, matchingOrigins)
+		request, matched, uncertain, err := matchDeliveryEmissionOrigin(admitted.Event(), delivery.AgentIdentity, candidates, nativeCLI, matchingOrigins)
 		if err != nil {
 			return nil, false, err
 		}
@@ -336,7 +332,7 @@ func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, post
 	return out, ambiguous, nil
 }
 
-func countDeliveryPublicationOrigins(delivery deliverylifecycle.Snapshot, deliveries []deliverylifecycle.Snapshot) int {
+func countDeliveryPublicationOrigins(delivery privatedelivery.RunOperationalFact, deliveries []privatedelivery.RunOperationalFact) int {
 	matching := 0
 	for _, sibling := range deliveries {
 		if sibling.EventID == delivery.EventID && sibling.RouteIdentity == delivery.RouteIdentity {
