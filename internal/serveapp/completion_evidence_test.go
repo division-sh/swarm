@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -55,7 +56,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 	}
 	for _, backend := range servedparity.RequiredBackends {
 		for _, profileID := range []string{llmselection.BackendAnthropic, llmselection.BackendOpenAICompatible, llmselection.BackendOpenAIResponses, llmselection.BackendClaudeCLI} {
-			for _, kind := range []string{"ordinary", "ordinary_emit", "selected"} {
+			for _, kind := range []string{"ordinary", "ordinary_emit", "siblings", "selected"} {
 				t.Run(string(backend)+"/"+profileID+"/"+kind, func(t *testing.T) {
 					if profileID == llmselection.BackendClaudeCLI {
 						if os.Getenv("SWARM_TEST_WORKSPACE_MCP_DOCKER") != "1" {
@@ -96,6 +97,9 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					root := writeServedLiveAgentFixture(t)
 					if kind == "ordinary_emit" {
 						root = canonicalrouting.CopyRootIngressServedCompletionEmit(t)
+					}
+					if kind == "siblings" {
+						root = canonicalrouting.CopyRootIngressServedCompletionSiblings(t)
 					}
 					if kind == "selected" {
 						root = canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
@@ -164,7 +168,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					}
 					var requests atomic.Int32
 					previous := http.DefaultTransport
-					http.DefaultTransport = completion2270Transport{t: t, profile: profileID, requests: &requests, base: previous, emit: kind == "ordinary_emit"}
+					http.DefaultTransport = completion2270Transport{t: t, profile: profileID, requests: &requests, base: previous, emit: kind == "ordinary_emit" || kind == "siblings"}
 					t.Cleanup(func() { http.DefaultTransport = previous })
 					process := startServeRuntimeTestProcess(t, opts)
 					process.waitForReadyLine()
@@ -177,7 +181,14 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 						proveCompletion2270ServedSelected(t, rt, selected, profileID, &requests, &invocationProof)
 						return
 					}
-					runID, before := proveCompletion2270ServedOrdinary(t, rt, profileID, wantObserved, &requests, &invocationProof, kind == "ordinary_emit")
+					var runID string
+					var before cliapp.DiagnosticRunDiagnosisResult
+					var siblingInvocations []completion2270Invocation
+					if kind == "siblings" {
+						runID, before, siblingInvocations = proveCompletion2720ServedSiblings(t, rt, profileID, &requests, &invocationProof)
+					} else {
+						runID, before = proveCompletion2270ServedOrdinary(t, rt, profileID, wantObserved, &requests, &invocationProof, kind == "ordinary_emit")
+					}
 					if code := process.stop(); code != 0 {
 						t.Fatalf("join completed provider runtime: code=%d\n%s", code, process.outputString())
 					}
@@ -191,16 +202,122 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					}
 					if profileID == llmselection.BackendClaudeCLI {
 						attempts, err := storetest.ReadCompletionAttemptStorage(context.Background(), rt.Selected.Effects(), "claude_cli", "")
-						if err != nil || len(attempts) != 1 || attempts[0].State != string(effects.StateSettled) {
+						want := 1
+						if kind == "siblings" {
+							want = 2
+						}
+						if err != nil || len(attempts) != want {
 							t.Fatalf("restart relaunched CLI provider work: %+v %v", attempts, err)
 						}
-					} else if requests.Load() != 1 {
+						for _, attempt := range attempts {
+							if attempt.State != string(effects.StateSettled) {
+								t.Fatalf("restart unsettled a completed CLI attempt: %+v", attempt)
+							}
+							if kind == "siblings" {
+								matched := false
+								for _, invocation := range siblingInvocations {
+									matched = matched || invocation.AttemptID == attempt.AttemptID
+								}
+								if !matched {
+									t.Fatalf("native attempt has no original physical invocation: %+v", attempt)
+								}
+								matched = false
+								for _, attribution := range before.Attributions {
+									matched = matched || slices.Contains(attribution.ProviderTurns, attempt.TargetID)
+								}
+								if !matched {
+									t.Fatalf("native attempt has no exact public provider turn: %+v", attempt)
+								}
+							}
+						}
+					} else if want := int32(1); requests.Load() != want && !(kind == "siblings" && requests.Load() == 2) {
 						t.Fatalf("restart re-prompted completed agent: calls=%d", requests.Load())
 					}
 				})
 			}
 		}
 	}
+}
+
+func proveCompletion2720ServedSiblings(t *testing.T, rt completion2270ServedProof, profile string, calls *atomic.Int32, proof *completion2270InvocationProof) (string, cliapp.DiagnosticRunDiagnosisResult, []completion2270Invocation) {
+	t.Helper()
+	runID, seed := createCompletion2270WaitingRun(t, rt)
+	publishCompletion2270BusinessEvent(t, rt, runID, seed)
+	var outputs operatorread.OperatorEventListResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": "external.observed"}, "limit": 100}, &outputs)
+	if len(outputs.Events) != 1 || len(outputs.Events[0].Deliveries) != 1 || outputs.Events[0].Deliveries[0].SubscriberType != "agent" {
+		t.Fatalf("same-slug fixture lost its exact receiving agent: %+v", outputs)
+	}
+	output := outputs.Events[0]
+	// Async agent execution may settle before or after dispatch returns. Both
+	// facts must hold within the same budget, without imposing a fake order.
+	deadline := time.Now().Add(servedEventPublishLifecycleProbeWaitTimeout)
+	rt.Probe.Expect(output.EventID).PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		t.Fatal("dispatch consumed the complete sibling settlement deadline")
+	}
+	rt.Probe.Expect(output.EventID).AgentDelivered(output.Deliveries[0].SubscriberID).Within(remaining)
+	var diagnosis cliapp.DiagnosticRunDiagnosisResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
+	if diagnosis.OperationalState == nil || *diagnosis.OperationalState != "stalled" || len(diagnosis.Attributions) != 2 {
+		t.Fatalf("same-slug simultaneous stalls were collapsed: %+v", diagnosis)
+	}
+	byPath := map[string]operatorread.RunTurnAttribution{}
+	for _, attribution := range diagnosis.Attributions {
+		if attribution.AgentID == "" || attribution.DeliveryID == "" || attribution.LogicalTurnID == "" || attribution.Historical || len(attribution.ProviderTurns) != 1 {
+			t.Fatalf("inexact same-slug turn: %+v", attribution)
+		}
+		byPath[attribution.FlowInstance] = attribution
+	}
+	root, child := byPath[runID], byPath["observation"]
+	if root.Emission != operatorread.RunEmissionAccepted || !reflect.DeepEqual(root.EmittedEvents, []operatorread.RunAcceptedEmission{{EventID: output.EventID, EventType: output.EventName}}) || len(root.GrantedEmitTools) != 1 ||
+		child.Emission != operatorread.RunEmissionNone || child.EventID != output.EventID || len(child.EmittedEvents) != 0 || len(child.GrantedEmitTools) != 0 ||
+		root.DeliveryID == child.DeliveryID || root.LogicalTurnID == child.LogicalTurnID || root.ProviderTurns[0] == child.ProviderTurns[0] {
+		t.Fatalf("same authored slug crossed turn/grant/publication ownership: root=%+v child=%+v", root, child)
+	}
+	var conversations operatorread.OperatorConversationListResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.list", map[string]any{"run_id": runID}, &conversations)
+	if len(conversations.Conversations) != 2 {
+		t.Fatalf("same-slug scopes lost an independent conversation: %+v", conversations)
+	}
+	for _, conversation := range conversations.Conversations {
+		path := conversation.FlowInstance
+		if path == "" {
+			path = runID
+		}
+		attribution, found := byPath[path]
+		if !found {
+			t.Fatalf("conversation belongs to an unattributed instance: %+v", conversation)
+		}
+		var page operatorread.OperatorConversationTurnListResult
+		requireServedJSONRPCResult(t, rt.Endpoint, "conversation.list_turns", map[string]any{"session_id": conversation.SessionID}, &page)
+		if len(page.Turns) != 1 || page.Turns[0].TurnID != attribution.ProviderTurns[0] || page.Turns[0].TriggerEventID != attribution.EventID {
+			t.Fatalf("public turn/history crossed sibling origin: %+v, attribution=%+v", page, attribution)
+		}
+	}
+	stdout, stderr, code := runServedCLICommand(t, rt.Endpoint, []string{"run", "status", runID, "--json"})
+	var cliDiagnosis cliapp.DiagnosticRunDiagnosisResult
+	if code != 0 || json.Unmarshal([]byte(stdout), &cliDiagnosis) != nil || !reflect.DeepEqual(diagnosis, cliDiagnosis) {
+		t.Fatalf("CLI JSON lost a sibling attribution: code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	stdout, stderr, code = runServedCLICommand(t, rt.Endpoint, []string{"run", "status", runID})
+	for _, value := range []string{"stalled", root.DeliveryID, child.DeliveryID, root.LogicalTurnID, child.LogicalTurnID, "no accepted emission", "1 accepted emission(s)"} {
+		if code != 0 || !strings.Contains(stdout, value) {
+			t.Fatalf("CLI text lost %q: code=%d stdout=%s stderr=%s", value, code, stdout, stderr)
+		}
+	}
+	var invocations []completion2270Invocation
+	if profile == llmselection.BackendClaudeCLI {
+		var err error
+		invocations, err = proof.read(context.Background())
+		if err != nil || len(invocations) != 2 || invocations[0].InvocationID == invocations[1].InvocationID || invocations[0].AttemptID == invocations[1].AttemptID {
+			t.Fatalf("expected exactly two original physical CLI invocations: %+v %v", invocations, err)
+		}
+	} else if calls.Load() != 2 {
+		t.Fatalf("two business turns were re-prompted/re-driven: provider calls=%d", calls.Load())
+	}
+	return runID, diagnosis, invocations
 }
 
 func proveCompletion2270ServedOrdinary(t *testing.T, rt completion2270ServedProof, profileID, wantObserved string, requests *atomic.Int32, proof *completion2270InvocationProof, emit bool) (string, cliapp.DiagnosticRunDiagnosisResult) {
