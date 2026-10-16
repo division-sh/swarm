@@ -185,6 +185,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 				ID:               fmt.Sprintf("%s:%s", nodeRef.Key(), rawEventType),
 				Node:             nodeRef,
 				EventType:        rawEventType,
+				ownerEventType:   ownerEventType,
 				Guard:            handler.Guard,
 				AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
 				Terminate:        handler.Terminate,

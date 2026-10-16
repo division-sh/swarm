@@ -242,6 +242,7 @@ type HandlerTransitionSemantic struct {
 	ID               string
 	Node             runtimeidentity.ExecutableNode
 	EventType        string
+	ownerEventType   string // Retained by the ownership compiler for declaration diagnostics.
 	Activity         ActivitySpec
 	Guard            *GuardSpec
 	AdvancesTo       string
