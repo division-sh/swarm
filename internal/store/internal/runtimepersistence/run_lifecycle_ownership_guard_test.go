@@ -245,8 +245,8 @@ func classifyCounterOracleRunLiterals(path string, file *ast.File) map[token.Pos
 			mockOracles[`UPDATE runs SET event_count = event_count \+`] = true
 		}
 		if path == "internal/store/internal/backend/runlifecycle/run_admission_test.go" && fn.Name.Name == "TestRunAdmissionCanonicalSourceRevisionReloads" {
-			mockOracles["UPDATE runs SET bundle_hash = $2 WHERE run_id = $1::uuid AND status IN ('running', 'paused')"] = true
-			mockOracles["UPDATE runs SET bundle_hash = ? WHERE run_id = ? AND status IN ('running', 'paused')"] = true
+			mockOracles["UPDATE runs SET bundle_hash = $2, source_root_directory = $3 WHERE run_id = $1::uuid AND status IN ('running', 'paused')"] = true
+			mockOracles["UPDATE runs SET bundle_hash = ?, source_root_directory = ? WHERE run_id = ? AND status IN ('running', 'paused')"] = true
 		}
 		if len(mockOracles) != 0 {
 			ast.Inspect(fn, func(node ast.Node) bool {
@@ -325,6 +325,40 @@ func TestCounterRunOracleClassificationDoesNotPermitWriters(t *testing.T) {
 				t.Fatalf("classified %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestS1RunRootSourceRevisionOracleDoesNotPermitWriters(t *testing.T) {
+	const oraclePath = "internal/store/internal/backend/runlifecycle/run_admission_test.go"
+	const oracleFunction = "TestRunAdmissionCanonicalSourceRevisionReloads"
+	queries := []string{
+		"UPDATE runs SET bundle_hash = $2, source_root_directory = $3 WHERE run_id = $1::uuid AND status IN ('running', 'paused')",
+		"UPDATE runs SET bundle_hash = ?, source_root_directory = ? WHERE run_id = ? AND status IN ('running', 'paused')",
+	}
+	for _, query := range queries {
+		for _, tc := range []struct {
+			name, path, function, receiver, method, query string
+			want                                          int
+		}{
+			{"oracle", oraclePath, oracleFunction, "mock", "ExpectExec", query, 1},
+			{"other-path", "internal/runtime/other_test.go", oracleFunction, "mock", "ExpectExec", query, 0},
+			{"other-function", oraclePath, "TestOther", "mock", "ExpectExec", query, 0},
+			{"executing", oraclePath, oracleFunction, "db", "Exec", query, 0},
+			{"foreign-receiver", oraclePath, oracleFunction, "db", "ExpectExec", query, 0},
+			{"rootless", oraclePath, oracleFunction, "mock", "ExpectExec", strings.ReplaceAll(strings.ReplaceAll(query, ", source_root_directory = $3", ""), ", source_root_directory = ?", ""), 0},
+			{"different-column", oraclePath, oracleFunction, "mock", "ExpectExec", strings.ReplaceAll(query, "source_root_directory", "status"), 0},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				source := fmt.Sprintf("package fixture\nfunc %s() { %s.%s(%q) }", tc.function, tc.receiver, tc.method, tc.query)
+				file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", source, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := len(classifyCounterOracleRunLiterals(tc.path, file)); got != tc.want {
+					t.Fatalf("rooted source revision oracle classified %d, want %d", got, tc.want)
+				}
+			})
+		}
 	}
 }
 
