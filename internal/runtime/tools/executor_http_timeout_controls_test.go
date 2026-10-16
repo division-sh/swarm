@@ -315,7 +315,7 @@ func TestHTTPToolTimeoutPreservesOtherClientConsumers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := executor.doNormalizedSearch(managedEffectCommittedContext(effecttest.New(), "native-search-shared-client"), req, "results", nil, externalDispatchAdmissionPolicy{})
+	result, err := executor.doNormalizedSearch(managedEffectCommittedContext(effecttest.New(), "native-search-shared-client"), req, "results", nil, externalDispatchAdmissionPolicy{}, 0)
 	if err != nil || len(result) != 0 || calls.Load() != 1 || executor.httpClient != client || client.Timeout != 30*time.Second {
 		t.Fatalf("native search=%#v err=%v calls=%d timeout=%s", result, err, calls.Load(), client.Timeout)
 	}

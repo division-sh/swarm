@@ -8902,6 +8902,12 @@ engine:
               unlock, or downgrade native_tools.web_search. If the configured CLI runtime cannot expose provider-native web_search,
               startup/runtime validation must fail closed. Non-CLI runtimes may still use fallback-aware validation outside
               this CLI-specific rule.
+            platform_custom_provider_timeout: >
+              Platform-executed custom web_search_provider.http requests use the prepared
+              tool_model.http_tool_definition.schema.http_block.optional.timeout_seconds budget, including
+              its default 30 seconds, for headers and body after provider rate admission.
+              An earlier caller cancellation wins; the shared client's default is not a maximum.
+              This does not change hardcoded providers or provider-native CLI web_search.
             platform_provider_rate_limit: >
               Non-CLI platform-executed web_search_provider dispatch may declare `rate_limit` and
               `rate_limit_max_wait` alongside the provider configuration. These fields are owned by the

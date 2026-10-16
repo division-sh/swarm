@@ -109,7 +109,7 @@ func TestManagedToolEffectOutcomes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = executor.doNormalizedSearch(managedEffectCommittedContext(harness, "native-search"), req, "results", map[string]string{"title": "title", "url": "url", "snippet": "snippet"}, externalDispatchAdmissionPolicy{})
+		_, err = executor.doNormalizedSearch(managedEffectCommittedContext(harness, "native-search"), req, "results", map[string]string{"title": "title", "url": "url", "snippet": "snippet"}, externalDispatchAdmissionPolicy{}, 0)
 		if err == nil {
 			t.Fatal("native search transport failure returned nil")
 		}
@@ -120,7 +120,7 @@ func TestManagedToolEffectOutcomes(t *testing.T) {
 		stale.AuthorizeErr = errors.New("superseded generation")
 		staleExecutor := &Executor{httpClient: &http.Client{Transport: managedEffectRoundTripper{t: t, harness: stale, adapter: "native_web_search"}}}
 		staleReq, _ := http.NewRequest(http.MethodPost, "http://effect.test/search", bytes.NewReader([]byte(`{"query":"x"}`)))
-		if _, err := staleExecutor.doNormalizedSearch(managedEffectCommittedContext(stale, "native-search-stale"), staleReq, "results", map[string]string{"title": "title", "url": "url", "snippet": "snippet"}, externalDispatchAdmissionPolicy{}); err == nil {
+		if _, err := staleExecutor.doNormalizedSearch(managedEffectCommittedContext(stale, "native-search-stale"), staleReq, "results", map[string]string{"title": "title", "url": "url", "snippet": "snippet"}, externalDispatchAdmissionPolicy{}, 0); err == nil {
 			t.Fatal("stale native search was admitted")
 		}
 		if _, launched := stale.StateForAdapter("native_web_search"); launched {
