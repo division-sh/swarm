@@ -397,7 +397,7 @@ func (r *unavailableThenFailingConnectReader) LookupFlowInstance(ctx context.Con
 }
 
 func TestUnavailableConnectionDoesNotHideLaterReadFailure(t *testing.T) {
-	source := connectReceiverPinCollisionSource(t, "static", false, "node", false)
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyUnavailableConnectionScan(t, "pin_collision"))
 	plans, issues := compiledConnectPlans(source)
 	if len(plans) != 2 || len(issues) != 0 {
 		t.Fatalf("counterexample requires two lawful connections: plans=%d issues=%+v", len(plans), issues)

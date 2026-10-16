@@ -9,10 +9,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 type refusedSuffixReader struct {
@@ -31,49 +31,13 @@ func (r *refusedSuffixReader) LookupFlowInstance(ctx context.Context, request pi
 
 func refusedSuffixSource(t *testing.T, intermediate string) semanticview.Source {
 	t.Helper()
-	flows := []connectRoutePlanTestFlow{{id: "producer", mode: "static", outputs: []contracts.FlowOutputEventPin{{Event: "work.ready"}}}}
-	var connects []contracts.FlowConnect
-	for _, id := range []string{"aterminal", "bintermediate", "yerror", "zerror"} {
-		flow := connectRoutePlanTestFlow{id: id, mode: "static", inputs: []contracts.FlowInputEventPin{{Event: "work.accepted"}}}
-		handlers := map[string]contracts.SystemNodeEventHandler{"work.accepted": existingOwnerHandlerFixture()}
-		if id == "bintermediate" {
-			switch intermediate {
-			case "collision":
-				flow.inputs = append(flow.inputs, contracts.FlowInputEventPin{Event: "work.audited"})
-				handlers["work.audited"] = existingOwnerHandlerFixture()
-			case "missing_key", "create":
-				flow.mode = contracts.FlowModeTemplate
-			}
-		}
-		flow.nodes = map[string]contracts.SystemNodeContract{"receiver": {EventHandlers: handlers}}
-		flows = append(flows, flow)
-		for _, input := range flow.inputs {
-			connect := contracts.FlowConnect{Event: "work.ready", From: "producer", To: id, Rename: input.Event}
-			if flow.mode == contracts.FlowModeTemplate {
-				connect.Resolution = contracts.FlowInputResolutionModeSelect
-				if intermediate == "create" {
-					connect.Resolution = contracts.FlowInputResolutionModeSelectOrCreate
-				}
-			}
-			connects = append(connects, connect)
-		}
-	}
-	bundle := connectRoutePlanTestBundle(t, flows, connects)
-	if intermediate == "missing_key" || intermediate == "create" {
-		for _, declaration := range []struct{ flow, event string }{{"producer", "work.ready"}, {"bintermediate", "work.accepted"}} {
-			view, _ := bundle.FlowViewByID(declaration.flow)
-			entry := view.Events[declaration.event]
-			entry.Payload.Properties = map[string]contracts.EventFieldSpec{"instance_key": {Type: "string"}}
-			entry.Payload.Required = []string{"instance_key"}
-			view.Events[declaration.event] = entry
-		}
-		if err := contracts.CompileWorkflowSemantics(bundle); err != nil {
-			t.Fatal(err)
-		}
-	}
-	source := semanticview.Wrap(bundle)
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyUnavailableConnectionScan(t, intermediate))
 	plans, issues := compiledConnectPlans(source)
-	if len(plans) != len(connects) || len(issues) != 0 {
+	want := 4
+	if intermediate == "collision" {
+		want++
+	}
+	if len(plans) != want || len(issues) != 0 {
 		t.Fatalf("refusal scan requires lawful compiled connections: plans=%d issues=%+v", len(plans), issues)
 	}
 	return source
