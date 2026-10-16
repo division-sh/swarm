@@ -44,6 +44,14 @@ GOMAXPROCS2/-p1, unchanged package/business bounds.
 | r04-native-boundary-guards-candidate2.log | Stable-source PASS runtimepersistence4.034s / schemastore0.236s: all5 selected event, activity-readback, lifecycle, semantic fixture and schema-interpreter boundaries. No guard edits or exemptions. |
 | r04-original-grant-fence-component-race3-candidate1.log | Component RED0.037s: the positive first-fence probe used a plain SQLmock transaction without the mandatory native transaction-ordering frame. Capture/isolation/cancellation controls PASS; no currentness or native takeover credit. |
 | r04-original-grant-fence-component-race3-candidate2.log | PASS activityjournal1.041s, all3 roots x3. The corrected first-fence probe uses the actual PostgreSQL/SQLite backend transaction frames over SQLmock, preserving the exact fence error/rollback oracle. Immutable normal/selected capture, no original reference replacement, pre-SQL refusal and original caller cancellation controls pass. Still not the connected four-writer/recovery proof. |
+| r04-opaque-cut-stub-race3-candidate1.log | PASS startupownership1.418s / activityjournal1.022s, race x3. E's exact unissued/inactive/foreign-attempt cut controls plus A's test-only port stub. The stub always refuses without results; this is deliberately NOT recovery execution. |
+| r04-original-writer-unbound-original-red.log | RED0.006s: all4 native owner entrances x both SQLmock dialects attempted Begin without an installed role. Component evidence, not actual-store takeover. |
+| r04-original-writer-grant-fences-race3-candidate1.log | PASS activityjournal1.108s, race x3. All4 entrances refuse unbound roles before native entry, and exact historical lookup precedes domain work. Binding preserves catalog/signal composition and never replaces an in-flight role or completion reference. |
+| r04-original-writer-port-and-stub-race3-candidate2.log | PASS activityjournal1.098s / startupownership1.024s, race x3, after the named binder port declaration. Exact original grant/version query and rollback tested in native transaction frames over SQLmock; no successful real takeover/currentness credit. |
+| r04-activityjournal-affected-package-race3-candidate1.log | PASS entire affected activityjournal component package, race x3, 1.315s. Includes original schema-before-protocol, strict codec/identity, exact receiver descriptor and no-delivery author projection controls. No actual-store or runtime installation credit. |
+| r04-bound-journal-composition-race3-candidate2.log | PASS activityjournal1.035s, race x3, after strengthening the binder control to retain a real nonnil reconciliation signal. Normal/selected roles preserve the existing catalog and signal without rebinding the base or copying its mutex. |
+| r04-bound-role-affected-guards-race3-candidate1.log | INCOMPLETE runtimepersistence90.032s: I incorrectly grouped pure filesystem/AST guards under race x3 with my 90s aggregate package cap. Panic shows SemanticRunFixturesUseLifecycleOwner scanning/unquoting Go literals, 17s into that root, with no assertion failure. No native DB or business deadline was reached. Runtime startupownership's four existing role/fence controls PASS race x3 in1.032s; no runtimepersistence race3 pass is claimed. Static guards use their ordinary non-race/count1 invocation separately, not a changed business allowance or runtime repair. |
+| r04-bound-role-filesystem-guards-count1.log | PASS runtimepersistence4.267s, all4 pure filesystem/AST roots, ordinary non-race/count1 invocation with the runner's existing default package limit. No guard or production change compensates for the mis-selected race3 aggregate. |
 
 The candidate2 diagnostic was repaired in production, restoring the original
 "was not found for completion/uncertain transition" message. No assertion,
@@ -51,13 +59,15 @@ timeout, accounting exception or baseline was relaxed.
 
 ## Still Required Before Enabling / Landing
 
-Reference/identity staging is not the live execution fence. The original
-installed normal/selected role must be captured, the BOTH-key historical
-snapshot admitted by its canonical owner, and process/current grant/selected
-fences held from BEFORE domain locks through commit in every original writer.
-Fresh live NULL is not an allowed fallback; the existing unbound writer
-behavior is an open implementation dependency, not accepted behavior or a
-compatibility path.
+Reference/identity staging is not connected live execution. The native four
+owner methods now require the fixed installed role, fill its reference only
+at Start/Claim, and invoke the original grant/history/currentness fence before
+domain locks. Complete/ordinary Uncertain cannot fill a missing reference.
+Unbound original writers now refuse before native entry; there is no live
+NULL fallback. The runtime still needs to install and retain the proper bound
+journal per dispatch. Until that assembly is complete, the current branch's
+unbound runtime activity path is intentionally unavailable, NOT qualified or
+an accepted final behavior.
 
 E owns the opaque fixed-session cut and shared startup assembly. Exact port is
 in issue-2700-r04-activity-port.md /6222302270; canonical-reader/shared-assembly
@@ -78,15 +88,16 @@ E's independent both-store race x3 receipt38.926s is donor evidence, not A's
 connected fence/recovery qualification. No other E provider-journal or startup
 ordering commit was taken.
 
-A's next local layer is execution_grant.go: an immutable captured admitted
+A's current native layer is execution_grant.go: an immutable captured admitted
 role, exact canonical history/reference comparison, and a native proof that
 takes the original generation mutation fence BEFORE domain locks. The named
 activity entry on agentpersistence delegates to its existing canonical admitted
 generation/source-set/run/selected proof, then the current full-snapshot check
 also verifies the original state version. No activity-side grant decoder,
-source-head query or new permission interpreter was added. The layer is not yet
-installed in the four native mutators/runtime dispatch and does NOT enable
-recovery; its component tests are not connected native takeover qualification.
+source-head query or new permission interpreter was added. The layer is now
+called by all4 native original mutators in both stores, but is not installed
+by runtime dispatch and does NOT enable recovery. Its component tests are not
+connected native takeover qualification.
 
 The original-role assembly handoff is6222905546. The proposed native session
 port supplies ActivityJournalGrantBinder.BindActivityGrant(GrantEvidence)
@@ -95,6 +106,35 @@ Capture must be through the actual installed sealed generation; an in-flight
 dispatcher retains that exact bound journal through completion. Shared startup/
 source-refresh/selected-runtime installation hunks are reserved before editing,
 not silently modified or replaced by mutable-global role lookup.
+
+E confirmed that exact binder/session split in6223038676. The named interface
+is now runtime/startupownership.ActivityJournalGrantBinder; A's native owner
+implements it with a fresh immutable bound role, the same catalog registry and
+channel signal, and no mutex copying. The unbound native owner remains the
+composition binder/readback owner, not a live mutation fallback. E still owns
+the session wrapper checking the captured process coordinates, and A retains
+the runtime installation/per-dispatch capture work. Neither is silently replaced
+by a caller-supplied role or mutable-global currentness read.
+
+The opaque cut and its original-attempt test are composed byte-for-byte from
+E's signed25bdd4979e1d035325c5b9b87718444e1dc91ea8, blobs
+5418e061eec3ec41f20aeca1d87317303b4b58aa and
+37c6097c19f3eac758c721861b08872a59fc090b. A adds only a TEST-ONLY adapter stub
+matching6222302270/6221547458. It always returns an error and no candidates,
+cannot mint an opaque cut, and has no writer/publication/commit path. No real
+startup hook, recovery implementation or provider-journal delta was composed.
+
+New raw-receipt SHA256 pins:
+
+| Receipt | SHA256 |
+| --- | --- |
+| r04-opaque-cut-stub-race3-candidate1.log | a841092af16e7107988be7335c6e75856039911f0b5bf2cc494eae89535ccca7 |
+| r04-original-writer-unbound-original-red.log | 1d2f8d94be3ae468bb313307f7870689a44aca103eba8bdb73f518b3e1174cbc |
+| r04-original-writer-grant-fences-race3-candidate1.log | 773e26fcf416756168cb761d01201110e653d8c5563fbc570658c2fd99b3c001 |
+| r04-original-writer-port-and-stub-race3-candidate2.log | 036dc2d10e643e69038382782a5d72c63963c7990af3d81a25884b68f77aa591 |
+| r04-activityjournal-affected-package-race3-candidate1.log | b843470ff0065e38c486f3c38a0af5f131499ffc7a3b81e20683aa682a3ea6f2 |
+| r04-bound-journal-composition-race3-candidate2.log | 7921ec96137ff58f9fc1f81a7eebab0d8ee1c673afb991d8d7a247cf476fc344 |
+| r04-bound-role-affected-guards-race3-candidate1.log | 9092804897ac6e11396b7d1e56edd9ece9ad549cd3ce2e150492e3bf2b87d416 |
 
 No recovery adapter or sweep has been enabled. Live
 duplicate versus takeover in both commit orders, late still-alive predecessor,

@@ -44,10 +44,17 @@ func (s *ActivityPostgresOwner) StartActivityAttempt(ctx context.Context, record
 	if err := s.schemaGuard(); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
+	record, err := s.executionGrant.prepareRecord(ctx, record, true)
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
+	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (activityAttemptMutationResult, error) {
 		var value activityAttemptMutationResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var err error
+			if err := s.executionGrant.proveOriginalTx(txctx, tx, record, false); err != nil {
+				return err
+			}
 			value.record, value.changed, err = Start(txctx, tx, DialectPostgres, postgresActivityRunOwner(tx), attempt, record)
 			if err != nil {
 				return err
@@ -71,10 +78,17 @@ func (s *ActivitySQLiteOwner) StartActivityAttempt(ctx context.Context, record r
 	if err := s.schemaGuard(); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
+	record, err := s.executionGrant.prepareRecord(ctx, record, true)
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
+	}
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "start activity attempt", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (activityAttemptMutationResult, error) {
 		var value activityAttemptMutationResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var err error
+			if err := s.executionGrant.proveOriginalTx(txctx, tx, record, true); err != nil {
+				return err
+			}
 			value.record, value.changed, err = Start(txctx, tx, DialectSQLite, sqliteActivityRunOwner(tx), attempt, record)
 			if err != nil {
 				return err
@@ -98,10 +112,17 @@ func (s *ActivityPostgresOwner) ClaimActivityAttemptForLoopGeneration(ctx contex
 	if err := s.schemaGuard(); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
+	record, err := s.executionGrant.prepareRecord(ctx, record, true)
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
+	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (activityAttemptMutationResult, error) {
 		var value activityAttemptMutationResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var err error
+			if err := s.executionGrant.proveOriginalTx(txctx, tx, record, false); err != nil {
+				return err
+			}
 			value.record, value.changed, err = Claim(txctx, tx, DialectPostgres, postgresActivityRunOwner(tx), attempt, record)
 			if err != nil {
 				return err
@@ -125,10 +146,17 @@ func (s *ActivitySQLiteOwner) ClaimActivityAttemptForLoopGeneration(ctx context.
 	if err := s.schemaGuard(); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
+	record, err := s.executionGrant.prepareRecord(ctx, record, true)
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
+	}
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "claim activity attempt", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (activityAttemptMutationResult, error) {
 		var value activityAttemptMutationResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var err error
+			if err := s.executionGrant.proveOriginalTx(txctx, tx, record, true); err != nil {
+				return err
+			}
 			value.record, value.changed, err = Claim(txctx, tx, DialectSQLite, sqliteActivityRunOwner(tx), attempt, record)
 			if err != nil {
 				return err
@@ -152,10 +180,17 @@ func (s *ActivityPostgresOwner) CompleteActivityAttempt(ctx context.Context, rec
 	if err := s.schemaGuard(); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
+	record, err := s.executionGrant.prepareRecord(ctx, record, false)
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
+	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (activityAttemptMutationResult, error) {
 		var value activityAttemptMutationResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var err error
+			if err := s.executionGrant.proveOriginalTx(txctx, tx, record, false); err != nil {
+				return err
+			}
 			value.record, value.changed, err = Complete(txctx, tx, DialectPostgres, postgresActivityRunOwner(tx), attempt, record)
 			if err != nil {
 				return err
@@ -179,10 +214,17 @@ func (s *ActivitySQLiteOwner) CompleteActivityAttempt(ctx context.Context, recor
 	if err := s.schemaGuard(); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
+	record, err := s.executionGrant.prepareRecord(ctx, record, false)
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
+	}
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "complete activity attempt", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (activityAttemptMutationResult, error) {
 		var value activityAttemptMutationResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var err error
+			if err := s.executionGrant.proveOriginalTx(txctx, tx, record, true); err != nil {
+				return err
+			}
 			value.record, value.changed, err = Complete(txctx, tx, DialectSQLite, sqliteActivityRunOwner(tx), attempt, record)
 			if err != nil {
 				return err
@@ -206,10 +248,17 @@ func (s *ActivityPostgresOwner) MarkActivityAttemptUncertain(ctx context.Context
 	if err := s.schemaGuard(); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
+	record, err := s.executionGrant.prepareRecord(ctx, record, false)
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
+	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (activityAttemptMutationResult, error) {
 		var value activityAttemptMutationResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var err error
+			if err := s.executionGrant.proveOriginalTx(txctx, tx, record, false); err != nil {
+				return err
+			}
 			value.record, value.changed, err = MarkUncertain(txctx, tx, DialectPostgres, postgresActivityRunOwner(tx), attempt, record)
 			if err != nil {
 				return err
@@ -233,10 +282,17 @@ func (s *ActivitySQLiteOwner) MarkActivityAttemptUncertain(ctx context.Context, 
 	if err := s.schemaGuard(); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
+	record, err := s.executionGrant.prepareRecord(ctx, record, false)
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
+	}
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "mark activity attempt uncertain", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (activityAttemptMutationResult, error) {
 		var value activityAttemptMutationResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			var err error
+			if err := s.executionGrant.proveOriginalTx(txctx, tx, record, true); err != nil {
+				return err
+			}
 			value.record, value.changed, err = MarkUncertain(txctx, tx, DialectSQLite, sqliteActivityRunOwner(tx), attempt, record)
 			if err != nil {
 				return err

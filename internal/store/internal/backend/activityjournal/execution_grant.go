@@ -23,6 +23,53 @@ type activityExecutionGrant struct {
 	reference processbinding.ActivityExecutionBinding
 }
 
+var _ runtimeownership.ActivityJournalGrantBinder = (*ActivityPostgresOwner)(nil)
+var _ runtimeownership.ActivityJournalGrantBinder = (*ActivitySQLiteOwner)(nil)
+
+func (s *ActivityPostgresOwner) BindActivityGrant(evidence runtimeownership.GrantEvidence) (runtimepipeline.ActivityAttemptJournal, error) {
+	if s == nil || s.backend == nil || s.schemaGuard == nil || s.executionGrant != nil {
+		return nil, errors.New("activity journal requires its unbound native postgres owner")
+	}
+	grant, err := captureActivityExecutionGrant(evidence)
+	if err != nil {
+		return nil, err
+	}
+	return &ActivityPostgresOwner{
+		backend: s.backend, schemaGuard: s.schemaGuard, catalog: s.authorActivityCatalog(),
+		channelChanges: s.channelChanges, executionGrant: grant,
+	}, nil
+}
+
+func (s *ActivitySQLiteOwner) BindActivityGrant(evidence runtimeownership.GrantEvidence) (runtimepipeline.ActivityAttemptJournal, error) {
+	if s == nil || s.backend == nil || s.schemaGuard == nil || s.executionGrant != nil {
+		return nil, errors.New("activity journal requires its unbound native sqlite owner")
+	}
+	grant, err := captureActivityExecutionGrant(evidence)
+	if err != nil {
+		return nil, err
+	}
+	return &ActivitySQLiteOwner{
+		backend: s.backend, schemaGuard: s.schemaGuard, catalog: s.authorActivityCatalog(),
+		channelChanges: s.channelChanges, executionGrant: grant,
+	}, nil
+}
+
+func (g *activityExecutionGrant) prepareRecord(ctx context.Context, record runtimepipeline.ActivityAttemptRecord, starting bool) (runtimepipeline.ActivityAttemptRecord, error) {
+	if ctx == nil || g == nil {
+		return runtimepipeline.ActivityAttemptRecord{}, errors.New("activity mutation requires its original installed execution role")
+	}
+	if err := ctx.Err(); err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, err
+	}
+	if starting && record.ExecutionBinding.IsZero() {
+		record.ExecutionBinding = g.reference
+	}
+	if record.ExecutionBinding != g.reference {
+		return runtimepipeline.ActivityAttemptRecord{}, errors.New("activity mutation differs from its original installed execution role")
+	}
+	return record, nil
+}
+
 func captureActivityExecutionGrant(evidence runtimeownership.GrantEvidence) (*activityExecutionGrant, error) {
 	if err := evidence.Validate(); err != nil {
 		return nil, err
