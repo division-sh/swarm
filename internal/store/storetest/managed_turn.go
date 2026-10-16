@@ -303,7 +303,7 @@ func managedTurnFixtureFrame(t testing.TB, authority runtimeeffects.Authority, s
 	if err != nil {
 		t.Fatalf("render managed turn fixture prompt: %v", err)
 	}
-	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, nil, prompt, agentintent.RuntimeEnvironmentContext())
+	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, prompt, agentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		t.Fatalf("assemble managed turn fixture prompt: %v", err)
 	}

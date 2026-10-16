@@ -93,7 +93,7 @@ func managedCompletionTestFrameForSource(t testing.TB, authority runtimeeffects.
 	if err != nil {
 		t.Fatalf("render managed completion test prompt: %v", err)
 	}
-	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, nil, prompt, agentintent.RuntimeEnvironmentContext())
+	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, prompt, agentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		t.Fatalf("assemble managed completion test provider prompt: %v", err)
 	}

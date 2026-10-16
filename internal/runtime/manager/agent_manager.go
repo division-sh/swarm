@@ -697,8 +697,7 @@ func bindCanonicalAgentPrompt(source semanticview.Source, cfg *models.AgentConfi
 	if matched == nil {
 		return fmt.Errorf("agent %s resolved intent does not match a canonical declaration", strings.TrimSpace(cfg.ID))
 	}
-	bundle, _ := semanticview.Bundle(source)
-	prompt, err := runtimecontracts.AssembleAgentPrompt(bundle, matched.OwnerFlowID, matched.Entry, cfg.Criteria)
+	prompt, err := runtimecontracts.AssembleAgentPrompt(matched.Entry)
 	if err != nil {
 		return fmt.Errorf("agent %s reconstruct derived prompt: %w", strings.TrimSpace(cfg.ID), err)
 	}

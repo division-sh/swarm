@@ -879,7 +879,7 @@ func managedFrameBindingFrame(t testing.TB, authority Authority, surface managed
 	if err != nil {
 		t.Fatalf("render binding intent: %v", err)
 	}
-	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, nil, prompt, agentintent.RuntimeEnvironmentContext())
+	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, prompt, agentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		t.Fatalf("assemble binding provider prompt: %v", err)
 	}

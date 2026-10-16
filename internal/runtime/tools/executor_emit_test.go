@@ -358,84 +358,49 @@ func TestHandleEmitTool_PreservesPayloadForFlowScopedEmit(t *testing.T) {
 	}
 }
 
-func TestHandleEmitTool_ValidatesCriteriaCitationsBeforePublish(t *testing.T) {
+// USER Q2 (6218902685) removes citation membership semantics. These fields
+// are ordinary typed payload data; schema and declaration admission still apply.
+func TestHandleEmitTool_ValidatesOrdinaryCitationDataBeforePublish(t *testing.T) {
 	tests := []struct {
-		name       string
-		payload    map[string]any
-		wantReason string
+		name      string
+		payload   map[string]any
+		wantError bool
 	}{
-		{
-			name: "valid single citation",
-			payload: map[string]any{
-				"cite": "FX-HARD-01",
-			},
-		},
-		{
-			name: "valid list citation",
-			payload: map[string]any{
-				"cites": []any{"FX-HARD-01"},
-			},
-		},
-		{
-			name: "empty list citation",
-			payload: map[string]any{
-				"cites": []any{},
-			},
-			wantReason: "criteria_citation_shape_invalid",
-		},
-		{
-			name: "unknown id",
-			payload: map[string]any{
-				"cite": "FX-MISSING",
-			},
-			wantReason: "criteria_id_unknown",
-		},
-		{
-			name: "class mismatch",
-			payload: map[string]any{
-				"cite": "FX-SOFT-04",
-			},
-			wantReason: "criteria_class_not_allowed",
-		},
+		{"single text", map[string]any{"cite": "FX-HARD-01"}, false},
+		{"list text", map[string]any{"cites": []any{"FX-HARD-01"}}, false},
+		{"empty list", map[string]any{"cites": []any{}}, false},
+		{"unknown rule id is business text", map[string]any{"cite": "FX-MISSING"}, false},
+		{"former class is business text", map[string]any{"cite": "FX-SOFT-04"}, false},
+		{"empty text", map[string]any{"cite": ""}, false},
+		{"missing optional values", map[string]any{}, false},
+		{"wrong single type", map[string]any{"cite": 3}, true},
+		{"wrong collection type", map[string]any{"cites": "FX-HARD-01"}, true},
+		{"wrong item type", map[string]any{"cites": []any{"FX-HARD-01", false}}, true},
+		{"undeclared property", map[string]any{"extra": true}, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			exec, bus, actor := criteriaCitationEmitTestExecutor(t)
+			exec, bus, actor := ordinaryCitationEmitTestExecutor(t)
 			_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_cto_spec_vetoed", tc.payload)
-			if tc.wantReason == "" {
-				if err != nil {
-					t.Fatalf("handleEmitTool: %v", err)
-				}
-				if bus.count != 1 {
-					t.Fatalf("publish count = %d, want 1", bus.count)
+			if !tc.wantError {
+				if err != nil || bus.count != 1 {
+					t.Fatalf("ordinary payload refused: publications=%d error=%v", bus.count, err)
 				}
 				return
 			}
-			if err == nil {
-				t.Fatal("handleEmitTool error = nil, want criteria citation rejection")
-			}
 			runtimeErr, ok := failures.As(err)
-			if !ok || runtimeErr == nil {
-				t.Fatalf("error = %#v, want canonical failure", err)
-			}
-			if runtimeErr.Failure.Class != failures.ClassSchemaInvalid || runtimeErr.Failure.Detail.Code != "criteria_citation_validation_failed" {
-				t.Fatalf("failure = %#v", runtimeErr.Failure)
-			}
-			if runtimeErr.Failure.Retryable {
-				t.Fatalf("runtime error retryable = true, want false")
-			}
-			if got := runtimeErr.Failure.Detail.Attributes["reason"]; got != tc.wantReason {
-				t.Fatalf("failure reason = %#v, want %q", got, tc.wantReason)
+			if !ok || runtimeErr.Failure.Class != failures.ClassSchemaInvalid || runtimeErr.Failure.Detail.Code != "schema_validation_failed" || runtimeErr.Failure.Retryable {
+				t.Fatalf("wrong canonical schema refusal: %v", err)
 			}
 			if bus.count != 0 {
-				t.Fatalf("publish count = %d, want 0", bus.count)
+				t.Fatalf("invalid payload published %d times", bus.count)
 			}
 		})
 	}
 }
 
-func TestHandleEmitTool_CriteriaCitationsSelectActorScopeForSharedEffectiveName(t *testing.T) {
-	exec, bus, actor := criteriaCitationEmitTestExecutor(t)
+func TestHandleEmitTool_OrdinaryCitationDataSelectsActorScopeForSharedEffectiveName(t *testing.T) {
+	exec, bus, actor := ordinaryCitationEmitTestExecutor(t)
 	if _, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_cto_spec_vetoed", map[string]any{
 		"cite": "FX-HARD-01",
 	}); err != nil {
@@ -446,34 +411,19 @@ func TestHandleEmitTool_CriteriaCitationsSelectActorScopeForSharedEffectiveName(
 	}
 }
 
-func criteriaCitationEmitTestExecutor(t testing.TB) (*Executor, *publishBusCapture, models.AgentConfig) {
-	return criteriaCitationEmitTestExecutorWithAgent(t, runtimecontracts.AgentRegistryEntry{
+func ordinaryCitationEmitTestExecutor(t testing.TB) (*Executor, *publishBusCapture, models.AgentConfig) {
+	return ordinaryCitationEmitTestExecutorWithAgent(t, runtimecontracts.AgentRegistryEntry{
 		ID:         "cto-agent",
 		Role:       "cto",
 		EmitEvents: []string{"cto.spec_vetoed"},
-		Criteria:   []string{"feasibility_exclusions"},
 	})
 }
 
-func criteriaCitationEmitTestExecutorWithAgent(t testing.TB, agent runtimecontracts.AgentRegistryEntry) (*Executor, *publishBusCapture, models.AgentConfig) {
+func ordinaryCitationEmitTestExecutorWithAgent(t testing.TB, agent runtimecontracts.AgentRegistryEntry) (*Executor, *publishBusCapture, models.AgentConfig) {
 	flow := runtimecontracts.FlowContractView{
 		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "validation"},
 		Schema: runtimecontracts.FlowSchemaDocument{},
-		Path:   "validation", Rules: runtimecontracts.RulesDocument{"feasibility_exclusions": {Criteria: &runtimecontracts.PolicyCriteriaSet{
-			Classes: map[string]runtimecontracts.PolicyCriteriaClass{
-				"hard": {Disposition: "cto.spec_vetoed"},
-				"soft": {Disposition: "cto.spec_revision_needed"},
-			},
-			Rules: []runtimecontracts.PolicyCriteriaRule{{
-				ID:    "FX-HARD-01",
-				Class: "hard",
-				Text:  "Requires regulated real-time integration.",
-			}, {
-				ID:    "FX-SOFT-04",
-				Class: "soft",
-				Text:  "Missing MVP spec.",
-			}},
-		}}}, Agents: map[string]runtimecontracts.AgentRegistryEntry{
+		Path:   "validation", Agents: map[string]runtimecontracts.AgentRegistryEntry{
 			"cto-agent": agent,
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -483,17 +433,9 @@ func criteriaCitationEmitTestExecutorWithAgent(t testing.TB, agent runtimecontra
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"cite": {
 							Type: "text",
-							Citation: runtimecontracts.CriteriaCitation{
-								Criteria:       "feasibility_exclusions",
-								AllowedClasses: []string{"hard"},
-							},
 						},
 						"cites": {
 							Type: "[text]",
-							Citation: runtimecontracts.CriteriaCitation{
-								Criteria:       "feasibility_exclusions",
-								AllowedClasses: []string{"hard"},
-							},
 						},
 					},
 				},
@@ -505,7 +447,7 @@ func criteriaCitationEmitTestExecutorWithAgent(t testing.TB, agent runtimecontra
 		Schema: runtimecontracts.FlowSchemaDocument{},
 		Path:   "other-validation",
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"cto-agent": {Role: "other-cto", Criteria: []string{"other_criteria"}},
+			"cto-agent": {Role: "other-cto"},
 		},
 	}
 	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow, otherFlow}}
@@ -541,38 +483,21 @@ func criteriaCitationEmitTestExecutorWithAgent(t testing.TB, agent runtimecontra
 		FlowID:        "validation",
 		FlowPath:      "validation",
 		EmitEvents:    []string{"cto.spec_vetoed"},
-		Criteria:      []string{"feasibility_exclusions"},
 	}
 	actor = toolTestConstructedActor(t, exec, actor)
 	return exec, bus, actor
 }
 
-func TestHandleEmitTool_RejectsMutableActorCriteriaGrant(t *testing.T) {
-	exec, bus, actor := criteriaCitationEmitTestExecutorWithAgent(t, runtimecontracts.AgentRegistryEntry{
-		ID:         "cto-agent",
-		Role:       "cto",
-		EmitEvents: []string{"cto.spec_vetoed"},
-	})
-	actor.Criteria = []string{"feasibility_exclusions"}
-
-	_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_cto_spec_vetoed", map[string]any{
-		"cite": "FX-HARD-01",
-	})
-	if err == nil {
-		t.Fatal("handleEmitTool error = nil, want mutable criteria grant rejection")
+func TestHandleEmitTool_RejectsMutableActorEmitGrant(t *testing.T) {
+	exec, bus, actor := ordinaryCitationEmitTestExecutor(t)
+	actor.EmitEvents = append(actor.EmitEvents, "undeclared.event")
+	_, err := exec.handleEmitTool(toolEventTestContext(actor), actor, "emit_undeclared_event", map[string]any{"cite": "FX-HARD-01"})
+	if err == nil || bus.count != 0 {
+		t.Fatalf("actor-only grant reached publication: publications=%d error=%v", bus.count, err)
 	}
 	runtimeErr, ok := failures.As(err)
-	if !ok || runtimeErr == nil {
-		t.Fatalf("error = %#v, want runtime error", err)
-	}
-	if runtimeErr.Failure.Detail.Code != "criteria_citation_validation_failed" {
-		t.Fatalf("failure detail = %q, want criteria_citation_validation_failed", runtimeErr.Failure.Detail.Code)
-	}
-	if got := runtimeErr.Failure.Detail.Attributes["reason"]; got != "criteria_set_not_allowed" {
-		t.Fatalf("failure reason = %#v, want criteria_set_not_allowed", got)
-	}
-	if bus.count != 0 {
-		t.Fatalf("publish count = %d, want 0", bus.count)
+	if !ok || runtimeErr.Failure.Detail.Code != "invalid_emit_tool_name" {
+		t.Fatalf("wrong undeclared-tool refusal: %v", err)
 	}
 }
 

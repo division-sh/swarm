@@ -1985,7 +1985,7 @@ func newConformanceManagedConversation(t *testing.T, agentID string, identity ag
 	if err != nil {
 		t.Fatalf("derive conformance agent prompt: %v", err)
 	}
-	providerPrompt, err := runtimeagentintent.AssembleProviderPrompt(intent, []string{}, prompt, runtimeagentintent.RuntimeEnvironmentContext())
+	providerPrompt, err := runtimeagentintent.AssembleProviderPrompt(intent, prompt, runtimeagentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		t.Fatalf("assemble conformance provider prompt: %v", err)
 	}

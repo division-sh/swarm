@@ -290,7 +290,7 @@ func managedConsumerWithRuntime(t *testing.T, fixture completionSettlementFixtur
 	if err != nil {
 		t.Fatal(err)
 	}
-	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, nil, prompt, agentintent.RuntimeEnvironmentContext())
+	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, prompt, agentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		t.Fatal(err)
 	}

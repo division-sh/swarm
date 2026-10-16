@@ -175,7 +175,7 @@ func effectiveFrameInspection(resolved runtimemanager.AgentFrameConfig, agentID,
 	}, agentframe.PreviewSeed{
 		BundleHash: resolved.BundleHash,
 		AgentID:    agentID, AuthoredFlow: cfg.FlowID, AgentIdentity: &identity,
-		Role: cfg.Role, FlowID: cfg.FlowID, Intent: cfg.Intent, Criteria: cfg.Criteria,
+		Role: cfg.Role, FlowID: cfg.FlowID, Intent: cfg.Intent,
 		Provider: &provider, ProviderPrompt: promptText,
 	})
 }

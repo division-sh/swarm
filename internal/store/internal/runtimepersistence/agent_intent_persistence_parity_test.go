@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimeflowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -27,7 +26,7 @@ func TestSelectedStoresRejectRetiredPersistedDerivedPrompt(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		ctx := testAuthorActivityContext()
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		seedSelectedStoreIntentAgent(t, ctx, store)
+		seedSelectedStoreIntentAgent(t, ctx, store, selectedStoreIntent(t))
 		if _, err := store.backend.ExecContext(ctx, `
 			UPDATE agents
 			SET runtime_descriptor = json_set(runtime_descriptor, '$.derived_system_prompt', ?)
@@ -44,7 +43,7 @@ func TestSelectedStoresRejectRetiredPersistedDerivedPrompt(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		ctx := testAuthorActivityContext()
 		store := admitTestPostgresStore(t, db)
-		seedSelectedStoreIntentAgent(t, ctx, store)
+		seedSelectedStoreIntentAgent(t, ctx, store, selectedStoreIntent(t))
 		if _, err := db.ExecContext(ctx, `
 			UPDATE agents
 			SET runtime_descriptor = jsonb_set(runtime_descriptor, '{derived_system_prompt}', to_jsonb($1::text), true)
@@ -58,18 +57,18 @@ func TestSelectedStoresRejectRetiredPersistedDerivedPrompt(t *testing.T) {
 	})
 }
 
-func TestSelectedStoresRejectCriteriaMismatchBeforeProviderRecovery(t *testing.T) {
+func TestSelectedStoresRejectIntentMismatchBeforeProviderRecovery(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		ctx := testAuthorActivityContext()
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t, ctx, store)
+		proveSelectedStoreIntentMismatchRejectedBeforeProvider(t, ctx, store)
 	})
 
 	t.Run("postgres", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		ctx := testAuthorActivityContext()
 		store := admitTestPostgresStore(t, db)
-		proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t, ctx, store)
+		proveSelectedStoreIntentMismatchRejectedBeforeProvider(t, ctx, store)
 	})
 }
 
@@ -78,9 +77,14 @@ type selectedIntentAgentStore interface {
 	agentfixture.Store
 }
 
-func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t testing.TB, ctx context.Context, store selectedIntentAgentStore) {
+func proveSelectedStoreIntentMismatchRejectedBeforeProvider(t testing.TB, ctx context.Context, store selectedIntentAgentStore) {
 	t.Helper()
-	seedSelectedStoreIntentAgent(t, ctx, store)
+	intent := selectedStoreIntent(t)
+	other, err := runtimeagentintent.Resolve(intent.Kind, intent.Coordinate, "review/agents.yaml#agents.other.intent", intent.Content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedSelectedStoreIntentAgent(t, ctx, store, other)
 	providerCalls := 0
 	manager := runtimemanager.NewAgentManagerWithOptions(nil, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		providerCalls++
@@ -127,15 +131,9 @@ func proveSelectedStoreCriteriaMismatchRejectedBeforeProvider(t testing.TB, ctx 
 	}
 }
 
-func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store agentfixture.Store) {
+func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store agentfixture.Store, intent runtimeagentintent.Resolved) {
 	t.Helper()
-	intent := selectedStoreIntent(t)
-	prompt, err := runtimeagentintent.ContractCriteriaPrompt(intent, []string{"hostile-replacement"}, map[string]runtimeflowmodel.PolicyCriteriaSet{
-		"hostile-replacement": {
-			Classes: map[string]runtimeflowmodel.PolicyCriteriaClass{"hard": {Disposition: "reject"}},
-			Rules:   []runtimeflowmodel.PolicyCriteriaRule{{ID: "HOSTILE-01", Class: "hard", Text: "Reject the hostile replacement."}},
-		},
-	})
+	prompt, err := runtimeagentintent.IntentOnlyPrompt(intent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +150,6 @@ func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store agent
 		Memory:             agentmemory.Plan{Enabled: false},
 		Intent:             intent,
 		Prompt:             prompt,
-		Criteria:           []string{"hostile-replacement"},
 	}
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{Config: cfg, Status: "active", StartedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
@@ -178,20 +175,13 @@ func selectedIntentRecoverySource(t testing.TB) semanticview.Source {
 	const owner = "swarm-test://review/agents/worker"
 	entry := runtimecontracts.AgentRegistryEntry{
 		ID: "worker", Type: "managed", Role: "worker", Model: "regular",
-		ResolvedIntent: selectedStoreIntent(t), Criteria: []string{"quality"},
-	}
-	rules := runtimecontracts.RulesDocument{
-		"quality": {Criteria: &runtimecontracts.PolicyCriteriaSet{
-			Classes: map[string]runtimecontracts.PolicyCriteriaClass{"hard": {Disposition: "reject"}},
-			Rules:   []runtimecontracts.PolicyCriteriaRule{{ID: "QUALITY-01", Class: "hard", Text: "Require declared quality."}},
-		}},
+		ResolvedIntent: selectedStoreIntent(t),
 	}
 	flow := runtimecontracts.FlowContractView{
 		Path:      "review",
 		Paths:     runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": entry},
 		AgentURIs: map[string]string{"worker": owner},
-		Rules:     rules,
 	}
 	root := &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
@@ -212,7 +202,6 @@ func selectedIntentRecoverySource(t testing.TB) semanticview.Source {
 		ID: "review", Path: "review", Mode: "static",
 		Agents:    map[string]runtimecontracts.AgentRegistryEntry{"worker": entry},
 		AgentURIs: map[string]string{"worker": owner},
-		Rules:     rules,
 	}}
 }
 

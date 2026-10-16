@@ -26,7 +26,7 @@ func TestAgentFactoryRejectsAuthoredPromptAuthority(t *testing.T) {
 
 func TestSelectedStoreRecoveryReconstructsCanonicalPromptBeforeProviderFactory(t *testing.T) {
 	intent := managerRecoveryIntent(t)
-	source := managerRecoverySource(intent, nil)
+	source := managerRecoverySource(intent)
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ID:       "worker",
 		Identity: managerAgentIdentity("worker"),
@@ -60,16 +60,19 @@ func TestSelectedStoreRecoveryReconstructsCanonicalPromptBeforeProviderFactory(t
 	}
 }
 
-func TestSelectedStoreRecoveryRejectsCriteriaMismatchBeforeProviderFactory(t *testing.T) {
+func TestSelectedStoreRecoveryRejectsIntentMismatchBeforeProviderFactory(t *testing.T) {
 	intent := managerRecoveryIntent(t)
-	source := managerRecoverySource(intent, []string{"quality"})
+	source := managerRecoverySource(intent)
+	other, err := runtimeagentintent.Resolve(intent.Kind, intent.Coordinate, "review/agents.yaml#agents.other.intent", intent.Content)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ID:       "worker",
 		Identity: managerAgentIdentity("worker"),
 		Role:     "worker",
 		Model:    "regular",
-		Intent:   intent,
-		Criteria: []string{"hostile-replacement"},
+		Intent:   other,
 	})
 	cfg.Prompt = runtimeagentintent.DerivedPrompt{}
 
@@ -79,12 +82,12 @@ func TestSelectedStoreRecoveryRejectsCriteriaMismatchBeforeProviderFactory(t *te
 		return newGenericAgent(got), nil
 	}, AgentManagerOptions{SemanticSource: source})
 
-	err := bindCanonicalAgentPrompt(source, &cfg)
+	err = bindCanonicalAgentPrompt(source, &cfg)
 	if err == nil {
 		_, err = am.buildAgent(cfg)
 	}
-	if err == nil || !strings.Contains(err.Error(), "runtime refs must match contract agent criteria") {
-		t.Fatalf("reconstruct selected-store prompt error = %v, want criteria mismatch rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "does not match a canonical declaration") {
+		t.Fatalf("reconstruct selected-store prompt error = %v, want intent mismatch rejection", err)
 	}
 	if providerCalls != 0 {
 		t.Fatalf("provider factory calls = %d, want 0", providerCalls)
@@ -105,7 +108,7 @@ func managerRecoveryIntent(t testing.TB) runtimeagentintent.Resolved {
 	return intent
 }
 
-func managerRecoverySource(intent runtimeagentintent.Resolved, criteria []string) semanticview.Source {
+func managerRecoverySource(intent runtimeagentintent.Resolved) semanticview.Source {
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{FlowPath: "review"},
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{
@@ -113,7 +116,6 @@ func managerRecoverySource(intent runtimeagentintent.Resolved, criteria []string
 				ID:             "worker",
 				Role:           "worker",
 				ResolvedIntent: intent,
-				Criteria:       append([]string(nil), criteria...),
 			},
 		},
 	}

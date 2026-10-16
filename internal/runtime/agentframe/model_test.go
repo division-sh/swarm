@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 const testBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -112,26 +111,13 @@ func TestExecutionFrameContentHashBindsCanonicalSemanticFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	changedIntent.Intent = intent
-	changedIntent.ProviderPrompt, err = agentintent.AssembleProviderPrompt(intent, nil, prompt, agentintent.RuntimeEnvironmentContext())
+	changedIntent.ProviderPrompt, err = agentintent.AssembleProviderPrompt(intent, prompt, agentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	changedCriteria := seed
-	changedCriteria.Criteria = []string{"criteria/review.md"}
-	criteriaPrompt, err := agentintent.ContractCriteriaPrompt(changedCriteria.Intent, changedCriteria.Criteria, map[string]flowmodel.PolicyCriteriaSet{
-		"criteria/review.md": {
-			Classes: map[string]flowmodel.PolicyCriteriaClass{"required": {Disposition: "reject"}},
-			Rules:   []flowmodel.PolicyCriteriaRule{{ID: "REVIEW-01", Class: "required", Text: "Review the admitted work."}},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	changedCriteria.ProviderPrompt, err = agentintent.AssembleProviderPrompt(changedCriteria.Intent, changedCriteria.Criteria, criteriaPrompt, agentintent.RuntimeEnvironmentContext())
-	if err != nil {
-		t.Fatal(err)
-	}
+	changedFlow := seed
+	changedFlow.FlowID = "review"
 
 	changedActor := seed
 	changedActor.AgentIdentity = agentidentity.Identity{
@@ -160,7 +146,7 @@ func TestExecutionFrameContentHashBindsCanonicalSemanticFacts(t *testing.T) {
 
 	variants := map[string]Frame{
 		"intent":         completeTestFrame(t, changedIntent, TurnDraft{Kind: TurnInitial, Event: event}, surface),
-		"criteria":       completeTestFrame(t, changedCriteria, TurnDraft{Kind: TurnInitial, Event: event}, surface),
+		"flow":           completeTestFrame(t, changedFlow, TurnDraft{Kind: TurnInitial, Event: event}, surface),
 		"actor":          completeTestFrame(t, changedActor, TurnDraft{Kind: TurnInitial, Event: event}, actorSurface),
 		"event":          completeTestFrame(t, seed, TurnDraft{Kind: TurnInitial, Event: changedEvent}, surface),
 		"provider alias": completeTestFrame(t, changedProviderAlias, TurnDraft{Kind: TurnInitial, Event: event}, surface),
@@ -360,7 +346,7 @@ func TestExecutionFrameRejectsProviderPromptFromAnotherSessionContract(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	seed.ProviderPrompt, err = agentintent.AssembleProviderPrompt(otherIntent, nil, otherDerived, agentintent.RuntimeEnvironmentContext())
+	seed.ProviderPrompt, err = agentintent.AssembleProviderPrompt(otherIntent, otherDerived, agentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +376,7 @@ func testExecutionFrameInputs(t testing.TB) (SessionSeed, events.Event, managedc
 	if err != nil {
 		t.Fatal(err)
 	}
-	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, nil, prompt, agentintent.RuntimeEnvironmentContext())
+	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, prompt, agentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		t.Fatal(err)
 	}

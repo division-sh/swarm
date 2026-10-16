@@ -113,7 +113,7 @@ func Admit(req AdmissionRequest) (Admission, error) {
 			return Admission{}, err
 		}
 		if previous, duplicate := prompts[blueprint.Identity]; duplicate {
-			prior, err := previous.Text(blueprint.Config.Intent, blueprint.Config.Criteria)
+			prior, err := previous.Text(blueprint.Config.Intent)
 			current, currentErr := blueprint.Config.DerivedSystemPrompt()
 			if err != nil || currentErr != nil || prior != current {
 				return Admission{}, fmt.Errorf("selected readiness repeats a conflicting actor prompt owner")
