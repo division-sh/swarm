@@ -57,6 +57,7 @@ func TestNativeTier12SourceLifecycleUsesCanonicalReaderAndExactFacts(t *testing.
 			strings.ReplaceAll(row.Before, "assertSourceRunLifecycle(t, h.db,", "assertSourceRunLifecycle(t, h.pg,") != row.After {
 			t.Fatal("Tier12 source/fork setup, PostgreSQL scope, cleanup, execution or source freeze assertions changed")
 		}
+		row, source := requireCatchUp2672MasterPair(t, row, selectedCausalObservationBody(t, row.File, row.Function))
 		// Q2 excludes diagnostic history (review 6183283144). Preserve that
 		// historical rewrite; its successor adds only explicit business setup.
 		const anchor = "\tforkAt := sourceEventID\n"
@@ -76,7 +77,7 @@ func TestNativeTier12SourceLifecycleUsesCanonicalReaderAndExactFacts(t *testing.
 			actual, err := canonicalFunction(candidate)
 			return err == nil && actual == expected
 		}
-		if !matches(row.Successor) || !matches(selectedCausalObservationBody(t, row.File, row.Function)) {
+		if !matches(row.Successor) || !matches(source) {
 			t.Fatal("source-advanced successor changed more than explicit post-cut business-event setup")
 		}
 		for _, edit := range [][2]string{

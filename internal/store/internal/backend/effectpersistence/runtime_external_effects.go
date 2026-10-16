@@ -503,7 +503,10 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 			return runtimeeffects.Attempt{}, err
 		}
 	}
-	var err error
+	journal, err := encodeProviderRequestJournal(ctx, authority, req)
+	if err != nil {
+		return runtimeeffects.Attempt{}, err
+	}
 	req.Lineage, err = bindExternalEffectRunLineage(ctx, authority, req.Lineage)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
@@ -546,7 +549,10 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 					return nil
 				}
 				var retry bool
-				attempt, retry, err = authorizePrelaunchRetryPostgres(ctx, tx, authority, req, existing)
+				attempt, retry, err = authorizeProviderResumeTx(ctx, tx, true, s.delivery, authority, req, existing)
+				if err == nil && !retry {
+					attempt, retry, err = authorizePrelaunchRetryPostgres(ctx, tx, authority, req, existing)
+				}
 				if err != nil {
 					return err
 				}
@@ -563,7 +569,7 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 			if err != nil {
 				return err
 			}
-			attempt, err = insertExternalAttemptPostgres(ctx, tx, authority, req)
+			attempt, err = insertExternalAttemptPostgres(ctx, tx, authority, req, journal)
 			if err != nil {
 				return err
 			}
@@ -672,7 +678,10 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 			return runtimeeffects.Attempt{}, err
 		}
 	}
-	var err error
+	journal, err := encodeProviderRequestJournal(ctx, authority, req)
+	if err != nil {
+		return runtimeeffects.Attempt{}, err
+	}
 	req.Lineage, err = bindExternalEffectRunLineage(ctx, authority, req.Lineage)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
@@ -710,14 +719,14 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 			if existing, found, err := loadExistingExternalAttemptSQLite(txctx, tx, req.OperationID); err != nil {
 				return err
 			} else if found {
-				attempt, err = authorizeExistingExternalAttemptSQLiteTx(txctx, tx, authority, req, existing)
+				attempt, err = authorizeExistingExternalAttemptSQLiteTx(txctx, tx, s.delivery, authority, req, existing)
 				return err
 			}
 			reservations, err := prepareCompletionBudgetReservationsSQLite(txctx, tx, authority, req.Now.UTC())
 			if err != nil {
 				return err
 			}
-			attempt, err = insertExternalAttemptSQLiteTx(txctx, tx, authority, req)
+			attempt, err = insertExternalAttemptSQLiteTx(txctx, tx, authority, req, journal)
 			if err != nil {
 				return err
 			}
@@ -779,11 +788,14 @@ func bindExternalEffectRunLineage(ctx context.Context, authority runtimeeffects.
 	return out, nil
 }
 
-func authorizeExistingExternalAttemptSQLiteTx(txctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, error) {
+func authorizeExistingExternalAttemptSQLiteTx(txctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, error) {
 	if resumed, ok := resumeProviderRegistrationAuthorization(authority, req, existing); ok {
 		return resumed, nil
 	}
-	attempt, retry, err := authorizePrelaunchRetrySQLite(txctx, tx, authority, req, existing)
+	attempt, retry, err := authorizeProviderResumeTx(txctx, tx, false, delivery, authority, req, existing)
+	if err == nil && !retry {
+		attempt, retry, err = authorizePrelaunchRetrySQLite(txctx, tx, authority, req, existing)
+	}
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
@@ -1600,7 +1612,7 @@ func externalEffectAgentIdentityValues(authority runtimeeffects.Authority) ([8]a
 	}, nil
 }
 
-func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
+func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, journal any) (runtimeeffects.Attempt, error) {
 	bundleHash, err := requiredExternalEffectBundleHash(ctx, authority)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
@@ -1623,7 +1635,7 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 		authority.ExecutionOwner, authority.LeaseExpiresAt.UTC(), authority.FenceGeneration,
 		string(authority.Target.Kind), authority.Target.ID, authority.Target.Ordinal, capabilitySurfaceID}
 	attemptArgs = append(attemptArgs, completionOriginValues(req.Origin)...)
-	attemptArgs = append(attemptArgs, req.Now.UTC(), req.SessionGrantID, req.SessionLockOwner, string(authorityEvidence))
+	attemptArgs = append(attemptArgs, req.Now.UTC(), req.SessionGrantID, req.SessionLockOwner, string(authorityEvidence), journal)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_operations (
 			operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id,
@@ -1646,18 +1658,18 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 			usage_target_kind, usage_target_id, target_ordinal, capability_surface_id,
 				origin_kind, origin_delivery_id, origin_run_id, origin_route_identity, origin_claim_token,
 				origin_claim_version, origin_subscriber_type, origin_subscriber_id, origin_directive_operation_id, origin_directive_owner_id,
-			state, authorized_at, updated_at, session_grant_id, session_lock_owner, authority_evidence
+			state, authorized_at, updated_at, session_grant_id, session_lock_owner, authority_evidence, provider_request_journal
 		) VALUES ($1::uuid, $2::uuid, 1, $3, $4, NULLIF($5,0), $6, $7, $8, $9, $10,
 		          NULLIF($11,''), NULLIF($12,'')::uuid, NULLIF($13,0), NULLIF($14,'')::uuid,
 			          NULLIF($15,''), NULLIF($16,'')::uuid, NULLIF($17,'')::uuid, NULLIF($18,''), NULLIF($19,'')::uuid,
-			          NULLIF($20,0), NULLIF($21,''), NULLIF($22,''), NULLIF($23,'')::uuid, NULLIF($24,''), 'authorized', $25, $25, NULLIF($26,''), NULLIF($27,''), $28::jsonb)
+			          NULLIF($20,0), NULLIF($21,''), NULLIF($22,''), NULLIF($23,'')::uuid, NULLIF($24,''), 'authorized', $25, $25, NULLIF($26,''), NULLIF($27,''), $28::jsonb, $29::jsonb)
 	`, attemptArgs...); err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert external effect attempt: %w", err)
 	}
 	return externalAuthorizedAttempt(authority, req, req.AttemptID, 1), nil
 }
 
-func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
+func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, journal any) (runtimeeffects.Attempt, error) {
 	bundleHash, err := requiredExternalEffectBundleHash(ctx, authority)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
@@ -1680,7 +1692,7 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 		authority.ExecutionOwner, authority.LeaseExpiresAt.UTC(), authority.FenceGeneration,
 		string(authority.Target.Kind), authority.Target.ID, authority.Target.Ordinal, capabilitySurfaceID}
 	attemptArgs = append(attemptArgs, completionOriginValues(req.Origin)...)
-	attemptArgs = append(attemptArgs, req.Now.UTC(), req.Now.UTC(), req.SessionGrantID, req.SessionLockOwner, string(authorityEvidence))
+	attemptArgs = append(attemptArgs, req.Now.UTC(), req.Now.UTC(), req.SessionGrantID, req.SessionLockOwner, string(authorityEvidence), journal)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runtime_external_effect_operations (
 			operation_id, effect_kind, effect_class, execution_mode, bundle_hash, authority_kind, authority_id,
@@ -1702,9 +1714,9 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 			usage_target_kind, usage_target_id, target_ordinal, capability_surface_id,
 				origin_kind, origin_delivery_id, origin_run_id, origin_route_identity, origin_claim_token,
 				origin_claim_version, origin_subscriber_type, origin_subscriber_id, origin_directive_operation_id, origin_directive_owner_id,
-			state, authorized_at, updated_at, session_grant_id, session_lock_owner, authority_evidence
+			state, authorized_at, updated_at, session_grant_id, session_lock_owner, authority_evidence, provider_request_journal
 		) VALUES (?, ?, 1, ?, ?, NULLIF(?,0), ?, ?, ?, ?, ?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,0), NULLIF(?,''),
-			          NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,0), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), 'authorized', ?, ?, NULLIF(?,''), NULLIF(?,''), ?)
+			          NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,0), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), 'authorized', ?, ?, NULLIF(?,''), NULLIF(?,''), ?, ?)
 	`, attemptArgs...); err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert sqlite external effect attempt: %w", err)
 	}
@@ -2528,7 +2540,7 @@ func externalEffectRecoveryFailure(class runtimefailures.Class, code string, now
 
 func reconcileExternalEffectAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, candidates []externalEffectRecoveryCandidate, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	allowed := externalEffectRecoveryAttemptSet(candidates)
-	completionSummary, err := reconcileCompletionAttemptsPostgres(ctx, tx, llm, delivery, directives, mutation, allowed, now, "")
+	completionSummary, err := reconcileCompletionAttemptsPostgres(ctx, tx, llm, delivery, directives, mutation, allowed, now, "", nil)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
@@ -2546,7 +2558,7 @@ func reconcileExternalEffectAttemptsPostgres(ctx context.Context, tx *sql.Tx, ll
 
 func reconcileExternalEffectAttemptsSQLiteTx(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, candidates []externalEffectRecoveryCandidate, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	allowed := externalEffectRecoveryAttemptSet(candidates)
-	completionSummary, err := reconcileCompletionAttemptsSQLite(ctx, tx, llm, delivery, directives, mutation, allowed, now, "")
+	completionSummary, err := reconcileCompletionAttemptsSQLite(ctx, tx, llm, delivery, directives, mutation, allowed, now, "", nil)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}

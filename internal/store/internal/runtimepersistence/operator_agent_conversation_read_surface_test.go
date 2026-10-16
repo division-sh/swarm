@@ -20,7 +20,10 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
@@ -88,7 +91,7 @@ func testOperatorAgentConfigForRun(runID, agentID, role string) runtimeactors.Ag
 }
 
 func testOperatorAgentConfigForIdentity(identity agentidentity.Identity, role string) runtimeactors.AgentConfig {
-	return runtimePersistenceTestAgentConfig(runtimeactors.AgentConfig{
+	cfg := runtimePersistenceTestAgentConfig(runtimeactors.AgentConfig{
 		Identity:      identity,
 		ID:            identity.AgentID(),
 		Role:          role,
@@ -99,6 +102,15 @@ func testOperatorAgentConfigForIdentity(identity agentidentity.Identity, role st
 		FlowPath:      "global",
 		Config:        json.RawMessage(`{}`),
 	})
+	profile, err := selection.ResolveLiveBackend(cfg.ResolvedLLMBackend)
+	if err != nil {
+		panic(err)
+	}
+	resolved, err := llm.ResolveAgentExecution(executionposture.Live, profile, nil, cfg)
+	if err != nil {
+		panic(err)
+	}
+	return resolved.Actor
 }
 
 func testOperatorAgentIdentity(agentID string) agentidentity.Identity {
@@ -169,7 +181,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 		role string
 	}{{"agent-1", "researcher"}, {"agent-2", "reviewer"}} {
 		if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-			Config:    testOperatorAgentConfigForRun(runID, agent.id, agent.role),
+			Config:    resolveNativeClaimFixtureActor(t, testOperatorAgentConfigForRun(runID, agent.id, agent.role)),
 			Status:    "active",
 			StartedAt: now,
 		}); err != nil {
@@ -195,14 +207,28 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	agentOneIdentity := mustTestAgentIdentityForRun(runID, "agent-1", "global")
 	agentOneRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: agentOneIdentity}
 	agentTwoRoute := testAgentDeliveryRoute(t, runID, "agent-2", "global")
+	for _, delivery := range []struct {
+		event events.Event
+		route events.DeliveryRoute
+	}{
+		{eventsByID[failedOldEventID], agentOneRoute},
+		{eventsByID[deadEventID], agentOneRoute},
+		{eventsByID[otherAgentEventID], agentTwoRoute},
+		{eventsByID[failedNewEventID], agentOneRoute},
+	} {
+		seedAgentDeliveryStateFixture(t, ctx, pg, delivery.event, delivery.route, runtimedelivery.StateQueued, nil)
+	}
+	if err := pg.ActivateDeliveryAuthority(ctx, admitAgentClaimProfileAuthority(t, ctx, pg, mustStoreTestSourceArtifactFact(authorActivityTestBundleHash))); err != nil {
+		t.Fatal(err)
+	}
 	oldFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "old_failure", nil)
-	oldSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[failedOldEventID], agentOneRoute, runtimedelivery.StateRetrying, &oldFailure)
+	oldSnapshot := settleDeliveryStateFixture(t, ctx, pg, eventsByID[failedOldEventID], agentOneRoute, runtimedelivery.StateRetrying, &oldFailure)
 	terminalFailureEnvelope := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal_failure", nil)
-	deadSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[deadEventID], agentOneRoute, runtimedelivery.StateExhausted, &terminalFailureEnvelope)
+	deadSnapshot := settleDeliveryStateFixture(t, ctx, pg, eventsByID[deadEventID], agentOneRoute, runtimedelivery.StateExhausted, &terminalFailureEnvelope)
 	otherAgentFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "other_agent_failure", nil)
-	seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[otherAgentEventID], agentTwoRoute, runtimedelivery.StateRetrying, &otherAgentFailure)
+	settleDeliveryStateFixture(t, ctx, pg, eventsByID[otherAgentEventID], agentTwoRoute, runtimedelivery.StateRetrying, &otherAgentFailure)
 	newFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "new_failure", nil)
-	newSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[failedNewEventID], agentOneRoute, runtimedelivery.StateRetrying, &newFailure)
+	newSnapshot := settleDeliveryStateFixture(t, ctx, pg, eventsByID[failedNewEventID], agentOneRoute, runtimedelivery.StateRetrying, &newFailure)
 	failedNewDeliveryID := newSnapshot.DeliveryID
 	failedOldDeliveryID := oldSnapshot.DeliveryID
 	deadDeliveryID := deadSnapshot.DeliveryID
@@ -523,6 +549,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 			t.Fatalf("UpsertAgent %s/%s: %v", agent.runID, agent.id, err)
 		}
 	}
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	pendingEventID := uuid.NewString()
 	inProgressEventID := uuid.NewString()
 	deliveredEventID := uuid.NewString()
@@ -681,6 +708,7 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 			t.Fatalf("UpsertAgent %s/%s: %v", agent.runID, agent.id, err)
 		}
 	}
+	ctx = admitPreparedAgentClaimContext(t, ctx, sqliteStore)
 	pendingEventID := uuid.NewString()
 	inProgressEventID := uuid.NewString()
 	deliveredEventID := uuid.NewString()
@@ -897,6 +925,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesCanonicalLifecy
 	}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	event := seedOperatorAgentEvent(t, ctx, pg, eventID, runID, "task.dead", "", time.Now().UTC())
 	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "missing_dead_letter_record", nil)
 	seedAgentDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: agentIdentity}, runtimedelivery.StateExhausted, &failure)

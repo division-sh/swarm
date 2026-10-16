@@ -1,6 +1,9 @@
 package manager_test
 
 import (
+	"context"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -16,6 +19,16 @@ func openManagerNativeSelectedDelivery(t *testing.T, backend string) *manager.Ma
 	fixture.Authority, fixture.NormalAuthority = execution.Authority, execution.NormalAuthority
 	fixture.SelectedAdmission, fixture.SelectedRoute = execution.SelectedAdmission, execution.SelectedRoute
 	fixture.SelectedEvent, fixture.SemanticSource, fixture.Context = execution.SelectedEvent, execution.SemanticSource, execution.Context
+	fixture.SelectedOrigin = execution.DiagnosticOrigin
+	fixture.PrepareActor = func(t *testing.T, cfg actors.AgentConfig) (context.Context, manager.PersistedAgent, manager.AgentLifecyclePersistence, agenttopology.SourceSetPlan) {
+		t.Helper()
+		if cfg.Identity.Normalize() != fixture.SelectedRoute.AgentIdentity {
+			t.Fatal("selected actor preparation must name its actual issued declaration")
+		}
+		record, grant := execution.PreparePersistedActor(t)
+		fixture.Context = execution.Context
+		return execution.Context, record, grant, agenttopology.SourceSetPlan{}
+	}
 	return fixture
 }
 

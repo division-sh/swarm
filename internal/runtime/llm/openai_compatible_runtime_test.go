@@ -242,12 +242,13 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 	runtime.credentials = testProviderCredentialResolver(t, "OPENAI_COMPATIBLE_API_KEY", "test-key")
 	ctx := runtimeactors.WithActor(harness.CompletionContext("openai-compatible-missing-usage"), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: "regular", FlowPath: "test/stateless"})
 	ctx = withTestStatelessMemory(t, ctx, "agent-1", "test/stateless")
-	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
+	session, err := runtime.StartSession(ctx, "agent-1", managedProviderPromptForEffectTest(t), nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
-	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, managedProviderCallForEffectTest(t, ctx))
+	managed := managedProviderCallForEffectTest(t, ctx)
+	_, err = runtime.continueSession(ctx, session, managedProviderInputForEffectTest(t, managed), managed)
 	if err == nil || !strings.Contains(err.Error(), "missing usage") {
 		t.Fatalf("ContinueSession error = %v, want missing usage", err)
 	}
@@ -275,12 +276,13 @@ func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *te
 
 	ctx := runtimeactors.WithActor(harness.CompletionContext("anthropic-missing-usage"), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: "regular", FlowPath: "test/stateless"})
 	ctx = withTestStatelessMemory(t, ctx, "agent-1", "test/stateless")
-	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
+	session, err := runtime.StartSession(ctx, "agent-1", managedProviderPromptForEffectTest(t), nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
-	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, managedProviderCallForEffectTest(t, ctx))
+	managed := managedProviderCallForEffectTest(t, ctx)
+	_, err = runtime.continueSession(ctx, session, managedProviderInputForEffectTest(t, managed), managed)
 	if err == nil || !strings.Contains(err.Error(), "missing usage") {
 		t.Fatalf("ContinueSession error = %v, want missing usage", err)
 	}

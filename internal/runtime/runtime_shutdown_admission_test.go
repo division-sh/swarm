@@ -18,7 +18,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -60,23 +62,6 @@ func (d *shutdownBlockedDispatcher) DispatchDeliveryContinuation(ctx context.Con
 	return runtimedeliverycontinuation.Fatal(ctx.Err())
 }
 
-func bindRuntimeShutdownAgentReadinessFinalizer(bus *runtimebus.EventBus) {
-	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
-		for _, route := range routes {
-			if !route.Recipient.IsAgent() {
-				continue
-			}
-			if err := route.AgentIdentity.Validate(); err != nil {
-				return err
-			}
-			if route.AgentIdentity.RunID != event.RunID() {
-				return errors.New("shutdown test agent readiness route escaped the event run")
-			}
-		}
-		return nil
-	}))
-}
-
 func (a runtimeShutdownTestAgent) ID() string { return a.id }
 func (runtimeShutdownTestAgent) Type() string { return "test" }
 func (a runtimeShutdownTestAgent) Subscriptions() []events.EventType {
@@ -85,8 +70,6 @@ func (a runtimeShutdownTestAgent) Subscriptions() []events.EventType {
 func (a runtimeShutdownTestAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
 	return a.onEvent(ctx, evt)
 }
-
-type runtimeShutdownManagerStore struct{}
 
 type runtimeShutdownCompletionStore struct {
 	started   chan struct{}
@@ -163,16 +146,58 @@ func activateRuntimeShutdownDelivery(t *testing.T, store *runtimeShutdownDeliver
 	}
 }
 
-func (*runtimeShutdownManagerStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
-	return nil
-}
-
-func (*runtimeShutdownManagerStore) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
-	return nil, nil
-}
-
-func (*runtimeShutdownManagerStore) EnsureEntitySchema(context.Context, string) error {
-	return nil
+func newRuntimeShutdownNativeManager(t *testing.T, rt *Runtime, fixture RuntimeLogNativeFixtureForTest, deliveryStore *runtimeShutdownDeliveryStore, agent runtimeShutdownTestAgent, release func()) (*runtimemanager.AgentManager, context.Context) {
+	t.Helper()
+	ctx := correlation.WithRuntimeInstanceID(testAuthorActivityContext(context.Background()), authorActivityTestRuntimeInstanceID)
+	subscriptions := make([]string, len(agent.subscriptions))
+	for i, subscription := range agent.subscriptions {
+		subscriptions[i] = string(subscription)
+	}
+	ctx, record, lifecycle, plan := fixture.PrepareActor(t, ctx, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+		ExecutionMode: "live", ID: agent.id, Identity: agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),
+		Subscriptions: subscriptions,
+	}))
+	roles := runtimeTestManagerBusRoles(rt.Bus)
+	roles.LifecycleState = fixture.Deliveries.(runtimemanager.AgentLifecycleStateReader)
+	roles.LifecycleOutcome = fixture.Deliveries.(runtimemanager.AgentLifecycleOutcomeReader)
+	roles.LifecycleCensus = fixture.Deliveries.(runtimemanager.AgentLifecycleCellCensus)
+	manager := runtimemanager.NewAgentManagerWithOptions(rt.Bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
+		if cfg.ID != agent.id {
+			t.Fatalf("unexpected native shutdown agent: %q", cfg.ID)
+		}
+		return agent, nil
+	}, runtimemanager.AgentManagerOptions{
+		ExecutionPosture: executionposture.Live, BaseContext: ctx, SourceArtifactFact: sourceartifactfixture.Fact(),
+		SemanticSource: runtimeTestSubscriptionSource("test.in"), RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
+		WorkOwner: rt.workOccurrence, LifecycleStore: lifecycle, DeliveryStore: deliveryStore,
+		PersistenceRoles: roles, ReceiverExecution: eventreceiver.NormalExecution(),
+	}, fixture.Deliveries.(runtimemanager.ManagerPersistence))
+	rt.Manager = manager
+	rt.Bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
+	// This registers after native capability setup, so joined runtime cleanup
+	// precedes capability release even if an assertion aborts before publication.
+	t.Cleanup(func() {
+		if release != nil {
+			release()
+		}
+		_ = rt.Shutdown()
+	})
+	if err := manager.InstallStartupTopology(lifecycle, record.Topology, plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.MaterializeAdmittedAgentForExecution(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	admission, _ := managedexecution.FromContext(ctx)
+	authority, err := runtimedelivery.NewExecutionAuthority(sourceartifactfixture.Fact(), admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Bus.SetDeliveryAuthority(authority); err != nil {
+		t.Fatal(err)
+	}
+	activateRuntimeShutdownDelivery(t, deliveryStore, rt.Bus, ctx)
+	return manager, ctx
 }
 
 type runtimeShutdownInboundStore struct {
@@ -233,7 +258,12 @@ func VerifyRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapterForTest(t 
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("shutdown-fixture-claim"),
 		"test.in", "tester", "", nil, 0, identity.RunID, events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
-	authority, err := runtimedelivery.NewNormalExecutionAuthority(sourceartifactfixture.Fact(), "runtime-shutdown-test", 1)
+	ctx := correlation.WithRuntimeInstanceID(testAuthorActivityContext(context.Background()), authorActivityTestRuntimeInstanceID)
+	ctx, _, _, _ = fixture.PrepareActor(t, ctx, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+		ID: identity.AgentID(), Identity: identity, ExecutionMode: "live",
+	}))
+	admission, _ := managedexecution.FromContext(ctx)
+	authority, err := runtimedelivery.NewExecutionAuthority(sourceartifactfixture.Fact(), admission)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +278,7 @@ func VerifyRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapterForTest(t 
 	if before.Events != 0 || before.Deliveries != 0 {
 		t.Fatalf("claim seeded unpublished durable work: %+v", before)
 	}
-	event = fixture.PublishDelivery(fixture.Context, event, []events.DeliveryRoute{route}, store.authority)
+	event = fixture.PublishDelivery(ctx, event, []events.DeliveryRoute{route}, store.authority)
 	result, err := store.ClaimDelivery(testAuthorActivityContext(context.Background()), store.authority, event, route)
 	if err != nil {
 		t.Fatalf("shutdown fixture must admit its real delivery claim: %v", err)
@@ -264,7 +294,6 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	activateRuntimeShutdownDelivery(t, deliveryStore, bus, fixture.Context)
 	started := make(chan struct{}, 1)
 	canceled := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -289,49 +318,22 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 	workOwner := runtimeTestEventBusRuntimeOccurrence(t, bus)
 	rt := &Runtime{Bus: bus, workOccurrence: workOwner}
 	t.Cleanup(func() { releaseWork(); _ = rt.Shutdown() })
-	managerStore := &runtimeShutdownManagerStore{}
-	lifecycle, roles := runtimeTestEphemeralManagerLifecycle(t)
-	busRoles := runtimeTestManagerBusRoles(bus)
-	busRoles.LifecycleState, busRoles.LifecycleOutcome = roles.LifecycleState, roles.LifecycleOutcome
-	am := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
-		if cfg.ID != agent.id {
-			t.Fatalf("unexpected agent id: %q", cfg.ID)
-		}
-		return agent, nil
-	}, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:               executionposture.Live,
-		SemanticSource:                 runtimeTestSubscriptionSource("test.in"),
-		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
-		WorkOwner:                      workOwner,
-		LifecycleStore:                 lifecycle,
-		DeliveryStore:                  deliveryStore,
-		PersistenceRoles:               busRoles, ReceiverExecution: eventreceiver.NormalExecution(),
-	}, managerStore)
-	rt.Manager = am
-	bindRuntimeShutdownAgentReadinessFinalizer(bus)
+	am, managerCtx := newRuntimeShutdownNativeManager(t, rt, fixture, deliveryStore, agent, releaseWork)
 
 	inboundStore := &runtimeShutdownInboundStore{}
 	testInbound := newTestInboundGateway(t, bus, nil, rt.shutdownAdmissionClosed, inboundStore)
 	rt.InboundGateway = testInbound.InboundGateway
 
-	if err := registerRuntimeTestAgent(am, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            agent.id,
-		Identity:      agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),
-		Subscriptions: []string{"test.in"},
-	})); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
-	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+	if err := am.Run(managerCtx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("runtime-shutdown-inbound-1"),
 		events.EventType("test.in"),
 		"tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
-	event = fixture.PublishDelivery(fixture.Context, event, []events.DeliveryRoute{{
+	event = fixture.PublishDelivery(managerCtx, event, []events.DeliveryRoute{{
 		Recipient: events.MustAgentDeliveryRecipient(agent.id), AgentIdentity: agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),
 	}}, deliveryStore.authority)
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), event); err != nil {
+	if err := bus.Publish(managerCtx, event); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 
@@ -445,7 +447,6 @@ func VerifyRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrainFor
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	activateRuntimeShutdownDelivery(t, deliveryStore, bus, fixture.Context)
 	started := make(chan struct{}, 1)
 	canceled := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -470,41 +471,18 @@ func VerifyRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrainFor
 	workOwner := runtimeTestEventBusRuntimeOccurrence(t, bus)
 	rt := &Runtime{Bus: bus, workOccurrence: workOwner}
 	t.Cleanup(func() { releaseWork(); _ = rt.Shutdown() })
-	lifecycle, roles := runtimeTestEphemeralManagerLifecycle(t)
-	busRoles := runtimeTestManagerBusRoles(bus)
-	busRoles.LifecycleState, busRoles.LifecycleOutcome = roles.LifecycleState, roles.LifecycleOutcome
-	am := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
-		return agent, nil
-	}, runtimemanager.AgentManagerOptions{
-		ExecutionPosture:               executionposture.Live,
-		SemanticSource:                 runtimeTestSubscriptionSource("test.in"),
-		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
-		WorkOwner:                      workOwner,
-		LifecycleStore:                 lifecycle,
-		DeliveryStore:                  deliveryStore,
-		PersistenceRoles:               busRoles, ReceiverExecution: eventreceiver.NormalExecution(),
-	})
-	rt.Manager = am
-	bindRuntimeShutdownAgentReadinessFinalizer(bus)
+	am, managerCtx := newRuntimeShutdownNativeManager(t, rt, fixture, deliveryStore, agent, releaseWork)
 
-	if err := registerRuntimeTestAgent(am, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
-		ExecutionMode: "live",
-		ID:            agent.id,
-		Identity:      agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),
-		Subscriptions: []string{"test.in"},
-	})); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
-	}
-	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+	if err := am.Run(managerCtx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("runtime-shutdown-grace-inbound-1"),
 		events.EventType("test.in"),
 		"tester", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, events.EventEnvelope{}, time.Now().UTC())
-	event = fixture.PublishDelivery(fixture.Context, event, []events.DeliveryRoute{{
+	event = fixture.PublishDelivery(managerCtx, event, []events.DeliveryRoute{{
 		Recipient: events.MustAgentDeliveryRecipient(agent.id), AgentIdentity: agentidentitytest.RootRuntime(t, agent.id, "runtime-test/shutdown-admission"),
 	}}, deliveryStore.authority)
-	if err := bus.Publish(testAuthorActivityContext(context.Background()), event); err != nil {
+	if err := bus.Publish(managerCtx, event); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 

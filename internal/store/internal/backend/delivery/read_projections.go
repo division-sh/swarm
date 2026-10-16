@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,9 +18,1133 @@ import (
 	"github.com/google/uuid"
 )
 
+type ForkReceiverSettlementStorage struct {
+	Status, Outcome, Failure string
+	Claim, OutcomeClaim      int
+}
+
+func ReadForkReceiverSettlementStorageTx(ctx context.Context, tx *sql.Tx, runID, deliveryID string) (ForkReceiverSettlementStorage, error) {
+	var out ForkReceiverSettlementStorage
+	err := tx.QueryRowContext(ctx, `SELECT d.status,d.claim_version,o.claim_version,o.outcome,COALESCE(CAST(o.failure AS TEXT),'') FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.delivery_id=$2`, runID, deliveryID).Scan(&out.Status, &out.Claim, &out.OutcomeClaim, &out.Outcome, &out.Failure)
+	return out, err
+}
+
+func ReadForkReceiverBusinessSettlementStorageTx(ctx context.Context, tx *sql.Tx, runID, deliveryID string) (ForkReceiverSettlementStorage, error) {
+	var out ForkReceiverSettlementStorage
+	err := tx.QueryRowContext(ctx, `SELECT d.status,d.claim_version,o.outcome,o.claim_version FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.delivery_id=$2`, runID, deliveryID).Scan(&out.Status, &out.Claim, &out.Outcome, &out.OutcomeClaim)
+	return out, err
+}
+
+func CountForkReceiverSettledAttemptsStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1`, deliveryID).Scan(&count)
+	return count, err
+}
+
+func ReadForkReceiverRuleSelectionStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) (PublicationRuleSelectionStorage, error) {
+	var out PublicationRuleSelectionStorage
+	err := tx.QueryRowContext(ctx, `SELECT selection_context,disposition,COALESCE(flow_path,''),COALESCE(declaration_family,''),COALESCE(semantic_path,''),COALESCE(display_label,'') FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, deliveryID).Scan(&out.Context, &out.Disposition, &out.Flow, &out.Family, &out.Path, &out.Label)
+	return out, err
+}
+
+type PublicationRuleSelectionStorage struct{ Context, Disposition, Flow, Family, Path, Label string }
+
+type DeliveryRollbackStorage struct{ Outcomes, Diagnostics, Transitions int }
+
+func ReadDeliveryRollbackStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) (DeliveryRollbackStorage, error) {
+	var out DeliveryRollbackStorage
+	err := tx.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1 AND closure_kind='settled'),
+		(SELECT COUNT(*) FROM dead_letters WHERE delivery_id=$1),
+		(SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=CAST($1 AS TEXT) AND transition IN ('dead_letter','terminalized'))`, deliveryID).Scan(&out.Outcomes, &out.Diagnostics, &out.Transitions)
+	return out, err
+}
+
+type ExactDeliveryDeadLetterStorage struct {
+	DeliveryID, EventType, Handler string
+	ClaimVersion                   int64
+	Payload, Failure               []byte
+	RetryCount, ChainDepth         int
+}
+
+func ReadExactDeliveryDeadLetterStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string, version int64) (ExactDeliveryDeadLetterStorage, error) {
+	var out ExactDeliveryDeadLetterStorage
+	err := tx.QueryRowContext(ctx, `SELECT CAST(delivery_id AS TEXT),claim_version,original_event,original_payload,failure,retry_count,chain_depth,handler_node FROM dead_letters WHERE delivery_id=$1 AND claim_version=$2`, deliveryID, version).Scan(&out.DeliveryID, &out.ClaimVersion, &out.EventType, &out.Payload, &out.Failure, &out.RetryCount, &out.ChainDepth, &out.Handler)
+	return out, err
+}
+
+func ReadDeliveryAttemptFailureStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string, version int64) ([]byte, error) {
+	var out []byte
+	err := tx.QueryRowContext(ctx, `SELECT failure FROM event_delivery_attempts WHERE delivery_id=$1 AND claim_version=$2`, deliveryID, version).Scan(&out)
+	return out, err
+}
+
+type DeliveryConformanceAttemptStorage struct {
+	Version          int64
+	Closure, Outcome string
+}
+
+func ReadDeliveryConformanceAttemptsStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) (out []DeliveryConformanceAttemptStorage, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT claim_version,closure_kind,outcome FROM event_delivery_attempts WHERE delivery_id=$1 ORDER BY claim_version`, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	for rows.Next() {
+		var row DeliveryConformanceAttemptStorage
+		if err := rows.Scan(&row.Version, &row.Closure, &row.Outcome); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func CountMatchingOpenDeliveryAttemptStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string, version int64) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id AND d.current_attempt_version=a.claim_version AND d.current_attempt_open=TRUE WHERE a.delivery_id=$1 AND a.claim_version=$2 AND a.open_marker=TRUE`, deliveryID, version).Scan(&count)
+	return count, err
+}
+
+func ReadDeliveryConformanceSelectionStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) (PublicationRuleSelectionStorage, error) {
+	var out PublicationRuleSelectionStorage
+	err := tx.QueryRowContext(ctx, `SELECT selection_context,disposition,COALESCE(flow_path,''),COALESCE(declaration_family,''),COALESCE(semantic_path,''),display_label FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, deliveryID).Scan(&out.Context, &out.Disposition, &out.Flow, &out.Family, &out.Path, &out.Label)
+	return out, err
+}
+
+func CountDeliveryHandlerSelectionsStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, deliveryID).Scan(&count)
+	return count, err
+}
+
+func ReadPublicationRuleSelectionStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID, subscriberID string) (PublicationRuleSelectionStorage, error) {
+	var out PublicationRuleSelectionStorage
+	err := tx.QueryRowContext(ctx, `SELECT s.selection_context,s.disposition,s.flow_path,s.declaration_family,s.semantic_path,s.display_label FROM event_delivery_handler_rule_selections s JOIN event_deliveries d ON d.delivery_id=s.delivery_id WHERE d.run_id=$1 AND d.event_id=$2 AND d.subscriber_id=$3`, runID, eventID, subscriberID).Scan(&out.Context, &out.Disposition, &out.Flow, &out.Family, &out.Path, &out.Label)
+	return out, err
+}
+
+func ReadDeliveryPayloadProjectionTextStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, deliveryID string) (string, error) {
+	query := `SELECT delivery_payload_projection FROM event_deliveries WHERE delivery_id=$1`
+	if postgres {
+		query = `SELECT delivery_payload_projection::text FROM event_deliveries WHERE delivery_id=$1`
+	}
+	var raw string
+	err := tx.QueryRowContext(ctx, query, deliveryID).Scan(&raw)
+	return raw, err
+}
+
+func CountUnfinishedMockAgentDeliveriesStorageTx(ctx context.Context, tx *sql.Tx) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE subscriber_type = 'agent' AND (subscriber_id LIKE 'phrase-bot%' OR subscriber_id = 'memory-bot') AND status <> 'delivered'`).Scan(&count)
+	return count, err
+}
+
+type MockAgentDeliveryDiagnosticStorage struct {
+	SubscriberID, Status string
+	ReasonCode, Failure  sql.NullString
+}
+
+type MockAgentDeliveryDiagnosticsStorage struct {
+	Rows      []MockAgentDeliveryDiagnosticStorage
+	ScanError error
+}
+
+func ReadMockAgentDeliveryDiagnosticsStorageTx(ctx context.Context, tx *sql.Tx) (MockAgentDeliveryDiagnosticsStorage, error) {
+	var out MockAgentDeliveryDiagnosticsStorage
+	rows, err := tx.QueryContext(ctx, `SELECT subscriber_id, status, reason_code, CAST(failure AS TEXT) FROM event_deliveries WHERE subscriber_type = 'agent' ORDER BY created_at`)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row MockAgentDeliveryDiagnosticStorage
+		if out.ScanError = rows.Scan(&row.SubscriberID, &row.Status, &row.ReasonCode, &row.Failure); out.ScanError != nil {
+			break
+		}
+		out.Rows = append(out.Rows, row)
+	}
+	return out, nil
+}
+
+func ReadMockConnectorDeliveryDiagnosticsStorageTx(ctx context.Context, tx *sql.Tx) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT subscriber_id, status, COALESCE(reason_code, ''), CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE subscriber_id LIKE '%telegram%' ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var subscriber, status, reason, failure string
+		if err := rows.Scan(&subscriber, &status, &reason, &failure); err != nil {
+			out = append(out, "scan_error="+err.Error())
+			break
+		}
+		out = append(out, fmt.Sprintf("%s/%s/%s=%s", subscriber, status, reason, failure))
+	}
+	return out, nil
+}
+
+func CountUnfinishedMemoryAgentDeliveriesStorageTx(ctx context.Context, tx *sql.Tx) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE (subscriber_id LIKE 'phrase-bot%' OR subscriber_id = 'memory-bot') AND status <> 'delivered'`).Scan(&count)
+	return count, err
+}
+
+type ServedDeliveryRouteEvidenceStorage struct {
+	ID, EventID, Identity, Kind, Recipient, Target, Context, Projection, Claim, Initialization string
+}
+
+type ServedTemplateCompletionDiagnosticStorage struct {
+	Columns                                 []string
+	Rows                                    [][]sql.NullString
+	ColumnsError, ScanError, IterationError error
+}
+
+func scanServedPhysicalDiagnosticRows(rows *sql.Rows) (ServedTemplateCompletionDiagnosticStorage, error) {
+	var out ServedTemplateCompletionDiagnosticStorage
+	defer rows.Close()
+	out.Columns, out.ColumnsError = rows.Columns()
+	if out.ColumnsError != nil {
+		return out, nil
+	}
+	for rows.Next() {
+		values := make([]sql.NullString, len(out.Columns))
+		args := make([]any, len(values))
+		for i := range values {
+			args[i] = &values[i]
+		}
+		if err := rows.Scan(args...); err != nil {
+			out.ScanError = err
+			return out, nil
+		}
+		out.Rows = append(out.Rows, values)
+	}
+	out.IterationError = rows.Err()
+	return out, nil
+}
+func ReadTemplateCompletionDeliveryDiagnosticsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (ServedTemplateCompletionDiagnosticStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT d.delivery_id,d.event_id,d.subscriber_id,d.status,COALESCE(d.reason_code,''),CAST(d.delivery_target_route AS TEXT) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 AND (e.event_name LIKE '%work.completed' OR e.event_name='mailbox.card_decided') ORDER BY d.created_at,d.delivery_id`, runID)
+	if err != nil {
+		return ServedTemplateCompletionDiagnosticStorage{}, err
+	}
+	return scanServedPhysicalDiagnosticRows(rows)
+}
+
+func ReadServedDeliveryRouteEvidenceStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]ServedDeliveryRouteEvidenceStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT delivery_id,event_id,route_identity,subscriber_type,subscriber_id,CAST(delivery_target_route AS TEXT),CAST(delivery_context AS TEXT),CAST(delivery_payload_projection AS TEXT),CAST(connect_execution_claim AS TEXT),CAST(receiver_materialization_plan AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY delivery_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ServedDeliveryRouteEvidenceStorage
+	for rows.Next() {
+		var row ServedDeliveryRouteEvidenceStorage
+		if err := rows.Scan(&row.ID, &row.EventID, &row.Identity, &row.Kind, &row.Recipient, &row.Target, &row.Context, &row.Projection, &row.Claim, &row.Initialization); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+type DeliveryRecoveryIdentityStorage struct{ EventID, Route, Status string }
+
+func ReadDeliveryRecoveryIdentityStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) (DeliveryRecoveryIdentityStorage, error) {
+	var out DeliveryRecoveryIdentityStorage
+	err := tx.QueryRowContext(ctx, `SELECT event_id, CAST(delivery_target_route AS TEXT), status FROM event_deliveries WHERE delivery_id=$1`, deliveryID).Scan(&out.EventID, &out.Route, &out.Status)
+	return out, err
+}
+
+type DeliveryRecoveryAttemptStorage struct {
+	Version         int64
+	Outcome, Reason string
+}
+
+func ReadDeliveryRecoveryAttemptsStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) ([]DeliveryRecoveryAttemptStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT claim_version, COALESCE(outcome,''), COALESCE(reason_code,'') FROM event_delivery_attempts WHERE delivery_id=$1 ORDER BY claim_version`, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeliveryRecoveryAttemptStorage
+	for rows.Next() {
+		var row DeliveryRecoveryAttemptStorage
+		if err := rows.Scan(&row.Version, &row.Outcome, &row.Reason); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func CountSourceRunDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID, sourceEventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 AND e.source_event_id=$2`, runID, sourceEventID).Scan(&count)
+	return count, err
+}
+
+type OrderedFanOutOutcomeStorage struct {
+	Ordinal  int
+	ID, Kind string
+}
+
+func ReadOrderedRunFanOutOutcomesStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]OrderedFanOutOutcomeStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT ordinal,CAST(event_id AS TEXT),outcome_kind FROM fan_out_outcomes WHERE run_id=$1 ORDER BY ordinal`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OrderedFanOutOutcomeStorage
+	for rows.Next() {
+		var row OrderedFanOutOutcomeStorage
+		if err := rows.Scan(&row.Ordinal, &row.ID, &row.Kind); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+type CommittedFanOutOrdinalStorage struct {
+	ID      string
+	Ordinal int
+}
+
+func ReadCommittedRunFanOutOrdinalsStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]CommittedFanOutOrdinalStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(event_id AS TEXT),ordinal FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CommittedFanOutOrdinalStorage
+	for rows.Next() {
+		var row CommittedFanOutOrdinalStorage
+		if err := rows.Scan(&row.ID, &row.Ordinal); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+type StandingDeliveryDiagnostic struct{ EventID, Subscriber, Status string }
+
+func ReadStandingDeliveryDiagnosticsTx(ctx context.Context, tx *sql.Tx, postgres bool) ([]StandingDeliveryDiagnostic, error) {
+	query := `SELECT event_id, subscriber_id, COALESCE(status, '') FROM event_deliveries ORDER BY created_at`
+	if postgres {
+		query = `SELECT event_id::text, subscriber_id, COALESCE(status, '') FROM event_deliveries ORDER BY created_at`
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StandingDeliveryDiagnostic
+	for rows.Next() {
+		var row StandingDeliveryDiagnostic
+		if rows.Scan(&row.EventID, &row.Subscriber, &row.Status) == nil {
+			out = append(out, row)
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadGateEventFailureTx(ctx context.Context, tx *sql.Tx, eventID string) (string, error) {
+	var failure string
+	err := tx.QueryRowContext(ctx, `SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1`, eventID).Scan(&failure)
+	return failure, err
+}
+
+func ReadGateSubscriberFailureTx(ctx context.Context, tx *sql.Tx, eventID, subscriberID string) (string, error) {
+	var failure string
+	err := tx.QueryRowContext(ctx, `SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2`, eventID, subscriberID).Scan(&failure)
+	return failure, err
+}
+
+func ReadGateNodeFailureTx(ctx context.Context, tx *sql.Tx, eventID, nodeID string) (string, error) {
+	var failure string
+	err := tx.QueryRowContext(ctx, `SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node' AND subscriber_id=$2`, eventID, nodeID).Scan(&failure)
+	return failure, err
+}
+
+type WorkflowTimerNodeFailureStorage struct {
+	Status  string
+	Failure []byte
+}
+
+type ExactJoinNodeDeliveryStorage struct{ Status, Failure string }
+
+func ReadExactJoinNodeDeliveryStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, subscriberKey string) (ExactJoinNodeDeliveryStorage, error) {
+	query := `SELECT status, CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
+	if postgres {
+		query = `SELECT status, COALESCE(failure, '{}'::jsonb)::text FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
+	}
+	var out ExactJoinNodeDeliveryStorage
+	if err := tx.QueryRowContext(ctx, query, eventID, subscriberKey).Scan(&out.Status, &out.Failure); err != nil {
+		return ExactJoinNodeDeliveryStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadWorkflowTimerNodeFailureTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (WorkflowTimerNodeFailureStorage, error) {
+	query := `SELECT status, COALESCE(failure, '{}') FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
+	if postgres {
+		query = `SELECT status, COALESCE(failure, '{}'::jsonb) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
+	}
+	var out WorkflowTimerNodeFailureStorage
+	if err := tx.QueryRowContext(ctx, query, eventID, nodeID).Scan(&out.Status, &out.Failure); err != nil {
+		return WorkflowTimerNodeFailureStorage{}, err
+	}
+	return out, nil
+}
+
+type WorkflowTimerDeliveryTraceStorage struct {
+	Lines     []string
+	ScanError string
+}
+
+func ReadWorkflowTimerDeliveryTraceTx(ctx context.Context, tx *sql.Tx, postgres bool, runID string) (out WorkflowTimerDeliveryTraceStorage, err error) {
+	query := `SELECT e.event_name, COALESCE(d.subscriber_id, ''), COALESCE(d.status, '') FROM events e LEFT JOIN event_deliveries d ON d.event_id = e.event_id WHERE e.run_id = ? ORDER BY e.created_at`
+	if postgres {
+		query = `SELECT e.event_name, COALESCE(d.subscriber_id, ''), COALESCE(d.status, '') FROM events e LEFT JOIN event_deliveries d ON d.event_id = e.event_id WHERE e.run_id = $1::uuid ORDER BY e.created_at`
+	}
+	rows, err := tx.QueryContext(ctx, query, runID)
+	if err != nil {
+		return out, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = WorkflowTimerDeliveryTraceStorage{}
+		}
+	}()
+	for rows.Next() {
+		var eventName, subscriberID, status string
+		if err := rows.Scan(&eventName, &subscriberID, &status); err != nil {
+			out.ScanError = err.Error()
+			return out, nil
+		}
+		out.Lines = append(out.Lines, eventName+" subscriber="+subscriberID+" status="+status)
+	}
+	return out, rows.Err()
+}
+
+func ReadGateSubscriberFailureOrEmptyObjectTx(ctx context.Context, tx *sql.Tx, eventID, subscriberID string) (string, error) {
+	var failure string
+	err := tx.QueryRowContext(ctx, `SELECT CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2`, eventID, subscriberID).Scan(&failure)
+	return failure, err
+}
+
+func ReadGateDeadLetterFailureTx(ctx context.Context, tx *sql.Tx, eventID string) (string, error) {
+	var failure string
+	err := tx.QueryRowContext(ctx, `SELECT CAST(failure AS TEXT) FROM dead_letters WHERE original_event_id=$1`, eventID).Scan(&failure)
+	return failure, err
+}
+
 type PreparedTargetConflictStorage struct {
 	Count                                       int
 	SubscriberID, RouteIdentity, TargetEncoding string
+}
+
+type PostgresSystemNodeDeliveryStorage struct {
+	Status, Reason string
+	SettledAt      sql.NullTime
+}
+
+type PostgresSystemNodeOutcomeStorage struct{ Outcome, Reason string }
+
+type PostgresRunStatusSettlementStorage struct{ EventCount, ActiveDeliveries int }
+type PostgresRunStatusFailureDiagnosticStorage struct{ Status, Failure string }
+
+func ReadPostgresRunStatusSettlementStorageTx(ctx context.Context, tx *sql.Tx, runID string) (PostgresRunStatusSettlementStorage, error) {
+	var out PostgresRunStatusSettlementStorage
+	err := tx.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name <> 'platform.runtime_log'),
+			(SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress'))
+	`, runID).Scan(&out.EventCount, &out.ActiveDeliveries)
+	if err != nil {
+		return PostgresRunStatusSettlementStorage{}, err
+	}
+	return out, nil
+}
+
+func CountRunDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`, runID).Scan(&count)
+	return count, err
+}
+
+func CountExactRunEventDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND event_id=$2`, runID, eventID).Scan(&count)
+	return count, err
+}
+
+func CountRunDeliveryAttemptStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id=$1)`, runID).Scan(&count)
+	return count, err
+}
+
+func CountRunEventLinkedDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id IN (SELECT event_id FROM events WHERE run_id=$1)`, runID).Scan(&count)
+	return count, err
+}
+
+func CountRunNonterminalDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status NOT IN ('delivered','dead_letter')`, runID).Scan(&count)
+	return count, err
+}
+
+func CountPostgresRunStatusActiveDeliveriesTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM event_deliveries
+		WHERE run_id = $1::uuid
+		  AND status IN ('pending', 'in_progress')
+	`, runID).Scan(&count)
+	return count, err
+}
+
+func ReadPostgresRunStatusFailureDiagnosticsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (out []PostgresRunStatusFailureDiagnosticStorage, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT status, COALESCE(CAST(failure AS TEXT), '') FROM event_deliveries WHERE run_id=$1::uuid`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	for rows.Next() {
+		var row PostgresRunStatusFailureDiagnosticStorage
+		if err := rows.Scan(&row.Status, &row.Failure); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func ReadPostgresSystemNodeDeliveryStorageTx(ctx context.Context, tx *sql.Tx, eventID, nodeID string) (PostgresSystemNodeDeliveryStorage, error) {
+	var out PostgresSystemNodeDeliveryStorage
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), settled_at
+		FROM event_deliveries
+		WHERE event_id = $1::uuid
+		  AND subscriber_type = 'node'
+		  AND subscriber_id = $2
+	`, eventID, nodeID).Scan(&out.Status, &out.Reason, &out.SettledAt)
+	if err != nil {
+		return PostgresSystemNodeDeliveryStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadPostgresSystemNodeOutcomeStorageTx(ctx context.Context, tx *sql.Tx, eventID, nodeID string) (PostgresSystemNodeOutcomeStorage, error) {
+	var out PostgresSystemNodeOutcomeStorage
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(o.outcome, ''), COALESCE(o.reason_code, '')
+		FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
+		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
+		WHERE d.event_id = $1::uuid
+		  AND d.subscriber_type = 'node'
+		  AND d.subscriber_id = $2
+	`, eventID, nodeID).Scan(&out.Outcome, &out.Reason)
+	if err != nil {
+		return PostgresSystemNodeOutcomeStorage{}, err
+	}
+	return out, nil
+}
+
+type TemplateDeliveryDiagnosticStorage struct{ SubscriberType, SubscriberID, Status, Reason, Failure, Target string }
+
+type BusAncestorDeliveryDiagnostic struct{ Name, SubscriberID, Status, Target string }
+
+type BusRoutingDeliveryDiagnostic struct {
+	Name, FlowInstance, SubscriberID, Status, Target string
+	HasSubscriber                                    bool
+}
+
+func CountBusValidationDeadLetterNodeTx(ctx context.Context, tx *sql.Tx, node string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d
+	JOIN events e ON e.event_id = d.event_id
+	WHERE e.event_name = 'validate.requested' AND d.subscriber_type = 'node'
+	AND d.subscriber_id = $1 AND d.status = 'dead_letter'`, node).Scan(&count)
+	return count, err
+}
+
+func ReadBusRoutingDeliveryDiagnosticsTx(ctx context.Context, tx *sql.Tx, postgres bool) ([]BusRoutingDeliveryDiagnostic, error) {
+	query := `SELECT e.event_name, COALESCE(e.flow_instance, ''), d.subscriber_id,
+	COALESCE(d.status, ''), COALESCE(CAST(d.delivery_target_route AS TEXT), '')
+	FROM events e LEFT JOIN event_deliveries d ON d.event_id = e.event_id
+	ORDER BY e.created_at, e.event_id, d.subscriber_id`
+	if postgres {
+		query = `SELECT e.event_name, COALESCE(e.flow_instance, ''), d.subscriber_id,
+		COALESCE(d.status, ''), COALESCE(d.delivery_target_route::text, '')
+		FROM events e LEFT JOIN event_deliveries d ON d.event_id = e.event_id
+		ORDER BY e.created_at, e.event_id, d.subscriber_id`
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BusRoutingDeliveryDiagnostic
+	for rows.Next() {
+		var row BusRoutingDeliveryDiagnostic
+		var subscriber sql.NullString
+		if err := rows.Scan(&row.Name, &row.FlowInstance, &subscriber, &row.Status, &row.Target); err != nil {
+			return nil, err
+		}
+		row.SubscriberID, row.HasSubscriber = subscriber.String, subscriber.Valid
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadBusAncestorDeliveryDiagnosticsTx(ctx context.Context, tx *sql.Tx, postgres bool) ([]BusAncestorDeliveryDiagnostic, error) {
+	query := `SELECT e.event_name, d.subscriber_id, COALESCE(d.status, ''), COALESCE(CAST(d.delivery_target_route AS TEXT), '')
+	FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+	ORDER BY e.created_at, d.subscriber_id, CAST(d.delivery_target_route AS TEXT)`
+	if postgres {
+		query = `SELECT e.event_name, d.subscriber_id, COALESCE(d.status, ''), COALESCE(d.delivery_target_route::text, '')
+		FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+		ORDER BY e.created_at, d.subscriber_id, d.delivery_target_route::text`
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BusAncestorDeliveryDiagnostic
+	for rows.Next() {
+		var row BusAncestorDeliveryDiagnostic
+		if err := rows.Scan(&row.Name, &row.SubscriberID, &row.Status, &row.Target); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func CountConnectorRunNodeDeliveriesTx(ctx context.Context, tx *sql.Tx, run, node string) (int, error) {
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND subscriber_type='node' AND subscriber_id=$2`, run, node).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func ReadConnectorLatestNodeDeliveryDiagnosticTx(ctx context.Context, tx *sql.Tx, postgres bool, run, node string) (string, error) {
+	query := `SELECT COALESCE(status,'') || ':' || COALESCE(reason_code,'') || ':' || COALESCE(json_extract(failure,'$.detail.code'),'') FROM event_deliveries WHERE run_id=$1 AND subscriber_type='node' AND subscriber_id=$2 ORDER BY created_at DESC LIMIT 1`
+	if postgres {
+		query = `SELECT COALESCE(status,'') || ':' || COALESCE(reason_code,'') || ':' || COALESCE(failure->'detail'->>'code','') FROM event_deliveries WHERE run_id=$1::uuid AND subscriber_type='node' AND subscriber_id=$2 ORDER BY created_at DESC LIMIT 1`
+	}
+	var out string
+	if err := tx.QueryRowContext(ctx, query, run, node).Scan(&out); err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+func CountConnectorEntityDeadLettersTx(ctx context.Context, tx *sql.Tx, entity string) (int, error) {
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM dead_letters WHERE entity_id=$1`, entity).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func ReadConnectorLatestEntityDeadLetterDiagnosticTx(ctx context.Context, tx *sql.Tx, postgres bool, entity string) (string, error) {
+	query := `SELECT COALESCE(json_extract(failure,'$.class'),'') || ':' || COALESCE(json_extract(failure,'$.detail.code'),'') FROM dead_letters WHERE entity_id=$1 ORDER BY created_at DESC LIMIT 1`
+	if postgres {
+		query = `SELECT COALESCE(failure->>'class','') || ':' || COALESCE(failure->'detail'->>'code','') FROM dead_letters WHERE entity_id=$1::uuid ORDER BY created_at DESC LIMIT 1`
+	}
+	var out string
+	if err := tx.QueryRowContext(ctx, query, entity).Scan(&out); err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+func ReadTemplateEventDeliveryDiagnosticsTx(ctx context.Context, tx *sql.Tx, event string) (out []TemplateDeliveryDiagnosticStorage, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT subscriber_type,subscriber_id,status,COALESCE(reason_code,''),COALESCE(CAST(failure AS TEXT),''),COALESCE(CAST(delivery_target_route AS TEXT),'') FROM event_deliveries WHERE event_id=$1 ORDER BY subscriber_type,subscriber_id`, event)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	for rows.Next() {
+		var row TemplateDeliveryDiagnosticStorage
+		if err := rows.Scan(&row.SubscriberType, &row.SubscriberID, &row.Status, &row.Reason, &row.Failure, &row.Target); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func CountTemplateNodeDeliveryTx(ctx context.Context, tx *sql.Tx, event, node string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node' AND subscriber_id=$2`, event, node).Scan(&count)
+	return count, err
+}
+
+func CountExactRunNodeEventDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID, nodeID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries
+		WHERE run_id=$1 AND event_id=$2 AND subscriber_type='node' AND subscriber_id=$3`, runID, eventID, nodeID).Scan(&count)
+	return count, err
+}
+
+func CountCurrentEventDeliveryOutcomeStorageTx(ctx context.Context, tx *sql.Tx, eventID, subscriberType, subscriberID, outcome string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d
+		JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id AND a.claim_version=d.claim_version
+		WHERE a.closure_kind='settled' AND d.event_id=$1 AND d.subscriber_type=$2
+		AND d.subscriber_id=$3 AND a.outcome=$4`, eventID, subscriberType, subscriberID, outcome).Scan(&count)
+	return count, err
+}
+
+func ReadGateNodeDeliveryStatusTx(ctx context.Context, tx *sql.Tx, event, node string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT status FROM event_deliveries WHERE event_id = $1 AND subscriber_type = 'node' AND subscriber_id = $2`, event, node).Scan(&out)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+type A2EarlyRefusalStorage struct {
+	Status, Failure, Outcome string
+	SettledAttempts          int
+}
+
+type CanonicalAccumulatorClaimStorage struct {
+	DeliveryID, Status string
+	Attempts, Settled  int
+}
+
+type CanonicalAccumulatorRefusalStorage struct {
+	Status                  string
+	Attempts, Settled, Open int
+}
+
+type ReceiverAppearanceSettlementStorage struct {
+	Status   string
+	Outcomes int
+}
+
+func ReadCanonicalAccumulatorClaimStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (CanonicalAccumulatorClaimStorage, error) {
+	var out CanonicalAccumulatorClaimStorage
+	err := tx.QueryRowContext(ctx, `SELECT d.delivery_id, d.status,
+ (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.claim_token IS NOT NULL),
+ (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.closure_kind='settled' AND a.open_marker=FALSE)
+ FROM event_deliveries d WHERE d.event_id=$1 AND d.subscriber_type='node'`, eventID).Scan(&out.DeliveryID, &out.Status, &out.Attempts, &out.Settled)
+	return out, err
+}
+
+func ReadCanonicalAccumulatorRefusalStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (CanonicalAccumulatorRefusalStorage, error) {
+	var out CanonicalAccumulatorRefusalStorage
+	err := tx.QueryRowContext(ctx, `SELECT d.status,
+ (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.claim_token IS NOT NULL),
+ (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.closure_kind='settled' AND a.open_marker=FALSE),
+ (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.open_marker=TRUE)
+ FROM event_deliveries d WHERE d.event_id=$1 AND d.subscriber_type='node'`, eventID).Scan(&out.Status, &out.Attempts, &out.Settled, &out.Open)
+	return out, err
+}
+
+func ReadReceiverAppearanceSettlementStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (ReceiverAppearanceSettlementStorage, error) {
+	var out ReceiverAppearanceSettlementStorage
+	err := tx.QueryRowContext(ctx, `SELECT d.status, (SELECT count(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o WHERE o.delivery_id=d.delivery_id) FROM event_deliveries d WHERE d.event_id=$1`, eventID).Scan(&out.Status, &out.Outcomes)
+	return out, err
+}
+
+func ReadA2EarlyRefusalTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (A2EarlyRefusalStorage, error) {
+	query := `SELECT d.status, CAST(COALESCE(d.failure, '{}') AS TEXT), COUNT(a.delivery_id), COALESCE(MAX(a.outcome), '')
+		FROM event_deliveries d LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id AND a.closure_kind='settled'
+		WHERE d.event_id=? AND d.subscriber_type='node' AND d.subscriber_id=? GROUP BY d.status, d.failure`
+	if postgres {
+		query = `SELECT d.status, COALESCE(d.failure, '{}'::jsonb)::text, COUNT(a.delivery_id), COALESCE(MAX(a.outcome), '')
+			FROM event_deliveries d LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id AND a.closure_kind='settled'
+			WHERE d.event_id=$1::uuid AND d.subscriber_type='node' AND d.subscriber_id=$2 GROUP BY d.status, d.failure`
+	}
+	var out A2EarlyRefusalStorage
+	if err := tx.QueryRowContext(ctx, query, eventID, nodeID).Scan(&out.Status, &out.Failure, &out.SettledAttempts, &out.Outcome); err != nil {
+		return A2EarlyRefusalStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadGateNodeDeliveryIdentityTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (string, error) {
+	query := `SELECT delivery_id FROM event_deliveries WHERE event_id=? AND subscriber_type='node' AND subscriber_id=?`
+	if postgres {
+		query = `SELECT delivery_id FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_type='node' AND subscriber_id=$2`
+	}
+	var id string
+	if err := tx.QueryRowContext(ctx, query, eventID, nodeID).Scan(&id); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func CountGateNodeSettledAttemptsTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, nodeID string) (int, error) {
+	query := `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON a.delivery_id=d.delivery_id
+					WHERE d.event_id=? AND d.subscriber_type='node' AND d.subscriber_id=? AND a.closure_kind='settled'`
+	if postgres {
+		query = `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON a.delivery_id=d.delivery_id
+						WHERE d.event_id=$1::uuid AND d.subscriber_type='node' AND d.subscriber_id=$2 AND a.closure_kind='settled'`
+	}
+	var count int
+	err := tx.QueryRowContext(ctx, query, eventID, nodeID).Scan(&count)
+	return count, err
+}
+
+func CountGateEventNodeDeliveriesTx(ctx context.Context, tx *sql.Tx, eventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node'`, eventID).Scan(&count)
+	return count, err
+}
+
+func ReadGateEventNodeDeliveryIdentityTx(ctx context.Context, tx *sql.Tx, eventID string) (string, error) {
+	var id string
+	if err := tx.QueryRowContext(ctx, `SELECT delivery_id FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node'`, eventID).Scan(&id); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func CountGateEventDeliveredRowsTx(ctx context.Context, tx *sql.Tx, eventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND status='delivered'`, eventID).Scan(&count)
+	return count, err
+}
+
+func CountGateEventSubscriberDeliveriesTx(ctx context.Context, tx *sql.Tx, event, subscriber string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1 AND subscriber_id = $2`, event, subscriber).Scan(&count)
+	return count, err
+}
+
+func ReadGateLatestDeadLetterFailureTx(ctx context.Context, tx *sql.Tx, postgres bool, event string) (string, error) {
+	query := `SELECT COALESCE(CAST(failure AS TEXT), '') FROM dead_letters WHERE original_event_id = $1 ORDER BY created_at DESC LIMIT 1`
+	if postgres {
+		query = `SELECT COALESCE(failure::text, '') FROM dead_letters WHERE original_event_id = $1::uuid ORDER BY created_at DESC LIMIT 1`
+	}
+	var out string
+	err := tx.QueryRowContext(ctx, query, event).Scan(&out)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+func CountTemplateNodeDeliveryChronologyTx(ctx context.Context, tx *sql.Tx, event, node string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node' AND subscriber_id=$2 AND settled_at IS NOT NULL AND created_at<settled_at`, event, node).Scan(&count)
+	return count, err
+}
+
+func CountTemplateNodeDeliveredAttemptTx(ctx context.Context, tx *sql.Tx, event, node string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN event_delivery_attempts o ON o.delivery_id=d.delivery_id AND o.claim_version=d.claim_version WHERE o.closure_kind='settled' AND d.event_id=$1 AND d.subscriber_type='node' AND d.subscriber_id=$2 AND d.status='delivered' AND d.settled_at IS NOT NULL AND o.outcome='delivered'`, event, node).Scan(&count)
+	return count, err
+}
+
+func CountTemplateAgentDeliveryTx(ctx context.Context, tx *sql.Tx, event, agent string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='agent' AND subscriber_id=$2`, event, agent).Scan(&count)
+	return count, err
+}
+
+func CountTemplatePlaceholderDeliveryTx(ctx context.Context, tx *sql.Tx, event string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_id='ceo-{product_id}'`, event).Scan(&count)
+	return count, err
+}
+
+func CountTemplateEventDeliveriesTx(ctx context.Context, tx *sql.Tx, event string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1`, event).Scan(&count)
+	return count, err
+}
+
+func CountTemplateCarrierDeliveriesTx(ctx context.Context, tx *sql.Tx, event string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_id IN ('workflow-runtime','raw-source-listener')`, event).Scan(&count)
+	return count, err
+}
+
+func CountPostgresTemplateNodeTargetTx(ctx context.Context, tx *sql.Tx, event, target, node string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_type='node' AND subscriber_id=$3 AND delivery_target_route @> $2::jsonb`, event, target, node).Scan(&count)
+	return count, err
+}
+
+func CountPostgresTemplateDeliveredNodeTargetTx(ctx context.Context, tx *sql.Tx, event, node, target string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_type='node' AND subscriber_id=$2 AND status='delivered' AND delivery_target_route @> $3::jsonb`, event, node, target).Scan(&count)
+	return count, err
+}
+
+func CountPostgresArtifactCallbackSettledTargetTx(ctx context.Context, tx *sql.Tx, event, target, node string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $3 AND status = 'delivered' AND settled_at IS NOT NULL AND delivery_target_route @> $2::jsonb`, event, target, node).Scan(&count)
+	return count, err
+}
+
+func ReadPostgresArtifactCallbackTargetDiagnosticsTx(ctx context.Context, tx *sql.Tx, event string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(jsonb_build_object(
+		'subscriber_type', subscriber_type, 'subscriber_id', subscriber_id,
+		'status', status, 'reason_code', reason_code, 'delivery_target_route', delivery_target_route
+	))::text, '[]') FROM event_deliveries WHERE event_id = $1::uuid`, event).Scan(&out)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+func ReadPostgresArtifactCallbackDeliveriesTx(ctx context.Context, tx *sql.Tx, event string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(to_jsonb(d))::text, '[]') FROM event_deliveries d WHERE event_id = $1::uuid`, event).Scan(&out)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// Receipt storage remains with its owner. The selected coordinator supplies its
+// detached aggregate within the same read transaction as the delivery snapshot.
+func ReadPostgresArtifactCallbackSettlementDiagnosticsTx(ctx context.Context, tx *sql.Tx, event, receipts string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT jsonb_build_object(
+		'deliveries', COALESCE(jsonb_agg(jsonb_build_object(
+			'status', d.status, 'target', d.delivery_target_route, 'claim_version', d.claim_version,
+			'outcomes', (SELECT COALESCE(jsonb_agg(to_jsonb(o)), '[]'::jsonb) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o WHERE o.delivery_id = d.delivery_id)
+		)), '[]'::jsonb), 'receipts', $2::jsonb
+	)::text FROM event_deliveries d WHERE d.event_id = $1::uuid`, event, receipts).Scan(&out)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+type FanInDiagnosticDeliveryStorage struct {
+	EventID, SubscriberID, Status, Reason, Failure string
+}
+
+type FanOutSemanticOutcomeStorage struct {
+	Ordinal          int
+	Kind, EventID    string
+	EventIDPresent   bool
+	Payload, Failure []byte
+}
+
+type FanOutBlockedSourceStorage struct {
+	Outcomes, Leased int
+	Failure          string
+}
+
+type FanOutSourceProgressStorage struct {
+	Cursor  int
+	Status  string
+	Present bool
+}
+
+type FanOutTriggerDeliveryStorage struct {
+	Status  string
+	Failure []byte
+}
+
+func CountNestedContinuationHandoffsTx(ctx context.Context, tx *sql.Tx, event string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND continuation_handoff_at IS NOT NULL`, event).Scan(&out)
+	if err != nil {
+		return 0, err
+	}
+	return out, nil
+}
+
+func ReadRepeatedFanOutSnapshotTx(ctx context.Context, tx *sql.Tx, run string) ([7]int64, error) {
+	var out [7]int64
+	err := tx.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM events WHERE run_id=$1),
+		(SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1),
+		(SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1),
+		(SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1),
+		(SELECT COALESCE(SUM(revision),0) FROM entity_state WHERE run_id=$1),
+		(SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1),
+		(SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id=$1))`, run).Scan(&out[0], &out[1], &out[2], &out[3], &out[4], &out[5], &out[6])
+	if err != nil {
+		return [7]int64{}, err
+	}
+	return out, nil
+}
+
+func ReadFanOutSourceProgressStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (FanOutSourceProgressStorage, error) {
+	var out FanOutSourceProgressStorage
+	err := tx.QueryRowContext(ctx, `SELECT i.cursor,i.status FROM fan_out_intents i JOIN event_deliveries d ON d.delivery_id=i.triggering_delivery_id WHERE i.run_id=$1 AND d.event_id=$2`, runID, eventID).Scan(&out.Cursor, &out.Status)
+	if err == sql.ErrNoRows {
+		return FanOutSourceProgressStorage{}, nil
+	}
+	if err != nil {
+		return FanOutSourceProgressStorage{}, err
+	}
+	out.Present = true
+	return out, nil
+}
+
+func ReadFanOutSourceOutcomesStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (out []FanOutSemanticOutcomeStorage, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT o.ordinal,o.outcome_kind,e.event_id,o.failure FROM fan_out_outcomes o JOIN event_deliveries d ON d.delivery_id=o.triggering_delivery_id LEFT JOIN events e ON e.event_id=o.event_id WHERE o.run_id=$1 AND d.event_id=$2 ORDER BY o.ordinal`, runID, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	for rows.Next() {
+		var row FanOutSemanticOutcomeStorage
+		var id sql.NullString
+		if err := rows.Scan(&row.Ordinal, &row.Kind, &id, &row.Failure); err != nil {
+			return nil, err
+		}
+		row.EventID, row.EventIDPresent = id.String, id.Valid
+		row.Failure = append([]byte(nil), row.Failure...)
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func CountFanOutSourceOutcomesStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_outcomes o JOIN event_deliveries d ON d.delivery_id=o.triggering_delivery_id WHERE o.run_id=$1 AND d.event_id=$2`, runID, eventID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func ReadFanOutBlockedSourceStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (FanOutBlockedSourceStorage, error) {
+	var out FanOutBlockedSourceStorage
+	err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM fan_out_outcomes o WHERE o.run_id=i.run_id AND o.triggering_delivery_id=i.triggering_delivery_id),CASE WHEN i.claim_owner IS NULL THEN 0 ELSE 1 END,i.blocked_reason FROM fan_out_intents i JOIN event_deliveries d ON d.delivery_id=i.triggering_delivery_id WHERE i.run_id=$1 AND d.event_id=$2`, runID, eventID).Scan(&out.Outcomes, &out.Leased, &out.Failure)
+	if err != nil {
+		return FanOutBlockedSourceStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadFanOutTriggerDeliveryDiagnosticStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (FanOutTriggerDeliveryStorage, error) {
+	var out FanOutTriggerDeliveryStorage
+	err := tx.QueryRowContext(ctx, `SELECT status,failure FROM event_deliveries WHERE run_id=$1 AND event_id=$2`, runID, eventID).Scan(&out.Status, &out.Failure)
+	if err != nil {
+		return FanOutTriggerDeliveryStorage{}, err
+	}
+	out.Failure = append([]byte(nil), out.Failure...)
+	return out, nil
+}
+
+func CountFanOutDeliveredTriggerStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND event_id=$2 AND status='delivered'`, runID, eventID).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func ReadFanInDiagnosticDeliveriesTx(ctx context.Context, tx *sql.Tx) (out []FanInDiagnosticDeliveryStorage, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(event_id AS TEXT), subscriber_id, status, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), '') FROM event_deliveries ORDER BY created_at, delivery_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	for rows.Next() {
+		var row FanInDiagnosticDeliveryStorage
+		if err := rows.Scan(&row.EventID, &row.SubscriberID, &row.Status, &row.Reason, &row.Failure); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func ReadPublicationDeliveryTargetEncodingsTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) ([]string, error) {
+	query := `SELECT COALESCE(delivery_target_route,'{}') FROM event_deliveries WHERE event_id=$1 ORDER BY subscriber_type,subscriber_id,delivery_id`
+	if postgres {
+		query = `SELECT COALESCE(delivery_target_route::text,'{}') FROM event_deliveries WHERE event_id=$1::uuid ORDER BY subscriber_type,subscriber_id,delivery_id`
+	}
+	rows, err := tx.QueryContext(ctx, query, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		out = append(out, raw)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Physical cardinality witnesses deliberately include every delivery status.
+// They grant no eligibility or claim authority and do not decode route data.
+func CountSelectedForkDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`, runID).Scan(&count)
+	return count, err
+}
+
+func CountSelectedForkDescendantDeliveryStorageTx(ctx context.Context, tx *sql.Tx, sourceRunID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id IN (SELECT run_id FROM runs WHERE forked_from_run_id=$1)`, sourceRunID).Scan(&count)
+	return count, err
 }
 
 func ReadPreparedTargetConflictTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, routeIdentity string) (PreparedTargetConflictStorage, error) {
@@ -57,7 +1182,8 @@ func ReadExactAgentDeliveryStatusTx(ctx context.Context, tx *sql.Tx, postgres bo
 
 func ReadStopPendingDeliveryCountTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
 	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','processing','retrying')`, runID).Scan(&count); err != nil {
+	// The historical name denotes unfinished work, including claimed and retrying rows.
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','in_progress','failed')`, runID).Scan(&count); err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -638,6 +1764,29 @@ func ReadSourceDeliveryStorageTables(ctx context.Context, q queryer, runID strin
 	return out, nil
 }
 
+func ReadMailboxCompletionDeliveryEffectsTx(ctx context.Context, tx *sql.Tx, runID string) ([]string, error) {
+	const query = `SELECT d.* FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 ORDER BY d.delivery_id`
+	table, err := readSourceDeliveryStorageTable(ctx, tx, query, runID)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, values := range table.Rows {
+		raw, err := json.Marshal(values)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, query+":"+string(raw))
+	}
+	return out, nil
+}
+
+func CountRunDeadLetterDeliveriesTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, runID).Scan(&count)
+	return count, err
+}
+
 func readSourceDeliveryStorageTable(ctx context.Context, q queryer, query, runID string) (SourceDeliveryStorageTable, error) {
 	rows, err := q.QueryContext(ctx, query, runID)
 	if err != nil {
@@ -659,7 +1808,7 @@ func readSourceDeliveryStorageTable(ctx context.Context, q queryer, query, runID
 		}
 		for i, value := range values {
 			if raw, ok := value.([]byte); ok {
-				values[i] = append([]byte(nil), raw...)
+				values[i] = slices.Clone(raw)
 			}
 		}
 		out.Rows = append(out.Rows, values)
@@ -1707,7 +2856,9 @@ func observeH1DeliveryAccountingForTest(ctx context.Context, tx *sql.Tx, runID s
 }
 
 func observeH2DeliveryAccountingForTest(ctx context.Context, tx *sql.Tx, runID string, out *H2DeliveryAccountingEvidence) error {
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, runID).Scan(&out.DeadLetters); err != nil {
+	var err error
+	out.DeadLetters, err = CountRunDeadLetterDeliveriesTx(ctx, tx, runID)
+	if err != nil {
 		return err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 AND (a.outcome='retry_scheduled' OR a.outcome='dead_letter')`, runID).Scan(&out.Retried); err != nil {
@@ -1831,3 +2982,559 @@ func observeH2NodeDeliveriesForTest(ctx context.Context, tx *sql.Tx, runID strin
 	}
 	return out, nil
 }
+
+func CountStageCompletionNodeDeliveriesTx(ctx context.Context, tx *sql.Tx, runID, eventName, nodeID, rootNodeID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id
+WHERE e.run_id=$1 AND e.event_name=$2 AND d.subscriber_type='node' AND d.subscriber_id IN ($3,$4) AND d.status='delivered'`, runID, eventName, nodeID, rootNodeID).Scan(&count)
+	return count, err
+}
+
+type FanOutDrainDeliveryStorage struct {
+	DeliveryID, EventID, EventName, SubscriberType, SubscriberID            WorkloadNullableText
+	Status, ClaimVersion, RetryCount, NextEligibleAt, ContinuationHandoffAt WorkloadNullableText
+	UpdatedAt, AttemptClosure, LeaseExpiresAt, AttemptOutcome               WorkloadNullableText
+}
+
+func ReadFanOutDrainDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]FanOutDrainDeliveryStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(d.delivery_id AS TEXT),
+CAST(d.event_id AS TEXT), e.event_name, d.subscriber_type, d.subscriber_id,
+d.status, CAST(d.claim_version AS TEXT), CAST(d.retry_count AS TEXT),
+CAST(d.next_eligible_at AS TEXT), CAST(d.continuation_handoff_at AS TEXT),
+CAST(d.updated_at AS TEXT), a.closure_kind, CAST(a.lease_expires_at AS TEXT),
+a.outcome FROM event_deliveries d JOIN events e ON e.event_id=d.event_id
+LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id
+AND a.claim_version=d.current_attempt_version
+WHERE d.run_id=$1 AND d.status NOT IN ('delivered','dead_letter')
+ORDER BY d.created_at,d.delivery_id LIMIT 33`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FanOutDrainDeliveryStorage
+	for rows.Next() {
+		var values [14]sql.NullString
+		var targets [14]any
+		for i := range values {
+			targets[i] = &values[i]
+		}
+		if err := rows.Scan(targets[:]...); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		var detached [14]WorkloadNullableText
+		for i, value := range values {
+			detached[i] = WorkloadNullableText{String: value.String, Valid: value.Valid}
+		}
+		out = append(out, FanOutDrainDeliveryStorage{
+			DeliveryID: detached[0], EventID: detached[1], EventName: detached[2], SubscriberType: detached[3], SubscriberID: detached[4],
+			Status: detached[5], ClaimVersion: detached[6], RetryCount: detached[7], NextEligibleAt: detached[8], ContinuationHandoffAt: detached[9],
+			UpdatedAt: detached[10], AttemptClosure: detached[11], LeaseExpiresAt: detached[12], AttemptOutcome: detached[13],
+		})
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+type PostgresAgentOneDeliverySessionStorage struct {
+	Status          string
+	ActiveSessionID string
+}
+
+func ReadPostgresAgentOneDeliverySessionStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (PostgresAgentOneDeliverySessionStorage, error) {
+	var out PostgresAgentOneDeliverySessionStorage
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(d.status, ''), COALESCE(a.active_session_id::text, '')
+FROM event_deliveries d JOIN event_delivery_attempts a
+ON a.delivery_id = d.delivery_id AND a.claim_version = d.current_attempt_version AND a.open_marker = TRUE
+WHERE d.event_id = $1::uuid AND d.subscriber_type = 'agent' AND d.subscriber_id = 'agent-1'`, eventID).Scan(&out.Status, &out.ActiveSessionID)
+	if err != nil {
+		return PostgresAgentOneDeliverySessionStorage{}, err
+	}
+	return out, nil
+}
+
+type DeploymentDeliveryStorage struct {
+	DeliveryID, EventID, SubscriberType, SubscriberID, Status string
+	RetryCount, ClaimVersion                                  int64
+	NextEligible, Handoff, Reason, Failure                    WorkloadNullableText
+}
+type DeploymentAttemptStorage struct {
+	DeliveryID, Closure      string
+	ClaimVersion             int64
+	Outcome, Reason, Failure WorkloadNullableText
+}
+type DeploymentDeliveryStatusStorage struct {
+	Status string
+	Count  int
+}
+
+func CountDeploymentPendingDeliveriesStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','in_progress')`, runID).Scan(&out)
+	return out, err
+}
+
+func CountDeploymentFailedDeliveriesStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('failed','dead_letter')`, runID).Scan(&out)
+	return out, err
+}
+
+func CountDeploymentStampedHandoffsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND continuation_handoff_at IS NOT NULL`, runID).Scan(&out)
+	return out, err
+}
+
+func CountRunDeliveredRowsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='delivered'`, runID).Scan(&out)
+	return out, err
+}
+
+type DeploymentRunEventDeliveryCutStorage struct {
+	Status  string
+	Handoff bool
+}
+
+func ReadDeploymentRunEventDeliveryCutStorageTx(ctx context.Context, tx *sql.Tx, run, event string) (DeploymentRunEventDeliveryCutStorage, error) {
+	var out DeploymentRunEventDeliveryCutStorage
+	err := tx.QueryRowContext(ctx, `SELECT status,continuation_handoff_at IS NOT NULL FROM event_deliveries WHERE run_id=$1 AND event_id=$2`, run, event).Scan(&out.Status, &out.Handoff)
+	return out, err
+}
+
+func CountDeploymentRunDeliveryAttemptsStorageTx(ctx context.Context, tx *sql.Tx, run string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1`, run).Scan(&out)
+	return out, err
+}
+
+type SelectedDeploymentClaimStorage struct {
+	Status, ExecutionID string
+	Version             int64
+}
+
+func ReadSelectedDeploymentClaimStorageTx(ctx context.Context, tx *sql.Tx, id, run string) (SelectedDeploymentClaimStorage, error) {
+	var out SelectedDeploymentClaimStorage
+	err := tx.QueryRowContext(ctx, `SELECT status,current_attempt_version,selected_execution_id FROM event_deliveries WHERE delivery_id=$1 AND run_id=$2`, id, run).Scan(&out.Status, &out.Version, &out.ExecutionID)
+	return out, err
+}
+
+type SelectedDeliveryExecutionStorage struct {
+	ID         string
+	Generation int64
+}
+
+func ReadSelectedDeliveryExecutionStorageTx(ctx context.Context, tx *sql.Tx, id string) (SelectedDeliveryExecutionStorage, error) {
+	var out SelectedDeliveryExecutionStorage
+	err := tx.QueryRowContext(ctx, `SELECT CAST(selected_execution_id AS TEXT),selected_execution_generation FROM event_deliveries WHERE delivery_id=$1`, id).Scan(&out.ID, &out.Generation)
+	return out, err
+}
+
+func CountDeliveredClaimVersionStorageTx(ctx context.Context, tx *sql.Tx, id string, version int64) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1 AND claim_version=$2 AND outcome='delivered'`, id, version).Scan(&out)
+	return out, err
+}
+
+func CountDeliveredSuccessorClaimVersionsStorageTx(ctx context.Context, tx *sql.Tx, id string, version int64) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1 AND claim_version>$2 AND outcome='delivered'`, id, version).Scan(&out)
+	return out, err
+}
+
+func CountPinnedPortfolioSettledDeliveriesStorageTx(ctx context.Context, tx *sql.Tx, run string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name IN ('portfolio/account.registered','portfolio/account.notify.requested') AND d.status='delivered' AND d.continuation_handoff_at IS NOT NULL`, run).Scan(&out)
+	return out, err
+}
+
+func CountRootReadyDeliveredStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='root.ready' AND d.status='delivered'`, runID).Scan(&out)
+	return out, err
+}
+
+func CountRootReadyStampedHandoffsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var out int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='root.ready' AND d.continuation_handoff_at IS NOT NULL`, runID).Scan(&out)
+	return out, err
+}
+
+func ReadDeploymentDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]DeploymentDeliveryStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(delivery_id AS TEXT),CAST(event_id AS TEXT),subscriber_type,subscriber_id,status,retry_count,claim_version,CAST(next_eligible_at AS TEXT),CAST(continuation_handoff_at AS TEXT),CAST(reason_code AS TEXT),CAST(failure AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY created_at,delivery_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeploymentDeliveryStorage
+	for rows.Next() {
+		var row DeploymentDeliveryStorage
+		var nextEligible, handoff, reason, failure sql.NullString
+		if err := rows.Scan(&row.DeliveryID, &row.EventID, &row.SubscriberType, &row.SubscriberID, &row.Status, &row.RetryCount, &row.ClaimVersion, &nextEligible, &handoff, &reason, &failure); err != nil {
+			return nil, err
+		}
+		row.NextEligible, row.Handoff, row.Reason, row.Failure = WorkloadNullableText(nextEligible), WorkloadNullableText(handoff), WorkloadNullableText(reason), WorkloadNullableText(failure)
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadDeploymentAttemptStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]DeploymentAttemptStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(a.delivery_id AS TEXT),a.claim_version,a.closure_kind,CAST(a.outcome AS TEXT),CAST(a.reason_code AS TEXT),CAST(a.failure AS TEXT) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 ORDER BY a.delivery_id,a.claim_version`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeploymentAttemptStorage
+	for rows.Next() {
+		var row DeploymentAttemptStorage
+		var outcome, reason, failure sql.NullString
+		if err := rows.Scan(&row.DeliveryID, &row.ClaimVersion, &row.Closure, &outcome, &reason, &failure); err != nil {
+			return nil, err
+		}
+		row.Outcome, row.Reason, row.Failure = WorkloadNullableText(outcome), WorkloadNullableText(reason), WorkloadNullableText(failure)
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadDeploymentDeliveryStatusStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]DeploymentDeliveryStatusStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT status,COUNT(*) FROM event_deliveries WHERE run_id=$1 GROUP BY status ORDER BY status`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeploymentDeliveryStatusStorage
+	for rows.Next() {
+		var row DeploymentDeliveryStatusStorage
+		if err := rows.Scan(&row.Status, &row.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+type ClosedReceiverReadinessStorage struct{ Actors, Events, Deliveries int }
+
+func CountPortfolioDeliveredDeploymentRowsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='portfolio/account.registered' AND d.status='delivered'`, runID).Scan(&count)
+	return count, err
+}
+
+func CountPortfolioAllDeploymentRowsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='portfolio/account.registered'`, runID).Scan(&count)
+	return count, err
+}
+
+func ReadClosedReceiverReadinessStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, runID, bridgeNodeID string) (ClosedReceiverReadinessStorage, error) {
+	query := `
+		SELECT
+			(SELECT COUNT(DISTINCT o.agent_id)
+			 FROM runtime_external_effect_operations o
+			 JOIN runtime_external_effect_attempts a ON a.operation_id = o.operation_id
+			 WHERE o.agent_id IN ('upstream-agent','downstream-agent') AND a.state = 'settled'),
+			(SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name IN ('task.completed','task.finalized')),
+			(SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+			 WHERE e.run_id = ? AND d.status = 'delivered'
+			   AND ((d.subscriber_type = 'agent' AND d.subscriber_id IN ('upstream-agent','downstream-agent'))
+			     OR (d.subscriber_type = 'node' AND d.subscriber_id = ?)))
+	`
+	args := []any{runID, runID, bridgeNodeID}
+	if postgres {
+		query = `
+			SELECT
+				(SELECT COUNT(DISTINCT o.agent_id)
+				 FROM runtime_external_effect_operations o
+				 JOIN runtime_external_effect_attempts a ON a.operation_id = o.operation_id
+				 WHERE o.agent_id IN ('upstream-agent','downstream-agent') AND a.state = 'settled'),
+				(SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name IN ('task.completed','task.finalized')),
+				(SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
+				 WHERE e.run_id = $1::uuid AND d.status = 'delivered'
+				   AND ((d.subscriber_type = 'agent' AND d.subscriber_id IN ('upstream-agent','downstream-agent'))
+				     OR (d.subscriber_type = 'node' AND d.subscriber_id = $2)))
+		`
+		args = []any{runID, bridgeNodeID}
+	}
+	var out ClosedReceiverReadinessStorage
+	err := tx.QueryRowContext(ctx, query, args...).Scan(&out.Actors, &out.Events, &out.Deliveries)
+	return out, err
+}
+
+type ClosedReceiverDeliveryStorage struct {
+	EventName, FlowInstance, EntityID, TargetRoute        string
+	SubscriberType, SubscriberID, Status, Reason, Failure WorkloadNullableText
+}
+
+func ReadClosedReceiverDeliveryStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, runID string) ([]ClosedReceiverDeliveryStorage, error) {
+	query := `
+		SELECT e.event_name, COALESCE(e.flow_instance, ''), COALESCE(CAST(e.entity_id AS TEXT), ''),
+		       CAST(e.target_route AS TEXT), d.subscriber_type, d.subscriber_id, d.status,
+		       COALESCE(d.reason_code, ''), COALESCE(CAST(d.failure AS TEXT), '')
+		FROM events e
+		LEFT JOIN event_deliveries d ON d.event_id = e.event_id
+		WHERE e.run_id = ?
+		ORDER BY e.created_at, d.subscriber_type, d.subscriber_id`
+	if postgres {
+		query = strings.Replace(query, "e.run_id = ?", "e.run_id = $1::uuid", 1)
+	}
+	rows, err := tx.QueryContext(ctx, query, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ClosedReceiverDeliveryStorage
+	for rows.Next() {
+		var row ClosedReceiverDeliveryStorage
+		var subscriberType, subscriberID, status, reason, failure sql.NullString
+		if err := rows.Scan(&row.EventName, &row.FlowInstance, &row.EntityID, &row.TargetRoute, &subscriberType, &subscriberID, &status, &reason, &failure); err != nil {
+			return nil, err
+		}
+		row.SubscriberType, row.SubscriberID, row.Status = WorkloadNullableText(subscriberType), WorkloadNullableText(subscriberID), WorkloadNullableText(status)
+		row.Reason, row.Failure = WorkloadNullableText(reason), WorkloadNullableText(failure)
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+type ClosedReceiverAgentRouteStorage struct{ AgentID, Owner, Source, Presence, Scope, InstanceID, InstancePath string }
+
+func ReadClosedReceiverAgentRouteStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, runID string) ([]ClosedReceiverAgentRouteStorage, error) {
+	query := `
+		SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+		       d.agent_route_presence, d.agent_flow_scope_key,
+		       d.agent_flow_instance_id, d.agent_flow_instance_path
+		FROM event_deliveries d
+		JOIN events e ON e.event_id = d.event_id
+		WHERE e.run_id = ? AND d.subscriber_type = 'agent'
+		ORDER BY d.subscriber_id`
+	if postgres {
+		query = `
+			SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
+			       d.agent_route_presence, d.agent_flow_scope_key,
+			       d.agent_flow_instance_id, d.agent_flow_instance_path
+			FROM event_deliveries d
+			JOIN events e ON e.event_id = d.event_id
+			WHERE e.run_id = $1::uuid AND d.subscriber_type = 'agent'
+			ORDER BY d.subscriber_id`
+	}
+	rows, err := tx.QueryContext(ctx, query, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ClosedReceiverAgentRouteStorage
+	for rows.Next() {
+		var row ClosedReceiverAgentRouteStorage
+		if err := rows.Scan(&row.AgentID, &row.Owner, &row.Source, &row.Presence, &row.Scope, &row.InstanceID, &row.InstancePath); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Fixed channel budget failure evidence; no executable-delivery interpretation.
+func scanChannelBudgetDiagnosticRows(rows *sql.Rows) ([]map[string]string, error) {
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	var result []map[string]string
+	for rows.Next() {
+		values, targets := make([]sql.NullString, len(columns)), make([]any, len(columns))
+		for index := range values {
+			targets[index] = &values[index]
+		}
+		if err := rows.Scan(targets...); err != nil {
+			return nil, err
+		}
+		row := map[string]string{}
+		for index, column := range columns {
+			if values[index].Valid {
+				row[column] = values[index].String
+			}
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
+}
+
+type LoopReceiverSettlementStorage struct {
+	Claim, OutcomeClaim           int
+	Outcome, Context, Disposition string
+}
+
+func ReadLoopReceiverSettlementStorageTx(ctx context.Context, tx *sql.Tx, runID, deliveryID string) (LoopReceiverSettlementStorage, error) {
+	var out LoopReceiverSettlementStorage
+	err := tx.QueryRowContext(ctx, `SELECT d.claim_version,o.claim_version,o.outcome,s.selection_context,s.disposition FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id JOIN event_delivery_handler_rule_selections s ON s.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.delivery_id=$2`, runID, deliveryID).Scan(&out.Claim, &out.OutcomeClaim, &out.Outcome, &out.Context, &out.Disposition)
+	return out, err
+}
+
+func CountReceiverFirstClaimAgentDeliveriesStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.subscriber_type='agent' AND d.status='delivered' AND d.claim_version=1 AND o.claim_version=1 AND o.outcome='delivered'`, runID).Scan(&count)
+	return count, err
+}
+
+func ReadChannelBudgetDeliveriesDiagnosticsStorageTx(ctx context.Context, tx *sql.Tx) ([]map[string]string, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT subscriber_type,subscriber_id,status,reason_code,retry_count FROM event_deliveries ORDER BY created_at DESC LIMIT 20")
+	if err != nil {
+		return nil, err
+	}
+	return scanChannelBudgetDiagnosticRows(rows)
+}
+
+type ServedDeliveryStatusReasonStorage struct{ Status, Reason string }
+
+func ReadServedDeliveryStatusReasonStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, recipientType, recipientID string) (ServedDeliveryStatusReasonStorage, error) {
+	query := `SELECT status, COALESCE(reason_code, '') FROM event_deliveries
+		WHERE event_id = ? AND subscriber_type = ? AND subscriber_id = ?`
+	if postgres {
+		query = `SELECT status, COALESCE(reason_code, '') FROM event_deliveries
+			WHERE event_id = $1::uuid AND subscriber_type = $2 AND subscriber_id = $3`
+	}
+	var out ServedDeliveryStatusReasonStorage
+	err := tx.QueryRowContext(ctx, query, eventID, recipientType, recipientID).Scan(&out.Status, &out.Reason)
+	return out, err
+}
+
+func CountUnsettledStandingDeliveriesStorageTx(ctx context.Context, tx *sql.Tx) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE status IN ('pending', 'failed', 'in_progress')`).Scan(&count)
+	return count, err
+}
+
+type SelectedNodeDeliveryFailureStorage struct {
+	Status, Reason string
+	Failure        []byte
+}
+
+func ReadSelectedNodeDeliveryFailureStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (SelectedNodeDeliveryFailureStorage, error) {
+	var out SelectedNodeDeliveryFailureStorage
+	err := tx.QueryRowContext(ctx, `SELECT status, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), '')
+		FROM event_deliveries WHERE run_id=$1 AND event_id=$2 AND subscriber_type='node'`, runID, eventID).
+		Scan(&out.Status, &out.Reason, &out.Failure)
+	return out, err
+}
+
+func CountRunEventSubscriberDeliveriesStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID, subscriberID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries
+		WHERE run_id=$1 AND event_id=$2 AND subscriber_id=$3`, runID, eventID, subscriberID).Scan(&count)
+	return count, err
+}
+
+func CountForkSourceSubscriberActiveDeliveriesStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries
+		WHERE run_id=$1 AND subscriber_id='validation-coordinator' AND status='in_progress'`, runID).Scan(&count)
+	return count, err
+}
+
+func CountRunEventAgentDeliveriesStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID, agentID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries
+		WHERE run_id=$1 AND event_id=$2 AND subscriber_type='agent' AND subscriber_id=$3`, runID, eventID, agentID).Scan(&count)
+	return count, err
+}
+
+func CountDeliveredAgentAttemptsStorageTx(ctx context.Context, tx *sql.Tx, eventID, agentID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts o
+		JOIN event_deliveries d ON d.delivery_id=o.delivery_id
+		WHERE o.closure_kind='settled' AND d.event_id=$1 AND d.subscriber_type='agent'
+		AND d.subscriber_id=$2 AND o.outcome='delivered'`, eventID, agentID).Scan(&count)
+	return count, err
+}
+
+func ReadLatestDeadLetterFailureStorageTx(ctx context.Context, tx *sql.Tx) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(CAST(failure AS TEXT),'') FROM dead_letters
+		WHERE failure IS NOT NULL ORDER BY created_at DESC LIMIT 1`).Scan(&out)
+	return out, err
+}
+
+func ReadPostgresSelectedAgentDeliveryFailureStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(jsonb_build_object(
+		'status',d.status,'reason',d.reason_code,'failure',d.failure,
+		'attempt_outcome',a.outcome,'attempt_failure',a.failure)::text,'')
+		FROM event_deliveries d LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id
+		WHERE d.run_id=$1::uuid AND d.subscriber_type='agent'
+		ORDER BY d.created_at DESC,a.claim_version DESC LIMIT 1`, runID).Scan(&out)
+	return out, err
+}
+
+func ReadPostgresRunDeliveryAttemptArrayStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(jsonb_build_object(
+		'subscriber',d.subscriber_id,'status',d.status,'reason',d.reason_code,'failure',d.failure,
+		'attempt_outcome',a.outcome,'attempt_failure',a.failure) ORDER BY d.created_at)::text,'[]')
+		FROM event_deliveries d LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id
+		WHERE d.run_id=$1::uuid`, runID).Scan(&out)
+	return out, err
+}
+
+func ReadPostgresSelectedForkDeliveryTimelineStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(string_agg(
+		e.event_name || ':' || COALESCE(d.subscriber_type,'-') || '/' || COALESCE(d.subscriber_id,'-') || ':' || COALESCE(d.status,'-'),
+		';' ORDER BY e.created_at,e.event_id,d.delivery_id),'')
+		FROM events e LEFT JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.run_id=$1::uuid`, runID).Scan(&out)
+	return out, err
+}
+
+func ReadPostgresSelectedForkRouteTimelineStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(string_agg(
+		e.event_name || ':' || COALESCE(e.flow_instance,'-') || ':' || COALESCE(d.delivery_target_route::text,'-') || ':' || COALESCE(d.delivery_payload_projection::text,'-'),
+		';' ORDER BY e.created_at,e.event_id,d.delivery_id),'')
+		FROM events e JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.run_id=$1::uuid`, runID).Scan(&out)
+	return out, err
+}
+
+func CountGlobalDeliveredNodeRowsStorageTx(ctx context.Context, tx *sql.Tx, nodeID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE subscriber_type='node' AND subscriber_id=$1 AND status='delivered'`, nodeID).Scan(&count)
+	return count, err
+}
+
+// These two closed expressions are consumed only by the private replay/API
+// fault installers. Their trigger-local identities cannot be supplied by callers.
+func ReplayScopePriorDeliveryWitnessSQL(postgres bool) string {
+	if postgres {
+		return `EXISTS (SELECT 1 FROM event_deliveries WHERE event_id=NEW.event_id::uuid)`
+	}
+	return `EXISTS (SELECT 1 FROM event_deliveries WHERE event_id=NEW.event_id)`
+}
+
+func APICompletionPriorDeliveryWitnessSQL(postgres bool) string {
+	if postgres {
+		return `EXISTS (SELECT 1 FROM event_deliveries WHERE event_id=NEW.resource_id::uuid)`
+	}
+	return `EXISTS (SELECT 1 FROM event_deliveries WHERE event_id=NEW.resource_id)`
+}
+
+// Preserve the original best-effort diagnostic, including its ordered prefix
+// when a later diagnostic query fails. This text is never execution authority.

@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"testing"
@@ -12,8 +11,8 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -24,6 +23,13 @@ type forkCommitOmissionProbeStore interface {
 	APIIdempotencyStore
 	storetest.AgentFixtureStore
 	storetest.ManagedAgentTurnFixtureStore
+}
+
+// The factories retain their original native location and close ledger. Invoke
+// them at the original response-loss consumer, not in another constructor seam.
+type forkCommitNativeReopen struct {
+	sqlite   func() *store.SQLiteRuntimeStore
+	postgres func() *store.PostgresStore
 }
 
 type forkCommitOmissionProbeOwner struct {
@@ -47,21 +53,20 @@ func (o *forkCommitOmissionProbeOwner) CreateAPIConversationFork(ctx context.Con
 	return created, nil
 }
 
-func newConversationForkCommitFixture(t *testing.T, backend string) (context.Context, forkCommitOmissionProbeStore, *sql.DB, time.Time, string, string) {
+func newConversationForkCommitFixture(t *testing.T, backend string) (context.Context, forkCommitOmissionProbeStore, forkCommitNativeReopen, time.Time, string, string) {
 	t.Helper()
 	ctx := testAuthorActivityContext(context.Background())
 	var selected forkCommitOmissionProbeStore
-	var db *sql.DB
+	var reopen forkCommitNativeReopen
 	runID, sessionID, turnID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	now := time.Now().UTC().Truncate(time.Second)
 	runFixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour)}
 	if backend == "sqlite" {
-		s := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		selected, db = s, storetest.DatabaseForTest(s)
+		s, open := storetest.StartSQLiteRuntimeStoreWithReopen(t, ctx)
+		selected, reopen.sqlite = s, open
 	} else {
-		_, pg, _ := testutil.StartPostgres(t)
-		db = pg
-		selected = storetest.AdmitPostgresRuntimeStore(t, db)
+		s, open := storetest.StartPostgresRuntimeStoreWithReopen(t)
+		selected, reopen.postgres = s, open
 	}
 	storetest.RequireRun(t, ctx, selected, runFixture)
 	const agentID = "fork-commit-omission-source"
@@ -69,11 +74,12 @@ func newConversationForkCommitFixture(t *testing.T, backend string) (context.Con
 	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{
 		Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "researcher", Type: "managed", Model: "cheap",
-			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a", Memory: agentmemory.Plan{Enabled: true},
+			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a", Memory: agentmemory.Plan{Enabled: true}, Config: []byte(`{}`),
 		}), Status: "active", StartedAt: now.Add(-5 * time.Minute),
 	}); err != nil {
 		t.Fatal(err)
 	}
+	ctx = admitAPITestAgentExecution(t, ctx, selected, authorActivityTestSourceArtifactFact)
 	history := storetest.SeedConversationForkSource(t, ctx, selected, storetest.ConversationForkSourceFixture{
 		Identity: identity, RunID: runID, SessionID: sessionID, EntityID: uuid.NewString(),
 		Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), CreatedAt: now,
@@ -83,7 +89,7 @@ func newConversationForkCommitFixture(t *testing.T, backend string) (context.Con
 		Store: selected, Selected: selected, Identity: identity, RunID: runID, SessionID: sessionID,
 		TurnID: turnID, Memory: agentmemory.Plan{Enabled: true}, Event: history[0], ParseOK: true, CreatedAt: now.Add(-2 * time.Minute),
 	})
-	return ctx, selected, db, now, sessionID, turnID
+	return ctx, selected, reopen, now, sessionID, turnID
 }
 
 // The return-loss regression intercepts the named atomic owner, not the former
@@ -96,7 +102,7 @@ func TestConversationForkCommitBeforeAPICompletionProbe(t *testing.T) {
 				phase = "postcommit_omission"
 			}
 			t.Run(backend+"/"+phase, func(t *testing.T) {
-				ctx, selected, db, now, sessionID, turnID := newConversationForkCommitFixture(t, backend)
+				ctx, selected, _, now, sessionID, turnID := newConversationForkCommitFixture(t, backend)
 				makeHandler := func(owner ConversationForkLifecycleStore) *Handler {
 					return testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorConversationForkHandlers(testOperatorCapabilities{
 						ConversationForkLifecycle: owner, ConversationForks: selected, Idempotency: selected, Now: func() time.Time { return now },
@@ -115,16 +121,7 @@ func TestConversationForkCommitBeforeAPICompletionProbe(t *testing.T) {
 				if !omit && first.Error != nil {
 					t.Fatalf("healthy create RPC: %+v", first.Error)
 				}
-				count := func(table string) int {
-					t.Helper()
-					var n int
-					query := "SELECT count(*) FROM " + table
-					if err := db.QueryRow(query).Scan(&n); err != nil {
-						t.Fatal(err)
-					}
-					return n
-				}
-				beforeForks, beforeCompletions := count("conversation_forks"), count("api_idempotency")
+				beforeForks, beforeCompletions := conversationForkCommitCounts(t, selected)
 				wantBeforeCompletions := 1
 				if beforeForks != 1 || beforeCompletions != wantBeforeCompletions {
 					t.Fatalf("post-first durable forks=%d completions=%d", beforeForks, beforeCompletions)
@@ -148,7 +145,7 @@ func TestConversationForkCommitBeforeAPICompletionProbe(t *testing.T) {
 				if thirdFork["fork_id"] != secondID {
 					t.Error("healthy completed response replay changed resource")
 				}
-				forks, completions := count("conversation_forks"), count("api_idempotency")
+				forks, completions := conversationForkCommitCounts(t, selected)
 				listed, err := selected.ListOperatorConversationForks(ctx, runfork.ConversationForkListOptions{SourceSessionID: sessionID, Now: now, Limit: 100})
 				if err != nil {
 					t.Fatal(err)

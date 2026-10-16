@@ -157,7 +157,7 @@ func TestCurrentConfigVocabularyRejectsUnknownAndMergedKeys(t *testing.T) {
 		{"workspace: {image: alpine, imag: another}", "imag"},
 		{"database: {<<: {totally_unknown: true}}", "totally_unknown"},
 		{"llm: {session: {unknown: false}}", "unknown"},
-		{"llm: {provider_limits: {anthropic: {models: {fast: {unknown: 1}}}}}", "unknown"},
+		{"llm: {provider_limits: {anthropic: {<<: {unknown: 1}}}}", "unknown"},
 		{"connection: {api_serve: url}", "api_serve"},
 	} {
 		t.Run(row.source, func(t *testing.T) {
@@ -193,7 +193,7 @@ func TestConfigCustomReadersAreStrictWithoutOuterDecoder(t *testing.T) {
 
 func TestConfigSourcePreservesSupportedAliasesPresenceAndOpenMaps(t *testing.T) {
 	var cfg Config
-	source := "runtime: {<<: {fan_out_workers: 2, recovery_on_startup: false}}\nworkspace: {<<: {image: '', allow_exec_on_host: false}, backend: host}\nllm: {models: {business_model: {provider: model}}, provider_limits: {provider: {models: {model: {max_concurrency: 2}}}}}\nconnection: {api_server: localhost}\nbudget: {human_tasks: {categories_enabled: [support]}}\npaths: {swarm_dir: state, monitor_dir: monitor}\n"
+	source := "runtime: {<<: {fan_out_workers: 2, recovery_on_startup: false}}\nworkspace: {<<: {image: '', allow_exec_on_host: false}, backend: host}\nllm: {models: {business_model: {provider: model}}, provider_limits: {provider: {<<: {max_concurrency: 2}}}}\nconnection: {api_server: localhost}\nbudget: {human_tasks: {categories_enabled: [support]}}\npaths: {swarm_dir: state, monitor_dir: monitor}\n"
 	if err := decodeConfigSourceTest(source, &cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestConfigDecodeSourceRejectsBeforeProjection(t *testing.T) {
 		"totally_unknown: true",
 		"<<: {totally_unknown: true}",
 		"database: {<<: {totally_unknown: true}}",
-		"llm: {provider_limits: {provider: {models: {model: {unknown: 1}}}}}",
+		"llm: {provider_limits: {provider: {unknown: 1}}}",
 		"runtime: {recovery_on_startup: true, recovery_on_startup: false}",
 	} {
 		t.Run(source, func(t *testing.T) {

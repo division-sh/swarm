@@ -323,10 +323,10 @@ writer:
 			})
 			var persistence sparseEntityToolStore
 			if backend == "sqlite" {
-				s := newSQLiteRuntimeToolStoreForTest(t)
+				s := storetest.StartSQLiteRuntimeStore(t)
 				persistence = s
 			} else {
-				s := newPostgresHumanTaskToolStoreForTest(t)
+				s := storetest.StartPostgresRuntimeStore(t)
 				persistence = s
 			}
 			runID, entityID := uuid.NewString(), uuid.NewString()

@@ -366,7 +366,7 @@ func TestRepositorySourceArtifactOwnershipHandoffsRequireExactOpaqueFacts(t *tes
 			required: []string{
 				"func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runtimeengine.EmitIntent) (err error)",
 				"ctx, lease, err := d.bus.beginRuntimeWork(ctx)",
-				"func (d engineDispatcher) dispatchOnePostCommit(ctx context.Context, intent runtimeengine.EmitIntent) (err error)",
+				"func (d engineDispatcher) dispatchOnePostCommit(ctx context.Context, intent runtimeengine.EmitIntent, requirePending bool) (handled bool, err error)",
 				"func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent)",
 				"ctx, err = d.bus.admitSourceArtifactFact(ctx)",
 				"func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimeengine.EmitIntent, publicationClaim *pipelinePublicationClaim)",

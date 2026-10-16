@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/timercancellation"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -352,9 +353,11 @@ func TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores(t *testing.T) {
 							t.Fatalf("canonical state-bucket owner must retain exactly one arm for the actual E2 entry/declaration: count=%d", retainedReentry)
 						}
 					}
-					var pending int
-					if err := selected.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status NOT IN ('delivered','dead_letter')`, runID).Scan(&pending); err != nil || pending != 0 {
-						t.Fatalf("cancellation left runnable/ownerless delivery work: count=%d err=%v", pending, err)
+					{
+						pending, err := storetest.CountRunNonterminalDeliveryStorage(ctx, selected.events, runID)
+						if err != nil || pending != 0 {
+							t.Fatalf("cancellation left runnable/ownerless delivery work: count=%d err=%v", pending, err)
+						}
 					}
 					t.Logf("actual %s/%s: exact real claims settle once; E1 route retained; no outcome effect, runnable continuation or restart/replay mutation", mode, phase)
 				})
@@ -376,14 +379,8 @@ func a2CancellationWaitForHandler(t *testing.T, ctx context.Context, probe *life
 
 func a2CancellationFootprint(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, runID string) [5]int {
 	t.Helper()
-	var result [5]int
-	if err := selected.db.QueryRowContext(ctx, `SELECT
-		(SELECT COUNT(*) FROM events WHERE run_id=$1),
-		(SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1),
-		(SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id=$1)),
-		(SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1),
-		(SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1)`, runID).Scan(
-		&result[0], &result[1], &result[2], &result[3], &result[4]); err != nil {
+	result, err := storetest.ReadA2CancellationFootprintStorage(ctx, selected.events, runID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return result

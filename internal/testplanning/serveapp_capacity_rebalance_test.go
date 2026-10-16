@@ -22,6 +22,8 @@ func serveappCapacityMoves() map[string]string {
 		"TestProviderAliasPhysicalTupleProofPreservesScopeNullsAndMultiplicity":        "serveapp-channel-neutral",
 		"TestProviderIngressProofRoleRegistryRejectsHiddenAuthorityFromSupportedProof": "serveapp-channel-neutral",
 		"TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission":         "serveapp-channel-neutral",
+		"TestProviderRestartRecoveryBothStores":                                        "serveapp-channel-neutral",
+		"TestProviderRestartRecoveryProcess":                                           "serveapp-channel-neutral",
 	}
 }
 
@@ -81,6 +83,9 @@ func serveappBeforeCapacityPolicy(policy Policy) Policy {
 	} {
 		unit := original.Units[id]
 		unit.Run = run
+		if id == "serveapp-channel" {
+			unit.Run = serveappCapacityWithNativeFixtureProofs(unit.Run)
+		}
 		unit.RequiredChildren = maps.Clone(unit.RequiredChildren)
 		if id == "serveapp-channel-neutral" {
 			delete(unit.RequiredChildren, "TestProviderSelectedRootStandingBootBothStores")
@@ -94,6 +99,31 @@ func serveappBeforeCapacityPolicy(policy Policy) Policy {
 		original.Units[id] = unit
 	}
 	return original
+}
+
+// These source-owned fixture controls were added after the capacity split.
+// Carry them on the same owner in both comparison views; none is a moved root.
+func serveappCapacityWithNativeFixtureProofs(run string) string {
+	names := []string{
+		"TestChannelAnchorReferenceSnapshotsCannotAdmitChangedSourceOrProductReferences",
+		"TestChannelProcessReferenceSnapshotsRetainExactFieldsAndRejectDuplicateRecords",
+		"TestChannelSettlementReferenceSnapshotsRejectChangedEvidenceAndDuplicateRecords",
+		"TestChannelAnchorStorageReaderSurvivesChildAndClosesWithHarnessBothStores",
+		"TestChannelBudgetDiagnosticFacetRefusesForeignOwnership",
+		"TestChannelBudgetDiagnosticStorageRetainsIndependentCutsAndLifetimeBothStores",
+		"TestChannelCurrentRenderFaultPreservesScopeCancellationAndRestorationBothStores",
+		"TestChannelInputBindingFaultKeepsOrdinaryRunAndExactReceiptBothStores",
+		"TestChannelPostgresConfigurationKeepsExactMetadataWithoutConnectionAuthority",
+		"TestChannelProcessDiagnosticKeepsEveryNativeOperationCoordinateBothStores",
+		"TestChannelProcessHistoryKeepsNativeFactsAndIndependentTemporalCutsBothStores",
+		"TestChannelProcessObservationPreservesAbsenceCancellationAndLifetimeBothStores",
+		"TestChannelProcessObservationRefusesForeignOwnership",
+		"TestChannelRunNamedEventObservationKeepsPhysicalScopeAndJoinedLifetimeBothStores",
+		"TestChannelSettlementDiagnosticPreservesBoundsIdentityAndRedaction",
+		"TestChannelSettlementIntentCountOvershootRefuses",
+		"TestChannelSettlementStorageReaderRetainsAbsenceCancellationAndLifetimeBothStores",
+	}
+	return "(" + run + "|^(" + strings.Join(names, "|") + ")$)"
 }
 
 func assertServeappCapacityPlans(t *testing.T, before, after RunPlan) {

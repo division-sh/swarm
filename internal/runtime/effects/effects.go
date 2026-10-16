@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -250,22 +251,23 @@ func RegistrationFor(adapter string) (Registration, bool) {
 }
 
 type AuthorizeRequest struct {
-	CompletionRequest  CompletionRequest
-	TurnTimeout        *timeridentity.TurnTimeout
-	SessionGrantID     string
-	SessionLockOwner   string
-	OperationID        string
-	AttemptID          string
-	Kind               Kind
-	Class              EffectClass
-	Adapter            string
-	Transport          string
-	RequestFingerprint string
-	CapabilitySurface  *managedcapabilities.Surface
-	AgentFrame         *agentframe.Frame
-	Origin             CompletionOrigin
-	Lineage            map[string]string
-	Now                time.Time
+	CompletionRequest      CompletionRequest
+	TurnTimeout            *timeridentity.TurnTimeout
+	SessionGrantID         string
+	SessionLockOwner       string
+	OperationID            string
+	AttemptID              string
+	Kind                   Kind
+	Class                  EffectClass
+	Adapter                string
+	Transport              string
+	RequestFingerprint     string
+	CapabilitySurface      *managedcapabilities.Surface
+	AgentFrame             *agentframe.Frame
+	ProviderRequestJournal *ProviderRequestJournal
+	Origin                 CompletionOrigin
+	Lineage                map[string]string
+	Now                    time.Time
 }
 
 type Attempt struct {
@@ -1079,14 +1081,22 @@ func managedEffectCapabilitySurface(ctx context.Context, authority Authority) (m
 }
 
 func BeginCompletion(ctx context.Context, adapter string, request []byte, lineage map[string]string) (*Handle, error) {
-	return beginCompletion(ctx, adapter, request, nil, lineage)
+	return beginCompletion(ctx, adapter, request, nil, nil, lineage)
 }
 
 func BeginManagedCompletion(ctx context.Context, adapter string, request []byte, frame agentframe.Frame, lineage map[string]string) (*Handle, error) {
-	return beginCompletion(ctx, adapter, request, &frame, lineage)
+	return beginCompletion(ctx, adapter, request, &frame, nil, lineage)
 }
 
-func beginCompletion(ctx context.Context, adapter string, request []byte, frame *agentframe.Frame, lineage map[string]string) (*Handle, error) {
+func BeginJournaledManagedCompletion(ctx context.Context, adapter string, request []byte, frame agentframe.Frame, journal ProviderRequestJournal, lineage map[string]string) (*Handle, error) {
+	if err := journal.ValidateRequest(request, Fingerprint(request)); err != nil {
+		return nil, err
+	}
+	journal.Lineage = maps.Clone(lineage)
+	return beginCompletion(ctx, adapter, request, &frame, &journal, lineage)
+}
+
+func beginCompletion(ctx context.Context, adapter string, request []byte, frame *agentframe.Frame, journal *ProviderRequestJournal, lineage map[string]string) (*Handle, error) {
 	if err := admitExecutionMode(ctx, adapter); err != nil {
 		return nil, err
 	}
@@ -1130,7 +1140,8 @@ func beginCompletion(ctx context.Context, adapter string, request []byte, frame 
 	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
 		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request),
 		CapabilitySurface: capabilitySurface, AgentFrame: frame, Origin: origin, Lineage: lineage,
-		SessionGrantID: sessionGrantFromContext(ctx).GrantID, SessionLockOwner: sessionGrantFromContext(ctx).LockOwner,
+		ProviderRequestJournal: journal,
+		SessionGrantID:         sessionGrantFromContext(ctx).GrantID, SessionLockOwner: sessionGrantFromContext(ctx).LockOwner,
 	})
 	return authorizedHandle(controller, attempt, err)
 }
@@ -1598,6 +1609,9 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	}
 	if req.Now.IsZero() {
 		req.Now = time.Now().UTC()
+	}
+	if err := ValidateProviderRequestJournalAdmission(ctx, authority, req); err != nil {
+		return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_provider_request_journal_invalid", "external-effects", "authorize_attempt", nil, err)
 	}
 	attempt, err := c.store.AuthorizeExternalAttempt(ctx, authority, req)
 	if attempt.AuthorizationAcknowledged && attempt.Kind == KindProviderTurn && attempt.Origin.Validate() == nil {

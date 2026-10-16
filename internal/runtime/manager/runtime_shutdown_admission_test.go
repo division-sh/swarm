@@ -212,24 +212,18 @@ func ProveNativeResetRuntimeState_KeepsManagerAdmissionClosedDuringManagerLocalS
 		},
 	}
 
-	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am, runCtx := newPreparedNativeTestManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	}, AgentManagerOptions{
-		DeliveryStore:                  nativeDelivery,
+	}, nativeDelivery, managerRootAgentConfig(agent.id, "test.in"), AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: func() bool { return false },
 	}, store)
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, true); err != nil {
-		t.Fatalf("spawnAgentInternal: %v", err)
-	}
 
-	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+	if err := am.Run(runCtx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
+	inbound := eventtest.ExistingRunRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
-		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	nativeDelivery.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -295,24 +289,18 @@ func ProveNativeAuthBreakerShutdown_KeepsManagerAdmissionClosedDuringManagerLoca
 		},
 	}
 
-	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am, runCtx := newPreparedNativeTestManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	}, AgentManagerOptions{
-		DeliveryStore:                  nativeDelivery,
+	}, nativeDelivery, managerRootAgentConfig(agent.id, "test.in"), AgentManagerOptions{
 		RuntimeShutdownAdmissionClosed: func() bool { return false },
 	}, store)
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, true); err != nil {
-		t.Fatalf("spawnAgentInternal: %v", err)
-	}
 
-	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+	if err := am.Run(runCtx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
+	inbound := eventtest.ExistingRunRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
-		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	nativeDelivery.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)

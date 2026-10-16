@@ -144,6 +144,12 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1943,
 			Reason:         "runner-owned service verification reads canonical Postgres settings through the typed test connection",
 		},
+		"internal/testpostgres/sandbox_empty_store.go": {
+			Classification: rawSQLTestSupportBoundary,
+			Issue:          2542,
+			SpecRef:        "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.runtime_execution_persistence_authority",
+			Reason:         "#2698/6205327685: leased test sandbox PublicTableCount/ResetPublicSchema owns empty-schema setup and observation; no production selected-store authority",
+		},
 	}
 }
 

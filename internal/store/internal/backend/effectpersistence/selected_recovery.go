@@ -19,7 +19,7 @@ func (s *EffectPostgresOwner) RecoverSelectedForkEffectsTx(ctx context.Context, 
 		if err != nil {
 			return err
 		}
-		completion, err := reconcileCompletionAttemptsPostgres(ctx, tx, s.llm, s.delivery, s.directives, mutation, externalEffectRecoveryAttemptSet(candidates), req.Now(), executionID)
+		completion, err := reconcileCompletionAttemptsPostgres(ctx, tx, s.llm, s.delivery, s.directives, mutation, externalEffectRecoveryAttemptSet(candidates), req.Now(), executionID, nil)
 		if err != nil {
 			return err
 		}
@@ -43,7 +43,7 @@ func (s *EffectSQLiteOwner) RecoverSelectedForkEffectsTx(ctx context.Context, mu
 		if err != nil {
 			return err
 		}
-		completion, err := reconcileCompletionAttemptsSQLite(ctx, tx, s.llm, s.delivery, s.directives, mutation, externalEffectRecoveryAttemptSet(candidates), req.Now(), executionID)
+		completion, err := reconcileCompletionAttemptsSQLite(ctx, tx, s.llm, s.delivery, s.directives, mutation, externalEffectRecoveryAttemptSet(candidates), req.Now(), executionID, nil)
 		if err != nil {
 			return err
 		}

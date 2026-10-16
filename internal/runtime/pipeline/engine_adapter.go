@@ -391,8 +391,10 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	if mutation.FanOutIntent != nil {
 		o.state.coordinator.signalFanOutWork()
 	}
-	if o.publication != nil {
+	if o.publication != nil && publicationErr == nil {
 		resultErr = errors.Join(resultErr, o.finishCommittedEnginePublications(ctx, committed.Publications))
+	} else if o.publication != nil {
+		resultErr = errors.Join(resultErr, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
 	}
 	resultErr = errors.Join(resultErr, o.finishCommittedWorkflowLifecycle(ctx, committed.Lifecycle))
 	return result, resultErr
@@ -403,7 +405,6 @@ func committedEnginePublicationIntents(planned []runtimeengine.DurablePublicatio
 		return nil, nil, fmt.Errorf("committed engine publications = %d, want exactly %d declared publications", len(committed), len(planned))
 	}
 	intents := make([]runtimeengine.EmitIntent, 0, len(planned))
-	seen := make(map[string]struct{}, len(planned))
 	for index, plan := range planned {
 		publication := committed[index]
 		if plan == nil || publication == nil {
@@ -415,15 +416,14 @@ func committedEnginePublicationIntents(planned []runtimeengine.DurablePublicatio
 		if err := publication.ValidateCommittedDurablePublication(); err != nil {
 			return nil, nil, fmt.Errorf("committed engine publication %d: %w", index, err)
 		}
+		if err := publication.ValidatePlannedPublication(plan); err != nil {
+			return nil, nil, fmt.Errorf("committed engine publication %d correspondence: %w", index, err)
+		}
 		id := plan.DurablePublicationEventID()
 		intent := publication.CommittedDurablePublicationIntent()
 		if id != publication.CommittedDurablePublicationEventID() || id != intent.Event.ID() {
 			return nil, nil, fmt.Errorf("committed engine publication %d differs from its declared event identity", index)
 		}
-		if _, duplicate := seen[id]; duplicate {
-			return nil, nil, fmt.Errorf("declared engine publication %s occurs more than once", id)
-		}
-		seen[id] = struct{}{}
 		intents = append(intents, intent)
 	}
 	requests, err := committedActivityRequestIntents(committed, activities)

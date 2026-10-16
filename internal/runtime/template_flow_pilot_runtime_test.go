@@ -2,7 +2,6 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,7 +29,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersistedDeliveryRoute(t *testing.T) {
@@ -41,9 +39,8 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 		t.Fatalf("template-flow pilot hard invalidities = %#v, want none", got)
 	}
 
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
+
 	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -112,39 +109,25 @@ func TestTemplateFlowPilotRuntime_ParentConnectCreatesTemplateInstanceAndPersist
 	if target := preflight.DeliveryRoutes[0].Target.Route(); target.FlowID != "account" || !strings.HasPrefix(target.FlowInstance, "account/") || target.EntityID == "" {
 		t.Fatalf("preflight target = %#v, want account template flow instance", target)
 	}
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM flow_instances
-		WHERE flow_template = 'account'
-	`, 0)
+	assertRuntimeStorageCount(t, "CountTemplateInstances", 0, func() (int, error) {
+		return storetest.CountTemplateInstances(ctx, pg, "account")
+	})
 
 	if err := bus.Publish(ctx, evt); err != nil {
 		t.Fatalf("Publish validation request: %v", err)
 	}
 	accountNodeID := identitytest.FlowNode(t, "account", "account-node").Key()
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = $2
-	`, 1, evt.ID(), accountNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_id IN ('workflow-runtime', 'raw-source-listener')
-	`, 0, evt.ID())
+	waitRuntimeStorageCount(t, ctx, pg, "CountTemplateNodeDelivery", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, evt.ID(), accountNodeID)
+	})
+	assertRuntimeStorageCount(t, "CountTemplateCarrierDeliveries", 0, func() (int, error) {
+		return storetest.CountTemplateCarrierDeliveries(ctx, pg, evt.ID())
+	})
 
-	flowInstance, entityID := loadTemplateFlowPilotInstanceIdentity(t, ctx, db)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = $3
-		  AND delivery_target_route @> $2::jsonb
-	`, 1, evt.ID(), templateFlowPilotDeliveryTargetRouteJSON(t, events.RouteIdentity{
-		FlowID:       "account",
-		FlowInstance: flowInstance,
-		EntityID:     entityID,
-	}), accountNodeID)
+	flowInstance, entityID := loadTemplateFlowPilotInstanceIdentity(t, ctx, pg)
+	assertRuntimeStorageCount(t, "CountPostgresTemplateNodeTarget", 1, func() (int, error) {
+		return storetest.CountPostgresTemplateNodeTarget(ctx, pg, evt.ID(), templateFlowPilotDeliveryTargetRouteJSON(t, events.RouteIdentity{FlowID: "account", FlowInstance: flowInstance, EntityID: entityID}), accountNodeID)
+	})
 	loaded, ok, err := pc.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
 		RunID: templateInstanceDeliveryRunID,
 		Route: runtimeflowidentity.RouteForInstancePath(flowInstance),
@@ -388,20 +371,13 @@ func (s *templateFlowPilotMemoryStore) InsertEventDeliveryRoutes(_ context.Conte
 	return nil
 }
 
-func loadTemplateFlowPilotInstanceIdentity(t *testing.T, ctx context.Context, db *sql.DB) (string, string) {
+func loadTemplateFlowPilotInstanceIdentity(t *testing.T, ctx context.Context, selected any) (string, string) {
 	t.Helper()
-	var flowInstance string
-	var entityID string
-	if err := db.QueryRowContext(ctx, `
-		SELECT flow_instance, entity_id::text
-		FROM entity_state
-		WHERE flow_instance LIKE 'account/%'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`).Scan(&flowInstance, &entityID); err != nil {
+	row, err := storetest.ReadLatestTemplateAccountIdentity(ctx, selected)
+	if err != nil {
 		t.Fatalf("load account instance identity: %v", err)
 	}
-	return flowInstance, entityID
+	return row.Path, row.EntityID
 }
 
 func templateFlowPilotDeliveryTargetRouteJSON(t *testing.T, target events.RouteIdentity) string {

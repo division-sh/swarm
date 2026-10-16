@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -18,8 +19,7 @@ func (*countingAdministrativeResetLifecycle) ResetSourceProjections(context.Cont
 }
 
 func TestRuntimeNukeDurableReplaySurvivesAPICompletionLossAndExpiration(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	selected := storetest.StartPostgresRuntimeStore(t)
 	cap := acquireAdministrativeResetCapability(t, selected)
 	lifecycle := &countingAdministrativeResetLifecycle{}
 	external := newBlockingAdministrativeExternalWork()
@@ -30,21 +30,30 @@ func TestRuntimeNukeDurableReplaySurvivesAPICompletionLossAndExpiration(t *testi
 		Cleaner: destructivereset.Cleaner{Store: administrativeResetCleanup{cap}}, Containers: external,
 	}
 	ctx := context.Background()
-	if _, err := db.Exec(`CREATE FUNCTION lose_reset_api_completion() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'API completion lost'; END $$;
-	CREATE TRIGGER lose_reset_api_completion BEFORE INSERT ON api_idempotency FOR EACH ROW EXECUTE FUNCTION lose_reset_api_completion()`); err != nil {
+	if err := storetest.InstallPostgresResetAPICompletionLoss(context.Background(), selected); err != nil {
 		t.Fatal(err)
 	}
+	restoreCompletion := sync.OnceValue(func() error {
+		return storetest.RemovePostgresResetAPICompletionLoss(context.Background(), selected)
+	})
+	defer func() {
+		if err := restoreCompletion(); err != nil {
+			t.Error(err)
+		}
+	}()
 	now := time.Now().UTC()
 	req := Request{Method: "runtime.nuke", ActorTokenID: "operator", RequestHash: "reset", Params: map[string]any{"idempotency_key": "permanent-reset", "include_source_artifacts": false}}
 	opts := RuntimeNukeHandlerOptions{Coordinator: coordinator, Idempotency: selected}
 	if _, err := executeRuntimeNuke(ctx, req, opts, now); err == nil {
 		t.Fatal("API completion fault was not exercised")
+	} else if !strings.Contains(err.Error(), "API completion lost") {
+		t.Fatalf("reset failed before the actual transport completion cut: %v", err)
 	}
-	if _, err := db.Exec(`DROP TRIGGER lose_reset_api_completion ON api_idempotency; DROP FUNCTION lose_reset_api_completion()`); err != nil {
+	if err := restoreCompletion(); err != nil {
 		t.Fatal(err)
 	}
-	var raw []byte
-	if err := db.QueryRow(`SELECT record FROM runtime_reset_operations`).Scan(&raw); err != nil {
+	raw, err := storetest.ReadResetCompletionStorageRecord(context.Background(), selected)
+	if err != nil {
 		t.Fatal(err)
 	}
 	var admitted destructivereset.Operation
@@ -64,15 +73,13 @@ func TestRuntimeNukeDurableReplaySurvivesAPICompletionLossAndExpiration(t *testi
 	if err != nil || !reflect.DeepEqual(first, second) {
 		t.Fatalf("expired cache replay = %+v, %v", second, err)
 	}
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM runs WHERE run_id = $1`, laterRun).Scan(&count); err != nil || count != 1 {
+	if count, err := storetest.CountPhysicalRunIdentity(context.Background(), selected, laterRun); err != nil || count != 1 {
 		t.Fatalf("historical replay affected later run: %d, %v", count, err)
 	}
 	if lifecycle.begins != 1 {
 		t.Fatalf("replay withdrew execution %d times", lifecycle.begins)
 	}
-	var operations int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM runtime_reset_operations`).Scan(&operations); err != nil || operations != 1 {
+	if operations, err := storetest.CountResetCompletionStorageOperations(context.Background(), selected); err != nil || operations != 1 {
 		t.Fatalf("operation identities = %d, %v", operations, err)
 	}
 }

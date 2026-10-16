@@ -6,12 +6,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
@@ -168,6 +170,37 @@ func prepareExactClaimFaultRefusal(t *testing.T, ctx context.Context, fixture au
 		_, err := fixture.store.(deliveryFixtureStore).SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond, deliverylifecycle.NotApplicableHandlerRuleSelection())
 		return err
 	}
+	if name == "wrong_version" {
+		original, err := ReadFirstAgentClaimProfileForTest(ctx, fixture.store, claimed.Snapshot)
+		if err != nil {
+			return err
+		}
+		if err := ExpireExactDeliveryClaimFaultForTest(ctx, fixture.store, claimed.Claim); err != nil {
+			return err
+		}
+		publication, found, err := fixture.store.(bus.PreparedPublishEventReader).LoadPreparedPublishEvent(ctx, claimed.Snapshot.EventID)
+		if err != nil {
+			return fmt.Errorf("load exact stale-claim publication: %w", err)
+		}
+		if !found {
+			return errors.New("exact stale-claim publication is missing")
+		}
+		successor, err := claimDeliveryFixture(ctx, fixture.store, publication.Event.Event(), claimed.Snapshot.Route)
+		if err != nil {
+			return err
+		}
+		if successor.Claim.Version() != claimed.Claim.Version()+1 {
+			return errors.New("stale-claim control did not acquire the exact successor")
+		}
+		retained, err := ReadFirstAgentClaimProfileForTest(ctx, fixture.store, successor.Snapshot)
+		if err != nil {
+			return fmt.Errorf("read stale-claim control first admission: %w", err)
+		}
+		if retained != original {
+			return errors.New("stale-claim control changed immutable first admission")
+		}
+		return nil
+	}
 	switch name {
 	case "missing_attempt", "closed_second_row", "multiple_attempts", "second_statement_error":
 		return prepareExactClaimSecondStatementFault(t, ctx, fixture, claimed.Claim, name)
@@ -185,12 +218,6 @@ func prepareExactClaimFaultRefusal(t *testing.T, ctx context.Context, fixture au
 		switch name {
 		case "wrong_run":
 			_, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET run_id=$1,event_id=$2 WHERE delivery_id=$3`, sibling.Claim.RunID(), foreignEventID, claimed.Claim.DeliveryID())
-			return err
-		case "wrong_version":
-			if _, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET claim_version=claim_version+1,current_attempt_version=current_attempt_version+1 WHERE delivery_id=$1`, claimed.Claim.DeliveryID()); err != nil {
-				return err
-			}
-			_, err := tx.ExecContext(ctx, `UPDATE event_delivery_attempts SET claim_version=claim_version+1 WHERE delivery_id=$1`, claimed.Claim.DeliveryID())
 			return err
 		case "wrong_token":
 			_, err := tx.ExecContext(ctx, `UPDATE event_delivery_attempts SET claim_token=$1 WHERE delivery_id=$2`, uuid.NewString(), claimed.Claim.DeliveryID())

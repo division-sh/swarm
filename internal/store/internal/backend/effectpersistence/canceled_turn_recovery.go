@@ -223,10 +223,11 @@ func loadBusinessTurnFirstAttempt(ctx context.Context, tx *sql.Tx, postgres bool
 		COALESCE(CAST(a.capability_surface_id AS TEXT),''),COALESCE(CAST(s.surface AS TEXT),''),a.execution_owner,a.fence_generation,a.lease_expires_at,
 		COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),COALESCE(CAST(o.agent_run_id AS TEXT),''),` + lineageRun + `,
 		COALESCE(o.agent_id,''),COALESCE(o.agent_name_owner,''),COALESCE(o.agent_name_source,''),COALESCE(o.agent_route_presence,''),
-		COALESCE(o.flow_scope_key,''),COALESCE(o.flow_instance_id,''),COALESCE(o.flow_instance,''),COALESCE(o.runtime_epoch,0),COALESCE(o.generation,0),
+		COALESCE(o.flow_scope_key,''),COALESCE(o.flow_instance_id,''),COALESCE(o.flow_instance,''),COALESCE(a.runtime_epoch,0),COALESCE(a.generation,0),
 		COALESCE(a.origin_kind,''),COALESCE(CAST(a.origin_delivery_id AS TEXT),''),COALESCE(CAST(a.origin_run_id AS TEXT),''),COALESCE(a.origin_route_identity,''),
 		COALESCE(CAST(a.origin_claim_token AS TEXT),''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_id,''),
-		COALESCE(CAST(a.origin_directive_operation_id AS TEXT),''),COALESCE(a.origin_directive_owner_id,'')
+		COALESCE(CAST(a.origin_directive_operation_id AS TEXT),''),COALESCE(a.origin_directive_owner_id,''),
+		COALESCE(CAST(a.provider_request_journal AS TEXT),''),o.request_fingerprint
 		FROM runtime_external_effect_operations o JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
 		WHERE a.attempt_id=$1 AND o.effect_kind='provider_turn' AND o.authority_kind IN ('normal_agent','selected_contract_fork')

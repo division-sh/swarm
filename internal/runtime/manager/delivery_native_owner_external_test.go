@@ -9,19 +9,28 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentintent"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -59,7 +68,7 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 	if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatal(err)
 	}
-	return &manager.ManagerDeliveryNativeFixture{
+	fixture := &manager.ManagerDeliveryNativeFixture{
 		Store: selected, Authority: authority, Context: ctx, NormalAuthority: authority,
 		RequireRun: func(t *testing.T, runID string) {
 			t.Helper()
@@ -115,6 +124,99 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 			}
 		},
 	}
+	fixture.PrepareActor = func(t *testing.T, cfg actors.AgentConfig) (context.Context, manager.PersistedAgent, manager.AgentLifecyclePersistence, agenttopology.SourceSetPlan) {
+		return prepareManagerNativeActor(t, selected, fixture, cfg)
+	}
+	return fixture
+}
+
+func prepareManagerNativeActor(t *testing.T, selected managerNativeDeliveryOwner, fixture *manager.ManagerDeliveryNativeFixture, cfg actors.AgentConfig) (context.Context, manager.PersistedAgent, manager.AgentLifecyclePersistence, agenttopology.SourceSetPlan) {
+	t.Helper()
+	owner, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatal("positive manager fixture requires its native actor/source owner")
+	}
+	if cfg.Role == "" {
+		cfg.Role = "worker"
+	}
+	if cfg.Model == "" {
+		cfg.Model = selection.ModelAliasRegular
+	}
+	if len(cfg.Config) == 0 {
+		cfg.Config = []byte(`{}`)
+	}
+	profile, err := selection.ResolveLiveBackend(selection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := llm.ResolveAgentExecution(executionposture.Live, profile, selection.EffectiveModelAliases(nil), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg = resolved.Actor
+	source := fixture.Authority.SourceArtifact()
+	ctx := correlation.WithRunID(fixture.Context, cfg.Identity.RunID)
+	scope, found := authoractivity.ScopeFromContext(ctx)
+	if !found || scope.RuntimeInstanceID == "" {
+		t.Fatal("positive manager fixture requires its original runtime scope")
+	}
+	ctx = correlation.WithRuntimeInstanceID(ctx, scope.RuntimeInstanceID)
+	if err := agentfixture.UpsertStaticForSource(t, ctx, owner, manager.PersistedAgent{Config: cfg, Status: "active", StartedAt: time.Now().UTC()}, source); err != nil {
+		t.Fatal(err)
+	}
+	ctx, plan := admitPreparedManagerNativeExecution(t, ctx, owner, fixture)
+	records, err := owner.LoadAgents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		if record.Config.Identity.Normalize() == cfg.Identity.Normalize() {
+			record.Config.Prompt = cfg.Prompt
+			return ctx, record, agentfixture.Lifecycle(t, owner), plan
+		}
+	}
+	t.Fatal("native manager fixture lost its constructed actor")
+	return nil, manager.PersistedAgent{}, nil, agenttopology.SourceSetPlan{}
+}
+
+func managerNativeClaimActor(t *testing.T, identity agentidentity.Identity) actors.AgentConfig {
+	t.Helper()
+	intent, err := agentintent.Resolve(agentintent.SourceInline, "inline", "agents.yaml#agents."+identity.AgentID()+".intent", "Perform the native claim fixture's assigned work.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := agentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return actors.AgentConfig{ID: identity.AgentID(), Identity: identity, ExecutionMode: "live", Intent: intent, Prompt: prompt}
+}
+
+func admitPreparedManagerNativeExecution(t *testing.T, ctx context.Context, owner agentfixture.Store, fixture *manager.ManagerDeliveryNativeFixture) (context.Context, agenttopology.SourceSetPlan) {
+	t.Helper()
+	source := fixture.Authority.SourceArtifact()
+	authority, err := agentfixture.AdmitExecutionAuthority(t, ctx, owner, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability, err := agentfixture.ProcessCapability(t, ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, found, err := capability.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("positive manager source plan: found=%t error=%v", found, err)
+	}
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, authority.ExecutionID(), authority.Generation(), "", plan.Revision, source.BundleHash(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = managedexecution.WithAdmission(ctx, admission)
+	if err := fixture.ActivateDeliveryAuthority(ctx, authority); err != nil {
+		t.Fatal(err)
+	}
+	fixture.Context, fixture.Authority, fixture.NormalAuthority = ctx, authority, authority
+	return ctx, plan
 }
 
 func publishManagerNativeDelivery(t *testing.T, ctx context.Context, selected managerNativeDeliveryOwner, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {
@@ -131,12 +233,10 @@ func TestManagerDeliveryNativeOwnerRequiresExplicitPublicationBothStores(t *test
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openManagerNativeDelivery(t, backend)
-			source := sourceartifactfixture.Fact()
-			ctx := correlation.WithSourceArtifactFact(context.Background(), source)
-			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("11111111-1111-1111-1111-111111111111", source.BundleHash()))
 			runID := uuid.NewString()
-			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 			identity := agentidentitytest.RootRuntimeForRun(t, runID, "agent-a", "manager.delivery_test")
+			ctx, _, _, _ := fixture.PrepareActor(t, managerNativeClaimActor(t, identity))
+			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, runID, events.EventEnvelope{}, time.Now().UTC())
 			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 			if missing, err := fixture.ClaimDelivery(ctx, fixture.Authority, event, route); err != nil || missing.Disposition != deliverylifecycle.ClaimAbsent {
 				t.Fatalf("unpublished event was claimable: %+v,error=%v", missing, err)
@@ -216,9 +316,10 @@ func TestManagerNativeDeliveryAgeFaultRollsBackForeignTokenBothStores(t *testing
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openManagerNativeDelivery(t, backend)
-			ctx := fixture.Context
-			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
-			identity := agentidentitytest.RootRuntimeForRun(t, event.RunID(), "age-proof", "manager.delivery_test")
+			runID := uuid.NewString()
+			identity := agentidentitytest.RootRuntimeForRun(t, runID, "age-proof", "manager.delivery_test")
+			ctx, _, _, _ := fixture.PrepareActor(t, managerNativeClaimActor(t, identity))
+			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, runID, events.EventEnvelope{}, time.Now().UTC())
 			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 			fixture.Publish(t, ctx, event, []events.DeliveryRoute{route}, fixture.Authority)
 			result, err := fixture.ClaimDelivery(ctx, fixture.Authority, event, route)

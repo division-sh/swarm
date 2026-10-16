@@ -37,16 +37,13 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 				if gate {
 					prefix = "outer/inner/"
 				}
-				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
-					"payload": map[string]any{"seed": true}, "idempotency_key": "release-seed",
-				})
+				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "release-seed"})
 				if gate {
-					entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
-					params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+					entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
+					params := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve")
 					var decision map[string]any
 					requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decision)
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "done")
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 					if len(history) != 1 || history[0].From != "approved" || history[0].To != "done" {
@@ -62,48 +59,44 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					if entity.Fields["result"] != "approved" {
 						t.Fatalf("nested gate final public result: %+v", entity)
 					}
-					requireLifecycleEventCount(t, rt, seed.RunID, prefix+"work.completed", 1)
-					before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+					requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, prefix+"work.completed", 1)
+					before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 					requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decision)
-					if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+					if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 						t.Fatal("duplicate acknowledged gate decision changed durable state")
 					}
 					return
 				}
-
-				entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, "waiting")
+				entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, seed.RunID, "waiting")
 				publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
-					return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-						"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID,
-						"payload": payload, "idempotency_key": key,
-					})
+					return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": key})
 				}
 				started := publish("loop.start", "release-start", map[string]any{"seed": true})
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "drafting")
 				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 				var finalEvent string
 				for attempt := 1; attempt <= 2; attempt++ {
-					current := readLifecycleLoop(t, rt, seed.RunID, entityID)
+					current := readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID)
 					if current.Attempt != attempt || current.MaxAttempts != 2 {
 						t.Fatalf("wrong public loop generation: %+v", current)
 					}
 					payload := map[string]any{"revision_id": current.RevisionID}
 					admit := publish("loop.admit", fmt.Sprintf("release-admit-%d", attempt), payload)
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "review")
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), admit.EventID, "drafting", "review")
 					finalEvent = publish("loop.repeat", fmt.Sprintf("release-repeat-%d", attempt), payload).EventID
 					next := "drafting"
 					if attempt == 2 {
 						next = "escaped"
 					}
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, next)
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, next)
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), finalEvent, "review", next)
 				}
-				closed := readLifecycleLoop(t, rt, seed.RunID, entityID)
+				closed := readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID)
 				if closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" || closed.Attempt != 2 {
 					t.Fatalf("loop cap not closed: %+v", closed)
 				}
-				receiver := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "done")
+				receiver := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "done")
 				if receiver == entityID {
 					t.Fatal("connected receiver borrowed the producer entity")
 				}
@@ -122,7 +115,7 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 				if entity.Fields["revision_id"] != closed.RevisionID {
 					t.Fatalf("connected public result lost escaped revision: %+v", entity)
 				}
-				requireLifecycleEventCount(t, rt, seed.RunID, "loop.escaped", 1)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "loop.escaped", 1)
 			})
 		}
 	}

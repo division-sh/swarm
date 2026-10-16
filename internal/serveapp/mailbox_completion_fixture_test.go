@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -48,7 +49,15 @@ func newRetainedMailboxCompletionRuntime(t *testing.T, backend servedparity.Back
 func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedparity.Backend, root, configSuffix string, tokens ...string) (servedControlProofRuntime, cursorMailboxStore, func() (servedControlProofRuntime, cursorMailboxStore)) {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	var receiverReader receiverProofStateReader
+	var snapshotReader func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
+		snapshotReader = func(ctx context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error) {
+			return storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, p.deps.EventStore)
+		}
+	})
 	if len(tokens) == 0 {
 		tokens = []string{apiv1.DefaultLoopbackAPIToken}
 	}
@@ -62,13 +71,8 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 		dsn, _, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		original := buildStoresForServe
-		buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			pg, err := store.NewPostgresStore(dsn)
-			if err != nil {
-				return nil, err
-			}
-			storetest.BootstrapPostgresRuntimeStore(t, pg)
-			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(pg), cfg), nil
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 		}
 		t.Cleanup(func() { buildStoresForServe = original })
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, name, "")
@@ -111,7 +115,7 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 		process.waitForReadyLine()
 		runtime := servedTestProcessRuntime(t, process)
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-		rt := servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: name, Runtime: runtime, Postgres: pg, SQLite: sq, BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
+		rt := servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: db, Backend: name, Runtime: runtime, Postgres: pg, SQLite: sq, BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
 		var owner cursorMailboxStore = sq
 		if pg != nil {
 			owner = pg
@@ -125,13 +129,13 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 func mailboxCompletionFixtureInRuntime(t *testing.T, rt servedControlProofRuntime, owner cursorMailboxStore) cursorMailboxFixture {
 	t.Helper()
 	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "matrix-seed-" + uuid.NewString()})
-	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
+	requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 	var id string
 	if err := rt.DB.QueryRow(`SELECT card_id FROM decision_cards WHERE run_id=$1 AND status='pending'`, seed.RunID).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	ctx := servedControlProofAuthorActivityContext(t, rt)
+	ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 	base, err := owner.GetDecisionCard(ctx, id)
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +176,7 @@ func mailboxCompletionAnchorCard(t *testing.T, f cursorMailboxFixture, kind deci
 	waitServedRunDeliveryQuiescence(t, f.rt.ReadRunDeliveries, f.base.RunID)
 	var id string
 	if err := f.rt.DB.QueryRow(`SELECT card_id FROM decision_cards WHERE run_id=$1 AND anchor_kind='human_task'`, f.base.RunID).Scan(&id); err != nil {
-		t.Fatalf("ask_human did not create a card: %v\n%s", err, servedEventPublishDebugSummary(t, f.rt.DB, f.rt.Backend, f.base.RunID))
+		t.Fatalf("ask_human did not create a card: %v\n%s", err, servedInspectionRunDebugSummary(f.rt.ReceiverStateReader, f.base.RunID))
 	}
 	card, err := f.store.GetDecisionCard(f.ctx, id)
 	if err != nil {
@@ -185,7 +189,7 @@ func mailboxCompletionNotice(t *testing.T, f cursorMailboxFixture, publicationOu
 	t.Helper()
 	seed := requireServedEventPublishRPCResult(t, f.rt.Endpoint, map[string]any{"event_name": "notice.requested", "run_id": f.base.RunID, "source_event_id": f.eventID, "payload": map[string]any{"seed": true}, "idempotency_key": "notice-seed-" + uuid.NewString()})
 	waitServedRunDeliveryQuiescence(t, f.rt.ReadRunDeliveries, f.base.RunID)
-	waitPublicationSiteCompletion(t, f.rt, f.base.RunID)
+	waitPublicationSiteCompletion(t, f.rt.ReceiverStateReader, f.base.RunID)
 	var id, summary, from string
 	if err := f.rt.DB.QueryRow(`SELECT item_id,summary,from_agent FROM mailbox WHERE source_event_id=$1 AND item_type=$2`, seed.EventID, runtimetools.NotifyHumanMailboxItemType).Scan(&id, &summary, &from); err != nil {
 		t.Fatalf("real notify_human did not persist the notice: %v", err)

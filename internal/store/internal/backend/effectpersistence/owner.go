@@ -46,6 +46,8 @@ type providerDrainDeliveryOwner interface {
 	SettleSelectedCanceledOriginRecoveryTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, string, runtimedelivery.CancellationReason, time.Duration) (runtimedelivery.Snapshot, error)
 	SettleProviderOriginFailureTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.Settlement) error
 	SettleProviderOriginRecoveryFailureTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.Settlement) error
+	QueueProviderResumeTx(context.Context, *mutationprotocol.Attempt, runtimedelivery.Claim, runtimedelivery.Settlement) (bool, error)
+	ValidateProviderResumeClaimTx(context.Context, *sql.Tx, runtimedelivery.Claim, runtimedelivery.Claim) error
 }
 
 type providerDrainDirectiveOwner interface {

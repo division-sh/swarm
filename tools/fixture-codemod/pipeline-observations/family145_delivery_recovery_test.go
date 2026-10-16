@@ -1,0 +1,5 @@
+package main
+
+const deliveryRecoveryReadOwner = "internal/store/internal/backend/delivery/read_projections.go"
+const deliveryRecoveryReadOwnerBefore = "28a43daef1ea1196242bd370653816ea61ea59460e6c0f2bbf96a05a81afab68"
+const deliveryRecoveryReadOwnerAfter = "a2bf26a7d22fb377634f3503897e30206f504efc20a179aca3f84a2dca77fa36"

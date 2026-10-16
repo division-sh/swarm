@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -46,10 +47,13 @@ func TestCanonicalEventReadbackOverridesConflictingReceiptsBothStores(t *testing
 			events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, time.Now().UTC())
 		statuses := []string{"pending", "in_progress", "delivered", "failed", "dead_letter"}
 		routes := make([]events.DeliveryRoute, len(statuses))
+		identities := make([]agentidentity.Identity, len(statuses))
 		for i, status := range statuses {
 			agentID := "agent-" + status
 			routes[i] = events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: agentidentitytest.RootRuntimeForRun(t, runID, agentID, "canonical-readback")}
+			identities[i] = routes[i].AgentIdentity
 		}
+		ctx = prepareAPIReadbackAgents(t, ctx, selected, identities...)
 		storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, routes, runtimepipelineobligation.ScopeSubscribed)
 		for i := 1; i < len(routes); i++ {
 			claimed, err := storetest.ClaimDelivery(ctx, selected, event, routes[i])

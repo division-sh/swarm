@@ -22,8 +22,15 @@ func staticAuthorityGuardRoots(t *testing.T, repo string) []TestRoot {
 	if !slices.Contains(roots, absentCutGuard) {
 		t.Fatal("static authority census lost the DC-6 exact-origin absent-cut fault guard")
 	}
-	if len(roots) != 81 {
-		t.Fatalf("static authority source census changed: %d roots, want 81", len(roots))
+	backendQueryGuard := TestRoot{
+		Package: "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+		Name:    "TestBackendQueryEventFixtureWriterClassificationPinsExactIsolatedSetup",
+	}
+	if !slices.Contains(roots, backendQueryGuard) {
+		t.Fatal("static authority census lost the exact isolated event-query fixture guard")
+	}
+	if len(roots) != 85 {
+		t.Fatalf("static authority source census changed: %d roots, want 85", len(roots))
 	}
 	return roots
 }

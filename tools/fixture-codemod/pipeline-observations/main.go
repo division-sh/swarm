@@ -14,8 +14,11 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
@@ -46,10 +49,40 @@ type pendingFile struct {
 
 func main() {
 	write := flag.Bool("write", false, "apply the finite reviewed rewrites after complete preflight")
+	forkCallers := flag.Bool("family145-fork-callers", false, "propagate the source-pinned original selected fork owners")
+	notifyRuntime := flag.Bool("family145-notify-runtime", false, "remove the source-pinned notify runtime pool carriers")
+	numericRegistration := flag.Bool("family145-numeric-registration", false, "remove the source-pinned numeric registration pool carriers")
 	flag.Parse()
-	if flag.NArg() != 0 {
-		fmt.Fprintln(os.Stderr, "usage: go run ./tools/fixture-codemod/pipeline-observations [-write]")
+	selectedModes := 0
+	for _, selected := range []bool{*forkCallers, *notifyRuntime, *numericRegistration} {
+		if selected {
+			selectedModes++
+		}
+	}
+	if flag.NArg() != 0 || selectedModes > 1 {
+		fmt.Fprintln(os.Stderr, "usage: go run ./tools/fixture-codemod/pipeline-observations [-family145-fork-callers | -family145-notify-runtime | -family145-numeric-registration] [-write]")
 		os.Exit(1)
+	}
+	if *forkCallers {
+		if err := migrateFamily145ForkCallers(*write); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *notifyRuntime {
+		if err := migrateFamily145NotifyRuntimeCallers(*write); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *numericRegistration {
+		if err := migrateFamily145NumericRegistrationCallers(*write); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
 	}
 	if err := migrate(*write); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -133,6 +166,10 @@ func prepareFiles(root string, recipes []recipe) ([]pendingFile, []recipe, error
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", path, err)
 		}
+		current, err = nativeEntryCurrentRecipes(root, path, source, current)
+		if err != nil {
+			return nil, nil, err
+		}
 		result, applied, err := rewriteSource(path, source, current)
 		if err != nil {
 			return nil, nil, err
@@ -143,6 +180,42 @@ func prepareFiles(root string, recipes []recipe) ([]pendingFile, []recipe, error
 		}
 	}
 	return files, changed, nil
+}
+
+func nativeEntryCurrentRecipes(root, path string, source []byte, rows []recipe) ([]recipe, error) {
+	var err error
+	rows, err = repair2698CurrentRecipes(root, path, source, rows)
+	if err != nil {
+		return nil, err
+	}
+	prior, err := selectedreadrole.NativeEntry2542HistoricalSource(root, path, source)
+	if err != nil || bytes.Equal(prior, source) {
+		return rows, err
+	}
+	var originals []recipe
+	if err := json.Unmarshal(recipeBytes, &originals); err != nil {
+		return nil, err
+	}
+	immutable := map[string]recipe{}
+	for _, row := range originals {
+		if row.File == path {
+			immutable[row.Function] = row
+		}
+	}
+	current := append([]recipe(nil), rows...)
+	for index, row := range current {
+		before, err := selectedreadrole.Body(prior, row.Function)
+		expected, parseErr := canonicalFunction(row.After)
+		if !reflect.DeepEqual(immutable[row.Function], row) || err != nil || parseErr != nil || before != expected {
+			return nil, fmt.Errorf("native-entry recipe is not its unchanged signed predecessor: %s", row.Function)
+		}
+		actual, err := selectedreadrole.Body(source, row.Function)
+		if err != nil {
+			return nil, err
+		}
+		current[index].After = actual
+	}
+	return current, nil
 }
 
 func validateRecipeSnapshots(row recipe) error {

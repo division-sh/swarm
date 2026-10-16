@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -106,6 +107,20 @@ func seedDeliveryStateFixture(
 	if err := commitDeliveryObligationFixture(ctx, store, event, route); err != nil {
 		t.Fatalf("commit delivery fixture %s/%s: %v", event.ID(), route.Recipient.ID(), err)
 	}
+	return settleDeliveryStateFixture(t, ctx, store, event, route, state, failure)
+}
+
+func settleDeliveryStateFixture(
+	t testing.TB,
+	ctx context.Context,
+	store deliveryFixtureStore,
+	event events.Event,
+	route events.DeliveryRoute,
+	state runtimedelivery.State,
+	failure *runtimefailures.Envelope,
+) runtimedelivery.Snapshot {
+	t.Helper()
+	route = canonicalDeliveryFixtureRoute(t, event.RunID(), route)
 	if state == runtimedelivery.StateQueued {
 		return loadDeliverySnapshotFixture(t, ctx, store, event.ID(), route)
 	}
@@ -225,6 +240,12 @@ func deliveryFixtureAuthorityForRun(ctx context.Context, queryer interface {
 	source, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
 	if err != nil {
 		return runtimedelivery.ExecutionAuthority{}, err
+	}
+	if admission, found := managedexecution.FromContext(ctx); found {
+		if admission.BundleHash != source.BundleHash() || (admission.Kind == managedexecution.KindSelectedContractFork && admission.RunID != runID) {
+			return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("delivery fixture admission differs from its exact run source or selected fork")
+		}
+		return runtimedelivery.NewExecutionAuthority(source, admission)
 	}
 	return runtimedelivery.NewNormalExecutionAuthority(source, "delivery-fixture:"+runID, 1)
 }
