@@ -166,6 +166,11 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if !sameSelectedForkPointIdentity(plan.ForkPoint, binding.ForkPoint) {
 		return SelectedContractActivationGateResult{}, errors.New("selected-contract activation plan differs from durable fork point")
 	}
+	original, err = retainOriginalActivityHistory(ctx, req.SourceLoader, original, plan)
+	if err != nil {
+		return SelectedContractActivationGateResult{}, err
+	}
+	resources.originalLoopCarriage = original
 	// Native preparation fingerprints the fixed plan, not resolved diagnostics.
 	fixedPlan := plan
 	plan.ReplayResumeAdmission.Dispositions = append([]runfork.RunForkReplayResumeDisposition(nil), plan.ReplayResumeAdmission.Dispositions...)

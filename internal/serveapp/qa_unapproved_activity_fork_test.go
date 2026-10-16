@@ -82,7 +82,7 @@ func TestQAUnapprovedRecordedHTTPWriteForkBothStores(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, "tools.yaml"), []byte(tool), 0600); err != nil {
 				t.Fatal(err)
 			}
-			rt, _ := startSemanticNumericRuntime(t, backend, root, false)
+			rt, restart := startSemanticNumericRuntime(t, backend, root, false)
 			first := semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "event.publish", "", "qa-unapproved-write", "7"))
 			if first.Error != nil {
 				t.Fatalf("source event: %+v", first.Error)
@@ -129,6 +129,7 @@ func TestQAUnapprovedRecordedHTTPWriteForkBothStores(t *testing.T) {
 					t.Fatalf("fork result=%s err=%v", response.Result, err)
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
+				requireQARecordedWriteForkConsumption(t, rt, fork.ForkRunID)
 				var copied string
 				if err := rt.DB.QueryRow(`SELECT CAST(result_payload AS TEXT) FROM activity_attempts WHERE CAST(run_id AS TEXT)=$1 AND status='succeeded'`, fork.ForkRunID).Scan(&copied); err != nil || copied == "" {
 					t.Fatalf("copied result=%s err=%v", copied, err)
@@ -162,6 +163,45 @@ func TestQAUnapprovedRecordedHTTPWriteForkBothStores(t *testing.T) {
 				if err != nil || !reflect.DeepEqual(projected, want) {
 					t.Fatalf("recorded result changed numeric kinds: got=%#v want=%#v err=%v", projected, want, err)
 				}
+				previous := fork.ForkRunID
+				for hop := 1; hop <= 2; hop++ {
+					var childInput string
+					if err := rt.DB.QueryRow(`SELECT CAST(event_id AS TEXT) FROM events WHERE CAST(run_id AS TEXT)=$1 AND event_name='platform.activity_requested'`, previous).Scan(&childInput); err != nil {
+						t.Fatal(err)
+					}
+					reforked := requestServedJSONRPC(t, rt.Endpoint, "run.fork", map[string]any{
+						"source_run_id": previous, "fork_event_id": childInput, "bundle_hash": rt.BundleHash,
+						"allow_source_freeze": true, "idempotency_key": fmt.Sprintf("qa-recorded-write-refork-%d", hop),
+					})
+					var next apiv1.RunForkExecutionResult
+					if reforked.Error != nil {
+						t.Fatalf("child-input refork hop %d: %+v", hop, reforked.Error)
+					}
+					if err := json.Unmarshal(reforked.Result, &next); err != nil || next.ForkRunID == "" || next.ForkRunID == previous {
+						t.Fatalf("child-input refork identity: %s error=%v", reforked.Result, err)
+					}
+					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, next.ForkRunID)
+					requireQARecordedWriteForkConsumption(t, rt, next.ForkRunID)
+					if calls.Load() != 1 {
+						t.Fatalf("child-input refork hop %d redispatched HTTP: %d", hop, calls.Load())
+					}
+					previous = next.ForkRunID
+				}
+				beforeReplay := qaRecordedWritePublicationCounts(t, rt, fork.ForkRunID)
+				// Reopen and reread the immutable ACK rather than materializing
+				// another child or borrowing the retired execution context.
+				rt = restart()
+				replayed := requestServedJSONRPC(t, rt.Endpoint, "run.fork", map[string]any{
+					"source_run_id": started.RunID, "fork_event_id": requestID, "bundle_hash": rt.BundleHash,
+					"allow_source_freeze": true, "idempotency_key": "qa-recorded-write-fork",
+				})
+				var recovered apiv1.RunForkExecutionResult
+				if replayed.Error != nil {
+					t.Fatalf("reopen original operation ACK: %+v", replayed.Error)
+				}
+				if err := json.Unmarshal(replayed.Result, &recovered); err != nil || recovered.ForkRunID != fork.ForkRunID || calls.Load() != 1 || qaRecordedWritePublicationCounts(t, rt, fork.ForkRunID) != beforeReplay {
+					t.Fatalf("recovered ACK rematerialized or redispatched: %s calls=%d error=%v", replayed.Result, calls.Load(), err)
+				}
 			}
 			var after string
 			if err := rt.DB.QueryRow(`SELECT CAST(result_payload AS TEXT) FROM activity_attempts WHERE CAST(request_event_id AS TEXT)=$1 AND status='succeeded'`, requestID).Scan(&after); err != nil || after != sourceResult || calls.Load() != 1 {
@@ -169,4 +209,33 @@ func TestQAUnapprovedRecordedHTTPWriteForkBothStores(t *testing.T) {
 			}
 		})
 	}
+}
+
+func requireQARecordedWriteForkConsumption(t *testing.T, rt servedControlProofRuntime, runID string) {
+	t.Helper()
+	var consumed string
+	if err := rt.DB.QueryRow(`SELECT CAST(payload AS TEXT) FROM events WHERE CAST(run_id AS TEXT)=$1 AND event_name='numeric.completed'`, runID).Scan(&consumed); err != nil {
+		t.Fatalf("fork did not actually consume the recorded activity result: %v", err)
+	}
+	var value any
+	if err := canonicaljson.DecodePreservingNumberLexemes([]byte(consumed), &value); err != nil {
+		t.Fatal(err)
+	}
+	projected, err := workflowexpr.ProjectCELValue(value)
+	want := map[string]any{"value": int64(15), "fraction": float64(8), "explicit_double": float64(8)}
+	if err != nil || !reflect.DeepEqual(projected, want) {
+		t.Fatalf("fork consumer changed numeric execution: got=%#v want=%#v error=%v", projected, want, err)
+	}
+}
+
+func qaRecordedWritePublicationCounts(t *testing.T, rt servedControlProofRuntime, runID string) [2]int {
+	t.Helper()
+	var counts [2]int
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE CAST(run_id AS TEXT)=$1 AND event_name IN ('platform.activity_requested','fetch.succeeded','numeric.completed')`, runID).Scan(&counts[0]); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE CAST(run_id AS TEXT)=$1`, runID).Scan(&counts[1]); err != nil {
+		t.Fatal(err)
+	}
+	return counts
 }

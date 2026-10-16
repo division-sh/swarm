@@ -63,7 +63,7 @@ func (s *RunForkPostgresOwner) PlanRunFork(ctx context.Context, req runfork.RunF
 		return runfork.RunForkPlan{}, fmt.Errorf("begin run fork revision snapshot: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	return planRunForkSnapshotWithActivityOrigins(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, s.RequirePresentSourceTx, true)
+	return planRunForkSnapshotWithActivityOrigins(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, s.ReadPresentSourceTx, true)
 }
 
 func (s *RunForkSQLiteOwner) PlanRunFork(ctx context.Context, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
@@ -76,7 +76,7 @@ func (s *RunForkSQLiteOwner) PlanRunFork(ctx context.Context, req runfork.RunFor
 	var plan runfork.RunForkPlan
 	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		plan, err = planRunForkSnapshotWithActivityOrigins(txctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, s.RequirePresentSourceTx, false)
+		plan, err = planRunForkSnapshotWithActivityOrigins(txctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, s.ReadPresentSourceTx, false)
 		return err
 	})
 	return plan, err

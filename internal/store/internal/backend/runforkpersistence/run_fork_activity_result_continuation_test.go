@@ -22,14 +22,32 @@ func activityPublicationCutFixture(t *testing.T) (runForkSourceStateAdmission, s
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This fixture tests a direct journal publication. Give it the ordinary
+	// request's real causal frame, not a selected root publication's empty frame.
+	requestProducer, err := events.NewProducerIdentity(events.EventProducerPlatform, "workflow-engine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := eventtest.ChildForProducerWithRoutingSource(activityidentity.RequestEventID(fact), runForkActivityRequestEvent, requestProducer, "", f.record.Payload, 1,
+		events.EventLineage{RunID: fact.RunID, ParentEventID: fact.SourceEventID, ExecutionMode: source.ExecutionMode}, request.Event().Envelope(), source.RoutingSource, f.record.CreatedAt)
+	requestAdmission, present := request.Event().PayloadAdmission()
+	if !present {
+		t.Fatal("request fixture lacks payload admission")
+	}
+	original, err = events.ApplyPayloadAdmission(original, requestAdmission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.record = activityPublicationFixtureRecord(t, original)
+	source.SourceEventID = original.ID()
 	resultID := activityidentity.ResultEventID(fact, "compute.succeeded")
-	raw := []byte(`{"activity_id":"compute","attempt":1,"effect_class":"non_idempotent_write","result":{"value":"recorded"},"tool":"compute"}`)
+	raw := []byte(`{"activity_id":"compute","result":{"value":"recorded"},"tool":"compute"}`)
 	producer, err := events.NewProducerIdentity(events.EventProducerAgent, "provider")
 	if err != nil {
 		t.Fatal(err)
 	}
 	result := eventtest.ChildForProducerWithRoutingSource(resultID, "compute.succeeded", producer, "", raw, 1,
-		events.EventLineage{RunID: f.record.RunID, ParentEventID: source.SourceEventID, ExecutionMode: source.ExecutionMode}, request.Event().Envelope(), source.RoutingSource, f.record.CreatedAt)
+		events.EventLineage{RunID: f.record.RunID, ParentEventID: original.ParentEventID(), ExecutionMode: source.ExecutionMode}, original.Envelope(), source.RoutingSource, f.record.CreatedAt)
 	schema, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{BundleHash: f.record.PayloadSchemaBundleHash, FlowID: ".", EventKey: "compute.succeeded",
 		SchemaDigest: f.record.PayloadSchemaDigest, SchemaClass: events.PayloadSchemaAuthored})
 	if err != nil {
@@ -43,7 +61,19 @@ func activityPublicationCutFixture(t *testing.T) (runForkSourceStateAdmission, s
 	if err != nil {
 		t.Fatal(err)
 	}
-	admitted, err := events.AdmitForPersistence(result, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	record := activityPublicationFixtureRecord(t, result)
+	snapshot := &runForkRevisionSnapshot{RunID: f.record.RunID, Revision: 3,
+		Events: []runForkRevisionEvent{genericPublicationRevisionEvent(f.record, original), genericPublicationRevisionEvent(record, result)}}
+	child := runForkActivityRequestPayload{SourceRunID: uuid.NewString(), SourceEventID: uuid.NewString(), EntityID: uuid.NewString(),
+		NodeID: fact.Owner.Key(), FlowID: ".", HandlerEventKey: fact.HandlerEventKey, ActivityID: fact.ActivityID, Tool: fact.Tool}
+	evidence := runForkActivityAttemptEvidence{Status: "succeeded", ExecutionMode: source.ExecutionMode,
+		ResultEventID: resultID, ResultEventType: "compute.succeeded", ResultPayload: raw, InputHash: "exact-input", CompletedAt: result.CreatedAt()}
+	return runForkSourceStateAdmission{snapshot: snapshot, forkRunID: child.SourceRunID}, source.SourceEventID, evidence, child
+}
+
+func activityPublicationFixtureRecord(t *testing.T, event events.Event) eventrecord.Record {
+	t.Helper()
+	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,13 +89,7 @@ func activityPublicationCutFixture(t *testing.T) (runForkSourceStateAdmission, s
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot := &runForkRevisionSnapshot{RunID: f.record.RunID, Revision: 3,
-		Events: []runForkRevisionEvent{genericPublicationRevisionEvent(f.record, request.Event()), genericPublicationRevisionEvent(record, result)}}
-	child := runForkActivityRequestPayload{SourceRunID: uuid.NewString(), SourceEventID: uuid.NewString(), EntityID: uuid.NewString(),
-		NodeID: fact.Owner.Key(), FlowID: ".", HandlerEventKey: fact.HandlerEventKey, ActivityID: fact.ActivityID, Tool: fact.Tool}
-	evidence := runForkActivityAttemptEvidence{Status: "succeeded", ExecutionMode: source.ExecutionMode,
-		ResultEventID: resultID, ResultEventType: "compute.succeeded", ResultPayload: raw, InputHash: "exact-input", CompletedAt: result.CreatedAt()}
-	return runForkSourceStateAdmission{snapshot: snapshot, forkRunID: child.SourceRunID}, source.SourceEventID, evidence, child
+	return record
 }
 
 func TestActivityPublicationContinuationUsesCutNotCurrentProgress(t *testing.T) {

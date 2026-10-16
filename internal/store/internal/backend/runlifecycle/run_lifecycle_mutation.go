@@ -143,6 +143,14 @@ func (s *RunLifecycleSQLiteOwner) RequirePresentSourceTx(ctx context.Context, tx
 	return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequirePresentSource(ctx, runID)
 }
 
+func (s *RunLifecyclePostgresOwner) ReadPresentSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+	return (postgresRunLifecycleMutation{store: s, tx: tx, readOnly: true}).RequirePresentSource(ctx, runID)
+}
+
+func (s *RunLifecycleSQLiteOwner) ReadPresentSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+	return (sqliteRunLifecycleMutation{store: s, tx: tx, readOnly: true}).RequirePresentSource(ctx, runID)
+}
+
 func runPostgresLifecycleOperation[T any](
 	ctx context.Context,
 	store *RunLifecyclePostgresOwner,
