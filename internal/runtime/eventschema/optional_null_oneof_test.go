@@ -23,6 +23,10 @@ func TestOptionalNullOneOfPreservesUniqueBranchAndInput(t *testing.T) {
 	delete(implicit, "type")
 	outer := optionalNullAlternatives()
 	outer["properties"] = map[string]any{"label": map[string]any{"type": "string", "minLength": 1}}
+	array := map[string]any{"oneOf": []any{
+		map[string]any{"type": "array", "items": optionalNullObject(map[string]any{"label": map[string]any{"type": "string"}})},
+		map[string]any{"type": "array", "items": optionalNullObject(map[string]any{"other": map[string]any{"type": "string"}}, "other")},
+	}}
 	shared := map[string]any{
 		"type": "object", "properties": map[string]any{"kind": map[string]any{"type": "string"}, "label": map[string]any{"type": "string"}},
 		"required": []string{"kind"}, "additionalProperties": false,
@@ -42,6 +46,7 @@ func TestOptionalNullOneOfPreservesUniqueBranchAndInput(t *testing.T) {
 		{"outer_declared_optional", outer, map[string]any{"label": nil}, map[string]any{}},
 		{"shared_outer_field", shared, map[string]any{"kind": "first", "label": nil}, map[string]any{"kind": "first"}},
 		{"list_record", optionalNullObject(map[string]any{"items": map[string]any{"type": "array", "items": optionalNullAlternatives()}}, "items"), map[string]any{"items": []any{map[string]any{"label": nil}}}, map[string]any{"items": []any{map[string]any{}}}},
+		{"array_alternatives", optionalNullObject(map[string]any{"items": array}, "items"), map[string]any{"items": []any{map[string]any{"label": nil}}}, map[string]any{"items": []any{map[string]any{}}}},
 		{"map_record", optionalNullObject(map[string]any{"entries": map[string]any{"type": "object", "additionalProperties": optionalNullAlternatives()}}, "entries"), map[string]any{"entries": map[string]any{"entry": map[string]any{"label": nil}}}, map[string]any{"entries": map[string]any{"entry": map[string]any{}}}},
 		{"non_null_branch", optionalNullAlternatives(), map[string]any{"other": "present"}, map[string]any{"other": "present"}},
 		{"already_omitted", optionalNullAlternatives(), map[string]any{}, map[string]any{}},
