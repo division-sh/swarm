@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -42,6 +44,44 @@ func TestBudgetRecoveryStageClassifierKeepsFlowScopedTerminality(t *testing.T) {
 		if got != tc.terminal || known != tc.known {
 			t.Errorf("flow %q stage %q: terminal=%v known=%v, want %v/%v", tc.flow, tc.stage, got, known, tc.terminal, tc.known)
 		}
+	}
+}
+
+func TestS1BudgetRecoveryRefusesMalformedRootReferenceBeforeSourceOrSpend(t *testing.T) {
+	root, _ := sourceartifactfixture.Rooted(t, "budget", sourceartifactfixture.Artifact())
+	for _, reference := range []sourceartifact.RootAdmissionReference{
+		{},
+		{BundleHash: root.Artifact().BundleHash()},
+		{BundleHash: root.Artifact().BundleHash(), RootDirectory: "budget "},
+		{BundleHash: "hash7", RootDirectory: "budget"},
+	} {
+		t.Run(reference.BundleHash+"/"+reference.RootDirectory, func(t *testing.T) {
+			store := &budgetSpendStoreCapture{sum: 0.95, targets: []budgetspend.ProjectionTarget{{
+				RunID: "run-budget", EntityID: "entity-budget", RootReference: reference, Stage: "active",
+			}}}
+			eventStore := &bootSelfCheckDescriptorStore{}
+			bus, err := newRuntimeTestEventBus(t, eventStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			loads := 0
+			tracker := NewBudgetTracker(store, bus, &config.Config{Extensions: map[string]any{
+				"budget": map[string]any{"per_entity_monthly_cap": 1},
+			}}, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), executionposture.Live, BudgetRecoveryStageSources{
+				CurrentBundleHash: root.Artifact().BundleHash(),
+				Load: func(context.Context, string) (semanticview.Source, error) {
+					loads++
+					return nil, nil
+				},
+			})
+			err = tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background()))
+			if err == nil || !strings.Contains(err.Error(), "requires its exact source root reference") {
+				t.Fatalf("malformed source reference did not refuse at the target boundary: %v", err)
+			}
+			if loads != 0 || len(store.sumQueries) != 0 || len(eventStore.appendedEvents()) != 0 {
+				t.Fatalf("malformed source reference reached loading/spend/publication: loads=%d queries=%+v events=%+v", loads, store.sumQueries, eventStore.appendedEvents())
+			}
+		})
 	}
 }
 
