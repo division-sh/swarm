@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -136,6 +137,8 @@ func loadDeliveryTurnAttribution(ctx context.Context, q eventReadQueryer, postgr
 		}
 	case ambiguous:
 		out.EvidenceReason = "publication_origin_ambiguous"
+	case len(turns) > 0:
+		out.EvidenceReason = "proposed_publication_unproven"
 	case complete:
 		out.Emission = operatorread.RunEmissionNone
 	default:
@@ -283,26 +286,35 @@ func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, post
 		if err != nil {
 			return nil, false, err
 		}
-		_, _, path, err := delivery.Route.AgentIdentity.ExecutionCoordinates()
+		identity := delivery.Route.AgentIdentity
+		_, _, path, err := identity.ExecutionCoordinates()
 		if err != nil {
 			return nil, false, err
 		}
-		if admitted.Event().SourceRoute().FlowInstance != path {
+		source := admitted.Event().RoutingSource()
+		if identity.Route.Presence == agentidentity.RouteRoot {
+			if source.Kind() != events.RoutingSourceRoot {
+				continue
+			}
+		} else if source.Route().FlowInstance != path || source.Route().FlowID != identity.Route.ScopeKey {
 			continue
 		}
-		toolName := tools.EmitToolName(record.EventName)
+		declaration, err := pinrouting.PublicationDeclarationForSourceEvent(admitted.Event().Type(), source)
+		if err != nil {
+			return nil, false, err
+		}
+		toolName := tools.EmitToolName(declaration.Local())
 		if candidates[id] != toolName && (!nativeCLI[toolName] || matchingOrigins != 1) {
 			ambiguous = true
 			continue
 		}
-		identity := delivery.Route.AgentIdentity
 		instance := flowidentity.RunScopedFlowInstance{RunID: identity.RunID, Route: flowidentity.Route{
 			ScopeKey: identity.Route.ScopeKey, InstanceID: identity.Route.InstanceID, InstancePath: identity.Route.InstancePath,
 		}}
 		if identity.Route.Presence == agentidentity.RouteRoot {
 			instance.Route = flowidentity.Route{ScopeKey: ".", InstanceID: identity.RunID, InstancePath: identity.RunID}
 		}
-		request := pipeline.WorkflowPublicationStageRequest{Instance: instance, EntityID: admitted.Event().SourceRoute().EntityID}
+		request := pipeline.WorkflowPublicationStageRequest{Instance: instance, EntityID: source.Route().EntityID}
 		if err := request.ValidateEvent(admitted.Event()); err != nil {
 			return nil, false, err
 		}
