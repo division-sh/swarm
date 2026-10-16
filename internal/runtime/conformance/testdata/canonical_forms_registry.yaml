@@ -415,7 +415,7 @@ rows:
   - id: handler.policy_selection_rows
     ruled: mechanical-ratified
     paths: "rule.when, retired handler.rules.condition, rule.case.selector, rule.case.selectors, rule.case.equals, rule.range.*, rule.lookup.*, rule.validate.*, rule.compute_module.*, rule.else, rule.default"
-    owner: projectNodeRuleRowsValue + projectNodePolicyRowValue
+    owner: projectNodeRuleRowsValue + projectNodePolicyRowValue + projectNodePolicyCaseValue
     information:
       choice: [predicate, case/range/lookup/validation/module selection, default branch]
       fact: [positional DeclarationIdentity, module and validation references]
@@ -424,7 +424,7 @@ rows:
       canonical_candidate: typed_policy_sheet_rows_with_when_only_predicate
       retired_duplicates: [condition_under_handler_rules, else_default, selector_one_item_selectors, scalar_one_item_equals]
       distinct_overrides: [multi_selector_case, literal_and_typed_lookup_values]
-    f2_resolution: "handler.rules.condition rejects at context-aware admission; when retains PolicyRow metadata and typed-row validation; on_complete.condition remains distinct. #2287 removes authored row id/description and binds internal lookup/validate/module RowID diagnostics to the shared admitted display. USER ruling6169683113 rejects else/default fields on presence and derives default kind from a trailing effectful predicate-less selection row; ordinary CEL readers/evaluation have no sentinel exception. Plain when-only blocks need no default; policy-sheet and emit-template defaults remain required, and lookup.default: fail is untouched. Other row-shape census candidates remain separately open."
+    f2_resolution: "handler.rules.condition rejects at context-aware admission; when retains PolicyRow metadata and typed-row validation; on_complete.condition remains distinct. #2287 removes authored row id/description and binds internal lookup/validate/module RowID diagnostics to the shared admitted display. USER ruling6169683113 rejects else/default fields on presence and derives default kind from a trailing effectful predicate-less selection row; ordinary CEL readers/evaluation have no sentinel exception. Plain when-only blocks need no default; policy-sheet and emit-template defaults remain required, and lookup.default: fail is untouched. USER ruling6198217322 retains singular selector/scalar equals and plural lists of equal length at least two; scalar selectors, singleton plural and mixed shapes refuse before coercion. Reviewer-d6207943492 bounds same-row duplicate refusal to identical normalized selector/typed literal pairs, distinct from ordered whole-row duplicate refusal. Blank tuple members are refused without changing range.monotonicity or lookup.on. Historical corpus counts stay immutable."
     corpus: {condition: 0, when: 1, else: 1, default: 0}
 
   - id: handler.emit_action_activity
