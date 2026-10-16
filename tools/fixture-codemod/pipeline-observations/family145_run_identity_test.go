@@ -162,6 +162,15 @@ func TestFamily145RunIdentityCallerInventoryIsClosed(t *testing.T) {
 			t.Fatal("unmanifested run identity consumer/alias/owner accepted:", source, err)
 		}
 	}
+	for _, source := range []string{
+		"package proof\nfunc unrelated(){ unrelatedOwner() }",
+		"package proof\nfunc unrelated(){ _ = `readServedRunPhysicalIdentity` }",
+	} {
+		file, err := parser.ParseFile(token.NewFileSet(), "unrelated.go", source, parser.AllErrors)
+		if err != nil || runIdentityFileError("foreign.go", file) != nil {
+			t.Fatal("a declaration without watched identifiers acquired reference authority:", err)
+		}
+	}
 }
 
 func runIdentityOwnedFile(t *testing.T, path string, file *ast.File) (int, int) {
@@ -204,6 +213,9 @@ func runIdentityFileError(path string, file *ast.File) error {
 			}
 			allowed[fn.Name.Pos()] = true
 		}
+		if !runIdentityContainsReference(fn) {
+			continue
+		}
 		current, err := servedsettlement.SetupEarlierSource("../../..", path, fn.Name.Name, requestkey.Node(fn))
 		if err != nil {
 			return err
@@ -226,6 +238,17 @@ func runIdentityFileError(path string, file *ast.File) error {
 		return true
 	})
 	return failure
+}
+
+func runIdentityContainsReference(fn *ast.FuncDecl) bool {
+	found := false
+	ast.Inspect(fn, func(node ast.Node) bool {
+		if id, ok := node.(*ast.Ident); ok && id.Name == "readServedRunPhysicalIdentity" {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 func recordRunIdentityReferences(allowed map[token.Pos]bool, fn *ast.FuncDecl) {
