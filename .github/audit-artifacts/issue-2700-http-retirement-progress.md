@@ -59,6 +59,9 @@ affected checks or the unresolved R04 integration.
 | effect-retirement-keyfree-agent-race3-candidate1.log | PASS24/24 executions, tools43.544s: GET/POST x transport/read_response x both stores x3. Existing native write_unknown accounting, one physical call, exact uncertainty result, reopen and replay assertions retained. |
 | effect-retirement-lineage-oracle-original-red.log | RED0.009s: two current-source lineage fixtures still authored the retired selector, so shared admission refused before their assertions. |
 | effect-retirement-lineage-oracle-race3-candidate1.log | PASS pipeline3.214s: both existing lineage roots x3. Key-free GET planning uses the fixed policy; source/run/parent/entity/flow/instance/handler/activity/tool/result/retry/fork-policy and generation negatives, plus exact/nonterminal parent controls, remain active. No historical packet changed. |
+| effect-retirement-validation-oracles-original-red.log | RED runtime0.062s: four stale expectations retained from authored policy selection. Approval/GET-static-credential cases now legitimately admit; old idempotency declaration must refuse at shared source admission; unsupported connectors still refuse missing credential/response-success policy, not a deleted class. |
+| effect-retirement-validation-oracles-race3-candidate1.log | PASS runtime3.995s, race x3. GET/POST approval positives and missing-consumer/noncanonical-decision negatives; all4 retired declarations refuse with exact teaching/source location. Connector credential and response-success negatives, rate/managed-credential refusal, input/MCP/result collision and ordinary connector positives remain active. |
+| effect-retirement-registry-tail-controls-race3-candidate1.log | PASS runtime1.052s, race x3. The invalid connector now asserts BOTH actual credential/response-policy refusals; every original registry observation, dependency, no-execution timestamp, selected-source scope and complete-tail assertion remains unchanged. |
 
 Earlier declaration-positive/notice receipts are superseded, not silently
 counted for retirement. Agent credit above does not qualify handler takeover
@@ -68,14 +71,23 @@ or R04 recovery.
 
 R04 now has the nullable native execution_binding column and strict codec,
 exact pre-mutation identity checks and explicit non-executing fork-copy NULL.
-The original-role process/grant/selected fences and E's fixed-session recovery
-integration remain unimplemented. Joint gate6221888821/6221925281 is approved;
+The original-role process/grant/selected fences are now called by each native
+owner writer, but runtime installation/per-dispatch capture and E's fixed-session
+recovery integration remain unimplemented. Joint gate6221888821/6221925281 is approved;
 the exact port and historical/non-executing writer map are in
 issue-2700-r04-activity-port.md. The native staging boundary and all original
 REDs are accounted in issue-2700-r04-native-progress.md. No recovery sweep has
 been enabled, no reference-only claim supplies permission, and the original
-component reopen RED remains visible. Existing unfenced live writer behavior
-is not accepted as a fresh-NULL permission or a completed R04 repair.
+component reopen RED remains visible. Original writers refuse unbound roles;
+the currently uninstalled runtime journal must be connected before native HTTP
+execution can be qualified again. There is no fresh-NULL permission or completed
+R04 repair. Earlier native HTTP receipts remain historical component evidence,
+not exact-head credit across this pending assembly.
+
+Validation-oracle raw SHA256 pins:
+original d7b1e5228ca60d1deaa9e4f2605a41563ac8ba6d8fdfb4ec4808e1f3f8f8e339;
+race3 821902dc92b1a4632c22056d9749ed0b81d9ef3ba7c7c2072d46949a3da7efe5;
+registry-tail23521bdff5b34ee9b3860ce57aa68ccfba79c737521aa75e033752a329d54338.
 
 Finish remaining current fixture/old-class oracle migrations through the new
 shared refusal or key-free execution contract; preserve their other negative
