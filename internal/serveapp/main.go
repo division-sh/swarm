@@ -1447,6 +1447,10 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		NoticePresentation:      noticePresentation,
 		SelectedFork:            supervisor.selected,
 	}
+	if err := recoverServeDisplacedHTTPActivities(ctx, processCapability, runtimeContexts); err != nil {
+		presenter.fail(5, "activity_startup_recovery", err)
+		return 1
+	}
 	apiStoreCaps, err := buildSelectedAPICapabilities(stores, apiCapabilityRequest)
 	if err != nil {
 		presenter.fail(5, "runtime_context", err)
