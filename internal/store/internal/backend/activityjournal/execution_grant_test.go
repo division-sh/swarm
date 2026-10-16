@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -160,6 +162,211 @@ func TestActivityOriginalGrantTakesCanonicalFenceFirst(t *testing.T) {
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+func TestActivityOriginalWritersRequireInstalledGrantBeforeNativeEntry(t *testing.T) {
+	for _, sqlite := range []bool{false, true} {
+		for _, operation := range []string{"start", "claim", "complete", "uncertain"} {
+			t.Run(fmt.Sprintf("sqlite=%t/%s", sqlite, operation), func(t *testing.T) {
+				db, mock, err := sqlmock.New()
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				var owner runtimepipeline.ActivityAttemptJournal
+				if sqlite {
+					backend, err := sqlitebackend.New(db)
+					if err != nil {
+						t.Fatal(err)
+					}
+					native, err := NewSQLite(backend, func() error { return nil })
+					if err != nil {
+						t.Fatal(err)
+					}
+					owner = native
+				} else {
+					backend, err := postgresbackend.New(db)
+					if err != nil {
+						t.Fatal(err)
+					}
+					native, err := NewPostgres(backend, func() error { return nil })
+					if err != nil {
+						t.Fatal(err)
+					}
+					owner = native
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				record := runtimepipeline.ActivityAttemptRecord{ExecutionMode: "live", Attempt: 1}
+				_, changed, err := invokeActivityWriterForTest(context.Background(), owner, operation, record)
+				if changed || err == nil || !strings.Contains(err.Error(), "installed execution role") {
+					t.Fatalf("unbound %s reached native work: changed=%t err=%v", operation, changed, err)
+				}
+				if err := mock.ExpectationsWereMet(); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
+
+func invokeActivityWriterForTest(ctx context.Context, owner runtimepipeline.ActivityAttemptJournal, operation string, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
+	switch operation {
+	case "start":
+		return owner.StartActivityAttempt(ctx, record)
+	case "claim":
+		return owner.ClaimActivityAttemptForLoopGeneration(ctx, record)
+	case "complete":
+		return owner.CompleteActivityAttempt(ctx, record)
+	default:
+		return owner.MarkActivityAttemptUncertain(ctx, record)
+	}
+}
+
+func TestActivityGrantBinderKeepsOriginalRoleAndCannotRebind(t *testing.T) {
+	for _, sqlite := range []bool{false, true} {
+		for _, selected := range []bool{false, true} {
+			t.Run(fmt.Sprintf("sqlite=%t/selected=%t", sqlite, selected), func(t *testing.T) {
+				db, mock, err := sqlmock.New()
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				owner := activityGrantBinderForTest(t, db, sqlite)
+				signal := &render.ReconcileSignal{}
+				composition := owner.(interface {
+					BindChannelReconciliation(*render.ReconcileSignal) error
+				})
+				if err := composition.BindChannelReconciliation(signal); err != nil {
+					t.Fatal(err)
+				}
+				evidence := activityInstalledGrantForTest(selected)
+				bound, err := owner.BindActivityGrant(evidence)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var grant *activityExecutionGrant
+				if sqlite {
+					base := owner.(*ActivitySQLiteOwner)
+					fixed := bound.(*ActivitySQLiteOwner)
+					if base.executionGrant != nil || base.authorActivityCatalog() != fixed.authorActivityCatalog() || fixed.channelChanges != signal {
+						t.Fatal("grant binding changed the unbound owner or lost existing composition")
+					}
+					grant = fixed.executionGrant
+					_, err = fixed.BindActivityGrant(evidence)
+				} else {
+					base := owner.(*ActivityPostgresOwner)
+					fixed := bound.(*ActivityPostgresOwner)
+					if base.executionGrant != nil || base.authorActivityCatalog() != fixed.authorActivityCatalog() || fixed.channelChanges != signal {
+						t.Fatal("grant binding changed the unbound owner or lost existing composition")
+					}
+					grant = fixed.executionGrant
+					_, err = fixed.BindActivityGrant(evidence)
+				}
+				if err == nil {
+					t.Fatal("an in-flight journal role could be rebound")
+				}
+				evidence.StateVersion++
+				evidence.ProbeSurfaceIDs[0] = "replacement-probe"
+				original := runtimepipeline.ActivityAttemptRecord{ExecutionMode: "live", Attempt: 1}
+				prepared, err := grant.prepareRecord(context.Background(), original, true)
+				if err != nil || prepared.ExecutionBinding != grant.reference || !original.ExecutionBinding.IsZero() || grant.reference.StateVersion != 3 || grant.evidence.ProbeSurfaceIDs[0] != "original-probe" {
+					t.Fatalf("fresh reference did not preserve the captured role: record=%+v err=%v", prepared, err)
+				}
+				if _, err := grant.prepareRecord(context.Background(), original, false); err == nil {
+					t.Fatal("completion filled a missing original reference")
+				}
+				foreign := prepared
+				foreign.ExecutionBinding.GrantID = uuid.NewString()
+				for _, starting := range []bool{false, true} {
+					if _, err := grant.prepareRecord(context.Background(), foreign, starting); err == nil {
+						t.Fatal("grant binding replaced a foreign original reference")
+					}
+				}
+				if got, err := grant.prepareRecord(context.Background(), prepared, false); err != nil || got.ExecutionBinding != prepared.ExecutionBinding {
+					t.Fatalf("exact completion reference changed: record=%+v err=%v", got, err)
+				}
+				cancelled, cancel := context.WithCancel(context.Background())
+				cancel()
+				if _, err := grant.prepareRecord(cancelled, prepared, false); !errors.Is(err, context.Canceled) {
+					t.Fatalf("caller cancellation was lost before native entry: %v", err)
+				}
+				if err := mock.ExpectationsWereMet(); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
+
+type activityGrantBinderForTestPort interface {
+	BindActivityGrant(runtimeownership.GrantEvidence) (runtimepipeline.ActivityAttemptJournal, error)
+}
+
+func activityGrantBinderForTest(t *testing.T, db *sql.DB, sqlite bool) activityGrantBinderForTestPort {
+	t.Helper()
+	if sqlite {
+		backend, err := sqlitebackend.New(db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner, err := NewSQLite(backend, func() error { return nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		return owner
+	}
+	backend, err := postgresbackend.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := NewPostgres(backend, func() error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	return owner
+}
+
+func TestActivityOriginalWritersResolveExactGrantBeforeDomainWork(t *testing.T) {
+	for _, sqlite := range []bool{false, true} {
+		for _, operation := range []string{"start", "claim", "complete", "uncertain"} {
+			t.Run(fmt.Sprintf("sqlite=%t/%s", sqlite, operation), func(t *testing.T) {
+				db, mock, err := sqlmock.New()
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				evidence := activityInstalledGrantForTest(false)
+				owner, err := activityGrantBinderForTest(t, db, sqlite).BindActivityGrant(evidence)
+				if err != nil {
+					t.Fatal(err)
+				}
+				mock.ExpectBegin()
+				if sqlite {
+					mock.ExpectExec("INSERT OR IGNORE INTO author_activity_order").WillReturnResult(sqlmock.NewResult(0, 0))
+					mock.ExpectExec("UPDATE author_activity_order SET last_sequence = last_sequence").WillReturnResult(sqlmock.NewResult(0, 1))
+				}
+				mock.ExpectQuery("SELECT last_sequence FROM author_activity_order").WillReturnRows(sqlmock.NewRows([]string{"last_sequence"}).AddRow(5))
+				historyErr := errors.New("exact original activity grant unavailable")
+				mock.ExpectQuery("SELECT CAST\\(grant_id AS TEXT\\).*FROM runtime_generation_grants WHERE grant_id=\\$1 AND state_version=\\$2").WithArgs(evidence.GrantID, evidence.StateVersion).WillReturnError(historyErr)
+				mock.ExpectRollback()
+				record := runtimepipeline.ActivityAttemptRecord{ExecutionMode: "live", Attempt: 1, ExecutionBinding: processbinding.ActivityExecutionBinding{
+					Version: processbinding.ActivityExecutionBindingVersion, GrantID: evidence.GrantID, StateVersion: evidence.StateVersion,
+				}}
+				if operation == "start" || operation == "claim" {
+					record.ExecutionBinding = processbinding.ActivityExecutionBinding{}
+				}
+				_, changed, err := invokeActivityWriterForTest(context.Background(), owner, operation, record)
+				if changed || !errors.Is(err, historyErr) {
+					t.Fatalf("original %s did not resolve exact attribution before domain work: changed=%t err=%v", operation, changed, err)
+				}
+				if err := mock.ExpectationsWereMet(); err != nil {
+					t.Fatal(err)
+				}
+			})
 		}
 	}
 }
