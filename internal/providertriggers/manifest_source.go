@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -29,11 +31,30 @@ func parseManifestAt(body []byte, file string) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, err
 	}
+	return freezeTriggerManifest(definition, root, snapshot.Bytes())
+}
+
+// AdmitBody projects the captured role view without decoding or rewriting its
+// source bytes. Provider identity comes only from its admitted directory.
+func AdmitBody(body packartifact.ProviderBody) (Manifest, error) {
+	if !body.Valid() || body.Role() != packmodel.BodyTrigger {
+		return Manifest{}, fmt.Errorf("provider trigger admission requires an admitted trigger.yaml BODY")
+	}
+	root := body.SourceValue()
+	definition, err := admitTriggerDefinition(root)
+	if err != nil {
+		return Manifest{}, err
+	}
+	definition.Provider = body.ProviderKey()
+	return freezeTriggerManifest(definition, root, body.Bytes())
+}
+
+func freezeTriggerManifest(definition manifestDefinition, root yamlsource.Value, body []byte) (Manifest, error) {
 	if err := definition.validate(); err != nil {
 		return Manifest{}, triggerSourceError(root, err.Error())
 	}
 	definition.outputs = definition.OutputManifest()
-	return Manifest{value: &manifestValue{definition: definition, source: root, body: snapshot.Bytes()}}, nil
+	return Manifest{value: &manifestValue{definition: definition, source: root, body: body}}, nil
 }
 
 func admitTriggerDefinition(root yamlsource.Value) (manifestDefinition, error) {
