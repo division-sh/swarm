@@ -95,8 +95,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 						root = canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 						writeSelectedForkAgentProofFixture(t, root, "loaded-decoy", "[receiver.closed]", "Source configuration must not execute at the selected frontier.", "return {'text': 'source only', 'usage': {'input_tokens': 2, 'output_tokens': 2}}")
 					}
-					opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath,
-						APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
+					opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
 						TestLifecycleProbe: probe, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 					rt.BundleHash = servedEventPublishFixtureBundleHash(t, opts.SourceRoot)
 					configPath := writeServeRuntimeTestConfig(t)

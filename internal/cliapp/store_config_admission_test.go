@@ -84,7 +84,7 @@ func TestRuntimeConfigAuthorityStoreRetainsAdmissionAndFlags(t *testing.T) {
 				} else {
 					writeRuntimeConfigText(t, path, "unknown_after_admission: true\n")
 				}
-				selection, err := resolveAuthorityStoreSelection(mustInvocationRootForTest(repo), cmd, loaded, CLISourcePlatformSpecPaths{}, "sqlite", true)
+				selection, err := resolveAuthorityStoreSelection(mustInvocationRootForTest(repo), cmd, loaded, CLISourcePaths{}, "sqlite", true)
 				if err != nil {
 					t.Fatalf("authority store selection re-read admitted file: %v", err)
 				}
@@ -139,7 +139,7 @@ func TestRuntimeConfigStoreSelectionRefusesUnadmittedResults(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), wantCause) || selection != (storebackend.Selection{}) {
 					t.Fatalf("unadmitted runtime selection: result=%#v error=%v", selection, err)
 				}
-				selection, err = resolveAuthorityStoreSelection(mustInvocationRootForTest(repo), nil, loaded, CLISourcePlatformSpecPaths{}, "sqlite", flagSet)
+				selection, err = resolveAuthorityStoreSelection(mustInvocationRootForTest(repo), nil, loaded, CLISourcePaths{}, "sqlite", flagSet)
 				if err == nil || !strings.Contains(err.Error(), wantCause) || selection != (storebackend.Selection{}) {
 					t.Fatalf("unadmitted authority selection: result=%#v error=%v", selection, err)
 				}

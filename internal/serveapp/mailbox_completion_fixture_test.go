@@ -52,7 +52,7 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 	if len(tokens) == 0 {
 		tokens = []string{apiv1.DefaultLoopbackAPIToken}
 	}
-	opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
+	opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 	name := "sqlite"
 	if backend == servedparity.BackendDefaultSQLite {
 		unsetStoreSelectorEnv(t)

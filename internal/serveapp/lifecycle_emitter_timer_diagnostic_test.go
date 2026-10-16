@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -42,8 +41,7 @@ func startLifecycleTimerContenderDiagnostic(t *testing.T, root string) (servedCo
 	ready := make(chan *runtimepkg.Runtime, 1)
 	opts := cliapp.ServeOptions{
 		ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: root,
-		PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-		StoreMode:        "postgres", StoreModeSet: true,
+		StoreMode: "postgres", StoreModeSet: true,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Verbose: true, Output: &d.server,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),

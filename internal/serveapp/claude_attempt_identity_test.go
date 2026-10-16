@@ -587,7 +587,7 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 	var backend claudeAttemptProofBackend
 	switch name {
 	case "sqlite":
-		spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
+		spec, err := loadServePlatformSpecDocument()
 		if err != nil {
 			t.Fatalf("load platform spec: %v", err)
 		}

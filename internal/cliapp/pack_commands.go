@@ -14,11 +14,10 @@ import (
 )
 
 type packCommandOptions struct {
-	repoRoot         string
-	root             rootCommandOptions
-	sourceRoot       string
-	platformSpecPath string
-	output           cliOutputOptions
+	repoRoot   string
+	root       rootCommandOptions
+	sourceRoot string
+	output     cliOutputOptions
 }
 
 type packInventoryEntryReadback struct {
@@ -156,7 +155,11 @@ func newImportPackCommand(invocationRoot InvocationRoot, root rootCommandOptions
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			platformSpec, err := loadChannelPlatformSpecDocument(paths.PlatformSpecPath)
+			specPath, err := EmbeddedPlatformSpecPath()
+			if err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
+			platformSpec, err := loadChannelPlatformSpecDocument(specPath)
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -211,7 +214,11 @@ func loadEffectivePackInventory(opts packCommandOptions) (*packartifact.Effectiv
 	if err != nil {
 		return nil, err
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(opts.repoRoot, sourceRoot, paths.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+	specPath, err := EmbeddedPlatformSpecPath()
+	if err != nil {
+		return nil, err
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(opts.repoRoot, sourceRoot, specPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBase: base, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {
@@ -220,9 +227,9 @@ func loadEffectivePackInventory(opts packCommandOptions) (*packartifact.Effectiv
 	return bundle.PackInventory, nil
 }
 
-func resolvePackInventoryPaths(opts packCommandOptions, cfgResult RuntimeConfigLoadResult) (CLISourcePlatformSpecPaths, error) {
-	return resolveCLISourcePlatformSpecPathsFromConfig(opts.repoRoot, CLISourcePlatformSpecPathOptions{
-		SourceRoot: opts.sourceRoot, PlatformSpecPath: opts.platformSpecPath,
+func resolvePackInventoryPaths(opts packCommandOptions, cfgResult RuntimeConfigLoadResult) (CLISourcePaths, error) {
+	return resolveCLISourcePathsFromConfig(opts.repoRoot, CLISourcePathOptions{
+		SourceRoot: opts.sourceRoot,
 	}, cfgResult.cli)
 }
 

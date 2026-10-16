@@ -40,7 +40,7 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 			if backend == "sqlite" {
 				selected = openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "paused-startup.db"), cfg)
 				db = selectedStoreDatabaseForTest(t, selected)
-				if _, err := initializeServePlatformStateStores(context.Background(), selected.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
+				if _, err := initializeServePlatformStateStores(context.Background(), selected.Schema()); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -63,7 +63,7 @@ func TestPausedMixedRunsStartupBothStores(t *testing.T) {
 				if err := os.WriteFile(path, append(body, []byte("\n# paused-context-"+label+"\n")...), 0o644); err != nil {
 					t.Fatal(err)
 				}
-				module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root, filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
+				module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root)
 				if err != nil {
 					t.Fatal(err)
 				}

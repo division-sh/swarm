@@ -19,7 +19,7 @@ type ServeProjectContextRegistration struct {
 	registered  bool
 }
 
-func PrepareServeProjectContextRegistration(root InvocationRoot, opts ServeOptions, resolvedPaths CLISourcePlatformSpecPaths, grant devscratch.RegistrationGrant) (*ServeProjectContextRegistration, error) {
+func PrepareServeProjectContextRegistration(root InvocationRoot, opts ServeOptions, resolvedPaths CLISourcePaths, grant devscratch.RegistrationGrant) (*ServeProjectContextRegistration, error) {
 	if !opts.Dev || opts.LocalRun {
 		return nil, nil
 	}
@@ -110,7 +110,7 @@ func (r *ServeProjectContextRegistration) Unregister() {
 	r.registered = false
 }
 
-func (r *ServeProjectContextRegistration) WriteFinal(runtimeInstanceID string, apiAddr net.Addr, apiAuth apiv1.AuthTokenResolution, resolvedPaths CLISourcePlatformSpecPaths, storeSelection storebackend.Selection, mountSources WorkspaceMountSources) error {
+func (r *ServeProjectContextRegistration) WriteFinal(runtimeInstanceID string, apiAddr net.Addr, apiAuth apiv1.AuthTokenResolution, resolvedPaths CLISourcePaths, storeSelection storebackend.Selection, mountSources WorkspaceMountSources) error {
 	if r == nil {
 		return nil
 	}

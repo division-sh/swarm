@@ -221,13 +221,6 @@ func TestStartLocalRunServeConsumesPositionalSourceOwner(t *testing.T) {
 	if want := mustInvocationRootForTest(configContracts).Path(); serveOpts.SourceRoot != want {
 		t.Fatalf("contracts path = %q, want %q", serveOpts.SourceRoot, want)
 	}
-	embedded, err := EmbeddedPlatformSpecPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if serveOpts.PlatformSpecPath != embedded {
-		t.Fatalf("platform spec path = %q, want embedded %q", serveOpts.PlatformSpecPath, embedded)
-	}
 	if serveOpts.APIListenAddr != "127.0.0.1:19001" {
 		t.Fatalf("api listen addr = %q, want API listener owner from --api-port", serveOpts.APIListenAddr)
 	}

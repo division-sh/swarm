@@ -101,7 +101,7 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			bundle := servedEventPublishFixtureBundleHash(t, root)
 			unsetStoreSelectorEnv(t)
 			stubServeRuntimeWorkspaceLifecycle(t)
-			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
+			opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			opts.TestLifecycleProbe = probe
 			var db *sql.DB
 			var deliveryReader servedRunDeliveryReader

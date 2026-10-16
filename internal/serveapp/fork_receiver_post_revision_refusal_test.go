@@ -3,7 +3,6 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -100,7 +99,7 @@ func requireForkReceiverPostRevisionPolicyRefusal(t *testing.T, rt servedControl
 	result, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: sourceRunID, At: frontierEventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
-			RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
+			RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore(),
 		},
 		ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
 		AgentRuntime:      forkOptions,

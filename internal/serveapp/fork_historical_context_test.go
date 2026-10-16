@@ -3,7 +3,6 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -77,7 +76,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			if !ok {
 				t.Fatal("selected availability projection does not expose the actual store fixture")
 			}
-			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()}
+			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()}
 			request, loaded := admitForkHistoricalSelectedRequest(t, ctx, family, loader, plan, rt.BundleHash, rt.ForkRuntime)
 			var revision, latestRevision int64
 			var original, latest []byte
@@ -139,7 +138,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				requireHistoricalRefusal(err)
 				result, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
 					SourceRunID: seed.RunID, At: at, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
-					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
+					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()},
 					ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: rt.BundleHash},
 					AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture},
 				})

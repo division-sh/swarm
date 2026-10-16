@@ -8,7 +8,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -31,7 +30,7 @@ func seedRunForkCLIConstruction(t *testing.T, db *sql.DB, runID, bundleHash stri
 	t.Helper()
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{
-		RepoRoot: repoRootForTest(), PlatformSpecPath: contracts.DefaultPlatformSpecFile(repoRootForTest()), Store: selected,
+		RepoRoot: repoRootForTest(), Store: selected,
 	}
 	loaded, err := loader.LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{
 		Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: bundleHash,

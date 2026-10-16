@@ -53,7 +53,8 @@ func TestNativePublicationMilestoneSuccessorsPreserveReviewedAssertions(t *testi
 				t.Fatal("missing exact milestone successor")
 			}
 			current := *selected
-			reviewed := reviewedMilestoneRow(t, current)
+			actual := selectedCausalObservationBody(t, current.File, current.Function)
+			reviewed := reviewedMilestoneRow(t, current, actual)
 			selected = &reviewed
 			restored := selected.Successor
 			for index, change := range target.cuts {
@@ -150,7 +151,7 @@ func TestNativeRootForkMilestoneSuccessorRejectsHostileCuts(t *testing.T) {
 	if err != nil || wantErr != nil || current != want {
 		t.Fatal("root-fork source differs from its current successor")
 	}
-	reviewed := reviewedMilestoneRow(t, *selected)
+	reviewed := reviewedMilestoneRow(t, *selected, actual)
 	selected = &reviewed
 	actual = reviewed.Successor
 	const gate = "\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, frontier.EventID)\n"

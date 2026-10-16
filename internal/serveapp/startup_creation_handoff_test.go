@@ -166,8 +166,8 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 					}
 					writeStandingCandidateFile(t, path, strings.ReplaceAll(string(raw), "auto.started", "worker.created"))
 				}
-				loaded, err := loadServeRuntimeBundle(ctx, repoRootForTest(), stores.SourceArtifactStore(), cliapp.CLISourcePlatformSpecPaths{
-					SourceRoot: root, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
+				loaded, err := loadServeRuntimeBundle(ctx, repoRootForTest(), stores.SourceArtifactStore(), cliapp.CLISourcePaths{
+					SourceRoot: root,
 				}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 				if err != nil {
 					t.Fatal(err)
@@ -323,8 +323,8 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 				if err != nil || !found || !pending.Pending() || pending.Plan.CreationEvent == nil || !pending.CreationEventEmittedAt.IsZero() {
 					t.Fatalf("interrupted creation must remain pending: found=%t readiness=%+v err=%v", found, pending, err)
 				}
-				loaded, err = loadServeRuntimeBundle(ctx, repoRootForTest(), stores.SourceArtifactStore(), cliapp.CLISourcePlatformSpecPaths{
-					SourceRoot: root, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
+				loaded, err = loadServeRuntimeBundle(ctx, repoRootForTest(), stores.SourceArtifactStore(), cliapp.CLISourcePaths{
+					SourceRoot: root,
 				}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 				if err != nil {
 					t.Fatal(err)

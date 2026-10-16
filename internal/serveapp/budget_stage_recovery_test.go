@@ -13,7 +13,6 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -71,7 +70,6 @@ func (r corruptStageRecoveryReader) GetSourceArtifact(ctx context.Context, hash 
 
 func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *testing.T) {
 	repo := runtimepipeline.WorkflowRepoRoot()
-	spec := runtimecontracts.DefaultPlatformSpecFile(repo)
 	packBases := testPlatformPackBaseGenerations(t)
 	artifacts := []*sourceartifact.AdmittedSourceArtifact{
 		stageRecoveryArtifact(t, "ready: {}\n  Ready:\n    final: true"),
@@ -96,7 +94,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 			for i, artifact := range artifacts {
 				runs[i] = uuid.NewString()
 				sourceartifactfixture.RequireArtifact(t, runStatusAuthorActivityContext(sourceartifactfixture.FactFor(artifact)), selected, artifact)
-				_, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, artifact.BundleHash())
+				_, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, artifact.BundleHash())
 				if err != nil {
 					t.Fatalf("load retained entity source %d: %v", i, err)
 				}
@@ -120,15 +118,15 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 					t.Fatalf("create retained entity %d: %v", i, err)
 				}
 			}
-			current, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, artifacts[0].BundleHash())
+			current, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, artifacts[0].BundleHash())
 			if err != nil {
 				t.Fatalf("load current source: %v", err)
 			}
-			stateless, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, artifacts[2].BundleHash())
+			stateless, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, artifacts[2].BundleHash())
 			if err != nil {
 				t.Fatalf("load stateless source: %v", err)
 			}
-			terminalSource, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, artifacts[1].BundleHash())
+			terminalSource, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, artifacts[1].BundleHash())
 			if err != nil {
 				t.Fatalf("load terminal source: %v", err)
 			}
@@ -174,7 +172,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 				CurrentBundleHash: artifacts[0].BundleHash(),
 				Load: func(ctx context.Context, hash string) (semanticview.Source, error) {
 					loads[hash]++
-					return loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, hash)
+					return loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, hash)
 				},
 			})
 			for pass := 1; pass <= 2; pass++ {
@@ -201,7 +199,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 					}}, nil, nil, current, executionposture.Live, runtimepkg.BudgetRecoveryStageSources{
 						CurrentBundleHash: artifacts[0].BundleHash(),
 						Load: func(ctx context.Context, hash string) (semanticview.Source, error) {
-							return loadBudgetRecoveryStageSource(ctx, tc.reader, repo, spec, packBases, hash)
+							return loadBudgetRecoveryStageSource(ctx, tc.reader, repo, packBases, hash)
 						},
 					})
 					if err := badTracker.ProjectRecoveryBudgetState(ctx); err == nil {

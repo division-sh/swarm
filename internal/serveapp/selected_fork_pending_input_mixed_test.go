@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -116,7 +115,7 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			}
 			_, refusal := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: seed.RunID, At: marker.EventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
-				SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
+				SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()},
 				AgentRuntime: rt.ForkRuntime,
 			})
 			if refusal == nil || refusal.Error() != "selected-contract fork execution materialization blocked: non_agent_delivery_replay_unsupported" {

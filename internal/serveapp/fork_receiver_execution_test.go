@@ -158,7 +158,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				request := runforkexecution.SelectedContractExecutionRequest{
 					SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 					SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
-						RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
+						RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore(),
 					},
 					ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
 					AgentRuntime:      forkOptions,

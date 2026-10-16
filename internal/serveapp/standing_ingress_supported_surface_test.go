@@ -175,8 +175,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 		opts = cliapp.ServeOptions{
 			ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
-			SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-			StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+			SourceRoot: sourceRoot, StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 			SelfCheck: true, Verbose: true,
 			TestLLMRuntime:          telegramPhraseBotLLMRuntime{onContinue: managerProbe.observe},
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -204,7 +203,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 		})
 		opts = cliapp.ServeOptions{
 			ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot,
-			PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true,
+			StoreMode: "postgres", StoreModeSet: true,
 			APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 			SelfCheck: true, Verbose: true,
 			TestLLMRuntime:          telegramPhraseBotLLMRuntime{onContinue: managerProbe.observe},
@@ -886,8 +885,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 
 	configPath := writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil)
 	opts := cliapp.ServeOptions{
-		ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		ConfigPath: configPath, SourceRoot: sourceRoot, StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck:      true,
 		TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
@@ -1033,8 +1031,7 @@ func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
 
 	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
-		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SourceRoot: sourceRoot, StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Dev: true, LocalRun: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
 		TestAfterAuthorActivityHead: func() error { return errors.New("author activity head unavailable") },
 	})
@@ -1084,8 +1081,7 @@ func TestStandingIngressUnsupportedAliasFailsBeforeServeReadiness(t *testing.T) 
 	sqlitePath := filepath.Join(t.TempDir(), "invalid-alias.sqlite")
 	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
-		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SourceRoot: sourceRoot, StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Dev: true, LocalRun: true, Verbose: true,
 	})
 	code, exited := process.waitForExit(15 * time.Second)
@@ -1143,8 +1139,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		}
 	}
 	opts := cliapp.ServeOptions{
-		ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode: "postgres", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot, StoreMode: "postgres", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Verbose: true,
 		TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
@@ -1274,8 +1269,7 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			})
 			runtimes := make(chan *runtimepkg.Runtime, 2)
 			opts := cliapp.ServeOptions{
-				SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+				SourceRoot: sourceRoot, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 				SelfCheck: true, Verbose: true,
 				TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 				TestRuntimeReadyHook: func(rt *runtimepkg.Runtime) { runtimes <- rt },

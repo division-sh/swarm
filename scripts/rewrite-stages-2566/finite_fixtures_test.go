@@ -19,7 +19,8 @@ import (
 )
 
 func TestRewrite2566FiniteFixturePlanMatchesReviewedOutputs(t *testing.T) {
-	if err := apply(canonicalrouting.RepoRoot(t), "scripts/rewrite-stages-2566/finite-fixtures.json", false, true); err != nil {
+	root := finiteFixtureRootWithEmbeddedSpecSuccessor(t, canonicalrouting.RepoRoot(t))
+	if err := apply(root, "finite-fixtures.json", false, true); err != nil {
 		t.Fatal(err)
 	}
 }

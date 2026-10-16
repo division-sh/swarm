@@ -36,9 +36,7 @@ func selectedContractReceiverReadinessSource(t *testing.T, policy canonicalrouti
 	t.Helper()
 	repo := runForkExecutionRepoRoot(t)
 	root := canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: policy}}, false)
-	loaded, err := (admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root,
-		PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
-	}).LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	loaded, err := (admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root}).LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err != nil {
 		t.Fatal(err)
 	}

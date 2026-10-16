@@ -129,8 +129,8 @@ func TestLoadServeRuntimeBundleRejectsMalformedPackBodiesBeforePublication(t *te
 			if err := os.WriteFile(filepath.Join(project, "packs", tc.id, tc.bodyFile), []byte("unknown_field: true\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			_, err := loadServeRuntimeBundle(context.Background(), repoRootForTest(), nil, cliapp.CLISourcePlatformSpecPaths{
-				SourceRoot: project, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRootForTest()),
+			_, err := loadServeRuntimeBundle(context.Background(), repoRootForTest(), nil, cliapp.CLISourcePaths{
+				SourceRoot: project,
 			}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("serve malformed %s error = %v, want %q", tc.name, err, tc.wantErr)
@@ -870,7 +870,7 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtim
 	})
 	root := canonicalrouting.CopyServedJoinProof(t)
 	repo := repoRootForTest()
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, root)
 	if err != nil {
 		t.Fatalf("load served join source: %v", err)
 	}
@@ -885,7 +885,6 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtim
 	endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
 		SourceRoot:              root,
-		PlatformSpecPath:        defaultPlatformSpecPath,
 		StoreMode:               "postgres",
 		StoreModeSet:            true,
 		APIListenAddr:           "127.0.0.1:0",
@@ -967,7 +966,6 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		SourceRoot:              sourceRoot,
-		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
@@ -1019,7 +1017,6 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testin
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		SourceRoot:              sourceRoot,
-		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
@@ -1044,7 +1041,6 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) 
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
 		SourceRoot:              sourceRoot,
-		PlatformSpecPath:        defaultPlatformSpecPath,
 		StoreMode:               "postgres",
 		StoreModeSet:            true,
 		APIListenAddr:           "127.0.0.1:0",
@@ -1075,7 +1071,6 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		SourceRoot:              sourceRoot,
-		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
@@ -1104,7 +1099,6 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *t
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
 		SourceRoot:              sourceRoot,
-		PlatformSpecPath:        defaultPlatformSpecPath,
 		StoreMode:               "postgres",
 		StoreModeSet:            true,
 		APIListenAddr:           "127.0.0.1:0",
@@ -1282,8 +1276,7 @@ func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	var releaseOnce sync.Once
 	contextsReady := make(chan *runtimepkg.RuntimeContextManager, 1)
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-		ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Verbose: true, TestLifecycleProbe: probe,
 		TestLLMRuntime:          servedSessionCleanupProofLLMRuntime{store: pg, started: started, release: release},
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -1568,7 +1561,6 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 			SourceRoot:              sourceRoot,
-			PlatformSpecPath:        defaultPlatformSpecPath,
 			APIListenAddr:           "127.0.0.1:0",
 			MCPListenAddr:           "127.0.0.1:0",
 			SelfCheck:               true,
@@ -1598,7 +1590,6 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:              writeServeRuntimeTestConfig(t),
 			SourceRoot:              sourceRoot,
-			PlatformSpecPath:        defaultPlatformSpecPath,
 			StoreMode:               "postgres",
 			StoreModeSet:            true,
 			APIListenAddr:           "127.0.0.1:0",
@@ -1663,7 +1654,6 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 			ConfigPath:                   writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 			TestRuntimeContextsReadyHook: captureContexts,
 			SourceRoot:                   sourceRoot,
-			PlatformSpecPath:             defaultPlatformSpecPath,
 			APIListenAddr:                "127.0.0.1:0",
 			MCPListenAddr:                "127.0.0.1:0",
 			SelfCheck:                    true,
@@ -1686,7 +1676,6 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 			ConfigPath:                   writeServeRuntimeTestConfig(t),
 			TestRuntimeContextsReadyHook: captureContexts,
 			SourceRoot:                   sourceRoot,
-			PlatformSpecPath:             defaultPlatformSpecPath,
 			StoreMode:                    "postgres",
 			StoreModeSet:                 true,
 			APIListenAddr:                "127.0.0.1:0",
@@ -1945,7 +1934,6 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		opts.ConfigPath = configPath
 		sourceRoot := canonicalrouting.CopyRootIngressServedConversationFork(t)
 		opts.SourceRoot = sourceRoot
-		opts.PlatformSpecPath = defaultPlatformSpecPath
 		opts.APIListenAddr = "127.0.0.1:0"
 		opts.MCPListenAddr = "127.0.0.1:0"
 		opts.SelfCheck = true
@@ -2542,7 +2530,6 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 			ConfigPath:                       configPath,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
-			PlatformSpecPath:                 filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 			APIListenAddr:                    "127.0.0.1:0",
 			MCPListenAddr:                    "127.0.0.1:0",
 			SelfCheck:                        true,
@@ -2567,7 +2554,6 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 			ConfigPath:                       configPath,
 			SourceRoot:                       sourceRoot,
 			TestWorkflowNodeHandlerStartHook: handlerStart,
-			PlatformSpecPath:                 filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 			StoreMode:                        "postgres",
 			StoreModeSet:                     true,
 			APIListenAddr:                    "127.0.0.1:0",
@@ -3408,7 +3394,6 @@ func runServedCreateCarryProjectionSQLiteProof(t *testing.T) {
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		SourceRoot:              sourceRoot,
-		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
@@ -3431,7 +3416,6 @@ func runServedCreateCarryProjectionPostgresProof(t *testing.T) {
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
 		SourceRoot:              sourceRoot,
-		PlatformSpecPath:        defaultPlatformSpecPath,
 		StoreMode:               "postgres",
 		StoreModeSet:            true,
 		APIListenAddr:           "127.0.0.1:0",
@@ -3549,7 +3533,6 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		SourceRoot:              sourceRoot,
-		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
@@ -3592,7 +3575,6 @@ func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
 	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 		ConfigPath:                       writeServeRuntimeTestConfig(t),
 		SourceRoot:                       sourceRoot,
-		PlatformSpecPath:                 defaultPlatformSpecPath,
 		StoreMode:                        "postgres",
 		StoreModeSet:                     true,
 		APIListenAddr:                    "127.0.0.1:0",
@@ -6616,14 +6598,13 @@ func TestRunServeRuntimePassesNoAmbientDataSourceToWorkspaceLifecycle(t *testing
 	})
 
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:       writeServeRuntimeTestConfig(t),
-		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        "postgres",
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
-		Verbose:          true,
+		ConfigPath:    writeServeRuntimeTestConfig(t),
+		SourceRoot:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		StoreMode:     "postgres",
+		APIListenAddr: "127.0.0.1:0",
+		MCPListenAddr: "127.0.0.1:0",
+		SelfCheck:     true,
+		Verbose:       true,
 	})
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
@@ -6647,7 +6628,6 @@ func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(
 		SourceRoot:          filepath.Join("examples", "routing", "root-ingress"),
 		WorkspaceBackend:    workspace.BackendHost,
 		WorkspaceBackendSet: true,
-		PlatformSpecPath:    defaultPlatformSpecPath,
 		StoreMode:           storebackend.ActiveDefaultBackend().String(),
 		APIListenAddr:       "127.0.0.1:0",
 		MCPListenAddr:       "127.0.0.1:0",
@@ -6671,14 +6651,13 @@ func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
 		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db"), []string{
 			fmt.Sprintf("  docker_bin: %q", missingDocker),
 		}),
-		SourceRoot:       filepath.Join("examples", "routing", "root-ingress"),
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        storebackend.ActiveDefaultBackend().String(),
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
-		ShutdownGrace:    runtimepkg.DefaultShutdownGrace,
-		Verbose:          true,
+		SourceRoot:    filepath.Join("examples", "routing", "root-ingress"),
+		StoreMode:     storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr: "127.0.0.1:0",
+		MCPListenAddr: "127.0.0.1:0",
+		SelfCheck:     true,
+		ShutdownGrace: runtimepkg.DefaultShutdownGrace,
+		Verbose:       true,
 	})
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
@@ -6701,15 +6680,14 @@ func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
 			fmt.Sprintf("  docker_bin: %q", missingDocker),
 			fmt.Sprintf("  host_root: %q", hostRoot),
 		}),
-		SourceRoot:       writeServeRuntimeAgentSlugFixture(t, "api-agent-host-default", "api-worker"),
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        storebackend.ActiveDefaultBackend().String(),
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
-		ShutdownGrace:    runtimepkg.DefaultShutdownGrace,
-		Verbose:          true,
-		TestLLMRuntime:   servedNoopLLMRuntime{},
+		SourceRoot:     writeServeRuntimeAgentSlugFixture(t, "api-agent-host-default", "api-worker"),
+		StoreMode:      storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr:  "127.0.0.1:0",
+		MCPListenAddr:  "127.0.0.1:0",
+		SelfCheck:      true,
+		ShutdownGrace:  runtimepkg.DefaultShutdownGrace,
+		Verbose:        true,
+		TestLLMRuntime: servedNoopLLMRuntime{},
 	})
 	serve.waitForReadyLine()
 	if code := serve.stop(); code != 0 {
@@ -6732,16 +6710,15 @@ func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) 
 		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db"), []string{
 			fmt.Sprintf("  docker_bin: %q", missingDocker),
 		}),
-		SourceRoot:       writeServeRuntimeNativeBashFixture(t),
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        storebackend.ActiveDefaultBackend().String(),
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
-		ShutdownGrace:    runtimepkg.DefaultShutdownGrace,
-		Verbose:          true,
-		TestLLMRuntime:   servedNoopLLMRuntime{},
-		Output:           &out,
+		SourceRoot:     writeServeRuntimeNativeBashFixture(t),
+		StoreMode:      storebackend.ActiveDefaultBackend().String(),
+		APIListenAddr:  "127.0.0.1:0",
+		MCPListenAddr:  "127.0.0.1:0",
+		SelfCheck:      true,
+		ShutdownGrace:  runtimepkg.DefaultShutdownGrace,
+		Verbose:        true,
+		TestLLMRuntime: servedNoopLLMRuntime{},
+		Output:         &out,
 	})
 	if code == 0 {
 		t.Fatalf("Run code = 0, want Docker prerequisite failure\noutput:\n%s", out.String())
@@ -6762,15 +6739,14 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsSer
 		return serveRuntimeWorkspaceStub{}
 	})
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:       writeServeRuntimeTestConfig(t),
-		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        "postgres",
-		StoreModeSet:     true,
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
-		Verbose:          true,
+		ConfigPath:    writeServeRuntimeTestConfig(t),
+		SourceRoot:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		StoreMode:     "postgres",
+		StoreModeSet:  true,
+		APIListenAddr: "127.0.0.1:0",
+		MCPListenAddr: "127.0.0.1:0",
+		SelfCheck:     true,
+		Verbose:       true,
 	})
 
 	serve.waitForReadyLine()
@@ -6795,7 +6771,6 @@ func TestRunLocalRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *te
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:        writeServeRuntimeTestConfig(t),
 		SourceRoot:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:  defaultPlatformSpecPath,
 		StoreMode:         "postgres",
 		APIListenAddr:     "127.0.0.1:0",
 		MCPListenAddr:     "127.0.0.1:0",
@@ -6835,20 +6810,19 @@ func TestServeDevContextAndSwarmDirCannotPartitionScratchEpoch(t *testing.T) {
 	repo := sourceRoot
 	base := func(contextName, swarmDir string) cliapp.ServeOptions {
 		return cliapp.ServeOptions{
-			ConfigPath:       writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), ""),
-			SourceRoot:       sourceRoot,
-			PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-			SwarmDir:         swarmDir,
-			SwarmDirSet:      true,
-			ContextName:      contextName,
-			ContextNameSet:   true,
-			APIListenAddr:    "127.0.0.1:0",
-			MCPListenAddr:    "127.0.0.1:0",
-			ShutdownGrace:    runtimepkg.DefaultShutdownGrace,
-			Dev:              true,
-			SelfCheck:        true,
-			NoFeed:           true,
-			Verbose:          true,
+			ConfigPath:     writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), ""),
+			SourceRoot:     sourceRoot,
+			SwarmDir:       swarmDir,
+			SwarmDirSet:    true,
+			ContextName:    contextName,
+			ContextNameSet: true,
+			APIListenAddr:  "127.0.0.1:0",
+			MCPListenAddr:  "127.0.0.1:0",
+			ShutdownGrace:  runtimepkg.DefaultShutdownGrace,
+			Dev:            true,
+			SelfCheck:      true,
+			NoFeed:         true,
+			Verbose:        true,
 		}
 	}
 	first := startServeRuntimeTestProcessAtRepo(t, repo, base("first", swarmDirA))
@@ -6952,14 +6926,13 @@ func TestPostgresIdleSessionLossReturnsFailureFromRun(t *testing.T) {
 		return serveRuntimeWorkspaceStub{}
 	})
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:       writeServeRuntimeTestConfig(t),
-		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        "postgres",
-		StoreModeSet:     true,
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
+		ConfigPath:    writeServeRuntimeTestConfig(t),
+		SourceRoot:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		StoreMode:     "postgres",
+		StoreModeSet:  true,
+		APIListenAddr: "127.0.0.1:0",
+		MCPListenAddr: "127.0.0.1:0",
+		SelfCheck:     true,
 	})
 	serve.waitForReadyLine()
 
@@ -7015,8 +6988,7 @@ func TestNonDevServeOwnershipParity(t *testing.T) {
 	sourceRoot := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	base := func(configPath, backend string) cliapp.ServeOptions {
 		return cliapp.ServeOptions{
-			ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-			StoreMode: backend, StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+			ConfigPath: configPath, SourceRoot: sourceRoot, StoreMode: backend, StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 			ShutdownGrace: runtimepkg.DefaultShutdownGrace, SelfCheck: true, Verbose: true,
 		}
 	}
@@ -7141,7 +7113,7 @@ func TestRunStartLocalCrashRecoveryParity(t *testing.T) {
 		stubServeRuntimeWorkspaceLifecycle(t)
 		unsetStoreSelectorEnv(t)
 		path := filepath.Join(t.TempDir(), "runtime.db")
-		spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
+		spec, err := loadServePlatformSpecDocument()
 		if err != nil {
 			t.Fatalf("load platform spec: %v", err)
 		}
@@ -7176,8 +7148,7 @@ func TestLocalRunStaleContextAndAbandonedStoreRecovers(t *testing.T) {
 	}
 	base := func(configPath, backend, swarmDir string) cliapp.ServeOptions {
 		return cliapp.ServeOptions{
-			ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-			StoreMode: backend, StoreModeSet: true, SwarmDir: swarmDir, SwarmDirSet: true,
+			ConfigPath: configPath, SourceRoot: sourceRoot, StoreMode: backend, StoreModeSet: true, SwarmDir: swarmDir, SwarmDirSet: true,
 			APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", ShutdownGrace: runtimepkg.DefaultShutdownGrace,
 			Dev: true, LocalRun: true, SelfCheck: true, NoFeed: true, Verbose: true,
 		}
@@ -7199,7 +7170,7 @@ func TestLocalRunStaleContextAndAbandonedStoreRecovers(t *testing.T) {
 		stubServeRuntimeWorkspaceLifecycle(t)
 		unsetStoreSelectorEnv(t)
 		path := filepath.Join(t.TempDir(), "runtime.db")
-		spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
+		spec, err := loadServePlatformSpecDocument()
 		if err != nil {
 			t.Fatalf("load platform spec: %v", err)
 		}
@@ -7273,7 +7244,6 @@ func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:        writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		SourceRoot:        filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath:  defaultPlatformSpecPath,
 		APIListenAddr:     "127.0.0.1:0",
 		MCPListenAddr:     "127.0.0.1:0",
 		SelfCheck:         true,
@@ -7306,7 +7276,6 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:        writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		SourceRoot:        sourceRoot,
-		PlatformSpecPath:  defaultPlatformSpecPath,
 		APIListenAddr:     "127.0.0.1:0",
 		MCPListenAddr:     "127.0.0.1:0",
 		SelfCheck:         true,
@@ -7407,15 +7376,14 @@ func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 			bundleHash := bundle.SourceArtifact.BundleHash()
 			var workspaceBundleScopes []string
 			opts := cliapp.ServeOptions{
-				SourceRoot:       filepath.Join(repoRootForTest(), "tests", "tier8-boot-verification", "test-boot-success"),
-				PlatformSpecPath: defaultPlatformSpecPath,
-				StoreMode:        backend.String(),
-				StoreModeSet:     true,
-				APIListenAddr:    "127.0.0.1:0",
-				MCPListenAddr:    "127.0.0.1:0",
-				SelfCheck:        true,
-				Verbose:          true,
-				TestLLMRuntime:   servedNoopLLMRuntime{},
+				SourceRoot:     filepath.Join(repoRootForTest(), "tests", "tier8-boot-verification", "test-boot-success"),
+				StoreMode:      backend.String(),
+				StoreModeSet:   true,
+				APIListenAddr:  "127.0.0.1:0",
+				MCPListenAddr:  "127.0.0.1:0",
+				SelfCheck:      true,
+				Verbose:        true,
+				TestLLMRuntime: servedNoopLLMRuntime{},
 			}
 
 			switch backend {
@@ -7423,7 +7391,7 @@ func Test2376DirectoryBootUsesExactSelectedStoreSource(t *testing.T) {
 				stubServeRuntimeWorkspaceLifecycleWithBundleScopes(t, &workspaceBundleScopes)
 				path := filepath.Join(t.TempDir(), "persisted-source.sqlite")
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend.String(), path)
-				spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
+				spec, err := loadServePlatformSpecDocument()
 				if err != nil {
 					t.Fatalf("load platform spec: %v", err)
 				}
@@ -7545,15 +7513,14 @@ func TestRunServeRuntimeRejectsPresentZeroBeforeContextPublication(t *testing.T)
 	var published atomic.Bool
 	var out lockedBuffer
 	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:       writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "runtime.db")),
-		SourceRoot:       project,
-		PlatformSpecPath: defaultPlatformSpecPath,
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
-		ShutdownGrace:    runtimepkg.DefaultShutdownGrace,
-		Output:           &out,
-		TestLLMRuntime:   servedNoopLLMRuntime{},
+		ConfigPath:     writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "runtime.db")),
+		SourceRoot:     project,
+		APIListenAddr:  "127.0.0.1:0",
+		MCPListenAddr:  "127.0.0.1:0",
+		SelfCheck:      true,
+		ShutdownGrace:  runtimepkg.DefaultShutdownGrace,
+		Output:         &out,
+		TestLLMRuntime: servedNoopLLMRuntime{},
 		TestRuntimeContextsReadyHook: func(*runtimepkg.RuntimeContextManager) {
 			published.Store(true)
 		},
@@ -7580,16 +7547,15 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 
 	var out lockedBuffer
 	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:       writeServeRuntimeTestConfig(t),
-		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        "postgres",
-		StoreModeSet:     true,
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
-		Verbose:          true,
-		Output:           &out,
+		ConfigPath:    writeServeRuntimeTestConfig(t),
+		SourceRoot:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		StoreMode:     "postgres",
+		StoreModeSet:  true,
+		APIListenAddr: "127.0.0.1:0",
+		MCPListenAddr: "127.0.0.1:0",
+		SelfCheck:     true,
+		Verbose:       true,
+		Output:        &out,
 	})
 	if code != serveExitDataIntegrity {
 		t.Fatalf("Run code = %d, want %d\noutput:\n%s", code, serveExitDataIntegrity, out.String())
@@ -7620,7 +7586,7 @@ func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory f
 
 func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *runtimecontracts.WorkflowContractBundle) (string, string) {
 	t.Helper()
-	spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
+	spec, err := loadServePlatformSpecDocument()
 	if err != nil {
 		t.Fatalf("load platform spec: %v", err)
 	}
@@ -7977,7 +7943,7 @@ func TestInitializeServeSchemaStateStoresNeverExposeTableInventory(t *testing.T)
 		}
 	}
 
-	defaultPlatformSummary, err := initializeServePlatformStateStores(ctx, schema, filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
+	defaultPlatformSummary, err := initializeServePlatformStateStores(ctx, schema)
 	if err != nil {
 		t.Fatalf("initializeServePlatformStateStores: %v", err)
 	}
@@ -8073,7 +8039,7 @@ type capturingSchemaBootstrapper struct {
 
 func workflowBundleWithGeneratedEntitySchemaForStateStoreTest(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
+	spec, err := loadServePlatformSpecDocument()
 	if err != nil {
 		t.Fatalf("load platform spec: %v", err)
 	}
@@ -8159,14 +8125,13 @@ func TestRunServeRuntimeVerboseEmitsPlatformSpecBootSequence(t *testing.T) {
 
 	sqlitePath := filepath.Join(t.TempDir(), "verbose-sequence.sqlite")
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-		ConfigPath:       writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
-		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        "sqlite",
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
-		Verbose:          true,
+		ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
+		SourceRoot:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		StoreMode:     "sqlite",
+		APIListenAddr: "127.0.0.1:0",
+		MCPListenAddr: "127.0.0.1:0",
+		SelfCheck:     true,
+		Verbose:       true,
 	})
 
 	serve.waitForReadyLine()
@@ -8225,15 +8190,14 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 
 			var out lockedBuffer
 			code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-				ConfigPath:       writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "listener-bind.sqlite"), nil),
-				SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-				PlatformSpecPath: defaultPlatformSpecPath,
-				StoreMode:        "sqlite",
-				APIListenAddr:    apiAddr,
-				MCPListenAddr:    mcpAddr,
-				SelfCheck:        true,
-				Verbose:          verbose,
-				Output:           &out,
+				ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "listener-bind.sqlite"), nil),
+				SourceRoot:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+				StoreMode:     "sqlite",
+				APIListenAddr: apiAddr,
+				MCPListenAddr: mcpAddr,
+				SelfCheck:     true,
+				Verbose:       verbose,
+				Output:        &out,
 			})
 			if code != 3 {
 				t.Fatalf("Run code = %d, want 3\noutput:\n%s", code, out.String())
@@ -8321,16 +8285,15 @@ func TestRunServeRuntimeDevClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 
 	bindingCh := make(chan toolgateway.Binding, 1)
 	opts := cliapp.ServeOptions{
-		ConfigPath:       writeDoctorClaudeDevScratchConfig(t),
-		Backend:          "claude_cli",
-		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        "sqlite",
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    mcpAddr,
-		SelfCheck:        true,
-		Verbose:          true,
-		Dev:              true,
+		ConfigPath:    writeDoctorClaudeDevScratchConfig(t),
+		Backend:       "claude_cli",
+		SourceRoot:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		StoreMode:     "sqlite",
+		APIListenAddr: "127.0.0.1:0",
+		MCPListenAddr: mcpAddr,
+		SelfCheck:     true,
+		Verbose:       true,
+		Dev:           true,
 		TestRuntimeReadyHook: func(rt *runtimepkg.Runtime) {
 			bindingCh <- rt.Options.ToolGatewayBinding
 		},
@@ -8530,14 +8493,13 @@ func TestRunServeRuntimeNonDevClaudeCLIRetiredGatewayURLEnvFailsClosed(t *testin
 			t.Setenv(tt.env, tt.value)
 
 			assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, tt.env, cliapp.ServeOptions{
-				ConfigPath:       writeDoctorClaudeConfig(t, ""),
-				Backend:          "claude_cli",
-				SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-				PlatformSpecPath: defaultPlatformSpecPath,
-				StoreMode:        "not-a-store",
-				APIListenAddr:    "127.0.0.1:0",
-				MCPListenAddr:    "127.0.0.1:0",
-				SelfCheck:        true,
+				ConfigPath:    writeDoctorClaudeConfig(t, ""),
+				Backend:       "claude_cli",
+				SourceRoot:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+				StoreMode:     "not-a-store",
+				APIListenAddr: "127.0.0.1:0",
+				MCPListenAddr: "127.0.0.1:0",
+				SelfCheck:     true,
 			})
 		})
 	}
@@ -8550,14 +8512,13 @@ func TestRunServeRuntimeDirectoryRetiredGatewayURLEnvFailsBeforeStartupSideEffec
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
 	assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, "SWARM_TOOL_GATEWAY_URL", cliapp.ServeOptions{
-		ConfigPath:       writeDoctorClaudeConfig(t, ""),
-		Backend:          "claude_cli",
-		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        "not-a-store",
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
+		ConfigPath:    writeDoctorClaudeConfig(t, ""),
+		Backend:       "claude_cli",
+		SourceRoot:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		StoreMode:     "not-a-store",
+		APIListenAddr: "127.0.0.1:0",
+		MCPListenAddr: "127.0.0.1:0",
+		SelfCheck:     true,
 	})
 }
 
@@ -8568,14 +8529,13 @@ func TestRunServeRuntimeNonClaudeRetiredGatewayURLEnvFailsBeforeStartupSideEffec
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
 	assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t, "SWARM_TOOL_GATEWAY_CONTAINER_URL", cliapp.ServeOptions{
-		ConfigPath:       writeServeRuntimeTestConfig(t),
-		Backend:          "anthropic",
-		SourceRoot:       filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        "not-a-store",
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
+		ConfigPath:    writeServeRuntimeTestConfig(t),
+		Backend:       "anthropic",
+		SourceRoot:    filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		StoreMode:     "not-a-store",
+		APIListenAddr: "127.0.0.1:0",
+		MCPListenAddr: "127.0.0.1:0",
+		SelfCheck:     true,
 	})
 }
 
@@ -8616,10 +8576,9 @@ func assertServePreflightTypedGateway(t *testing.T, opts cliapp.ServeOptions, wa
 	if err != nil {
 		t.Fatalf("load config for preflight proof: %v", err)
 	}
-	resolvedPaths, err := cliapp.ResolveCLISourcePlatformSpecPaths(repoRootForTest(), cliapp.CLISourcePlatformSpecPathOptions{
-		SourceRoot:       opts.SourceRoot,
-		PlatformSpecPath: opts.PlatformSpecPath,
-		ConfigPath:       opts.ConfigPath,
+	resolvedPaths, err := cliapp.ResolveCLISourcePaths(repoRootForTest(), cliapp.CLISourcePathOptions{
+		SourceRoot: opts.SourceRoot,
+		ConfigPath: opts.ConfigPath,
 	})
 	if err != nil {
 		t.Fatalf("resolve preflight paths: %v", err)
@@ -8632,7 +8591,7 @@ func assertServePreflightTypedGateway(t *testing.T, opts cliapp.ServeOptions, wa
 	if err != nil {
 		t.Fatalf("load platform pack base for preflight proof: %v", err)
 	}
-	_, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repoRootForTest(), resolvedPaths.SourceRoot, resolvedPaths.PlatformSpecPath, platformPackBase)
+	_, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repoRootForTest(), resolvedPaths.SourceRoot, platformPackBase)
 	if err != nil {
 		t.Fatalf("load workflow bundle for preflight proof: %v", err)
 	}
@@ -8829,7 +8788,6 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:        writeServeRuntimeTestConfig(t),
 		SourceRoot:        sourceRoot,
-		PlatformSpecPath:  defaultPlatformSpecPath,
 		StoreMode:         "postgres",
 		APIListenAddr:     "127.0.0.1:0",
 		MCPListenAddr:     "127.0.0.1:0",

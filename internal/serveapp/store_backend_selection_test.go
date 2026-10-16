@@ -263,7 +263,7 @@ func TestBuildStoresSQLiteBindsOwnershipToConstructedBackendIdentity(t *testing.
 	path := filepath.Join(t.TempDir(), "runtime.db")
 	stores := openSelectedSQLiteOwner(t, path, &config.Config{})
 	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
-	if _, err := initializeServePlatformStateStores(ctx, stores.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
+	if _, err := initializeServePlatformStateStores(ctx, stores.Schema()); err != nil {
 		t.Fatalf("bootstrap SQLite selected store: %v", err)
 	}
 

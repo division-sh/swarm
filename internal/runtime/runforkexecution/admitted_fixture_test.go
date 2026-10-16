@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -22,7 +23,6 @@ import (
 type admittedFixtureSelectedContractSourceLoader struct {
 	RepoRoot         string
 	SourceRoot       string
-	PlatformSpecPath string
 	PlatformPackBase *packartifact.PlatformPackInventory
 }
 
@@ -47,7 +47,11 @@ func (l admittedFixtureSelectedContractSourceLoader) LoadRunForkSelectedContract
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(l.RepoRoot, artifact, l.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+	specPath, err := platform.MaterializePlatformSpecFile()
+	if err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(l.RepoRoot, artifact, specPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBase: l.PlatformPackBase, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {

@@ -87,7 +87,6 @@ func TestIssue2564H2ServeProcessHelper(t *testing.T) {
 	opts := cliapp.DefaultServeOptions()
 	opts.SourceRoot, opts.ConfigPath = request.Source, request.Config
 	opts.StoreMode, opts.StoreModeSet = request.Backend, true
-	opts.PlatformSpecPath = defaultPlatformSpecPath
 	opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
 	opts.WorkspaceBackend, opts.WorkspaceBackendSet = "host", true
 	opts.SelfCheck, opts.Verbose, opts.Dev = true, true, false

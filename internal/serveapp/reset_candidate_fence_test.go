@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -179,8 +178,8 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					t.Fatal(err)
 				}
 				for _, root := range []string{writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), writeServedEventPublishFollowUpFixture(t)} {
-					loaded, err := loadServeRuntimeBundle(ctx, repoRootForTest(), stores.SourceArtifactStore(), cliapp.CLISourcePlatformSpecPaths{
-						SourceRoot: root, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
+					loaded, err := loadServeRuntimeBundle(ctx, repoRootForTest(), stores.SourceArtifactStore(), cliapp.CLISourcePaths{
+						SourceRoot: root,
 					}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 					if err != nil {
 						t.Fatal(err)
@@ -288,8 +287,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					t.Fatal("canonical publication handler is not configured")
 				}
 				handler, err := apiv1.NewHandler(apiv1.Options{
-					PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-					AuthTokens:       []string{apiv1.DefaultLoopbackAPIToken}, ProcessWorkOwner: process,
+					AuthTokens: []string{apiv1.DefaultLoopbackAPIToken}, ProcessWorkOwner: process,
 					Handlers: supervisor.executionDispatch(),
 				})
 				if err != nil {

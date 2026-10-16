@@ -123,7 +123,7 @@ func TestServePostgresRemotePossessionOutlivesLocalLoss(t *testing.T) {
 		return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 	}
 	t.Cleanup(func() { buildStoresForServe = oldBuild })
-	opts := cliapp.ServeOptions{ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: filepath.Join("tests", "tier8-boot-verification", "test-boot-success"), PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, ShutdownGrace: time.Second}
+	opts := cliapp.ServeOptions{ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: filepath.Join("tests", "tier8-boot-verification", "test-boot-success"), StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, ShutdownGrace: time.Second}
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
 	const ownershipSQL = `SELECT pid FROM pg_locks WHERE locktype='advisory' AND granted AND database=(SELECT oid FROM pg_database WHERE datname=current_database()) AND classid::bigint=CASE WHEN hashtext($1)<0 THEN 4294967295::bigint ELSE 0::bigint END AND objid::bigint=(hashtext($1)::bigint & 4294967295::bigint) AND objsubid=1 LIMIT 1`

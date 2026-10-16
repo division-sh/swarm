@@ -55,23 +55,22 @@ const (
 )
 
 type runCommandOptions struct {
-	apiOptions       rootCommandOptions
-	eventName        string
-	payloadPath      string
-	connectURL       string
-	noFollow         bool
-	reattachRunID    string
-	configPath       string
-	backend          string
-	sourceRoot       string
-	dataImports      []string
-	dataPins         []string
-	platformSpecPath string
-	idempotencyKey   string
-	runID            string
-	apiPort          int
-	mcpPort          int
-	changedFlags     map[string]bool
+	apiOptions     rootCommandOptions
+	eventName      string
+	payloadPath    string
+	connectURL     string
+	noFollow       bool
+	reattachRunID  string
+	configPath     string
+	backend        string
+	sourceRoot     string
+	dataImports    []string
+	dataPins       []string
+	idempotencyKey string
+	runID          string
+	apiPort        int
+	mcpPort        int
+	changedFlags   map[string]bool
 }
 
 type runStartResult struct {
@@ -473,10 +472,9 @@ func startLocalRunServe(ctx context.Context, root InvocationRoot, opts runComman
 	if runServe == nil {
 		return nil, fmt.Errorf("serve runtime is unavailable")
 	}
-	resolvedPaths, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{
-		SourceRoot:       opts.sourceRoot,
-		PlatformSpecPath: opts.platformSpecPath,
-		ConfigPath:       opts.configPath,
+	resolvedPaths, err := ResolveCLISourcePaths(repo, CLISourcePathOptions{
+		SourceRoot: opts.sourceRoot,
+		ConfigPath: opts.configPath,
 	})
 	if err != nil {
 		return nil, err
@@ -492,7 +490,6 @@ func startLocalRunServe(ctx context.Context, root InvocationRoot, opts runComman
 	serveOpts.ConfigPath = opts.configPath
 	serveOpts.Backend = opts.backend
 	serveOpts.SourceRoot = resolvedPaths.SourceRoot
-	serveOpts.PlatformSpecPath = resolvedPaths.PlatformSpecPath
 	serveOpts.LocalRun = true
 	var startupOutput runStartupOutput
 	serveOpts.Output = &startupOutput
@@ -529,7 +526,7 @@ func startLocalRunServe(ctx context.Context, root InvocationRoot, opts runComman
 	return stop, nil
 }
 
-func prepareLocalRunProjectClaim(ctx context.Context, repo string, opts runCommandOptions, resolvedPaths CLISourcePlatformSpecPaths) (func(), error) {
+func prepareLocalRunProjectClaim(ctx context.Context, repo string, opts runCommandOptions, resolvedPaths CLISourcePaths) (func(), error) {
 	project := resolveLocalRuntimeStateProject(repo, resolvedPaths)
 	if strings.TrimSpace(project.CanonicalProjectRoot) == "" {
 		return nil, nil

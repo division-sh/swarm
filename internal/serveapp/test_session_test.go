@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
@@ -177,23 +178,32 @@ func TestPrivateTestSessionJoinedCleanupAndPrivateTransport(t *testing.T) {
 	}
 }
 
+type privateTestSchemaFailure struct {
+	store.SchemaBootstrapper
+}
+
+func (privateTestSchemaFailure) BootstrapSchema(context.Context, store.SchemaBootstrapRequest) error {
+	return errors.New("injected platform schema failure")
+}
+
 func TestPrivateTestStartupFailureUnwindsAcquiredResources(t *testing.T) {
 	for _, stage := range []string{"store_acquisition", "schema_after_store", "workspace_prepare", "workspace_release_failure", "runtime_construction"} {
 		t.Run(stage, func(t *testing.T) {
 			req := admittedPrivateTestRequest(t)
-			if stage == "schema_after_store" {
-				req.PlatformSpecPath = filepath.Join(t.TempDir(), "missing-platform-spec.yaml")
-			}
 			original := buildStoresForServe
 			t.Cleanup(func() { buildStoresForServe = original })
 			var privateRoot string
 			var db *sql.DB
-			if stage == "runtime_construction" {
+			if stage == "runtime_construction" || stage == "schema_after_store" {
 				originalProjection := projectRuntimePersistenceForServe
 				t.Cleanup(func() { projectRuntimePersistenceForServe = originalProjection })
 				projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
 					projection := originalProjection(owner)
-					projection.deps.EventStore = nil
+					if stage == "schema_after_store" {
+						projection.schema = privateTestSchemaFailure{projection.schema}
+					} else {
+						projection.deps.EventStore = nil
+					}
 					return projection
 				}
 			}
@@ -234,6 +244,9 @@ func TestPrivateTestStartupFailureUnwindsAcquiredResources(t *testing.T) {
 			})
 			if err == nil || called || privateRoot == "" {
 				t.Fatalf("startup failure: err=%v callback=%t root=%q", err, called, privateRoot)
+			}
+			if stage == "schema_after_store" && !strings.Contains(err.Error(), "injected platform schema failure") {
+				t.Fatalf("schema failure was not exercised: %v", err)
 			}
 			if stage != "store_acquisition" && db == nil {
 				t.Fatal("startup failure did not exercise the acquired store")
@@ -340,8 +353,7 @@ func TestPrivateTestDoesNotSelectConcurrentLiveRuntime(t *testing.T) {
 	liveStore := filepath.Join(t.TempDir(), "live.sqlite")
 	configPath := writeStoreBackendRuntimeConfig(t, "sqlite", liveStore)
 	live := startServeRuntimeTestProcessAtRepo(t, source, cliapp.ServeOptions{
-		ConfigPath: configPath, SourceRoot: source, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true,
+		ConfigPath: configPath, SourceRoot: source, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true,
 	})
 	live.waitForReadyLine()
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, live.outputString())

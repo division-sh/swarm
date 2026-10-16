@@ -19,6 +19,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apispec"
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -76,7 +77,6 @@ type Handler struct {
 type MethodHandler func(context.Context, Request) (any, error)
 
 type Options struct {
-	PlatformSpecPath    string
 	Registry            *Registry
 	AuthTokens          []string
 	Handlers            map[string]MethodHandler
@@ -144,8 +144,11 @@ func NewHandler(opts Options) (*Handler, error) {
 	}
 	registry := opts.Registry
 	if registry == nil {
-		var err error
-		registry, err = LoadRegistry(opts.PlatformSpecPath)
+		specPath, err := platform.MaterializePlatformSpecFile()
+		if err != nil {
+			return nil, err
+		}
+		registry, err = LoadRegistry(specPath)
 		if err != nil {
 			return nil, err
 		}

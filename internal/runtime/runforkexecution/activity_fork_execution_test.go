@@ -473,7 +473,7 @@ loops:
 		writeSelectedContractFixtureFile(t, filepath.Join(root, path), contents)
 	}
 	repoRoot := runForkExecutionRepoRoot(t)
-	loaded, err := (admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}).LoadRunForkSelectedContractSource(context.Background(), selection)
+	loaded, err := (admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: root}).LoadRunForkSelectedContractSource(context.Background(), selection)
 	if err != nil {
 		t.Fatalf("load declared activity producer fixture: %v", err)
 	}

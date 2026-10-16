@@ -99,7 +99,7 @@ func TestServePostgresLossAndRestartFromDurableState(t *testing.T) {
 			if err := os.WriteFile(configPath, []byte("runtime:\n  recovery_on_startup: true\nworkspace: {}\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			opts := cliapp.ServeOptions{ConfigPath: configPath, SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, ShutdownGrace: time.Second}
+			opts := cliapp.ServeOptions{ConfigPath: configPath, SourceRoot: root, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, ShutdownGrace: time.Second}
 			serve := startServeRuntimeTestProcess(t, opts)
 			serve.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/v1/rpc"

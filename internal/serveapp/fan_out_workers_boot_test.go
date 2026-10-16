@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -44,8 +43,8 @@ func TestBuildServeRuntimeMapsFanOutWorkers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			repo := repoRootForTest()
 			root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
-			loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePlatformSpecPaths{
-				SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
+			loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePaths{
+				SourceRoot: root,
 			}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 			if err != nil {
 				t.Fatal(err)

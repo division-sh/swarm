@@ -17,7 +17,7 @@ func TestResolveLocalRuntimeStateUsesProjectLocalStoreWithoutAmbientData(t *test
 
 	state, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
 		RepoRoot:                projectRoot,
-		ResolvedPaths:           CLISourcePlatformSpecPaths{SourceRoot: sourceRoot},
+		ResolvedPaths:           CLISourcePaths{SourceRoot: sourceRoot},
 		SwarmDir:                swarmDir,
 		Config:                  &config.Config{},
 		CreateDefaultDataSource: true,
@@ -44,7 +44,7 @@ func TestResolveLocalRuntimeStateBorrowedContractsNeedsNoAmbientData(t *testing.
 
 	state, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
 		RepoRoot:                RepoRoot,
-		ResolvedPaths:           CLISourcePlatformSpecPaths{SourceRoot: sourceRoot},
+		ResolvedPaths:           CLISourcePaths{SourceRoot: sourceRoot},
 		SwarmDir:                CLISwarmDirResolution{Path: t.TempDir(), Source: "test"},
 		Config:                  &config.Config{},
 		CreateDefaultDataSource: true,
@@ -72,7 +72,7 @@ func TestResolveLocalRuntimeStateRejectsLegacySQLiteOrphan(t *testing.T) {
 
 	_, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
 		RepoRoot:                projectRoot,
-		ResolvedPaths:           CLISourcePlatformSpecPaths{SourceRoot: sourceRoot},
+		ResolvedPaths:           CLISourcePaths{SourceRoot: sourceRoot},
 		SwarmDir:                CLISwarmDirResolution{Path: t.TempDir(), Source: "test"},
 		Config:                  &config.Config{},
 		CreateDefaultDataSource: true,
@@ -100,7 +100,7 @@ func TestRunStartLocalLiveProjectRefusal(t *testing.T) {
 	_, err := prepareLocalRunProjectClaim(context.Background(), projectRoot, runCommandOptions{
 		apiOptions: apiOptions,
 		sourceRoot: sourceRoot,
-	}, CLISourcePlatformSpecPaths{SourceRoot: sourceRoot})
+	}, CLISourcePaths{SourceRoot: sourceRoot})
 	if err == nil || !strings.Contains(err.Error(), "local swarm run start requires exclusive project runtime") || !strings.Contains(err.Error(), "--connect") {
 		t.Fatalf("prepareLocalRunProjectClaim error = %v, want live project runtime conflict", err)
 	}

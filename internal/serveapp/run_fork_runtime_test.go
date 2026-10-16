@@ -902,7 +902,7 @@ func seedRunForkCLISelectedExecutionSource(t *testing.T, db *sql.DB, runID, enti
 func registerRunForkCLIContractCatalog(t *testing.T, ctx context.Context, db *sql.DB, sourceRoot string) (string, storetest.RunFixtureStore) {
 	t.Helper()
 	repo := repoRootForTest()
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, sourceRoot, runtimecontracts.DefaultPlatformSpecFile(repo))
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, sourceRoot)
 	if err != nil {
 		t.Fatalf("load run-fork selected contracts %s: %v", sourceRoot, err)
 	}
