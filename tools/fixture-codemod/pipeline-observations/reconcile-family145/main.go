@@ -297,6 +297,9 @@ var files = []string{
 }
 
 func main() {
+	if capture2698SourceCommand(os.Args) {
+		return
+	}
 	if captureRecentFamilyCommand(os.Args) {
 		return
 	}
