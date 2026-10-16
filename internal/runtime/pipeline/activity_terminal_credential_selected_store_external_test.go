@@ -74,10 +74,10 @@ func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 				}
 				if posture == "static_present" || posture == "managed_present" {
 					if receipt.Status != runtimepipeline.ActivityAttemptStatusSucceeded || calls.Load() != 1 || receipt.ResultPayload["result"].(map[string]any)["echoed_authorization"] != "Bearer [REDACTED]" {
-						t.Fatal("credentialed dispatch or redaction changed")
+						t.Fatalf("credentialed dispatch or redaction changed: status=%s calls=%d failure=%+v", receipt.Status, calls.Load(), receipt.Failure)
 					}
 				} else if receipt.Status != runtimepipeline.ActivityAttemptStatusFailed || calls.Load() != 0 || receipt.Failure == nil || receipt.Failure.Class != runtimefailures.ClassAuthenticationNeeded || receipt.Failure.Detail.Code != "activity_credential_required" {
-					t.Fatal("missing credential did not journal the exact pre-dispatch refusal")
+					t.Fatalf("missing credential did not journal the exact pre-dispatch refusal: status=%s calls=%d failure=%+v", receipt.Status, calls.Load(), receipt.Failure)
 				}
 				wantManagedReads := int32(0)
 				if posture == "managed_present" || posture == "managed_absent" {
@@ -141,9 +141,11 @@ func activityReplayManagedCredentials(t *testing.T, posture string, tool runtime
 	httpSpec, _ := tool.HTTP()
 	httpSpec.Headers = nil
 	tool = runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolCategory("provider_connector"),
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
 		runtimecontracts.WithToolSchemas(tool.InputSchema(), tool.OutputSchema()),
 		runtimecontracts.WithToolHTTP(httpSpec),
+		runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}),
 		runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "provider_token", Header: "Authorization", Prefix: "Bearer ", GrantType: managedcredentials.GrantClientCredentials}),
 	)
 	if posture == "managed_present" {
