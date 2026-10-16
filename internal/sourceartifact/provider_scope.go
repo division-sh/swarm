@@ -2,7 +2,6 @@ package sourceartifact
 
 import (
 	"fmt"
-	"path"
 	"sort"
 	"strings"
 )
@@ -17,7 +16,10 @@ func (a *AdmittedSourceArtifact) ProviderDirectoriesInScope(flowPath string) ([]
 	selected := make(map[string]ProviderDirectory)
 	for index := len(ancestors) - 1; index >= 0; index-- {
 		for _, directory := range ancestors[index].providers {
-			key := path.Base(directory)
+			key, err := a.ProviderKey(directory)
+			if err != nil {
+				return nil, err
+			}
 			if _, nearer := selected[key]; !nearer {
 				selected[key] = a.providers[directory]
 			}

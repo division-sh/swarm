@@ -23,11 +23,11 @@ func TestS1ProviderArtifactOwnsExactCapturedMembers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !provider.Valid() || provider.Metadata().Version != "1.0.0" || provider.Directory() != "team-bot" || provider.DeclaringFlow() != "." {
+	if !provider.Valid() || provider.Key() != "team-bot" || provider.Metadata().Version != "1.0.0" || provider.Directory() != "team-bot" || provider.DeclaringFlow() != "." {
 		t.Fatalf("wrong provider identity: %+v", provider)
 	}
 	body, present := provider.Body(packmodel.BodyTrigger)
-	if !present || !body.Valid() || body.Role() != packmodel.BodyTrigger || body.Label() != "team-bot/trigger.yaml" || body.Metadata().Version != "1.0.0" {
+	if !present || !body.Valid() || body.ProviderKey() != "team-bot" || body.Role() != packmodel.BodyTrigger || body.Label() != "team-bot/trigger.yaml" || body.Metadata().Version != "1.0.0" {
 		t.Fatalf("body lost its admitted parent: %+v", body)
 	}
 	wantHash := body.Hash()
@@ -40,7 +40,7 @@ func TestS1ProviderArtifactOwnsExactCapturedMembers(t *testing.T) {
 	readback[0] = 'x'
 	metadata := body.Metadata()
 	metadata.Version = "9.9.9"
-	if !bytes.Equal(body.Bytes(), wantBody) || body.Hash() != wantHash || body.Metadata().Version != "1.0.0" {
+	if !bytes.Equal(body.Bytes(), wantBody) || body.Hash() != wantHash || body.Metadata().Version != "1.0.0" || body.ProviderKey() != "team-bot" {
 		t.Fatal("mutable caller changed captured provider bytes or identity")
 	}
 	if value := body.SourceValue(); value.Location().File != "team-bot/trigger.yaml" {
@@ -61,7 +61,7 @@ func TestS1ProviderArtifactOwnsExactCapturedMembers(t *testing.T) {
 		t.Fatal(err)
 	}
 	reopenedBody, present := reopened.Body(packmodel.BodyTrigger)
-	if !present || reopenedBody.Hash() != wantHash || !bytes.Equal(reopenedBody.Bytes(), wantBody) || reopenedBody.Metadata().Version != "1.0.0" {
+	if !present || reopened.Key() != "team-bot" || reopenedBody.ProviderKey() != "team-bot" || reopenedBody.Hash() != wantHash || !bytes.Equal(reopenedBody.Bytes(), wantBody) || reopenedBody.Metadata().Version != "1.0.0" {
 		t.Fatal("retained reconstruction changed provider ownership or exact bytes")
 	}
 }
@@ -104,7 +104,7 @@ func TestS1ProviderArtifactRefusesPathAliasesAndForeignSelection(t *testing.T) {
 	missingRole := validBody
 	missingRole.role = packmodel.BodyConnector
 	for _, malformed := range []ProviderBody{foreignLabel, missingRole} {
-		if malformed.Valid() || malformed.Hash() != "" || malformed.Bytes() != nil {
+		if malformed.Valid() || malformed.Hash() != "" || malformed.Bytes() != nil || malformed.ProviderKey() != "" {
 			t.Fatal("contradictory body acquired admitted evidence")
 		}
 	}

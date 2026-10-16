@@ -13,14 +13,33 @@ import (
 type AdmittedProvider struct {
 	source    *sourceartifact.AdmittedSourceArtifact
 	directory sourceartifact.ProviderDirectory
+	key       string
 }
 
 func ProviderFromArtifact(source *sourceartifact.AdmittedSourceArtifact, directory string) (AdmittedProvider, error) {
+	key, err := source.ProviderKey(directory)
+	if err != nil {
+		return AdmittedProvider{}, err
+	}
+	return providerFromArtifact(source, directory, key)
+}
+
+// ProviderFromRootedSource retains the selected root's key without minting root
+// evidence on its shared, content-only artifact.
+func ProviderFromRootedSource(source sourceartifact.RootedSource, directory string) (AdmittedProvider, error) {
+	key, err := source.ProviderKey(directory)
+	if err != nil {
+		return AdmittedProvider{}, err
+	}
+	return providerFromArtifact(source.Artifact(), directory, key)
+}
+
+func providerFromArtifact(source *sourceartifact.AdmittedSourceArtifact, directory, key string) (AdmittedProvider, error) {
 	provider, present := source.ProviderDirectory(directory)
 	if !present {
 		return AdmittedProvider{}, fmt.Errorf("source has no admitted provider directory %q", directory)
 	}
-	return AdmittedProvider{source: source, directory: provider}, nil
+	return AdmittedProvider{source: source, directory: provider, key: key}, nil
 }
 
 // AdmitProviderMembers consumes captured bytes, not host paths or an import
@@ -48,8 +67,9 @@ func AdmitProviderMembers(directory string, members map[string][]byte) (Admitted
 }
 
 func (p AdmittedProvider) Valid() bool {
-	return p.source != nil && p.directory.Manifest().Kind() == packmodel.DirectoryProvider
+	return p.source != nil && p.key != "" && p.directory.Manifest().Kind() == packmodel.DirectoryProvider
 }
+func (p AdmittedProvider) Key() string                  { return p.key }
 func (p AdmittedProvider) Directory() string            { return p.directory.Path() }
 func (p AdmittedProvider) DeclaringFlow() string        { return p.directory.FlowPath() }
 func (p AdmittedProvider) Metadata() packmodel.Manifest { return p.directory.Manifest() }
@@ -92,6 +112,12 @@ func (b ProviderBody) Valid() bool {
 func (b ProviderBody) Role() packmodel.BodyRole     { return b.role }
 func (b ProviderBody) Label() string                { return b.label }
 func (b ProviderBody) Metadata() packmodel.Manifest { return b.provider.Metadata() }
+func (b ProviderBody) ProviderKey() string {
+	if !b.Valid() {
+		return ""
+	}
+	return b.provider.Key()
+}
 
 func (b ProviderBody) Bytes() []byte {
 	if !b.Valid() {
