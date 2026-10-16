@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -24,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type inboundBatchAuthorizationVerifier struct {
@@ -235,7 +237,7 @@ func TestPrepareInboundDeliveryBatchUsesLiveSourceOwnerAndSettlesConsumerlessRaw
 				instance := installConnectionSourceConstructionForRun(t, bus, source, "telegram-ingress", batch.Events[0].Event.RunID())
 				store.setTargetOwners(ActiveTargetDescriptor{ID: "constructed", FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
 			}
-			plan, err := bus.PrepareInboundDeliveryBatch(testAuthorActivityContext(context.Background()), batch)
+			plan, err := bus.PrepareInboundDeliveryBatch(inboundBatchAuthorContext(t, source), batch)
 			if err != nil {
 				t.Fatalf("PrepareInboundDeliveryBatch: %v", err)
 			}
@@ -297,11 +299,22 @@ func TestPrepareInboundDeliveryBatchRejectsChangedAuthenticatedPublicationBefore
 			batch.Events[0].Event = eventtest.ExistingRunRootIngressWithRoutingSource(raw.ID(), name, "inbound-gateway", "", payload, 0,
 				raw.RunID(), events.EventEnvelope{}, routing, raw.CreatedAt())
 			bus, err := newScopedTestEventBus(store, opts)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := bus.PrepareInboundDeliveryBatch(testAuthorActivityContext(context.Background()), batch); err == nil {
-				t.Fatal("changed authenticated publication was accepted")
+			switch change {
+			case "missing selected source", "foreign selected bundle":
+				want := "durable event bus requires its compiled rooted source"
+				if change == "foreign selected bundle" {
+					want = "event bus source fact differs from its compiled rooted source"
+				}
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("invalid selected source passed construction: %v", err)
+				}
+			default:
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := bus.PrepareInboundDeliveryBatch(inboundBatchAuthorContext(t, source), batch); err == nil {
+					t.Fatal("changed authenticated publication was accepted")
+				}
 			}
 			if len(store.events) != 0 || len(store.routes) != 0 || len(store.instanceObservations) != 0 || len(store.constructions) != 0 {
 				t.Fatal("refused authenticated publication changed event, delivery or construction state")
@@ -312,13 +325,25 @@ func TestPrepareInboundDeliveryBatchRejectsChangedAuthenticatedPublicationBefore
 
 func TestAuthenticatedRawSettlementCannotEraseGenuineLocalConsumer(t *testing.T) {
 	const flow = "telegram-ingress"
-	base := semanticviewtest.WithProviderIngress(semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{{
-		id: flow, mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
-		nodes: map[string]runtimecontracts.SystemNodeContract{"observer": {
-			SubscribesTo: []string{"inbound.telegram"}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.telegram": {}},
-		}},
-	}}, nil)), map[string][]string{flow: {"inbound.telegram"}})
+	base := loadInboundRawSettlementSource(t, true, true)
 	catalog, batch := authenticatedTelegramBatchForSource(t, base, flow, false)
+	entry, present := catalog.EntryByProvider("telegram")
+	if !present {
+		t.Fatal("authenticated fixture lost its provider catalog entry")
+	}
+	compiled, err := runtimecontracts.CompileImportedEventSchema(flow, "inbound.telegram", entry.Manifest.EventCatalogEntries()["inbound.telegram"], runtimecontracts.CompiledEventSchemaSource{Layer: "provider_trigger_pack", File: entry.Source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin, present := base.FlowInputEventPin(flow, "inbound.telegram")
+	if !present {
+		t.Fatal("consumer fixture lost its declared input")
+	}
+	pin, err = pin.BindImportedEventSchema(compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base = providerOutputAuthorizedTestSource{Source: base, declaringFlow: flow, generation: catalog.Generation(), input: pin}
 	store := newTargetRouteMemoryStore()
 	instance := ConstructedFlowInstanceIdentityFixture(base, flow, "", busInternalTestRunID)
 	store.setTargetOwners(ActiveTargetDescriptor{ID: flow, FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
@@ -329,7 +354,7 @@ func TestAuthenticatedRawSettlementCannotEraseGenuineLocalConsumer(t *testing.T)
 		t.Fatal(err)
 	}
 	installConnectionSourceConstruction(t, bus, base, flow)
-	plan, err := bus.PrepareInboundDeliveryBatch(testAuthorActivityContext(context.Background()), batch)
+	plan, err := bus.PrepareInboundDeliveryBatch(inboundBatchAuthorContext(t, base), batch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +373,8 @@ func TestGenericPublicationCannotMintProviderRawSettlementAdmission(t *testing.T
 	target := events.RouteIdentity{FlowInstance: "telegram-ingress/standing", EntityID: entityID}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(ActiveTargetDescriptor{ID: "standing", FlowInstance: target.FlowInstance, EntityID: target.EntityID})
-	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: inboundRawSettlementSource(t, true)})
+	source := inboundRawSettlementSource(t, true)
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -357,7 +383,7 @@ func TestGenericPublicationCannotMintProviderRawSettlementAdmission(t *testing.T
 	if err != nil {
 		t.Fatalf("AdmitForPublish: %v", err)
 	}
-	_, _, err = bus.prepareClosedPublication(testAuthorActivityContext(context.Background()), eventBusCommitPublishPlan{
+	_, _, err = bus.prepareClosedPublication(inboundBatchAuthorContext(t, source), eventBusCommitPublishPlan{
 		bus: bus, event: admitted.Event(), admitted: admitted,
 	})
 	if err == nil || !strings.Contains(err.Error(), "provider declaration publication requires its authenticated admission owner") {
@@ -365,6 +391,24 @@ func TestGenericPublicationCannotMintProviderRawSettlementAdmission(t *testing.T
 	}
 	if len(store.events) != 0 || len(store.routes) != 0 {
 		t.Fatal("refused generic publication mutated persistence")
+	}
+}
+
+func TestS1InboundObservationFixtureRequiresCapturedRoot(t *testing.T) {
+	source := inboundRawSettlementSource(t, true)
+	identity := ConstructedFlowInstanceIdentityFixture(source, "telegram-ingress", "", busInternalTestRunID)
+	observation, err := admitConstructionIndexTestObservation(source, busInternalTestRunID, identity, "")
+	if err != nil || !observation.Valid() {
+		t.Fatalf("rooted fixture observation refused: %v", err)
+	}
+	bundle, present := semanticview.Bundle(source)
+	if !present || observation.SourceFact().BundleHash() != bundle.SourceArtifact.BundleHash() {
+		t.Fatal("fixture observation lost its exact admitted source")
+	}
+	rootless := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{{id: "telegram-ingress", mode: "static"}}, nil))
+	observation, err = admitConstructionIndexTestObservation(rootless, busInternalTestRunID, identity, "")
+	if !errors.Is(err, sourceartifact.ErrRootAdmissionMissing) || observation.Valid() {
+		t.Fatalf("programmatic fixture gained rooted observation authority: %v", err)
 	}
 }
 
@@ -444,14 +488,55 @@ func authenticatedTelegramBatchForSource(t testing.TB, source semanticview.Sourc
 }
 
 func inboundRawSettlementSource(t testing.TB, admitted bool) semanticview.Source {
-	base := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{{
-		id: "telegram-ingress", mode: runtimecontracts.FlowModeStatic,
-		inputs: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
-	}}, nil))
+	t.Helper()
+	return loadInboundRawSettlementSource(t, admitted, false)
+}
+
+func loadInboundRawSettlementSource(t testing.TB, admitted, withConsumer bool) semanticview.Source {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "inbound-batch")
+	flow := filepath.Join(root, "telegram-ingress")
+	if err := os.MkdirAll(flow, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(flow, "schema.yaml"), []byte("pins:\n  inputs: [inbound.telegram]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if withConsumer {
+		const nodes = "observer:\n  execution_type: system_node\n  subscribes_to: [inbound.telegram]\n  event_handlers:\n    inbound.telegram: {}\n"
+		if err := os.WriteFile(filepath.Join(flow, "nodes.yaml"), []byte(nodes), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := semanticview.Wrap(bundle)
 	if !admitted {
 		return base
 	}
 	return semanticviewtest.WithProviderIngress(base, map[string][]string{"telegram-ingress": {"inbound.telegram"}})
+}
+
+func inboundBatchAuthorContext(t testing.TB, source semanticview.Source) context.Context {
+	t.Helper()
+	bundle, present := semanticview.Bundle(source)
+	if !present {
+		t.Fatal("inbound fixture requires its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact, err := runtimecorrelation.NewSourceArtifactFact(rooted.Admission().BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), fact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 }
 
 func inboundRawSettlementRoutingSource(t testing.TB) events.RoutingSource {

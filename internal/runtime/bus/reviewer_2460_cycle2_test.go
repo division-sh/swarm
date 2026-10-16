@@ -100,10 +100,10 @@ func TestReviewCycle2DeferredDispatchFailureOwnership(t *testing.T) {
 func TestReviewCycle2InboundFinalizationKeepsCommittedSiblings(t *testing.T) {
 	for _, failAt := range []int{1, 2} {
 		t.Run(fmt.Sprintf("position_%d", failAt), func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
 			store := &InMemoryEventStore{}
 			probe := &review2460PublicationProbe{failAt: failAt}
 			source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
+			ctx := inboundBatchAuthorContext(t, source)
 			bus, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle: source, ProviderOutputVerifier: catalog, TestLifecycleProbe: probe,
 				Durable: DurableDependencies{Instances: FlowInstanceIndexFixture()},

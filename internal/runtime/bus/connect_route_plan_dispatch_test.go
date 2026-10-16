@@ -69,17 +69,26 @@ func (s providerOutputAuthorizedTestSource) SemanticCapabilities() semanticview.
 }
 
 func (s providerOutputAuthorizedTestSource) FlowInputEventPins(flowID string) []runtimecontracts.CompiledFlowInputPin {
-	if flowID == "consumer" {
+	if !s.input.Empty() && flowID == s.input.FlowID() {
 		return []runtimecontracts.CompiledFlowInputPin{s.input}
 	}
 	return s.Source.FlowInputEventPins(flowID)
 }
 
 func (s providerOutputAuthorizedTestSource) FlowInputEventPin(flowID, event string) (runtimecontracts.CompiledFlowInputPin, bool) {
-	if flowID == "consumer" && event == s.input.EventType() {
+	if !s.input.Empty() && flowID == s.input.FlowID() && event == s.input.EventType() {
 		return s.input, true
 	}
 	return s.Source.FlowInputEventPin(flowID, event)
+}
+
+func (s providerOutputAuthorizedTestSource) ResolveEffectiveCompiledFlowEventSchema(flowID, event string) (runtimecontracts.CompiledEventSchema, bool, error) {
+	if !s.input.Empty() && flowID == s.input.FlowID() && event == s.input.EventType() {
+		if schema, present := s.input.ReceiverEventSchema(); present && schema.Classification() == runtimecontracts.CompiledEventSchemaImported && schema.FlowPath() == flowID {
+			return schema, true, nil
+		}
+	}
+	return s.Source.ResolveEffectiveCompiledFlowEventSchema(flowID, event)
 }
 
 type connectRoutePlanMutationStore struct {
