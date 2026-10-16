@@ -56,7 +56,7 @@ func rootInputProducerFixture(t *testing.T) *runtimecontracts.WorkflowContractBu
 	t.Helper()
 	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
 		"schema.yaml": []byte("stages: []\npins: {inputs: [work.requested]}\n"),
-		"events.yaml": []byte("work.requested: {}\n"),
+		"events.yaml": []byte("work.requested:\n"),
 	})
 	if err != nil {
 		t.Fatal(err)
