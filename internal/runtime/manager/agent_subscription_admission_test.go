@@ -118,10 +118,11 @@ func TestS1AgentSubscriptionWrapperPreservesRawFlowSelector(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := semanticview.Wrap(bundle)
+	// The minimal source has no authored event catalog; use its supported intrinsic.
 	for _, flow := range []string{".", " . ", "\t.\n", "", " ", "foreign"} {
-		for _, subscriptions := range [][]string{nil, {"task.ready"}} {
+		for _, subscriptions := range [][]string{nil, {"platform.join_complete"}} {
 			cfg := runtimeactors.AgentConfig{ID: "listener", FlowID: flow, Subscriptions: subscriptions}
-			admission, err := admitAgentConfigSubscriptions(source, &cfg, map[string]struct{}{"task.ready": {}})
+			admission, err := admitAgentConfigSubscriptions(source, &cfg, nil)
 			want := flow == "."
 			if (err == nil) != want || admission.ValidForAgent("listener") != want {
 				t.Errorf("raw flow %q subscriptions %v accepted=%t want=%t: %v", flow, subscriptions, admission.ValidForAgent("listener"), want, err)
