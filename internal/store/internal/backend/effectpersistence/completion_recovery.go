@@ -252,6 +252,10 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 		if err != nil {
 			return runtimeeffects.RecoverySummary{}, err
 		}
+		turnCtx, err := completionRecoveryTurnContext(ctx, tx, recovered, attempt, settlement, postgres)
+		if err != nil {
+			return runtimeeffects.RecoverySummary{}, err
+		}
 		resolution := providerDrainRecoveryResolution{Kind: completionSettlementCurrent}
 		if postgres {
 			resolution, err = resolveProviderDrainRecoveryPostgres(ctx, tx, attempt, now)
@@ -290,7 +294,7 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 				if err := insertCompletionTargetPostgres(ctx, tx, postgresLLM, mutation, attempt, settlement, projectCurrent); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
-				if err := postgresLLM.RecordCompletionTurnAuthorActivityTx(ctx, mutation, attempt, settlement); err != nil {
+				if err := postgresLLM.RecordCompletionTurnAuthorActivityTx(turnCtx, mutation, attempt, settlement); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
 				if _, err := insertCompletionSpendPostgres(ctx, tx, attempt, settlement); err != nil {
@@ -309,7 +313,7 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 				if err := insertCompletionTargetSQLite(ctx, tx, sqliteLLM, mutation, attempt, settlement, projectCurrent); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
-				if err := sqliteLLM.RecordCompletionTurnAuthorActivityTx(ctx, mutation, attempt, settlement); err != nil {
+				if err := sqliteLLM.RecordCompletionTurnAuthorActivityTx(turnCtx, mutation, attempt, settlement); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
 				if _, err := insertCompletionSpendSQLite(ctx, tx, attempt, settlement); err != nil {
