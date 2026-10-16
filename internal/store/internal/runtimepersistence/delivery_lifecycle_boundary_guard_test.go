@@ -93,6 +93,9 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 				return err
 			}
 			classifiedReads := classifiedPipelineDeliveryReads(relative, file)
+			for literal := range classifiedUnretainedCleanupDeliverySQL(relative, file) {
+				classifiedReads[literal] = true
+			}
 			ast.Inspect(file, func(node ast.Node) bool {
 				literal, ok := node.(*ast.BasicLit)
 				if !ok || literal.Kind != token.STRING {

@@ -275,6 +275,9 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 		return fmt.Errorf("managed turn fixture requires its original source")
 	}
 	fixtureCtx := testAuthorActivityContextForBundle(source.BundleHash())
+	if authority, ok := runtimeeffects.AuthorityFromContext(ctx); ok && authority.Kind == runtimeeffects.AuthoritySelectedContractFork {
+		fixtureCtx = ctx
+	}
 	plan := rec.Memory
 	if rec.Identity == (agentmemory.Identity{}) {
 		rec.Identity = testAgentMemoryIdentity(t, rec.RunID, rec.AgentID, rec.FlowInstance)
@@ -323,6 +326,10 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: rec.RunID,
 		AgentID: rec.AgentID, AgentIdentity: identity, SessionID: rec.SessionID,
 		Memory: plan, FlowInstance: rec.FlowInstance, EntityID: rec.EntityID,
+	}
+	authority, err = managedTurnReadbackAuthority(ctx, authority)
+	if err != nil {
+		return err
 	}
 	adapter := "anthropic_api"
 	surface := managedCompletionTestSurface(t, authority, adapter)
@@ -478,6 +485,24 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 		}
 	}
 	return nil
+}
+
+// Selected readback consumes the caller's actual issued authority and exact
+// target. It must not reconstruct ordinary authority for a selected claim.
+func managedTurnReadbackAuthority(ctx context.Context, normal runtimeeffects.Authority) (runtimeeffects.Authority, error) {
+	selected, found := runtimeeffects.AuthorityFromContext(ctx)
+	if !found || selected.Kind != runtimeeffects.AuthoritySelectedContractFork {
+		return normal, nil
+	}
+	admission, admitted := managedexecution.FromContext(ctx)
+	source, hasSource := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !admitted || !hasSource || admission.BundleHash != source.BundleHash() || !admission.AuthorizesSelected(selected.ID, selected.SelectedFork.ForkRunID, selected.SelectedFork.Generation) {
+		return runtimeeffects.Authority{}, fmt.Errorf("selected turn fixture requires its original managed admission")
+	}
+	if !selected.Valid() || selected.Target != normal.Target {
+		return runtimeeffects.Authority{}, fmt.Errorf("selected turn fixture differs from its exact admitted target")
+	}
+	return selected, nil
 }
 
 func withManagedCompletionTestSurface(t testing.TB, ctx context.Context, authority runtimeeffects.Authority, adapter string) context.Context {
