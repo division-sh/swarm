@@ -7,11 +7,14 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type subscriptionAdmissionTestAgent struct{ id string }
@@ -104,5 +107,24 @@ func TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmiss
 	}
 	if after.Token != before.Token || !reflect.DeepEqual(after.Config, before.Config) || !reflect.DeepEqual(after.Admission.RoutePatterns(), before.Admission.RoutePatterns()) {
 		t.Fatalf("rejected reconfigure changed execution: before=%#v after=%#v", before, after)
+	}
+}
+
+func TestS1AgentSubscriptionWrapperPreservesRawFlowSelector(t *testing.T) {
+	rooted, _ := sourceartifactfixture.Rooted(t, "selected", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource("", rooted, "", runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	for _, flow := range []string{".", " . ", "\t.\n", "", " ", "foreign"} {
+		for _, subscriptions := range [][]string{nil, {"task.ready"}} {
+			cfg := runtimeactors.AgentConfig{ID: "listener", FlowID: flow, Subscriptions: subscriptions}
+			admission, err := admitAgentConfigSubscriptions(source, &cfg, map[string]struct{}{"task.ready": {}})
+			want := flow == "."
+			if (err == nil) != want || admission.ValidForAgent("listener") != want {
+				t.Errorf("raw flow %q subscriptions %v accepted=%t want=%t: %v", flow, subscriptions, admission.ValidForAgent("listener"), want, err)
+			}
+		}
 	}
 }
