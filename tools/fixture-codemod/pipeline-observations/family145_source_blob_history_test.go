@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/globalname"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
@@ -22,12 +28,40 @@ func sourceBlobLivePins(t *testing.T) []sourceblob.Pin {
 	if err != nil {
 		t.Fatal(err)
 	}
+	batch, err := servedsettlement.ReadBatchPins("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	setup, err := servedsettlement.ReadSetupPins("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{sourceblob.Path, globalname.Path, servedsettlement.Path, servedsettlement.LookupPath,
+		servedsettlement.SetupOwnerPath, servedsettlement.SetupRolePath, "internal/serveapp/main_runtime_test.go"}
 	for _, pin := range pins {
-		raw, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil {
-			t.Fatal("source blob live endpoint changed:", pin.Function, err)
+		paths = append(paths, pin.File)
+	}
+	for _, stage := range [][]runphysical.Pin{setup, batch} {
+		for _, pin := range stage {
+			paths = append(paths, pin.File)
 		}
-		current := servedObservationEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, raw, pin.Function))
+	}
+	image, err := captureSourceBlobInvocation("../../..", paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := servedsettlement.ValidateBatchCurrentSource("../../..", batch); err != nil {
+		t.Fatal(err)
+	}
+	for _, pin := range pins {
+		raw := image.files[pin.File]
+		current := servedSetupPredecessorSource(t, pin.File, pin.Function, requestKeyDeclaration(t, raw, pin.Function))
+		for _, stage := range [][]runphysical.Pin{setup, batch} {
+			current, err = servedsettlement.EarlierSource(stage, pin.File, pin.Function, current)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 		if err := sourceblob.ValidateCurrentSource(pin, []byte("package proof\n"+current)); err != nil {
 			t.Fatal(err)
 		}
@@ -43,7 +77,182 @@ func sourceBlobLivePins(t *testing.T) []sourceblob.Pin {
 	if err := sourceblob.ValidateFixtureRole(raw); err != nil {
 		t.Fatal(err)
 	}
+	if err := servedsettlement.ValidateBatchCurrentSource("../../..", batch); err != nil {
+		t.Fatal(err)
+	}
+	if err := image.recheck("../../.."); err != nil {
+		t.Fatal(err)
+	}
 	return pins
+}
+
+type sourceBlobInvocation struct {
+	files map[string][]byte
+	head  []byte
+	owned bool
+}
+
+func sourceBlobOwnedInvocationPaths(root string) ([]string, error) {
+	var paths []string
+	err := checkoutsource.WalkDir(root, root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if !(strings.HasPrefix(rel, "internal/") || strings.HasPrefix(rel, "tools/fixture-codemod/pipeline-observations/") || strings.HasPrefix(rel, ".github/audit-artifacts/")) {
+			return nil
+		}
+		switch filepath.Ext(rel) {
+		case ".go", ".json", ".tsv", ".yaml":
+			paths = append(paths, rel)
+		}
+		return nil
+	})
+	return paths, err
+}
+
+type sourceBlobDeclarationInvocation struct {
+	setup, batch []runphysical.Pin
+	pins         []sourceblob.Pin
+}
+
+func sourceBlobDeclarationsForInvocation(t *testing.T) sourceBlobDeclarationInvocation {
+	t.Helper()
+	paths, err := sourceBlobOwnedInvocationPaths("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := captureSourceBlobInvocation("../../..", paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image.owned = true
+	t.Cleanup(func() {
+		if err := image.recheck("../../.."); err != nil {
+			t.Error(err)
+		}
+	})
+	return sourceBlobDeclarationInvocation{setup: servedSetupPins(t), batch: servedObservationBatchPins(t), pins: sourceBlobLivePins(t)}
+}
+
+func (proof sourceBlobDeclarationInvocation) previous(t *testing.T, file, function, current string) string {
+	t.Helper()
+	current = servedSetupPredecessorSource(t, file, function, current)
+	for _, pins := range [][]runphysical.Pin{proof.setup, proof.batch} {
+		var err error
+		current, err = servedsettlement.EarlierSource(pins, file, function, current)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, pin := range proof.pins {
+		if pin.File == file && pin.Function == function {
+			if current != pin.After {
+				t.Fatal("invocation source escaped its exact source-blob endpoint:", function)
+			}
+			return pin.Before
+		}
+	}
+	return current
+}
+
+func captureSourceBlobInvocation(root string, paths []string) (sourceBlobInvocation, error) {
+	image := sourceBlobInvocation{files: map[string][]byte{}}
+	var err error
+	image.head, err = exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
+	if err != nil {
+		return image, err
+	}
+	for _, path := range paths {
+		if image.files[path] != nil {
+			continue
+		}
+		image.files[path], err = os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			return image, err
+		}
+	}
+	return image, nil
+}
+
+func (image sourceBlobInvocation) recheck(root string) error {
+	head, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
+	if err != nil || !bytes.Equal(head, image.head) {
+		return fmt.Errorf("source-blob invocation changed its head: %v", err)
+	}
+	if image.owned {
+		paths, err := sourceBlobOwnedInvocationPaths(root)
+		if err != nil || len(paths) != len(image.files) {
+			return fmt.Errorf("source-blob invocation changed source inventory membership: %v", err)
+		}
+		for _, path := range paths {
+			if _, found := image.files[path]; !found {
+				return fmt.Errorf("source-blob invocation added an unobserved source: %s", path)
+			}
+		}
+	}
+	for path, before := range image.files {
+		current, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil || !bytes.Equal(before, current) {
+			return fmt.Errorf("source-blob input changed during invocation: %s: %v", path, err)
+		}
+	}
+	return nil
+}
+
+func TestFamily145SourceBlobInvocationRejectsChangesBeforeItsEndCheck(t *testing.T) {
+	root := t.TempDir()
+	gitdir, err := exec.Command("git", "-C", "../../..", "rev-parse", "--absolute-git-dir").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: "+strings.TrimSpace(string(gitdir))+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	const path = "internal/serveapp/current.go"
+	const manifest = "tools/fixture-codemod/pipeline-observations/manifest.json"
+	for _, path := range []string{path, manifest} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, path)), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	original := []byte("package proof\nfunc current(){ actualOwner() }\n")
+	for _, mutation := range []string{"body", "extra-caller", "missing", "manifest", "extra-file"} {
+		t.Run(mutation, func(t *testing.T) {
+			for name, raw := range map[string][]byte{path: original, manifest: []byte(`{"exact":"source"}`)} {
+				if err := os.WriteFile(filepath.Join(root, name), raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			image, err := captureSourceBlobInvocation(root, []string{path, manifest})
+			image.owned = true
+			if err != nil || image.recheck(root) != nil {
+				t.Fatal("fresh unchanged invocation failed:", err)
+			}
+			target, replacement := path, bytes.Replace(original, []byte("actualOwner"), []byte("foreignOwner"), 1)
+			switch mutation {
+			case "extra-caller":
+				replacement = append(bytes.Clone(original), []byte("func escaped(){ rawCaller() }\n")...)
+			case "manifest":
+				target, replacement = manifest, []byte(`{"exact":"foreign"}`)
+			case "extra-file":
+				target, replacement = "internal/serveapp/extra.go", []byte("package proof\nfunc escaped(){ rawCaller() }\n")
+				t.Cleanup(func() { _ = os.Remove(filepath.Join(root, target)) })
+			case "missing":
+				err = os.Remove(filepath.Join(root, target))
+			}
+			if mutation != "missing" {
+				err = os.WriteFile(filepath.Join(root, target), replacement, 0600)
+			}
+			if err != nil || image.recheck(root) == nil {
+				t.Fatal("a mid-invocation change survived its end check:", mutation, err)
+			}
+		})
+	}
 }
 
 func TestFamily145SourceBlobHistoryRefusesMissingDuplicateForeignAndChangedCurrentSource(t *testing.T) {
