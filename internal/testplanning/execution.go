@@ -419,6 +419,9 @@ func BindExecution(plan *RunPlan, inventory RootInventory, parity []ParityProof,
 		if err := bindFullUnitObligations(plan, *full); err != nil {
 			return err
 		}
+		if err := bindServeappChannelComposition(plan, *full, inventory, parity, policy); err != nil {
+			return err
+		}
 		if err := bindTierDeferrals(plan, *full, policy); err != nil {
 			return err
 		}
