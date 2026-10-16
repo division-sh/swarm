@@ -116,7 +116,7 @@ It identifies repeated construction of the same setup/batch/blob invocation
 within the existing fork/delivery restoration chain. The continuation carries
 that same authenticated invocation through the entire chain; no inverse or
 current-source check is skipped. The affected history/source-image receipt
-pr2698-history-dependency-one-source-invocation.jsonl PASS52.312s. Two now-unused
+pr2698-history-dependency-one-source-invocation.jsonl PASS52.312s. Four now-unused
 wrappers are deleted; unchanged preservation receipts otherwise carry.
 
 The cold-census USER disposition is still pending6214693627/6214751470; no known
