@@ -76,8 +76,8 @@ func TestPolicyCaseCanonicalShapesAndRefusals2287(t *testing.T) {
 		{"empty_lists", "selectors: [], equals: []", "", "requires a non-empty list"},
 		{"null_selector", "selector: null, equals: gold", "", "must be a scalar"},
 		{"null_selectors", "selectors: null, equals: [gold, blue]", "", "sequence"},
-		{"null_equals", "selector: payload.mode, equals: null", "", "must be a scalar"},
-		{"null_member", "selectors: [payload.mode, payload.target], equals: [gold, null]", "", "must be a scalar"},
+		{"null_equals", "selector: payload.mode, equals: null", "", "has unsupported tag !!null"},
+		{"null_member", "selectors: [payload.mode, payload.target], equals: [gold, null]", "", "has unsupported tag !!null"},
 		{"mapping_member", "selectors: [payload.mode, {path: payload.target}], equals: [gold, blue]", "", "must be a scalar"},
 		{"mapping_equals", "selector: payload.mode, equals: {value: gold}", "", "must be a scalar"},
 		{"arity", "selectors: [payload.mode, payload.target], equals: [gold]", "", "selector count 2 does not match equals count 1"},
@@ -87,7 +87,7 @@ func TestPolicyCaseCanonicalShapesAndRefusals2287(t *testing.T) {
 		{"nonadjacent_pair", "selectors: [payload.mode, payload.target, payload.mode], equals: [gold, blue, gold]", "", "duplicate case pair at positions 1 and 3"},
 		{"normalized_pair", `selectors: [payload.mode, " payload.mode "], equals: [gold, gold]`, "", "duplicate case pair at positions 1 and 2"},
 		{"duplicate_key", "selector: payload.mode, selector: payload.target, equals: gold", "", "duplicate"},
-		{"missing_alias", "selector: *missing, equals: gold", "", "alias"},
+		{"missing_alias", "selector: *missing, equals: gold", "", "unknown anchor"},
 		{"invalid_merge", "<<: 1, selector: payload.mode, equals: gold", "", "merge"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,6 +104,25 @@ func TestPolicyCaseCanonicalShapesAndRefusals2287(t *testing.T) {
 			}
 			if err != nil || condition != tc.condition {
 				t.Fatalf("condition=%q want %q, error=%v", condition, tc.condition, err)
+			}
+		})
+	}
+}
+
+func TestPolicyCaseContextAndAcrossRowRefusals2287(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, refusal string
+	}{
+		{"handler", "case: {selector: payload.mode, equals: gold}\n", "case"},
+		{"completion", "on_complete:\n  - case: {selector: payload.mode, equals: gold}\n    emit: done\n", "only supported under handler.rules"},
+		{"missing_default", "rules:\n  - case: {selector: payload.mode, equals: gold}\n    emit: done\n", "must end with a predicate-less default row"},
+		{"across_rows", "rules:\n  - case: {selectors: [payload.mode, payload.target], equals: [gold, blue]}\n    emit: done\n  - case: {selectors: [payload.mode, payload.target], equals: [gold, blue]}\n    emit: other\n  - emit: fallback\n", "duplicate case key at rules[0] and rules[1]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var handler SystemNodeEventHandler
+			err := decodeNodeTestYAML([]byte(tc.body), &handler)
+			if err == nil || !strings.Contains(err.Error(), tc.refusal) || !strings.Contains(err.Error(), "nodes.yaml:") {
+				t.Fatalf("want located %s refusal, got %v", tc.name, err)
 			}
 		})
 	}

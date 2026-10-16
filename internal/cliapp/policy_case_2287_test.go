@@ -34,7 +34,7 @@ func TestRunVerifyPolicyCaseShapes2287(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), RepoRoot(), root, &stdout, &stderr)
 			if tc.name == "type_mismatch" {
-				if code == 0 || !strings.Contains(stderr.String(), "executable_reader_expression_validation") {
+				if code == 0 || !strings.Contains(stderr.String(), "[BLOCKER] condition_expression_validation") || !strings.Contains(stderr.String(), "(bool, string)") {
 					t.Fatalf("typed comparison did not reach expression refusal: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
 				}
 			} else if tc.refusal != "" {
