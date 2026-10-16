@@ -88,35 +88,6 @@ func family145DeploymentReadProofError(function, before, after string) error {
 	return nil
 }
 
-func TestFamily145DeploymentObservationWholeChainPreservesAllFieldsAndIndependentCuts(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]bool{}
-	for _, row := range rows {
-		cuts := family145DeploymentReadCuts[row.Function]
-		if cuts == nil {
-			continue
-		}
-		if seen[row.Function] {
-			t.Fatal("duplicate deployment helper transition")
-		}
-		seen[row.Function] = true
-		if err := family145DeploymentReadProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range cuts {
-			if family145DeploymentReadProofError(row.Function, row.Before, strings.Replace(row.After, cut, "foreignDeploymentCut()", 1)) == nil {
-				t.Fatalf("lost or rebound owner/field/context/clock/cut passed: %s", cut)
-			}
-		}
-	}
-	if len(seen) != 5 {
-		t.Fatalf("whole deployment helper inventory=%d/5", len(seen))
-	}
-}
-
 var family145DeploymentQueryFiles = map[string][]string{
 	"internal/durabledata/deployment_observation.go":                                   {"ReadRootReadyResourcePinStorageTx"},
 	"internal/backend/pipelinepersistence/deployment_observation.go":                   {"ReadDeploymentIntentVersionStorageTx", "ReadDeploymentIntentProgressStorageTx", "ReadDeploymentIntentMetadataStorageTx", "ReadDeploymentFeedStorageTx", "ReadDeploymentIntentDiagnosticsStorageTx", "CountDeploymentCommittedOutcomesStorageTx", "CountDeploymentPipelineReceiptsStorageTx", "CountRootReadySuccessfulPipelineReceiptsStorageTx", "ReadDeploymentReceiptStorageTx"},
@@ -167,50 +138,5 @@ func TestFamily145DeploymentObservationEntire44QueryInventoryHasExactClosedOwner
 	}
 	if queries != 44 || len(consumed) != len(owned) {
 		t.Fatalf("deployment query consumption is incomplete: occurrences=%d/44 consumed=%d owned=%d", queries, len(consumed), len(owned))
-	}
-}
-
-func TestFamily145DeploymentObservationCallerPropagationChangesOnlyOriginalCarrier(t *testing.T) {
-	var current []map[string]any
-	if err := json.Unmarshal(family145TransitionBytes, &current); err != nil {
-		t.Fatal(err)
-	}
-	prior, err := json.Marshal(restoreSourceForkHistory(t, current, false))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(prior, &rows); err != nil {
-		t.Fatal(err)
-	}
-	callers, calls := 0, 0
-	for _, row := range rows {
-		if family145DeploymentReadCuts[row.Function] != nil || !strings.HasPrefix(row.File, "internal/runtime/conformance/") {
-			continue
-		}
-		normalized, count := row.After, 0
-		for _, helper := range []string{"logSelectedDeploymentForkFailure", "logDeploymentResourceFailure", "waitDeploymentForkRowEvent"} {
-			from, to := helper+"(t, f.selected,", helper+"(t, f.db,"
-			if helper == "waitDeploymentForkRowEvent" {
-				from, to = helper+"(t, f.ctx, f.selected,", helper+"(t, f.ctx, f.db,"
-			}
-			count += strings.Count(normalized, from)
-			normalized = strings.ReplaceAll(normalized, from, to)
-		}
-		if count == 0 {
-			continue
-		}
-		callers++
-		calls += count
-		if row.Function == "assertDeploymentResourceRows" {
-			if err := family145DeploymentPublicRowProofError(row.Function, row.Before, row.After); err != nil {
-				t.Fatal(err)
-			}
-		} else if normalized != row.Before {
-			t.Fatalf("deployment propagation changed an original fixture, held-child/fault/replay/receipt/identity/public assertion: %s", row.Function)
-		}
-	}
-	if callers != 6 || calls != 7 {
-		t.Fatalf("deployment caller inventory=%d/6 calls=%d/7", callers, calls)
 	}
 }

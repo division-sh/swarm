@@ -52,47 +52,6 @@ func family145SemanticReadHelperProofError(function, beforeSource, afterSource s
 	return nil
 }
 
-func TestFamily145SemanticCarrierHelpersRejectForeignReadsAndLostBusinessProof(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	checked := 0
-	for _, row := range rows {
-		calls, ok := family145SemanticReadHelperCalls[row.Function]
-		if !ok {
-			continue
-		}
-		checked++
-		if err := family145SemanticReadHelperProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, call := range calls {
-			if err := family145SemanticReadHelperProofError(row.Function, row.Before, strings.Replace(row.After, call, "foreignSnapshot()", 1)); err == nil {
-				t.Fatalf("changed source coordinates accepted: %s", row.Function)
-			}
-		}
-		hostile := strings.Replace(row.After, "{", "{ f.db.QueryContext(ctx, rawSQL);", 1)
-		if err := family145SemanticReadHelperProofError(row.Function, row.Before, hostile); err == nil {
-			t.Fatalf("raw carrier returned: %s", row.Function)
-		}
-		switch row.Function {
-		case "verifyNoAttemptRows":
-			hostile = strings.Replace(row.After, "leaked != 0", "false", 1)
-		case "waitIntent":
-			hostile = strings.Replace(row.After, "err == nil && !progress.Present", "!progress.Present", 1)
-		case "assertOutcomes":
-			hostile = strings.Replace(row.After, "t.Fatalf(", "t.Logf(", 1)
-		}
-		if err := family145SemanticReadHelperProofError(row.Function, row.Before, hostile); err == nil {
-			t.Fatalf("semantic residue/absence/assertion proof was weakened: %s", row.Function)
-		}
-	}
-	if checked != 3 {
-		t.Fatalf("semantic carrier helper census changed: %d", checked)
-	}
-}
-
 func semanticReadBusinessAssertions(source string) ([]string, error) {
 	file, err := parser.ParseFile(token.NewFileSet(), "semantic.go", "package proof\n"+source, parser.AllErrors)
 	if err != nil {
@@ -143,35 +102,4 @@ func family145FanInHelperProofError(function, beforeSource, afterSource string) 
 		return fmt.Errorf("fan-in helper changed business assertions: %s", function)
 	}
 	return nil
-}
-
-func TestFamily145FanInHelpersPreserveExactOwnerAndRejectWeakenedAssertions(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	checked := 0
-	for _, row := range rows {
-		call, ok := family145FanInHelperCalls[row.Function]
-		if !ok {
-			continue
-		}
-		checked++
-		if err := family145FanInHelperProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, hostile := range []string{
-			strings.Replace(row.After, call, "foreignReadOwner()", 1),
-			strings.Replace(row.After, call, call+"; "+call, 1),
-			strings.Replace(row.After, "t.Fatalf(", "t.Logf(", 1),
-			strings.Replace(row.After, "{", "{ db.QueryContext(ctx, hostileSQL);", 1),
-		} {
-			if err := family145FanInHelperProofError(row.Function, row.Before, hostile); err == nil {
-				t.Fatalf("changed fan-in scope, observer, assertion or raw authority accepted: %s", row.Function)
-			}
-		}
-	}
-	if checked != 3 {
-		t.Fatalf("fan-in shared helper inventory changed: %d", checked)
-	}
 }

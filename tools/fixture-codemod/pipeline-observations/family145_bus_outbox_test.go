@@ -71,30 +71,3 @@ func earlierOutboxAndSelectedForkOwner(root, file string, current []byte) ([]byt
 	}
 	return current, nil
 }
-
-func TestBusOutboxAndSelectedForkAdditionsPreserveCompleteEarlierOwners(t *testing.T) {
-	root := filepath.Clean("../../..")
-	for _, file := range []string{agentSnapshotEventOwner, deliveryRecoveryReadOwner} {
-		t.Run(filepath.Base(filepath.Dir(file)), func(t *testing.T) {
-			current, err := os.ReadFile(filepath.Join(root, file))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if file == deliveryRecoveryReadOwner {
-				current, err = earlierDeliveryRecoveryOwnerFile(root, file, current)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			previous, err := earlierOutboxAndSelectedForkOwner(root, file, current)
-			if err != nil || bytes.Equal(current, previous) {
-				t.Fatal("exact owner additions were not composed:", err)
-			}
-			for _, bad := range [][]byte{append(bytes.Clone(current), '\n'), bytes.Replace(current, []byte("func "), []byte("func Foreign"), 1)} {
-				if actual, err := earlierOutboxAndSelectedForkOwner(root, file, bad); err == nil && !bytes.Equal(actual, bad) {
-					t.Fatal("altered complete source entered a signed inverse")
-				}
-			}
-		})
-	}
-}

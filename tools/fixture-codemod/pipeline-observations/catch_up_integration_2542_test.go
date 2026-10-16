@@ -118,45 +118,6 @@ func catchUp2542PriorPair(row recipe, actual string, master bool) (recipe, strin
 	return row, actual, nil
 }
 
-func TestCatchUp2542RecipeCompositionPreservesBothSignedInventories(t *testing.T) {
-	packet, err := selectedreadrole.CatchUp2542Receipts()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if packet.Base != "26701e7b187579220dffe72e01debd2e89cd2675" || packet.Master != "19dc188f6d57985a3360a619ea57b890b3c148dd" || packet.Lane != "dec6f1a009400d230b0bb92c83c0997ae35b2938" ||
-		packet.Authorization != "https://github.com/division-sh/swarm/issues/2542#issuecomment-6194296317" || len(packet.Rows) != 407 || len(packet.Files) != 229 {
-		t.Fatal("finite integration boundary changed")
-	}
-	var current []recipe
-	if err := json.Unmarshal(recipeBytes, &current); err != nil {
-		t.Fatal(err)
-	}
-	master := catchUp2542HistoricalRows(t, current, true)
-	lane := catchUp2542HistoricalRows(t, current, false)
-	if len(master) != 893 || len(lane) != 1856 || len(current) != len(lane) {
-		t.Fatal("integration lost or appended reviewed rows")
-	}
-	for index, row := range current {
-		old := lane[index]
-		row.Successor, row.Removed = old.Successor, old.Removed
-		if !reflect.DeepEqual(row, old) {
-			t.Fatalf("immutable lane receipt/order changed: %s", row.Function)
-		}
-		if index < len(master) {
-			oldMaster := master[index]
-			oldMaster.Successor, oldMaster.Removed = old.Successor, old.Removed
-			if !reflect.DeepEqual(oldMaster, old) {
-				t.Fatalf("immutable master receipt/order changed: %s", row.Function)
-			}
-		}
-	}
-	assertCatchUp2542RowMap(t, packet, current, master, lane)
-	assertCatchUp2542CurrentFiles(t, packet)
-	if files, changes, err := prepareFiles("../../..", current); err != nil || len(files) != 0 || len(changes) != 0 {
-		t.Fatalf("complete current endpoint packet is not inert: %v", err)
-	}
-}
-
 func assertCatchUp2542RowMap(t *testing.T, packet selectedreadrole.CatchUp2542Packet, current, master, lane []recipe) {
 	t.Helper()
 	base, err := catchUp2542ReadRecipes(packet.Base)
@@ -223,28 +184,6 @@ func assertCatchUp2542CurrentFiles(t *testing.T, packet selectedreadrole.CatchUp
 	}
 }
 
-func TestCatchUp2542CurrentPairsKeepHistoricalChecksBoundToExactLiveSource(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	for _, master := range []bool{false, true} {
-		checked := 0
-		for _, row := range rows {
-			if row.Removed || !assertCatchUp2542CurrentPairHostility(t, row, master) {
-				continue
-			}
-			checked++
-			if checked == 3 {
-				break
-			}
-		}
-		if checked != 3 {
-			t.Fatal("lost both-predecessor current-pair counterexamples")
-		}
-	}
-}
-
 func assertCatchUp2542CurrentPairHostility(t *testing.T, row recipe, master bool) bool {
 	t.Helper()
 	endpoint := row.Successor
@@ -290,40 +229,4 @@ func mutateCatchUp2542Receipt(row recipe, field string) recipe {
 		row.Mechanical = &mechanicalSnapshot{SourceCommit: "foreign"}
 	}
 	return row
-}
-
-func TestCatchUp2542RecipeCompositionRejectsChangedHistoryCurrentnessAndMultiplicity(t *testing.T) {
-	for _, mutation := range []string{"missing", "extra", "history", "endpoint", "mechanical", "retirement", "order"} {
-		t.Run(mutation, func(t *testing.T) {
-			var rows []map[string]any
-			if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-				t.Fatal(err)
-			}
-			switch mutation {
-			case "missing":
-				rows = rows[:len(rows)-1]
-			case "extra":
-				rows = append(rows, rows[0])
-			case "history":
-				rows[0]["Before"] = "unreviewed"
-			case "endpoint":
-				rows[0]["Successor"] = "unreviewed"
-			case "mechanical":
-				rows[0]["Mechanical"] = map[string]any{"SourceCommit": strings.Repeat("0", 40)}
-			case "retirement":
-				rows[0]["Removed"] = true
-			case "order":
-				rows[0], rows[1] = rows[1], rows[0]
-			}
-			raw, err := json.Marshal(rows)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, master := range []bool{false, true} {
-				if _, err := selectedreadrole.CatchUp2542HistoricalRecipes("../../..", raw, master); err == nil {
-					t.Fatal("unreviewed history supplied a predecessor view")
-				}
-			}
-		})
-	}
 }

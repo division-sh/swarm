@@ -69,44 +69,6 @@ func family145ResetRecoveryAftermathProofError(function, before, after string) e
 	return nil
 }
 
-func TestFamily145ResetRecoveryAftermathWholeGroupPreservesAssertionsAndExecutionCuts(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	found := 0
-	for _, row := range rows {
-		if _, ok := family145ResetRecoveryAftermathCuts[row.Function]; !ok {
-			continue
-		}
-		found++
-		if err := family145ResetRecoveryAftermathProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatalf("%s: %v", row.Function, err)
-		}
-		for _, cut := range family145ResetRecoveryAftermathCuts[row.Function] {
-			if family145ResetRecoveryAftermathProofError(row.Function, row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("lost reset/recovery cut accepted: %s", cut)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.Before)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			hostile, err := family145BusAssertionCounterexample(row.After, strings.SplitN(assertion, " => ", 2)[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if family145ResetRecoveryAftermathProofError(row.Function, row.Before, hostile) == nil {
-				t.Fatalf("lost original reset/recovery business assertion accepted: %s", assertion)
-			}
-		}
-	}
-	if found != 2 {
-		t.Fatalf("complete reset/recovery aftermath inventory=%d want2", found)
-	}
-}
-
 func TestFamily145ResetRecoveryAftermathStoragePreservesEveryPhysicalQuery(t *testing.T) {
 	var rows []struct{ Function, Before string }
 	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {

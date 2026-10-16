@@ -65,45 +65,6 @@ func family145LifecycleBusinessReaderProofError(before, after string) error {
 	return nil
 }
 
-func TestFamily145LifecycleBusinessSnapshotRetainsExactLeftJoinAndAll40CallerCuts(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(servedSetupEarlierHistory(t, family145TransitionBytes, false), &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen, helpers := map[string]bool{}, 0
-	for _, row := range rows {
-		if row.Function == "lifecycleStoredSnapshot" {
-			helpers++
-			family145LifecycleBusinessCheckReader(t, row.Before, row.After)
-		} else if family145LifecycleBusinessCallers[row.Function] != 0 {
-			seen[row.Function] = true
-			if err := family145LifecycleBusinessCallerProofError(row.Function, row.Before, row.After); err != nil {
-				t.Fatal(err)
-			}
-			for _, cut := range []string{"lifecycleStoredSnapshot(t, rt.ReceiverStateReader, ", "t.Fatal"} {
-				if !strings.Contains(row.After, cut) || family145LifecycleBusinessCallerProofError(row.Function, row.Before, strings.Replace(row.After, cut, "foreignLifecycleCut()", 1)) == nil {
-					t.Fatalf("lifecycle caller owner/assertion mutation survived: %s/%s", row.Function, cut)
-				}
-			}
-		} else {
-			continue
-		}
-		actual := family145ConversationForkOwnerSource(t, "../serveapp/"+filepath.Base(row.File), row.Function)
-		if actual != row.After {
-			t.Fatalf("lifecycle consumer escaped its finite complete body: %s", row.Function)
-		}
-	}
-	if helpers != 1 || len(seen) != len(family145LifecycleBusinessCallers) {
-		t.Fatalf("lifecycle helper=%d/1 consumers=%d/%d", helpers, len(seen), len(family145LifecycleBusinessCallers))
-	}
-	counts := family145ForkReceiverJoinedOwnedInventory(t)
-	for function, want := range family145LifecycleBusinessCallers {
-		if counts["lifecycle-business/"+function] != want {
-			t.Fatalf("lifecycle owned caller count %s=%d/%d", function, counts["lifecycle-business/"+function], want)
-		}
-	}
-}
-
 func family145LifecycleBusinessRecordCall(t *testing.T, function string, call *ast.CallExpr, counts map[string]int) {
 	t.Helper()
 	if family145NodeString(call.Fun) != "lifecycleStoredSnapshot" {

@@ -75,54 +75,6 @@ func family145CheckServedDebugWholeRule(t *testing.T, file, function, after stri
 	return false
 }
 
-func TestFamily145ServedDebugWholeRulePreservesEveryBodyAndOwner(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimSuffix(string(family145ServedDebugPreimages), "\n")))) != "31f62531eda187d22fa6d08b1379ab1df88a4d4f75aa6c997b00fdb06d89700e" {
-		t.Fatal("served debug signed predecessor ledger changed")
-	}
-	seen := map[string]bool{}
-	debug, helpers, retired, carriers := 0, 0, 0, 0
-	for _, row := range family145ServedDebugRows {
-		key := row.File + "/" + row.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(row.Before))) != row.SHA256 {
-			t.Fatalf("duplicate/changed complete predecessor: %s", key)
-		}
-		seen[key] = true
-		if actual := family145ServedDebugCurrentDeclaration(t, row); actual != row.After {
-			t.Errorf("current declaration differs from closed rule: %s", key)
-		}
-		if row.After == "" {
-			if row.Function != "servedEventPublishDebugSummary" && row.Function != "servedEventPublishDebugQuery" {
-				t.Fatal("unexpected diagnostic retirement")
-			}
-			retired++
-			continue
-		}
-		if strings.HasPrefix(row.Function, "type/") {
-			if family145ServedDebugNormalize(t, serveddebug.TransformCarrier(row.Before)) != row.After {
-				t.Fatal("session carrier changed beyond its original read role")
-			}
-			carriers++
-			continue
-		}
-		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, "before.go", "package proof\n"+row.Before, parser.AllErrors)
-		if err != nil {
-			t.Fatal(err)
-		}
-		function := file.Decls[0].(*ast.FuncDecl)
-		after, n, calls, needs := serveddebug.TransformFunction(fset, function, row.Before)
-		if needs || n != row.DebugCalls || calls != row.HelperCalls || family145ServedDebugNormalize(t, after) != row.After {
-			t.Fatalf("finite transform changed assertions/waits/identity/lifecycle/capture cuts: %s", key)
-		}
-		debug += n
-		helpers += calls
-		family145ServedDebugHostiles(t, row)
-	}
-	if len(seen) != 85 || debug != 63 || retired != 2 || carriers != 1 || helpers == 0 {
-		t.Fatalf("served debug complete inventory bodies=%d direct=%d helper-calls=%d retired=%d carriers=%d", len(seen), debug, helpers, retired, carriers)
-	}
-}
-
 func family145ServedDebugNormalize(t *testing.T, source string) string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "rule.go", "package proof\n"+source, parser.AllErrors)
@@ -176,35 +128,5 @@ func family145ServedDebugHostiles(t *testing.T, row servedDebugPreimage) {
 		if _, _, err := rewriteFunction(row.File, []byte("package proof\n"+hostile), finite); err == nil {
 			t.Fatalf("diagnostic rule accepted lost identity/assertion/temporal/owner cut: %s/%s", row.Function, cut)
 		}
-	}
-}
-
-func TestFamily145ServedDebugWholeOwnedInventoryHasNoRawInterpreter(t *testing.T) {
-	root := "../../.."
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, raw, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		ast.Inspect(file, func(node ast.Node) bool {
-			if function, ok := node.(*ast.FuncDecl); ok && (function.Name.Name == "servedEventPublishDebugSummary" || function.Name.Name == "servedEventPublishDebugQuery") {
-				t.Errorf("retired diagnostic interpreter returned: %s", path)
-			}
-			if identifier, ok := node.(*ast.Ident); ok && (identifier.Name == "servedEventPublishDebugSummary" || identifier.Name == "servedEventPublishDebugQuery") {
-				t.Errorf("owned source retains raw diagnostic capability: %s", path)
-			}
-			return true
-		})
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 }

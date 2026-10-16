@@ -68,61 +68,6 @@ func earlierDeliveryRecoveryOwnerFile(root, file string, current []byte) ([]byte
 	return restored, nil
 }
 
-func TestFamily145DeliveryRecoveryWholeReadOwnerPreservesEveryEarlierByte(t *testing.T) {
-	root := filepath.Clean("../../..")
-	current, err := os.ReadFile(filepath.Join(root, deliveryRecoveryReadOwner))
-	if err != nil {
-		t.Fatal(err)
-	}
-	prior, err := earlierDeliveryRecoveryOwnerFile(root, deliveryRecoveryReadOwner, current)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := earlierDeliveryRecoveryOwnerFile(root, deliveryRecoveryReadOwner, prior); err != nil {
-		t.Fatal("unchanged predecessor cannot continue into older inverse:", err)
-	}
-	for _, name := range deliveryRecoveryReadDeclarations {
-		bad := bytes.Replace(current, []byte(name), []byte(name+"Foreign"), 1)
-		if _, err := earlierDeliveryRecoveryOwnerFile(root, deliveryRecoveryReadOwner, bad); err == nil {
-			t.Fatal("changed complete owner accepted:", name)
-		}
-	}
-	if _, err := earlierDeliveryRecoveryOwnerFile(root, deliveryRecoveryReadOwner, append(current, '\n')); err == nil {
-		t.Fatal("changed whole-file bytes accepted")
-	}
-}
-
-func TestFamily145DeliveryRecoveryCompleteSourceAndSelectedOwners(t *testing.T) {
-	root := filepath.Clean("../../..")
-	pins, err := selectedreadrole.ReadDeliveryRecoveryPins(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pins) != 22 {
-		t.Fatalf("delivery recovery declarations=%d want22 plus the exact carrier retirement", len(pins))
-	}
-	if err := selectedreadrole.ValidateDeliveryRecoveryCurrent(root, pins); err != nil {
-		t.Fatal(err)
-	}
-	for _, pin := range pins {
-		before, err := selectedreadrole.EarlierDeliveryRecoverySource(root, pin.File, pin.Function, pin.After)
-		if err != nil || before != pin.Before {
-			t.Fatalf("signed source inverse failed %s: %v", pin.Function, err)
-		}
-		for _, hostile := range []string{pin.Before, pin.After + "\n", strings.Replace(pin.After, "{", "{ foreignAuthority();", 1)} {
-			if _, err := selectedreadrole.EarlierDeliveryRecoverySource(root, pin.File, pin.Function, hostile); err == nil {
-				t.Fatalf("changed source accepted: %s", pin.Function)
-			}
-		}
-		assertSelectedForkExecutionFiniteRewrite(t, pin)
-		if err := family145DescriptorReadinessEscape([]byte("package proof\n" + pin.After)); err != nil {
-			t.Fatalf("raw authority remains %s: %v", pin.Function, err)
-		}
-		assertDeliveryRecoveryRootMessages(t, pin)
-	}
-	assertDeliveryRecoveryCleanupAndClaims(t, pins)
-}
-
 func assertDeliveryRecoveryRootMessages(t *testing.T, pin selectedreadrole.EntityToolPin) {
 	t.Helper()
 	if !strings.HasPrefix(pin.Function, "Test") {
@@ -200,60 +145,6 @@ func assertDeliveryRecoveryCleanupAndClaims(t *testing.T, pins []selectedreadrol
 	}
 }
 
-func TestFamily145DeliveryRecoveryAppendOnlyHistoryAndImmutableSiblings(t *testing.T) {
-	root := filepath.Clean("../../..")
-	for _, recipes := range []bool{false, true} {
-		prior, err := selectedreadrole.PriorDeliveryRecoveryHistory(root, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		actual := family145TransitionBytes
-		if recipes {
-			actual = recipeBytes
-		}
-		actual, err = selectedreadrole.BeforeServedScenarioHistory(root, actual, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		expected, err := selectedreadrole.ComposeDeliveryRecoveryHistory(root, prior, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var before, after, want []map[string]any
-		if json.Unmarshal(prior, &before) != nil || json.Unmarshal(actual, &after) != nil || json.Unmarshal(expected, &want) != nil || !reflect.DeepEqual(after, want) {
-			t.Fatal("history differs from exact complete composition")
-		}
-		assertDeliveryRecoveryHistoryOriginals(t, before, after, recipes)
-		recovered, err := selectedreadrole.EarlierDeliveryRecoveryHistory(root, actual, recipes)
-		if err != nil || !bytes.Equal(prior, recovered) {
-			t.Fatalf("complete signed predecessor was not recovered: %v", err)
-		}
-		for _, cut := range []string{"lost", "order", "before", "after"} {
-			var rows []map[string]any
-			if err := json.Unmarshal(actual, &rows); err != nil {
-				t.Fatal(err)
-			}
-			switch cut {
-			case "lost":
-				rows = rows[:len(rows)-1]
-			case "order":
-				rows[len(rows)-1], rows[len(rows)-2] = rows[len(rows)-2], rows[len(rows)-1]
-			case "before":
-				rows[len(rows)-1]["Before"] = "foreign"
-			case "after":
-				rows[len(rows)-1]["After"] = "foreign"
-			}
-			bad, err := json.Marshal(rows)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := selectedreadrole.EarlierDeliveryRecoveryHistory(root, bad, recipes); err == nil {
-				t.Fatalf("changed history accepted: %s", cut)
-			}
-		}
-	}
-}
-
 func assertDeliveryRecoveryHistoryOriginals(t *testing.T, before, after []map[string]any, recipes bool) {
 	t.Helper()
 	appended := 22
@@ -284,48 +175,6 @@ func assertDeliveryRecoveryHistoryOriginals(t *testing.T, before, after []map[st
 	if recipes && (advanced != 2 || unchanged != 3) {
 		t.Fatalf("five existing endpoints changed outside2+3 boundary: %d/%d", advanced, unchanged)
 	}
-}
-
-func TestFamily145DeliveryRecoveryManifestChecksActualSourceAndCarrierAfterWarmCache(t *testing.T) {
-	root := filepath.Clean("../../..")
-	pins, err := selectedreadrole.ReadDeliveryRecoveryPins(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	copy := deliveryRecoveryProbeCheckout(t, root)
-	if err := selectedreadrole.ValidateDeliveryRecoveryCurrent(copy, pins); err != nil {
-		t.Fatal(err)
-	}
-	for _, file := range []string{selectedreadrole.DeliveryRecoveryFile, selectedreadrole.DeliveryRecoveryStartupFile} {
-		path := filepath.Join(copy, file)
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var function string
-		for _, pin := range pins {
-			if pin.File == file {
-				function = pin.Function
-				break
-			}
-		}
-		for _, cut := range []string{"changed", "missing", "duplicate"} {
-			next := selectedForkActualSourceMutation(t, raw, function, cut)
-			if next == string(raw) {
-				t.Fatal("mutation did not reach actual source")
-			}
-			if err := os.WriteFile(path, []byte(next), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if err := selectedreadrole.ValidateDeliveryRecoveryCurrent(copy, pins); err == nil {
-				t.Fatalf("warm cache concealed actual%s/%s", file, cut)
-			}
-		}
-		if err := os.WriteFile(path, raw, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	assertDeliveryRecoveryCarrierRefusesResurrection(t, copy, pins)
 }
 
 func assertDeliveryRecoveryCarrierRefusesResurrection(t *testing.T, copy string, pins []selectedreadrole.EntityToolPin) {

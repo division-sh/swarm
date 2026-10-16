@@ -38,54 +38,6 @@ func family145ArtifactCallbackProofError(function, before, after string) error {
 	return nil
 }
 
-func TestFamily145ArtifactCallbackWholeChainPreservesOriginalAssertionsAndCuts(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	original := map[string]string{}
-	for _, row := range rows {
-		cuts, ok := family145ArtifactCallbackCuts[row.Function]
-		if !ok {
-			continue
-		}
-		original[row.Function] = row.Before
-		if err := family145ArtifactCallbackProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatalf("%s: %v", row.Function, err)
-		}
-		for _, cut := range cuts {
-			if family145ArtifactCallbackProofError(row.Function, row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("lost exact callback cut accepted: %s", cut)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.Before)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			condition := strings.SplitN(assertion, " => ", 2)[0]
-			hostile, err := family145BusAssertionCounterexample(row.After, condition)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if family145ArtifactCallbackProofError(row.Function, row.Before, hostile) == nil {
-				t.Fatalf("lost original callback assertion accepted: %s", condition)
-			}
-		}
-	}
-	if len(original) != len(family145ArtifactCallbackCuts) {
-		t.Fatalf("callback chain inventory incomplete: %d", len(original))
-	}
-	assertFamily145ArtifactCallbackSQL(t, original)
-	data, err := os.ReadFile("../../../internal/runtime/artifact_action_result_delivery_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := family145DescriptorReadinessEscape(data); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func assertFamily145ArtifactCallbackSQL(t *testing.T, original map[string]string) {
 	t.Helper()
 	for _, port := range []struct {

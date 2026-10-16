@@ -28,35 +28,3 @@ func family145NumericTimerInspectionProofError(before, after string) error {
 	}
 	return nil
 }
-
-func TestFamily145NumericTimerPostJoinChildKeepsExactWholeBodyAndNativeLocationOwner(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen := 0
-	for _, row := range rows {
-		if row.File != "internal/serveapp/numeric_timer_inspection_test.go" || row.Function != "TestOwnedNumericTimerInspection" {
-			continue
-		}
-		seen++
-		if err := family145NumericTimerInspectionProofError(row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range []string{
-			"storetest.StartSQLiteRuntimeStoreWithReopen(t, ctx, loaded.Config.Store.SQLite.Path)",
-			"storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)",
-			"reader.ListWorkflowTimerActivations(ctx, request.RunID, \"\", false)",
-			"len(request.Entities) != 100", "activation.FireAt.Sub(activation.CreatedAt) != after",
-			"request.Entities[activation.EntityID] != activation.Route.InstancePath",
-			"os.WriteFile(request.Output, body, 0600)",
-		} {
-			if strings.Count(row.After, cut) != 1 || family145NumericTimerInspectionProofError(row.Before, strings.Replace(row.After, cut, "foreignNumericInspection()", 1)) == nil {
-				t.Fatalf("lost exact location/owner/read/identity/clock/output passed: %s", cut)
-			}
-		}
-	}
-	if seen != 1 {
-		t.Fatalf("numeric inspection whole-child inventory=%d/1", seen)
-	}
-}

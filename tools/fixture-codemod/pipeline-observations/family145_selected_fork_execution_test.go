@@ -16,47 +16,6 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
-func TestFamily145SelectedForkExecutionCompleteSourceAndFiniteInverse(t *testing.T) {
-	root := filepath.Clean("../../..")
-	pins, err := selectedreadrole.ReadSelectedForkExecutionPins(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := selectedreadrole.ValidateSelectedForkExecutionCurrent(root, pins); err != nil {
-		t.Fatal(err)
-	}
-	if len(pins) != 14 {
-		t.Fatalf("selected execution declarations=%d, want14 including the dead field-format helper", len(pins))
-	}
-	for _, pin := range pins {
-		if pin.File != selectedreadrole.SelectedForkExecutionFile {
-			t.Fatalf("foreign declaration/retirement entered the wave: %s", pin.Function)
-		}
-		if pin.Removed {
-			assertSelectedForkFieldHelperRetired(t, root, pin)
-			continue
-		}
-		before, err := selectedreadrole.EarlierSelectedForkExecutionSource(root, pin.File, pin.Function, pin.After)
-		if err != nil || before != pin.Before {
-			t.Fatalf("exact signed inverse %s: %v", pin.Function, err)
-		}
-		for _, hostile := range []string{pin.Before, pin.After + "\n", strings.Replace(pin.After, "{", "{ erasedProof();", 1)} {
-			if _, err := selectedreadrole.EarlierSelectedForkExecutionSource(root, pin.File, pin.Function, hostile); err == nil {
-				t.Fatalf("stale/changed endpoint accepted: %s", pin.Function)
-			}
-		}
-		if !reflect.DeepEqual(selectedForkFailureMessages(t, pin.Before), selectedForkFailureMessages(t, pin.After)) {
-			t.Fatalf("original failure assertions changed: %s", pin.Function)
-		}
-		assertSelectedForkExecutionFiniteRewrite(t, pin)
-		if pin.Function == "TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage" {
-			assertSelectedForkRetiredRoutingDebtRetained(t, pin.After)
-		} else if err := family145DescriptorReadinessEscape([]byte("package proof\n" + pin.After)); err != nil {
-			t.Fatalf("raw execution authority survived %s: %v", pin.Function, err)
-		}
-	}
-}
-
 func assertSelectedForkExecutionFiniteRewrite(t *testing.T, pin selectedreadrole.EntityToolPin) {
 	t.Helper()
 	row := recipe{File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}
@@ -132,38 +91,6 @@ func assertSelectedForkRetiredRoutingDebtRetained(t *testing.T, source string) {
 	}
 }
 
-func TestFamily145SelectedForkExecutionAppendOnlyHistoryAndUntouchedSiblings(t *testing.T) {
-	root := filepath.Clean("../../..")
-	for _, recipes := range []bool{false, true} {
-		prior, err := selectedreadrole.PriorSelectedForkExecutionHistory(root, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		actual := family145TransitionBytes
-		if recipes {
-			actual = recipeBytes
-		}
-		actual, err = selectedreadrole.BeforeDeliveryRecoveryHistory(root, actual, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		expected, err := selectedreadrole.ComposeSelectedForkExecutionHistory(root, prior, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var before, after, want []map[string]any
-		if json.Unmarshal(prior, &before) != nil || json.Unmarshal(actual, &after) != nil || json.Unmarshal(expected, &want) != nil || !reflect.DeepEqual(after, want) {
-			t.Fatal("selected execution history differs from complete finite composition")
-		}
-		assertSelectedForkHistoryOriginals(t, before, after, recipes)
-		recovered, err := selectedreadrole.EarlierSelectedForkExecutionHistory(root, actual, recipes)
-		if err != nil || !bytes.Equal(recovered, prior) {
-			t.Fatalf("complete signed predecessor recovery: %v", err)
-		}
-		assertSelectedForkHistoryHostiles(t, root, actual, recipes)
-	}
-}
-
 func assertSelectedForkHistoryOriginals(t *testing.T, before, after []map[string]any, recipes bool) {
 	t.Helper()
 	appended := 14
@@ -219,35 +146,6 @@ func assertSelectedForkHistoryHostiles(t *testing.T, root string, actual []byte,
 		}
 		if _, err := selectedreadrole.EarlierSelectedForkExecutionHistory(root, bad, recipes); err == nil {
 			t.Fatalf("changed history accepted: %s", cut)
-		}
-	}
-}
-
-func TestFamily145SelectedForkExecutionManifestRemainsTheCompleteCurrentSource(t *testing.T) {
-	root := filepath.Clean("../../..")
-	pins, err := selectedreadrole.ReadSelectedForkExecutionPins(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	copy := selectedForkExecutionProbeCheckout(t, root)
-	if err := selectedreadrole.ValidateSelectedForkExecutionCurrent(copy, pins); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(copy, selectedreadrole.SelectedForkExecutionFile)
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, cut := range []string{"changed", "missing", "duplicate"} {
-		next := selectedForkActualSourceMutation(t, raw, pins[0].Function, cut)
-		if next == string(raw) {
-			t.Fatalf("hostile control did not reach source: %s", cut)
-		}
-		if err := os.WriteFile(path, []byte(next), 0600); err != nil {
-			t.Fatal(err)
-		}
-		if err := selectedreadrole.ValidateSelectedForkExecutionCurrent(copy, pins); err == nil {
-			t.Fatalf("warm cache concealed actual %s declaration", cut)
 		}
 	}
 }

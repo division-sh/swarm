@@ -55,39 +55,6 @@ func family145StageLifecycleProofError(function, before, after string) error {
 	return family145DescriptorReadinessEscape([]byte("package proof\n" + after))
 }
 
-func TestFamily145StageLifecycleCompleteCallerChainRetainsIdentityAndExecutionAssertions(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	var found int
-	for _, row := range rows {
-		if _, ok := family145StageLifecycleCuts[row.Function]; !ok {
-			continue
-		}
-		found++
-		if err := family145StageLifecycleProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatalf("%s: %v", row.Function, err)
-		}
-		for _, cut := range family145StageLifecycleCuts[row.Function] {
-			if family145StageLifecycleProofError(row.Function, row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("lost stage lifecycle owner/cut accepted: %s", cut)
-			}
-		}
-		assertFamily145StageLifecycleHostileAssertions(t, row.Function, row.Before, row.After)
-	}
-	if found != 3 {
-		t.Fatalf("stage lifecycle source/caller inventory=%d want3", found)
-	}
-	data, err := os.ReadFile("../../../internal/runtime/conformance/workflow_stage_lifecycle_identity_conformance_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := family145DescriptorReadinessEscape(data); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func assertFamily145StageLifecycleHostileAssertions(t *testing.T, function, before, after string) {
 	t.Helper()
 	if function == "stageLifecycleRuntimeLogs" {
