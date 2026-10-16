@@ -1,4 +1,4 @@
-package entitystore
+package pipelinepersistence
 
 import (
 	"context"
@@ -7,6 +7,13 @@ import (
 	"fmt"
 	"time"
 )
+
+func InsertEntityToolHistoricalReadOnlyStateTx(ctx context.Context, tx *sql.Tx, runID, entityID string, at time.Time) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO entity_state
+		(run_id,entity_id,flow_instance,entity_type,current_state,gates,fields,accumulator,revision,entered_state_at,created_at,updated_at)
+		VALUES ($1::uuid,$2::uuid,'review/inst-1','accounts','queued','{}'::jsonb,'{"status":"open"}'::jsonb,'{}'::jsonb,1,$3,$3,$3)`, runID, entityID, at)
+	return err
+}
 
 // This contradictory sibling is negative read evidence, not a constructed
 // entity or a source-history fact. The live header retains its real owner.
@@ -49,5 +56,21 @@ func SetEntityToolMarginalStateFaultTx(ctx context.Context, tx *sql.Tx, entityID
 func AdvanceEntityToolForkSourceFaultTx(ctx context.Context, tx *sql.Tx, runID, entityID string, at time.Time) error {
 	_, err := tx.ExecContext(ctx, `UPDATE entity_state SET current_state='done', fields='{"status":"closed"}'::jsonb,
 		revision=7, updated_at=$3 WHERE run_id=$1::uuid AND entity_id=$2::uuid`, runID, entityID, at)
+	return err
+}
+
+func SeedPostgresPublicationIdentityLookalikesTx(ctx context.Context, tx *sql.Tx, runID, entityID string) error {
+	_, err := tx.ExecContext(ctx, `UPDATE entity_state
+		SET fields='{"entity_id":"authored-lookalike","flow_instance":"authored/lookalike"}'::jsonb,
+		bookkeeping='{"entity_id":"bookkeeping-lookalike","flow_instance":"bookkeeping/lookalike"}'::jsonb
+		WHERE run_id=$1::uuid AND entity_id=$2::uuid`, runID, entityID)
+	return err
+}
+
+// The state-only hostile input deliberately has no construction or attachment.
+func SeedPostgresPublicationUnroutableEntityTx(ctx context.Context, tx *sql.Tx, runID, entityID, flowInstance string) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO entity_state
+		(run_id,entity_id,flow_instance,entity_type,current_state,gates,fields,accumulator,revision,entered_state_at,created_at,updated_at)
+		VALUES($1::uuid,$2::uuid,$3,'widget','pending','{}'::jsonb,'{}'::jsonb,'{}'::jsonb,1,now(),now(),now())`, runID, entityID, flowInstance)
 	return err
 }

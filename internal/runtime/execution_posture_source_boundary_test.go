@@ -68,26 +68,7 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 				}
 				aliases[name] = importPath
 			}
-			comparisons := map[*ast.SelectorExpr]bool{}
-			if rel == "internal/runtime/runfork/preparation.go" {
-				// The persisted preparation decoder tests whether a probe is required.
-				// Only equality operands in this predicate are exempt, never constructors.
-				for _, declaration := range parsed.Decls {
-					fn, ok := declaration.(*ast.FuncDecl)
-					if !ok || fn.Name.Name != "RequiresProbe" {
-						continue
-					}
-					ast.Inspect(fn.Body, func(node ast.Node) bool {
-						comparison, ok := node.(*ast.BinaryExpr)
-						if ok && comparison.Op == token.EQL {
-							if selector, ok := comparison.Y.(*ast.SelectorExpr); ok {
-								comparisons[selector] = true
-							}
-						}
-						return true
-					})
-				}
-			}
+			comparisons := liveAuthorityComparisonSelectors(rel, parsed)
 			ast.Inspect(parsed, func(node ast.Node) bool {
 				selector, ok := node.(*ast.SelectorExpr)
 				if !ok {
@@ -114,6 +95,70 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 	sort.Strings(violations)
 	if len(violations) > 0 {
 		t.Fatalf("production source minted live authority outside the process-posture owner/comparison allowlist:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func liveAuthorityComparisonSelectors(path string, file *ast.File) map[*ast.SelectorExpr]bool {
+	comparisons := map[*ast.SelectorExpr]bool{}
+	for _, declaration := range file.Decls {
+		fn, ok := declaration.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		probe := path == "internal/runtime/runfork/preparation.go" && fn.Name.Name == "RequiresProbe"
+		history := path == "internal/store/internal/runtimepersistence/test_activity_fork_history_fixture.go" && fn.Name.Name == "SeedHistoricalActivityForkAttemptForTest"
+		if !probe && !history {
+			continue
+		}
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			comparison, ok := node.(*ast.BinaryExpr)
+			if !ok {
+				return true
+			}
+			if probe && comparison.Op == token.EQL || history && historicalLiveModeComparison(comparison) {
+				if selector, ok := comparison.Y.(*ast.SelectorExpr); ok {
+					comparisons[selector] = true
+				}
+			}
+			return true
+		})
+	}
+	return comparisons
+}
+
+func historicalLiveModeComparison(comparison *ast.BinaryExpr) bool {
+	field, ok := comparison.X.(*ast.SelectorExpr)
+	if !ok || comparison.Op != token.NEQ || field.Sel.Name != "ExecutionMode" {
+		return false
+	}
+	record, ok := field.X.(*ast.Ident)
+	return ok && record.Name == "record"
+}
+
+func TestHistoricalLiveModeGuardAllowsOnlyExactRefusalComparison(t *testing.T) {
+	const path = "internal/store/internal/runtimepersistence/test_activity_fork_history_fixture.go"
+	for _, row := range []struct {
+		name, declaration, body, path string
+		want                          int
+	}{
+		{"exact_refusal", "SeedHistoricalActivityForkAttemptForTest", "if record.ExecutionMode != executionmode.Live { return };", path, 1},
+		{"assignment", "SeedHistoricalActivityForkAttemptForTest", "record.ExecutionMode = executionmode.Live", path, 0},
+		{"return", "SeedHistoricalActivityForkAttemptForTest", "return executionmode.Live", path, 0},
+		{"different_operand", "SeedHistoricalActivityForkAttemptForTest", "if other.ExecutionMode != executionmode.Live { return }", path, 0},
+		{"different_field", "SeedHistoricalActivityForkAttemptForTest", "if record.Mode != executionmode.Live { return }", path, 0},
+		{"different_operator", "SeedHistoricalActivityForkAttemptForTest", "if record.ExecutionMode == executionmode.Live { return }", path, 0},
+		{"different_declaration", "InventLiveAuthority", "if record.ExecutionMode != executionmode.Live { return }", path, 0},
+		{"foreign_file", "SeedHistoricalActivityForkAttemptForTest", "if record.ExecutionMode != executionmode.Live { return }", "internal/runtime/foreign.go", 0},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), row.path, "package probe\nfunc "+row.declaration+"() {"+row.body+"}\n", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(liveAuthorityComparisonSelectors(row.path, file)); got != row.want {
+				t.Fatalf("comparison exceptions=%d want=%d", got, row.want)
+			}
+		})
 	}
 }
 

@@ -103,13 +103,13 @@ func ProveNativeProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayR
 			nativeDelivery := newNativeDelivery(t)
 			deliveryStore := nativeDelivery
 			bus := &recordingReceiptBus{}
-			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
 			err := tt.newFailure()
 			expected := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event").Failure
-			evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-"+tt.name), events.EventType("work.requested"), "", "", nil, 0, eventtest.UUID("failure-run-"+tt.name), "", events.EventEnvelope{}, time.Time{})
+			evt := eventtest.ExistingRunRootIngress(eventtest.UUID("evt-"+tt.name), events.EventType("work.requested"), "", "", nil, 0, eventtest.UUID("failure-run-"+tt.name), events.EventEnvelope{}, time.Time{})
 			agent := failureReturningAgent{id: "agent-a", err: err}
+			am, base := newPreparedNativeReceiptManager(t, bus, nativeDelivery, agent, evt, AgentManagerOptions{})
 			nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
-			ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), evt, agent.ID())
+			ctx := managerClaimedDeliveryContext(t, am, base, evt, agent.ID())
 			result := am.processEventDetailed(ctx, agent, evt)
 			if result.err == nil {
 				t.Fatal("processEventDetailed error = nil")
@@ -173,18 +173,15 @@ func ProveNativeRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRe
 			newFactory := func(runtimeactors.AgentConfig) (Agent, error) {
 				return agent, nil
 			}
-			manager := newTestAgentManagerWithOptions(t, eventBus, newFactory, AgentManagerOptions{DeliveryStore: deliveryStore, TestLifecycleProbe: probe.Raw()}, persistence)
-			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.intervention"}})}, true); err != nil {
-				t.Fatalf("spawn intervention agent: %v", err)
-			}
-			if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+			manager, runCtx := newPreparedNativeTestManager(t, eventBus, newFactory, nativeDelivery, managerRootAgentConfig(agent.ID(), "test.intervention"), AgentManagerOptions{DeliveryStore: deliveryStore, TestLifecycleProbe: probe.Raw()}, persistence)
+			if err := manager.Run(runCtx); err != nil {
 				t.Fatalf("run intervention manager: %v", err)
 			}
 			managerRunCtx, _, running := manager.lifecycle.runSnapshot()
 			if !running || managerRunCtx == nil {
 				t.Fatal("intervention manager is not running")
 			}
-			inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("intervention-"+tt.name), events.EventType("test.intervention"), "test", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+			inbound := eventtest.ExistingRunRootIngress(eventtest.UUID("intervention-"+tt.name), events.EventType("test.intervention"), "test", "", nil, 0, managerIdentityTestRunID, events.EventEnvelope{}, time.Now().UTC())
 			nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{inbound})
 			if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 				t.Fatalf("publish intervention event: %v", err)
@@ -268,18 +265,15 @@ func ProveNativeRunningManagerInterventionSettlementFailureShutsDownAndRecoversC
 			newFactory := func(runtimeactors.AgentConfig) (Agent, error) {
 				return agent, nil
 			}
-			manager := newTestAgentManagerWithOptions(t, eventBus, newFactory, AgentManagerOptions{DeliveryStore: deliveryStore, TestLifecycleProbe: probe.Raw()}, persistence)
-			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.intervention.settlement"}})}, true); err != nil {
-				t.Fatalf("spawn intervention settlement agent: %v", err)
-			}
-			if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+			manager, runCtx := newPreparedNativeTestManager(t, eventBus, newFactory, nativeDelivery, managerRootAgentConfig(agent.ID(), "test.intervention.settlement"), AgentManagerOptions{DeliveryStore: deliveryStore, TestLifecycleProbe: probe.Raw()}, persistence)
+			if err := manager.Run(runCtx); err != nil {
 				t.Fatalf("run intervention settlement manager: %v", err)
 			}
 			managerRunCtx, _, running := manager.lifecycle.runSnapshot()
 			if !running || managerRunCtx == nil {
 				t.Fatal("intervention settlement manager is not running")
 			}
-			inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("intervention-settlement-"+tt.name), events.EventType("test.intervention.settlement"), "test", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+			inbound := eventtest.ExistingRunRootIngress(eventtest.UUID("intervention-settlement-"+tt.name), events.EventType("test.intervention.settlement"), "test", "", nil, 0, managerIdentityTestRunID, events.EventEnvelope{}, time.Now().UTC())
 			nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{inbound})
 			if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 				t.Fatalf("publish intervention settlement event: %v", err)
@@ -322,13 +316,13 @@ func ProveNativeProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay(t *
 	nativeDelivery := newNativeDelivery(t)
 	deliveryStore := nativeDelivery
 	store := &startupReplayTestStore{recoveryTestStore: recoveryTestStore{}, ManagerDeliveryNativeFixture: deliveryStore}
-	am := newTestAgentManager(t, &recordingReceiptBus{}, nil, store)
 	err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", "wait", nil)
 	agent := &countingFailureAgent{failureReturningAgent: failureReturningAgent{id: "agent-a", err: err}}
-	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-uncertain"), events.EventType("work.requested"), "", "", nil, 0, eventtest.UUID("uncertain-run"), "", events.EventEnvelope{}, time.Time{})
+	evt := eventtest.ExistingRunRootIngress(eventtest.UUID("evt-uncertain"), events.EventType("work.requested"), "", "", nil, 0, eventtest.UUID("uncertain-run"), events.EventEnvelope{}, time.Time{})
+	am, base := newPreparedNativeReceiptManager(t, &recordingReceiptBus{}, nativeDelivery, agent, evt, AgentManagerOptions{}, store)
 	deliveryStore.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
 	route := managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID())
-	ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), evt, agent.ID())
+	ctx := managerClaimedDeliveryContext(t, am, base, evt, agent.ID())
 	first := am.processEventDetailed(ctx, agent, evt)
 	if first.err == nil || agent.calls != 1 {
 		t.Fatalf("first result err=%v calls=%d, want one terminal failure", first.err, agent.calls)

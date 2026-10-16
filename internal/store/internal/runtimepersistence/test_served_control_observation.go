@@ -6,9 +6,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
-	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	entitystore "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
 
@@ -48,13 +48,13 @@ func ReadDirectiveReplayStorageForTest(ctx context.Context, selected any, key st
 
 func ReadDirectivePipelineFailureStorageForTest(ctx context.Context, selected any, key string) ([]byte, error) {
 	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) ([]byte, error) {
-		return delivery.ReadDirectivePipelineFailureStorageTx(ctx, tx, key)
+		return pipelinepersistence.ReadDirectivePipelineFailureStorageTx(ctx, tx, key)
 	})
 }
 
 func CountSuccessfulDirectivePipelineReceiptsStorageForTest(ctx context.Context, selected any, eventID string) (int, error) {
 	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (int, error) {
-		return delivery.CountSuccessfulDirectivePipelineReceiptsStorageTx(ctx, tx, eventID)
+		return pipelinepersistence.CountSuccessfulDirectivePipelineReceiptsStorageTx(ctx, tx, eventID)
 	})
 }
 

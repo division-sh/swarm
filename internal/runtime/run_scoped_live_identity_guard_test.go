@@ -172,8 +172,8 @@ type runScopedPublicationFaultOwner struct {
 func runScopedPublicationFaultOwners() []runScopedPublicationFaultOwner {
 	return []runScopedPublicationFaultOwner{
 		{"internal/store/internal/backend/delivery/lifecycle.go", "SetPublicationMaterializationFailureTx", "NEW.run_id", "NEW.event_id"},
-		{"internal/store/internal/backend/pipelinepersistence/test_publication_replay_failure.go", "SetPublicationReplayFailureTx", "(SELECTrun_idFROMeventsWHEREevent_id=NEW.event_id)", "NEW.event_id"},
-		{"internal/store/internal/apiidempotency/test_publication_completion_failure.go", "SetPublicationCompletionFailureTx", "(SELECTrun_idFROMeventsWHEREevent_id=NEW.resource_id", "NEW.resource_id"},
+		{"internal/store/internal/backend/pipelinepersistence/owner_operations.go", "SetPublicationReplayFailureTx", "(SELECTrun_idFROMeventsWHEREevent_id=NEW.event_id)", "NEW.event_id"},
+		{"internal/store/internal/backend/pipelinepersistence/owner_operations.go", "SetPublicationCompletionFailureTx", "(SELECTrun_idFROMeventsWHEREevent_id=NEW.resource_id", "NEW.resource_id"},
 	}
 }
 
