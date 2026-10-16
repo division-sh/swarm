@@ -201,9 +201,28 @@ func runIdentityOwnedFile(t *testing.T, path string, file *ast.File) (int, int) 
 }
 
 func runIdentityFileError(path string, file *ast.File) error {
-	allowed := map[token.Pos]bool{}
+	normalized := map[token.Pos]string{}
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if !runIdentityContainsReference(fn) {
+			continue
+		}
+		current, err := servedsettlement.SetupEarlierSource("../../..", path, fn.Name.Name, requestkey.Node(fn))
+		if err != nil {
+			return err
+		}
+		normalized[fn.Pos()] = sourceBlobEarlierInventoryEndpoint(path, fn.Name.Name, current)
+	}
+	return runIdentityReferenceError(path, file, normalized)
+}
+
+func runIdentityReferenceError(path string, file *ast.File, normalized map[token.Pos]string) error {
+	allowed := map[token.Pos]bool{}
+	for _, declaration := range file.Decls {
+		fn, ok := declaration.(*ast.FuncDecl)
 		if !ok {
 			continue
 		}
@@ -213,16 +232,8 @@ func runIdentityFileError(path string, file *ast.File) error {
 			}
 			allowed[fn.Name.Pos()] = true
 		}
-		if !runIdentityContainsReference(fn) {
-			continue
-		}
-		current, err := servedsettlement.SetupEarlierSource("../../..", path, fn.Name.Name, requestkey.Node(fn))
-		if err != nil {
-			return err
-		}
-		current = sourceBlobEarlierInventoryEndpoint(path, fn.Name.Name, current)
 		for _, pin := range runIdentityPins {
-			if pin.File == path && pin.Function == fn.Name.Name && pin.After == current {
+			if pin.File == path && pin.Function == fn.Name.Name && pin.After == normalized[fn.Pos()] {
 				recordRunIdentityReferences(allowed, fn)
 			}
 		}
@@ -238,6 +249,52 @@ func runIdentityFileError(path string, file *ast.File) error {
 		return true
 	})
 	return failure
+}
+
+func TestFamily145RunIdentityReferencePrecheckPreservesRestoredReferenceRefusals(t *testing.T) {
+	var pin runidentity.Pin
+	for _, candidate := range runIdentityPins {
+		if candidate.Function != "readServedRunPhysicalIdentity" && strings.Contains(candidate.After, "readServedRunPhysicalIdentity") {
+			pin = candidate
+			break
+		}
+	}
+	if pin.Function == "" {
+		t.Fatal("reference conservation requires its original pinned consumer")
+	}
+	// A model of the normalized output, not a grant to invented live source.
+	// Both paths authorize positions in CURRENT AST nodes, never restored nodes.
+	native := strings.ReplaceAll(pin.After, "readServedRunPhysicalIdentity", "nativeIdentityObservation")
+	for _, source := range []string{
+		native,
+		native + "\nvar text = `readServedRunPhysicalIdentity`\n",
+		native + "\nvar escaped = readServedRunPhysicalIdentity\n",
+		pin.After,
+		"func foreign(){ alias := readServedRunPhysicalIdentity; _ = alias }",
+	} {
+		file, err := parser.ParseFile(token.NewFileSet(), "model.go", "package proof\n"+source, parser.AllErrors)
+		if err != nil {
+			t.Fatal(err)
+		}
+		legacy, scoped := map[token.Pos]string{}, map[token.Pos]string{}
+		for _, declaration := range file.Decls {
+			if fn, ok := declaration.(*ast.FuncDecl); ok {
+				legacy[fn.Pos()] = pin.After // Restores watched identifiers even from native-only source.
+				if runIdentityContainsReference(fn) {
+					scoped[fn.Pos()] = pin.After
+				}
+			}
+		}
+		before, after := runIdentityReferenceError(pin.File, file, legacy), runIdentityReferenceError(pin.File, file, scoped)
+		if (before == nil) != (after == nil) {
+			t.Fatalf("reference precheck changed restored-reference admission: before=%v after=%v", before, after)
+		}
+		if strings.Contains(source, "escaped") || strings.Contains(source, "func foreign") {
+			if after == nil {
+				t.Fatal("restored reference hid a current initializer or foreign function alias")
+			}
+		}
+	}
 }
 
 func runIdentityContainsReference(fn *ast.FuncDecl) bool {
