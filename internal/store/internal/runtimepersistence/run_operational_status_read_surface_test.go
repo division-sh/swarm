@@ -10,6 +10,7 @@ import (
 
 func TestProjectRunOperationalStatus_UsesDeliveryLifecycleWhenRunIsOperationallyStalled(t *testing.T) {
 	report := operatorread.RunDebugReport{
+		OperationalFacts: idleRunOperationalFactsForTest(),
 		RunTableStatus: "running",
 		LastEventAt:    time.Unix(1700000000, 0).UTC(),
 		Deliveries: []operatorread.RunDebugDeliveryCount{
@@ -30,8 +31,9 @@ func TestProjectRunOperationalStatus_UsesDeliveryLifecycleWhenRunIsOperationally
 	}
 }
 
-func TestProjectRunOperationalStatus_UsesScoringOutcomeBlockingLayer(t *testing.T) {
+func TestProjectRunOperationalStatus_DoesNotInferDomainSpecificObligations(t *testing.T) {
 	report := operatorread.RunDebugReport{
+		OperationalFacts: idleRunOperationalFactsForTest(),
 		RunTableStatus: "running",
 		LastEventAt:    time.Unix(1700000000, 0).UTC(),
 		EventCounts: []operatorread.RunDebugEventCount{
@@ -46,16 +48,17 @@ func TestProjectRunOperationalStatus_UsesScoringOutcomeBlockingLayer(t *testing.
 	if got.State != "stalled" {
 		t.Fatalf("state = %q, want stalled", got.State)
 	}
-	if got.BlockingLayer != "scoring_terminal_outcome" {
-		t.Fatalf("blocking_layer = %q, want scoring_terminal_outcome", got.BlockingLayer)
+	if got.BlockingLayer != "delivery_lifecycle" {
+		t.Fatalf("blocking_layer = %q, want delivery_lifecycle", got.BlockingLayer)
 	}
-	if got.BlockingReason != "terminal_scoring_outcome_missing" {
-		t.Fatalf("blocking_reason = %q, want terminal_scoring_outcome_missing", got.BlockingReason)
+	if got.BlockingReason != "no_active_deliveries" {
+		t.Fatalf("blocking_reason = %q, want no_active_deliveries", got.BlockingReason)
 	}
 }
 
 func TestProjectRunOperationalStatus_TreatsScopedShortlistAsTerminalScoringOutcome(t *testing.T) {
 	report := operatorread.RunDebugReport{
+		OperationalFacts: idleRunOperationalFactsForTest(),
 		RunTableStatus: "running",
 		LastEventAt:    time.Unix(1700000000, 0).UTC(),
 		EventCounts: []operatorread.RunDebugEventCount{
@@ -77,6 +80,10 @@ func TestProjectRunOperationalStatus_TreatsScopedShortlistAsTerminalScoringOutco
 	if got.BlockingReason != "no_active_deliveries" {
 		t.Fatalf("blocking_reason = %q, want no_active_deliveries", got.BlockingReason)
 	}
+}
+
+func idleRunOperationalFactsForTest() *operatorread.RunOperationalFacts {
+	return &operatorread.RunOperationalFacts{Complete: true, Instances: []operatorread.RunInstanceFacts{{FlowInstance: "work/a", Complete: true}}}
 }
 
 func TestProjectRunOperationalStatus_PreservesHealthyRunningWhenActiveDeliveriesRemain(t *testing.T) {

@@ -262,7 +262,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := runLifecycle.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
-	operatorRun, err := storeoperatorsurface.NewRunPostgres(backend, store.requireCurrentSchema, pipelineOwner, timerObligations, operatorObservability)
+	operatorRun, err := storeoperatorsurface.NewRunPostgres(backend, store.requireCurrentSchema, pipelineOwner, timerObligations, operatorObservability, sourceArtifacts)
 	if err != nil {
 		return nil, err
 	}
@@ -568,7 +568,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err := runLifecycle.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
-	operatorRun, err := storeoperatorsurface.NewRunSQLite(backend, store.requireCurrentSchema, store.now, pipelineOwner, timerObligations, operatorObservability)
+	operatorRun, err := storeoperatorsurface.NewRunSQLite(backend, store.requireCurrentSchema, store.now, pipelineOwner, timerObligations, operatorObservability, sourceArtifacts)
 	if err != nil {
 		return nil, err
 	}

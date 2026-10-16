@@ -20446,7 +20446,7 @@ run_model:
     stalled_run_escalation:
       owner: policy.runtime.stalled_run_escalation
       event_owner: platform_events.catalog.platform.run_stalled
-      diagnosis_owner: internal/store/internal/operatorsurface/run_operational_status_read_surface.go.ProjectRunOperationalStatus
+      diagnosis_owner: internal/operatorread/behavior.go.ProjectRunOperationalStatus
       progress_timestamp_owner: latest events.created_at for the run excluding platform.run_stalled self-alert rows
       default_policy:
         enabled: true
@@ -20465,6 +20465,21 @@ run_model:
         (run_id, blocking_layer, blocking_reason, last_progress_at). A new event may be emitted only
         when canonical progress advances LastEventAt or the diagnosis tuple changes while the run
         remains stalled.
+      attribution: >-
+        The selected-store operator read owner loads one coherent snapshot of constructed
+        instances, pinned stage authority, owed work, legitimate waits and immutable
+        turn/publication/delivery evidence. The one operatorread projection supplies
+        both run.diagnose and this monitor. A waiting instance is not stalled; a stalled
+        sibling remains visible in diagnostic attributions while active or waiting work
+        keeps the run-level headline running. Final headers never manufacture completion.
+        Attribution does not change the run-level progress clock, threshold or dedup key.
+        Provider completion precedes API tool execution: empty agent_turns.emitted_events
+        is not final-turn silence evidence. Accepted publication survives feedback error;
+        incomplete or ambiguous history is explicitly unknown. Drained predecessor facts
+        are historical and cannot blame a replacement instance. No attribution read may
+        invoke a provider, retry, re-prompt, park or re-drive work. Operator re-drive uses
+        swarm event replay. Multiple stalled scopes' policy and alert-envelope arbitration
+        remains held for the #2720 LEAD/user ruling; no sibling-selection fallback is authorized.
       non_owners:
       - mailbox item creation
       - incident records
@@ -22230,6 +22245,7 @@ platform_events:
         threshold_seconds: integer
         stalled_for_seconds: integer
         emitted_at: string (ISO 8601)
+        attributions: array
       produced_by_type: platform
     platform.reset:
       description: Admin-initiated platform state reset. Emitted ONLY when a human administrator explicitly triggers a reset
@@ -27131,16 +27147,11 @@ cli_specification:
                 NOT_IMPORTED: NOT IMPORTED
                 UNKNOWN: UNKNOWN
             operational_state:
-              machine_owner: internal/store/internal/operatorsurface/run_operational_status_read_surface.go ProjectRunOperationalStatus and components.schemas.OperationalState
+              machine_owner: internal/operatorread/behavior.go ProjectRunOperationalStatus and components.schemas.OperationalState
               phrases: {running: running, stalled: stalled, paused: paused, completed: completed, failed: failed, cancelled: cancelled, forked: forked}
             run_blocking_tuples:
-              machine_owner: internal/store/internal/operatorsurface/run_operational_status_read_surface.go ProjectRunOperationalStatus
+              machine_owner: internal/operatorread/behavior.go ProjectRunOperationalStatus
               current_non_empty:
-              - state: stalled
-                blocking_layer: scoring_terminal_outcome
-                blocking_reason: terminal_scoring_outcome_missing
-                layer_phrase: scoring outcome
-                reason_phrase: waiting for a terminal scoring outcome
               - state: stalled
                 blocking_layer: delivery_lifecycle
                 blocking_reason: no_active_deliveries
@@ -32362,7 +32373,7 @@ api_specification:
         type: string
         description: 'Operational state of a run. Source of truth:
 
-          internal/store/internal/operatorsurface/run_operational_status_read_surface.go
+          internal/operatorread/behavior.go
 
           ProjectRunOperationalStatus. Values are RunTableStatus values
 
@@ -32381,12 +32392,12 @@ api_specification:
         - forked
       BlockingLayer:
         type: string
-        description: "Layer-of-the-system identifier when operational_state is \"stalled\".\nEmpty string when state is running\
-          \ or terminal. Source of truth:\nProjectRunOperationalStatus. Current owner emits:\n  \"\" (empty) \u2014 state\
-          \ is running or terminal\n  \"scoring_terminal_outcome\" \u2014 scoring entities have not reached\n    a terminal\
-          \ scoring outcome (shortlisted/marginal/rejected)\n  \"delivery_lifecycle\" \u2014 no active deliveries but events\
-          \ exist\nAdditional values may be added as the operator-state owner gains\nmore diagnostic semantics. Type stays\
-          \ string (not enum) for\nforward compatibility \u2014 additive owner extensions must not\nrequire a /v2/ bump.\n"
+        description: >-
+          Generic blocking layer from operatorread.ProjectRunOperationalStatus. Empty
+          for running or terminal runs; delivery_lifecycle denotes an idle non-final
+          constructed instance with no owed work or legitimate wait. Authored domain
+          and event names never create platform-owned output obligations. This remains
+          a string rather than an enum for additive diagnostic compatibility.
       DiagnosisEvidence:
         description: "Generic evidence pointer shape for future diagnosis extensions. Current run.diagnose failure evidence\
           \ is owner-backed by RunDebugFailureDelivery, which carries concrete event_deliveries/dead_letters facts instead\
@@ -32691,6 +32702,67 @@ api_specification:
             type: string
           declaration_path:
             type: string
+      RunStallAttribution:
+        description: >-
+          Detached exact settled-origin evidence for one idle constructed instance.
+          Provider snapshots and proposed tool calls alone never prove publication or
+          silence. Unknown linkage does not invent an agent, delivery or logical turn.
+          Granted emit tools come from frozen provider capability evidence, not current
+          source declarations. This projection grants no execution or settlement authority.
+        type: object
+        additionalProperties: false
+        required: [flow_instance, provider_turns, granted_emit_tools, emitted_events, emission_evidence, historical]
+        properties:
+          flow_instance: {type: string}
+          agent_id: {type: string}
+          event_id: {type: string}
+          event_type: {type: string}
+          delivery_id: {type: string}
+          logical_turn_id: {type: string}
+          provider_turns:
+            type: array
+            items: {type: string}
+          granted_emit_tools:
+            type: array
+            items: {type: string}
+          emitted_events:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [event_id, event_type]
+              properties:
+                event_id: {type: string}
+                event_type: {type: string}
+          emission_evidence:
+            type: string
+            enum: [accepted, none, unknown]
+          evidence_reason: {type: string}
+          historical: {type: boolean}
+      RunInstanceOperationalStatus:
+        type: object
+        additionalProperties: false
+        required: [flow_instance, revision, disposition, work]
+        properties:
+          flow_instance: {type: string}
+          stage: {type: string}
+          revision: {type: integer, minimum: 1}
+          disposition:
+            type: string
+            enum: [active, waiting, stalled, final, retired, unknown]
+          work:
+            type: object
+            additionalProperties: false
+            required: [deliveries, retries, pipeline, fan_out, barriers, timers, await, sessions]
+            properties:
+              deliveries: {type: integer, minimum: 0}
+              retries: {type: integer, minimum: 0}
+              pipeline: {type: integer, minimum: 0}
+              fan_out: {type: integer, minimum: 0}
+              barriers: {type: integer, minimum: 0}
+              timers: {type: integer, minimum: 0}
+              await: {type: integer, minimum: 0}
+              sessions: {type: integer, minimum: 0}
       RunDiagnosis:
         description: "Run header plus the canonical operator-state projection and concrete failed-delivery evidence. Source\
           \ of truth: ProjectRunOperationalStatus for operational_state/blocking fields, RunDebugReport.FailedDeliveries\
@@ -32707,6 +32779,8 @@ api_specification:
         - failed_deliveries
         - fan_out
         - test_quiescence
+        - instances
+        - attributions
         properties:
           run:
             $ref: '#/components/schemas/RunHeader'
@@ -32716,9 +32790,7 @@ api_specification:
             $ref: '#/components/schemas/BlockingLayer'
           blocking_reason:
             type: string
-            description: "Free-form reason string when operational_state is \"stalled\".\nEmpty when state is running or terminal.\
-              \ Current owner emits:\n  \"\" (empty)\n  \"terminal_scoring_outcome_missing\"\n  \"no_active_deliveries\"\n\
-              Additional values may be added additively.\n"
+            description: Generic reason from the canonical operational projection. Empty for running or terminal; no_active_deliveries for a provably idle non-final constructed instance. No domain-specific obligation is inferred.
           heuristics:
             type: array
             items:
@@ -32739,6 +32811,12 @@ api_specification:
             $ref: '#/components/schemas/FanOutRunSummary'
           test_quiescence:
             $ref: '#/components/schemas/RunTestQuiescence'
+          instances:
+            type: array
+            items: {$ref: '#/components/schemas/RunInstanceOperationalStatus'}
+          attributions:
+            type: array
+            items: {$ref: '#/components/schemas/RunStallAttribution'}
       EntitySummary:
         type: object
         additionalProperties: false
@@ -38722,7 +38800,7 @@ api_specification:
       errors: [RUN_NOT_FOUND]
     run.diagnose:
       tier: must_have
-      description: "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/internal/operatorsurface/run_operational_status_read_surface.go\
+      description: "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/operatorread/behavior.go\
         \ and concrete failed-delivery evidence from\nRunDebugReport.FailedDeliveries, plus result.test_quiescence from\n\
         RunDebugReport.TestQuiescence for deterministic test assertion barriers. The single canonical owner for\n\"why isn't\
         \ this run progressing?\" routes persisted evidence through\nthe API instead of having every consumer recompute it.\n"
@@ -40718,10 +40796,10 @@ api_specification:
       the geth-style rpc.subscription shape.
     - health.check returns the BundleIdentity block including canonical bundle_hash.
     - mailbox.decide / defer / begin_input / cancel_input mutate only typed decision cards and drafts; mailbox.acknowledge mutates only notice acknowledgment state.
-    - run.diagnose exposes the existing operator-state projection from internal/store/internal/operatorsurface/run_operational_status_read_surface.go.ProjectRunOperationalStatus
+    - run.diagnose exposes the single operator-state projection from internal/operatorread/behavior.go.ProjectRunOperationalStatus
       over the JSON-RPC API, returning operational_state + blocking_layer + blocking_reason + heuristics. The projection itself
-      is the canonical owner and is unchanged; this proof confirms the API surface routes through it (no second interpretation
-      layer in the API handler).
+      is the canonical owner for both API and monitor, including every relevant exact instance attribution and explicit
+      unknown evidence; no second domain-specific interpretation lives in the API or serve adapter.
     - platform.run_stalled is emitted by the serve runtime only after policy.runtime.stalled_run_escalation consumes
       ProjectRunOperationalStatus plus the latest non-platform.run_stalled run event timestamp. The default policy is
       enabled with threshold_seconds=300, and the producer dedupes by (run_id, blocking_layer, blocking_reason,

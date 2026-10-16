@@ -151,8 +151,9 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
 	ctx = runtimebus.WithInboundEvent(ctx, evt)
 	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, a.cfg.Identity)
-	recorder := runtimebus.NewEmittedEventsRecorder()
-	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
+	if recorder, found := runtimebus.EmittedEventsRecorderFromContext(ctx); !found || recorder == nil {
+		ctx = runtimebus.WithEmittedEventsRecorder(ctx, runtimebus.NewEmittedEventsRecorder())
+	}
 	ctx, releaseToolPublication, err := a.applyTurnToolDefinitions(ctx)
 	if err != nil {
 		return nil, err

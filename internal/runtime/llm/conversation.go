@@ -565,7 +565,7 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 	executed := make([]executedToolCall, 0, len(calls))
 	for callIndex, tc := range calls {
 		terminal := toolIsTerminalInContext(ctx, tc.Name)
-		callIdentity := fmt.Sprintf("tool_call:%d:%d:%s:%s", c.TurnCount, callIndex, strings.TrimSpace(tc.ID), strings.TrimSpace(tc.Name))
+		callIdentity := completionToolCallIdentity(c.TurnCount, callIndex, tc)
 		callCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, callIdentity)
 		out, transported, err := c.executeResponseToolCall(callCtx, response, tc, terminal, callIdentity)
 		entry := map[string]any{

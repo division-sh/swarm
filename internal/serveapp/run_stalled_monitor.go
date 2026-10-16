@@ -91,15 +91,24 @@ func (r *serveRunStalledReader) LoadRunSnapshot(ctx context.Context, runID strin
 	if err != nil {
 		return runstalled.RunSnapshot{}, err
 	}
-	flowInstance, err := r.store.LoadLatestRunFlowInstance(ctx, report.RunID)
-	if err != nil {
-		return runstalled.RunSnapshot{}, err
+	if report.OperationalFacts == nil {
+		return runstalled.RunSnapshot{}, fmt.Errorf("run stalled monitor requires coherent operational evidence")
 	}
-	progressAt, err := r.store.LoadLatestRunNonEscalationProgressAt(ctx, report.RunID, runstalled.EventType)
-	if err != nil {
-		return runstalled.RunSnapshot{}, err
+	status := operatorread.ProjectRunOperationalStatus(report)
+	current := make([]operatorread.RunTurnAttribution, 0)
+	for _, attribution := range status.Attributions {
+		if !attribution.Historical {
+			current = append(current, attribution)
+		}
 	}
-	return runStalledSnapshotFromDebugReport(report, flowInstance, progressAt), nil
+	if len(current) > 1 && status.State == "stalled" {
+		return runstalled.RunSnapshot{}, fmt.Errorf("multi-instance stall policy and alert envelope arbitration await the #2720 user ruling")
+	}
+	flowInstance := ""
+	if len(current) == 1 {
+		flowInstance = current[0].FlowInstance
+	}
+	return runStalledSnapshotFromDebugReport(report, flowInstance, report.OperationalFacts.LastProgressAt), nil
 }
 
 func (r *serveRunStalledReader) StalledRunEscalationExists(ctx context.Context, key runstalled.EscalationKey) (bool, error) {
@@ -145,6 +154,7 @@ func runStalledSnapshotFromDebugReport(report operatorread.RunDebugReport, flowI
 			OperationalState: strings.TrimSpace(status.State),
 			BlockingLayer:    strings.TrimSpace(status.BlockingLayer),
 			BlockingReason:   strings.TrimSpace(status.BlockingReason),
+			Attributions:     status.Attributions,
 		},
 	}
 }

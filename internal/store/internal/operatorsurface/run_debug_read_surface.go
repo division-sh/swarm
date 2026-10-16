@@ -192,6 +192,21 @@ func (s *RunPostgres) LoadRunDebugReport(ctx context.Context, runID string, opts
 	if s == nil || s.backend == nil {
 		return operatorread.RunDebugReport{}, fmt.Errorf("postgres store is required")
 	}
+	var report operatorread.RunDebugReport
+	err := s.backend.InspectSnapshot(ctx, func(snapshot context.Context) (err error) {
+		report, err = s.loadRunDebugReport(snapshot, runID, opts)
+		return err
+	})
+	if err != nil {
+		return operatorread.RunDebugReport{}, err
+	}
+	return report, nil
+}
+
+func (s *RunPostgres) loadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
+	if s == nil || s.backend == nil {
+		return operatorread.RunDebugReport{}, fmt.Errorf("postgres store is required")
+	}
 	if err := s.requireRunDebugAccess(); err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
@@ -204,7 +219,12 @@ func (s *RunPostgres) LoadRunDebugReport(ctx context.Context, runID string, opts
 	if err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
+	header.ClockSchedules, err = s.LoadRunClockSchedules(ctx, runID)
+	if err != nil {
+		return operatorread.RunDebugReport{}, err
+	}
 	report := operatorread.RunDebugReport{
+		Header:         header,
 		RunID:          header.RunID,
 		RunTableStatus: header.Status,
 		Failure:        runtimefailures.CloneEnvelope(header.Failure),
@@ -418,6 +438,10 @@ func (s *RunPostgres) LoadRunDebugReport(ctx context.Context, runID string, opts
 	report.TestQuiescence.FanOutBarriers = report.FanOut.BarrierArmed + report.FanOut.BarrierPending
 	report.TestQuiescence.Ready = runTestQuiescenceReady(report.TestQuiescence)
 
+	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorPostgresDelivery, s.sources, s.pipeline, s.timers, header, report.TestQuiescence, time.Now().UTC())
+	if err != nil {
+		return operatorread.RunDebugReport{}, err
+	}
 	return report, nil
 }
 

@@ -123,7 +123,8 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 			CAST(t.timer_id AS TEXT), t.initial_fire_at,
 			COALESCE(CAST(t.occurrence_event_id AS TEXT), ''), t.occurrence_admitted_at, t.accepted_at,
 			COALESCE(t.cancel_cause, ''), t.cancelled_at,
-			COALESCE(t.failure_code, ''), COALESCE(t.failure_message, ''), t.failed_at
+			COALESCE(t.failure_code, ''), COALESCE(t.failure_message, ''), t.failed_at,
+			COALESCE(t.flow_instance, '')
 		FROM timers t
 		LEFT JOIN runs r ON r.run_id = t.run_id
 		WHERE (? = '' OR t.run_id = ?)
@@ -142,7 +143,8 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 				t.timer_id::text, t.initial_fire_at,
 				COALESCE(t.occurrence_event_id::text, ''), t.occurrence_admitted_at, t.accepted_at,
 				COALESCE(t.cancel_cause, ''), t.cancelled_at,
-				COALESCE(t.failure_code, ''), COALESCE(t.failure_message, ''), t.failed_at
+				COALESCE(t.failure_code, ''), COALESCE(t.failure_message, ''), t.failed_at,
+				COALESCE(t.flow_instance, '')
 			FROM timers t
 			LEFT JOIN runs r ON r.run_id = t.run_id
 			WHERE (NULLIF($1, '') IS NULL OR t.run_id = NULLIF($1, '')::uuid)
@@ -178,7 +180,7 @@ func read(ctx context.Context, queryer queryer, postgres bool, scope Scope, obse
 			&familyValue, &runID, &status, &ownerKind, &fireAtValue, &runStatus,
 			&activation.ActivationID, &initialAt, &activation.OccurrenceEventID,
 			&occurrenceAdmittedAt, &acceptedAt, &activation.CancelCause, &cancelledAt,
-			&activation.FailureCode, &activation.FailureMessage, &failedAt,
+			&activation.FailureCode, &activation.FailureMessage, &failedAt, &activation.FlowInstance,
 		); err != nil {
 			return Snapshot{}, fmt.Errorf("scan timer obligation: %w", err)
 		}
