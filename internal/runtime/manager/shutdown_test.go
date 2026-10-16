@@ -55,22 +55,17 @@ func ProveNativeShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testin
 		},
 	}
 
-	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am, runCtx := newPreparedNativeTestManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		if cfg.ID != agent.id {
 			t.Fatalf("unexpected agent id: %q", cfg.ID)
 		}
 		return agent, nil
-	}, AgentManagerOptions{DeliveryStore: native})
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, true); err != nil {
-		t.Fatalf("spawnAgentInternal: %v", err)
-	}
+	}, native, managerRootAgentConfig(agent.id, "test.in"), AgentManagerOptions{})
 
-	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
-	event := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
+	am.Run(runCtx)
+	event := eventtest.ExistingRunRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
-		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	native.seedAgentDeliveries(t, agent.id, []events.Event{event})
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), event); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -147,19 +142,14 @@ func ProveNativeShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopCo
 		},
 	}
 
-	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am, runCtx := newPreparedNativeTestManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	}, AgentManagerOptions{DeliveryStore: native})
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, true); err != nil {
-		t.Fatalf("spawnAgentInternal: %v", err)
-	}
+	}, native, managerRootAgentConfig(agent.id, "test.in"), AgentManagerOptions{})
 
-	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
-	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
+	am.Run(runCtx)
+	inbound := eventtest.ExistingRunRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
-		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	native.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -244,19 +234,14 @@ func ProveNativeShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T, ne
 		},
 	}
 
-	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am, runCtx := newPreparedNativeTestManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	}, AgentManagerOptions{DeliveryStore: native})
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, true); err != nil {
-		t.Fatalf("spawnAgentInternal: %v", err)
-	}
+	}, native, managerRootAgentConfig(agent.id, "test.in"), AgentManagerOptions{})
 
-	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
-	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
+	am.Run(runCtx)
+	inbound := eventtest.ExistingRunRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
-		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	native.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish(first): %v", err)
@@ -334,24 +319,19 @@ func ProveNativeShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *
 		},
 	}
 
-	am := newTestAgentManagerWithOptions(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am, runCtx := newPreparedNativeTestManager(t, bus, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	}, AgentManagerOptions{DeliveryStore: native})
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.in"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, true); err != nil {
-		t.Fatalf("spawnAgentInternal: %v", err)
-	}
+	}, native, managerRootAgentConfig(agent.id, "test.in"), AgentManagerOptions{})
 
-	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	am.Run(runCtx)
 	initialRunCtx, _, _ := am.lifecycle.runSnapshot()
 	if initialRunCtx == nil {
 		t.Fatal("expected initial run context")
 	}
 
-	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-in-1"),
+	inbound := eventtest.ExistingRunRootIngress(eventtest.UUID("evt-in-1"),
 		events.EventType("test.in"),
-		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	native.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
 	if err := bus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -377,7 +357,7 @@ func ProveNativeShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	am.Run(runCtx)
 
 	currentRunCtx, _, running := am.lifecycle.runSnapshot()
 	shuttingDown := am.lifecycle.phaseSnapshot() == runtimeLifecycleShuttingDown

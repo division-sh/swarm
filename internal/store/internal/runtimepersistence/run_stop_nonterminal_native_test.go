@@ -12,9 +12,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
 )
@@ -42,26 +42,38 @@ func stopNonterminalNativePlan(t *testing.T, f receiverConfigActivationFixture, 
 	t.Helper()
 	ctx := correlation.WithRunID(f.ctx, runID)
 	requireRunFixtureForTest(t, ctx, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: f.bundle.SourceArtifact, BundleHash: f.bundle.SourceArtifact.BundleHash()})
-	source := semanticview.Wrap(f.bundle)
-	root := flowidentity.Stored(source, ".", runID, runID, runID, "")
-	child, err := flowidentity.KeylessChild(source, root, "review")
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := sqliteFlowActivationRequest(f.bundle, "review", "review", "", "review")
-	req.Instance = child
+	req := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
+	req.Instance = flowidentity.Stored(req.ContractBundle, ".", runID, runID, runID, "")
 	plan, err := f.manager.PrepareFlowInstanceActivation(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(plan.Children) != 1 || plan.Children[0].Identity.TemplateID != "review" || len(plan.Children[0].Readiness.Agents) != 1 {
+		t.Fatalf("native stop source omitted its declared review child: %+v", plan)
+	}
 	result, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(ctx, plan)
-	if err != nil || !result.Created || !result.Acknowledged || len(plan.Readiness.Agents) != 1 {
-		t.Fatalf("native stop construction=%+v, agents=%d, err=%v", result, len(plan.Readiness.Agents), err)
+	if err != nil || !result.Created || !result.Acknowledged {
+		t.Fatalf("native stop construction=%+v, err=%v", result, err)
 	}
 	if err := f.manager.FinalizeCommittedFlowInstanceActivation(ctx, result); err != nil {
 		t.Fatal(err)
 	}
-	return plan
+	actor := plan.Children[0].Readiness.Agents[0]
+	state, found, err := f.store.(manager.AgentLifecycleStateReader).LoadAgentLifecycleState(ctx, actor.Identity)
+	if err != nil || !found || state.Phase != manager.AgentLifecycleRegistered {
+		t.Fatalf("native stop actor registration: %+v found=%t err=%v", state, found, err)
+	}
+	started, err := f.grant.CommitAgentLifecycleTransition(ctx, manager.AgentLifecycleTransition{
+		DiagnosticOrigin: manager.LifecycleDiagnosticOrigin{Owner: manager.LifecycleDiagnosticNormal, Causality: manager.LifecycleDiagnosticObservation},
+		OperationID:      uuid.NewString(), OperationKind: "start", RequestHash: uuid.NewString(), Identity: state.Identity, AgentID: state.AgentID,
+		Trigger: "start", ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
+		TargetEpoch: state.RuntimeEpoch, TargetGeneration: state.Generation + 1, TargetPhase: manager.AgentLifecycleRunning,
+		ConfigRevision: state.ConfigRevision, RunMode: manager.AgentRunModeStandard, Topology: state.Topology, Now: time.Now().UTC(),
+	})
+	if err != nil || started.Phase != manager.AgentLifecycleRunning || started.Generation != state.Generation+1 {
+		t.Fatalf("native stop actor admission: %+v err=%v", started, err)
+	}
+	return plan.Children[0]
 }
 
 func stopNonterminalNativeAuthority(t *testing.T, f receiverConfigActivationFixture) deliverylifecycle.ExecutionAuthority {
@@ -83,10 +95,19 @@ func stopNonterminalNativeDelivery(t *testing.T, f receiverConfigActivationFixtu
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "review/work.requested", "fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(mustPersistenceNode("review", "progress")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: plan.Identity.Route().InstancePath, EntityID: plan.Instance.EntityID})}
 	if agent {
-		identity := plan.Readiness.Agents[0].Identity
+		actor := plan.Readiness.Agents[0]
+		identity := actor.Identity
 		route.Recipient, route.AgentIdentity = events.MustAgentDeliveryRecipient(identity.AgentID()), identity
+		// The static agent is attached to the flow but owns no entity. Its
+		// route must not borrow the constructed header's entity ownership.
+		if actor.EntityID != "" {
+			t.Fatal("native stop fixture requires its declared entityless static agent")
+		}
+		route.Target = events.DeliveryTargetOwnership{}
 	}
-	event = eventtest.TargetRouted(event, route.Target.Route())
+	if !route.Target.Empty() {
+		event = eventtest.TargetRouted(event, route.Target.Route())
+	}
 	commitSelectedReceiverClaimEvent(t, correlation.WithRunID(f.ctx, runID), f.store, event, route, authority)
 	return event, route
 }

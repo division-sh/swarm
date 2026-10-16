@@ -68,6 +68,11 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 		{agentID: "agent-retrying", state: runtimedelivery.StateRetrying, wantState: "retrying", wantLayer: "delivery_retry"},
 		{agentID: "agent-exhausted", state: runtimedelivery.StateExhausted, wantState: "exhausted", wantLayer: "delivery_terminal"},
 	}
+	for _, tc := range cases {
+		identity := mustTestAgentIdentityForRun(runID, tc.agentID, "lifecycle/"+tc.agentID)
+		prepareAgentLifecycleReadActor(t, ctx, pg, identity, tc.activeSession != "")
+	}
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	identities := make([]agentidentity.Identity, 0, len(cases))
 	for _, tc := range cases {
 		eventID := uuid.NewString()
@@ -143,6 +148,8 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 	activeEventID := uuid.NewString()
 	oldDeadLetterEventID := uuid.NewString()
 	identity := mustTestAgentIdentityForRun(runID, "agent-1", "lifecycle/agent-1")
+	prepareAgentLifecycleReadActor(t, ctx, pg, identity, true)
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	activeRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: identity}
 	activeEvent := seedAgentLifecycleEvent(t, ctx, pg, activeEventID, runID, activeRoute, time.Now().UTC())
 	deadLetterEvent := seedAgentLifecycleEvent(t, ctx, pg, oldDeadLetterEventID, runID, activeRoute, time.Now().UTC().Add(-time.Hour))
@@ -194,6 +201,8 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLife
 	eventID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	identity := mustTestAgentIdentityForRun(runID, "agent-1", "lifecycle/agent-1")
+	prepareAgentLifecycleReadActor(t, ctx, pg, identity, false)
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: identity}
 	event := seedAgentLifecycleEvent(t, ctx, pg, eventID, runID, route, time.Now().UTC())
 	claimed, err := claimDeliveryFixture(ctx, pg, event, route)
@@ -233,20 +242,28 @@ func seedAgentLifecycleEvent(t *testing.T, ctx context.Context, pg *PostgresStor
 	return event
 }
 
+func prepareAgentLifecycleReadActor(t *testing.T, ctx context.Context, pg *PostgresStore, identity agentidentity.Identity, memory bool) {
+	t.Helper()
+	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
+		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+			ExecutionMode: "live", ID: identity.AgentID(), Identity: identity, Role: "worker", Type: "managed",
+			Model: "regular", Memory: agentmemory.Plan{Enabled: memory}, FlowPath: identity.FlowInstance(), Config: json.RawMessage(`{}`),
+		})),
+		Status: "active", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("prepare lifecycle agent %s: %v", identity.AgentID(), err)
+	}
+}
+
 func seedAgentLifecycleSession(t *testing.T, ctx context.Context, pg *PostgresStore, db *sql.DB, runID string, identity agentidentity.Identity, sessionID string) {
 	t.Helper()
 	fields, err := agentIdentityFields(identity)
 	if err != nil {
 		t.Fatalf("seed lifecycle identity: %v", err)
 	}
-	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
-			ExecutionMode: "live", ID: fields.AgentID, Identity: identity, Role: "worker", Type: "managed",
-			Model: "test", Memory: agentmemory.Plan{Enabled: true}, FlowPath: fields.FlowInstancePath,
-		}),
-		Status: "active", StartedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("admit lifecycle agent %s: %v", fields.AgentID, err)
+	state, found, err := pg.LoadAgentLifecycleState(ctx, identity)
+	if err != nil || !found || state.Phase != runtimemanager.AgentLifecycleRunning {
+		t.Fatalf("session requires its already-prepared running actor: %+v found=%t error=%v", state, found, err)
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (

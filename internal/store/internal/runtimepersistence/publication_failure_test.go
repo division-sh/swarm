@@ -14,9 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/store/internal/apiidempotency"
-	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
-	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	"github.com/google/uuid"
 )
 
@@ -180,11 +178,11 @@ func requirePublicationFaultObjects(t testing.TB, fault *PublicationFailure, wan
 	got, err := readFanOutSemanticStorage(context.Background(), fault.selected, nil, func(ctx context.Context, tx *sql.Tx) (int, error) {
 		switch fault.cut {
 		case PublicationAfterMaterialization:
-			return delivery.CountPublicationMaterializationFaultObjectsTx(ctx, tx, postgres, fault.id)
+			return schemastore.CountPublicationMaterializationFaultObjectsTx(ctx, tx, postgres, fault.id)
 		case PublicationBeforeReplayScope:
-			return pipelinepersistence.CountPublicationReplayFaultObjectsTx(ctx, tx, postgres, fault.id)
+			return schemastore.CountPublicationReplayFaultObjectsTx(ctx, tx, postgres, fault.id)
 		case PublicationBeforeAPICompletion:
-			return apiidempotency.CountPublicationCompletionFaultObjectsTx(ctx, tx, postgres, fault.id)
+			return schemastore.CountPublicationCompletionFaultObjectsTx(ctx, tx, postgres, fault.id)
 		default:
 			return 0, errors.New("unknown publication fault")
 		}

@@ -54,18 +54,6 @@ func CountTemplateNodeReceiptTx(ctx context.Context, tx *sql.Tx, event, node str
 	return count, err
 }
 
-func CountTemplateSubscribedReplayScopeTx(ctx context.Context, tx *sql.Tx, event string) (int, error) {
-	var count int
-	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id=$1 AND scope='subscribed'`, event).Scan(&count)
-	return count, err
-}
-
-func CountTemplateEventReplayScopesTx(ctx context.Context, tx *sql.Tx, event string) (int, error) {
-	var count int
-	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id=$1`, event).Scan(&count)
-	return count, err
-}
-
 func CountTemplateInstancesTx(ctx context.Context, tx *sql.Tx, template string) (int, error) {
 	var count int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instances WHERE flow_template=$1`, template).Scan(&count)
@@ -91,13 +79,6 @@ func CountSubscriberEventReceiptOutcomeStorageTx(ctx context.Context, tx *sql.Tx
 	var count int
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts
 		WHERE event_id=$1 AND subscriber_type=$2 AND subscriber_id=$3 AND outcome=$4`, eventID, subscriberType, subscriberID, outcome).Scan(&count)
-	return count, err
-}
-
-func CountExactRunEventReplayScopeStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID, scope string) (int, error) {
-	var count int
-	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes
-		WHERE run_id=$1 AND event_id=$2 AND scope=$3`, runID, eventID, scope).Scan(&count)
 	return count, err
 }
 
