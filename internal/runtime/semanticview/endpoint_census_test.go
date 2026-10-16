@@ -272,7 +272,7 @@ func TestAuthoredEventEndpointCensusMatchesScopedWildcardConsumers(t *testing.T)
 			if err != nil {
 				t.Fatalf("load fixture: %v", err)
 			}
-			matched := BuildAuthoredEventEndpointCensus(Wrap(bundle)).MatchingConsumers("", tc.eventType)
+			matched := BuildAuthoredEventEndpointCensus(Wrap(bundle)).MatchingConsumers(".", tc.eventType)
 			found := false
 			for _, endpoint := range matched {
 				if endpoint.NodeID == tc.nodeID && endpoint.Pattern && endpoint.Event.Authored == tc.pattern {
@@ -508,7 +508,7 @@ func TestInvalidAuthoredSubscriptionsRejectFullURIWithoutFlowPathResolution(t *t
 		},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{Root: &root},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root}},
 		Nodes:    root.Nodes,
 	}
 
