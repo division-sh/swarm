@@ -12798,8 +12798,8 @@ tool_model:
         and requires the relevant signed-payload recipe to fail closed on malformed form input.
       normalized_events:
         shape: >
-          Optional list entries use `{event, fields, when, author_subject}`. `event` must be an exact
-          `inbound.<provider>.*` literal.
+          Optional list entries use `{event, fields, when, author_subject}`. Authored `event` uses a short local name;
+          directory BODY admission qualifies it once into the exact `inbound.<provider-directory>.<local>` literal.
           Each field declares `from`, one required post-conversion JSON `schema`, optional `optional`, and an optional closed
           conversion. The schema is the sole admitted-value owner: runtime normalization, imported event refinements,
           accepted trigger descriptors, channel assignability, carry eligibility, and capability type projection derive
