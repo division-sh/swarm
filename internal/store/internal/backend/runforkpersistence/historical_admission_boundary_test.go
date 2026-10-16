@@ -69,9 +69,18 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	allowed[historicalBoundaryWriter+"CountWorkflowTimerRevisionFactsForTest/ledger_sql"] = historicalBoundaryAllowance{1, "fixed physical timer-revision witness stays with the canonical ledger owner; no payload decoding or caller selector"}
 	allowed[historicalBoundaryWriter+"ObserveWorkflowMetadataRevisionsForTest/ledger_sql"] = historicalBoundaryAllowance{1, "fixed physical workflow metadata revision witness stays with the canonical ledger owner; no historical payload decoding or execution grant"}
 	allowed[historicalBoundaryWriter+"ObserveH2CounterCommitsForTest/ledger_sql"] = historicalBoundaryAllowance{1, "test-only H2 committed-stage evidence stays with the canonical ledger owner; no payload decoding or execution grant"}
+	allowed[historicalBoundaryWriter+"ObserveH2CommittedHistoryForTest/ledger_sql"] = historicalBoundaryAllowance{1, "fixed physical ledger witness for failure-only H2 evidence in the canonical revision owner; opaque facts grant no historical admission, replay or execution"}
 	allowed["store/internal/runtimepersistence::ObserveWorkflowTimerReplayStorageForTest/reference:"+historicalBoundaryWriter+"CountWorkflowTimerRevisionFactsForTest"] = historicalBoundaryAllowance{1, "exact selected read transaction delegates physical ledger observation to its canonical owner"}
 	allowed[historicalBoundaryWriter+"CountNotifyFanOutRevisionStorageForTest/ledger_sql"] = historicalBoundaryAllowance{1, "fixed physical revision cardinalities stay with the canonical ledger owner; no payload decoding or caller selector"}
 	allowed["store/internal/runtimepersistence::ReadNotifyFanOutWorkForTest/reference:"+historicalBoundaryWriter+"CountNotifyFanOutRevisionStorageForTest"] = historicalBoundaryAllowance{1, "fan-out diagnostic delegates fixed ledger counts within the original selected read snapshot"}
+	for _, name := range []string{"CountRunFactRevisionRowsForTest", "CountServingLifetimeHistoryStorageTx", "ReadLatestFanOutObligationFactStorageTx", "ReadRunRevisionFactStorageTx", "ReadFanOutObligationHistoryStorageForTestTx", "ReadSupplementalFanOutObligationHistoryTx"} {
+		allowed[historicalBoundaryWriter+name+"/ledger_sql"] = historicalBoundaryAllowance{1, "fixed physical ledger witness in the canonical revision owner; no historical decoding, admission or execution grant"}
+	}
+	for _, name := range []string{"ReadA2MapHistoryFootprintStorageForTest", "ReadA2RetainedSourceFootprintStorageForTest"} {
+		allowed["store/internal/runtimepersistence::"+name+"/reference:"+historicalBoundaryWriter+"CountNotifyFanOutRevisionStorageForTest"] = historicalBoundaryAllowance{1, "fixed read-only diagnostic delegates its exact run cardinalities within the original selected read transaction"}
+	}
+	allowed["store/internal/runtimepersistence::ReadRepeatedFanOutSnapshotForTest/reference:"+historicalBoundaryWriter+"CountRunFactRevisionRowsForTest"] = historicalBoundaryAllowance{1, "slot six of the complete physical witness consumes the canonical ledger count within the same selected snapshot"}
+	allowed["store/internal/runtimepersistence::CountRunStopFactRevisionRowsForTest/reference:"+historicalBoundaryWriter+"CountRunFactRevisionRowsForTest"] = historicalBoundaryAllowance{1, "existing stop witness delegates the same fixed physical count to its canonical owner"}
 	allowed[historicalBoundaryOwner+"validateSelectedForkBranchDivergenceTx/reference:"+historicalBoundaryOwner+"resolveRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "typed branch evidence verifies its bound point through the canonical contextual resolver; it neither decodes payloads nor grants replay"}
 	for _, caller := range []string{
 		"resolveSQLiteRunForkRevisionPoint", "lockRunForkSourceRevisionFrontier",
@@ -276,7 +285,7 @@ func historicalBoundaryCollect(pkg *types.Package, info *types.Info, fset *token
 				case historicalBoundaryWriter + "FactKey", historicalBoundaryWriter + "projectionFactKey", historicalBoundaryWriter + "admitFactKeyCoordinates", historicalBoundaryOwner + "appendRunForkHistoricalFact", "runtime/deliverylifecycle::DecodeHistoricalSnapshot",
 					"runtime/runfork::NewTerminalBarrierHistory", historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory",
 					historicalBoundaryOwner + "resolveRunForkRevisionPoint", historicalBoundaryOwner + "resolveSQLiteRunForkRevisionPoint",
-					historicalBoundaryWriter + "CountWorkflowTimerRevisionFactsForTest", historicalBoundaryWriter + "CountNotifyFanOutRevisionStorageForTest":
+					historicalBoundaryWriter + "CountWorkflowTimerRevisionFactsForTest", historicalBoundaryWriter + "CountNotifyFanOutRevisionStorageForTest", historicalBoundaryWriter + "CountRunFactRevisionRowsForTest":
 					add(n, "reference:"+callee)
 				case historicalBoundaryOwner + "AppendRunForkRevisionFact", historicalBoundaryOwner + "appendRunForkRevisionFact":
 					add(n, "contextless_append_reference")
@@ -508,6 +517,7 @@ func (imports historicalBoundaryImports) Import(path string) (*types.Package, er
 func historicalBoundaryHostile(t *testing.T, imports historicalBoundaryImports) {
 	t.Helper()
 	inheritedFanOutBoundaryHostile(t, imports)
+	historicalBoundaryH2OpaqueFactDecodeControl(t, imports)
 	const source = `package runforkpersistence
 import (
     codec "encoding/json"
@@ -530,6 +540,11 @@ func (arbitrary *unexpectedReader) stealTimerRevisionObservation() {
 }
 func (arbitrary *unexpectedReader) stealNotifyRevisionObservation() {
     observe := revision.CountNotifyFanOutRevisionStorageForTest
+    alias := observe
+    _ = alias
+}
+func (arbitrary *unexpectedReader) stealRepeatedRevisionObservation() {
+    observe := revision.CountRunFactRevisionRowsForTest
     alias := observe
     _ = alias
 }
@@ -610,6 +625,7 @@ func ordinaryBusiness(raw []byte) error {
 	want := []string{
 		historicalBoundaryOwner + "unexpectedReader.stealTimerRevisionObservation/reference:" + historicalBoundaryWriter + "CountWorkflowTimerRevisionFactsForTest",
 		historicalBoundaryOwner + "unexpectedReader.stealNotifyRevisionObservation/reference:" + historicalBoundaryWriter + "CountNotifyFanOutRevisionStorageForTest",
+		historicalBoundaryOwner + "unexpectedReader.stealRepeatedRevisionObservation/reference:" + historicalBoundaryWriter + "CountRunFactRevisionRowsForTest",
 		historicalBoundaryOwner + "unexpectedReader.mintInitializer/reference:events::AdmitFlowReceiverInitialization",
 		historicalBoundaryOwner + "unexpectedReader.restoreInitializer/reference:events::RestoreReceiverMaterializationRecord",
 		historicalBoundaryOwner + "unexpectedReader.mintOrigin/reference:events::NewInheritedFanOutOrigin",
@@ -710,5 +726,32 @@ func harmlessSameSpelling() {
 		!strings.Contains(projectionProblems[2], "arbitrary.directCoordinates/reference:"+historicalBoundaryWriter+"admitFactKeyCoordinates") ||
 		!strings.Contains(projectionProblems[3], "arbitrary.stealProjection/reference:"+historicalBoundaryWriter+"projectionFactKey") {
 		t.Fatalf("unapproved direct and aliased key consumers in the approved file must fail: %v", projectionProblems)
+	}
+}
+
+func historicalBoundaryH2OpaqueFactDecodeControl(t *testing.T, imports historicalBoundaryImports) {
+	t.Helper()
+	const source = `package runforkrevision
+import codec "encoding/json"
+func ObserveH2CommittedHistoryForTest(raw []byte) error {
+    query := "SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1"
+    _ = query
+    var opaque map[string]any
+    return codec.Unmarshal(raw, &opaque)
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "test_timer_fact_observation.go", source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Defs: map[*ast.Ident]types.Object{}, Uses: map[*ast.Ident]types.Object{}}
+	pkg, err := (&types.Config{Importer: imports}).Check(historicalBoundaryModule+"store/internal/backend/runforkrevision", fset, []*ast.File{file}, info)
+	if err != nil {
+		t.Fatalf("H2 decode control must type-check: %v", err)
+	}
+	problems := historicalBoundaryProblems(historicalBoundaryCollect(pkg, info, fset, file), historicalBoundaryAllowances(), false)
+	if len(problems) != 1 || !strings.HasPrefix(problems[0], historicalBoundaryWriter+"ObserveH2CommittedHistoryForTest/raw_decode at ") {
+		t.Fatalf("H2 physical ledger witness acquired historical decoding authority: %v", problems)
 	}
 }

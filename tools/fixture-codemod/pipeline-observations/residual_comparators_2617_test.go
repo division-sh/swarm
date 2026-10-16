@@ -47,6 +47,10 @@ func loadResidualComparators2617(t *testing.T) residualComparatorPacket2617 {
 }
 
 func residualComparatorMatches2617(row recipe, actual string, corpus []recipe, packet residualComparatorPacket2617) bool {
+	row, actual, err := catchUp2542PriorMasterPair(row, actual)
+	if err != nil {
+		return false
+	}
 	for _, pin := range packet.Rows {
 		if row.Family != pin.Family || row.File != pin.File || row.Function != pin.Function {
 			continue
@@ -126,7 +130,7 @@ func TestResidualComparators2617PreserveHistoryAndRejectUnlistedCurrentPairs(t *
 			if row.Family == "native-pipeline-delivery-exact-join-semantic" || row.Family == "native-pipeline-delivery-bus-semantic" {
 				name = nativePipelineRecipeReplacementName(t, row)
 			}
-			actual := selectedCausalObservationBody(t, row.File, name)
+			actual := repair2698HistoricalBody(t, row.File, name)
 			if !residualComparatorMatches2617(row, actual, rows, packet) {
 				t.Fatal("exact historical/current residual endpoint refused")
 			}

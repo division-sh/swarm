@@ -40,6 +40,28 @@ const fanOutFoldJoinedQuery = `
 		ORDER BY o.ordinal
 	`
 
+// Count both row families in one SQL snapshot at the failed native insert cut.
+func CountFanOutAttemptResidueStorageTx(ctx context.Context, tx *sql.Tx, command runtimepipeline.FanOutChunkCommand) (int, error) {
+	key := command.Claim.Key
+	query := `SELECT (SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5 AND ordinal >= $6 AND ordinal < $7)`
+	args := []any{key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath, command.Outcomes[0].Ordinal, command.Outcomes[len(command.Outcomes)-1].Ordinal + 1}
+	var eventParams []string
+	for _, outcome := range command.Outcomes {
+		if outcome.Publication != nil {
+			args = append(args, outcome.Publication.DurablePublicationEventID())
+			eventParams = append(eventParams, fmt.Sprintf("$%d", len(args)))
+		}
+	}
+	if len(eventParams) != 0 {
+		query += ` + (SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id IN (` + strings.Join(eventParams, ",") + `))`
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 const fanOutFoldJoinedDeploymentQuery = `
 		SELECT i.cardinality, i.cursor, i.status, o.run_id IS NOT NULL,
 		       o.ordinal, o.outcome_kind, o.event_id, o.source_event_id, o.inherited_disposition

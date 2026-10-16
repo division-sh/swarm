@@ -51,6 +51,12 @@ profiles:
     - catalog-runtime-scatter-safety
     - conformance-2394-pressure
     - store-admission-full
+    - store-admission-debt-01
+    - store-admission-debt-02
+    - store-admission-debt-03
+    - store-admission-debt-04
+    - store-admission-debt-05
+    - store-admission-debt-06
     - persistence-authority-debt-census
     - parity-served-source-artifact
     - parity-connected-channel-onboarding-surface
@@ -111,6 +117,12 @@ profiles:
     - serveapp-selected-rest
     - serveapp-standing
     - store-admission-full
+    - store-admission-debt-01
+    - store-admission-debt-02
+    - store-admission-debt-03
+    - store-admission-debt-04
+    - store-admission-debt-05
+    - store-admission-debt-06
     - persistence-authority-debt-census
     - store-runtime-full-01
     - store-runtime-full-02
@@ -197,6 +209,12 @@ profiles:
     - serveapp-selected-rest
     - serveapp-standing
     - store-admission-full
+    - store-admission-debt-01
+    - store-admission-debt-02
+    - store-admission-debt-03
+    - store-admission-debt-04
+    - store-admission-debt-05
+    - store-admission-debt-06
     - persistence-authority-debt-census
     - store-runtime-full-01
     - store-runtime-full-02
@@ -305,7 +323,7 @@ units:
       - github.com/division-sh/swarm/internal/runtime
       - github.com/division-sh/swarm/internal/serveapp
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: '^(TestA2CollectionMinimalRunFixtureClassificationIsExact|TestActivityResultExistenceProjectionCannotOwnEventPayload|TestAgentLifecycleDependenciesAreExplicit|TestAgentManagerDeliveryRolesAreExplicit|TestAgentManagerPersistenceRolesAreExplicit|TestAgentTopologyMutationProductionConsumersStatic|TestBranchDivergenceMinimalRunFixtureClassificationIsExact|TestCandidateHandoffGuardRejectsDomainAssembler|TestCandidateHandoffRetryProtocolIsSoleAssembler|TestCanonicalEventCatalogCloneSeamRejectsReconstruction|TestChannelActivationExecutableReaderCensus|TestChannelActivationExecutionConsumersUseCanonicalOwner|TestCounterRunOracleClassificationDoesNotPermitWriters|TestDevModeDoesNotImplicitlyAbandonRuns|TestEffectiveSourceHasNoChannelDeploymentInterpreter|TestEntityWorkspacePersistenceSeamIsRetired|TestEventAdmittedPersistenceBoundaryGuard|TestEventBusConstructorsDoNotClassifyStoreCapabilities|TestEventBusDurableDependenciesAreExplicit|TestEventBusRoutePersistenceDependenciesAreExplicit|TestEventFixtureWritersUseSemanticOwners|TestEventSchemaRequiredProjectionHasNoBehavioralConsumers|TestExecutableDeliverySQLHasClosedOwners|TestHostileEventObservationMarkerClassificationIsExact|TestHostileEventRecordConsumerClassificationDoesNotGrantSQL|TestInboundStandingAdmissionConsumesCanonicalRestartDisposition|TestOperatorLineageHostileRunFixtureClassificationIsExact|TestOrdinaryForkAbsentCutFaultOwnsExactOriginCAS|TestRawProjectFlowModeGuardDistinguishesMethodsFromFields|TestReceiverHistoryMinimalRunFixtureClassificationIsExact|TestRegisteredToolSemanticReconstructionIsAbsent|TestReleaseE2ECapacityFixtureImportBoundary|TestReleaseE2EImportBoundaryRejectsRuntimeAndUnscopedPlanning|TestReleaseE2EPackageStaysAtPublicProcessBoundary|TestReplayScopesAreNotExecutableDeliveries|TestRepositoryEventBusSourceOperationLedgerHostileControls|TestRetiredBuilderNegativeControlReferenceCountRemainsExact|TestRetiredBuilderSemanticReferencesStayExplicit|TestRetiredDashboardBoundaryRejectsReintroduction|TestRetiredDashboardTransportCannotReturn|TestRetiredFlattenedExecutableNodeReadersStayAbsent|TestRetiredGenericDeliveryReadersHaveNoProductionConsumers|TestRetiredStandingRestartInterpretersStayAbsent|TestRunForkRevisionAttemptResetOwnersAreClosed|TestRunForkRevisionEnumeratedWriterContributions|TestRunForkRevisionExactContributorGuardHostileControls|TestRunForkRevisionExactWriterContributions|TestRunForkRevisionExplicitBroadWriterContributions|TestRunForkRevisionFreshEffectsStayInsideRetryOwners|TestRunForkRevisionJoinedPhysicalWriterGuardHostileControls|TestRunForkRevisionProjectionContributorCensusIsClosed|TestRunForkRevisionRetiredEntityDiffGuardHostileControls|TestRunForkRevisionRetryOwnerGuardHostileControls|TestRunForkRevisionStateAccessorInventoryIsClosed|TestRunLifecycleCompletionReadsOnlyOwnerSummaries|TestRunLifecycleFixtureGuardRejectsSiblingWrites|TestRunLifecycleOwnershipBoundaryGuard|TestRunScopedLiveIdentityStructuralRatchet|TestRuntimeContextLoadedStateHasOneVisibilityPublisher|TestRuntimeCorePersistenceRolesAreConstructorInputs|TestRuntimeSemanticModelsHaveSingleConsumerOwner|TestSchemaToolPlanPackagesRejectFreeSemanticStringsAndConsumerNormalization|TestSelectedContractExecutionUsesSemanticPorts|TestSelectedContractSourceLoaderIsExact|TestSelectedStoreAbstractionGuardMatrixCoversApprovedBoundary|TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs|TestSelectedStoreProofCensusRejectsForeignOnlyDeclaration|TestSemanticOwnershipProducerConsumerLedgerIsClosed|TestSemanticRunFixturesUseLifecycleOwner|TestServeCompositionProvidesExactRuntimePorts|TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners|TestStandingRestartClassificationHasOneProductionOwner|TestStandingRestartSchemaRejectsAutomaticRepair|TestStructuralReadersDoNotConstructChannelActivation|TestUnleasedToolDefinitionReadersDoNotProjectChannelActivations|TestUnrevisionedDeliveryFixtureSQLAllowanceIsExact|TestUnrevisionedEventFixtureConsumerAllowanceIsExact|TestUnrevisionedEventFixtureHasOnlyStoretestConsumers|TestUnrevisionedEventFixtureSQLAllowanceIsExact|TestWorkflowMutationExecutorDoesNotEscapeOpaquePersistence|TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape)$'
+    run: '^(TestA2CollectionMinimalRunFixtureClassificationIsExact|TestActivityResultExistenceProjectionCannotOwnEventPayload|TestAgentLifecycleDependenciesAreExplicit|TestAgentManagerDeliveryRolesAreExplicit|TestAgentManagerPersistenceRolesAreExplicit|TestAgentTopologyMutationProductionConsumersStatic|TestBackendQueryEventFixtureWriterClassificationPinsExactIsolatedSetup|TestBranchDivergenceMinimalRunFixtureClassificationIsExact|TestCandidateHandoffGuardRejectsDomainAssembler|TestCandidateHandoffRetryProtocolIsSoleAssembler|TestCanonicalEventCatalogCloneSeamRejectsReconstruction|TestChannelActivationExecutableReaderCensus|TestChannelActivationExecutionConsumersUseCanonicalOwner|TestChannelAnchorReferenceSnapshotsCannotAdmitChangedSourceOrProductReferences|TestChannelProcessReferenceSnapshotsRetainExactFieldsAndRejectDuplicateRecords|TestChannelSettlementReferenceSnapshotsRejectChangedEvidenceAndDuplicateRecords|TestCounterRunOracleClassificationDoesNotPermitWriters|TestDevModeDoesNotImplicitlyAbandonRuns|TestEffectiveSourceHasNoChannelDeploymentInterpreter|TestEntityWorkspacePersistenceSeamIsRetired|TestEventAdmittedPersistenceBoundaryGuard|TestEventBusConstructorsDoNotClassifyStoreCapabilities|TestEventBusDurableDependenciesAreExplicit|TestEventBusRoutePersistenceDependenciesAreExplicit|TestEventFixtureWritersUseSemanticOwners|TestEventSchemaRequiredProjectionHasNoBehavioralConsumers|TestExecutableDeliverySQLHasClosedOwners|TestHostileEventObservationMarkerClassificationIsExact|TestHostileEventRecordConsumerClassificationDoesNotGrantSQL|TestInboundStandingAdmissionConsumesCanonicalRestartDisposition|TestOperatorLineageHostileRunFixtureClassificationIsExact|TestOrdinaryForkAbsentCutFaultOwnsExactOriginCAS|TestRawProjectFlowModeGuardDistinguishesMethodsFromFields|TestReceiverHistoryMinimalRunFixtureClassificationIsExact|TestRegisteredToolSemanticReconstructionIsAbsent|TestReleaseE2ECapacityFixtureImportBoundary|TestReleaseE2EImportBoundaryRejectsRuntimeAndUnscopedPlanning|TestReleaseE2EPackageStaysAtPublicProcessBoundary|TestReplayScopesAreNotExecutableDeliveries|TestRepositoryEventBusSourceOperationLedgerHostileControls|TestRetiredBuilderNegativeControlReferenceCountRemainsExact|TestRetiredBuilderSemanticReferencesStayExplicit|TestRetiredDashboardBoundaryRejectsReintroduction|TestRetiredDashboardTransportCannotReturn|TestRetiredFlattenedExecutableNodeReadersStayAbsent|TestRetiredGenericDeliveryReadersHaveNoProductionConsumers|TestRetiredStandingRestartInterpretersStayAbsent|TestRunForkRevisionAttemptResetOwnersAreClosed|TestRunForkRevisionEnumeratedWriterContributions|TestRunForkRevisionExactContributorGuardHostileControls|TestRunForkRevisionExactWriterContributions|TestRunForkRevisionExplicitBroadWriterContributions|TestRunForkRevisionFreshEffectsStayInsideRetryOwners|TestRunForkRevisionJoinedPhysicalWriterGuardHostileControls|TestRunForkRevisionProjectionContributorCensusIsClosed|TestRunForkRevisionRetiredEntityDiffGuardHostileControls|TestRunForkRevisionRetryOwnerGuardHostileControls|TestRunForkRevisionStateAccessorInventoryIsClosed|TestRunLifecycleCompletionReadsOnlyOwnerSummaries|TestRunLifecycleFixtureGuardRejectsSiblingWrites|TestRunLifecycleOwnershipBoundaryGuard|TestRunScopedLiveIdentityStructuralRatchet|TestRuntimeContextLoadedStateHasOneVisibilityPublisher|TestRuntimeCorePersistenceRolesAreConstructorInputs|TestRuntimeSemanticModelsHaveSingleConsumerOwner|TestSchemaToolPlanPackagesRejectFreeSemanticStringsAndConsumerNormalization|TestSelectedContractExecutionUsesSemanticPorts|TestSelectedContractSourceLoaderIsExact|TestSelectedStoreAbstractionGuardMatrixCoversApprovedBoundary|TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs|TestSelectedStoreProofCensusRejectsForeignOnlyDeclaration|TestSemanticOwnershipProducerConsumerLedgerIsClosed|TestSemanticRunFixturesUseLifecycleOwner|TestServeCompositionProvidesExactRuntimePorts|TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners|TestStandingRestartClassificationHasOneProductionOwner|TestStandingRestartSchemaRejectsAutomaticRepair|TestStructuralReadersDoNotConstructChannelActivation|TestUnleasedToolDefinitionReadersDoNotProjectChannelActivations|TestUnrevisionedDeliveryFixtureSQLAllowanceIsExact|TestUnrevisionedEventFixtureConsumerAllowanceIsExact|TestUnrevisionedEventFixtureHasOnlyStoretestConsumers|TestUnrevisionedEventFixtureSQLAllowanceIsExact|TestWorkflowMutationExecutorDoesNotEscapeOpaquePersistence|TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape)$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
@@ -850,7 +868,7 @@ units:
       - github.com/division-sh/swarm/internal/serveapp
     # 36644617733 exhausted the unchanged 600s budget after passing whole
     # delivery families. Keep complete journeys together in distinct units.
-    run: '^Test(Canonical.*|Channel(Connect.*|Draft.*|Duplicate.*|Effect.*|Listener.*|OneBot.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*|PendingResetRestartToReadyE2E))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
+    run: '^Test(Canonical.*|Channel(AnchorStorageReaderSurvivesChildAndClosesWithHarnessBothStores|BudgetDiagnosticFacetRefusesForeignOwnership|BudgetDiagnosticStorageRetainsIndependentCutsAndLifetimeBothStores|CurrentRenderFaultPreservesScopeCancellationAndRestorationBothStores|InputBindingFaultKeepsOrdinaryRunAndExactReceiptBothStores|PostgresConfigurationKeepsExactMetadataWithoutConnectionAuthority|ProcessDiagnosticKeepsEveryNativeOperationCoordinateBothStores|ProcessHistoryKeepsNativeFactsAndIndependentTemporalCutsBothStores|ProcessObservationPreservesAbsenceCancellationAndLifetimeBothStores|ProcessObservationRefusesForeignOwnership|RunNamedEventObservationKeepsPhysicalScopeAndJoinedLifetimeBothStores|SettlementDiagnosticPreservesBoundsIdentityAndRedaction|SettlementIntentCountOvershootRefuses|SettlementStorageReaderRetainsAbsenceCancellationAndLifetimeBothStores|AnchorReferenceSnapshotsCannotAdmitChangedSourceOrProductReferences|ProcessReferenceSnapshotsRetainExactFieldsAndRejectDuplicateRecords|SettlementReferenceSnapshotsRejectChangedEvidenceAndDuplicateRecords|Connect.*|Draft.*|Duplicate.*|Effect.*|Listener.*|OneBot.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*|PendingResetRestartToReadyE2E))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
     required_children:
       TestReceiverCompositionRestartBothStores: [sqlite, postgres]
     count_mode: count-1
@@ -1011,7 +1029,7 @@ units:
   serveapp-selected-rest:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^TestSelected(Fork($|[^R].*)|Reset.*|Recovery.*|Owner.*)$'
+    run: '^TestSelected(Fork($|[^R].*)|Reset.*|Recovery.*|Owner.*|ServedReadRoleCleanupNeverPublishesEvidence)$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
@@ -1114,8 +1132,50 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/store
       - github.com/division-sh/swarm/internal/testpostgres
-    # Positive RE2 complement: the census unit owns the two exact scan roots.
-    run: '^($|[^T].*|T($|[^e].*|e($|[^s].*|s($|[^t].*|t($|[^NP].*|N($|[^a].*|a($|[^t].*|t($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^F].*|F($|[^i].*|i($|[^x].*|x($|[^t].*|t($|[^u].*|u($|[^r].*|r($|[^e].*|e($|[^F].*|F($|[^a].*|a($|[^m].*|m($|[^i].*|i($|[^l].*|l($|[^i].*|i($|[^e].*|e($|[^s].*|s($|[^D].*|D($|[^o].*|o($|[^N].*|N($|[^o].*|o($|[^t].*|t($|[^R].*|R($|[^e].*|e($|[^c].*|c($|[^e].*|e($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^R].*|R($|[^a].*|a($|[^w].*|w($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y.+))))))))))))))))))))))))))))))))))))))))))))|P($|[^e].*|e($|[^r].*|r($|[^s].*|s($|[^i].*|i($|[^s].*|s($|[^t].*|t($|[^e].*|e($|[^n].*|n($|[^c].*|c($|[^e].*|e($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y($|[^D].*|D($|[^e].*|e($|[^b].*|b($|[^t].*|t($|[^R].*|R($|[^a].*|a($|[^t].*|t($|[^c].*|c($|[^h].*|h($|[^e].*|e($|[^t].*|t.+)))))))))))))))))))))))))))))))))))$'
+    # #2698: ordinary admission/testpostgres plus B's 17 finite base debt roots.
+    run: '^((?:|[^T].*|T(?:|[^e].*|e(?:|[^s].*|s(?:|[^t].*|t(?:|[^NP].*|N(?:|[^a].*|a(?:|[^t].*|t(?:|[^i].*|i(?:|[^v].*|v(?:|[^e].*|e(?:|[^F].*|F(?:|[^i].*|i(?:|[^x].*|x(?:|[^t].*|t(?:|[^u].*|u(?:|[^r].*|r(?:|[^e].*|e(?:|[^F].*|F(?:|[^a].*|a(?:|[^m].*|m(?:|[^i].*|i(?:|[^l].*|l(?:|[^i].*|i(?:|[^e].*|e(?:|[^s].*|s(?:|[^D].*|D(?:|[^o].*|o(?:|[^N].*|N(?:|[^o].*|o(?:|[^t].*|t(?:|[^R].*|R(?:|[^e].*|e(?:|[^c].*|c(?:|[^e].*|e(?:|[^i].*|i(?:|[^v].*|v(?:|[^e].*|e(?:|[^R].*|R(?:|[^a].*|a(?:|[^w].*|w(?:|[^A].*|A(?:|[^u].*|u(?:|[^t].*|t(?:|[^h].*|h(?:|[^o].*|o(?:|[^r].*|r(?:|[^i].*|i(?:|[^t].*|t(?:|[^y].*|y.+))))))))))))))))))))))))))))))))))))))))))))|P(?:|[^e].*|e(?:|[^r].*|r(?:|[^s].*|s(?:|[^i].*|i(?:|[^s].*|s(?:|[^t].*|t(?:|[^e].*|e(?:|[^n].*|n(?:|[^c].*|c(?:|[^e].*|e(?:|[^A].*|A(?:|[^u].*|u(?:|[^t].*|t(?:|[^h].*|h(?:|[^o].*|o(?:|[^r].*|r(?:|[^i].*|i(?:|[^t].*|t(?:|[^y].*|y(?:|[^D].*|D(?:|[^e].*|e(?:|[^b].*|b(?:|[^t].*))))))))))))))))))))))))))))|TestPersistenceAuthorityDebt(CatchUpForkRenameRetainsAlreadyAcceptedRemovals|CatchUpSourceReadsRemainFresh|CensusInactiveLocalOperations|FixtureRoleTransitionIsExactAndMetadataOnly|ForkProofCollectorIsPinned|ForkProofRequiresConservedSource|FreshnessCatchUpRefusesChangedCurrentSource|NativeEntryCatchUpSourceIsExact|ProcessLeaseCustodyUsesCollectorMember|ProcessLeaseRelocationsAreOneWay|ReadbackWarmSourceAndManifestControls|Repair2698CopiedWarmSourceRefusesEscapes|RunFixtureSignatureTransitionIsExact|SelectedReadRoleCacheRequiresActualImmutableEvidence|ServedDebugTransfersConserveAll71Occurrences|ServedDebugUnrefreshedMetadataRemainsLocalAndReadOnly|ServedObservationNativeComparisonPreservesAddedAndRetainedCode))$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  store-admission-debt-01:
+    packages:
+      - github.com/division-sh/swarm/internal/store
+    run: '^TestPersistenceAuthorityDebt(AnalysisCacheIdentity|AnalysisCacheKeepsFreshSourcesAndResurrection|DeliveryRetirementIsFiniteSourceVerifiedAndOneWay|ExcludedTypedRefusalForwarder|ExcludedUncertaintyRatchet|ForkProofTransferIsExact|NativeEntryCatchUpForwardAndForeignProvenance|ProcessLeaseCollectorTransitionIsBounded|ProcessLeaseCustodyIsSourceBound|PublicA2UnrefreshedMetadataIsLocalAndSourceBound|PublicRollbackRetirementCollectorUsesExactHistoricalCopies|RatchetRejectsPaymentDuplicationReseedAndResurrection|ReadbackRetirementRequiresFreshCompleteNativeSources|ReadbackSourceIsSignedFiniteAndCurrent|ReceiverReadbackMetadataIsLocalAndSourceBound|Repair2698FixtureNameCopiedWarmBoundary|RequestKeyExactPairsRetainTwoOccurrences|SourceInvocationRejectsEveryChangedImage)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  store-admission-debt-02:
+    packages:
+      - github.com/division-sh/swarm/internal/store
+    run: '^TestPersistenceAuthorityDebt(AnalysisCacheFingerprintsOwnersAndBuildContext|AnalysisCacheRejectsInvalidEntries|CatchUpForwardAndForeignProvenance|CensusPackageInitializers|CensusRepeatedOccurrences|CensusRetainsAliasesCallbacksAndOpaqueConstruction|DeliveryRetirementKeepsLaterServedAuthorizationSeparate|EventNameMetadataIsLocalAndSourceBound|G01TransitionIsExactAndMetadataOnly|NativeEntryCatchUpRefusesChangedCurrentSource|ProcessLeaseReviewedSourcePins|PublicA2CollectorIsPinnedAndConservesDebt|ServedDebugCollectorComposesOnlyExactPredecessors|ServedDebugModelMatchesExactReviewedManifest|ServedDebugSourcePinsRejectProvenanceAndNearMatches|WorkflowStateCollectorPreservesOldChainAndDebt|WorkflowStateComposesExactlyOneHistoricalBody|WriterStageUnrefreshedMetadataIsScopedAndFailClosed)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  store-admission-debt-03:
+    packages:
+      - github.com/division-sh/swarm/internal/store
+    run: '^TestPersistenceAuthorityDebt(AnalysisCacheKeepsIgnoredHeadInputOutOfBase|AnalysisCacheRecomputesCorruptAndUnavailableEntries|BootstrapOriginSurvivesRebase|CatchUpPendingMetadataRequiresExactDownwardProvenance|DeliveryRetirementCollectorPreservesExactChain|DeliveryRetirementRefusesChangedNativeSource|DeliveryStatusSourcePinsAndCompositionFailClosed|EventNameSourceCompositionIsExact|IdentityIgnoresLinesAndEarlierOrdinalRemoval|ReadbackRetirementIsExactAndRejectsResurrection|RequestKeySourceAndCollectorPins|RunIdentityCollectorAddsNoCredit|SelectedReadRoleSourceRefusesHistoricalForeignAndStaleEvidence|ServedObservationRetirementIsFiniteAndRejectsResurrection|ServedObservationRetirementPinsAll48LiveBodies|SourceForkCompositionPreservesExactHistory|StageCompletionSourceAndFactoryPins|WriterStageCollectorTransferAndPriorCompositionAreExact|WriterStageModelMatchesReviewedManifestAndBodies)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  store-admission-debt-04:
+    packages:
+      - github.com/division-sh/swarm/internal/store
+    run: '^TestPersistenceAuthorityDebt(CensusRetainsNonSQLConstructionAcrossOrdinaryPackages|DeliveryRetirementFingerprint|EventNameCollectorPreservesOldChainAndAllDebt|ExcludedPlatformIdentity|FixtureRoleFingerprintIsRequired|FreshnessCatchUpForwardAndForeignProvenance|FreshnessCatchUpSourceIsExact|PublicRollbackRetirementIsFiniteAndOneWay|RatchetIsSelectedInEveryTier|Repair2698ProofCostForwardEdgeKeepsOriginalFingerprintAndRefusesReverse|RunFixtureCollectorTransitionIsPinned|RunFixturePolicyDestinationMatchesSource|RunIdentitySourceCompositionIsFinite|ServedObservationBatchReportsEveryOlderSourceIntersection|ServedObservationCollectorRetainsTrustedPredecessorCeiling|ServedScenarioCompositionIsExactAndSourceOnly|ServedSetupSourceInverseRejectsStaleAndForeignCuts|StageCompletionRelocationIsExact)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  store-admission-debt-05:
+    packages:
+      - github.com/division-sh/swarm/internal/store
+    run: '^TestPersistenceAuthorityDebt(AnalysisCachePRCannotPublish|AnalysisCachePublicationAdmission|AnalysisCachePublishMaster|AnalysisCacheRoundTripAndIsolation|BaselineRejectsCorruptionAndDuplicateRows|CatchUpCollectorPreservesBothPolicyOwners|CensusClearsAmbientSelectionFlags|CensusOwnedSourceBeforeLoading|ChannelProcessCachesKeepActualEvidence|ChannelProcessSourceInverseIsExactAndAccountingNeutral|CollectorSidecarRejectsForeignMetadata|CollectorSidecarRequiresCurrentMetadata|ConstructionDistinguishesNativeOwnerFromRecovery|DeliveryStatusCollectorPreservesEveryOccurrenceAndDirection|EventNameSourceManifestAndNativeBodyFailClosed|ExcludedInheritedReceiver|ExcludedReadCloserFileRefusal|ExcludedWindowsAndUnknownDeclarations|FixtureRoleDoesNotAuthorizeProductionConsumption|PublicA2SourceAndManifestRejectUnknownBodies|PublicRollbackCollectorAddsNoInverseCredit|QuiescenceCollectorTransitionIsPinnedAndDownward|ReadbackRetirementPreservesHistoricalInventories|ReceiverReadbackCollectorIsExactAndAddsNoCredit|ReceiverReadbackCompositionPreservesOriginalSource|Repair2698DeclarationCacheUsesActualBytes|RequestKeyCollectorTransitionKeepsExactDonorsAndDirection|RoleLabelsCannotGrantPermission|RunScalarCollectorPreservesEveryOccurrenceAndDirection|SelectedScopeIncludesAliasesAndInactiveSource|ServedDebugFourWriterStageCompositionsRemainExact|ServedObservationCollectorFingerprintIsExact|ServedObservationSourceInversesAreExactAndActualSourceBound|SourceForkDeploymentInversePinsBothCompleteFiles|StageCompletionCollectorTransitionIsPinned|StandingControlCollectorDependenciesStayExact|StandingControlFiveInversesAndHostileEvidence|TrustedBaseDistinguishesBootstrapFromLandedMerge|UnsupportedProcessWaitsUseTypedRefusal|WorkflowStateRejectsForeignCutsAndKeys)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  store-admission-debt-06:
+    packages:
+      - github.com/division-sh/swarm/internal/store
+    run: '^TestPersistenceAuthorityDebt(CatchUpCollectorFingerprintIsExact|CensusFailsClosedOnMissingAndTypeFailedSource|CensusPlatformIndependentSource|CensusPreservesAugmentedVariantEvidence|ChannelSettlementSourceInverseRefusesForeignEvidence|CollectorMetadataIdentity|DeliveryRetirementMetadataIsLocalAndSourceBound|ProcessLeaseRelocationRejectsSourceDrift|PublicA2AccountingConservesAncestorIntermediateAndCurrent|PublicRollbackSourceCompositionIsFinite|QuiescenceTransitionPreservesExactDebtAndDirection|Repair2698ExactSourceAndForwardPolicy|Repair2698ReconcilesLiveCensus|RunScalarSourcePinsAndCompositionFailClosed|ServedObservationCollectorTransitionIsOneWayAndAddsNoCredit|SourceBlobResetInverseChecksLiveSourceAndChangesNoAccounting|WorkflowStateManifestAndOwnersFailClosed|WorkflowStateMetadataIsLocalAndSourceBound|WriterStageSourcePinsRejectBodyAndManifestTampering|WriterStageTransfersPreserveSevenExactOccurrences)$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
@@ -1148,10 +1208,14 @@ units:
   store-runtime-full-01:
     packages:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
-    run: '^(Test($|2376.*|[AB].*|Ru($|[^n].*|n($|[^F].*)))|Example.*|Fuzz.*)$'
+    run: '^(Test($|2376.*|[AB].*|Ru($|[^n].*|n($|[^F].*|F($|[^o].*|o($|[^r].*|r($|[^k].*))))))|Example.*|Fuzz.*)$'
     required_children:
       TestA2JoinNativeCommitBoundaryOnBothStores: [sqlite/acknowledged, sqlite/commit_before_lost_ack, sqlite/rollback_before_lost_ack, sqlite/native_deferred_rejection, postgres/acknowledged, postgres/commit_before_lost_ack, postgres/rollback_before_lost_ack, postgres/native_deferred_rejection]
       TestA2JoinHeaderOnlyReceiverRefusesClaimBothStores: [sqlite, postgres]
+      TestAPIIdempotencyCardinalityPreservesExactMethodKeyAndAllActorsBothStores: [sqlite, postgres]
+      TestAPIIdempotencyCardinalityRefusesInvalidCancelledAndClosedOwnersBothStores: [sqlite, postgres]
+      TestAPIEventPublicationScalarStoragePreservesPhysicalPredicatesBothStores: [sqlite, postgres]
+      TestAPIEventPublicationScalarStorageRefusesRawCancelledAndClosedOwnersBothStores: [sqlite, postgres]
       TestAuthoredTurnTerminationCommitsWithExactStageBothStores: [committed/sqlite, committed/postgres, late_rollback/sqlite, late_rollback/postgres, stale_cas/sqlite, stale_cas/postgres, other_instance/sqlite, other_instance/postgres, prelaunch/sqlite, prelaunch/postgres, prelaunch_restart/sqlite, prelaunch_restart/postgres]
       TestAgentFixtureSealedAuthorityRejectionParity: [sqlite, postgres]
       TestAgentLifecycleProcessBindingReadbackParity: [sqlite, postgres]
@@ -1160,6 +1224,7 @@ units:
       TestA9KeyedStandingGenerationDoesNotConstructBothStores: [sqlite/., sqlite/parent, postgres/., postgres/parent]
       TestActivityAdmissionConsumesConstructedHeaderBothStores: [postgres/fieldless/current, postgres/fieldless/malformed_bucket, postgres/fieldless/missing_header, postgres/fieldless/stale, postgres/fieldless/wrong_entity, postgres/fieldless/wrong_header_flow, postgres/fieldless/wrong_path, postgres/fields/current, postgres/fields/malformed_bucket, postgres/fields/missing_header, postgres/fields/stale, postgres/fields/wrong_entity, postgres/fields/wrong_header_flow, postgres/fields/wrong_path, sqlite/fieldless/current, sqlite/fieldless/malformed_bucket, sqlite/fieldless/missing_header, sqlite/fieldless/stale, sqlite/fieldless/wrong_entity, sqlite/fieldless/wrong_header_flow, sqlite/fieldless/wrong_path, sqlite/fields/current, sqlite/fields/malformed_bucket, sqlite/fields/missing_header, sqlite/fields/stale, sqlite/fields/wrong_entity, sqlite/fields/wrong_header_flow, sqlite/fields/wrong_path]
       TestRunControlControllerStopReconcilesBothTimerFamiliesOnBothStores: [sqlite, postgres]
+      TestRunFanOutBarrierStatusRefusesMissingInvalidAndClosedEvidenceBothStores: [sqlite, postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
@@ -1169,8 +1234,13 @@ units:
     # Positive RE2 complement of TestFanOut, TestFlow and TestForkG within D-F.
     run: '^Test([D-E].*|F($|[^alo].*|a($|[^n].*|n($|[^O].*|O($|[^u].*|u($|[^t].*))))|l($|[^o].*|o($|[^w].*))|o($|[^r].*|r($|[^k].*|k($|[^G].*)))))$'
     required_children:
+      TestDynamicFlowRuntimeReadinessStorageFaultsKeepNativeScopeBothStores: [sqlite, postgres]
       TestDormantStandingPreparationDoesNotConstructBothStores: [sqlite, postgres]
       TestForkActivationInventoriesConstructedHeadersBothStores: [sqlite/fieldless, sqlite/fields, postgres/fieldless, postgres/fields]
+      TestForkReceiverCompanionStoragePreservesWholeRowsAndSeparateCutsBothStores: [sqlite, postgres]
+      TestForkReceiverCompanionStorageRefusesRawCancelledClosedAndPartialReadsBothStores: [sqlite, postgres]
+      TestForkReceiverNoticeStoragePreservesCompleteSourceScopedRowsBothStores: [sqlite, postgres]
+      TestForkReceiverNoticeStorageRefusesInvalidCancelledClosedAndPartialEvidenceBothStores: [sqlite, postgres]
       TestDynamicFlowRuntimeCreationOccurrenceLinearizesWithTerminalizationOnBothStores: [postgres/creation_wins, postgres/terminal_wins, sqlite/creation_wins, sqlite/terminal_wins]
       TestDynamicFlowRuntimeCreationOccurrenceRollsBackAppendedEventOnBothStores: [sqlite, postgres]
       TestDynamicFlowRuntimeCreationOccurrenceRejectsRetiredAttemptOnBothStores: [sqlite, postgres]
@@ -1261,6 +1331,9 @@ units:
       TestCanceledDeliveryTurnRollsBackAllOriginEvidenceBothStores: [sqlite, postgres]
       TestCompletionReportsCanceledOriginWithoutDroppingAcceptedResponseBothStores: [sqlite, postgres]
       TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores: [sqlite, postgres]
+      TestChannelIntentObservationRequiresCompleteIndependentIdentityBothStores: [sqlite, postgres]
+      TestChannelIntentObservationRefusesInvalidCancelledClosedAndDuplicateEvidenceBothStores: [sqlite, postgres]
+      TestChannelIntentObservationSeparatesReusedTokenAndDistinctOccurrencesBothStores: [sqlite, postgres]
       TestChannelDeliveryEffectCurrentnessSelectedStoreParity: [sqlite/eligibility_before_authorize, sqlite/eligibility_before_launch, sqlite/eligibility_after_launch, sqlite/eligibility_after_observation, sqlite/eligibility_edit, sqlite/eligibility_uncertain, sqlite/eligibility_recover_authorized, sqlite/eligibility_recover_launched, sqlite/eligibility_recover_observed, postgres/eligibility_before_authorize, postgres/eligibility_before_launch, postgres/eligibility_after_launch, postgres/eligibility_after_observation, postgres/eligibility_edit, postgres/eligibility_uncertain, postgres/eligibility_recover_authorized, postgres/eligibility_recover_launched, postgres/eligibility_recover_observed]
       TestConstructedHeaderGateSummaryBothStores: [sqlite, postgres]
       TestConstructedHeaderGateFreezeBothStores: [sqlite/fields=false, sqlite/fields=true, postgres/fields=false, postgres/fields=true]
@@ -1299,6 +1372,7 @@ units:
       - github.com/division-sh/swarm/internal/store/internal/runtimepersistence
     run: ^Test[P-Q].*$
     required_children:
+      TestPublicationFaultPrerequisitesConsumeOneNativeConstructionBothStores: [sqlite, postgres]
       TestQueuedTurnTerminationBothStores: [pending/sqlite, pending/postgres, retry/sqlite, retry/postgres, rollback/sqlite, rollback/postgres, isolated/sqlite, isolated/postgres, root/sqlite, root/postgres, retained_settled/sqlite, retained_settled/postgres, retained_open/sqlite, retained_open/postgres]
       TestQueuedDirectiveTerminationBothStores: [pending/sqlite, pending/postgres, rollback/sqlite, rollback/postgres, admission_wins/sqlite, admission_wins/postgres, isolated/sqlite, isolated/postgres, root/sqlite, root/postgres]
     count_mode: count-1
@@ -1336,6 +1410,8 @@ units:
     run: ^TestSelected.*$
     required_children:
       TestSelectedContinuationReadFenceBothStores: [sqlite/existing_busy, sqlite/existing_retry, sqlite/entityless_pending, postgres/existing_busy, postgres/existing_retry, postgres/entityless_pending, sqlite/existing_delivered, sqlite/existing_dead_letter, sqlite/existing_terminalized, postgres/existing_delivered, postgres/existing_dead_letter, postgres/existing_terminalized]
+      TestSelectedForkSourceEntityFixtureUsesOriginalCoordinatorBothStores: [sqlite, postgres]
+      TestSelectedForkSourceEntityFixtureRefusalsAndRollbackBothStores: [sqlite, postgres]
       TestSelectedProviderTurnRetainsActualBusinessOriginBothStores: [sqlite, postgres]
       TestSelectedTurnTerminationPreservesExactOriginBothStores: [sqlite, postgres]
       TestSelectedRetriedTurnCancellationBothStores: [unstarted/sqlite, unstarted/postgres, authorized/sqlite, authorized/postgres, launched/sqlite, launched/postgres, timeout_recovery/sqlite, timeout_recovery/postgres]
@@ -1388,6 +1464,11 @@ units:
     # Positive complement of TestSelected within the original S-Z territory.
     run: '^Test(S($|[^e].*|e($|[^l].*|l($|[^e].*|e($|[^c].*|c($|[^t].*|t($|[^e].*|e($|[^d].*)))))))|[T-Z].*)$'
     required_children:
+      TestTemplateStorageObservationsKeepOriginalAbsenceAndIndependentCutsBothStores: [sqlite, postgres]
+      TestTemplateStorageObservationsRefuseRawCancelledAndClosedOwnersBothStores: [sqlite, postgres]
+      TestSupplementalFanOutStorageRetainsStrictNullAbsenceAndSeparateReadCutsBothStores: [sqlite, postgres]
+      TestSupplementalFanOutStorageRefusesRawCancelledAndClosedOwnersBothStores: [sqlite, postgres]
+      TestTemplateEventObservationsKeepGlobalNameAndExactParentBothStores: [sqlite, postgres]
       TestUnstartedClaimedTurnTerminationBothStores: [waiting/sqlite, waiting/postgres, waiting_restart/sqlite, waiting_restart/postgres, rollback/sqlite, rollback/postgres, authorization_wins/sqlite, authorization_wins/postgres]
       TestUnstartedDirectiveTurnRecoveryBothStores: [root/restart/sqlite, root/restart/postgres, root/rollback/sqlite, root/rollback/postgres, completion/restart/sqlite, completion/restart/postgres, completion/rollback/sqlite, completion/rollback/postgres]
       TestWorkflowPublicationAcceptanceStageBothStores: [sqlite/healthy, sqlite/rollback, sqlite/lost_ack, postgres/healthy, postgres/rollback, postgres/lost_ack]

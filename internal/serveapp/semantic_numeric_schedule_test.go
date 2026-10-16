@@ -28,18 +28,24 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 			stubServeRuntimeWorkspaceLifecycle(t)
 			var db *sql.DB
 			var deliveryReader servedRunDeliveryReader
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				deliveryReader = p.deps.DeliveryStore.SummarizeRun
+			})
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			dialect := "sqlite"
 			if backend == servedparity.BackendExplicitPostgres {
 				dialect = "postgres"
-				_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+				_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+					return serveRuntimeWorkspaceStub{}
+				})
 				opts.ConfigPath = writeServeRuntimeTestConfig(t)
 				opts.StoreMode, opts.StoreModeSet = "postgres", true
 			} else {
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "schedule.db"))
 			}
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				db, _, _ = selectedRuntimeStoreForTest(t, p)
+			})
 			start := func() (*serveRuntimeTestProcess, servedControlProofRuntime) {
 				process := startServeRuntimeTestProcess(t, opts)
 				process.waitForReadyLine()
@@ -48,15 +54,12 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 			process, rt := start()
 			run := uuid.NewString()
 			var setup any
-			requireServedJSONRPCResult(t, rt.Endpoint, "test.setup_entities", map[string]any{"bundle_hash": rt.BundleHash, "run_id": run, "idempotency_key": uuid.NewString(),
-				"entities": []any{map[string]any{"alias": "subject", "entity_id": run, "entity_type": "widget", "current_state": "waiting", "fields": map[string]any{"score": 0}}}}, &setup)
+			requireServedJSONRPCResult(t, rt.Endpoint, "test.setup_entities", map[string]any{"bundle_hash": rt.BundleHash, "run_id": run, "idempotency_key": uuid.NewString(), "entities": []any{map[string]any{"alias": "subject", "entity_id": run, "entity_type": "widget", "current_state": "waiting", "fields": map[string]any{"score": 0}}}}, &setup)
 			route, err := events.NewRootRoutingSource(run)
 			if err != nil {
 				t.Fatal(err)
 			}
-			command := genericschedule.AdmissionCommand{RunID: run, OwnerID: "runtime", OwnerKind: genericschedule.OwnerAgent,
-				AgentIdentity: agentidentitytest.RootRuntimeForRun(t, run, "runtime", "numeric-schedule"), ScheduleKey: "numeric", TaskID: "numeric", EventType: "numeric.requested", EntityID: run,
-				RoutingSource: route, ExecutionMode: executionmode.Live, Due: genericschedule.AbsoluteDue(time.Now().UTC().Add(100 * time.Millisecond).Truncate(time.Microsecond))}
+			command := genericschedule.AdmissionCommand{RunID: run, OwnerID: "runtime", OwnerKind: genericschedule.OwnerAgent, AgentIdentity: agentidentitytest.RootRuntimeForRun(t, run, "runtime", "numeric-schedule"), ScheduleKey: "numeric", TaskID: "numeric", EventType: "numeric.requested", EntityID: run, RoutingSource: route, ExecutionMode: executionmode.Live, Due: genericschedule.AbsoluteDue(time.Now().UTC().Add(100 * time.Millisecond).Truncate(time.Microsecond))}
 			var activationID, fingerprint string
 			admit := func(number string) {
 				t.Helper()
@@ -65,7 +68,7 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 					t.Fatal(err)
 				}
 				command.Payload = value
-				result, err := rt.Runtime.GenericSchedules.Admit(servedControlProofAuthorActivityContext(t, rt), command)
+				result, err := rt.Runtime.GenericSchedules.Admit(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), command)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -77,13 +80,13 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 			}
 			admit("7")
 			admit("7.0")
-			semanticNumericOutput(t, rt.Endpoint, rt.DB, run)
+			semanticNumericOutput(t, rt.Endpoint, rt.ReceiverStateReader, run)
 			if code := process.stop(); code != 0 {
 				t.Fatalf("stop=%d", code)
 			}
 			process, rt = start()
 			admit("7e0")
-			semanticNumericOutput(t, rt.Endpoint, rt.DB, run)
+			semanticNumericOutput(t, rt.Endpoint, rt.ReceiverStateReader, run)
 			if code := process.stop(); code != 0 {
 				t.Fatalf("restart stop=%d", code)
 			}

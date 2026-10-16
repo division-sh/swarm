@@ -43,6 +43,7 @@ func TestSourceForkFreezeSuccessorPreservesHistoryAndAllOtherAssertions(t *testi
 		}
 		matched++
 		actual := selectedCausalObservationBody(t, row.File, row.Function)
+		row, actual = requireCatchUp2672MasterPair(t, row, actual)
 		if err := validateSourceForkFreezeSuccessor(row, actual); err != nil {
 			t.Fatal(err)
 		}

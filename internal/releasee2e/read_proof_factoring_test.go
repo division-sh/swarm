@@ -28,13 +28,18 @@ func TestReadProofFactoringCompiledSurfaces(t *testing.T) {
 			writeReleaseFile(t, filepath.Join(cwd, "api-token"), goldenAPIToken+"\n")
 			env := goldenProcessEnv(t, cwd, store.passwordEnv, 0)
 			process := startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, InternalMockLifecycleBinary: lifecycle, WorkingDir: cwd, ConfigPath: "swarm.yaml", Source: "contracts", Store: backend, APIPort: 0, TokenFile: "api-token", Token: goldenAPIToken, Env: env})
-			ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
-			defer cancel()
-			if err := process.waitReady(ctx); err != nil {
+			startupCtx, startupCancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+			defer startupCancel()
+			if err := process.waitReady(startupCtx); err != nil {
 				t.Fatal(err)
 			}
+			startupCancel()
 			runID := goldenPublishIngress(t, process.rpc, goldenServedBundleHash(t, process.rpc, "mock_only"), goldenSmokeCandidateIDs)
 			waitForGoldenTerminalRun(t, process, store, runID, goldenRunDeadline)
+			// Readback owns a separate lifetime from startup and run completion.
+			// Do not enter its first RPC with an expired readiness context.
+			ctx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+			defer cancel()
 			conversations := listGoldenConversations(t, ctx, process.rpc, runID)
 			if len(conversations) == 0 {
 				t.Fatal("no real conversation")

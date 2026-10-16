@@ -65,11 +65,19 @@ func TestForkProofTruthSuccessorPreservesWholeHistoricalCaller(t *testing.T) {
 		fmt.Sprintf("%x", sha256.Sum256([]byte(row.After))) != "8a77bfcf4a078afc07b19c2bf238c9d3b50fd6591de92b24224bda662bca1fe3" {
 		t.Fatal("historical fork Before/After changed")
 	}
-	if err := validateForkProofTruthSuccessor(row, row.Successor); err != nil {
+	history, historicalSource, err := catchUp2542PriorMasterPair(row, row.Successor)
+	if err != nil || history.Before != row.Before || history.After != row.After {
+		t.Fatal("fork proof historical pair changed:", err)
+	}
+	if err := validateForkProofTruthSuccessor(history, historicalSource); err != nil {
 		t.Fatal(err)
 	}
-	actual := selectedCausalObservationBody(t, row.File, forkProofTruthNewName)
-	if err := validateForkProofTruthSuccessor(row, actual); err != nil {
+	actual := repair2698HistoricalBody(t, row.File, forkProofTruthNewName)
+	_, historicalActual, err := catchUp2542PriorMasterPair(row, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateForkProofTruthSuccessor(history, historicalActual); err != nil {
 		t.Fatal(err)
 	}
 	if files, changes, err := prepareFiles("../../..", []recipe{row}); err != nil || len(files) != 0 || len(changes) != 0 {
@@ -120,12 +128,22 @@ func TestForkProofTruthSuccessorPreservesWholeHistoricalCaller(t *testing.T) {
 		{"extra-diagnostic", "COMMITTED DOMAIN fork=", "ALTERED DOMAIN fork="},
 	} {
 		t.Run(mutation.name, func(t *testing.T) {
-			mutant := strings.Replace(row.Successor, mutation.before, mutation.after, 1)
-			if mutant == row.Successor || validateForkProofTruthSuccessor(row, mutant) == nil {
+			candidate := historicalSource
+			mutant := strings.Replace(candidate, mutation.before, mutation.after, 1)
+			if mutant == candidate || validateForkProofTruthSuccessor(history, mutant) == nil {
 				t.Fatal("hostile edit admitted by exact proof-truth reversal")
 			}
 		})
 	}
+	t.Run("current-source-cardinality-owner", func(t *testing.T) {
+		mutant := strings.Replace(row.Successor, "readServedSourceForkCardinality(rt.ReceiverStateReader, seed.RunID)", "readServedSourceForkCardinality(foreignReader, seed.RunID)", 1)
+		if mutant == row.Successor {
+			t.Fatal("current source cardinality hostile did not change")
+		}
+		if _, _, err := catchUp2542PriorMasterPair(row, mutant); err == nil {
+			t.Fatal("foreign current source cardinality owner acquired a historical pair")
+		}
+	})
 }
 
 func requireForkProofLiveIdentity(t *testing.T) {

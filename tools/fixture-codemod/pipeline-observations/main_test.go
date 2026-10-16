@@ -17,7 +17,7 @@ func TestReviewedSnapshotsAreFiniteAndIdempotent(t *testing.T) {
 	if err := json.Unmarshal(recipeBytes, &recipes); err != nil {
 		t.Fatal(err)
 	}
-	if len(recipes) != 893 {
+	if len(recipes) != 1856 {
 		t.Fatalf("recipe count=%d", len(recipes))
 	}
 	for _, row := range recipes {
@@ -89,6 +89,10 @@ func TestReviewedSnapshotCandidateOverlayTypeChecks(t *testing.T) {
 			t.Fatal(err)
 		}
 		recipes, err = checkpointRecipes(source, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recipes, err = nativeEntryCurrentRecipes(root, path, source, recipes)
 		if err != nil {
 			t.Fatal(err)
 		}

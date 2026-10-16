@@ -103,7 +103,7 @@ func TestReviewer2566FeedOnlyRejectsNestedServiceBothStores(t *testing.T) {
 		if replay := rpcCall(t, handler, body); replay.Error != nil || !reflect.DeepEqual(first.Result, replay.Result) {
 			t.Fatalf("selected closure changed receipt replay: first=%#v replay=%#v", first, replay)
 		}
-		if dataRunCount(t, fixture, "events", "run_id", runID) != 1 || dataRunCount(t, fixture, "fan_out_intents", "run_id", runID) != 0 {
+		if dataRunObservedCount(t, fixture, storetest.CountPhysicalRunEvents, runID) != 1 || dataRunObservedCount(t, fixture, storetest.CountRunFanOutIntentStorage, runID) != 0 {
 			t.Fatal("event-only initiation invented a feed or duplicated the initial event")
 		}
 	})

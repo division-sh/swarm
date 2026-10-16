@@ -7,8 +7,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -21,7 +25,10 @@ type ManagerDeliveryNativeFixture struct {
 	SelectedEvent     events.Event
 	SelectedAdmission managedexecution.Admission
 	SelectedRoute     events.DeliveryRoute
+	SelectedOrigin    LifecycleDiagnosticOrigin
 	SemanticSource    semanticview.Source
+	PrepareActor      func(*testing.T, actors.AgentConfig) (context.Context, PersistedAgent, AgentLifecyclePersistence, agenttopology.SourceSetPlan)
+	Flow              *ManagerDeliveryNativeFlowFixture
 	RequireRun        func(*testing.T, string)
 	NormalAuthority   runtimedelivery.ExecutionAuthority
 	Publish           func(*testing.T, context.Context, events.Event, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority)
@@ -32,7 +39,53 @@ type ManagerDeliveryNativeFixture struct {
 	Transitions       func(*testing.T) []string
 }
 
+type ManagerDeliveryNativeFlowFixture struct {
+	Context           context.Context
+	Options           AgentManagerOptions
+	Topology          agenttopology.Admission
+	Plan              agenttopology.SourceSetPlan
+	Request           runtimepipeline.FlowInstanceActivationRequest
+	Event             func(string) events.Event
+	ProjectDiagnostic func(context.Context, diaglog.LifecycleDiagnostic) error
+}
+
 type managerDeliveryNativeFactory func(*testing.T) *ManagerDeliveryNativeFixture
+
+func newPreparedNativeTestManager(t *testing.T, bus Bus, factory AgentFactory, native *ManagerDeliveryNativeFixture, cfg actors.AgentConfig, opts AgentManagerOptions, stores ...ManagerPersistence) (*AgentManager, context.Context) {
+	t.Helper()
+	if native.PrepareActor == nil || opts.LifecycleStore != nil {
+		t.Fatal("positive manager fixture requires its explicit native preparation owner")
+	}
+	ctx, record, lifecycle, plan := native.PrepareActor(t, cfg)
+	if opts.DeliveryStore == nil {
+		opts.DeliveryStore = native
+	}
+	opts.LifecycleStore, opts.BaseContext = lifecycle, ctx
+	if opts.PersistenceRoles.LifecycleState == nil {
+		opts.PersistenceRoles.LifecycleState, _ = native.Store.(AgentLifecycleStateReader)
+	}
+	if opts.PersistenceRoles.LifecycleCensus == nil {
+		opts.PersistenceRoles.LifecycleCensus, _ = native.Store.(AgentLifecycleCellCensus)
+	}
+	if opts.PersistenceRoles.LifecycleOutcome == nil {
+		opts.PersistenceRoles.LifecycleOutcome, _ = native.Store.(AgentLifecycleOutcomeReader)
+	}
+	manager := newTestAgentManagerWithOptions(t, bus, factory, opts, stores...)
+	if err := manager.InstallStartupTopology(lifecycle, record.Topology, plan); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.MaterializeAdmittedAgentForExecution(ctx, record); err != nil {
+		t.Fatalf("materialize admitted native actor: %v", err)
+	}
+	return manager, ctx
+}
+
+func newPreparedNativeReceiptManager(t *testing.T, bus Bus, native *ManagerDeliveryNativeFixture, agent Agent, event events.Event, opts AgentManagerOptions, stores ...ManagerPersistence) (*AgentManager, context.Context) {
+	t.Helper()
+	cfg := managerRootAgentConfig(agent.ID())
+	cfg.Identity = managerAgentDeliveryRouteForRun(event.RunID(), agent.ID()).AgentIdentity
+	return newPreparedNativeTestManager(t, bus, func(actors.AgentConfig) (Agent, error) { return agent, nil }, native, cfg, opts, stores...)
+}
 
 func (s *ManagerDeliveryNativeFixture) managerTestDeliveryAuthority() runtimedelivery.ExecutionAuthority {
 	return s.Authority

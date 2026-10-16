@@ -26,7 +26,7 @@ func TestNativeConversationTurnPublicationRetainsAllPublicReadbackAssertions(t *
 		}
 		want, err := canonicalFunction(expected)
 		got, actualErr := canonicalFunction(row.After)
-		actual, sourceErr := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
+		actual, sourceErr := canonicalFunction(catchUp2542HistoricalBody(t, row.File, row.Function))
 		if err != nil || actualErr != nil || sourceErr != nil || want != got || got != actual {
 			t.Fatalf("conversation record/payload/session/public projection assertions changed: %s", row.Function)
 		}

@@ -68,14 +68,15 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	}
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Hour)})
 	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
+		Config: apiExecutionFixtureConfig(t, "anthropic", runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "researcher", Type: "managed", Model: "cheap",
 			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a", Intent: intent,
-		},
+		}),
 		Status: "active", StartedAt: base.Add(-time.Minute),
 	}); err != nil {
 		t.Fatalf("upsert postgres operator-read agent: %v", err)
 	}
+	ctx = admitAPITestAgentExecution(t, ctx, selected, authorActivityTestSourceArtifactFact)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
@@ -89,7 +90,7 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, base.Add(-5*time.Minute), base); err != nil {
 		t.Fatalf("seed postgres session: %v", err)
 	}
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, "postgres", eventID, runID, events.EventType("operator.read"),
+	storetest.InsertNativeExistingRunRootEvent(t, ctx, selected, eventID, runID, events.EventType("operator.read"),
 		eventtest.Producer(events.EventProducerExternal, "operator-read-fixture"), []byte(`{}`),
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, base.Add(-4*time.Minute))
 	storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{

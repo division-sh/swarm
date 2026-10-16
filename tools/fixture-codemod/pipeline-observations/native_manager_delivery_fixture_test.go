@@ -184,14 +184,14 @@ func TestManagerDeliveryWholeFamilyRecipesPreserveMechanicalConsumers(t *testing
 func checkManagerDeliveryRecipe(t *testing.T, row recipe) {
 	t.Helper()
 	actualName := "ProveNative" + strings.TrimPrefix(row.Function, "Test")
-	actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, actualName))
+	actual, err := canonicalFunction(repair2698HistoricalBody(t, row.File, actualName))
 	current := row.After
 	if row.Successor != "" {
 		current = row.Successor
 	}
 	expected, wantErr := canonicalFunction(current)
 	if err != nil || wantErr != nil || actual != expected {
-		t.Fatalf("manager caller source diverged: %s", row.Function)
+		t.Fatalf("manager caller source diverged: %s\nwant:\n%s\ngot:\n%s", row.Function, expected, actual)
 	}
 	mutant := strings.Replace(row.After, "newNativeDelivery(t)", "newForeignDelivery(t)", 1)
 	if mutant == row.After {

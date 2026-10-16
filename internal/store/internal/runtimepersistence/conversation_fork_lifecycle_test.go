@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,11 +12,15 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -27,7 +30,7 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now)
+	source := seedConversationForkSource(t, s, now)
 
 	created, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
@@ -153,7 +156,7 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now)
+	source := seedConversationForkSource(t, s, now)
 
 	_, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
@@ -198,7 +201,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now)
+	source := seedConversationForkSource(t, s, now)
 	entityID := uuid.NewString()
 
 	if _, err := db.ExecContext(ctx, `
@@ -463,7 +466,7 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now)
+	source := seedConversationForkSource(t, s, now)
 	fork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
 		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
@@ -625,6 +628,7 @@ func conversationForkToolCallMap(t *testing.T, raw json.RawMessage) map[string]a
 }
 
 type conversationForkSourceFixture struct {
+	selected   forkChatCompletionAuthorityStore
 	runID      string
 	bundleHash string
 	agentID    string
@@ -639,7 +643,7 @@ type conversationForkSourceFixture struct {
 
 const conversationForkSourceFlowInstance = "review"
 
-func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conversationForkSourceFixture {
+func seedConversationForkSource(t *testing.T, store *PostgresStore, base time.Time) conversationForkSourceFixture {
 	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:      uuid.NewString(),
@@ -654,14 +658,15 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 		turn2At:    base.Add(-1 * time.Minute),
 	}
 	ctx := testAuthorActivityContext()
-	store := admitTestPostgresStore(t, db)
+	db := store.backend.ConstructionHandle()
+	source.selected = store
 	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: source.runID, StartedAt: base.Add(-3 * time.Minute), BundleHash: source.bundleHash})
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()
 	if err != nil {
 		t.Fatalf("conversation fork source identity: %v", err)
 	}
-	seedTestAgentRow(t, ctx, db, true, identity, "active")
+	seedConversationForkSourceAgent(t, ctx, store, identity)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -691,4 +696,18 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 		}
 	}
 	return source
+}
+
+func seedConversationForkSourceAgent(t *testing.T, ctx context.Context, store agentfixture.Store, identity agentidentity.Identity) {
+	t.Helper()
+	config := resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		ID: identity.AgentID(), Identity: identity, Role: "worker", Type: "stub", Model: "regular",
+		ExecutionMode: "live", Memory: agentmemory.Plan{Enabled: true}, FlowPath: identity.FlowInstance(),
+		Config: json.RawMessage(`{}`),
+	}))
+	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
+		Config: config, Status: "active", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed native conversation fork source agent: %v", err)
+	}
 }

@@ -164,11 +164,10 @@ func TestAdministrativeLeasesAreOperationSpecific(t *testing.T) {
 func TestAdjacent2149AuthorityFindingsClosed(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	registry := readArchitectureFile(t, root, "internal/store/testdata/persistence_authority_findings.tsv")
-	for _, invalid := range []string{"adjacent-2149\t", "unclassified\t"} {
-		if strings.Contains(registry, invalid) {
-			t.Errorf("registry retains %q findings", strings.TrimSuffix(invalid, "\t"))
-		}
+	if strings.Contains(registry, "adjacent-2149\t") {
+		t.Errorf("registry retains %q findings", "adjacent-2149")
 	}
+	verifyPersistenceAuthorityFindingRegistry(t, root)
 }
 
 func readArchitectureFile(t *testing.T, root, path string) string {

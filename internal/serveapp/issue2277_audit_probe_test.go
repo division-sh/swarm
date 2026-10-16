@@ -13,9 +13,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
-	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	"github.com/division-sh/swarm/internal/store/storetest"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -44,8 +43,12 @@ func TestAudit2277ForkDurableResultBypassesGenericCompletionBothStores(t *testin
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": point.EventID, "allow_source_freeze": true, "idempotency_key": "audit2277-fork"}
 			first := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.fork", params, 30*time.Second)
 			var forks, completions int
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, seed.RunID).Scan(&forks); err != nil {
-				t.Fatal(err)
+			{
+				var err error
+				forks, err = readServedSourceForkCardinality(rt.ReceiverStateReader, seed.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM api_idempotency WHERE method='run.fork'`).Scan(&completions); err != nil {
 				t.Fatal(err)
@@ -76,8 +79,12 @@ func TestAudit2277ForkDurableResultBypassesGenericCompletionBothStores(t *testin
 				}
 			}
 			retry := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.fork", params, 30*time.Second)
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, seed.RunID).Scan(&forks); err != nil {
-				t.Fatal(err)
+			{
+				var err error
+				forks, err = readServedSourceForkCardinality(rt.ReceiverStateReader, seed.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM api_idempotency WHERE method='run.fork'`).Scan(&completions); err != nil {
 				t.Fatal(err)
@@ -104,23 +111,21 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			opts.TestLifecycleProbe = probe
 			var db *sql.DB
+			var reader receiverProofStateReader
 			var deliveryReader servedRunDeliveryReader
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				db, _, _ = selectedRuntimeStoreForTest(t, p)
+				reader = requireReceiverProofStateReader(t, p.deps.EventStore)
+			})
 			if backend == "sqlite" {
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "audit2277.sqlite"))
-				captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
 			} else {
 				dsn, _, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				original := buildStoresForServe
-				buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-					pg, err := store.NewPostgresStore(dsn)
-					if err != nil {
-						return nil, err
-					}
-					storetest.BootstrapPostgresRuntimeStore(t, pg)
-					db = storetest.DatabaseForTest(pg)
-					return openSelectedPostgresOwner(t, dsn, db, cfg), nil
+				buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+					return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 				}
 				t.Cleanup(func() { buildStoresForServe = original })
 				opts.ConfigPath = writeServeRuntimeTestConfig(t)
@@ -130,9 +135,9 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			first.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString()) + "/v1/rpc"
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"bundle_hash": bundle, "event_name": "opco.bootstrap_requested", "payload": map[string]any{"owner": "operator"}, "idempotency_key": "audit2277-stop-source"})
-			requireServedEventPublishEntityState(t, db, backend, seed.RunID, "", "waiting")
+			requireServedEventPublishEntityState(t, reader, backend, seed.RunID, "", "waiting")
 			spinup := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"run_id": seed.RunID, "source_event_id": seed.EventID, "event_name": "opco.spinup_requested", "payload": map[string]any{"instance_id": "11111111-1111-4111-8111-111111111111", "product_id": "product-1"}, "idempotency_key": "audit2277-spinup"})
-			waitServedEventPublishEventID(t, db, backend, seed.RunID, servedTypedCreationInstancePath+"/opco.product_initialization_requested")
+			waitServedEventPublishEventID(t, reader, backend, seed.RunID, servedTypedCreationInstancePath+"/opco.product_initialization_requested")
 			waitServedRunDeliveryQuiescence(t, deliveryReader, seed.RunID)
 			probe.Expect(seed.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
 			probe.Expect(spinup.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
@@ -146,7 +151,7 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			}
 			var stopped any
 			requireServedJSONRPCResult(t, endpoint, "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "audit2277-stop"}, &stopped)
-			requireServedRunStatusWithDebug(t, endpoint, db, backend, seed.RunID, "cancelled")
+			requireServedRunStatusWithDebug(t, endpoint, reader, backend, seed.RunID, "cancelled")
 			before := repeatedStaticRunSnapshot(t, db, seed.RunID)
 			var readinessBefore string
 			if err := db.QueryRow(`SELECT CAST(plan AS TEXT) FROM flow_instance_runtime_readiness WHERE run_id=$1`, seed.RunID).Scan(&readinessBefore); err != nil {
@@ -165,7 +170,7 @@ func TestAudit2277StoppedRunReadinessRestart(t *testing.T) {
 			second := startServeRuntimeTestProcess(t, opts)
 			second.waitForReadyLine()
 			endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString()) + "/v1/rpc"
-			requireServedRunStatusWithDebug(t, endpoint, db, backend, seed.RunID, "cancelled")
+			requireServedRunStatusWithDebug(t, endpoint, reader, backend, seed.RunID, "cancelled")
 			var readinessAfter string
 			if err := db.QueryRow(`SELECT CAST(plan AS TEXT) FROM flow_instance_runtime_readiness WHERE run_id=$1`, seed.RunID).Scan(&readinessAfter); err != nil {
 				t.Fatal(err)

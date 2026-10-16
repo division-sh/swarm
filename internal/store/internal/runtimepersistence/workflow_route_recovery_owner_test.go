@@ -2,20 +2,23 @@ package runtimepersistence_test
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
 
 type activeWorkflowRouteReader interface {
+	bus.FlowInstanceActivationCommitOwner
 	LoadActiveWorkflowRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimeworkflowroute.RecoveryRecord, error)
 	runtimerunlifecycle.OperationOwner
 	runtimerunlifecycle.CandidateStore
@@ -23,38 +26,34 @@ type activeWorkflowRouteReader interface {
 
 func TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores(t *testing.T) {
 	tests := []struct {
-		name   string
-		open   func(*testing.T) (activeWorkflowRouteReader, *sql.DB)
-		sqlite bool
+		name string
+		open func(*testing.T) activeWorkflowRouteReader
 	}{
 		{
 			name: "sqlite",
-			open: func(t *testing.T) (activeWorkflowRouteReader, *sql.DB) {
-				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, storetest.Database(selected)
+			open: func(t *testing.T) activeWorkflowRouteReader {
+				return storetest.StartSQLiteRuntimeStore(t)
 			},
-			sqlite: true,
 		},
 		{
 			name: "postgres",
-			open: func(t *testing.T) (activeWorkflowRouteReader, *sql.DB) {
-				_, db, _ := testutil.StartPostgres(t)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			open: func(t *testing.T) activeWorkflowRouteReader {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, db := tc.open(t)
+			selected := tc.open(t)
 			ctx := testAuthorActivityContext()
 			retiredRunID := uuid.NewString()
 			currentRunID := uuid.NewString()
 			ambiguousRunID := uuid.NewString()
 			for _, fixture := range []storetest.RunFixture{
-				{Origin: storetest.ScenarioSetupOrigin(), RunID: retiredRunID, State: runtimerunlifecycle.StateCancelled},
+				{Origin: storetest.ScenarioSetupOrigin(), RunID: retiredRunID, State: runtimerunlifecycle.StateRunning},
 				{Origin: storetest.ScenarioSetupOrigin(), RunID: currentRunID, State: runtimerunlifecycle.StateRunning},
-				{Origin: storetest.ScenarioSetupOrigin(), RunID: ambiguousRunID, State: runtimerunlifecycle.StatePaused},
+				{Origin: storetest.ScenarioSetupOrigin(), RunID: ambiguousRunID, State: runtimerunlifecycle.StateRunning},
 			} {
 				storetest.RequireRun(t, ctx, selected, fixture)
 			}
@@ -63,34 +62,15 @@ func TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores(t *testing.T) 
 			retiredEntityID := uuid.NewString()
 			currentEntityID := uuid.NewString()
 			ambiguousEntityID := uuid.NewString()
-			config := `{"workflow_version":"1","instance_id":"one","flow_path":"` + instancePath + `"}`
-			// Exact adapter-component headers; this is not constructor proof.
-			headerQuery := `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, current_state, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
-				VALUES ($1, $2, $3, 'review_entity', 'review', 'template', $4, 'active', 'active', TRUE, '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
-			if !tc.sqlite {
-				headerQuery = `INSERT INTO flow_instances (run_id, instance_path, entity_id, entity_type, flow_template, mode, config, status, current_state, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
-					VALUES ($1::uuid, $2, $3::uuid, 'review_entity', 'review', 'template', $4::jsonb, 'active', 'active', TRUE, '{}', '{}', '{}', 1, NOW(), NOW(), NOW())`
-			}
 			for _, owner := range []struct{ runID, entityID string }{{retiredRunID, retiredEntityID}, {currentRunID, currentEntityID}, {ambiguousRunID, ambiguousEntityID}} {
-				if _, err := db.ExecContext(ctx, headerQuery, owner.runID, instancePath, owner.entityID, config); err != nil {
-					t.Fatalf("seed exact flow header: %v", err)
-				}
+				constructWorkflowRecoveryComponent(t, ctx, selected, owner.runID, owner.entityID, instancePath)
 			}
-
-			insertOwner := func(runID, entityID string) {
-				t.Helper()
-				query := "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES (?, ?, ?, 'review_entity', 'active')"
-				if !tc.sqlite {
-					query = "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES ($1::uuid, $2::uuid, $3, 'review_entity', 'active')"
-				}
-				if _, err := db.ExecContext(ctx, query, runID, entityID, instancePath); err != nil {
-					t.Fatalf("seed route owner %s/%s: %v", runID, entityID, err)
-				}
+			if _, _, err := storetest.TerminalizeRun(ctx, selected, runtimerunlifecycle.TerminalRequest{RunID: retiredRunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC()}); err != nil {
+				t.Fatal(err)
 			}
-
-			insertOwner(retiredRunID, retiredEntityID)
-			insertOwner(currentRunID, currentEntityID)
-			insertOwner(ambiguousRunID, ambiguousEntityID)
+			if _, err := selected.TransitionActiveRun(ctx, runtimerunlifecycle.ActiveTransitionRequest{RunID: ambiguousRunID, State: runtimerunlifecycle.StatePaused}); err != nil {
+				t.Fatal(err)
+			}
 			currentIdentity := runtimeflowidentity.RunScopedFlowInstance{
 				RunID: currentRunID,
 				Route: runtimeflowidentity.RouteForInstancePath(instancePath),
@@ -111,8 +91,9 @@ func TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores(t *testing.T) 
 				t.Fatalf("recover same path from exact paused run: record=%#v err=%v", foreign, err)
 			}
 
-			secondCurrentOwner := uuid.NewString()
-			insertOwner(currentRunID, secondCurrentOwner)
+			if _, err := storetest.AddAmbiguousWorkflowProjectionFields(ctx, selected, currentRunID, currentEntityID); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := selected.LoadActiveWorkflowRoute(ctx, currentIdentity); err == nil || !strings.Contains(err.Error(), "exactly one matching declared field row") {
 				t.Fatalf("ambiguous exact-run owner error = %v", err)
 			}
@@ -131,39 +112,58 @@ func TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores(t *testing.T) 
 
 func TestEntityStateSchemaRequiresExplicitNonblankEntityContractOnBothStores(t *testing.T) {
 	tests := []struct {
-		name   string
-		open   func(*testing.T) (activeWorkflowRouteReader, *sql.DB)
-		sqlite bool
+		name string
+		open func(*testing.T) activeWorkflowRouteReader
 	}{
-		{name: "sqlite", sqlite: true, open: func(t *testing.T) (activeWorkflowRouteReader, *sql.DB) {
-			selected := storetest.StartSQLiteRuntimeStore(t)
-			return selected, storetest.Database(selected)
+		{name: "sqlite", open: func(t *testing.T) activeWorkflowRouteReader {
+			return storetest.StartSQLiteRuntimeStore(t)
 		}},
-		{name: "postgres", open: func(t *testing.T) (activeWorkflowRouteReader, *sql.DB) {
-			_, db, _ := testutil.StartPostgres(t)
-			return storetest.AdmitPostgresRuntimeStore(t, db), db
+		{name: "postgres", open: func(t *testing.T) activeWorkflowRouteReader {
+			return storetest.StartPostgresRuntimeStore(t)
 		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, db := tc.open(t)
+			selected := tc.open(t)
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 				Origin: storetest.ScenarioSetupOrigin(), RunID: runID, State: runtimerunlifecycle.StateRunning,
 			})
-			omitted := `INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES (?, ?, 'review/one', 'active')`
-			blank := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES (?, ?, 'review/two', '   ', 'active')`
-			if !tc.sqlite {
-				omitted = `INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES ($1::uuid, $2::uuid, 'review/one', 'active')`
-				blank = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES ($1::uuid, $2::uuid, 'review/two', '   ', 'active')`
-			}
-			if _, err := db.ExecContext(ctx, omitted, runID, uuid.NewString()); err == nil {
+			if err := storetest.InsertDescriptorEntityStateWithoutType(ctx, selected, runID); err == nil {
 				t.Fatal("fresh schema accepted omitted entity_type")
 			}
-			if _, err := db.ExecContext(ctx, blank, runID, uuid.NewString()); err == nil {
+			if err := storetest.InsertDescriptorEntityStateWithBlankType(ctx, selected, runID); err == nil {
 				t.Fatal("fresh schema accepted blank entity_type")
 			}
 		})
+	}
+}
+
+func constructWorkflowRecoveryComponent(t *testing.T, ctx context.Context, selected bus.FlowInstanceActivationCommitOwner, run, entity, path string) {
+	t.Helper()
+	at := time.Now().UTC()
+	ctx = correlation.WithRunID(ctx, run)
+	root, err := flowactivationfixture.Command(ctx, pipeline.WorkflowInstance{
+		WorkflowName: ".", WorkflowVersion: "1", Mode: "static",
+		StorageRef: run, InstanceID: run, EntityID: run,
+		CurrentState: "active", CreatedAt: at, EnteredStageAt: at, UpdatedAt: at,
+	}, pipeline.WorkflowLifecycleMutationPlan{}, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err := flowactivationfixture.Command(correlation.WithRunID(ctx, run), pipeline.WorkflowInstance{
+		WorkflowName: "review", WorkflowVersion: "1", Mode: "template", EntityType: "review_entity",
+		StorageRef: path, InstanceID: runtimeflowidentity.LogicalInstanceID(path), InstanceKey: runtimeflowidentity.LogicalInstanceID(path), EntityID: entity,
+		ParentFlowID: ".", ParentFlowInstance: run, ParentEntityID: run,
+		CurrentState: "active", StageDefined: true, CreatedAt: at, EnteredStageAt: at, UpdatedAt: at,
+	}, pipeline.WorkflowLifecycleMutationPlan{}, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root.Plan.Children = []pipeline.FlowInstanceActivationPlan{command.Plan}
+	committed, err := selected.CommitFlowInstanceActivation(ctx, root)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("construct exact recovery component: result=%+v err=%v", committed, err)
 	}
 }

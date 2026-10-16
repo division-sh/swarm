@@ -45,6 +45,9 @@ func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, s
 	actor.Identity.RunID = correlation.RunIDFromContext(ctx)
 	actor.Model = "regular"
 	actor.Type = "generic"
+	if len(actor.Config) == 0 {
+		actor.Config = []byte(`{}`)
+	}
 	profile, err := llmselection.ResolveLiveBackend(llmselection.BackendClaudeCLI)
 	if err != nil {
 		t.Fatal(err)
@@ -63,6 +66,8 @@ func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, s
 	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, store, manager.PersistedAgent{Config: actor, Status: "active"}, source); err != nil {
 		t.Fatal(err)
 	}
+	ctx, _ = admitNativeRuntimeAgentExecution(t, ctx, store, source)
+	nativeAdmission, _ := managedexecution.FromContext(ctx)
 	state, found, err := store.LoadAgentLifecycleState(ctx, actor.Identity)
 	if err != nil || !found {
 		t.Fatalf("managed lifecycle: found=%v err=%v", found, err)
@@ -99,6 +104,10 @@ func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, s
 			if err != nil {
 				t.Fatal(err)
 			}
+			surface, err = surface.ProjectNormalContinuation(nativeAdmission.ExecutionAuthorityID, authority.Target.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			surface, err = llm.ObserveCLIResponseCapabilitySurface(surface, &llm.Response{CLIInventory: llm.CLIInventoryValid, MCPServers: map[string]string{"runtime-tools": "connected"}, MCPVisibleTools: []string{"mcp__runtime-tools__channel.ops.deliver"}})
 			if err != nil {
 				t.Fatal(err)
@@ -125,7 +134,7 @@ func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, s
 			if err != nil {
 				t.Fatal(err)
 			}
-			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, authority.ID, authority.FenceGeneration, "", "channel-transport", source.BundleHash(), []string{surface.ID})
+			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, nativeAdmission.ExecutionAuthorityID, nativeAdmission.Generation, "", nativeAdmission.ActorCensusFingerprint, source.BundleHash(), []string{surface.ID})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -116,12 +116,14 @@ func TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres(t *testing.T) {
 			continue
 		}
 		found = true
-		// Keep the mixed root's SQLite release/crash cases; only its PostgreSQL
-		// children and the four PostgreSQL-only roots require excluded resources.
-		want := "go test ./internal/store/internal/startupownership -skip '^(TestPostgresPossessionObservationUsesIndependentExactSessionAndKey|TestPostgresGenerationMonitorFencesStalledNativePhase|TestPostgresGenerationMonitorHealthyQueueAndCancellation|TestPostgresGenerationMonitorWithdrawsCapabilityBeforeNativeJoin)$|^TestPossessionObservationExternalProcessReleaseAndCrashBothStores$/^postgres$' -count=1"
+		// Preserve both mixed roots' SQLite cases; only their PostgreSQL children
+		// and the four PostgreSQL-only roots require excluded resources.
+		want := "go test ./internal/store/internal/startupownership -skip '^(TestPostgresPossessionObservationUsesIndependentExactSessionAndKey|TestPostgresGenerationMonitorFencesStalledNativePhase|TestPostgresGenerationMonitorHealthyQueueAndCancellation|TestPostgresGenerationMonitorWithdrawsCapabilityBeforeNativeJoin)$|^Test(PossessionObservationExternalProcessReleaseAndCrashBothStores|AgentRecoveryNativePreBindWriteMustJoinBothStores)$/^postgres$' -count=1"
 		if strings.TrimSpace(step.Run) != want {
 			t.Fatalf("SQLite-only qualification no longer selects every SQLite package root: %s", step.Run)
 		}
+		match := regexp.MustCompile(`-skip '([^']+)'`).FindStringSubmatch(step.Run)
+		assertMacOSPossessionSubtestSelection(t, match[1])
 	}
 	if !found {
 		t.Fatal("missing macOS possession qualification")
@@ -531,7 +533,21 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 	if len(censusUnit.RequiredChildren) != 1 || !slices.Equal(censusUnit.RequiredChildren["TestNativeFixtureFamiliesDoNotReceiveRawAuthority"], nativeChildren) {
 		t.Fatal("census unit dropped a completed-family assertion")
 	}
-	assertGoProofPartition(t, filepath.Join(root, "internal", "store"), []*regexp.Regexp{regexp.MustCompile(storeUnit.Run), regexp.MustCompile(censusUnit.Run)})
+	storePatterns := []*regexp.Regexp{regexp.MustCompile(storeUnit.Run), regexp.MustCompile(censusUnit.Run)}
+	for i := 1; i <= 6; i++ {
+		id := fmt.Sprintf("store-admission-debt-%02d", i)
+		unit, exists := policy.Units[id]
+		if !exists || !slices.Equal(unit.Packages, []string{storePackage}) || unit.Run == "" || unit.Skip != "" || unit.GoTimeout != "" || unit.CountMode != "count-1" || unit.BudgetClass != "broad" {
+			t.Fatalf("%s changed ordinary whole-root debt envelope: %+v", id, unit)
+		}
+		storePatterns = append(storePatterns, regexp.MustCompile(unit.Run))
+		for name, profile := range policy.Profiles {
+			if !slices.Contains(profile.Units, id) {
+				t.Fatalf("profile %s lost debt partition %s", name, id)
+			}
+		}
+	}
+	assertGoProofPartition(t, filepath.Join(root, "internal", "store"), storePatterns)
 	assertGoProofPartition(t, filepath.Join(root, "internal", "testpostgres"), []*regexp.Regexp{regexp.MustCompile(storeUnit.Run)})
 	for name, profile := range policy.Profiles {
 		if !slices.Contains(profile.Units, "persistence-authority-debt-census") {

@@ -40,9 +40,9 @@ func TestReceiverCompositionIndependentPoliciesBothStores(t *testing.T) {
 						t.Fatalf("recipient lost independent constructed target: %s", raw)
 					}
 				}
-				requireReceiverConstructedInstance(t, rt, published.RunID, optionalScope, optionalScope, flowidentity.EntityID(optionalScope), "receipt", "pending", published.RunID, "ready", 1, map[string]any{})
-				requireReceiverConstructedInstance(t, rt, published.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "done", published.RunID, "ready", 2, map[string]any{"result": "emitted"})
-				requireReceiverPublicReadback(t, rt, published.RunID)
+				requireReceiverConstructedInstance(t, rt.BundleHash, rt.ReceiverStateReader, published.RunID, optionalScope, optionalScope, flowidentity.EntityID(optionalScope), "receipt", "pending", published.RunID, "ready", 1, map[string]any{})
+				requireReceiverConstructedInstance(t, rt.BundleHash, rt.ReceiverStateReader, published.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "done", published.RunID, "ready", 2, map[string]any{"result": "emitted"})
+				requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, published.RunID)
 			})
 		}
 	}

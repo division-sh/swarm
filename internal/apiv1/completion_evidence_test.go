@@ -75,6 +75,7 @@ func TestCompletion2270PublicReadbackBothStores(t *testing.T) {
 			identity := sqliteAgentUsageIdentityForRun(t, runID, "completion-2270")
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 			seedCompletion2270Agent(t, ctx, selected, identity)
+			ctx = admitAPITestAgentExecution(t, ctx, selected, authorActivityTestSourceArtifactFact)
 			want := map[string]effects.CompletionEvidence{}
 			base := time.Now().UTC()
 			for i := 0; i < 4; i++ {
@@ -194,7 +195,7 @@ func decodeCompletion2270RPC(t *testing.T, response rpcResponse, result any) {
 func seedCompletion2270Agent(t *testing.T, ctx context.Context, selected completion2270PublicStore, identity agentidentity.Identity) {
 	t.Helper()
 	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{
-		Config: withAPITestIntent(t, actors.AgentConfig{Identity: identity, ID: identity.AgentID(), Role: "researcher", Type: "managed", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "claude_cli", FlowPath: identity.FlowInstance()}),
+		Config: withAPITestIntent(t, actors.AgentConfig{Identity: identity, ID: identity.AgentID(), Role: "researcher", Type: "managed", Model: "regular", ExecutionMode: "live", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli", FlowPath: identity.FlowInstance(), Config: json.RawMessage(`{}`)}),
 		Status: "active", StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)

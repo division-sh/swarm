@@ -13,6 +13,108 @@ type WorkflowControlProjectionStorage struct {
 	Fields                      json.RawMessage
 }
 
+type WorkflowRunFieldsRevisionStorage struct {
+	Fields   string
+	Revision int64
+}
+
+type WorkflowAccumulatorStorage struct {
+	Revision            int64
+	Fields, Accumulator []byte
+}
+
+func ReadRootFlowAccumulatorStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]byte, error) {
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$1`, runID).Scan(&raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func ReadWorkflowAccumulatorStorageTx(ctx context.Context, tx *sql.Tx, runID, path string) (WorkflowAccumulatorStorage, error) {
+	var out WorkflowAccumulatorStorage
+	err := tx.QueryRowContext(ctx, `SELECT revision, fields, accumulator FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, path).
+		Scan(&out.Revision, &out.Fields, &out.Accumulator)
+	if err != nil {
+		return WorkflowAccumulatorStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadBoundReplyFlowHeadersStorageTx(ctx context.Context, tx *sql.Tx, runID, path string) ([][]any, error) {
+	return readBoundReplyPhysicalRows(ctx, tx, `SELECT * FROM flow_instances WHERE run_id=$1 AND instance_path=$2 ORDER BY instance_path`, runID, path)
+}
+
+func ReadBoundReplyEntityStatesStorageTx(ctx context.Context, tx *sql.Tx, runID, path string) ([][]any, error) {
+	return readBoundReplyPhysicalRows(ctx, tx, `SELECT * FROM entity_state WHERE run_id=$1 AND flow_instance=$2 ORDER BY entity_id`, runID, path)
+}
+
+func readBoundReplyPhysicalRows(ctx context.Context, tx *sql.Tx, query, runID, path string) (out [][]any, err error) {
+	rows, err := tx.QueryContext(ctx, query, runID, path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		values, destinations := make([]any, len(columns)), make([]any, len(columns))
+		for index := range values {
+			destinations[index] = &values[index]
+		}
+		if err := rows.Scan(destinations...); err != nil {
+			return nil, err
+		}
+		for index, value := range values {
+			if raw, ok := value.([]byte); ok {
+				values[index] = string(raw)
+			}
+		}
+		out = append(out, values)
+	}
+	return out, rows.Err()
+}
+
+func ReadWorkflowRunFieldsRevisionStorageTx(ctx context.Context, tx *sql.Tx, runID string) (WorkflowRunFieldsRevisionStorage, error) {
+	var out WorkflowRunFieldsRevisionStorage
+	err := tx.QueryRowContext(ctx, `SELECT CAST(fields AS TEXT), revision FROM entity_state WHERE run_id=$1`, runID).Scan(&out.Fields, &out.Revision)
+	return out, err
+}
+
+func ReadWorkflowRunHeaderRevisionStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int64, error) {
+	var revision int64
+	err := tx.QueryRowContext(ctx, `SELECT revision FROM flow_instances WHERE run_id=$1`, runID).Scan(&revision)
+	return revision, err
+}
+
+func ReadWorkflowRunFieldsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var fields string
+	err := tx.QueryRowContext(ctx, `SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1`, runID).Scan(&fields)
+	return fields, err
+}
+
+type ActivityForkEntityStorage struct {
+	Flow, EntityType, Stage string
+	Fields, Accumulator     []byte
+}
+
+func ReadActivityForkEntityStorageTx(ctx context.Context, tx *sql.Tx, runID, entityID string) (ActivityForkEntityStorage, error) {
+	var out ActivityForkEntityStorage
+	err := tx.QueryRowContext(ctx, `SELECT flow_instance,entity_type,current_state,fields,accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, entityID).
+		Scan(&out.Flow, &out.EntityType, &out.Stage, &out.Fields, &out.Accumulator)
+	if err != nil {
+		return ActivityForkEntityStorage{}, err
+	}
+	return out, nil
+}
+
 func CountWorkflowFieldRowsForRun(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
 	var count int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, runID).Scan(&count); err != nil {

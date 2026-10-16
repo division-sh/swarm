@@ -38,13 +38,14 @@ func (o *acknowledgedEngineOwner) CommitWorkflowEngineMutation(context.Context, 
 type outcomeEnginePlanner struct {
 	*recordingPipelineBus
 	releases, finalizes int
+	releaseErr          error
 	finalizeErr         error
 	finalizePanic       bool
 }
 
 func (p *outcomeEnginePlanner) ReleaseEnginePublications(context.Context, []runtimeengine.DurablePublicationPlan) error {
 	p.releases++
-	return nil
+	return p.releaseErr
 }
 func (p *outcomeEnginePlanner) FinalizeEnginePublications(context.Context, []runtimeengine.CommittedDurablePublication) error {
 	p.finalizes++

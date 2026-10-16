@@ -15,6 +15,175 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestLifecycleBusinessStoragePreservesLeftJoinNullFieldsAndExactBytesBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			runID, sibling := seedReceiverJoinedInventoryStorage(t, fixture, ctx)
+			want := lifecycleBusinessStorageOracle(t, ctx, fixture.db, runID)
+			if len(want) != 5 || !want[0].Fields.Valid || want[3].Fields.Valid || want[4].Fields.Valid || want[0].EntityID >= want[1].EntityID {
+				t.Fatalf("physical lifecycle fixture lost LEFT JOIN NULLs/order: %+v", want)
+			}
+			requireDistinctLifecycleOracleColumns(t, want[0])
+			before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restore()
+			got, err := ReadLifecycleBusinessStorageForTest(ctx, fixture.store, runID)
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("physical lifecycle rows changed exact fields/config/accumulator/revision/state: got=%+v want=%+v err=%v", got, want, err)
+			}
+			if counts := probe.Snapshot(); counts.Total.Begun != 1 || counts.Total.ReadCommits != 1 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
+				t.Fatalf("lifecycle inventory escaped the original read owner: %+v", counts)
+			}
+			restore()
+			if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store); err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("lifecycle inventory changed storage: %v", err)
+			}
+			requireLifecycleBusinessDetachedRunIsolation(t, ctx, fixture.store, runID, sibling, got, want)
+		})
+	}
+}
+
+func requireDistinctLifecycleOracleColumns(t *testing.T, row LifecycleBusinessStorageRow) {
+	t.Helper()
+	if row.Config == row.Accumulator || !strings.Contains(row.Config, "native-reader-config") || !strings.Contains(row.Accumulator, "native-reader-accumulator") {
+		t.Fatalf("physical lifecycle oracle cannot discriminate config/accumulator scan destinations: %+v", row)
+	}
+}
+
+func requireLifecycleBusinessDetachedRunIsolation(t *testing.T, ctx context.Context, selected any, runID, sibling string, got, want []LifecycleBusinessStorageRow) {
+	t.Helper()
+	got[0].Fields.String = "changed detached evidence"
+	if again, err := ReadLifecycleBusinessStorageForTest(ctx, selected, runID); err != nil || !reflect.DeepEqual(again, want) {
+		t.Fatalf("caller changed physical lifecycle storage: %+v %v", again, err)
+	}
+	if got, err := ReadLifecycleBusinessStorageForTest(ctx, selected, sibling); err != nil || len(got) != 2 || got[0].Fields.Valid != true || got[1].Fields.Valid != false {
+		t.Fatalf("sibling lifecycle rows/NULLs crossed run identity: %+v %v", got, err)
+	}
+	if got, err := ReadLifecycleBusinessStorageForTest(ctx, selected, uuid.NewString()); err != nil || got != nil {
+		t.Fatalf("missing lifecycle fabricated rows: %+v %v", got, err)
+	}
+}
+
+func TestLifecycleBusinessStorageRefusesInvalidCancelledAndClosedOwnersBothStores(t *testing.T) {
+	ctx, id := context.Background(), "abcdef01-1111-4111-8111-111111111111"
+	for _, owner := range []any{nil, &sql.DB{}, &sql.Tx{}, (*PostgresStore)(nil), (*SQLiteRuntimeStore)(nil), &PostgresStore{}, &SQLiteRuntimeStore{}} {
+		if got, err := ReadLifecycleBusinessStorageForTest(ctx, owner, id); err == nil || got != nil {
+			t.Fatalf("invalid lifecycle owner returned evidence: %+v %v", got, err)
+		}
+	}
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			runID, _ := seedReceiverJoinedInventoryStorage(t, fixture, ctx)
+			for _, invalid := range []string{"", "bad", uuid.Nil.String(), " " + runID} {
+				if got, err := ReadLifecycleBusinessStorageForTest(ctx, fixture.store, invalid); err == nil || got != nil {
+					t.Fatalf("invalid lifecycle identity returned evidence: %+v %v", got, err)
+				}
+			}
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			if got, err := ReadLifecycleBusinessStorageForTest(cancelled, fixture.store, runID); !errors.Is(err, context.Canceled) || got != nil {
+				t.Fatalf("cancelled lifecycle read returned partial evidence: %+v %v", got, err)
+			}
+			if err := fixture.store.(interface{ Close() error }).Close(); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := ReadLifecycleBusinessStorageForTest(ctx, fixture.store, runID); err == nil || got != nil {
+				t.Fatalf("closed lifecycle owner returned evidence: %+v %v", got, err)
+			}
+		})
+	}
+}
+
+func TestLifecycleBusinessStorageLateScanErrorDoesNotPublishPartialRowsBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			runID, _ := seedReceiverJoinedInventoryStorage(t, fixture, ctx)
+			want := lifecycleBusinessStorageOracle(t, ctx, fixture.db, runID)
+			restore := installLifecycleBusinessNullConfiguration(t, ctx, fixture.store, want[len(want)-1].EntityID)
+			if got, err := ReadLifecycleBusinessStorageForTest(ctx, fixture.store, runID); err == nil || got != nil || !strings.Contains(strings.ToLower(err.Error()), "null") {
+				t.Fatalf("late invalid configuration returned partial physical rows: %+v %v", got, err)
+			}
+			if err := restore(); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := ReadLifecycleBusinessStorageForTest(ctx, fixture.store, runID); err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("late scan refusal changed physical lifecycle rows: %+v %v", got, err)
+			}
+		})
+	}
+}
+
+func installLifecycleBusinessNullConfiguration(t *testing.T, ctx context.Context, selected any, entityID string) func() error {
+	t.Helper()
+	installed := false
+	restore := func() error {
+		if !installed {
+			return nil
+		}
+		err := runUnrevisionedEventFixtureTransactionForTest(context.WithoutCancel(ctx), selected, func(ctx context.Context, tx *sql.Tx) error {
+			if _, err := tx.ExecContext(ctx, `DROP VIEW flow_instances`); err != nil {
+				return err
+			}
+			_, err := tx.ExecContext(ctx, `ALTER TABLE retained_lifecycle_headers RENAME TO flow_instances`)
+			return err
+		})
+		if err == nil {
+			installed = false
+		}
+		return err
+	}
+	t.Cleanup(func() {
+		if err := restore(); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE flow_instances RENAME TO retained_lifecycle_headers`); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, fmt.Sprintf(`CREATE VIEW flow_instances AS
+			SELECT run_id,entity_id,instance_path,current_state,revision,accumulator,
+			CASE WHEN entity_id='%s' THEN NULL ELSE config END AS config FROM retained_lifecycle_headers`, entityID))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	installed = true
+	return restore
+}
+
+func lifecycleBusinessStorageOracle(t *testing.T, ctx context.Context, db *sql.DB, runID string) []LifecycleBusinessStorageRow {
+	t.Helper()
+	rows, err := db.QueryContext(ctx, `SELECT f.entity_id,f.current_state,f.revision,CAST(e.fields AS TEXT),CAST(f.config AS TEXT),CAST(f.accumulator AS TEXT)
+		FROM flow_instances f LEFT JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path AND e.entity_id=f.entity_id
+		WHERE f.run_id=$1 ORDER BY f.entity_id`, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []LifecycleBusinessStorageRow
+	for rows.Next() {
+		var row LifecycleBusinessStorageRow
+		if err := rows.Scan(&row.EntityID, &row.CurrentState, &row.Revision, &row.Fields, &row.Config, &row.Accumulator); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 func TestReceiverJoinedInventoryPreservesExactPhysicalOracleBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
@@ -233,7 +402,7 @@ func seedReceiverJoinedInventoryStorage(t *testing.T, fixture authorActivityRece
 			if _, err := tx.ExecContext(ctx, `INSERT INTO flow_instances
 				(run_id,entity_id,instance_path,current_state,flow_template,mode,status,config,stage_defined,
 				gates,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at,terminated_at)
-				VALUES($1,$2,$3,$4,'inventory','static',$5,'{}',TRUE,'{}','{}','{}',1,$6,$6,$6,$7)`,
+				VALUES($1,$2,$3,$4,'inventory','static',$5,'{"configuration":"native-reader-config","nested":{"limit":7}}',TRUE,'{}','{}','{"native_reader":{"label":"native-reader-accumulator","values":[null,7.0,"exact"]}}',1,$6,$6,$6,$7)`,
 				row.headerRun, row.headerEntity, row.headerPath, row.state, status, now, ended); err != nil {
 				return err
 			}

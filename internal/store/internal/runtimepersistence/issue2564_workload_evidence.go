@@ -316,6 +316,37 @@ func ObserveH2NodeDeliveriesForTest(ctx context.Context, selected any, runID str
 type H2TimersEvidence = storepipeline.H2TimersEvidence
 type H2TransitionCutsEvidence = storerevision.WorkflowMetadataRevisionEvidence
 type H2CounterCommitEvidence = storerevision.H2CounterCommitEvidence
+type H2CommittedFactEvidence = storerevision.H2CommittedFactEvidence
+type H2CommittedHistoryEvidence = storerevision.H2CommittedHistoryEvidence
+
+func ObserveH2CommittedHistoryForTest(ctx context.Context, selected any, runID string) (H2CommittedHistoryEvidence, error) {
+	var out H2CommittedHistoryEvidence
+	read := func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = storerevision.ObserveH2CommittedHistoryForTest(ctx, tx, runID)
+		return err
+	}
+	var err error
+	switch s := selected.(type) {
+	case *PostgresStore:
+		if err := s.requireCurrentSchema(); err != nil {
+			return out, err
+		}
+		err = s.backend.RunReadTransaction(ctx, read)
+	case *SQLiteRuntimeStore:
+		if err := s.requireCurrentSchema(); err != nil {
+			return out, err
+		}
+		err = s.backend.RunReadTransaction(ctx, read)
+	default:
+		err = fmt.Errorf("H2 committed history requires exact selected owner, got %T", selected)
+	}
+	if err != nil {
+		out.Complete = false
+	}
+	return out, err
+}
+
 type H2WorkloadSnapshotEvidence struct {
 	Hubs           []H2HubsEvidence
 	Timers         []H2TimersEvidence

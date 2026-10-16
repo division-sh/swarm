@@ -334,9 +334,19 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 		}
 	} else {
 		location, pgDB, _ := testutil.StartPostgres(t)
-		s := admitTestPostgresStore(t, pgDB)
-		store, db = s, pgDB
-		source = seedConversationForkSource(t, db, now)
+		db = pgDB
+		primary, err := NewPostgresStore(location)
+		if err != nil {
+			t.Fatalf("open native forkchat postgres source: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := primary.Close(); err != nil {
+				t.Errorf("close native forkchat postgres source: %v", err)
+			}
+		})
+		bootstrapTestPostgresStore(t, primary)
+		source = seedConversationForkSource(t, primary, now)
+		store = source.selected
 		reopen = func() forkChatHistoryReader {
 			reader, err := NewPostgresStore(location)
 			if err != nil {
@@ -346,6 +356,9 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 			bootstrapTestPostgresStore(t, reader)
 			return reader
 		}
+	}
+	if store == nil || store != source.selected {
+		t.Fatal("forkchat consumers require the source's original selected owner")
 	}
 	// Register after construction and before consumers, not at each later reopen.
 	t.Cleanup(func() {

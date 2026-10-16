@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -123,6 +124,14 @@ func TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit(t *testing.T) {
 			want: "event_deliveries required_path README.md does not match pattern",
 		},
 		{
+			name: "migrated delivery conformance remains required",
+			mutate: func(inventory *routeAuthorityDriftInventory) {
+				dim := routeAuthorityDriftSearchDimensionByID(t, inventory, "delivery_target_route")
+				dim.RequiredPaths = []string{"platform-spec.yaml", "internal/store/internal/backend/delivery/adapter.go"}
+			},
+			want: "delivery_target_route missing required selected conformance path",
+		},
+		{
 			name: "no implemented guardrail is not enough",
 			mutate: func(inventory *routeAuthorityDriftInventory) {
 				for i := range inventory.GuardrailProposals {
@@ -177,6 +186,19 @@ func TestRouteAuthorityDriftInventoryRejectsNarrowOrStaleAudit(t *testing.T) {
 				t.Fatalf("validation problems missing %q:\n- %s", tc.want, strings.Join(problems, "\n- "))
 			}
 		})
+	}
+	proveSelectedDeliveryConformancePathRefusesLoss(t, root, corpus, base)
+}
+
+func proveSelectedDeliveryConformancePathRefusesLoss(t *testing.T, root string, corpus *routeAuthorityDriftValidationCorpus, inventory routeAuthorityDriftInventory) {
+	t.Helper()
+	const path = "internal/runtime/conformance/delivery_lifecycle_conformance_test.go"
+	for _, source := range []string{"package conformance\n", "package conformance\nfunc CorruptDeliveryConformanceRouteForeign() {}\n"} {
+		changed := corpus.withFile(routeAuthorityDriftRepoFile{Path: path, Raw: []byte(source)})
+		problems := validateRouteAuthorityDriftInventoryWithCorpus(root, changed, inventory)
+		if !routeAuthorityProblemsContain(problems, "delivery_target_route required_path "+path+" does not match pattern") {
+			t.Fatalf("missing or partial native port satisfied required conformance: %v", problems)
+		}
 	}
 }
 
@@ -502,6 +524,9 @@ func validateRouteAuthorityDriftSources(root string, source routeAuthorityDriftI
 func validateRouteAuthorityDriftSearchDimension(corpus *routeAuthorityDriftValidationCorpus, dimension routeAuthorityDriftSearchDimension) []string {
 	var problems []string
 	id := strings.TrimSpace(dimension.ID)
+	if id == "delivery_target_route" && !slices.Contains(dimension.RequiredPaths, "internal/runtime/conformance/delivery_lifecycle_conformance_test.go") {
+		problems = append(problems, "delivery_target_route missing required selected conformance path")
+	}
 	pattern := strings.TrimSpace(dimension.Pattern)
 	if pattern == "" {
 		return append(problems, fmt.Sprintf("%s search_dimension missing pattern", id))

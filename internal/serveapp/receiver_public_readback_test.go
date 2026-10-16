@@ -12,26 +12,23 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/gorilla/websocket"
 )
 
-func requireReceiverConstructedInstance(t *testing.T, rt servedControlProofRuntime, runID, instance, template, entityID, entityType, state, parent, wantPhase string, wantRevision int, fields map[string]any) {
+func requireReceiverConstructedInstance(t *testing.T, selectedProofBundleHash string, selectedProofReceiverStateReader receiverProofStateReader, runID, instance, template, entityID, entityType, state, parent, wantPhase string, wantRevision int, fields map[string]any) {
 	t.Helper()
-	physical := requireReceiverConstructionStorage(t, rt.ReceiverStateReader, runID, instance, entityID, entityType)
+	physical := requireReceiverConstructionStorage(t, selectedProofReceiverStateReader, runID, instance, entityID, entityType)
 	if physical.EntityID != entityID || physical.Template != template || physical.State != state || physical.EntityType != entityType || physical.EntityTypePresent != (entityType != "") || physical.Revision != wantRevision || physical.CreatedAt == "" || physical.UpdatedAt == "" || !physical.OrderedClocks {
 		t.Fatalf("constructed receiver mismatch: run=%s instance=%s physical=%+v", runID, instance, physical)
 	}
-	// Historical source-only fork headers preserve their recorded clocks.
 	if wantRevision == 1 && wantPhase != "" && physical.UpdatedAt != physical.CreatedAt {
 		t.Fatal("delivery-only settlement changed the construction header clock")
 	}
 	phase, planHash := physical.Phase, physical.PlanHash
 	if wantPhase == "" {
-		// A historical, fieldless source-only root is inventoried, not attached.
 		if physical.ReadinessPresent || template != "." || entityType != "" || parent != "" {
 			t.Fatalf("historical source-only projection acquired attachment: phase=%s", phase)
 		}
@@ -51,7 +48,7 @@ func requireReceiverConstructedInstance(t *testing.T, rt servedControlProofRunti
 			}
 			wantParent = flowidentity.ParentRoute{FlowID: parentTemplate, FlowInstance: parent, EntityID: flowidentity.EntityID(parent)}
 		}
-		if plan.RunID != runID || plan.BundleHash != rt.BundleHash || plan.Identity.TemplateID != template || plan.Identity.InstancePath != instance || plan.Identity.EntityID != entityID || plan.Identity.ParentRoute != wantParent || plan.Identity.ParentEntityID != wantParent.EntityID {
+		if plan.RunID != runID || plan.BundleHash != selectedProofBundleHash || plan.Identity.TemplateID != template || plan.Identity.InstancePath != instance || plan.Identity.EntityID != entityID || plan.Identity.ParentRoute != wantParent || plan.Identity.ParentEntityID != wantParent.EntityID {
 			t.Fatalf("receiver attachment lost exact construction/source identity: %+v", plan)
 		}
 	}
@@ -80,32 +77,7 @@ type receiverPublicDeliveryEvidence struct {
 	owner           events.DeliveryTargetOwnership
 }
 
-func requireReceiverPublicReadback(t *testing.T, rt servedControlProofRuntime, runID string) {
-	t.Helper()
-	want := map[string]receiverPublicDeliveryEvidence{}
-	rows, err := rt.DB.Query(`SELECT delivery_id,event_id,status,CAST(delivery_target_route AS TEXT) FROM event_deliveries WHERE run_id=$1`, runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for rows.Next() {
-		var id, raw string
-		var record receiverPublicDeliveryEvidence
-		if err := rows.Scan(&id, &record.eventID, &record.status, &raw); err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal([]byte(raw), &record.owner); err != nil {
-			t.Fatal(err)
-		}
-		want[id] = record
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
-	requireReceiverPublicReadbackEvidence(t, rt.Endpoint, runID, want)
-}
-
-func requireWorkspaceProofReceiverPublicReadback(t *testing.T, endpoint string, owner runtimebus.EventStore, runID string) {
+func requireReceiverPublicReadback(t *testing.T, endpoint string, owner receiverProofStateReader, runID string) {
 	t.Helper()
 	rows, err := storetest.ReadReceiverDeliveryStorage(context.Background(), owner, runID)
 	if err != nil {

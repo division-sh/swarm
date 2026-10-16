@@ -3332,3 +3332,193 @@ func observeH2OccurrencesForTest(ctx context.Context, tx *sql.Tx, runID string) 
 	}
 	return out, nil
 }
+
+// Historical clocks are fixture facts, not a new live scope decision. The
+// existing owner rejects contradictory scope before the exact clock refresh.
+func StampHistoricalReplayScopeFixtureTx(ctx context.Context, tx *sql.Tx, postgres bool, runID, eventID string, scope runtimepipelineobligation.CommittedScope, at time.Time) error {
+	if at.IsZero() {
+		return fmt.Errorf("historical replay scope requires its original timestamp")
+	}
+	if err := persistCommittedPipelineScopeTx(ctx, tx, eventID, scope, postgres, at); err != nil {
+		return err
+	}
+	query := `UPDATE committed_replay_scopes SET created_at=?, updated_at=? WHERE event_id=? AND run_id=? AND scope=?`
+	if postgres {
+		query = `UPDATE committed_replay_scopes SET created_at=$1, updated_at=$2 WHERE event_id=$3::uuid AND run_id=$4::uuid AND scope=$5`
+	}
+	result, err := tx.ExecContext(ctx, query, at, at, eventID, runID, string(scope))
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return fmt.Errorf("historical replay scope refreshed %d rows, want the exact event/run/scope", changed)
+	}
+	return nil
+}
+
+func ReadHistoricalReplayScopeStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (HistoricalReplayScopeStorage, error) {
+	var out HistoricalReplayScopeStorage
+	var created, updated any
+	err := tx.QueryRowContext(ctx, `SELECT CAST(run_id AS TEXT), scope, created_at, updated_at FROM committed_replay_scopes WHERE event_id=$1`, eventID).Scan(&out.RunID, &out.Scope, &created, &updated)
+	if err != nil {
+		return HistoricalReplayScopeStorage{}, err
+	}
+	var present bool
+	out.CreatedAt, present, err = sqliteTimeValue(created)
+	if err != nil || !present {
+		return HistoricalReplayScopeStorage{}, fmt.Errorf("historical replay scope created clock missing or invalid: %v", err)
+	}
+	out.UpdatedAt, present, err = sqliteTimeValue(updated)
+	if err != nil || !present {
+		return HistoricalReplayScopeStorage{}, fmt.Errorf("historical replay scope updated clock missing or invalid: %v", err)
+	}
+	return out, nil
+}
+
+func CountCopiedSourceReplayScopeStorageTx(ctx context.Context, tx *sql.Tx, runID, sourceEventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes WHERE run_id=$1 AND event_id=$2`, runID, sourceEventID).Scan(&count)
+	return count, err
+}
+
+func CountForkLocalReplayScopeStorageTx(ctx context.Context, tx *sql.Tx, runID, sourceEventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes WHERE run_id=$1 AND event_id<>$2`, runID, sourceEventID).Scan(&count)
+	return count, err
+}
+
+func SetSelectedReplayScopeCollisionFaultTx(ctx context.Context, tx *sql.Tx, enabled bool) error {
+	statement := `DROP TRIGGER IF EXISTS seed_conflicting_replay_scope_after_event_insert ON events;
+DROP FUNCTION IF EXISTS seed_conflicting_replay_scope_after_event_insert();`
+	if enabled {
+		statement = `CREATE OR REPLACE FUNCTION seed_conflicting_replay_scope_after_event_insert()
+RETURNS trigger AS $$
+BEGIN
+    INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
+    VALUES (NEW.event_id, NEW.run_id, 'direct', NEW.created_at, NEW.created_at)
+    ON CONFLICT (event_id) DO NOTHING;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER seed_conflicting_replay_scope_after_event_insert
+AFTER INSERT ON events
+FOR EACH ROW EXECUTE FUNCTION seed_conflicting_replay_scope_after_event_insert();`
+	}
+	_, err := tx.ExecContext(ctx, statement)
+	return err
+}
+
+func CountTemplateSubscribedReplayScopeTx(ctx context.Context, tx *sql.Tx, event string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id=$1 AND scope='subscribed'`, event).Scan(&count)
+	return count, err
+}
+
+func CountTemplateEventReplayScopesTx(ctx context.Context, tx *sql.Tx, event string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id=$1`, event).Scan(&count)
+	return count, err
+}
+
+func CountExactRunEventReplayScopeStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID, scope string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes
+		WHERE run_id=$1 AND event_id=$2 AND scope=$3`, runID, eventID, scope).Scan(&count)
+	return count, err
+}
+
+func SetPublicationReplayFailureTx(ctx context.Context, tx *sql.Tx, postgres bool, id uuid.UUID, template string, enabled bool) error {
+	name := "publication_replay_" + strings.ReplaceAll(id.String(), "-", "")
+	statements := []string{"DROP TRIGGER IF EXISTS " + name}
+	if postgres {
+		statements = []string{"DROP TRIGGER IF EXISTS " + name + " ON committed_replay_scopes", "DROP FUNCTION IF EXISTS " + name + "()"}
+	}
+	if enabled {
+		template = strings.ReplaceAll(template, "'", "''")
+		priorDelivery := delivery.ReplayScopePriorDeliveryWitnessSQL(postgres)
+		statements = []string{fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON committed_replay_scopes BEGIN
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM events WHERE event_id=NEW.event_id) OR NOT (%s)
+THEN RAISE(ABORT,'replay fault prerequisite: exact event/delivery absent') END;
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM flow_instances fi
+JOIN workflow_instance_initial_materializations m ON m.run_id=fi.run_id AND m.instance_path=fi.instance_path AND m.entity_id=fi.entity_id
+JOIN flow_instance_runtime_readiness r ON r.run_id=fi.run_id AND r.instance_path=fi.instance_path
+WHERE fi.run_id=(SELECT run_id FROM events WHERE event_id=NEW.event_id) AND fi.flow_template='%s'
+AND json_extract(m.projection,'$.creating_input.event_id')=NEW.event_id
+AND (fi.entity_type IS NULL OR EXISTS (SELECT 1 FROM entity_state es
+WHERE es.run_id=fi.run_id AND es.flow_instance=fi.instance_path AND es.entity_id=fi.entity_id AND es.entity_type=fi.entity_type)))
+THEN RAISE(ABORT,'replay fault prerequisite: exact lifecycle absent') END;
+SELECT RAISE(ABORT,'injected committed replay-scope persistence failure'); END`, name, priorDelivery, template)}
+		if postgres {
+			statements = []string{fmt.Sprintf(`CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+IF NOT EXISTS (SELECT 1 FROM events WHERE event_id=NEW.event_id) OR NOT (%s) THEN
+RAISE EXCEPTION 'replay fault prerequisite: exact event/delivery absent'; END IF;
+IF NOT EXISTS (SELECT 1 FROM flow_instances fi
+JOIN workflow_instance_initial_materializations m ON m.run_id=fi.run_id AND m.instance_path=fi.instance_path AND m.entity_id=fi.entity_id
+JOIN flow_instance_runtime_readiness r ON r.run_id=fi.run_id AND r.instance_path=fi.instance_path
+WHERE fi.run_id=(SELECT run_id FROM events WHERE event_id=NEW.event_id) AND fi.flow_template='%s'
+AND m.projection->'creating_input'->>'event_id'=NEW.event_id::text
+AND (fi.entity_type IS NULL OR EXISTS (SELECT 1 FROM entity_state es
+WHERE es.run_id=fi.run_id AND es.flow_instance=fi.instance_path AND es.entity_id=fi.entity_id AND es.entity_type=fi.entity_type))) THEN
+RAISE EXCEPTION 'replay fault prerequisite: exact lifecycle absent'; END IF;
+RAISE EXCEPTION 'injected committed replay-scope persistence failure'; END $$`, name, priorDelivery, template),
+				fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON committed_replay_scopes FOR EACH ROW EXECUTE FUNCTION %s()`, name, name)}
+		}
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func SetPublicationCompletionFailureTx(ctx context.Context, tx *sql.Tx, postgres bool, id uuid.UUID, template string, enabled bool) error {
+	name := "publication_completion_" + strings.ReplaceAll(id.String(), "-", "")
+	statements := []string{"DROP TRIGGER IF EXISTS " + name}
+	if postgres {
+		statements = []string{"DROP TRIGGER IF EXISTS " + name + " ON api_idempotency", "DROP FUNCTION IF EXISTS " + name + "()"}
+	}
+	if enabled {
+		template = strings.ReplaceAll(template, "'", "''")
+		priorDelivery := delivery.APICompletionPriorDeliveryWitnessSQL(postgres)
+		statements = []string{fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON api_idempotency WHEN NEW.method='event.publish' BEGIN
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM events WHERE event_id=NEW.resource_id) OR NOT (%s) OR
+NOT EXISTS (SELECT 1 FROM committed_replay_scopes WHERE event_id=NEW.resource_id)
+THEN RAISE(ABORT,'API completion fault prerequisite: exact publication absent') END;
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM flow_instances fi
+JOIN workflow_instance_initial_materializations m ON m.run_id=fi.run_id AND m.instance_path=fi.instance_path AND m.entity_id=fi.entity_id
+JOIN flow_instance_runtime_readiness r ON r.run_id=fi.run_id AND r.instance_path=fi.instance_path
+WHERE fi.run_id=(SELECT run_id FROM events WHERE event_id=NEW.resource_id) AND fi.flow_template='%s'
+AND json_extract(m.projection,'$.creating_input.event_id')=NEW.resource_id
+AND (fi.entity_type IS NULL OR EXISTS (SELECT 1 FROM entity_state es
+WHERE es.run_id=fi.run_id AND es.flow_instance=fi.instance_path AND es.entity_id=fi.entity_id AND es.entity_type=fi.entity_type)))
+THEN RAISE(ABORT,'API completion fault prerequisite: exact lifecycle absent') END;
+SELECT RAISE(ABORT,'injected API idempotency completion persistence failure'); END`, name, priorDelivery, template)}
+		if postgres {
+			statements = []string{fmt.Sprintf(`CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+IF NOT EXISTS (SELECT 1 FROM events WHERE event_id=NEW.resource_id::uuid) OR NOT (%s) OR
+NOT EXISTS (SELECT 1 FROM committed_replay_scopes WHERE event_id=NEW.resource_id::uuid) THEN
+RAISE EXCEPTION 'API completion fault prerequisite: exact publication absent'; END IF;
+IF NOT EXISTS (SELECT 1 FROM flow_instances fi
+JOIN workflow_instance_initial_materializations m ON m.run_id=fi.run_id AND m.instance_path=fi.instance_path AND m.entity_id=fi.entity_id
+JOIN flow_instance_runtime_readiness r ON r.run_id=fi.run_id AND r.instance_path=fi.instance_path
+WHERE fi.run_id=(SELECT run_id FROM events WHERE event_id=NEW.resource_id::uuid) AND fi.flow_template='%s'
+AND m.projection->'creating_input'->>'event_id'=NEW.resource_id
+AND (fi.entity_type IS NULL OR EXISTS (SELECT 1 FROM entity_state es
+WHERE es.run_id=fi.run_id AND es.flow_instance=fi.instance_path AND es.entity_id=fi.entity_id AND es.entity_type=fi.entity_type))) THEN
+RAISE EXCEPTION 'API completion fault prerequisite: exact lifecycle absent'; END IF;
+RAISE EXCEPTION 'injected API idempotency completion persistence failure'; END $$`, name, priorDelivery, template),
+				fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON api_idempotency FOR EACH ROW WHEN (NEW.method='event.publish') EXECUTE FUNCTION %s()`, name, name)}
+		}
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}

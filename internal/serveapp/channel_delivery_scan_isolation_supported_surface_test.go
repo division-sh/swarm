@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *testing.T) {
@@ -20,47 +21,34 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 			previousLog := log.Writer()
 			log.SetOutput(io.MultiWriter(previousLog, workerLog))
 			defer log.SetOutput(previousLog)
-			h, db, bundleHash := startChannelAnchorJourney(t, backend, "scan-token", false)
+			var selected any
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p.deps.EventStore })
+			h, _, bundleHash := startChannelAnchorJourney(t, backend, "scan-token", false)
 			var cards [2]string
 			var messages [2]int
 			for index := range cards {
-				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": bundleHash,
-					"payload": map[string]any{"seed": true}, "idempotency_key": fmt.Sprintf("scan-isolation-%d", index),
-				})
-				cards[index] = waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-				messages[index] = waitChannelAnchorReceipt(t, db, cards[index])
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": bundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": fmt.Sprintf("scan-isolation-%d", index)})
+				cards[index] = waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				messages[index] = waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), cards[index])
 			}
-			// Negative fault injection only: neither source cards nor authority are fabricated.
 			injectionCtx, cancelInjection := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancelInjection()
-			conn, err := db.Conn(injectionCtx)
+			fault, err := storetest.CaptureChannelCurrentRenderFaultForTest(injectionCtx, selected, cards[0])
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer conn.Close()
-			if backend == servedparity.BackendDefaultSQLite {
-				// The served writer may hold SQLite's lock; configure only this fault-injection connection.
-				if _, err := conn.ExecContext(injectionCtx, `PRAGMA busy_timeout=5000`); err != nil {
-					t.Fatal(err)
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := fault.RestoreForTest(ctx); err != nil {
+					t.Errorf("restore original current render before joined serve teardown: %v", err)
 				}
-			}
-			result, err := conn.ExecContext(injectionCtx, `UPDATE channel_delivery_renders SET render_input='{}'
-				WHERE render_id IN (SELECT current_render_id FROM channel_delivery_plans WHERE source_id=$1)`, cards[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if rows, err := result.RowsAffected(); err != nil || rows != 1 {
-				t.Fatalf("fault did not address one actual frozen render: rows=%d err=%v", rows, err)
-			}
-			if err := conn.Close(); err != nil {
+			})
+			if err := fault.InstallForTest(injectionCtx); err != nil {
 				t.Fatal(err)
 			}
 			var deferred map[string]any
-			requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.defer", map[string]any{
-				"card_id": cards[1], "until": time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano),
-				"idempotency_key": "scan-isolation-defer",
-			}, &deferred)
+			requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.defer", map[string]any{"card_id": cards[1], "until": time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano), "idempotency_key": "scan-isolation-defer"}, &deferred)
 			deadline := time.Now().Add(20 * time.Second)
 			for {
 				updated := false
@@ -75,10 +63,9 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 				}
 				time.Sleep(20 * time.Millisecond)
 			}
-			var state, status string
-			if err := db.QueryRow(`SELECT p.state,c.status FROM channel_delivery_plans p
-				JOIN decision_cards c ON c.card_id=p.source_id WHERE p.source_id=$1`, cards[0]).Scan(&state, &status); err != nil || state != "sent" || status != "pending" {
-				t.Fatalf("corrupt render gained new authority: state=%s status=%s err=%v", state, status, err)
+			observed, err := channelProcessStorageObservation(t, h).ReadChannelPlanCardStateStorage(context.Background(), cards[0])
+			if err != nil || observed.State != "sent" || observed.Status != "pending" {
+				t.Fatalf("corrupt render gained new authority: state=%s status=%s err=%v", observed.State, observed.Status, err)
 			}
 		})
 	}

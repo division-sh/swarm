@@ -396,8 +396,8 @@ func (p *a2MapFanOutExecution) assertProgress(t *testing.T, cursor, cardinality 
 		t.Fatalf("durable progress requires exactly one physical intent: %+v", evidence)
 	}
 	intent := evidence.Intents[0]
-	var eventsCount int
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='item.ready'`, p.runID).Scan(&eventsCount); err != nil {
+	eventsCount, err := storetest.CountRunEventNameStorage(p.ctx, p.selected.events, p.runID, "item.ready")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if evidence.Outcomes != cursor || eventsCount != cursor || intent.Cursor != cursor || intent.Cardinality != cardinality || intent.Status != status || intent.SourceMutationID != sourceMutation {
@@ -969,8 +969,8 @@ func runA2MapFanOutCompiledImmutableSource(t *testing.T, selected gateRecoverySt
 	}
 	written, err := json.Marshal(p.instance(t).Fields["items"])
 	if err != nil || a2AccumulatorJSONHash(t, written) != a2AccumulatorJSONHash(t, wantWritten) {
-		var persisted []byte
-		if readErr := p.selected.db.QueryRowContext(p.ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND entity_id=$2`, p.runID, p.runID).Scan(&persisted); readErr != nil {
+		persisted, readErr := storetest.ReadGateRunRootFieldsStorage(p.ctx, p.selected.events, p.runID)
+		if readErr != nil {
 			t.Fatal(readErr)
 		}
 		t.Fatalf("compiled writer changed exact admitted map keys/values: %s; persisted=%s err=%v", written, persisted, err)
@@ -1008,10 +1008,8 @@ func runA2MapFanOutCompiledImmutableSource(t *testing.T, selected gateRecoverySt
 		intent.Request.Cardinality != len(keys) || !intent.Request.Capsule.SourceProjection.SourceAfterWrites || intent.Request.Capsule.Lineage.ParentEventID != trigger.ID() {
 		t.Fatalf("handler did not pin its post-write state revision: %#v", intent)
 	}
-	var frozen []byte
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT new_value FROM entity_mutations
-					WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4`,
-		intent.Source.MutationID, intent.Source.RunID, intent.Source.EntityID, intent.Source.Field).Scan(&frozen); err != nil {
+	frozen, err := storetest.ReadPinnedAuthoredMutationStorage(p.ctx, p.selected.events, intent.Source)
+	if err != nil {
 		t.Fatal(err)
 	}
 	wantFrozen, _ := json.Marshal(original)
@@ -1170,26 +1168,23 @@ func TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(baseline.Items, []any{"A", "a", "z"}) || baseline.StartOrdinal != 0 {
 				t.Fatalf("actual immutable map source: %#v err=%v", baseline, err)
 			}
-			var capsuleRaw []byte
-			if err := p.selected.db.QueryRowContext(p.ctx, `SELECT capsule FROM fan_out_intents WHERE run_id=$1`, p.runID).Scan(&capsuleRaw); err != nil {
+			capsuleRaw, err := storetest.ReadFanOutRunCapsuleWire(p.ctx, p.selected.events, p.runID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			footprint := func(t *testing.T) string {
 				t.Helper()
-				var mutations, facts, revisions int
-				var cursor, cardinality int
-				var status, owner, generation, lease, retained string
-				if err := p.selected.db.QueryRowContext(p.ctx, `SELECT
-					(SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1),
-					(SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1),
-					(SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1)`, p.runID).Scan(&mutations, &facts, &revisions); err != nil {
+				history, err := storetest.ReadA2MapHistoryFootprintStorage(p.ctx, p.selected.events, p.runID)
+				if err != nil {
 					t.Fatal(err)
 				}
-				if err := p.selected.db.QueryRowContext(p.ctx, `SELECT cursor,cardinality,status,claim_owner,
-					CAST(claim_generation AS TEXT),CAST(lease_expires_at AS TEXT),CAST(capsule AS TEXT)
-					FROM fan_out_intents WHERE run_id=$1`, p.runID).Scan(&cursor, &cardinality, &status, &owner, &generation, &lease, &retained); err != nil {
+				mutations, facts, revisions := history.Mutations, history.Facts, history.Revisions
+				metadata, err := storetest.ReadFanOutRunClaimMetadataStorage(p.ctx, p.selected.events, p.runID)
+				if err != nil {
 					t.Fatal(err)
 				}
+				cursor, cardinality := metadata.Cursor, metadata.Cardinality
+				status, owner, generation, lease, retained := metadata.Status, metadata.Owner, metadata.Generation, metadata.Lease, metadata.Capsule
 				state, err := json.Marshal(p.instance(t))
 				if err != nil {
 					t.Fatal(err)
@@ -1202,11 +1197,11 @@ func TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores(t *testing.T) {
 				t.Helper()
 				// Hostile retained-metadata setup only. The business source revision
 				// above was created by the actual compiled writer, never by SQL.
-				result, err := p.selected.db.ExecContext(p.ctx, `UPDATE fan_out_intents SET capsule=$1 WHERE run_id=$2`, string(raw), p.runID)
+				count, err := storetest.SetRetainedFanOutCapsuleWire(p.ctx, p.selected.events, p.runID, raw)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if count, err := result.RowsAffected(); err != nil || count != 1 {
+				if err != nil || count != 1 {
 					t.Fatalf("hostile retained capsule affected %d rows: %v", count, err)
 				}
 			}
@@ -1241,8 +1236,8 @@ func TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					setCapsule(t, raw)
 					t.Cleanup(func() { setCapsule(t, capsuleRaw) })
+					setCapsule(t, raw)
 					before := footprint(t)
 					input, err := handoff.owner.LoadFanOutEvaluation(p.ctx, claim)
 					if err == nil || !strings.Contains(err.Error(), corruption.want) || input.Trigger.ID() != "" || len(input.Items) != 0 {
@@ -1254,14 +1249,14 @@ func TestA2MapFanOutRetainedProjectionAndRangeRefuseOnBothStores(t *testing.T) {
 				})
 			}
 			t.Run("source_cardinality_range_mismatch", func(t *testing.T) {
-				if _, err := p.selected.db.ExecContext(p.ctx, `UPDATE fan_out_intents SET cardinality=$1 WHERE run_id=$2`, 4, p.runID); err != nil {
-					t.Fatal(err)
-				}
 				t.Cleanup(func() {
-					if _, err := p.selected.db.ExecContext(p.ctx, `UPDATE fan_out_intents SET cardinality=$1 WHERE run_id=$2`, 3, p.runID); err != nil {
+					if _, err := storetest.SetRetainedFanOutCardinality(p.ctx, p.selected.events, p.runID, 3); err != nil {
 						t.Error(err)
 					}
 				})
+				if _, err := storetest.SetRetainedFanOutCardinality(p.ctx, p.selected.events, p.runID, 4); err != nil {
+					t.Fatal(err)
+				}
 				before := footprint(t)
 				input, err := handoff.owner.LoadFanOutEvaluation(p.ctx, claim)
 				if err == nil || !strings.Contains(err.Error(), "immutable source cardinality = 3, want 4") || len(input.Items) != 0 {

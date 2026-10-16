@@ -36,7 +36,7 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 				if !ok {
 					t.Fatal("missing selected fork owner")
 				}
-				ctx := servedControlProofAuthorActivityContext(t, rt)
+				ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 				plan, err := family.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: point.EventID})
 				if err != nil {
 					t.Fatal(err)
@@ -78,7 +78,7 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 					if executed != 0 {
 						t.Fatal("stale input reached fork delivery")
 					}
-					requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
+					requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "ready", 2)
 					return
 				}
 				switch fault {
@@ -112,7 +112,7 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, point.EventID); err != nil {
 					t.Fatal(err)
 				}
-				before := snapshotForkReceiverApplication(t, rt)
+				before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 				direct, ok := family.Availability().(forkHistoricalSelectedStore)
 				if !ok {
 					t.Fatal("missing direct store fixture")
@@ -121,7 +121,7 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 				if err == nil || materialized.ForkRunID != "" {
 					t.Fatalf("stale preparation admitted: %+v %v", materialized, err)
 				}
-				if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
+				if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)) {
 					t.Fatal("stale preparation changed application state")
 				}
 			})

@@ -66,6 +66,36 @@ func receiverInstanceSource(t *testing.T, mutation string) Source {
 	return Wrap(bundle)
 }
 
+func TestReceiverCreationEmissionDoesNotDonateSchemaOwnership(t *testing.T) {
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopySelectedForkLocalReadiness(t, 1, "node"), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := Wrap(bundle)
+	scope, found := source.FlowScopeByID("worker-flow")
+	if !found || scope.AutoEmitEvent != "worker.inspect.requested" {
+		t.Fatal("missing actual reference-only creation emission")
+	}
+	if _, owned := scope.Events[scope.AutoEmitEvent]; owned {
+		t.Fatal("receiver fixture restated the producer-owned schema")
+	}
+	declared := ResolveFlowEventProof(source, scope.ID, scope.AutoEmitEvent)
+	for _, name := range []string{scope.AutoEmitEvent, "worker-flow/worker.inspect.requested", "worker-flow/worker-001/worker.inspect.requested"} {
+		for _, proof := range []FlowEventProof{
+			ResolveFlowEventProof(source, scope.ID, name),
+			ResolveExecutableNodeEventProof(source, identitytest.FlowNode(t, scope.ID, "worker-inspect-entry"), name),
+		} {
+			if !proof.HasSchema || !proof.IsAuthored(source) || proof.IsAuthoredDeclaration(source) || !reflect.DeepEqual(proof.Entry, declared.Entry) {
+				t.Fatalf("creation emission changed schema ownership or lost its authored line: %+v", proof)
+			}
+		}
+	}
+	if foreign := ResolveFlowEventProof(source, ".", "worker-flow/worker.inspect.requested"); foreign.IsAuthored(source) {
+		t.Fatalf("child creation line donated authorship to the parent proof: %+v", foreign)
+	}
+}
+
 func TestReceiverInstanceEventProofPreservesDescendantBoundary(t *testing.T) {
 	source := receiverInstanceSource(t, "nested")
 	const descendant = "worker-flow/nested/worker.inspect.requested"

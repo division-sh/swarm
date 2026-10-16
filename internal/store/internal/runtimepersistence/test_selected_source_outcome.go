@@ -5,17 +5,81 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
 
 type SelectedSourceOutcomeFixture struct {
 	RunID, EventID, EntityID string
 	CreatedAt                time.Time
 	Failure                  failures.Envelope
+}
+
+type SelectedSourceEntityFixture struct {
+	RunID, EventID, EntityID, EntityType string
+	CreatedAt                            time.Time
+}
+
+func CountPhysicalSourceArtifactsStorageForTest(ctx context.Context, selected any) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, sourceadmission.CountPhysicalSourceArtifactsStorageTx)
+}
+
+// Availability is intentionally distinct from artifact decoding. Historical
+// refusal fixtures must reach their original integrity gate without repair.
+func RequireSelectedSourceArtifactPresenceForTest(ctx context.Context, selected any, source correlation.SourceArtifactFact) error {
+	if source.BundleHash() == "" {
+		return fmt.Errorf("source availability fixture requires an exact source")
+	}
+	dialect, err := eventFixtureDialectForTest(selected)
+	if err != nil {
+		return err
+	}
+	return readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return sourceadmission.RequireArtifact(ctx, tx, privateactivity.Dialect(dialect), source)
+	})
+}
+
+// This preserves the deliberately headerless historical source, not a live
+// receiver construction. The existing event/run pair owns both physical facts.
+func SeedSelectedSourceEntityForTest(ctx context.Context, selected any, fixture SelectedSourceEntityFixture) error {
+	for _, identity := range []string{fixture.RunID, fixture.EventID, fixture.EntityID} {
+		if err := validateSelectedForkStorageIdentity(identity); err != nil {
+			return err
+		}
+	}
+	source, ok := correlation.SourceArtifactFactFromContext(ctx)
+	if !ok || source.BundleHash() == "" || fixture.CreatedAt.IsZero() || fixture.EntityType == "" || strings.TrimSpace(fixture.EntityType) != fixture.EntityType {
+		return fmt.Errorf("source entity fixture requires exact source, entity type and time")
+	}
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return err
+	}
+	return runEventFixtureMutationForTest(ctx, selected, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+		return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			var hash, eventRun string
+			if err := tx.QueryRowContext(ctx, `SELECT r.bundle_hash,e.run_id FROM runs r JOIN events e ON e.run_id=r.run_id WHERE r.run_id=$1 AND e.event_id=$2`, fixture.RunID, fixture.EventID).Scan(&hash, &eventRun); err != nil {
+				return err
+			}
+			if hash != source.BundleHash() || eventRun != fixture.RunID {
+				return fmt.Errorf("source entity fixture does not own the persisted event")
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO entity_mutations
+				(run_id,entity_id,domain,path,old_value,new_value,caused_by_event,writer_type,writer_id,handler_step,created_at)
+				VALUES ($1,$2,'lifecycle_state','','null','"pending"',$3,'platform','selected-execution-test','seed',$4)`, fixture.RunID, fixture.EntityID, fixture.EventID, fixture.CreatedAt); err != nil {
+				return err
+			}
+			_, err := tx.ExecContext(ctx, `INSERT INTO entity_state
+				(run_id,entity_id,flow_instance,entity_type,name,current_state,gates,fields,accumulator,revision,entered_state_at,created_at,updated_at)
+				VALUES ($1,$2,'flow-a/1',$3,'Selected Execution Entity','pending','{}','{}','{}',1,$4,$4,$4)`, fixture.RunID, fixture.EntityID, fixture.EntityType, fixture.CreatedAt)
+			return err
+		})
+	})
 }
 
 // These two exact predecessor facts deliberately must not suppress fork work.

@@ -14,7 +14,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -84,21 +84,17 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 				if result["run_id"] != runID || asMap(t, result["data_binding"])["pin_count"] != float64(1) {
 					t.Fatalf("feed-only result = %#v", result)
 				}
-				if got := dataRunCount(t, fixture, "events", "run_id", runID); got != 0 {
+				if got := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunEvents, runID); got != 0 {
 					t.Fatalf("feed-only created %d events", got)
 				}
-				if got := dataRunCount(t, fixture, "fan_out_intents", "run_id", runID); got != 1 {
+				if got := dataRunObservedCount(t, fixture, storetest.CountRunFanOutIntentStorage, runID); got != 1 {
 					t.Fatalf("feed-only created %d intents, want 1", got)
 				}
-				query := "SELECT cardinality, status FROM fan_out_intents WHERE run_id = ?"
-				if _, postgres := fixture.primary.(*store.PostgresStore); postgres {
-					query = "SELECT cardinality, status FROM fan_out_intents WHERE run_id = $1::uuid"
-				}
-				var cardinality int
-				var intentStatus string
-				if err := fixture.db.QueryRowContext(ctx, query, runID).Scan(&cardinality, &intentStatus); err != nil {
+				intent, err := storetest.ReadDeploymentIntentStatusStorage(ctx, fixture.primary, runID)
+				if err != nil {
 					t.Fatalf("read feed intent: %v", err)
 				}
+				cardinality, intentStatus := intent.Cardinality, intent.Status
 				if cardinality != tc.rowCount || (tc.rowCount == 0 && intentStatus != "closed") || (tc.rowCount > 0 && intentStatus != "open") {
 					t.Fatalf("feed intent cardinality/status = %d/%s, want %d", cardinality, intentStatus, tc.rowCount)
 				}
@@ -122,18 +118,14 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 				if replay.Error != nil || asMap(t, replay.Result)["run_id"] != runID {
 					t.Fatalf("feed-only replay = %#v", replay)
 				}
-				cacheDelete := "DELETE FROM api_idempotency WHERE resource_id = ?"
-				if _, postgres := fixture.primary.(*store.PostgresStore); postgres {
-					cacheDelete = "DELETE FROM api_idempotency WHERE resource_id = $1"
-				}
-				if _, err := fixture.db.ExecContext(ctx, cacheDelete, runID); err != nil {
+				if err := storetest.ExpireRunTransportCache(ctx, fixture.primary, runID); err != nil {
 					t.Fatalf("expire transport cache for permanent-receipt proof: %v", err)
 				}
 				permanentReplay := rpcCall(t, handler, body)
 				if permanentReplay.Error != nil || asMap(t, permanentReplay.Result)["run_id"] != runID {
 					t.Fatalf("feed-only permanent replay = %#v", permanentReplay)
 				}
-				if got := dataRunCount(t, fixture, "fan_out_intents", "run_id", runID); got != 1 {
+				if got := dataRunObservedCount(t, fixture, storetest.CountRunFanOutIntentStorage, runID); got != 1 {
 					t.Fatalf("replay created %d intents", got)
 				}
 				if tc.rowCount == 0 {
@@ -147,13 +139,8 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 							break
 						}
 						if time.Now().After(deadline) {
-							query := "SELECT completion_revision, completion_due_at FROM runs WHERE run_id = ?"
-							if _, postgres := fixture.primary.(*store.PostgresStore); postgres {
-								query = "SELECT completion_revision, completion_due_at FROM runs WHERE run_id = $1::uuid"
-							}
-							var revision int64
-							var due any
-							_ = fixture.db.QueryRowContext(ctx, query, runID).Scan(&revision, &due)
+							clock, _ := storetest.ReadDeploymentCompletionClockStorage(ctx, fixture.primary, runID)
+							revision, due := clock.Revision, clock.Due
 							t.Fatalf("empty feed run remained %s (candidate revision=%d due=%v active=%d)", header.Status, revision, due, executor.ActiveCandidates())
 						}
 						time.Sleep(10 * time.Millisecond)
@@ -174,10 +161,10 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 			if response.Error != nil || asMap(t, asMap(t, response.Result)["data_binding"])["pin_count"] != float64(2) {
 				t.Fatalf("multi-pin deployment run = %#v", response)
 			}
-			if got := dataRunCount(t, fixture, "fan_out_intents", "run_id", runID); got != 2 {
+			if got := dataRunObservedCount(t, fixture, storetest.CountRunFanOutIntentStorage, runID); got != 2 {
 				t.Fatalf("multi-pin intents = %d, want 2", got)
 			}
-			if got := dataRunCount(t, fixture, "events", "run_id", runID); got != 0 {
+			if got := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunEvents, runID); got != 0 {
 				t.Fatalf("multi-pin run created %d initial events", got)
 			}
 		})
@@ -195,9 +182,17 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 			if response.Error == nil {
 				t.Fatalf("invalid second pin admitted: %#v", response)
 			}
-			for _, table := range []string{"runs", "events", "resource_version_pins", "fan_out_intents"} {
-				if got := dataRunCount(t, fixture, table, "run_id", runID); got != 0 {
-					t.Fatalf("invalid second pin left %d %s rows", got, table)
+			for _, observed := range []struct {
+				table string
+				count func(context.Context, any, string) (int, error)
+			}{
+				{"runs", storetest.CountPhysicalRunIdentity},
+				{"events", storetest.CountPhysicalRunEvents},
+				{"resource_version_pins", storetest.CountRunResourcePinsStorage},
+				{"fan_out_intents", storetest.CountRunFanOutIntentStorage},
+			} {
+				if got := dataRunObservedCount(t, fixture, observed.count, runID); got != 0 {
+					t.Fatalf("invalid second pin left %d %s rows", got, observed.table)
 				}
 			}
 			receipt, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID)
@@ -207,7 +202,7 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 			}
 			replay := rpcCall(t, handler, body)
 			if replay.Error == nil || !reflect.DeepEqual(replay.Error, response.Error) ||
-				dataRunCount(t, fixture, "resource_run_creation_operations", "run_id", runID) != 1 {
+				dataRunObservedCount(t, fixture, storetest.CountRunDataCreationOperationsStorage, runID) != 1 {
 				t.Fatalf("invalid second pin replay changed the permanent rejection: first=%#v replay=%#v", response, replay)
 			}
 		})
@@ -220,10 +215,10 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 			if response.Error != nil || asMap(t, asMap(t, response.Result)["data_binding"])["pin_count"] != float64(1) {
 				t.Fatalf("event-plus-feed run.start = %#v", response)
 			}
-			if got := dataRunCount(t, fixture, "resource_version_pins", "run_id", runID); got != 1 {
+			if got := dataRunObservedCount(t, fixture, storetest.CountRunResourcePinsStorage, runID); got != 1 {
 				t.Fatalf("event-plus-feed pins = %d, want 1", got)
 			}
-			if got := dataRunCount(t, fixture, "fan_out_intents", "run_id", runID); got != 1 {
+			if got := dataRunObservedCount(t, fixture, storetest.CountRunFanOutIntentStorage, runID); got != 1 {
 				t.Fatalf("event-plus-feed intents = %d, want 1", got)
 			}
 		})
@@ -260,16 +255,25 @@ func TestRunStartRejectsDeclaredFeedWithoutOutputPinBeforeMutation(t *testing.T)
 				if !strings.Contains(fmt.Sprint(details["reason"]), "no exact declared output pin") {
 					t.Fatalf("rejection did not come from compiled output-pin admission: %#v", response.Error)
 				}
-				for _, table := range []string{"runs", "events", "resource_version_pins", "fan_out_intents", "resource_run_creation_operations"} {
-					if got := dataRunCount(t, fixture, table, "run_id", runID); got != 0 {
-						t.Fatalf("failed admission mutated %s: %d rows", table, got)
+				for _, observed := range []struct {
+					table string
+					count func(context.Context, any, string) (int, error)
+				}{
+					{"runs", storetest.CountPhysicalRunIdentity},
+					{"events", storetest.CountPhysicalRunEvents},
+					{"resource_version_pins", storetest.CountRunResourcePinsStorage},
+					{"fan_out_intents", storetest.CountRunFanOutIntentStorage},
+					{"resource_run_creation_operations", storetest.CountRunDataCreationOperationsStorage},
+				} {
+					if got := dataRunObservedCount(t, fixture, observed.count, runID); got != 0 {
+						t.Fatalf("failed admission mutated %s: %d rows", observed.table, got)
 					}
 				}
-				var apiCompletions int
-				if err := fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_idempotency WHERE resource_id=$1`, runID).Scan(&apiCompletions); err != nil || apiCompletions != 0 {
+				apiCompletions, err := storetest.CountRunTransportCacheStorage(ctx, fixture.primary, runID)
+				if err != nil || apiCompletions != 0 {
 					t.Fatalf("failed admission stored %d API completions: %v", apiCompletions, err)
 				}
-				if sourceID != "" && dataRunCount(t, fixture, "resource_source_invocations", "source_invocation_id", sourceID) != 0 {
+				if sourceID != "" && dataRunObservedCount(t, fixture, storetest.CountResourceSourceInvocationStorage, sourceID) != 0 {
 					t.Fatal("failed admission committed source import")
 				}
 				after, err := fixture.primary.ShowDataResource(ctx, bundleHash, openedRef)

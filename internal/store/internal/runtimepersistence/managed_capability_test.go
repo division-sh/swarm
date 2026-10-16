@@ -21,6 +21,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -235,21 +236,33 @@ type managedAgentTurnFixtureOptions struct {
 	OriginEvent *events.Event
 }
 
-func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store completionSettlementTestStore, runID, agentID, flowInstance string) agentmemory.Identity {
+func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store agentfixture.Store, runID, agentID, flowInstance string) agentmemory.Identity {
 	t.Helper()
 	identity := testAgentMemoryIdentity(t, runID, agentID, flowInstance)
 	memory := agentmemory.Plan{}
 	if strings.TrimSpace(flowInstance) != "" {
 		memory = agentmemory.Plan{Enabled: true}
 	}
-	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
-			ExecutionMode: "live", ID: agentID, Identity: identity, Role: "worker", Type: "managed",
-			Model: "regular", LLMBackend: "anthropic", ResolvedLLMBackend: "anthropic",
-			Memory: memory, FlowID: "global", FlowPath: flowInstance,
-		}),
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		ExecutionMode: "live", ID: agentID, Identity: identity, Role: "worker", Type: "managed",
+		Model: "regular", LLMBackend: "anthropic", ResolvedLLMBackend: "anthropic",
+		Memory: memory, FlowID: "global", FlowPath: flowInstance, Config: json.RawMessage(`{}`),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("managed turn fixture requires its original source context")
+	}
+	if err := agentfixture.UpsertStaticForSource(t, ctx, store, runtimemanager.PersistedAgent{
+		Config: resolved.Actor,
 		Status: "active", StartedAt: time.Now().UTC(),
-	}); err != nil {
+	}, source); err != nil {
 		t.Fatalf("seed managed turn fixture agent: %v", err)
 	}
 	return identity
@@ -257,7 +270,14 @@ func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store comple
 
 func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context.Context, store completionSettlementTestStore, rec runtimellm.AgentTurnRecord, options managedAgentTurnFixtureOptions) error {
 	t.Helper()
-	fixtureCtx := testAuthorActivityContext()
+	source, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		return fmt.Errorf("managed turn fixture requires its original source")
+	}
+	fixtureCtx := testAuthorActivityContextForBundle(source.BundleHash())
+	if authority, ok := runtimeeffects.AuthorityFromContext(ctx); ok && authority.Kind == runtimeeffects.AuthoritySelectedContractFork {
+		fixtureCtx = ctx
+	}
 	plan := rec.Memory
 	if rec.Identity == (agentmemory.Identity{}) {
 		rec.Identity = testAgentMemoryIdentity(t, rec.RunID, rec.AgentID, rec.FlowInstance)
@@ -307,6 +327,10 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 		AgentID: rec.AgentID, AgentIdentity: identity, SessionID: rec.SessionID,
 		Memory: plan, FlowInstance: rec.FlowInstance, EntityID: rec.EntityID,
 	}
+	authority, err = managedTurnReadbackAuthority(ctx, authority)
+	if err != nil {
+		return err
+	}
 	adapter := "anthropic_api"
 	surface := managedCompletionTestSurface(t, authority, adapter)
 	rec.CapabilitySurface = &surface
@@ -351,7 +375,7 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 	completionCtx = runtimeeffects.WithLogicalOperationIdentity(completionCtx, "managed-turn-fixture:"+authority.Target.ID)
 	completionCtx = withManagedCompletionTestSurface(t, completionCtx, authority, adapter)
 	completionCtx = runtimecorrelation.WithInboundEvent(completionCtx, originEvent)
-	frame := managedCompletionTestFrameWithEvent(t, authority, adapter, originEvent)
+	frame := managedCompletionTestFrameForSource(t, authority, adapter, originEvent, source.BundleHash())
 	handle, err := runtimeeffects.BeginManagedCompletion(completionCtx, adapter, rec.RequestPayload, frame, nil)
 	if err != nil {
 		return err
@@ -461,6 +485,24 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 		}
 	}
 	return nil
+}
+
+// Selected readback consumes the caller's actual issued authority and exact
+// target. It must not reconstruct ordinary authority for a selected claim.
+func managedTurnReadbackAuthority(ctx context.Context, normal runtimeeffects.Authority) (runtimeeffects.Authority, error) {
+	selected, found := runtimeeffects.AuthorityFromContext(ctx)
+	if !found || selected.Kind != runtimeeffects.AuthoritySelectedContractFork {
+		return normal, nil
+	}
+	admission, admitted := managedexecution.FromContext(ctx)
+	source, hasSource := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !admitted || !hasSource || admission.BundleHash != source.BundleHash() || !admission.AuthorizesSelected(selected.ID, selected.SelectedFork.ForkRunID, selected.SelectedFork.Generation) {
+		return runtimeeffects.Authority{}, fmt.Errorf("selected turn fixture requires its original managed admission")
+	}
+	if !selected.Valid() || selected.Target != normal.Target {
+		return runtimeeffects.Authority{}, fmt.Errorf("selected turn fixture differs from its exact admitted target")
+	}
+	return selected, nil
 }
 
 func withManagedCompletionTestSurface(t testing.TB, ctx context.Context, authority runtimeeffects.Authority, adapter string) context.Context {

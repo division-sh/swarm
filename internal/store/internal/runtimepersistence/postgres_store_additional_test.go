@@ -22,9 +22,11 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -174,6 +176,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, "test-flow", "test-flow", "default", "ready", "{}", time.Now().UTC())
 	route := testAgentDeliveryRoute(t, runID, "agent-1", "fixture/agent-1")
+	ctx = preparePositiveAgentClaimFixture(t, ctx, pg, route.AgentIdentity)
 	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, route)
 	if err := acknowledgePipelineEventFixture(ctx, pg, eventID); err != nil {
 		t.Fatalf("seed pipeline receipt: %v", err)
@@ -673,8 +676,16 @@ func seedSpecAgent(t *testing.T, ctx context.Context, pg *PostgresStore, agentID
 		Config:        []byte(`{}`),
 		Identity:      specMemoryIdentity(agentID, "global"),
 	})
+	profile, err := selection.ResolveActiveBackend(selection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config:    cfg,
+		Config:    resolved.Actor,
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),
@@ -1826,7 +1837,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_LeavesLiveSessionRuntimeStateFo
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
-	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	seedSpecAgent(t, ctx, pg, "a1", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
 	identity := specMemoryIdentity("a1", "global")
 
@@ -2661,7 +2672,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	ceoID := "operator-" + entityID
 	ceoIdentity := mustTestAgentIdentityForRun(specEntityStateRunID, ceoID, "operating/global")
 	_ = agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: ceoID,
+		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: ceoID,
 			Identity: ceoIdentity,
 			Role:     "operator",
 			FlowID:   "operating",
@@ -2671,7 +2682,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 			FlowPath: "operating/global",
 			EntityID: entityID,
 			Config:   json.RawMessage(`{}`),
-		}),
+		})),
 		Status:          "active",
 		HiredBy:         "test",
 		StartedAt:       time.Now().UTC(),
@@ -2689,11 +2700,15 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now().Add(-2*time.Hour),
 	)
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
+		RunID: evt.RunID(), Origin: semanticEventRunOriginForTest(t, evt.ID(), string(evt.Type())), StartedAt: evt.CreatedAt(),
+	})
+	deliveryIdentity := mustTestAgentIdentityForRun(evt.RunID(), ceoID, "fixture/"+ceoID)
+	ctx = preparePositiveAgentClaimFixture(t, ctx, pg, deliveryIdentity)
 
 	if err := commitSemanticEventFixtureWithAgents(ctx, pg, evt, []string{ceoID}); err != nil {
 		t.Fatalf("AppendEvent with exact delivery: %v", err)
 	}
-	deliveryIdentity := mustTestAgentIdentityForRun(evt.RunID(), ceoID, "fixture/"+ceoID)
 	pending, err := pg.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
 		AgentIdentity: deliveryIdentity,
 		Since:         time.Now().Add(-24 * time.Hour),
@@ -2797,7 +2812,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 	resetAgentSessionsSpecTable(t, ctx, pg)
 
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-cleanup-1",
+		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-cleanup-1",
 			Identity: mustTestAgentIdentityForRun(specEntityStateRunID, "agent-cleanup-1", "global"),
 			Role:     "worker",
 			FlowID:   "worker",
@@ -2806,7 +2821,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 			Memory:   agentmemory.Plan{Enabled: true},
 			FlowPath: "global",
 			Config:   json.RawMessage(`{}`),
-		}),
+		})),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),
