@@ -8,16 +8,11 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/receiverreadback"
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 )
 
 //go:embed family145-receiver-public-readback-preimages.json

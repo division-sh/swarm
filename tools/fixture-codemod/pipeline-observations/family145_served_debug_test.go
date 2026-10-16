@@ -1,23 +1,18 @@
 package main
 
 import (
-	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/serveddebug"
 )
 
 //go:embed family145-served-debug-preimages.json

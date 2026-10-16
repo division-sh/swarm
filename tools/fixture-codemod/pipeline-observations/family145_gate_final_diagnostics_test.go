@@ -1,11 +1,9 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
-	"testing"
 )
 
 var family145GateFinalDiagnosticCuts = map[string][]string{

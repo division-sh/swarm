@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/sha256"
 	_ "embed"
 	"errors"
 	"fmt"
@@ -9,17 +8,13 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/deliverystatus"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 )
 
 //go:embed family145-delivery-status-preimages.json

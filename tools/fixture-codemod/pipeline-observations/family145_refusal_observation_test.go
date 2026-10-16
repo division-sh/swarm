@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"

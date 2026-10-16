@@ -1,23 +1,17 @@
 package main
 
 import (
-	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicrollback"
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 //go:embed family145-public-rollback-preimages.json

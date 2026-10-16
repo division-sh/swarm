@@ -5,10 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"go/format"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"testing"
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )

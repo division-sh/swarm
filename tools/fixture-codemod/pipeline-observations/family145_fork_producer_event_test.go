@@ -1,9 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 )

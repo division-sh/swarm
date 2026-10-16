@@ -9,12 +9,6 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
-	"testing"
-
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 func deploymentResourceCarrierClosed(raw []byte) error {

@@ -5,9 +5,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
-	"strings"
-	"testing"
 )
 
 func family145SourceProjectedMarker(source []byte) error {

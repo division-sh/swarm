@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"strings"
 	"testing"
 )

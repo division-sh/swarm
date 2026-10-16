@@ -5,9 +5,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
-	"strings"
-	"testing"
 )
 
 func family145TimerStartupOwnerError(source string) error {

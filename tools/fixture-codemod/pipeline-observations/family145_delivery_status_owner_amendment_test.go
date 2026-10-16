@@ -8,9 +8,7 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 

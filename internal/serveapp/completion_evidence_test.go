@@ -379,7 +379,14 @@ func TestServedCompletion2270EvidenceBothStores(t *testing.T) {
 				previousTransport := http.DefaultTransport
 				http.DefaultTransport = completion2270Transport{t: t, profile: profileID, requests: &requests}
 				t.Cleanup(func() { http.DefaultTransport = previousTransport })
-				bus, work, _ := newClaudeAttemptProofEventBus(t, backend, 1)
+				actor := claudeAttemptProofAgentConfig()
+				profile, err := llmselection.ResolveActiveBackend(profileID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				actor.LLMBackend, actor.ResolvedLLMBackend, actor.ResolvedLLMProvider = profileID, profileID, profile.Provider
+				actor.ResolvedLLMTransport, actor.ResolvedModel = profile.Transport, "request-A"
+				bus, work, _ := newClaudeAttemptProofEventBus(t, backend, 1, actor)
 				factory := runtimellm.RuntimeFactory{Cfg: cfg, Sessions: backend.sessions, LiveSessions: runtimellm.NewTransientLiveSessionAcquirer(backend.sessions),
 					Conversations: backend.store, LockOwner: "completion-2270", Workspaces: claudeAttemptProofWorkspace{}, Events: bus,
 					Credentials: runtimecredentials.NewEnvStore(), CompletionController: liveTestCompletionController(backend.store, backend.store, backend.store, claudeAttemptProofSpendProjection{})}
@@ -394,13 +401,6 @@ func TestServedCompletion2270EvidenceBothStores(t *testing.T) {
 					SemanticSource: claudeAttemptProofSemanticSource(), Sessions: backend.sessions, SessionResetter: backend.store,
 					PersistenceRoles: selectedStoreManagerPersistenceRoles(backend.store, bus), LLMBackend: profileID, ModelAliases: cfg.LLM.Models,
 					WorkOwner: work, ReceiverExecution: eventreceiver.NormalExecution()}, backend.store)
-				actor := claudeAttemptProofAgentConfig()
-				profile, err := llmselection.ResolveActiveBackend(profileID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				actor.LLMBackend, actor.ResolvedLLMBackend, actor.ResolvedLLMProvider = profileID, profileID, profile.Provider
-				actor.ResolvedLLMTransport, actor.ResolvedModel = profile.Transport, "request-A"
 				installClaudeAttemptProofManagerTopology(t, backend, manager, bus, actor)
 				runClaudeAttemptProofManager(t, backend, manager)
 				defer func() {
