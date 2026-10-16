@@ -64,7 +64,18 @@ func debtChannelSettlementSourcePrevious(root, file, function, current string) (
 		if _, err := debtChannelSettlementLiveSources(root); err != nil {
 			return "", err
 		}
+		return debtChannelSettlementSourceInverse(root, pins, file, function, current)
+	}
+	return current, nil
+}
+
+func debtChannelSettlementSourceInverse(root string, pins []debtRunIdentitySourceBody, file, function, current string) (string, error) {
+	for _, pin := range pins {
+		if pin.File != file || pin.Function != function {
+			continue
+		}
 		if current != pin.After {
+			var err error
 			current, err = debtChannelProcessSourcePrevious(root, file, function, current)
 			if err != nil {
 				return "", err
