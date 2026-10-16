@@ -2767,6 +2767,9 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 	if err != nil {
 		return PublishRecipientPlan{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return PublishRecipientPlan{}, err
+	}
 	if eb.payloadAdmitter != nil {
 		var err error
 		evt, err = eb.admitEventPayload(ctx, evt)

@@ -122,6 +122,23 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	return newScopedAPITestEventBusWithDataCatalog(t, eventStore, nil, options...)
 }
 
+func retainAPITestCompiledRoot(ctx context.Context, selected runtimebus.EventStore, bundle *runtimecontracts.WorkflowContractBundle) error {
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return fmt.Errorf("API test source requires captured rooted compilation: %w", err)
+	}
+	owner, ok := selected.(interface {
+		EnsureRootedSource(context.Context, sourceartifact.RootedSource) (sourceartifact.RootedEnsureResult, error)
+	})
+	if !ok {
+		return fmt.Errorf("API test store %T lacks compiled root retention", selected)
+	}
+	if _, err := owner.EnsureRootedSource(ctx, rooted); err != nil {
+		return fmt.Errorf("retain exact API test compiled root: %w", err)
+	}
+	return nil
+}
+
 func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus.EventStore, exactCatalog *durabledata.Catalog, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
 	t.Helper()
 	opts := runtimebus.EventBusOptions{}
@@ -158,6 +175,9 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 		}
 		artifact := authorActivityTestSourceArtifact
 		if bundle, ok := semanticview.Bundle(opts.ContractBundle); ok && bundle.SourceArtifact != nil {
+			if err := retainAPITestCompiledRoot(context.Background(), eventStore, bundle); err != nil {
+				return nil, err
+			}
 			if exactCatalog == nil {
 				var err error
 				catalog, err = runtimecontracts.BuildDurableDataCatalog(bundle)

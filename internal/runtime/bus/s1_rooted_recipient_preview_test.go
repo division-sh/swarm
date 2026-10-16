@@ -91,8 +91,8 @@ func TestS1RecipientPreviewAdmitsFrozenRootBeforeSourceConsumers(t *testing.T) {
 						t.Fatalf("valid creating preview lost its frozen source: payload_calls=%d plan=%+v err=%v", payloadCalls, plan, err)
 					}
 				} else if test.canceled {
-					if !errors.Is(err, context.Canceled) {
-						t.Fatalf("preview concealed caller cancellation: %v", err)
+					if !errors.Is(err, context.Canceled) || payloadCalls != 0 {
+						t.Fatalf("preview concealed cancellation or reached source consumers: payload_calls=%d err=%v", payloadCalls, err)
 					}
 				} else if err == nil || payloadCalls != 0 || len(plan.DeliveryRoutes) != 0 {
 					t.Fatalf("invalid root reached source consumers: payload_calls=%d plan=%+v err=%v", payloadCalls, plan, err)
