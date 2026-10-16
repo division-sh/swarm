@@ -11,7 +11,7 @@ import (
 const debtReceiverReadbackCollectorTo = "84f9fb91bc1ec1d9f0da71ddd541905b995ada9cf6bae14960c642dca9d5596a"
 
 // #2542/6211981991: exact preservation-source continuation, no census allowance.
-const debtActiveCollectorTo = debtRepair2698ProofCostCollectorTo
+const debtActiveCollectorTo = debtRepair2698CleanupCollectorTo
 const debtReceiverReadbackManifest = "tools/fixture-codemod/pipeline-observations/family145-receiver-public-readback-preimages.json"
 
 func TestPersistenceAuthorityDebtReceiverReadbackCompositionPreservesOriginalSource(t *testing.T) {
@@ -80,7 +80,8 @@ func debtReceiverReadbackLatestSourcePrevious(root, file, function, current stri
 
 func debtReceiverReadbackSourceCopy(t *testing.T, root, file string) string {
 	t.Helper()
-	copy := debtServedDebugSourceCopy(t)
+	copy := debtCatchUpSourceCopyFrom(t, root)
+	copyRepair2698CustodySources(t, root, copy)
 	for _, path := range []string{file, debtReceiverReadbackManifest} {
 		raw, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {

@@ -150,7 +150,7 @@ func TestR52ManagerFixtureSuccessorsPreserveNativeSetupAndHostility(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			actual := string(source[set.Position(function.Pos()).Offset:set.Position(function.End()).Offset])
+			actual := repair2698HistoricalBody(t, selected.File, function.Name.Name)
 			if _, err := reverseR52ManagerSuccessor(*selected, actual); err != nil {
 				t.Fatal(err)
 			}

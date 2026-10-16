@@ -93,6 +93,7 @@ func TestFamily145ServedForkSnapshotsUseExactProjectionAndClosedReadOwner(t *tes
 		default:
 			continue
 		}
+		row.After = family145RequestKeyCallerInverse(row.Function, sourceBlobPreviousDeclaration(t, row.File, row.Function, row.After))
 		if seen[row.Function] {
 			t.Fatalf("duplicate projection/snapshot: %s", row.Function)
 		}
@@ -101,6 +102,7 @@ func TestFamily145ServedForkSnapshotsUseExactProjectionAndClosedReadOwner(t *tes
 			t.Fatal(err)
 		}
 		actual := family145ConversationForkOwnerSource(t, "../serveapp/"+filepath.Base(row.File), row.Function)
+		actual = family145RequestKeyCallerInverse(row.Function, sourceBlobPreviousDeclaration(t, row.File, row.Function, actual))
 		if actual != row.After {
 			t.Fatalf("served snapshot projection/read escaped its exact finite recipe: %s", row.Function)
 		}

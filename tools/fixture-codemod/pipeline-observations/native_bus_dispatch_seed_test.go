@@ -45,14 +45,14 @@ func TestNativeBusDispatchSeedPreservesOriginClockAndEveryContinuationAssertion(
 		if mechanicalBusDispatchSeed(t, row) != row.After {
 			t.Fatal("run origin, source, clock, continuation ordering or assertions changed")
 		}
-		actual, actualErr := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
+		actual, actualErr := canonicalFunction(repair2698HistoricalBody(t, row.File, row.Function))
 		currentSource := current.After
 		if current.Successor != "" {
 			currentSource = current.Successor
 		}
 		expected, expectedErr := canonicalFunction(currentSource)
 		if actualErr != nil || expectedErr != nil || actual != expected {
-			t.Fatalf("%s: complete-event seed diverged from finite migration", row.Function)
+			t.Fatalf("%s: complete-event seed diverged from finite migration\nwant:\n%s\ngot:\n%s", row.Function, expected, actual)
 		}
 	}
 	if matched != 7 {

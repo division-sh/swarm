@@ -245,13 +245,17 @@ func TestR52DirectiveFixtureSuccessorsPreserveNativeSetupAndHostility(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			actual := string(source[set.Position(function.Pos()).Offset:set.Position(function.End()).Offset])
+			actual := repair2698HistoricalBody(t, row.File, function.Name.Name)
+			actual, err = canonicalFunction(actual)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := reverseR52DirectiveSuccessor(*row, actual, pin); err != nil {
 				t.Fatal(err)
 			}
 			mutants := map[string]string{
-				"foreign_store":   strings.Replace(actual, "LifecycleState:      pg", "LifecycleState:      foreign", 1),
-				"missing_outcome": strings.Replace(actual, "LifecycleOutcome:    pg,", "", 1),
+				"foreign_store":   strings.Replace(actual, "LifecycleState: pg", "LifecycleState: foreign", 1),
+				"missing_outcome": strings.Replace(actual, "LifecycleOutcome: pg,", "", 1),
 				"late_config":     strings.Replace(actual, ", Config: json.RawMessage(`{}`)", "", 1),
 				"assertion":       strings.Replace(actual, "t.Fatalf", "t.Logf", 1),
 				"unrelated_body":  strings.Replace(actual, "{", "{ unreviewedSetup();", 1),
@@ -266,11 +270,11 @@ func TestR52DirectiveFixtureSuccessorsPreserveNativeSetupAndHostility(t *testing
 			}
 			if pin.family == "native-execution-construction-tail" {
 				mutants = map[string]string{
-					"foreign_store":   strings.Replace(actual, "LifecycleState:      pg", "LifecycleState:      foreign", 1),
+					"foreign_store":   strings.Replace(actual, "LifecycleState: pg", "LifecycleState: foreign", 1),
 					"foreign_writer":  strings.Replace(actual, "agentfixture.Lifecycle(t, pg)", "agentfixture.Lifecycle(t, foreign)", 1),
 					"missing_writer":  strings.Replace(actual, "agentfixture.Lifecycle(t, pg)", "nil", 1),
-					"missing_state":   strings.Replace(actual, "LifecycleState:      pg,", "", 1),
-					"missing_outcome": strings.Replace(actual, "LifecycleOutcome:    pg,", "", 1),
+					"missing_state":   strings.NewReplacer("LifecycleState: pg, ", "", ", LifecycleState: pg", "", "LifecycleState: pg", "").Replace(actual),
+					"missing_outcome": strings.NewReplacer("LifecycleOutcome: pg, ", "", ", LifecycleOutcome: pg", "", "LifecycleOutcome: pg", "").Replace(actual),
 					"native_identity": strings.Replace(actual, "pg.LoadAgentLifecycleState(ctx, rec.Config.Identity)", "pg.LoadAgentLifecycleState(ctx, foreignIdentity)", 1),
 					"missing_row":     strings.Replace(actual, "err != nil || !found", "err != nil", 1),
 					"native_topology": strings.Replace(actual, "state.ProcessBinding, state.Topology", "state.ProcessBinding, foreignTopology", 1),

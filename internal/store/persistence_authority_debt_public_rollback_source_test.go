@@ -295,7 +295,7 @@ func TestPersistenceAuthorityDebtPublicRollbackRetirementCollectorUsesExactHisto
 	}
 	for _, lowered := range []bool{false, true} {
 		head := retained
-		head.Collector = debtPublicRollbackCollectorTo
+		head.Collector = debtActiveCollectorTo
 		head.Sites = maps.Clone(retained.Sites)
 		actual := maps.Clone(retained.Sites)
 		for _, pair := range pairs {
@@ -305,9 +305,12 @@ func TestPersistenceAuthorityDebtPublicRollbackRetirementCollectorUsesExactHisto
 				delete(head.Sites, pair[0].identity())
 				delete(head.Sites, pair[1].identity())
 			} else if trusted.Sites[pair[0].identity()] == pair[0] {
-				// A validation-only retained ceiling keeps this test discriminating
-				// after the real baseline has legitimately removed both donors.
-				head.Sites[pair[1].identity()] = pair[1]
+				// Keep the old unrefreshed-frame proof separate from the active
+				// shrink-only edge: retired occurrences cannot be resurrected there.
+				comparison := debtPublicRollbackMetadataComparison(trusted.Sites, head.Sites, actual)
+				if comparison[pair[1].identity()] != pair[1] {
+					t.Fatal("historical unrefreshed comparison lost its exact donor")
+				}
 			}
 		}
 		if err := debtValidateCollectorIdentity(collector, head.Collector, trusted, head, "", debtDeliveryRetirementProof{Root: proofRoot, Actual: actual}); err != nil {

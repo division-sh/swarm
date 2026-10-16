@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"go/parser"
+	"go/token"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -55,6 +60,44 @@ func catchUp2542HistoricalRows(t *testing.T, rows []recipe, master bool) []recip
 }
 
 var catchUp2542PriorRows sync.Map
+
+func catchUp2542HistoricalBody(t *testing.T, path, name string) string {
+	t.Helper()
+	current, err := canonicalFunction(selectedCausalObservationBody(t, path, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := selectedreadrole.CatchUp2542HistoricalFunction("../../..", path, name, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return prior
+}
+
+func repair2698HistoricalBody(t *testing.T, path, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("../../..", path))
+	actual := raw
+	if err == nil {
+		raw, err = selectedreadrole.Repair2698HistoricalSource("../../..", path, raw)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(raw, actual) {
+		return selectedCausalObservationBody(t, path, name)
+	}
+	set := token.NewFileSet()
+	file, err := parser.ParseFile(set, path, raw, parser.AllErrors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	function, err := uniqueFunction(file, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw[set.Position(function.Pos()).Offset:set.Position(function.End()).Offset])
+}
 
 // Restore only the exact authenticated pair for the old master comparator.
 // Its immutable packets and hostile controls remain unchanged.

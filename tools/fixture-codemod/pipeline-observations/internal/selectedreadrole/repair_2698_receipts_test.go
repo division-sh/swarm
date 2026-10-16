@@ -28,7 +28,7 @@ func TestRepair2698SourceCompositionPreservesBothSignedCuts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			endpoint, err := Repair2698FixtureNameHistoricalSource(root, pin.File, current)
+			endpoint, err := Repair2698SuccessorHistoricalSource(root, pin.File, current)
 			if err != nil || fmt.Sprintf("%x", sha256.Sum256(endpoint)) != pin.AfterSHA256 {
 				t.Fatal("actual source differs from the finite repaired endpoint:", err)
 			}

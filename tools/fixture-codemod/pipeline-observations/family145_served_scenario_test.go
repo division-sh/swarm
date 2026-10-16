@@ -80,12 +80,16 @@ func TestFamily145ServedScenarioReadOwnerAndFixedWitnessConsumersAreClosed(t *te
 	if _, err := earlierServedScenarioOwnerFile(root, deliveryRecoveryReadOwner, append(current, '\n')); err == nil {
 		t.Fatal("owner inverse accepted unrelated bytes")
 	}
-	for _, cut := range []struct{ path, witness string }{
-		{"internal/store/internal/backend/pipelinepersistence/test_publication_replay_failure.go", "delivery.ReplayScopePriorDeliveryWitnessSQL(postgres)"},
-		{"internal/store/internal/apiidempotency/test_publication_completion_failure.go", "delivery.APICompletionPriorDeliveryWitnessSQL(postgres)"},
+	for _, cut := range []struct{ path, declaration, witness string }{
+		{"internal/store/internal/backend/pipelinepersistence/owner_operations.go", "SetPublicationReplayFailureTx", "delivery.ReplayScopePriorDeliveryWitnessSQL(postgres)"},
+		{"internal/store/internal/backend/pipelinepersistence/owner_operations.go", "SetPublicationCompletionFailureTx", "delivery.APICompletionPriorDeliveryWitnessSQL(postgres)"},
 	} {
 		raw, err := os.ReadFile(filepath.Join(root, cut.path))
-		if err != nil || strings.Count(string(raw), cut.witness) != 1 || strings.Contains(string(raw), "FROM event_deliveries") {
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := selectedreadrole.Body(raw, cut.declaration)
+		if err != nil || strings.Count(body, cut.witness) != 1 || strings.Contains(body, "FROM event_deliveries") {
 			t.Fatalf("private trigger rebuilt/lost the canonical delivery witness: %s %v", cut.path, err)
 		}
 	}
@@ -94,8 +98,8 @@ func TestFamily145ServedScenarioReadOwnerAndFixedWitnessConsumersAreClosed(t *te
 func TestFamily145ServedScenarioFixedWitnessesNeverEscapePrivateFaultOwners(t *testing.T) {
 	root := filepath.Clean("../../..")
 	allowed := map[string]string{
-		"ReplayScopePriorDeliveryWitnessSQL":   "internal/store/internal/backend/pipelinepersistence/test_publication_replay_failure.go",
-		"APICompletionPriorDeliveryWitnessSQL": "internal/store/internal/apiidempotency/test_publication_completion_failure.go",
+		"ReplayScopePriorDeliveryWitnessSQL":   "SetPublicationReplayFailureTx",
+		"APICompletionPriorDeliveryWitnessSQL": "SetPublicationCompletionFailureTx",
 	}
 	seen := map[string]int{}
 	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, err error) error {
@@ -110,13 +114,20 @@ func TestFamily145ServedScenarioFixedWitnessesNeverEscapePrivateFaultOwners(t *t
 		if err != nil {
 			return err
 		}
+		declaration := ""
 		ast.Inspect(file, func(node ast.Node) bool {
+			if fn, ok := node.(*ast.FuncDecl); ok {
+				declaration = fn.Name.Name
+			}
+			if _, ok := node.(*ast.GenDecl); ok {
+				declaration = ""
+			}
 			selector, ok := node.(*ast.SelectorExpr)
 			if !ok || allowed[selector.Sel.Name] == "" {
 				return true
 			}
 			seen[selector.Sel.Name]++
-			if filepath.ToSlash(relative) != allowed[selector.Sel.Name] {
+			if filepath.ToSlash(relative) != "internal/store/internal/backend/pipelinepersistence/owner_operations.go" || declaration != allowed[selector.Sel.Name] {
 				t.Errorf("fixed private witness escaped its exact owner: %s in %s", selector.Sel.Name, relative)
 			}
 			return true

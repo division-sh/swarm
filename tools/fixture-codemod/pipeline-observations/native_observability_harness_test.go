@@ -85,7 +85,7 @@ func TestNativeObservabilityHarnessConfinesEveryReceiptFaultAndConsumer(t *testi
 		}
 		want, err := canonicalFunction(before)
 		got, afterErr := canonicalFunction(row.After)
-		actual := selectedCausalObservationBody(t, row.File, row.Function)
+		actual := catchUp2542HistoricalBody(t, row.File, row.Function)
 		value, sourceErr := canonicalFunction(actual)
 		if err != nil || afterErr != nil || sourceErr != nil || want != got || value != got {
 			t.Fatalf("observation harness drift: %s", row.Function)
