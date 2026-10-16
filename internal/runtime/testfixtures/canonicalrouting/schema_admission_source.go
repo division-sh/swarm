@@ -61,3 +61,10 @@ const (
 	SchemaInputPinsParserEnvelope  = "pins:\n  inputs:"
 	SchemaOutputPinsParserEnvelope = "pins:\n  outputs:"
 )
+
+const SchemaProviderReferenceAdmission = `pins:
+  inputs: [inbound.telegram.message]
+  outputs: [inbound.telegram.message]
+connect:
+  - {event: inbound.telegram.message, from: ., to: child, resolution: select}
+`

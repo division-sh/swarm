@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -126,8 +127,7 @@ func TestS1ReservedInboundDeclarationStopsExecutableCompiler(t *testing.T) {
 }
 
 func TestS1ProviderReferencesDoNotDeclareInboundNamespace(t *testing.T) {
-	const body = "pins:\n  inputs: [inbound.telegram.message]\n  outputs: [inbound.telegram.message]\nconnect:\n  - {event: inbound.telegram.message, from: ., to: child, resolution: select}\n"
-	snapshot, err := yamlsource.Load([]byte(body))
+	snapshot, err := yamlsource.Load([]byte(canonicalrouting.SchemaProviderReferenceAdmission))
 	if err != nil {
 		t.Fatal(err)
 	}
