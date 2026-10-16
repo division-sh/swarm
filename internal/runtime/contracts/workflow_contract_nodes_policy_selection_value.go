@@ -15,67 +15,102 @@ func projectNodePolicyCaseValue(value yamlsource.Value) (string, PolicySheetRowM
 	if err != nil {
 		return "", PolicySheetRowMetadata{}, err
 	}
-	if _, singular := fields["selector"]; singular {
-		if _, plural := fields["selectors"]; plural {
-			return "", PolicySheetRowMetadata{}, fmt.Errorf("POLICY-SHEET-ROW: case at %s declares both selector and selectors", value.Location())
-		}
-	}
-	var selectors []string
-	if singular, present := fields["selector"]; present {
-		text, err := nodeValueText(singular, "case.selector")
-		if err != nil {
-			return "", PolicySheetRowMetadata{}, err
-		}
-		selectors = []string{strings.TrimSpace(text)}
-	}
-	if plural, present := fields["selectors"]; present {
-		selectors, err = projectNodePolicyStringListValue(plural, "case.selectors")
-		if err != nil {
-			return "", PolicySheetRowMetadata{}, err
-		}
-	}
-	if len(selectors) == 0 {
-		return "", PolicySheetRowMetadata{}, fmt.Errorf("POLICY-SHEET-ROW: case at %s requires selector or selectors", value.Location())
-	}
-	for _, selector := range selectors {
-		if err := validatePolicySheetSelector(selector, "case.selector"); err != nil {
-			return "", PolicySheetRowMetadata{}, err
-		}
+	selectors, plural, err := projectNodePolicyCaseSelectors(value, fields)
+	if err != nil {
+		return "", PolicySheetRowMetadata{}, err
 	}
 	equals, present := fields["equals"]
 	if !present {
 		return "", PolicySheetRowMetadata{}, fmt.Errorf("POLICY-SHEET-ROW: case at %s requires equals", value.Location())
 	}
-	var values, literals []string
-	if equals.Presence() == yamlsource.PresenceSequence || equals.Presence() == yamlsource.PresenceEmptySequence {
-		items, err := equals.Sequence()
-		if err != nil {
-			return "", PolicySheetRowMetadata{}, err
-		}
-		for _, item := range items {
-			literalValue, literal, err := projectNodePolicyLiteralValue(item, "case.equals")
-			if err != nil {
-				return "", PolicySheetRowMetadata{}, err
-			}
-			values, literals = append(values, literalValue), append(literals, literal)
-		}
-	} else {
-		literalValue, literal, err := projectNodePolicyLiteralValue(equals, "case.equals")
-		if err != nil {
-			return "", PolicySheetRowMetadata{}, err
-		}
-		values, literals = []string{literalValue}, []string{literal}
+	values, literals, err := projectNodePolicyCaseEquals(equals, plural)
+	if err != nil {
+		return "", PolicySheetRowMetadata{}, err
 	}
 	if len(values) != len(selectors) {
 		return "", PolicySheetRowMetadata{}, fmt.Errorf("POLICY-SHEET-ROW: case at %s selector count %d does not match equals count %d", value.Location(), len(selectors), len(values))
 	}
+	if plural && len(selectors) == 1 {
+		return "", PolicySheetRowMetadata{}, fmt.Errorf("POLICY-SHEET-ROW: case at %s: one selector: write `selector:` and a scalar `equals:`", value.Location())
+	}
 	parts := make([]string, 0, len(selectors))
+	seen := make(map[[2]string]int, len(selectors))
 	for i := range selectors {
+		// The lowered literal preserves text/bool/number distinctions without
+		// inventing a separate numeric equivalence or changing authored order.
+		pair := [2]string{selectors[i], literals[i]}
+		if previous, duplicate := seen[pair]; duplicate {
+			return "", PolicySheetRowMetadata{}, fmt.Errorf("POLICY-SHEET-ROW: duplicate case pair at positions %d and %d at %s", previous+1, i+1, value.Location())
+		}
+		seen[pair] = i
 		parts = append(parts, selectors[i]+" == "+literals[i])
 	}
 	return strings.Join(parts, " && "), PolicySheetRowMetadata{
 		Kind: PolicySheetRowKindCase, Selectors: selectors, CaseValues: values,
 	}, nil
+}
+
+func projectNodePolicyCaseSelectors(value yamlsource.Value, fields map[string]yamlsource.Value) ([]string, bool, error) {
+	singular, hasSingular := fields["selector"]
+	plural, hasPlural := fields["selectors"]
+	if hasSingular && hasPlural {
+		return nil, false, fmt.Errorf("POLICY-SHEET-ROW: case at %s declares both selector and selectors", value.Location())
+	}
+	var items []yamlsource.Value
+	switch {
+	case hasSingular:
+		items = []yamlsource.Value{singular}
+	case hasPlural:
+		if plural.Presence() == yamlsource.PresenceScalar || plural.Presence() == yamlsource.PresenceEmptyScalar {
+			return nil, false, fmt.Errorf("POLICY-SHEET-ROW: case.selectors at %s: `selectors` is a list; for one selector write `selector`", plural.Location())
+		}
+		var err error
+		items, err = plural.Sequence()
+		if err != nil {
+			return nil, false, nodeValueError(plural, err)
+		}
+	default:
+		return nil, false, fmt.Errorf("POLICY-SHEET-ROW: case at %s requires selector or selectors", value.Location())
+	}
+	if len(items) == 0 {
+		return nil, false, fmt.Errorf("POLICY-SHEET-ROW: case.selectors at %s requires a non-empty list", plural.Location())
+	}
+	selectors := make([]string, len(items))
+	for i, item := range items {
+		text, err := nodeValueText(item, "case.selector")
+		if err != nil {
+			return nil, false, err
+		}
+		selectors[i] = strings.TrimSpace(text)
+		if err := validatePolicySheetSelector(selectors[i], "case.selector"); err != nil {
+			return nil, false, nodeValueError(item, err)
+		}
+	}
+	return selectors, hasPlural, nil
+}
+
+func projectNodePolicyCaseEquals(value yamlsource.Value, plural bool) ([]string, []string, error) {
+	sequence := value.Presence() == yamlsource.PresenceSequence || value.Presence() == yamlsource.PresenceEmptySequence
+	if sequence != plural {
+		return nil, nil, fmt.Errorf("POLICY-SHEET-ROW: case.equals at %s: case is either singular (selector/equals) or plural (selectors/equals), not mixed", value.Location())
+	}
+	items := []yamlsource.Value{value}
+	if sequence {
+		var err error
+		items, err = value.Sequence()
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	values, literals := make([]string, 0, len(items)), make([]string, 0, len(items))
+	for _, item := range items {
+		literalValue, literal, err := projectNodePolicyLiteralValue(item, "case.equals")
+		if err != nil {
+			return nil, nil, err
+		}
+		values, literals = append(values, literalValue), append(literals, literal)
+	}
+	return values, literals, nil
 }
 
 func projectNodePolicyRangeValue(value yamlsource.Value) (string, PolicySheetRowMetadata, error) {
