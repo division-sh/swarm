@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -54,6 +55,15 @@ func TestS1SelectedForkSourceRequiresWholeRetainedResponsibilityBothStores(t *te
 				}
 			}
 			requireSource(t)
+			t.Run("otherwise-valid-operation-other-root", func(t *testing.T) {
+				fixture.replaceOperationRoot(t, fixture.parent.Admission().Reference())
+				loaded, err := reader.LoadSelectedForkRootedSource(ctx, fixture.childID)
+				fixture.replaceOperationRoot(t, fixture.target.Admission().Reference())
+				if err == nil || loaded.Artifact() != nil || loaded.Admission() != (sourceartifact.RootAdmission{}) {
+					t.Fatalf("valid permanent operation crossed child root: %+v, %v", loaded.Admission().Reference(), err)
+				}
+				requireSource(t)
+			})
 			for _, cell := range []struct {
 				name, statement   string
 				changed, original any
@@ -103,6 +113,13 @@ func TestS1SelectedForkSourceRequiresWholeRetainedResponsibilityBothStores(t *te
 				loaded, err := reader.LoadSelectedForkRootedSource(canceled, fixture.childID)
 				if !errors.Is(err, context.Canceled) || loaded.Artifact() != nil {
 					t.Fatalf("canceled reconstruction returned compiler authority: %+v, %v", loaded.Admission().Reference(), err)
+				}
+			})
+			t.Run("missing-content", func(t *testing.T) {
+				fixture.removeSourceContent(t)
+				loaded, err := reader.LoadSelectedForkRootedSource(ctx, fixture.childID)
+				if err == nil || loaded.Artifact() != nil || loaded.Admission() != (sourceartifact.RootAdmission{}) {
+					t.Fatalf("deleted content reconstructed compiler authority from history: %+v, %v", loaded.Admission().Reference(), err)
 				}
 			})
 		})
@@ -317,13 +334,72 @@ func newSelectedRootedSourceFixture(t *testing.T, backend string) selectedRooted
 	return f
 }
 
-func (f selectedRootedSourceFixture) changeEvidence(t *testing.T, statement string, value, id any) {
+func (f selectedRootedSourceFixture) changeEvidence(t *testing.T, statement string, args ...any) {
 	t.Helper()
 	var err error
+	var result sql.Result
 	if f.postgres != nil {
-		_, err = f.postgres.ExecContext(context.Background(), statement, value, id)
+		result, err = f.postgres.ExecContext(context.Background(), statement, args...)
 	} else {
-		_, err = f.sqlite.ExecContext(context.Background(), statement, value, id)
+		result, err = f.sqlite.ExecContext(context.Background(), statement, args...)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		t.Fatalf("corrupt/restore exact retained evidence: affected=%d err=%v", count, err)
+	}
+}
+
+func (f selectedRootedSourceFixture) replaceOperationRoot(t *testing.T, reference sourceartifact.RootAdmissionReference) {
+	t.Helper()
+	var request runfork.ForkOperationRequest
+	read := func(ctx context.Context, tx *sql.Tx) error {
+		record, found, err := loadForkOperationByIDTx(ctx, tx, f.operationID, false)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return sql.ErrNoRows
+		}
+		request = record.Request
+		return nil
+	}
+	var err error
+	if f.postgres != nil {
+		err = f.postgres.RunReadTransaction(context.Background(), read)
+	} else {
+		err = f.sqlite.RunReadTransaction(context.Background(), read)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.TargetRootReference = reference
+	canonical, semanticHash, err := request.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := canonicaljson.Bytes(canonical)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.changeEvidence(t, `UPDATE run_fork_operations SET request_json=$1, semantic_hash=$2 WHERE operation_id=$3`, string(raw), semanticHash, f.operationID)
+}
+
+func (f selectedRootedSourceFixture) removeSourceContent(t *testing.T) {
+	t.Helper()
+	remove := func(ctx context.Context, tx *sql.Tx) error {
+		dialect := "sqlite"
+		if f.postgres != nil {
+			dialect = "postgres"
+		}
+		return artifactstore.DeleteSourceArtifactForFixtureRefusalTx(ctx, tx, dialect, sourceartifactfixture.FactFor(f.target.Artifact()))
+	}
+	var err error
+	if f.postgres != nil {
+		err = f.postgres.RunTransaction(context.Background(), remove)
+	} else {
+		err = f.sqlite.RunTransaction(context.Background(), remove)
 	}
 	if err != nil {
 		t.Fatal(err)
