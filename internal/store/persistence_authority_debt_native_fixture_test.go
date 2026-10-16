@@ -67,11 +67,13 @@ func debtReviewedNativeReopenDeclaration(path string) string {
 		return "TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores"
 	case "internal/runtime/runforkexecution/pending_effect_reply_recovery_test.go":
 		return "TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores"
+	case "internal/runtime/runforkexecution/q1_session_fork_execution_test.go":
+		return "proveSelectedQ1SessionSiblingReforkBothStores"
 	}
 	return ""
 }
 
-// Only the second result of each exact public factory can supply these eight
+// Only the second result of each exact public factory can supply these ten
 // zero-argument opens. Inspect resolved objects so unrelated/shadowed names do
 // not gain authority and the factory closure cannot be reassigned or escape.
 func debtReviewedNativeReopenCalls(path string, file *ast.File, info *types.Info) map[token.Pos]bool {

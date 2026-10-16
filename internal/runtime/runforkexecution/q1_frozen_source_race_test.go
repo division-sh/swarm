@@ -7,9 +7,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
@@ -24,7 +27,11 @@ type q1FreezeBetweenTransactions struct {
 	}
 	materializations atomic.Int32
 	children         [2]string
-	secondReady      chan struct{}
+	completed        [2]chan struct{}
+	allReady         chan struct{}
+	completeMu       sync.Mutex
+	completeOrder    []int
+	secondFirst      bool
 	releaseSecond    chan struct{}
 	refused          atomic.Int32
 }
@@ -45,15 +52,33 @@ func (p *q1FreezeBetweenTransactions) MaterializeRunForkForSelectedContractExecu
 	if err != nil {
 		return result, selectedMaterializationCommitTestError{value: result, cause: err}
 	}
-	p.children[index] = result.ForkRunID
-	if index == 1 {
-		close(p.secondReady)
+	if index == 0 && p.secondFirst {
+		select {
+		case <-p.completed[1]:
+		case <-ctx.Done():
+			return result, selectedMaterializationCommitTestError{value: result, cause: ctx.Err()}
+		}
 	}
+	p.completeMu.Lock()
+	p.children[index] = result.ForkRunID
+	p.completeOrder = append(p.completeOrder, index)
+	close(p.completed[index])
+	if len(p.completeOrder) == len(p.children) {
+		close(p.allReady)
+	}
+	p.completeMu.Unlock()
 	return result, nil
 }
 
 func (p *q1FreezeBetweenTransactions) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-	ready := p.secondReady
+	// Both native materializations must publish their identities before either
+	// activation selects its role, including reversed completion order.
+	select {
+	case <-p.allReady:
+	case <-ctx.Done():
+		return runfork.RunForkActivation{}, ctx.Err()
+	}
+	ready := p.allReady
 	if req.ForkRunID != p.children[0] {
 		ready = p.releaseSecond
 	}
@@ -157,90 +182,134 @@ func proveSelectedQ1FrozenOwnerlessRecoveryBothStores(t *testing.T) {
 
 func proveSelectedQ1FirstFreezeRaceBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			parent, request := ownerlessSelectedOperationFixture(t, backend)
-			ctx, cancel := context.WithCancel(parent)
-			selected := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader).Store
-			headers := selected.(interface {
-				LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
-			})
-			probe := &q1FreezeBetweenTransactions{SelectedContractForkLifecycle: request.Owner.ports.fork, headers: headers,
-				secondReady: make(chan struct{}), releaseSecond: make(chan struct{})}
-			request.Owner.ports.fork = probe
-			type outcome struct {
-				result SelectedContractExecutionResult
-				err    error
-			}
-			results, joined := make(chan outcome, 2), make(chan struct{}, 2)
-			var release sync.Once
-			defer func() {
-				cancel()
-				release.Do(func() { close(probe.releaseSecond) })
-				for range 2 {
-					<-joined
+		for _, order := range []string{"natural_completion", "second_completes_first"} {
+			t.Run(backend+"/"+order, func(t *testing.T) {
+				parent, request := ownerlessSelectedOperationFixture(t, backend)
+				ctx, cancel := context.WithCancel(parent)
+				selected := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader).Store
+				headers := selected.(interface {
+					LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+				})
+				other := q1IndependentExecutionOwner(t, request.Owner)
+				probe := &q1FreezeBetweenTransactions{SelectedContractForkLifecycle: request.Owner.ports.fork, headers: headers,
+					completed: [2]chan struct{}{make(chan struct{}), make(chan struct{})}, allReady: make(chan struct{}),
+					secondFirst: order == "second_completes_first", releaseSecond: make(chan struct{})}
+				request.Owner.ports.fork = probe
+				other.ports.fork = probe
+				type outcome struct {
+					result SelectedContractExecutionResult
+					err    error
 				}
-			}()
-			for range 2 {
-				invocation := request
-				operation := *request.ForkOperation
-				operation.OperationID, operation.IdempotencyKey = uuid.NewString(), uuid.NewString()
-				invocation.ForkOperation = &operation
-				go func() {
-					defer func() { joined <- struct{}{} }()
-					result, err := ExecuteSelectedContractRunFork(ctx, invocation)
-					results <- outcome{result, err}
+				results, joined := make(chan outcome, 2), make(chan struct{}, 2)
+				var release sync.Once
+				defer func() {
+					cancel()
+					release.Do(func() { close(probe.releaseSecond) })
+					for range 2 {
+						<-joined
+					}
 				}()
-			}
-			await := func() outcome {
-				t.Helper()
-				select {
-				case result := <-results:
-					return result
-				case <-ctx.Done():
-					t.Fatal(ctx.Err())
-					return outcome{}
+				for _, owner := range []SelectedContractExecutionOwner{request.Owner, other} {
+					invocation := request
+					invocation.Owner = owner
+					operation := *request.ForkOperation
+					operation.OperationID, operation.IdempotencyKey = uuid.NewString(), uuid.NewString()
+					invocation.ForkOperation = &operation
+					go func() {
+						defer func() { joined <- struct{}{} }()
+						result, err := ExecuteSelectedContractRunFork(ctx, invocation)
+						results <- outcome{result, err}
+					}()
 				}
-			}
-			first := await()
-			if first.err != nil || !first.result.Activation.Activated || !first.result.Activation.SourceFrozen || first.result.Materialization.ForkRunID != probe.children[0] {
-				t.Fatalf("first child failed to perform the original freeze: %+v %v", first.result, first.err)
-			}
-			frozen, err := headers.LoadRunHeader(ctx, request.SourceRunID)
-			if err != nil || frozen.Status != "forked" || frozen.ContinuedAsRunID != probe.children[0] || frozen.EndedAt == nil {
-				t.Fatalf("original source freeze lineage: %+v %v", frozen, err)
-			}
-			paused, err := headers.LoadRunHeader(ctx, probe.children[1])
-			if err != nil || paused.Status != "paused" {
-				t.Fatalf("second child bypassed the activation barrier: %+v %v", paused, err)
-			}
-			before, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, request.SourceRunID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			release.Do(func() { close(probe.releaseSecond) })
-			second := await()
-			if second.err != nil || !second.result.Activation.Activated || !second.result.Activation.SourceFrozen || second.result.Activation.SourceRunStatus != "forked" ||
-				second.result.Activation.BranchDivergence != nil || second.result.Materialization.ForkRunID != probe.children[1] || probe.children[0] == probe.children[1] ||
-				!first.result.Materialization.ForkPoint.SameIdentity(second.result.Materialization.ForkPoint) || probe.materializations.Load() != 2 || probe.refused.Load() != 2 {
-				t.Fatalf("second activation did not re-prove historical source admission: %+v %v", second.result, second.err)
-			}
-			afterHeader, err := headers.LoadRunHeader(ctx, request.SourceRunID)
-			if err != nil || !reflect.DeepEqual(frozen, afterHeader) {
-				t.Fatalf("second activation rewrote the original source freeze: before=%+v after=%+v err=%v", frozen, afterHeader, err)
-			}
-			after, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, request.SourceRunID)
-			if err != nil || !reflect.DeepEqual(before, after) {
-				t.Fatalf("second activation changed frozen source domain: %v", err)
-			}
-			for _, child := range probe.children {
-				stored, err := storetest.ReadSelectedExecutionStorage(ctx, selected, child)
-				if err != nil || stored.Occurrences != 1 || stored.RunStatus == "failed" || stored.RunStatus == "cancelled" {
-					t.Fatalf("independent current child authority: child=%s stored=%+v err=%v", child, stored, err)
+				await := func() outcome {
+					t.Helper()
+					select {
+					case result := <-results:
+						return result
+					case <-ctx.Done():
+						t.Fatal(ctx.Err())
+						return outcome{}
+					}
 				}
-			}
-			if err := request.Owner.RetireSelectedContexts(ctx); err != nil {
-				t.Fatal(err)
-			}
-		})
+				first := await()
+				if first.err != nil || !first.result.Activation.Activated || !first.result.Activation.SourceFrozen || first.result.Materialization.ForkRunID != probe.children[0] {
+					t.Fatalf("first child failed to perform the original freeze: %+v %v", first.result, first.err)
+				}
+				if order == "second_completes_first" && !reflect.DeepEqual(probe.completeOrder, []int{1, 0}) {
+					t.Fatalf("reversed completion schedule did not execute: %v", probe.completeOrder)
+				}
+				frozen, err := headers.LoadRunHeader(ctx, request.SourceRunID)
+				if err != nil || frozen.Status != "forked" || frozen.ContinuedAsRunID != probe.children[0] || frozen.EndedAt == nil {
+					t.Fatalf("original source freeze lineage: %+v %v", frozen, err)
+				}
+				paused, err := headers.LoadRunHeader(ctx, probe.children[1])
+				if err != nil || paused.Status != "paused" {
+					t.Fatalf("second child bypassed the activation barrier: %+v %v", paused, err)
+				}
+				before, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, request.SourceRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				release.Do(func() { close(probe.releaseSecond) })
+				second := await()
+				if second.err != nil || !second.result.Activation.Activated || !second.result.Activation.SourceFrozen || second.result.Activation.SourceRunStatus != "forked" ||
+					second.result.Activation.BranchDivergence != nil || second.result.Materialization.ForkRunID != probe.children[1] || probe.children[0] == probe.children[1] ||
+					!first.result.Materialization.ForkPoint.SameIdentity(second.result.Materialization.ForkPoint) || probe.materializations.Load() != 2 || probe.refused.Load() != 2 {
+					t.Fatalf("second activation did not re-prove historical source admission: %+v %v", second.result, second.err)
+				}
+				afterHeader, err := headers.LoadRunHeader(ctx, request.SourceRunID)
+				if err != nil || !reflect.DeepEqual(frozen, afterHeader) {
+					t.Fatalf("second activation rewrote the original source freeze: before=%+v after=%+v err=%v", frozen, afterHeader, err)
+				}
+				after, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, request.SourceRunID)
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("second activation changed frozen source domain: %v", err)
+				}
+				for _, child := range probe.children {
+					stored, err := storetest.ReadSelectedExecutionStorage(ctx, selected, child)
+					if err != nil || stored.Occurrences != 1 || stored.RunStatus == "failed" || stored.RunStatus == "cancelled" {
+						t.Fatalf("independent current child authority: child=%s stored=%+v err=%v", child, stored, err)
+					}
+				}
+				if err := request.Owner.RetireSelectedContexts(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err := other.RetireSelectedContexts(ctx); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
 	}
+}
+
+// Separate inventories let both real materializations finish independently;
+// the test does not remove the production materialize/bind admission mutex.
+func q1IndependentExecutionOwner(t *testing.T, original SelectedContractExecutionOwner) SelectedContractExecutionOwner {
+	t.Helper()
+	p := original.ports
+	owner, err := NewSelectedContractExecutionOwner(p.workflow, p.fork, p.runtimeExecution, p.replay,
+		p.events, p.busDurable, p.pipelineObligations, p.manager, p.managerRoles,
+		p.effects, p.completion, p.completionHeartbeat, p.liveSessions, p.managedCapabilities,
+		p.budget, p.logs, p.decisionCards, p.proposedEffects, p.humanTasks,
+		p.decisionCardDraftExpiry, p.humanTaskExpiry, p.candidates, p.genericSchedules)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := runForkTestContext(t)
+	process, found := worklifetime.ProcessFromContext(ctx)
+	if !found {
+		t.Fatal("missing fixture process")
+	}
+	if err := owner.BindSelectedProcess(ctx, process, p.contexts.capability); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := owner.RetireSelectedContexts(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	return owner
 }

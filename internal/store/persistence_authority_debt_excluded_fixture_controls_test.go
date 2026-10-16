@@ -183,7 +183,7 @@ func TestPersistenceAuthorityDebtReviewedExcludedPolicyIsFingerprintBound(t *tes
 		}
 		debtWriteModuleSource(t, copy, path, string(data))
 	}
-	if digest, err := debtCollectorDigest(copy); err != nil || digest != debtExcludedFixtureCollectorTo {
+	if digest, err := debtCollectorDigest(copy); err != nil || digest != debtQ1ReopenCollectorTo {
 		t.Fatalf("copied reviewed policy=%s %v", digest, err)
 	}
 	const policy = "internal/store/persistence_authority_debt_excluded_fixture_test.go"
@@ -192,7 +192,7 @@ func TestPersistenceAuthorityDebtReviewedExcludedPolicyIsFingerprintBound(t *tes
 		t.Fatal(err)
 	}
 	debtWriteModuleSource(t, copy, policy, strings.Replace(string(data), "!= 1", "< 1", 1))
-	if digest, err := debtCollectorDigest(copy); err != nil || digest == debtExcludedFixtureCollectorTo {
+	if digest, err := debtCollectorDigest(copy); err != nil || digest == debtQ1ReopenCollectorTo {
 		t.Fatalf("increased occurrence permission was not fingerprinted: %s %v", digest, err)
 	}
 	if err := os.Remove(filepath.Join(copy, policy)); err != nil {
@@ -226,7 +226,7 @@ func TestPersistenceAuthorityDebtReviewedExcludedCollectorTransition(t *testing.
 	if digest, err := debtCollectorDigest(predecessor); err != nil || digest != debtNativeFixtureCollectorTo {
 		t.Fatalf("immutable predecessor collector=%s error=%v", digest, err)
 	}
-	if digest, err := debtCollectorDigest(root); err != nil || digest != debtExcludedFixtureCollectorTo {
+	if digest, err := debtCollectorDigest(root); err != nil || digest != debtQ1ReopenCollectorTo {
 		t.Fatalf("exact successor collector=%s error=%v", digest, err)
 	}
 	// The uncertainty extraction itself is unchanged, not replaced by a trusting scanner.

@@ -203,7 +203,7 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 func TestPersistenceAuthorityDebtRunFixturePolicyDestinationMatchesSource(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	digest, err := debtCollectorDigest(root)
-	if err != nil || (digest != debtForkProofCollectorTo && digest != debtProcessLeaseCollectorTo && digest != debtNativeFixtureCollectorTo && digest != debtExcludedFixtureCollectorTo) {
+	if err != nil || (digest != debtForkProofCollectorTo && digest != debtProcessLeaseCollectorTo && digest != debtNativeFixtureCollectorTo && digest != debtExcludedFixtureCollectorTo && digest != debtQ1ReopenCollectorTo) {
 		t.Fatalf("reviewed fork/process successor=%s/%s actual=%s error=%v", debtForkProofCollectorTo, debtProcessLeaseCollectorTo, digest, err)
 	}
 	prior := materializeDebtBase(t, root, "40c0b18bf315a949959417688adb32e358413b78")

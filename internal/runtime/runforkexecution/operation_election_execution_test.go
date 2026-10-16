@@ -24,6 +24,7 @@ type competingPreparationLoader struct {
 
 func TestSelectedForkIndependentOperationsExecuteDistinctChildrenBothStores(t *testing.T) {
 	t.Run("first_freeze_between_transactions", proveSelectedQ1FirstFreezeRaceBothStores)
+	t.Run("quiesced_historical_attachment", proveSelectedQ1QuiescedHistoricalAttachmentBothStores)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, identity := range []string{"independent_keys", "independent_actors", "keyless"} {
 			t.Run(backend+"/"+identity, func(t *testing.T) {
