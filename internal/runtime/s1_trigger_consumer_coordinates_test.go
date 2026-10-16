@@ -17,7 +17,7 @@ func s1TriggerConsumerSource(t *testing.T) semanticview.Source {
 	const event = "inbound.team-bot.text_message"
 	for _, prefix := range []string{"", "sibling/"} {
 		members[prefix+"schema.yaml"] = []byte(fmt.Sprintf("stages: []\npins:\n  inputs: [%s]\n  outputs: [%s]\n", event, event))
-		members[prefix+"nodes.yaml"] = []byte(fmt.Sprintf("listener:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s: {guard: {check: 'true'}}\n", event, event))
+		members[prefix+"nodes.yaml"] = []byte(fmt.Sprintf("listener:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s: {guard: {check: true}}\n", event, event))
 	}
 	bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact())})
@@ -100,6 +100,9 @@ func TestS1TriggerSubscriptionConsumersRequireExactSourceScope(t *testing.T) {
 				t.Errorf("caller maps/pattern bypassed raw source scope %q", flow)
 			}
 		}
+		if agent, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{AgentID: "listener", FlowID: flow}); err == nil || agent.ValidForAgent("listener") {
+			t.Errorf("empty-subscription agent admission accepted noncanonical flow %q", flow)
+		}
 	}
 	for _, flow := range []string{".", "sibling"} {
 		node := identitytest.FlowNode(t, flow, "listener")
@@ -114,8 +117,12 @@ func TestS1TriggerProofConsumersCannotNormalizeFlowSelectors(t *testing.T) {
 	const event = "inbound.team-bot.text_message"
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)
 	for _, flow := range []string{".", "sibling"} {
-		if len(census.MatchingConsumers(flow, event)) == 0 || !pinrouting.PinDeclaredOutput(source, flow, event) {
+		if len(census.MatchingConsumers(flow, event)) == 0 || !pinrouting.PinDeclaredOutput(source, flow, event) || !census.ResolveDeclaredInputEndpoint(flow, event).Matched() {
 			t.Fatalf("exact %s lost declared consumer/output", flow)
+		}
+		producer := semanticview.AuthoredEventEndpoint{FlowID: flow, Event: semanticview.ResolveFlowEventProof(source, flow, event)}
+		if len(census.ResolveTypedPubSubConsumerMatches(producer)) == 0 {
+			t.Fatalf("exact %s lost its same-flow relation", flow)
 		}
 		canonical := semanticview.ResolveFlowEventProof(source, flow, event).Canonical
 		if _, err := runtimebus.NewOrdinaryFlowAPIEventPublicationEndpoint(source, flow, canonical); err != nil {
@@ -128,6 +135,13 @@ func TestS1TriggerProofConsumersCannotNormalizeFlowSelectors(t *testing.T) {
 		}
 		if pinrouting.PinDeclaredOutput(source, flow, event) {
 			t.Errorf("output declaration normalized %q", flow)
+		}
+		if census.ResolveDeclaredInputEndpoint(flow, event).Matched() {
+			t.Errorf("declared input lookup normalized %q", flow)
+		}
+		producer := semanticview.AuthoredEventEndpoint{FlowID: flow, Event: semanticview.ResolveFlowEventProof(source, ".", event)}
+		if len(census.ResolveTypedPubSubConsumerMatches(producer)) != 0 {
+			t.Errorf("typed relation normalized producer flow %q", flow)
 		}
 		if _, err := runtimebus.NewOrdinaryFlowAPIEventPublicationEndpoint(source, flow, event); err == nil {
 			t.Errorf("public endpoint normalized %q", flow)
