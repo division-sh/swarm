@@ -63,48 +63,9 @@ func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter
 	if err != nil {
 		return nil, err
 	}
-	fact, err := correlation.DecodeSourceArtifactFact(header.BundleHash)
+	byPath, err := loadRunOperationalInstances(ctx, instances, source, header, facts)
 	if err != nil {
 		return nil, err
-	}
-	flowIDs := []string{"."}
-	for flowID := range source.FlowSchemaEntries() {
-		if flowID != "." {
-			flowIDs = append(flowIDs, flowID)
-		}
-	}
-	slices.Sort(flowIDs)
-	scope, err := pipeline.NewFlowInstanceLookupScope(source, fact, header.RunID, flowIDs, nil)
-	if err != nil {
-		return nil, err
-	}
-	observations, err := instances.ListFlowInstances(ctx, scope)
-	if err != nil {
-		return nil, err
-	}
-	byPath := make(map[string]int, len(observations))
-	for _, observation := range observations {
-		instance, err := observation.WorkflowInstance()
-		if err != nil {
-			return nil, err
-		}
-		graph, known := semanticview.WorkflowStageTopology(source, observation.Selection().FlowID())
-		if !known {
-			return nil, fmt.Errorf("constructed instance has no pinned stage catalog")
-		}
-		stage, err := graph.ResolveStoredStage(instance.CurrentState)
-		if err != nil {
-			return nil, err
-		}
-		path := observation.Owner().Route.InstancePath
-		byPath[path] = len(facts.Instances)
-		facts.Instances = append(facts.Instances, operatorread.RunInstanceFacts{
-			FlowInstance: path, Stage: instance.CurrentState, Revision: instance.Revision,
-			Final: stage.IsFinal(), Complete: true, Retired: instance.Status != "active",
-		})
-		if !instance.StageDefined {
-			facts.Instances[len(facts.Instances)-1].Stage = ""
-		}
 	}
 	deliveries, err := adapter.SnapshotsForRun(ctx, q, header.RunID)
 	if err != nil {
@@ -158,6 +119,53 @@ func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter
 	}
 	facts.Complete = true
 	return facts, nil
+}
+
+func loadRunOperationalInstances(ctx context.Context, instances PipelineObligationSource, source semanticview.Source, header operatorread.RunHeader, facts *operatorread.RunOperationalFacts) (map[string]int, error) {
+	fact, err := correlation.DecodeSourceArtifactFact(header.BundleHash)
+	if err != nil {
+		return nil, err
+	}
+	flowIDs := []string{"."}
+	for flowID := range source.FlowSchemaEntries() {
+		if flowID != "." {
+			flowIDs = append(flowIDs, flowID)
+		}
+	}
+	slices.Sort(flowIDs)
+	scope, err := pipeline.NewFlowInstanceLookupScope(source, fact, header.RunID, flowIDs, nil)
+	if err != nil {
+		return nil, err
+	}
+	observations, err := instances.ListFlowInstances(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	byPath := make(map[string]int, len(observations))
+	for _, observation := range observations {
+		instance, err := observation.WorkflowInstance()
+		if err != nil {
+			return nil, err
+		}
+		graph, known := semanticview.WorkflowStageTopology(source, observation.Selection().FlowID())
+		if !known {
+			return nil, fmt.Errorf("constructed instance has no pinned stage catalog")
+		}
+		stage, err := graph.ResolveStoredStage(instance.CurrentState)
+		if err != nil {
+			return nil, err
+		}
+		path := observation.Owner().Route.InstancePath
+		byPath[path] = len(facts.Instances)
+		facts.Instances = append(facts.Instances, operatorread.RunInstanceFacts{
+			FlowInstance: path, Stage: instance.CurrentState, Revision: instance.Revision,
+			Final: stage.IsFinal(), Complete: true, Retired: instance.Status != "active",
+		})
+		if !instance.StageDefined {
+			facts.Instances[len(facts.Instances)-1].Stage = ""
+		}
+	}
+	return byPath, nil
 }
 
 func loadRunOperationalSessions(ctx context.Context, q eventReadQueryer, runID string, byPath map[string]int, facts *operatorread.RunOperationalFacts, observedAt time.Time) (err error) {
