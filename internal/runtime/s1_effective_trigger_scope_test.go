@@ -128,3 +128,131 @@ func TestS1EffectiveProviderTriggerSchemasRetainCapturedAndRestoredSelection(t *
 		t.Fatal("retained reconstruction selected another provider BODY")
 	}
 }
+
+func TestS1EffectiveProviderTriggerSchemasBindRawAndTemplatePinsWithoutIngress(t *testing.T) {
+	for _, cell := range []struct {
+		name, body, event string
+	}{
+		{"normalized-and-raw", string(packfixture.NeutralProviderMembers()["trigger.yaml"]), "raw"},
+		{"raw-only", "secret: {required: true}\nsignature: {type: token_equality, header: X-Signature}\nevent_name: {literal: raw}\n", "raw"},
+		{"template", "secret: {required: true}\nsignature: {type: token_equality, header: X-Signature}\nevent_name: {template: 'raw.{event_type}'}\nevent_type: {literal: message}\n", "raw.message"},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			members := s1EffectiveProviderScopeMembers()
+			members["team-bot/manifest.yaml"] = packfixture.NeutralProviderMembers()["manifest.yaml"]
+			members["team-bot/trigger.yaml"] = []byte(cell.body)
+			event := "inbound.team-bot." + cell.event
+			for _, flow := range []string{"", "child/"} {
+				members[flow+"schema.yaml"] = []byte(fmt.Sprintf("stages: []\npins:\n  inputs: [%s]\n  outputs: [%s]\n", event, event))
+			}
+			bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
+			projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact())})
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := projection.Source()
+			for _, flow := range []string{".", "child"} {
+				input, found := source.FlowInputEventPin(flow, event)
+				if !found {
+					t.Fatalf("%s lost its authored input pin", flow)
+				}
+				producer, bound := input.ProducerEventSchema()
+				output, outputFound := source.FlowOutputEventPin(flow, event)
+				emitted, outputBound := output.EventSchema()
+				wantBound := flow == "."
+				if !outputFound || bound != wantBound || outputBound != wantBound {
+					t.Fatalf("%s borrowed or lost a whole-directory pin schema: input=%t output=%t", flow, bound, outputBound)
+				}
+				if wantBound && (producer.Classification() != runtimecontracts.CompiledEventSchemaImported || emitted.AcceptanceSchemaDigest() != producer.AcceptanceSchemaDigest() || !compiledSchemaHasField(producer, "provider")) {
+					t.Fatal("raw input/output schemas differ from the imported raw event")
+				}
+			}
+			for _, item := range source.SemanticCapabilities().ProviderTriggerEventProvenance() {
+				if item.Provider == "team-bot" && len(item.FlowScopes) == 1 && item.FlowScopes[0] == "." && item.Event == event && item.Kind != "raw" {
+					t.Fatalf("raw output was reclassified as normalized: %+v", item)
+				}
+			}
+			if cell.name != "normalized-and-raw" && semanticview.ResolveEventSchema(source, ".", "inbound.team-bot.text_message").HasSchema {
+				t.Fatal("raw-only directory acquired a fabricated normalized event")
+			}
+			if len(source.SemanticCapabilities().ProviderTriggerOutputBindings()) != 0 || len(source.SemanticCapabilities().ProviderIngressEvents()) != 0 {
+				t.Fatal("static input/schema composition created authenticated output or enabled ingress")
+			}
+		})
+	}
+}
+
+func TestS1EffectiveProviderTriggerSchemaReadbackIsDefensive(t *testing.T) {
+	bundle, rooted, _ := loadS1EffectiveProviderScope(t, s1EffectiveTriggerMembers())
+	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := projection.Source()
+	const event = "inbound.team-bot.text_message"
+	for _, readback := range []map[string]runtimecontracts.EventCatalogEntry{
+		source.EventEntries(), source.ResolvedEventCatalog(), source.FlowScopes()[0].Events,
+	} {
+		delete(readback, event)
+	}
+	for _, flow := range []string{".", "sibling"} {
+		scope, found := source.FlowScopeByID(flow)
+		if !found {
+			t.Fatal("fixture lost flow")
+		}
+		entry := scope.Events[event]
+		delete(entry.Payload.Properties, "text")
+		delete(scope.Events, event)
+		delete(scope.Events, "inbound.team_bot.text_message")
+		after, _ := source.FlowScopeByID(flow)
+		entry, present := after.Events[event]
+		if _, found := entry.Payload.Properties["text"]; !present || !found {
+			t.Errorf("%s returned flow metadata mutated the retained provider schema", flow)
+		}
+		if _, present := after.Events["inbound.team_bot.text_message"]; !present {
+			t.Errorf("%s returned flow metadata deleted another visible provider", flow)
+		}
+		resolution := semanticview.ResolveEventSchema(source, flow, event)
+		if !resolution.HasCompiled || !compiledSchemaHasField(resolution.CompiledSchema, "text") {
+			t.Errorf("%s diagnostic readback changed the compiled contract", flow)
+		}
+	}
+}
+
+func TestS1EffectiveProviderTriggerSchemasRefuseNoncanonicalFlowReaders(t *testing.T) {
+	members := s1EffectiveTriggerMembers()
+	const event = "inbound.team-bot.text_message"
+	members["schema.yaml"] = []byte("stages: []\npins:\n  inputs: [" + event + "]\n  outputs: [" + event + "]\n")
+	bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
+	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := projection.Source()
+	for _, flow := range []string{"", " ", " . ", "./", "/", "/child", "child/", "child/../sibling", "foreign", "team-bot"} {
+		t.Run(fmt.Sprintf("%q", flow), func(t *testing.T) {
+			if pins := source.FlowInputEventPins(flow); len(pins) != 0 {
+				t.Errorf("noncanonical flow %q borrowed %d input pins", flow, len(pins))
+			}
+			if pins := source.FlowOutputEventPins(flow); len(pins) != 0 {
+				t.Errorf("noncanonical flow %q borrowed %d output pins", flow, len(pins))
+			}
+			if _, found := source.FlowInputEventPin(flow, event); found {
+				t.Errorf("noncanonical flow %q acquired an input pin", flow)
+			}
+			if _, found := source.FlowOutputEventPin(flow, event); found {
+				t.Errorf("noncanonical flow %q acquired an output pin", flow)
+			}
+			if _, found, err := source.ResolveEffectiveCompiledFlowEventSchema(flow, event); err != nil || found {
+				t.Errorf("noncanonical flow %q acquired a compiled provider schema: %v", flow, err)
+			}
+			if _, _, found := source.ResolveFlowEventCatalogEntry(flow, event); found {
+				t.Errorf("noncanonical flow %q acquired scoped catalog evidence", flow)
+			}
+		})
+	}
+	input, found := source.FlowInputEventPin(".", event)
+	if _, bound := input.ProducerEventSchema(); !found || !bound {
+		t.Fatal("exact root lost its imported input pin")
+	}
+}
