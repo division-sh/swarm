@@ -1,5 +1,14 @@
 # #2698 nested preservation cost and reset correspondence
 
+Decision 1A update: USER6217048948 and reviewer-b6217090854 supersede the
+historical freshness typed-reconciliation landing obligation below. Only
+TestPersistenceAuthorityDebtFreshnessCatchUpReconcilesActualOrigins is removed;
+all original RED/phase receipts remain evidence, not a passing scan. The three
+other freshness controls, shared cache/archive/source machinery and the live
+ratchet remain. The separate NativeEntry historical-census sibling is retained
+pending explicit scope clarification. Decision1B is separate; no codemod
+selection or budget change is implied. Reintroduction belongs to#2714.
+
 Track: FULL. Local repair only, not the final landing head. The PR branch is not
 pushed by this checkpoint. Authority: reviewer-b 6214334661, continuing
 6213085335/6213797930; cold-origin measurement reported in 6214618025.

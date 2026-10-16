@@ -136,34 +136,6 @@ func TestPersistenceAuthorityDebtFreshnessCatchUpForwardAndForeignProvenance(t *
 	}
 }
 
-func TestPersistenceAuthorityDebtFreshnessCatchUpReconcilesActualOrigins(t *testing.T) {
-	root := debtCatchUpHistoricalArchive(t, debtCatchUpNativeEntryLane)
-	// The archive identifies the inspected input, not the executing analyzer.
-	cache := debtAnalysisCacheForCheckout(t, persistenceAuthorityRepoRoot(t))
-	actual := cache.baseSites(t, root, debtCatchUpNativeEntryLane)
-	raw, err := os.ReadFile(filepath.Join(root, debtBaselinePath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	head, err := debtBaselineWithCollector(root, raw, debtCatchUpFreshnessCollectorTo, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, input := range [][2]string{{debtCatchUpFreshnessLane, debtCatchUpCollectorTo}, {debtCatchUpFreshnessInput, debtProcessLeaseFreshnessCollectorTo}} {
-		origin := materializeDebtBase(t, root, input[0])
-		original := cache.baseSites(t, origin, input[0])
-		trusted, _, err := debtCatchUpSignedBaseline(root, input[0], input[1])
-		if err != nil {
-			t.Fatal(err)
-		}
-		failures := authorityDebtRatchet(actual, head.Sites, trusted.Sites, original, debtDeliveryRetirementProof{Root: root, Actual: actual})
-		if len(failures) != 0 {
-			t.Fatalf("actual-source reconciliation failed for %s: %v", input[0], failures)
-		}
-		t.Logf("actual origin %s=%d; composed=%d; no unmatched additions or resurrection", input[0], authorityDebtCount(original), authorityDebtCount(actual))
-	}
-}
-
 func TestPersistenceAuthorityDebtFreshnessCatchUpRefusesChangedCurrentSource(t *testing.T) {
 	root := debtCatchUpHistoricalArchive(t, debtCatchUpNativeEntryLane)
 	copy := debtCatchUpSourceCopyFrom(t, root)
