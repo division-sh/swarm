@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"maps"
 	"os"
 	"path/filepath"
@@ -21,6 +22,12 @@ const debtRepair2698FixtureNameSHA = "910a0a6e02aba0d8f3245454c0505ab237c6ee0da1
 const debtRepair2698CollectorTo = "502836943c1bdeacad123044ecebba5bacb85970942ab67297a4fb4719b202e2"
 const debtRepair2698ProofCostBefore = "02886cacfda701c53551d2a06cca05955eaa1b5b"
 const debtRepair2698ProofCostCollectorTo = "7898e5f737ab7f1ab9d69439eb484f57c95c3c251737a06a4c21e64dbcc24580"
+const debtRepair2698CleanupPacketPath = "tools/fixture-codemod/pipeline-observations/internal/selectedreadrole/testdata/repair_2698_cleanup_successor.json"
+const debtRepair2698CleanupSource = "internal/serveapp/main_runtime_test.go"
+const debtRepair2698CleanupAfter = "6d6c3eafaea02d3e0fef5e3183870174436adbc1"
+const debtRepair2698CleanupSHA = "976911841d61b4088ff55ce29b0e499b5629b1e3b764b6c91169538493debd05"
+const debtRepair2698CleanupBefore = "d785d2e881965c4e7374fc71234c0b6084834cfa"
+const debtRepair2698CleanupCollectorTo = "30ae07018481378e7a90f6ad34438574b57c49705e9affd2af9b2d7a7aec21eb"
 
 func TestPersistenceAuthorityDebtRepair2698DeclarationCacheUsesActualBytes(t *testing.T) {
 	root := t.TempDir()
@@ -59,8 +66,8 @@ func TestPersistenceAuthorityDebtRepair2698DeclarationCacheUsesActualBytes(t *te
 
 func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	if actual, err := debtCollectorDigest(root); err != nil || actual != debtRepair2698ProofCostCollectorTo {
-		t.Fatalf("native repair collector=%s expected=%s: %v", actual, debtRepair2698ProofCostCollectorTo, err)
+	if actual, err := debtCollectorDigest(root); err != nil || actual != debtRepair2698CleanupCollectorTo {
+		t.Fatalf("native repair collector=%s expected=%s: %v", actual, debtRepair2698CleanupCollectorTo, err)
 	}
 	if err := debtCatchUpCollectorSource(root); err != nil {
 		t.Fatal(err)
@@ -73,12 +80,31 @@ func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	head.Collector = debtRepair2698ProofCostCollectorTo
+	head.Collector = debtRepair2698CleanupCollectorTo
 	proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(head.Sites)}
-	if !debtRepair2698ProofCostCollectorTransition(trusted.Collector, head.Collector, trusted, head, proof) {
+	if !debtRepair2698CleanupCollectorTransition(trusted.Collector, head.Collector, trusted, head, proof) {
 		t.Fatal("exact forward source continuation refused")
 	}
 	assertDebtCatchUpForeignProvenance(t, trusted, head, proof)
+	t.Run("cleanup-forward-only", func(t *testing.T) {
+		original, _, err := debtCatchUpSignedBaseline(root, debtRepair2698CleanupBefore, debtRepair2698ProofCostCollectorTo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		archive := debtCatchUpHistoricalArchive(t, debtRepair2698CleanupBefore)
+		if actual, err := debtCollectorDigest(archive); err != nil || actual != debtRepair2698ProofCostCollectorTo {
+			t.Fatalf("cleanup retargeted the old fingerprint: %s: %v", actual, err)
+		}
+		current := original
+		current.Collector = debtRepair2698CleanupCollectorTo
+		proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(current.Sites)}
+		if !debtRepair2698CleanupCollectorTransition(original.Collector, current.Collector, original, current, proof) ||
+			debtRepair2698CleanupCollectorTransition(current.Collector, original.Collector, current, original, proof) ||
+			debtRepair2698ProofCostCollectorTransition(original.Collector, current.Collector, original, current, proof) {
+			t.Fatal("cleanup edge refused forward or accepted reverse/retargeted provenance")
+		}
+		assertDebtCatchUpForeignProvenance(t, original, current, proof)
+	})
 }
 
 func TestPersistenceAuthorityDebtRepair2698ProofCostForwardEdgeKeepsOriginalFingerprintAndRefusesReverse(t *testing.T) {
@@ -134,6 +160,7 @@ func TestPersistenceAuthorityDebtRepair2698CopiedWarmSourceRefusesEscapes(t *tes
 	root := persistenceAuthorityRepoRoot(t)
 	copy := debtCatchUpSourceCopyFrom(t, root)
 	copyRepair2698CustodySources(t, root, copy)
+	assertRepair2698CleanupActualMutants(t, copy)
 	packet, err := debtRepair2698ReadPacket(copy)
 	if err != nil {
 		t.Fatal(err)
@@ -202,6 +229,74 @@ func TestPersistenceAuthorityDebtRepair2698CopiedWarmSourceRefusesEscapes(t *tes
 	if err := debtCatchUpCollectorSource(copy); err == nil {
 		t.Fatal("missing certificate admitted")
 	}
+}
+
+func assertRepair2698CleanupActualMutants(t *testing.T, root string) {
+	t.Helper()
+	packet, err := debtRepair2698ReadCleanupPacket(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := packet.Files[0]
+	current, err := os.ReadFile(filepath.Join(root, file.File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := debtRepair2698CleanupHistoricalSource(root, file.File, current)
+	if err != nil || debtBaselineChecksum(previous) != file.BeforeSHA256 {
+		t.Fatal("exact cleanup predecessor refused:", err)
+	}
+	for _, changed := range [][]byte{
+		previous,
+		append(bytes.Clone(current), '\n'),
+		bytes.Replace(current, []byte("} else if code != 0 {"), []byte("} else if code == 0 {"), 1),
+		append(bytes.Clone(current), []byte("\nfunc extraRawCaller(db interface{ Exec(string, ...any) }) { db.Exec(\"DELETE FROM events\") }\n")...),
+	} {
+		debtWriteModuleSource(t, root, file.File, string(changed))
+		if err := debtCatchUpCollectorSource(root); err == nil {
+			t.Fatal("warm cleanup continuation accepted stale/changed/raw-caller source")
+		}
+		got, err := debtRepair2698HistoricalSource(root, file.File, changed)
+		if err == nil && !bytes.Equal(got, changed) {
+			t.Fatal("unreviewed cleanup source acquired an inverse")
+		}
+	}
+	debtWriteModuleSource(t, root, file.File, string(current))
+	manifest, err := os.ReadFile(filepath.Join(root, debtRepair2698CleanupPacketPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate := packet
+	duplicate.Files = append(append([]debtRepair2698SourceFile(nil), packet.Files...), file)
+	duplicateBytes, err := json.Marshal(duplicate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, changed := range [][]byte{
+		append(bytes.Clone(manifest), '\n'),
+		bytes.Replace(manifest, []byte(file.File), []byte(file.File+".foreign"), 1),
+		bytes.Replace(manifest, []byte(packet.AfterCommit), []byte(packet.BeforeCommit), 1),
+		duplicateBytes,
+	} {
+		debtWriteModuleSource(t, root, debtRepair2698CleanupPacketPath, string(changed))
+		if err := debtCatchUpCollectorSource(root); err == nil {
+			t.Fatal("warm cleanup continuation accepted changed/foreign/reverse/duplicate packet")
+		}
+	}
+	if err := os.Remove(filepath.Join(root, debtRepair2698CleanupPacketPath)); err != nil {
+		t.Fatal(err)
+	}
+	if err := debtCatchUpCollectorSource(root); err == nil {
+		t.Fatal("missing cleanup continuation admitted")
+	}
+	debtWriteModuleSource(t, root, debtRepair2698CleanupPacketPath, string(manifest))
+	if err := os.Remove(filepath.Join(root, file.File)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := debtRepair2698CleanupHistoricalSource(root, file.File, current); err == nil {
+		t.Fatal("pristine gitdir concealed missing copied cleanup source")
+	}
+	debtWriteModuleSource(t, root, file.File, string(current))
 }
 
 func copyRepair2698CustodySources(t *testing.T, root, destination string) {

@@ -150,7 +150,7 @@ func TestReviewedSuccessors2617PreserveExactHistoryAndRejectHostileCompositions(
 				(row.Mechanical != nil) != pin.Pin.HasMechanicalReceipt {
 				t.Fatal("reviewed historical fields or prior endpoint changed")
 			}
-			actual := selectedCausalObservationBody(t, row.File, row.Function)
+			actual := repair2698HistoricalBody(t, row.File, row.Function)
 			if !matchesReviewedSuccessor2617(row, actual, pin) {
 				t.Fatal("current source/Successor pair is not the exact authorized endpoint")
 			}

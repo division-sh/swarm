@@ -64,7 +64,12 @@ func TestNativeSharedCoordinatorRemovesOnlyUnusedAuthorityAcrossEveryCaller(t *t
 		row = historicalMechanicalRecipe(t, row)
 		want, err := canonicalFunction(nativeSharedCoordinatorSource(t, row.Before))
 		got, afterErr := canonicalFunction(row.After)
-		body := selectedCausalObservationBody(t, row.File, row.Function)
+		body := repair2698HistoricalBody(t, row.File, row.Function)
+		var integrationErr error
+		current, body, integrationErr = catchUp2542PriorMasterPair(current, body)
+		if integrationErr != nil {
+			t.Fatal(integrationErr)
+		}
 		actual, sourceErr := canonicalFunction(body)
 		currentBody, successorErr := reviewedSharedCoordinatorCurrentBody2617(current, body, packet)
 		currentAfter, currentErr := canonicalFunction(currentBody)

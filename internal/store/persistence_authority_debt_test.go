@@ -1687,7 +1687,7 @@ func debtPublicA2EndpointSourcePins(root string) error {
 			"declaration:"+debtBaselineChecksum([]byte(pin.After)) != current.Operation || pin.SHA256 != strings.TrimPrefix(old.Operation, "declaration:") {
 			return fmt.Errorf("A2 source manifest lost exact before/after provenance")
 		}
-		bodies, err := debtServedDebugDeclarations(filepath.Join(root, pin.File))
+		bodies, err := debtCatchUpLaneDeclarations(root, pin.File)
 		if err != nil || bodies[pin.Function] != pin.After {
 			return fmt.Errorf("current A2 uncertainty body differs from reviewed successor: %v", err)
 		}
@@ -2430,6 +2430,9 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
+		return nil
+	}
+	if debtRepair2698CleanupCollectorTransition(base, current, trusted, head, retirement...) {
 		return nil
 	}
 	if debtRepair2698ProofCostCollectorTransition(base, current, trusted, head, retirement...) {

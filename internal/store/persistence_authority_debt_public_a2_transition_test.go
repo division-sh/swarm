@@ -99,7 +99,9 @@ func debtPublicA2EndpointDescriptorHostiles(t *testing.T, before, current author
 
 func debtPublicA2EndpointSourceCopy(t *testing.T) string {
 	t.Helper()
-	root, copy := persistenceAuthorityRepoRoot(t), t.TempDir()
+	root := persistenceAuthorityRepoRoot(t)
+	copy := debtCatchUpSourceCopyFrom(t, root)
+	copyRepair2698CustodySources(t, root, copy)
 	_, current := debtPublicA2EndpointTransition()
 	for _, path := range []string{current.File, debtPublicA2EndpointManifest} {
 		raw, err := os.ReadFile(filepath.Join(root, path))

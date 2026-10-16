@@ -26,9 +26,17 @@ func TestGateTraceFactoriesRetainOnlyOriginalSelectedReader(t *testing.T) {
 		matched++
 		want, err := canonicalFunction(originalGateTraceSource(row.Before))
 		got, afterErr := canonicalFunction(row.After)
-		actual, actualErr := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
-		if err != nil || afterErr != nil || actualErr != nil || want != got || got != actual {
+		current := row.After
+		if row.Successor != "" {
+			current = row.Successor
+		}
+		endpoint, endpointErr := canonicalFunction(current)
+		actual, actualErr := canonicalFunction(repair2698HistoricalBody(t, row.File, row.Function))
+		if err != nil || afterErr != nil || endpointErr != nil || actualErr != nil || want != got || endpoint != actual {
 			t.Fatalf("gate source, role, construction or cleanup changed: %s", row.Function)
+		}
+		if files, changes, err := prepareFiles("../../..", []recipe{row}); err != nil || len(files) != 0 || len(changes) != 0 {
+			t.Fatalf("gate trace exact current recipe changed: %s: %v", row.Function, err)
 		}
 		for _, cut := range []string{"trace: selected", "result.trace != selected", "persistence: persistence"} {
 			mutant, mutantErr := canonicalFunction(strings.Replace(row.After, cut, "unreviewed", 1))

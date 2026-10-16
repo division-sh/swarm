@@ -81,13 +81,28 @@ func proveRetainedJoinTypedReaderSource(t *testing.T) {
 //go:embed testdata/retained_join_r7_reviewed.go.txt
 var retainedJoinR7Reviewed string
 
+const retainedJoinSupersededWait = "\n\t\t\twaitForServeStory(t, func() bool {\n\t\t\t\tcurrent, sourceJoins = readRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)\n\t\t\t\treturn len(sourceJoins) == 2 && sourceJoins[0].OutcomeFired && sourceJoins[1].OutcomeFired\n\t\t\t})\n\t\t\twaitRetainedJoinPipelineHandoff(t, rt.ReceiverStateReader, started.RunID)\n"
+
+func retainedJoinReviewedFormatting(candidate string) string {
+	expected := strings.Replace(strings.TrimSuffix(retainedJoinR7Reviewed, "\n"), retainedJoinSupersededWait, "", 1)
+	for _, edit := range retainedJoinSuccessorEdits {
+		expected = strings.Replace(expected, edit.before, edit.before+edit.block, 1)
+	}
+	actual, err := canonicalFunction(candidate)
+	want, expectedErr := canonicalFunction(expected)
+	if err == nil && expectedErr == nil && actual == want {
+		return expected
+	}
+	return candidate
+}
+
 func validateRetainedJoinSuccessor(row recipe, candidate string) error {
 	predecessor := strings.TrimSuffix(retainedJoinR7Reviewed, "\n")
 	if fmt.Sprintf("%x", sha256.Sum256([]byte(predecessor))) != "9fe6d8918d3fc2716ec8db18d7415b6445afa8da23014a4b20965f6a85155867" {
 		return fmt.Errorf("reviewed R7 predecessor changed")
 	}
 	expected, restored := predecessor, candidate
-	const superseded = "\n\t\t\twaitForServeStory(t, func() bool {\n\t\t\t\tcurrent, sourceJoins = readRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)\n\t\t\t\treturn len(sourceJoins) == 2 && sourceJoins[0].OutcomeFired && sourceJoins[1].OutcomeFired\n\t\t\t})\n\t\t\twaitRetainedJoinPipelineHandoff(t, rt.ReceiverStateReader, started.RunID)\n"
+	const superseded = retainedJoinSupersededWait
 	if strings.Count(expected, superseded) != 1 {
 		return fmt.Errorf("reviewed R7 wait changed")
 	}
@@ -120,8 +135,8 @@ func TestRetainedJoinOutcomeSuccessorPreservesReviewedCaller(t *testing.T) {
 			if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 				t.Fatal(err)
 			}
-			if len(rows) != 893 {
-				t.Fatalf("recipe census=%d,want893", len(rows))
+			if len(rows) != 1856 {
+				t.Fatalf("recipe census=%d,want1856", len(rows))
 			}
 			var row *recipe
 			for i := range rows {
@@ -139,12 +154,21 @@ func TestRetainedJoinOutcomeSuccessorPreservesReviewedCaller(t *testing.T) {
 				fmt.Sprintf("%x", sha256.Sum256([]byte(row.After))) != "fcdf44feff728df7a784859bfa4d3d1a9345866013b5ea8a291530871478d474" {
 				t.Fatal("retained-join Before/After pins changed")
 			}
-			if err := validateRetainedJoinSuccessor(*row, row.Successor); err != nil {
+			history, historicalSource, err := catchUp2542PriorMasterPair(*row, row.Successor)
+			if err != nil || history.Before != row.Before || history.After != row.After {
+				t.Fatal("retained join historical pair changed:", err)
+			}
+			history.Successor = retainedJoinReviewedFormatting(historicalSource)
+			if err := validateRetainedJoinSuccessor(history, history.Successor); err != nil {
+				t.Fatalf("%v\nauthenticated candidate:\n%s", err, history.Successor)
+			}
+			actual := repair2698HistoricalBody(t, row.File, row.Function)
+			_, actual, err = catchUp2542PriorMasterPair(*row, actual)
+			if err != nil {
 				t.Fatal(err)
 			}
-			actual := selectedCausalObservationBody(t, row.File, row.Function)
 			current, currentErr := canonicalFunction(actual)
-			pinned, pinErr := canonicalFunction(row.Successor)
+			pinned, pinErr := canonicalFunction(history.Successor)
 			if currentErr != nil || pinErr != nil || current != pinned {
 				t.Fatal("current caller differs from exact Successor")
 			}
@@ -175,15 +199,15 @@ func TestRetainedJoinOutcomeSuccessorPreservesReviewedCaller(t *testing.T) {
 				{"changed_setup", "canonicalrouting.CopyForkLoopRetainedJoin(t)", "canonicalrouting.CopyForkLoopRetainedJoinSeparateCheckpoint(t)"},
 			} {
 				t.Run(mutation.name, func(t *testing.T) {
-					mutant := strings.Replace(row.Successor, mutation.before, mutation.after, 1)
-					if mutant == row.Successor {
+					mutant := strings.Replace(history.Successor, mutation.before, mutation.after, 1)
+					if mutant == history.Successor {
 						t.Fatal("hostile mutation did not change source")
 					}
-					if err := validateRetainedJoinSuccessor(*row, mutant); err == nil {
+					if err := validateRetainedJoinSuccessor(history, mutant); err == nil {
 						t.Fatal("hostile join composition admitted")
 					}
 					guard := *row
-					guard.Before, guard.After, guard.Successor = row.Successor, row.Successor, ""
+					guard.Before, guard.After, guard.Successor = history.Successor, history.Successor, ""
 					if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+mutant), guard); err == nil || changed {
 						t.Fatal("hostile caller accepted by finite rewrite")
 					}
