@@ -171,6 +171,7 @@ func TestFamily145ChannelAnchorTransformRefusesForeignCarriersAndShadowedCalls(t
 }
 
 func TestFamily145ChannelAnchorWholeChainPreservesEveryPollAndRefusalCut(t *testing.T) {
+	proof := sourceBlobDeclarationsForInvocation(t)
 	calls := 0
 	seen := map[string]bool{}
 	for _, pin := range channelAnchorPins(t) {
@@ -184,7 +185,7 @@ func TestFamily145ChannelAnchorWholeChainPreservesEveryPollAndRefusalCut(t *test
 			t.Fatal("channel anchor source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || family145ChannelDecisionPrevious(t, pin.File, pin.Function, sourceBlobPreviousDeclaration(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))) != pin.After {
+		if err != nil || family145ChannelDecisionPrevious(t, pin.File, pin.Function, proof.previous(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))) != pin.After {
 			t.Fatal("channel anchor current source escaped its whole rule:", key, err)
 		}
 		after, count, err := channelanchor.Transform(pin.Before)
@@ -218,6 +219,7 @@ func channelAnchorHostiles(t *testing.T, pin channelanchor.Pin) {
 }
 
 func TestFamily145ChannelAnchorOwnedInventoryHasNoRawCallerOrAlias(t *testing.T) {
+	proof := sourceBlobDeclarationsForInvocation(t)
 	root := "../../.."
 	calls, definitions := 0, 0
 	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
@@ -232,7 +234,7 @@ func TestFamily145ChannelAnchorOwnedInventoryHasNoRawCallerOrAlias(t *testing.T)
 		if err != nil {
 			return err
 		}
-		n, d := channelAnchorOwnedFile(t, filepath.ToSlash(rel), file)
+		n, d := channelAnchorOwnedFile(t, filepath.ToSlash(rel), file, proof)
 		calls += n
 		definitions += d
 		return nil
@@ -243,7 +245,7 @@ func TestFamily145ChannelAnchorOwnedInventoryHasNoRawCallerOrAlias(t *testing.T)
 	}
 }
 
-func channelAnchorOwnedFile(t *testing.T, path string, file *ast.File) (int, int) {
+func channelAnchorOwnedFile(t *testing.T, path string, file *ast.File, proof sourceBlobDeclarationInvocation) (int, int) {
 	t.Helper()
 	calls, definitions := 0, 0
 	allowed := map[token.Pos]bool{}
@@ -272,7 +274,7 @@ func channelAnchorOwnedFile(t *testing.T, path string, file *ast.File) (int, int
 				if native {
 					return true
 				}
-				current := family145ChannelDecisionPrevious(t, path, fn.Name.Name, sourceBlobPreviousDeclaration(t, path, fn.Name.Name, requestkey.Node(fn)))
+				current := family145ChannelDecisionPrevious(t, path, fn.Name.Name, proof.previous(t, path, fn.Name.Name, requestkey.Node(fn)))
 				if channelanchor.Previous(channelAnchorPins(t), path, fn.Name.Name, current) == current {
 					t.Error("channel anchor caller escaped exact chain:", path, fn.Name.Name)
 				}

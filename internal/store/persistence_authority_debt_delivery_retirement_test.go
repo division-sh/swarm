@@ -2,6 +2,9 @@ package store_test
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"maps"
 	"os"
 	"path/filepath"
@@ -70,11 +73,49 @@ func TestPersistenceAuthorityDebtDeliveryRetirementIsFiniteSourceVerifiedAndOneW
 			continue
 		}
 		actual := debtControlSet()
-		if failures := authorityDebtRatchet(actual, debtControlSet(pair[1]), debtControlSet(pair[0]), debtControlSet(pair[0]), debtDeliveryRetirementProof{Root: root, Actual: actual}); len(failures) == 0 {
-			t.Fatal("retirement spread to one of the other42 pairs:", pair[0].Declaration, pair[0].Operation)
+		head, base, source := debtControlSet(pair[1]), debtControlSet(pair[0]), debtControlSet(pair[0])
+		gotHead, gotBase, gotSource, failures := debtDeliveryRetirementComparisons(actual, head, base, source, debtDeliveryRetirementProof{Root: root, Actual: actual})
+		if len(failures) != 0 || !debtSitesEqual(head, gotHead) || !debtSitesEqual(base, gotBase) || !debtSitesEqual(source, gotSource) {
+			t.Fatal("seven-pair retirement changed an unrelated identity:", pair[0].Declaration, pair[0].Operation)
+		}
+		if failures := authorityDebtRatchet(actual, head, base, source); len(failures) == 0 {
+			t.Fatal("unrelated deletion accepted without its separate source authorization:", pair[0].Declaration, pair[0].Operation)
 		}
 	}
 	deliveryRetirementProofControls(t, root)
+}
+
+func TestPersistenceAuthorityDebtDeliveryRetirementKeepsLaterServedAuthorizationSeparate(t *testing.T) {
+	root := persistenceAuthorityRepoRoot(t)
+	var later [2]authorityDebtSite
+	for _, pair := range debtServedObservationRetirementPairs() {
+		if pair[0].Declaration == "TestAudit2277StoppedRunReadinessRestart" && strings.HasSuffix(pair[0].Operation, ".waitServedEventPublishEventID") {
+			later = pair
+		}
+	}
+	if later[0].Declaration == "" || deliveryRetirementContains(later) {
+		t.Fatal("the later exact authorization was lost or absorbed into the seven-pair owner")
+	}
+	actual, head, base := debtControlSet(), debtControlSet(later[1]), debtControlSet(later[0])
+	if failures := authorityDebtRatchet(actual, head, base, base, debtDeliveryRetirementProof{Root: root, Actual: actual}); len(failures) != 0 {
+		t.Fatal("the separate reviewed served-observation retirement was refused:", failures)
+	}
+	for _, tc := range []struct {
+		name string
+		site authorityDebtSite
+	}{
+		{"foreign", requestKeyChangedDebtSite(later[1], "declaration")},
+		{"new", debtControlSite("call:unreviewedRawCaller", 1)},
+		{"increased", requestKeyChangedDebtSite(later[1], "multiplicity")},
+		{"reintroduced", later[0]},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			actual := debtControlSet(tc.site)
+			if failures := authorityDebtRatchet(actual, debtControlSet(later[1], tc.site), base, base, debtDeliveryRetirementProof{Root: root, Actual: actual}); len(failures) == 0 {
+				t.Fatal("a later authorization accepted foreign/new/increased/reintroduced debt")
+			}
+		})
+	}
 }
 
 func deliveryRetirementProofControls(t *testing.T, root string) {
@@ -141,18 +182,10 @@ func deliveryRetirementMutation(t *testing.T, root string, pair [2]authorityDebt
 
 func TestPersistenceAuthorityDebtDeliveryRetirementRefusesChangedNativeSource(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	copy := t.TempDir()
-	debtSourceForkCopySourceEvidence(t, root, copy)
+	copy := debtCatchUpSourceCopyFrom(t, root)
+	copyRepair2698CustodySources(t, root, copy)
 	const file = "internal/serveapp/main_runtime_test.go"
 	const manifest = "tools/fixture-codemod/pipeline-observations/family145-delivery-status-preimages.json"
-	for _, path := range []string{file, manifest, "tools/fixture-codemod/pipeline-observations/family145-event-name-preimages.json"} {
-		raw, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		debtWriteModuleSource(t, copy, path, string(raw))
-	}
-	debtServedObservationCopySourceEvidence(t, root, copy)
 	bodies, err := debtDeliveryStatusBodies(root)
 	if err != nil {
 		t.Fatal(err)
@@ -175,11 +208,15 @@ func TestPersistenceAuthorityDebtDeliveryRetirementRefusesChangedNativeSource(t 
 			t.Fatal(err)
 		}
 		current := declarations[body.Function]
-		mutant := strings.Replace(current, "{", "{ foreignRetirementSource();", 1)
-		if strings.Count(string(original), current) != 1 || mutant == current {
+		mutant := deliveryRetirementMutatedBody(t, current)
+		if current == "" || mutant == current {
 			t.Fatal("hostile retirement source cut is not exact:", body.Function)
 		}
-		debtWriteModuleSource(t, copy, file, strings.Replace(string(original), current, mutant, 1))
+		debtSourceBlobCopyDeclaration(t, copy, file, body.Function, mutant)
+		changed, err := debtServedDebugDeclarations(filepath.Join(copy, file))
+		if err != nil || changed[body.Function] == current || !strings.Contains(changed[body.Function], "foreignRetirementSource()") {
+			t.Fatal("hostile retirement mutation did not reach the actual declaration:", body.Function, err)
+		}
 		if failures := check(); len(failures) == 0 {
 			t.Fatal("changed complete native source admitted:", body.Function)
 		}
@@ -196,6 +233,22 @@ func TestPersistenceAuthorityDebtDeliveryRetirementRefusesChangedNativeSource(t 
 	if failures := check(); len(failures) == 0 {
 		t.Fatal("missing native source admitted")
 	}
+}
+
+func deliveryRetirementMutatedBody(t *testing.T, current string) string {
+	t.Helper()
+	const prefix = "package proof\n"
+	set := token.NewFileSet()
+	file, err := parser.ParseFile(set, "retirement.go", prefix+current, parser.AllErrors)
+	if err != nil || len(file.Decls) != 1 {
+		t.Fatal("retirement mutant requires a unique complete declaration:", err)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || fn.Body == nil {
+		t.Fatal("retirement mutant requires a function body")
+	}
+	start := set.Position(fn.Body.Lbrace).Offset - len(prefix) + 1
+	return current[:start] + "\nforeignRetirementSource();\n" + current[start:]
 }
 
 func TestPersistenceAuthorityDebtDeliveryRetirementFingerprint(t *testing.T) {
@@ -270,16 +323,9 @@ func TestPersistenceAuthorityDebtDeliveryRetirementCollectorPreservesExactChain(
 }
 
 func TestPersistenceAuthorityDebtDeliveryRetirementMetadataIsLocalAndSourceBound(t *testing.T) {
-	root, copy := persistenceAuthorityRepoRoot(t), t.TempDir()
-	debtSourceForkCopySourceEvidence(t, root, copy)
-	for _, path := range []string{"internal/serveapp/main_runtime_test.go", "tools/fixture-codemod/pipeline-observations/family145-delivery-status-preimages.json", "tools/fixture-codemod/pipeline-observations/family145-event-name-preimages.json"} {
-		raw, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		debtWriteModuleSource(t, copy, path, string(raw))
-	}
-	debtServedObservationCopySourceEvidence(t, root, copy)
+	root := persistenceAuthorityRepoRoot(t)
+	copy := debtCatchUpSourceCopyFrom(t, root)
+	copyRepair2698CustodySources(t, root, copy)
 	_, current := debtServedDebugTransitionStates()
 	baseline := authorityDebtBaseline{BootstrapSource: strings.Repeat("a", 40), Collector: debtCacheCollectorFrom, Sites: current}
 	data := marshalAuthorityDebtBaseline(baseline)

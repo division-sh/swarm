@@ -225,19 +225,7 @@ func servedSetupEarlierHistory(t *testing.T, current []byte, recipes bool) []byt
 
 func servedSetupEarlierSource(t *testing.T, file, function, current string) string {
 	t.Helper()
-	var err error
-	current, err = selectedreadrole.EarlierSource("../../..", file, function, current)
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, err = budgetdiagnostic.EarlierSource("../../..", file, function, current)
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, err = channelsettlement.EarlierSource("../../..", file, function, current)
-	if err != nil {
-		t.Fatal(err)
-	}
+	current = servedSetupPredecessorSource(t, file, function, current)
 	pins, err := servedsettlement.ReadSetupPins("../../..")
 	if err != nil {
 		t.Fatal(err)
@@ -254,6 +242,21 @@ func servedSetupEarlierSource(t *testing.T, file, function, current string) stri
 			t.Fatal(err)
 		}
 		return prior
+	}
+	return current
+}
+
+func servedSetupPredecessorSource(t *testing.T, file, function, current string) string {
+	t.Helper()
+	current, err := selectedreadrole.EarlierSource("../../..", file, function, current)
+	if err == nil {
+		current, err = budgetdiagnostic.EarlierSource("../../..", file, function, current)
+	}
+	if err == nil {
+		current, err = channelsettlement.EarlierSource("../../..", file, function, current)
+	}
+	if err != nil {
+		t.Fatal(err)
 	}
 	return current
 }

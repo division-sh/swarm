@@ -48,6 +48,7 @@ func family145CheckRunIdentityWholeRule(t *testing.T, file, function, current st
 }
 
 func TestFamily145RunIdentityWholeRulePreservesEveryAssertionAndCut(t *testing.T) {
+	proof := sourceBlobDeclarationsForInvocation(t)
 	calls := 0
 	for i, pin := range runIdentityPins {
 		old, err := exec.Command("git", "show", runidentity.Predecessor+":"+pin.File).Output()
@@ -55,7 +56,7 @@ func TestFamily145RunIdentityWholeRulePreservesEveryAssertionAndCut(t *testing.T
 			t.Fatal("run identity complete signed predecessor changed:", pin.Function, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || sourceBlobPreviousDeclaration(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
+		if err != nil || proof.previous(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("run identity current output changed:", pin.Function, err)
 		}
 		rule := runidentity.Rules[i]

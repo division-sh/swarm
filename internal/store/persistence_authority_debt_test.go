@@ -14,6 +14,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
+	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
@@ -171,6 +172,17 @@ func debtDeliveryRetirementPairs() [7][2]authorityDebtSite {
 }
 
 func debtDeliveryRetirementComparisons(actual, head, base, source map[string]authorityDebtSite, proofs ...debtDeliveryRetirementProof) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
+	needsSource := len(proofs) != 0 && !debtDeliveryRetirementAllAbsent(actual, head, base, source)
+	head, base, source, failures := debtDeliveryRetirementStateComparisons(actual, head, base, source, proofs...)
+	if len(failures) == 0 && needsSource {
+		if err := debtDeliveryStatusSourcePins(proofs[0].Root); err != nil {
+			failures = append(failures, err.Error())
+		}
+	}
+	return head, base, source, failures
+}
+
+func debtDeliveryRetirementStateComparisons(actual, head, base, source map[string]authorityDebtSite, proofs ...debtDeliveryRetirementProof) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
 	if len(proofs) == 0 {
 		return head, base, source, nil // Historical pre-retirement comparisons are unchanged.
 	}
@@ -181,13 +193,12 @@ func debtDeliveryRetirementComparisons(actual, head, base, source map[string]aut
 	if debtDeliveryRetirementAllAbsent(actual, head, base, source) {
 		return head, base, source, nil // Landed deletion needs no fictitious donor forever.
 	}
-	if err := debtDeliveryStatusSourcePins(proofs[0].Root); err != nil {
-		return head, base, source, []string{err.Error()}
-	}
 	for _, pair := range pairs {
 		if err := debtDeliveryRetirementState(pair, actual, head, base, source); err != nil {
 			return head, base, source, []string{err.Error()}
 		}
+	}
+	for _, pair := range pairs {
 		old, current := pair[0], pair[1]
 		if base[old.identity()] == old {
 			// Comparison copies only. The census, baseline and actual deletion stay intact.
@@ -265,7 +276,8 @@ func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDeb
 	if len(retirementFailures) != 0 {
 		return retirementFailures
 	}
-	head, base, baseActual, retirementFailures = debtDeliveryRetirementComparisons(actual, head, base, baseActual, retirement...)
+	needsRetirementSource := len(retirement) != 0 && !debtDeliveryRetirementAllAbsent(actual, head, base, baseActual)
+	head, base, baseActual, retirementFailures = debtDeliveryRetirementStateComparisons(actual, head, base, baseActual, retirement...)
 	if len(retirementFailures) != 0 {
 		return retirementFailures
 	}
@@ -322,6 +334,13 @@ func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDeb
 	failures = authorityDebtSubset(actual, head, "actual -> head baseline")
 	failures = append(failures, authorityDebtSubset(head, base, "head -> trusted baseline")...)
 	failures = append(failures, authorityDebtSubset(actual, baseActual, "actual -> trusted source (resurrection)")...)
+	// Invalid maps can refuse before source I/O. No accepting retirement path
+	// may return without its fresh complete source authentication.
+	if len(failures) == 0 && needsRetirementSource {
+		if err := debtDeliveryStatusSourcePins(retirement[0].Root); err != nil {
+			failures = append(failures, err.Error())
+		}
+	}
 	return failures
 }
 
@@ -629,8 +648,109 @@ func debtDeliveryStatusSuccessorCandidate(current string) bool {
 	return false
 }
 
+// This image lasts for one proof only. It includes the complete source/manifest
+// inventory, so adding a caller or changing an input during validation refuses.
+type debtServedSourceInvocation struct {
+	files map[string]string
+	head  string
+}
+
+func debtCaptureServedSourceInvocation(root string) (debtServedSourceInvocation, error) {
+	image := debtServedSourceInvocation{files: map[string]string{}}
+	head, err := debtGit(root, "rev-parse", "HEAD")
+	if err != nil {
+		return image, err
+	}
+	image.head = string(head)
+	err = checkoutsource.WalkDir(root, root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if !(strings.HasPrefix(rel, "internal/") || strings.HasPrefix(rel, "tools/fixture-codemod/pipeline-observations/") || strings.HasPrefix(rel, ".github/audit-artifacts/")) {
+			return nil
+		}
+		switch filepath.Ext(rel) {
+		case ".go", ".json", ".tsv", ".yaml":
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			image.files[rel] = debtBaselineChecksum(raw)
+		}
+		return nil
+	})
+	return image, err
+}
+
+func (image debtServedSourceInvocation) recheck(root string) error {
+	current, err := debtCaptureServedSourceInvocation(root)
+	if err != nil || current.head != image.head || !maps.Equal(current.files, image.files) {
+		return fmt.Errorf("served-source invocation changed its head or complete source/manifest inventory: %v", err)
+	}
+	return nil
+}
+
+// The returned function is private to this invocation. Every member was checked
+// against its actual endpoint; callers outside these finite families use the
+// original source-bound interpreter, not an unlisted replacement.
+func debtServedObservationInvocation(root string) (func(string, string, string) (string, error), func() error, error) {
+	image, err := debtCaptureServedSourceInvocation(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	setup, err := debtServedSetupVerifiedPredecessors(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	observation, err := debtServedObservationLiveSources(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	actual := map[[2]string]string{}
+	for key := range setup {
+		declarations, err := debtServedDebugDeclarations(filepath.Join(root, key[0]))
+		if err != nil || declarations[key[1]] == "" {
+			return nil, nil, fmt.Errorf("setup invocation lost actual declaration %v: %v", key, err)
+		}
+		actual[key] = declarations[key[1]]
+	}
+	previous := func(file, function, current string) (string, error) {
+		if before, found := setup[[2]string{file, function}]; found {
+			if current != actual[[2]string{file, function}] {
+				return "", fmt.Errorf("setup invocation supplied source differs from its actual endpoint: %s", function)
+			}
+			current = before
+		} else {
+			var err error
+			current, err = debtServedSetupSourcePrevious(root, file, function, current)
+			if err != nil {
+				return "", err
+			}
+		}
+		for _, pin := range observation {
+			if pin.File == file && pin.Function == function {
+				if current != pin.After {
+					return "", fmt.Errorf("served observation invocation supplied source changed: %s", function)
+				}
+				return pin.Before, nil
+			}
+		}
+		return current, nil
+	}
+	return previous, func() error { return image.recheck(root) }, nil
+}
+
 func debtDeliveryStatusSourcePins(root string) error {
 	bodies, err := debtDeliveryStatusBodies(root)
+	if err != nil {
+		return err
+	}
+	previousObservation, recheck, err := debtServedObservationInvocation(root)
 	if err != nil {
 		return err
 	}
@@ -642,7 +762,7 @@ func debtDeliveryStatusSourcePins(root string) error {
 				return err
 			}
 		}
-		entry, err := debtServedObservationSourcePrevious(root, body.File, body.Function, files[body.File][body.Function])
+		entry, err := previousObservation(body.File, body.Function, files[body.File][body.Function])
 		if err != nil {
 			return err
 		}
@@ -655,7 +775,7 @@ func debtDeliveryStatusSourcePins(root string) error {
 			return fmt.Errorf("delivery status owner/assertion/polling cut changed: %s/%s: %v", body.File, body.Function, err)
 		}
 	}
-	return nil
+	return recheck()
 }
 
 func debtDeliveryStatusCollectorTransition(base, current string, trusted, head authorityDebtBaseline) bool {
@@ -2310,6 +2430,9 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
+		return nil
+	}
+	if debtRepair2698ProofCostCollectorTransition(base, current, trusted, head, retirement...) {
 		return nil
 	}
 	if debtRepair2698CollectorTransition(base, current, trusted, head, retirement...) {
