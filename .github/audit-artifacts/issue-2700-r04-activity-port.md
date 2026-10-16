@@ -80,14 +80,35 @@ noncanonical IDs, unknown versions and nonpositive/out-of-range state versions.
 It conveys immutable attribution only. Normal/selected identity stays in the
 referenced canonical snapshot, not duplicated in this column.
 
-runtime/pipeline.ActivityRecoverySummary has Results []ActivityAttemptRecord.
-Those values are native result candidates until the enclosing native ACK; they
-are not a second queue or a permission to publish. A must atomically conserve
+runtime/pipeline.ActivityRecoverySummary now has Results []RecoveredHTTPActivity.
+Each value embeds the original ActivityAttemptRecord and carries Request
+events.Event plus BundleHash from the same native recovery read. This is the
+finite post-ACK carrier correction requested by E in6225128402, not a second
+queue, transaction ACK or permission. A must atomically conserve
 the original uncertainty result plus the existing durable publication/readback
 obligation. E may expose the summary only after acknowledgement; post-ACK
 publication goes through the existing result owner. Recovery refusal rolls
 back all rows/obligations of that step and keeps dispatch closed. ACK loss or
 repeated boot rereads the same result, not a new timestamp or provider call.
+
+The A-owned production entry is:
+
+```go
+func (pc *PipelineCoordinator) PublishRecoveredHTTPActivity(
+    ctx context.Context,
+    recovered RecoveredHTTPActivity,
+) error
+```
+
+Signed local0dbb5fd0ed implements this exact entry. It validates the retained
+request/source/terminal content, rereads the ORIGINAL configured native journal
+and requires exact durable identity/content/time before delegating to existing
+publishExistingActivityAttempt -> publishJournaledActivityResult. A missing,
+started or changed row refuses without publication; no HTTP/claim/handler replay
+is available through this entry. E owns calling it after recovery ACK and before
+ordinary/selected dispatch release, under its startup fence. A publication error
+must keep that startup closed. Its focused controls are pending, not GREEN;
+genuine native rollback, ACK-loss and takeover remain separate mandatory proofs.
 
 ## Complete Writer Boundary
 

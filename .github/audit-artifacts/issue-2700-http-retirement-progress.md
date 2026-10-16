@@ -174,6 +174,14 @@ genuine both-store takeover, rollback, ACK-loss and late-writer proofs.
 | amendment2-recovery-content-and-capture-race3-candidate3.log | Race x3 PASS at e0b5c7b395: pipeline3.334s and runtime/startupownership1.027s. Exact terminal content/reuse, original request/source/input/reply checks, retired-carrier refusals, captured-journal replacement and sealed generation capture; no native takeover claim. |
 | amendment2-carriers-complexity-candidate1.log | Original candidate RED on the new recovery sweep's cognitive42 hotspot. |
 | amendment2-carriers-complexity-candidate2.log | PASS after factoring at de02b6c105, against253df7f075: cognitive hotspots537->537, >=50 hotspots190->189, cyclomatic247->247. No baseline raise; later changes still require the final refresh. |
+| amendment2-http-components-race3-candidate1.log | Race x3 PASS pipeline3.932s after the current once-only component migration: real HTTP request/result mapping, one call on complete5xx, exact terminal replay, logging-failure isolation, captured journal replacement, recovery-content and carrier/lineage refusals. Component journals do not confer native permission or qualify R04 takeover. |
+| amendment2-runtime-installation-fixtures-compile1.log | Build-only PASS runtimepersistence/runtime/runforkexecution via /bin/true; no test/native execution credit. |
+| amendment2-unused-candidate1.log | swarm-unused completed exit0, but Go source changed during its long scan. This is NOT an exact-head receipt; a fresh stable integrated-head check remains owed. |
+
+HTTP-component receipt SHA256:
+629dcae7ebefcffe232e902167e720885850c3b7ae99eaf29d031e7b73002b2b.
+Build-only receipt SHA256:
+8c7fa7ed363353b40b4efcc81f9101c8c46d14e2a0a4ade2eccc2a7ff91d0b23.
 
 E's blocking prerequisite question6224909578 is answered by the signed LOCAL
 integration-only common source8984035819cc962bb3d0da13712ae01720919ced,
@@ -185,6 +193,16 @@ startup hook. Merge resolutions keep B/E's native historical fixture owner,
 remove its retired column/argument, and do not mint execution permission for
 historical copies. Both production branches remain unchanged by that object-only
 composition.
+
+The E follow-up6225128402 identified the missing concrete post-ACK consumer.
+Signed local0dbb5fd0ed adds PublishRecoveredHTTPActivity and carries the retained
+request plus original bundle identity beside each native terminal candidate.
+The consumer rereads the original configured journal and requires exact durable
+terminal readback before entering the existing result publisher, with no HTTP,
+claim, handler replay or new queue. Its focused candidate is
+amendment2-recovery-publication-race3-candidate1.log, outcome pending. E owns the
+startup call after ACK, before dispatch release; no native integration GREEN is
+implied. The exact engineering handoff is6225201942.
 
 ## Still Open
 
