@@ -126,6 +126,14 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 	if context == "rule" && (key == "else" || key == "default") {
 		remediation = "DIALECT-RULES-DEFAULT: the handler.rules default branch is the last row written without a predicate."
 	}
+	if context == "accumulate" && key == "into" {
+		remediation = "into: is not an accumulate key; write target: <state field>."
+		if len(source) != 0 {
+			if scalar, err := source[0].Value.Scalar(); err == nil && scalar.Tag == "!!str" && strings.TrimSpace(scalar.Value) != "" {
+				remediation = fmt.Sprintf("into: is not an accumulate key; write target: %s.", scalar.Value)
+			}
+		}
+	}
 	diagnostic := &LoaderDiagnostic{
 		Code:         "contract_loader.undefined_field",
 		Problem:      fmt.Sprintf("%s field %q is not supported.", context, key),
