@@ -46,12 +46,8 @@ type sourceMembership struct {
 
 func admitDirectoryMembership(entries []Entry, snapshots map[string]yamlsource.Snapshot) (sourceMembership, error) {
 	providers := collectProviderDirectories(entries)
-	for _, directory := range sortedProviderDirectories(providers) {
-		if directory != "." {
-			if parent, nested := providerForLabel(directory, providers); nested {
-				return sourceMembership{}, fmt.Errorf("provider directory %s contains nested provider %s; move the provider into a flow subfolder", parent.directory, directory)
-			}
-		}
+	if err := validateProviderNesting(providers); err != nil {
+		return sourceMembership{}, err
 	}
 	if err := validateProviderOnlyMembers(entries, providers); err != nil {
 		return sourceMembership{}, err
@@ -60,6 +56,32 @@ func admitDirectoryMembership(entries []Entry, snapshots map[string]yamlsource.S
 	if err != nil {
 		return sourceMembership{}, err
 	}
+	manifests, err := admitDirectoryManifests(entries, snapshots, providers)
+	if err != nil {
+		return sourceMembership{}, err
+	}
+	for _, directory := range sortedProviderDirectories(providers) {
+		provider, err := admitProviderDirectory(providers[directory], manifests, snapshots)
+		if err != nil {
+			return sourceMembership{}, err
+		}
+		providers[directory] = provider
+	}
+	return sourceMembership{providers: providers, manifests: manifests, root: root}, nil
+}
+
+func validateProviderNesting(providers map[string]ProviderDirectory) error {
+	for _, directory := range sortedProviderDirectories(providers) {
+		if directory != "." {
+			if parent, nested := providerForLabel(directory, providers); nested {
+				return fmt.Errorf("provider directory %s contains nested provider %s; move the provider into a flow subfolder", parent.directory, directory)
+			}
+		}
+	}
+	return nil
+}
+
+func admitDirectoryManifests(entries []Entry, snapshots map[string]yamlsource.Snapshot, providers map[string]ProviderDirectory) (map[string]Manifest, error) {
 	manifests := make(map[string]Manifest)
 	for _, entry := range entries {
 		if entry.disposition != DispositionManifest {
@@ -71,38 +93,39 @@ func admitDirectoryMembership(entries []Entry, snapshots map[string]yamlsource.S
 		}
 		manifest, err := packmodel.ProjectManifest(snapshots[entry.label].Document(entry.label).Root(), kind)
 		if err != nil {
-			return sourceMembership{}, err
+			return nil, err
 		}
 		manifests[entry.label] = manifest
 	}
-	for _, directory := range sortedProviderDirectories(providers) {
-		provider := providers[directory]
-		manifest, present := manifests[path.Join(directory, packmodel.ManifestFileName)]
-		if !present {
-			return sourceMembership{}, fmt.Errorf("provider directory %s requires manifest.yaml beside its bodies", directory)
-		}
-		// Logical roots have no host basename; disk admission checks it separately.
-		if directory != "." && path.Base(directory) != manifest.Name {
-			return sourceMembership{}, fmt.Errorf("folder %s holds provider %s; rename the folder", path.Base(directory), manifest.Name)
-		}
-		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
-			if label, present := provider.bodies[role]; present {
-				if err := manifest.ValidateBodyHeader(snapshots[label].Document(label).Root()); err != nil {
-					return sourceMembership{}, fmt.Errorf("provider body %s: %w", label, err)
-				}
-			}
-		}
-		if _, channel := provider.bodies[packmodel.BodyChannel]; channel {
-			_, trigger := provider.bodies[packmodel.BodyTrigger]
-			_, connector := provider.bodies[packmodel.BodyConnector]
-			if !trigger || !connector {
-				return sourceMembership{}, fmt.Errorf("%s: channel.yaml requires trigger.yaml and connector.yaml in the same folder", directory)
-			}
-		}
-		provider.manifest = manifest
-		providers[directory] = provider
+	return manifests, nil
+}
+
+func admitProviderDirectory(provider ProviderDirectory, manifests map[string]Manifest, snapshots map[string]yamlsource.Snapshot) (ProviderDirectory, error) {
+	directory := provider.directory
+	manifest, present := manifests[path.Join(directory, packmodel.ManifestFileName)]
+	if !present {
+		return ProviderDirectory{}, fmt.Errorf("provider directory %s requires manifest.yaml beside its bodies", directory)
 	}
-	return sourceMembership{providers: providers, manifests: manifests, root: root}, nil
+	// Logical roots have no host basename; disk admission checks it separately.
+	if directory != "." && path.Base(directory) != manifest.Name {
+		return ProviderDirectory{}, fmt.Errorf("folder %s holds provider %s; rename the folder", path.Base(directory), manifest.Name)
+	}
+	for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+		if label, present := provider.bodies[role]; present {
+			if err := manifest.ValidateBodyHeader(snapshots[label].Document(label).Root()); err != nil {
+				return ProviderDirectory{}, fmt.Errorf("provider body %s: %w", label, err)
+			}
+		}
+	}
+	if _, channel := provider.bodies[packmodel.BodyChannel]; channel {
+		_, trigger := provider.bodies[packmodel.BodyTrigger]
+		_, connector := provider.bodies[packmodel.BodyConnector]
+		if !trigger || !connector {
+			return ProviderDirectory{}, fmt.Errorf("%s: channel.yaml requires trigger.yaml and connector.yaml in the same folder", directory)
+		}
+	}
+	provider.manifest = manifest
+	return provider, nil
 }
 
 func sortedProviderDirectories(providers map[string]ProviderDirectory) []string {

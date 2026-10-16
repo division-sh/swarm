@@ -15,10 +15,7 @@ import (
 )
 
 const (
-	EnvelopeFileName          = "pack.yaml"
-	TriggerManifestFileName   = "trigger.yaml"
-	ConnectorManifestFileName = "connector.yaml"
-	ChannelManifestFileName   = "channel.yaml"
+	EnvelopeFileName = "pack.yaml"
 
 	TypeTrigger   = "trigger"
 	TypeConnector = "connector"

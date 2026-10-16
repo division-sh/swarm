@@ -1,5 +1,11 @@
 package packmodel
 
+const (
+	TriggerManifestFileName   = "trigger.yaml"
+	ConnectorManifestFileName = "connector.yaml"
+	ChannelManifestFileName   = "channel.yaml"
+)
+
 type BodyRole uint8
 
 const (

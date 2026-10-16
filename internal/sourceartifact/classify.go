@@ -141,17 +141,7 @@ func buildFlowTree(entries []Entry, providers map[string]ProviderDirectory) (*Fl
 				flowSegments = strings.Split(provider.flowPath, "/")
 			}
 		}
-		current := root
-		for index := range flowSegments {
-			flowPath := strings.Join(flowSegments[:index+1], "/")
-			next := nodes[flowPath]
-			if next == nil {
-				next = &FlowNode{flowPath: flowPath, declarations: map[string]string{}, resources: map[string][]string{}}
-				nodes[flowPath] = next
-				current.children = append(current.children, next)
-			}
-			current = next
-		}
+		current := ensureFlowPath(root, nodes, flowSegments)
 		if providerMember {
 			if !attachedProviders[provider.directory] {
 				current.providers = append(current.providers, provider.directory)
@@ -159,21 +149,47 @@ func buildFlowTree(entries []Entry, providers map[string]ProviderDirectory) (*Fl
 			}
 			continue
 		}
-		switch entry.disposition {
-		case DispositionDeclaration:
-			current.declarations[local] = entry.label
-		case DispositionManifest:
-			current.manifest = entry.label
-		case DispositionResource:
-			current.resources[branch] = append(current.resources[branch], entry.label)
-		case DispositionDocument:
-			if branch == "docs" {
-				current.resources[branch] = append(current.resources[branch], entry.label)
-			} else {
-				current.documents = append(current.documents, entry.label)
-			}
+		attachFlowEntry(current, entry, local, branch)
+	}
+	if err := finishFlowTree(root, nodes); err != nil {
+		return nil, err
+	}
+	return root, nil
+}
+
+func ensureFlowPath(root *FlowNode, nodes map[string]*FlowNode, segments []string) *FlowNode {
+	current := root
+	for index := range segments {
+		flowPath := strings.Join(segments[:index+1], "/")
+		next := nodes[flowPath]
+		if next == nil {
+			next = &FlowNode{flowPath: flowPath, declarations: map[string]string{}, resources: map[string][]string{}}
+			nodes[flowPath] = next
+			current.children = append(current.children, next)
+		}
+		current = next
+	}
+	return current
+}
+
+func attachFlowEntry(node *FlowNode, entry Entry, local, branch string) {
+	switch entry.disposition {
+	case DispositionDeclaration:
+		node.declarations[local] = entry.label
+	case DispositionManifest:
+		node.manifest = entry.label
+	case DispositionResource:
+		node.resources[branch] = append(node.resources[branch], entry.label)
+	case DispositionDocument:
+		if branch == "docs" {
+			node.resources[branch] = append(node.resources[branch], entry.label)
+		} else {
+			node.documents = append(node.documents, entry.label)
 		}
 	}
+}
+
+func finishFlowTree(root *FlowNode, nodes map[string]*FlowNode) error {
 	for _, node := range nodes {
 		sort.Slice(node.children, func(i, j int) bool { return node.children[i].flowPath < node.children[j].flowPath })
 		for branch := range node.resources {
@@ -184,19 +200,19 @@ func buildFlowTree(entries []Entry, providers map[string]ProviderDirectory) (*Fl
 	}
 	if !flowNodeLive(root) {
 		if root.manifest != "" {
-			return nil, fmt.Errorf("directory . has a manifest and no body or flow files")
+			return fmt.Errorf("directory . has a manifest and no body or flow files")
 		}
-		return nil, fmt.Errorf("selected source root has no semantic declarations, typed resources, or live descendants")
+		return fmt.Errorf("selected source root has no semantic declarations, typed resources, or live descendants")
 	}
 	for flowPath, node := range nodes {
 		if flowPath != "." && !flowNodeLive(node) {
 			if node.manifest != "" {
-				return nil, fmt.Errorf("directory %s has a manifest and no body or flow files", flowPath)
+				return fmt.Errorf("directory %s has a manifest and no body or flow files", flowPath)
 			}
-			return nil, fmt.Errorf("flow %q is empty; add local semantics/resources or remove the dead directory", flowPath)
+			return fmt.Errorf("flow %q is empty; add local semantics/resources or remove the dead directory", flowPath)
 		}
 	}
-	return root, nil
+	return nil
 }
 
 func flowNodeLive(node *FlowNode) bool {
