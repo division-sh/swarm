@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -14,7 +15,7 @@ func TestProviderResumeAdmissionRetainsOriginalLogicalAuthorityBothStores(t *tes
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture, _ := openProviderJournalFixture(t, backend, agentmemory.Plan{})
-			ctx, journal, frame, _, body := providerJournalAdmissionInputs(t, fixture)
+			ctx, journal, frame, surface, body := providerJournalAdmissionInputs(t, fixture)
 			original, err := effects.BeginJournaledManagedCompletion(ctx, "anthropic_api", body, frame, journal, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -59,22 +60,36 @@ func TestProviderResumeAdmissionRetainsOriginalLogicalAuthorityBothStores(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			resumed, err := effects.BeginJournaledManagedCompletion(resumeCtx, "anthropic_api", body, frame, journal, nil)
+			origin, err := effects.DeliveryCompletionOrigin(claimed.Claim)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attemptID, err := effects.AttemptID(original.Attempt().OperationID, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resumed, err := fixture.store.AuthorizeExternalAttempt(resumeCtx, successor, effects.AuthorizeRequest{
+				OperationID: original.Attempt().OperationID, AttemptID: attemptID,
+				Kind: effects.KindProviderTurn, Class: effects.EffectWriteOrUnknown, Adapter: "anthropic_api", Transport: "http",
+				CompletionRequest: successor.CompletionRequest, RequestFingerprint: effects.Fingerprint(body),
+				AgentFrame: &frame, CapabilitySurface: &surface, ProviderRequestJournal: &journal,
+				Origin: origin, Now: time.Now().UTC(),
+			})
 			if err != nil {
 				t.Fatalf("exact retained continuation was not admitted: %v", err)
 			}
-			if !resumed.Attempt().AuthorizationAcknowledged || resumed.Attempt().OperationID != original.Attempt().OperationID ||
-				resumed.Attempt().AttemptID == original.Attempt().AttemptID || resumed.Attempt().Ordinal != 2 {
+			if !resumed.AuthorizationAcknowledged || resumed.OperationID != original.Attempt().OperationID ||
+				resumed.AttemptID == original.Attempt().AttemptID || resumed.Ordinal != 2 {
 				t.Fatal("resume did not admit one distinct physical attempt under its original operation")
 			}
-			if err := resumed.MarkLaunched(resumeCtx); err != nil {
+			if _, err := fixture.store.MarkExternalAttemptLaunched(resumeCtx, resumed, time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
 			after, err := ReadSelectedForkApplicationStorageSnapshotForTest(resumeCtx, fixture.store)
 			if err != nil {
 				t.Fatal(err)
 			}
-			physical := providerResumeSnapshotRow(t, after, "runtime_external_effect_attempts", "attempt_id", resumed.Attempt().AttemptID)
+			physical := providerResumeSnapshotRow(t, after, "runtime_external_effect_attempts", "attempt_id", resumed.AttemptID)
 			if parent, _ := physical["resume_from_attempt_id"].Text(); parent != original.Attempt().AttemptID {
 				t.Fatal("resumed physical attempt lacks the exact immutable predecessor link")
 			}
