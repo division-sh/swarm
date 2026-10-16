@@ -88,6 +88,10 @@ func (f CatalogConformanceFixture) Validate() error {
 	if strings.TrimSpace(f.FixtureStatus) != GenerationFixturePassing || strings.TrimSpace(f.ReviewStatus) != GenerationReviewApproved {
 		return fmt.Errorf("catalog conformance fixture_status/review_status must be passing/approved")
 	}
+	return f.validateExpectedRequest()
+}
+
+func (f CatalogConformanceFixture) validateExpectedRequest() error {
 	if f.Input == nil || f.Credentials == nil || f.ManagedCredentials == nil || strings.TrimSpace(f.Expected.Method) == "" || strings.TrimSpace(f.Expected.URL) == "" || f.Expected.Headers == nil || f.Expected.Body == nil {
 		return fmt.Errorf("catalog conformance input, credentials, managed_credentials, and expected method/url/headers/body are required, including declared-empty maps")
 	}

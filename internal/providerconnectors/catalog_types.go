@@ -62,6 +62,13 @@ type GenerationOperationEvidence struct {
 }
 
 func (g GenerationEvidence) Validate(provider string, tools map[string]runtimecontracts.ToolSchemaEntry) error {
+	if err := g.validateHeader(provider); err != nil {
+		return err
+	}
+	return g.validateOperations(provider, tools)
+}
+
+func (g GenerationEvidence) validateHeader(provider string) error {
 	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
 		return fmt.Errorf("generation provider requires an exact portable directory key: %w", err)
 	}
@@ -83,6 +90,10 @@ func (g GenerationEvidence) Validate(provider string, tools map[string]runtimeco
 	if err := validateSHA256("generation profile", g.Profile.SHA256); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (g GenerationEvidence) validateOperations(provider string, tools map[string]runtimecontracts.ToolSchemaEntry) error {
 	if len(g.Operations) == 0 {
 		return fmt.Errorf("generation operations are required")
 	}
