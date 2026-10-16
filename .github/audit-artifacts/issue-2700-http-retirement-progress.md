@@ -64,12 +64,16 @@ or R04 recovery.
 
 ## Still Open
 
-R04 native execution_binding column/codec, original-role Start/Claim/Complete/
-Uncertain fences and E's fixed-session recovery integration remain unimplemented
-at this intermediate snapshot. Joint gate6221888821/6221925281 is now approved;
-the exact port and complete historical/non-executing writer map are in
-issue-2700-r04-activity-port.md. No schema/backend writer or recovery sweep has
-been enabled and the original component reopen RED remains visible.
+R04 now has the nullable native execution_binding column and strict codec,
+exact pre-mutation identity checks and explicit non-executing fork-copy NULL.
+The original-role process/grant/selected fences and E's fixed-session recovery
+integration remain unimplemented. Joint gate6221888821/6221925281 is approved;
+the exact port and historical/non-executing writer map are in
+issue-2700-r04-activity-port.md. The native staging boundary and all original
+REDs are accounted in issue-2700-r04-native-progress.md. No recovery sweep has
+been enabled, no reference-only claim supplies permission, and the original
+component reopen RED remains visible. Existing unfenced live writer behavior
+is not accepted as a fresh-NULL permission or a completed R04 repair.
 
 Finish remaining current fixture/old-class oracle migrations through the new
 shared refusal or key-free execution contract; preserve their other negative

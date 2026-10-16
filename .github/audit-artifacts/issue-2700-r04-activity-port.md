@@ -51,6 +51,20 @@ original binding through existing native owners before settlement. The grant
 reference alone is never execution authority. E keeps process/selected grant
 interpretation; A does not duplicate its decoder or latest/currentness logic.
 
+E's concrete historical reader is pinned in6222592959, reserved to E:
+
+```go
+func ReadActivityExecutionGrantTx(
+    ctx context.Context, tx *sql.Tx, grantID string, stateVersion uint64,
+) (runtimestartupownership.GrantEvidence, error)
+```
+
+It lives in store/internal/startupownership/activity_execution_grant.go and
+checks every native row projection against the exact decoded snapshot. A will
+compose the signed implementation; its declaration is not current permission
+or a reason to duplicate the decoder. Fixed-role and native currentness fences
+remain A's writer responsibility, distinct from this historical read.
+
 The now-defined leaf DTO is:
 
 ```go

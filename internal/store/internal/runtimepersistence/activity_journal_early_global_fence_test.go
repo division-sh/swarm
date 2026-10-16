@@ -131,7 +131,7 @@ func completeActivityBehindPostgresCompetingLocks(t *testing.T, fixture authorAc
 	if err := global.Rollback(); err != nil {
 		t.Fatal(err)
 	}
-	waitForActivityJournalPostgresBlocker(t, ctx, fixture.db, domainPID, "UPDATE activity_attempts", done)
+	waitForActivityJournalPostgresBlocker(t, ctx, fixture.db, domainPID, "FROM activity_attempts", done)
 	assertActivityJournalStarted(t, fixture, request.RequestEventID)
 	if err := domain.Rollback(); err != nil {
 		t.Fatal(err)

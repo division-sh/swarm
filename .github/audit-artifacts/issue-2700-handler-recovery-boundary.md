@@ -21,9 +21,11 @@ ReconcileDisplacedHTTPActivities step follows acknowledged generation cutover
 and precedes BOTH selected-context recovery and PreparedStartup.Start. It lends
 its original mutationprotocol.Attempt plus an opaque transaction-bound fenced
 cut to A's private activity Tx adapter. The real disposition may not be supplied
-until the joint writer/currentness/legacy-row implementation is complete. No activity
-schema or backend writer changes have been made yet; a fresh claim, open
-connection or elapsed time is not that disposition.
+until the joint writer/currentness/legacy-row implementation is complete. The
+nullable activity reference, codec and exact pre-write identity checks are now
+being implemented under A's owner; process/grant/selected fences and the real
+recovery adapter are not enabled. A fresh claim, open connection or elapsed time
+is not that disposition.
 
 The approved immutable reference is processbinding.ActivityExecutionBinding:
 version activity-execution.v1 plus exact grant_id AND state_version. Its shape
@@ -63,12 +65,13 @@ No allowance, retry-to-green, raw SQL, new hook or weakened control was used.
 
 ## Exact Missing Fact / Trace
 
-ActivityAttemptRecord stores request/run/source/input/mode/loop identity,
+The original RED predates the new reference: ActivityAttemptRecord then stored
+request/run/source/input/mode/loop identity and
 class/attempt/status/result/timestamps/reply, but no execution-owner or launch
-association to the predecessor process/pipeline claim. Claim and terminal CAS
-in backend/activityjournal validate active run plus exact request identity;
-MarkUncertain can transition a started row but does not prove a predecessor
-dead. publishExistingActivityAttempt deliberately returns nil for started.
+association. The current staging reference is attribution only, not the missing
+native process/grant/selected permission or recovery disposition. MarkUncertain
+must not infer displacement from a started row. publishExistingActivityAttempt
+deliberately returns nil for started.
 
 The bus DOES have its existing opaque pipelineobligation.Claim and issuer:
 processClaimedPipelineWork -> RecoverPersistedPipeline receives ClaimedWork.
@@ -85,7 +88,7 @@ channel authorities, not an ordinary handler activity launch. OwnerPipelineActiv
 marks a different owner; it does not issue a completion controller or a durable
 attempt/process binding. Do not manufacture an agent-turn target for a handler.
 
-## Bounded Engineering Question
+## Original Question / Approved Disposition
 
 Which EXISTING authoritative retirement/recovery fact may the activity owner
 consume to distinguish the ended predecessor from the live duplicate, and
@@ -96,7 +99,13 @@ exists, the missing fact is the exact attempt-to-predecessor execution/launch
 ownership and its authoritative retired disposition; please disposition that
 bounded extension before implementation. I have not designed a new mechanism.
 
-Only the dependent R04 recovery enabling cut is paused. Shared key retirement,
+That original question is answered by the joint sub-gate and E's fixed-session
+cut above. The remaining engineering handoff is the canonical exact-snapshot
+reader and original installed-role composition, recorded in6222512961; A does
+not add another grant-table interpreter or edit E's shared assembly without a
+file/signature pin.
+
+Only the dependent R04 recovery enabling cut remains unwired. Shared key retirement,
 timeout/O04, conservative fresh handler settlement and accepted presentation
 remain within the approved scope, but no complete retirement GREEN or hosted
 qualification will be claimed without R04. The separately approved #1745

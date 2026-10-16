@@ -638,13 +638,13 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 			node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
 			success_event, failure_event, result_event_id, result_event_type, result_payload,
 			failure, input_hash, loop_generation, loop_stage, reply_context_id,
-			started_at, completed_at, updated_at
+			started_at, completed_at, updated_at, execution_binding
 		) VALUES (
 			$1, $2, $25, $3, $4, $5, $24,
 			$6, $7, $8, $9, $10, 1, $11,
 			$12, $13, $14, $15, $16,
 			$17, $18, $19, $20, NULL,
-			$21, $22, $23
+			$21, $22, $23, NULL
 		) ON CONFLICT (request_event_id) DO NOTHING
 	`, requestEventID, forkRunID, nullableRunForkString(request.SourceEventID), nullableRunForkString(request.ParentEventID), nullableRunForkString(request.EntityID),
 		request.NodeID, request.HandlerEventKey, request.ActivityID, request.Tool, request.EffectClass, evidence.Status,
@@ -664,20 +664,21 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 	var gotFlowInstance, gotResultType, gotInputHash, gotReplyContext string
 	var gotGeneration, gotResultPayload, gotFailure []byte
 	var gotStarted, gotCompleted, gotUpdated any
+	var gotExecutionBinding any
 	if err := tx.QueryRowContext(ctx, `
 		SELECT CAST(run_id AS TEXT), execution_mode, status, CAST(result_event_id AS TEXT), loop_generation,
 		       COALESCE(CAST(source_event_id AS TEXT), ''), COALESCE(CAST(parent_event_id AS TEXT), ''),
 		       COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(flow_instance, ''), node_id, handler_event_key,
 		       activity_id, tool, effect_class, attempt, success_event, failure_event, result_event_type,
 		       result_payload, COALESCE(failure, 'null'), input_hash, COALESCE(loop_stage, ''),
-		       COALESCE(CAST(reply_context_id AS TEXT), ''), started_at, completed_at, updated_at
+		       COALESCE(CAST(reply_context_id AS TEXT), ''), started_at, completed_at, updated_at, execution_binding
 		FROM activity_attempts WHERE request_event_id = $1`, requestEventID).
 		Scan(&gotRunID, &gotExecutionMode, &gotStatus, &gotResultID, &gotGeneration,
 			&gotRequest.SourceEventID, &gotRequest.ParentEventID, &gotRequest.EntityID, &gotFlowInstance,
 			&gotRequest.NodeID, &gotRequest.HandlerEventKey, &gotRequest.ActivityID, &gotRequest.Tool,
 			&gotRequest.EffectClass, &gotRequest.Attempt, &gotRequest.SuccessEvent, &gotRequest.FailureEvent,
 			&gotResultType, &gotResultPayload, &gotFailure, &gotInputHash, &gotRequest.LoopStage,
-			&gotReplyContext, &gotStarted, &gotCompleted, &gotUpdated); err != nil {
+			&gotReplyContext, &gotStarted, &gotCompleted, &gotUpdated, &gotExecutionBinding); err != nil {
 		return fmt.Errorf("confirm fork-local activity evidence %s: %w", request.ActivityID, err)
 	}
 	var got attemptgeneration.Generation
@@ -693,7 +694,7 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 		gotRequest.Tool != request.Tool || gotRequest.EffectClass != request.EffectClass || gotRequest.Attempt != 1 ||
 		gotRequest.SuccessEvent != request.SuccessEvent || gotRequest.FailureEvent != request.FailureEvent ||
 		gotResultType != evidence.ResultEventType || gotInputHash != evidence.InputHash || gotRequest.LoopStage != request.LoopStage ||
-		gotReplyContext != "" || !workflowCommitJSONEqual(gotGeneration, generationJSON) || !workflowCommitJSONEqual(gotResultPayload, resultPayload) {
+		gotReplyContext != "" || gotExecutionBinding != nil || !workflowCommitJSONEqual(gotGeneration, generationJSON) || !workflowCommitJSONEqual(gotResultPayload, resultPayload) {
 		return fmt.Errorf("fork-local activity evidence %s conflicts with canonical fork identity", request.ActivityID)
 	}
 	expectedFailure := evidence.Failure
