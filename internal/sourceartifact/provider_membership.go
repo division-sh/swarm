@@ -38,6 +38,14 @@ func (a *AdmittedSourceArtifact) ProviderDirectories() []ProviderDirectory {
 	return out
 }
 
+func (a *AdmittedSourceArtifact) ProviderDirectory(directory string) (ProviderDirectory, bool) {
+	if a == nil {
+		return ProviderDirectory{}, false
+	}
+	provider, present := a.providers[directory]
+	return provider, present
+}
+
 type sourceMembership struct {
 	providers map[string]ProviderDirectory
 	manifests map[string]Manifest

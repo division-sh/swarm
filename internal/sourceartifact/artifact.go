@@ -167,6 +167,20 @@ type AdmittedSourceArtifact struct {
 	bundleHash     string
 }
 
+// AdmitMembers applies the same admission as disk and retained decoding to an
+// already captured file set. Host filesystem readers still own no-follow I/O.
+func AdmitMembers(members map[string][]byte) (*AdmittedSourceArtifact, error) {
+	if len(members) > MaxMembers {
+		return nil, fmt.Errorf("source artifact has %d members, maximum is %d", len(members), MaxMembers)
+	}
+	entries := make([]Entry, 0, len(members))
+	for label, body := range members {
+		entries = append(entries, Entry{label: label, body: body})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].label < entries[j].label })
+	return newArtifact(entries)
+}
+
 func newArtifact(entries []Entry) (*AdmittedSourceArtifact, error) {
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("source artifact contains no admitted members")
