@@ -31,6 +31,11 @@ func earlierServedScenarioOwnerFile(root, file string, current []byte) ([]byte, 
 	if file != deliveryRecoveryReadOwner {
 		return current, nil
 	}
+	var err error
+	current, err = selectedreadrole.CatchUp2542HistoricalSource(root, file, current)
+	if err != nil {
+		return nil, err
+	}
 	digest := fmt.Sprintf("%x", sha256.Sum256(current))
 	if digest == deliveryRecoveryReadOwnerAfter || digest == deliveryRecoveryReadOwnerBefore {
 		return current, nil

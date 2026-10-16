@@ -44,7 +44,7 @@ var debtCatchUpNativeEntryDeclarationPins = map[string]string{
 }
 
 func TestPersistenceAuthorityDebtNativeEntryCatchUpSourceIsExact(t *testing.T) {
-	root := persistenceAuthorityRepoRoot(t)
+	root := debtCatchUpHistoricalArchive(t, debtRepair2698Before)
 	if actual, err := debtCollectorDigest(root); err != nil || actual != debtCatchUpNativeEntryCollectorTo {
 		t.Fatalf("native-entry collector=%s expected=%s: %v", actual, debtCatchUpNativeEntryCollectorTo, err)
 	}

@@ -92,6 +92,10 @@ func TestReviewedSnapshotCandidateOverlayTypeChecks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		recipes, err = nativeEntryCurrentRecipes(root, path, source, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(recipes) == 0 {
 			continue
 		}

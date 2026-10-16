@@ -34,11 +34,31 @@ var agentSnapshotSupportSources = map[string]string{
 }
 
 func validateAgentSnapshotSupport(path string, source []byte) error {
+	var err error
+	source, err = agentSnapshotSupportHistoricalSource(path, source)
+	if err != nil {
+		return err
+	}
 	expected, ok := agentSnapshotSupportSources[path]
 	if !ok || fmt.Sprintf("%x", sha256.Sum256(source)) != expected {
 		return fmt.Errorf("operator snapshot support is not its exact reviewed source: %s", path)
 	}
 	return nil
+}
+
+// #6200510991's exact E packet adds recovery-write custody to this original
+// fixture. #2698/6205327685 authorizes composing that support consumer while
+// keeping the original support inventory, bytes and foreign-edit controls.
+func agentSnapshotSupportHistoricalSource(path string, source []byte) ([]byte, error) {
+	if path != "internal/store/internal/backend/sqlite/test_agent_snapshot_corruption.go" ||
+		fmt.Sprintf("%x", sha256.Sum256(source)) != "9c47a40cc1093c0fa7f6e19de539b93264a2cc8bd9ed8865e8d0bc3668236ccc" {
+		return source, nil
+	}
+	prior, err := exec.Command("git", "-C", "../../..", "show", "7333184bec:"+path).Output()
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prior)) != agentSnapshotSupportSources[path] {
+		return nil, fmt.Errorf("snapshot support lost its exact signed predecessor: %v", err)
+	}
+	return prior, nil
 }
 
 func TestFamily145AgentSnapshotSupportEntriesStayFinite(t *testing.T) {

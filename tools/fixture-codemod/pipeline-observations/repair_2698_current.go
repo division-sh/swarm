@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"reflect"
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
@@ -20,21 +22,43 @@ func repair2698CurrentRecipes(root, path string, source []byte, rows []recipe) (
 	if err := json.Unmarshal(recipeBytes, &originals); err != nil {
 		return nil, err
 	}
-	immutable := map[string]recipe{}
+	var historical []recipe
 	for _, row := range originals {
 		if row.File == path {
-			immutable[row.Function] = row
+			historical = append(historical, row)
 		}
+	}
+	historical, err = checkpointRecipes(prior, historical)
+	if err != nil {
+		return nil, err
+	}
+	immutable := map[string][]recipe{}
+	for _, row := range historical {
+		immutable[row.Function] = append(immutable[row.Function], row)
+	}
+	set := token.NewFileSet()
+	oldFile, err := parser.ParseFile(set, path, prior, parser.AllErrors)
+	if err != nil {
+		return nil, err
+	}
+	currentSet := token.NewFileSet()
+	currentFile, err := parser.ParseFile(currentSet, path, source, parser.AllErrors)
+	if err != nil {
+		return nil, err
 	}
 	current := append([]recipe(nil), rows...)
 	for index, row := range current {
-		if !reflect.DeepEqual(immutable[row.Function], row) {
+		if !consumeRepair2698Recipe(immutable, row) {
 			return nil, fmt.Errorf("native repair recipe changed history: %s/%s", path, row.Function)
 		}
 		if row.Removed {
 			continue
 		}
-		before, err := selectedreadrole.Body(prior, row.Function)
+		fn, err := uniqueRecipeFunction(oldFile, row)
+		if err != nil {
+			return nil, err
+		}
+		before, err := canonicalFunction(string(prior[set.Position(fn.Pos()).Offset:set.Position(fn.End()).Offset]))
 		endpoint := row.Successor
 		if endpoint == "" {
 			endpoint = row.After
@@ -43,7 +67,11 @@ func repair2698CurrentRecipes(root, path string, source []byte, rows []recipe) (
 		if err != nil || parseErr != nil || before != expected {
 			return nil, fmt.Errorf("native repair is not its exact prior recipe endpoint: %s/%s", path, row.Function)
 		}
-		actual, err := selectedreadrole.Body(source, row.Function)
+		actualFunction, err := uniqueRecipeFunction(currentFile, row)
+		if err != nil {
+			return nil, err
+		}
+		actual, err := canonicalFunction(string(source[currentSet.Position(actualFunction.Pos()).Offset:currentSet.Position(actualFunction.End()).Offset]))
 		if err != nil {
 			return nil, err
 		}
@@ -54,4 +82,16 @@ func repair2698CurrentRecipes(root, path string, source []byte, rows []recipe) (
 		}
 	}
 	return current, nil
+}
+
+// Method names can repeat under different exact receivers. Compare the complete
+// receipt and consume one occurrence rather than collapsing them by name.
+func consumeRepair2698Recipe(rows map[string][]recipe, row recipe) bool {
+	for index, original := range rows[row.Function] {
+		if reflect.DeepEqual(original, row) {
+			rows[row.Function] = append(rows[row.Function][:index], rows[row.Function][index+1:]...)
+			return true
+		}
+	}
+	return false
 }

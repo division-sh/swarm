@@ -150,7 +150,7 @@ func proofHistoryInputs(t *testing.T) map[string][]string {
 
 func TestProofHistoryInputsMatchPinnedSourceConsumers(t *testing.T) {
 	files := map[string][]string{
-		"github.com/division-sh/swarm/scripts/rewrite-stages-2566": {"scripts/rewrite-stages-2566/current_entries_test.go", "scripts/rewrite-stages-2566/embedded_entries.go", "scripts/rewrite-stages-2566/intent.json"},
+		"github.com/division-sh/swarm/scripts/rewrite-stages-2566": {"scripts/rewrite-stages-2566/current_entries_test.go", "scripts/rewrite-stages-2566/embedded_entries.go", "scripts/rewrite-stages-2566/intent.json", "scripts/rewrite-stages-2566/native_repair_2698.go"},
 	}
 	inputs := proofHistoryInputs(t)
 	expected := proofHistorySourceConsumers(t, testTimingRepoRoot(t))
