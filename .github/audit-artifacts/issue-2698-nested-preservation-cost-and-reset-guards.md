@@ -97,7 +97,8 @@ not clear those runtime obligations or authorize a qualifying PR push.
 
 At signed0108351e35 the sequential, otherwise unchanged codemod-owner-guards unit
 times out at600.211s:212 completed roots PASS, zero explicit assertion failures,
-out of647 statically selected roots. The interrupted run-identity history root
+The first grep inventory reported647 roots; the authoritative Go list correction
+below supersedes that count. The interrupted run-identity history root
 and all unstarted work remain unqualified. Receipt is
 pr2698-0108351e35-sequential-whole-codemod-owner-guards.jsonl; BLOCKING packet
 6214934410 retains it. No concurrent B test/analysis ran alongside that unit.
@@ -121,3 +122,36 @@ wrappers are deleted; unchanged preservation receipts otherwise carry.
 
 The cold-census USER disposition is still pending6214693627/6214751470; no known
 cold root or store unit is rerun unchanged. Runtime/Q1/H2/194/155 holds remain.
+
+## Escalation and exact reference conservation
+
+Reviewer-b6214981064 bounds the remaining effort: no serial next-root cost chase
+or further whole-unit attempt without credible completion evidence. No such
+bound is established for the unreached work, so the codemod unit joins the
+separate USER-reserved cost/placement decision. There is no placement or budget
+change in this source. The existing647-root estimate in6214934410 was wrong:
+the official unchanged-selector Go list contains663 roots at0108351e35, with212
+complete, one interrupted and450 unstarted. The new differential control brings
+the current list to664. Retained official list and per-root completion ledger:
+pr2698-codemod-unit-official-root-list.txt and
+pr2698-codemod-unit-completion-ledger.tsv. No unstarted test becomes PASS.
+
+The AST-reference precheck now has a differential counterexample for historical
+restoration INTRODUCING the watched reference into a declaration without a current
+one. Both original and scoped decisions feed the SAME reference-position owner;
+only current AST nodes can acquire allowed positions. Current initializers,
+function-value aliases and foreign declarations remain refused even when the
+modeled historical output contains the signed consumer's watched reference.
+This is a pure reference-accounting model, not fabricated live source authority.
+The full-file actual AST walk and original native normalization are unchanged.
+
+pr2698-identity-restored-reference-conservation.jsonl PASS5.543s: all original
+caller refusals and whole-body controls pass, inventory2.64s, differential model
+0.00s. The changed test and extracted owner score25/20 cognitive respectively;
+no waiver. Vet and affected U1000 pass. No additional whole unit has been started.
+
+At2b208dd2df the independent complexity comparison against97099bb686 passes:
+539 cognitive and247 cyclomatic hotspots, unchanged policy/counts. The final
+signed delta receives its own exact-head complexity receipt separately; this
+older receipt is not relabeled. No canonical preflight or HumanTask final-head
+PASS is claimed. Registry4704, collector7898e5f7... and raw debt remain unchanged.
