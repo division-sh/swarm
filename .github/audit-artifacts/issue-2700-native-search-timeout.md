@@ -40,7 +40,7 @@ retained. `native-timeout-baseline-red.log` ran normal managed
 
 | Cell | Baseline result |
 | --- | --- |
-| N01 explicit 1s / 10s / 120s | RED: all three outgoing requests carried the client's approximately 30s deadline. This first component fixture used the existing Go-field-name policy builder; canonical authored spelling has its separate counterexample below. Omitted/default 30s passed separately. Exact context-creation interval oracle, not an elapsed-performance ceiling. |
+| N01 explicit 1s / 10s / 120s | RED: all three outgoing requests carried the client's approximately 30s deadline. This first component fixture used the existing Go-field-name policy serializer; canonical authored spelling has its separate counterexample below. Omitted/default 30s passed separately. Exact context-creation interval oracle, not an elapsed-performance ceiling. |
 | N02 authored 1s / real 2s response | RED: succeeded after 2.002334478s, incorrectly returning the normalized result. One request. |
 | N03 authored 120s / real 45s response | RED: failed after 30.001726539s with exact native transport uncertainty; one request. The server's original bounded handler joined at 45s; package 47.034s. |
 
