@@ -4,15 +4,19 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestForkOperationCanonicalIdentityBindsSelectedMeaning(t *testing.T) {
+	target := forkOperationRootReference(t)
 	first := ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "same-key",
 		TransportHash: "exact-wire-request", SourceRunID: uuid.NewString(), ForkEventID: uuid.NewString(),
-		TargetBundleHash:  "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		ContractSelection: RunForkContractSelection{Mode: RunForkContractSelectionModeSelectedContracts},
+		TargetBundleHash:    target.BundleHash,
+		TargetRootReference: target,
+		ContractSelection:   RunForkContractSelection{Mode: RunForkContractSelectionModeSelectedContracts},
 		DataPinOverrides: []durabledata.ExplicitPin{
 			{Declaration: durabledata.DeclarationRef{FlowPath: "z", EventName: "z/last"}, VersionID: durabledata.VersionID("resource-version-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")},
 			{Declaration: durabledata.DeclarationRef{FlowPath: "a", EventName: "a/first"}, VersionID: durabledata.VersionID("resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")},
@@ -42,7 +46,15 @@ func TestForkOperationCanonicalIdentityBindsSelectedMeaning(t *testing.T) {
 }
 
 func TestForkOperationRejectsMissingIdentityAndDuplicatePins(t *testing.T) {
-	request := ForkOperationRequest{OperationID: uuid.NewString(), Actor: "actor", TransportHash: "hash", SourceRunID: uuid.NewString(), ForkEventID: uuid.NewString(), TargetBundleHash: "bundle"}
+	target := forkOperationRootReference(t)
+	request := ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "actor", TransportHash: "hash", SourceRunID: uuid.NewString(), ForkEventID: uuid.NewString(),
+		TargetBundleHash: target.BundleHash, TargetRootReference: target,
+		ContractSelection: RunForkContractSelection{Mode: RunForkContractSelectionModeSelectedContracts},
+	}
+	if _, _, err := request.Canonical(); err != nil {
+		t.Fatalf("negative controls require a valid baseline: %v", err)
+	}
 	for _, change := range []func(*ForkOperationRequest){
 		func(r *ForkOperationRequest) { r.OperationID = "" },
 		func(r *ForkOperationRequest) { r.Actor = "" },
@@ -62,9 +74,10 @@ func TestForkOperationRejectsMissingIdentityAndDuplicatePins(t *testing.T) {
 }
 
 func TestForkOperationKeepsEventlessSelectorDistinctFromEventFork(t *testing.T) {
+	target := forkOperationRootReference(t)
 	request := ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "bearer:operator", TransportHash: "exact-wire-request",
-		SourceRunID: uuid.NewString(), TargetBundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		SourceRunID: uuid.NewString(), TargetBundleHash: target.BundleHash, TargetRootReference: target,
 		ContractSelection: RunForkContractSelection{Mode: RunForkContractSelectionModeSelectedContracts},
 	}
 	_, eventlessHash, err := request.Canonical()
@@ -83,9 +96,10 @@ func TestForkOperationKeepsEventlessSelectorDistinctFromEventFork(t *testing.T) 
 }
 
 func TestForkOperationResolvedDeploymentPointDoesNotRehashRequest(t *testing.T) {
+	target := forkOperationRootReference(t)
 	request := ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "bearer:operator", TransportHash: "exact-wire-request",
-		SourceRunID: uuid.NewString(), TargetBundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		SourceRunID: uuid.NewString(), TargetBundleHash: target.BundleHash, TargetRootReference: target,
 		ContractSelection: RunForkContractSelection{Mode: RunForkContractSelectionModeSelectedContracts},
 	}
 	_, requestHash, err := request.Canonical()
@@ -104,9 +118,10 @@ func TestForkOperationResolvedDeploymentPointDoesNotRehashRequest(t *testing.T) 
 }
 
 func TestForkOperationRecordRequiresExactResolvedPoint(t *testing.T) {
+	target := forkOperationRootReference(t)
 	request := ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "bearer:operator", TransportHash: "exact-wire-request",
-		SourceRunID: uuid.NewString(), TargetBundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		SourceRunID: uuid.NewString(), TargetBundleHash: target.BundleHash, TargetRootReference: target,
 		ContractSelection: RunForkContractSelection{Mode: RunForkContractSelectionModeSelectedContracts},
 	}
 	_, hash, err := request.Canonical()
@@ -161,6 +176,7 @@ func TestForkOperationRecordRequiresExactResolvedPoint(t *testing.T) {
 }
 
 func TestForkOperationResolvedSelectorCorrespondence(t *testing.T) {
+	target := forkOperationRootReference(t)
 	for _, explicit := range []bool{false, true} {
 		t.Run(map[bool]string{false: "omitted", true: "explicit"}[explicit], func(t *testing.T) {
 			point := RunForkPoint{Kind: RunForkPointEvent, EventID: uuid.NewString(), Revision: 3}
@@ -169,7 +185,7 @@ func TestForkOperationResolvedSelectorCorrespondence(t *testing.T) {
 			}
 			request := ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "operator", TransportHash: "request", SourceRunID: uuid.NewString(),
-				ForkEventID: point.Input, TargetBundleHash: "bundle", ContractSelection: RunForkContractSelection{Mode: RunForkContractSelectionModeSelectedContracts},
+				ForkEventID: point.Input, TargetBundleHash: target.BundleHash, TargetRootReference: target, ContractSelection: RunForkContractSelection{Mode: RunForkContractSelectionModeSelectedContracts},
 			}
 			_, before, err := request.Canonical()
 			if err != nil {
@@ -190,4 +206,10 @@ func TestForkOperationResolvedSelectorCorrespondence(t *testing.T) {
 			}
 		})
 	}
+}
+
+func forkOperationRootReference(t testing.TB) sourceartifact.RootAdmissionReference {
+	t.Helper()
+	root, _ := sourceartifactfixture.Rooted(t, "fork-target", sourceartifactfixture.Artifact())
+	return root.Admission().Reference()
 }
