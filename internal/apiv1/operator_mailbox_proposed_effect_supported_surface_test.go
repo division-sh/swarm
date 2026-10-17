@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -26,8 +27,10 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -188,6 +191,7 @@ func newProposedEffectMailboxHandler(
 		DeliveryStore: deliveryOwner, DeliveryRuntime: bus, PipelineObligations: obligationOwner,
 		RunLifecycle: runLifecycle, SourceArtifactFact: fact,
 	}))
+	installProposedEffectAPIJournal(t, persistence.(agentfixture.Store), bus, coordinator, fact)
 
 	mailbox, ok := persistence.(MailboxAPIStore)
 	if !ok {
@@ -226,6 +230,41 @@ func newProposedEffectMailboxHandler(
 		}),
 	})
 	return handler, bus
+}
+
+func installProposedEffectAPIJournal(t *testing.T, selected agentfixture.Store, bus *runtimebus.EventBus, coordinator *runtimepipeline.PipelineCoordinator, fact runtimecorrelation.SourceArtifactFact) {
+	t.Helper()
+	ctx := testAuthorActivityContextForSource(context.Background(), fact)
+	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := grant.AdmitExecution(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal, err := startupownership.CaptureActivityJournal(ctx, grant, evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.InstallActivityJournal(journal); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := bus.WaitForQuiescence(cleanup); err != nil {
+			t.Errorf("join approved-effect fixture before releasing its original journal: %v", err)
+		}
+	})
 }
 
 func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecorrelation.SourceArtifactFact, workflowVersion string) (decisioncard.Card, decisioncard.ProposedEffectContinuation) {
