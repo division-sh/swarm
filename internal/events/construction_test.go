@@ -36,7 +36,7 @@ var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/runtime/event_construction.go", Scope: "newStandaloneRuntimePlatformDiagnosticEvent", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:         1,
 	{Path: "internal/runtime/genericschedule/owner.go", Scope: "occurrenceEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:                                      1,
 	{Path: "internal/runtime/genericschedule/owner.go", Scope: "occurrenceEvent", Constructor: "NewStandaloneRuntimeControlEvent"}:                                     1,
-	{Path: "internal/runtime/inbound.go", Scope: "projectInboundPublication", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                                        1,
+	{Path: "internal/runtime/inboundpublication/projection.go", Scope: "ProjectEvidence", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                            1,
 	{Path: "internal/runtime/ingress/controller.go", Scope: "Controller.publishTransitionEvent", Constructor: "NewCausalRuntimeControlEvent"}:                          1,
 	{Path: "internal/runtime/ingress/controller.go", Scope: "Controller.publishTransitionEvent", Constructor: "NewStandaloneRuntimeControlEvent"}:                      1,
 	{Path: "internal/runtime/llm/session_events.go", Scope: "newAgentStartedRuntimeDiagnostic", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                        1,
@@ -71,7 +71,7 @@ var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 
 var productionRootConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/apiv1/operator_event_publish.go", Scope: "eventPublicationEvent", Constructor: "NewRunCreatingRootIngressEvent"}:                 1,
-	{Path: "internal/runtime/inbound.go", Scope: "projectInboundPublication", Constructor: "NewExistingRunRootIngressEvent"}:                          1,
+	{Path: "internal/runtime/inboundpublication/projection.go", Scope: "ProjectOutputEvent", Constructor: "NewExistingRunRootIngressEvent"}:           1,
 	{Path: "internal/runtime/fanoutobligation/ordinal_emission.go", Scope: "OrdinalEmission.NewEvent", Constructor: "NewExistingRunRootIngressEvent"}: 1,
 	{Path: "internal/store/eventfixture/event.go", Scope: "ExistingRunRoot", Constructor: "NewExistingRunRootIngressEvent"}:                           1,
 	// Native selected fixtures publish one source root and one genuinely issued fork root.
