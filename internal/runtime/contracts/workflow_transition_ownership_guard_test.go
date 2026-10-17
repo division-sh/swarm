@@ -636,6 +636,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.validateWorkflowTransitionHistoryFlow::call internal/runtime/pipeline.validateWorkflowTransitionRecord":                         1,
 		"internal/runtime/pipeline.validateWorkflowTransitionHistoryFlow::history evidence fields":                                                                 2,
 		"internal/runtime/pipeline.validateWorkflowTransitionRecord::history evidence fields":                                                                      11,
+		"internal/runtime/pipeline.WorkflowTimerLifecycle.stageTimerEntryCurrent::history evidence fields":                                                         11,
 		"internal/runtime/pipeline.workflowInstancePersistedProjectionFromInstance::call internal/runtime/pipeline.validateWorkflowTransitionHistoryFlow":          1,
 		"internal/runtime/pipeline.workflowInstanceTransitionHistoryFromConfig::call internal/runtime/pipeline.validateWorkflowTransitionRecord":                   1,
 		// Validated lifecycle evidence construction and round-trip.
