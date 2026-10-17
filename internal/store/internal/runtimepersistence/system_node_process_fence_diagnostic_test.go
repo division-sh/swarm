@@ -43,6 +43,13 @@ func TestSystemNodeMutationRejectsPredecessorAfterProcessCutoverBothStores(t *te
 				t.Fatalf("claim predecessor system-node work: %+v err=%v", claimed, err)
 			}
 			record = workflowMutationDeliveryEntry(t, record, node, event, claimed.Claim)
+			command := runtimepipeline.WorkflowEngineMutationCommand{State: record, DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
+				Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, Duration: time.Second,
+				RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+			}}
+			if err := command.Validate(); err != nil {
+				t.Fatalf("validate the genuine predecessor command before the cut: %v", err)
+			}
 			before, found, err := f.workflows.Load(f.ctx, record.Identity)
 			if err != nil || !found {
 				t.Fatalf("load predecessor state: found=%v err=%v", found, err)
@@ -67,10 +74,7 @@ func TestSystemNodeMutationRejectsPredecessorAfterProcessCutoverBothStores(t *te
 			if err != nil || next.AuthorityGeneration != old.AuthorityGeneration+1 {
 				t.Fatalf("prove durable process cutover: before=%+v after=%+v err=%v", old, next, err)
 			}
-			committed, commitErr := f.store.(runtimepipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(f.ctx,
-				runtimepipeline.WorkflowEngineMutationCommand{State: record, DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
-					Claim: claimed.Claim, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
-				}})
+			committed, commitErr := f.store.(runtimepipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(f.ctx, command)
 			after, found, readErr := f.workflows.Load(f.ctx, record.Identity)
 			t.Logf("process_generation=%d->%d acknowledged=%v refusal=%v state_conserved=%v found=%v read_err=%v",
 				old.AuthorityGeneration, next.AuthorityGeneration, committed.Committed, commitErr, reflect.DeepEqual(before, after), found, readErr)
