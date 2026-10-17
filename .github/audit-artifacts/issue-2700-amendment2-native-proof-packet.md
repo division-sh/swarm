@@ -160,3 +160,118 @@ the no-push hold also prevents upload-dependent preflight completion. Local
 focused receipts are not hosted-tier credit. Provisional hosted lifecycle must
 be revalidated against the widened pack/approval/fork/schema consumer set at
 FINAL; add an exact disjoint omitted unit only if necessary.
+
+## 2026-10-17 Shared-Fixture And Replay Successor
+
+Signed173eb81316ffbfe6f0a8d2663a85ff5ec5dbfaaf closes the shared native
+fixture setup item above. RequireRun explicitly captures and binds ONE real
+original journal before mutation; coordinator, cleanup-error and claim-reply-
+loss consumers retain that exact role. Reopen joins and releases the original
+process, exposes durable readback and does not infer new write permission.
+There is no callback-time capture, latest-role lookup or production fallback.
+The native explicit-setup proof checks unprepared/reopened/retired write
+refusals, unchanged original binding across runs and complete retained evidence.
+Unused unbound public cleanup/claim-loss fixture facades were removed, not
+replaced by raw SQL or a new owner. Original negative factory controls remain.
+
+The mock-consumer refresh then exposed a real ordering regression: the fixed
+once-only path reused terminal history before checking a scenario profile's
+effective source. Signed0df756bd309624d9f2296521b6719156290e18d7 restores
+that existing admission before readback. It loads the profile exactly once,
+retains caller/run/posture/effective-source checks, and defers responder
+materialization until fresh execution. Admitted terminal replay still needs
+no current response plan. The expanded original test executes on BOTH stores,
+checks exact profile-read counts, named mismatch refusal, unchanged native
+story/revision/attempt counts and complete terminal record equality. No
+existing assertion or bound is removed.
+
+All logs below remain in the same local receipt directory:
+
+| Receipt | Result and boundary |
+| --- | --- |
+| amendment2-shared-native-fixture-original-red.log | RED7.185s: direct journal, terminal post-commit-error and loop ordering consumers refused before their assertions because the common fixture still exposed an unbound writer. |
+| amendment2-shared-native-fixture-role-fences-race3-candidate1.log | PASS99.082s at173eb81316: all7 roots x3, both stores. Native journal, terminal ACK error, repeat/close/duplicate ordering, reply-context restart, original-process release/reopen and exact binding controls. |
+| amendment2-shared-native-fixture-http-fault-consumers-race3-candidate1.log | PASS98.844s at173eb81316: all6 roots x3, both stores. Actual lost claim reply, terminal post-commit error, projected channel result/ACK-loss, static HTTP once-only execution and concurrent duplicate preservation. |
+| amendment2-shared-native-fixture-once-only-consumers-count1-candidate1.log | PASS5.918s, all10 selected once-only/connector/credential roots. The old read-only-fork-named component uses separately created run identities; it does NOT close C's unapproved selected-fork execution boundary. |
+| amendment2-shared-native-fixture-mock-refusal-consumers-count1-candidate1.log | RED6.947s, only the original scenario-profile replay root fails; all9 other mock/expiry/native mutation-refusal roots PASS. The initial SQLite mismatch reproducer reaches the wrong predecessor event. |
+| amendment2-profile-terminal-source-order-both-stores-original-red.log | RED1.176s, BOTH stores fail the added admitted-replay profile-read assertion: terminal reuse performed zero additional profile admissions. Preserved separately from the initial wrong-result RED. |
+| amendment2-profile-terminal-source-order-both-stores-race3-candidate1.log | PASS126.271s at0df756bd30: all7 roots x3 (21 complete root executions), including the both-store mismatch/native-history control, restart/concurrent-run profile resolution, literal response handling, current-plan-free terminal replay and original pre-journal mock/posture refusals. |
+| amendment2-profile-and-shared-native-complexity-candidate1.log | PASS at0df756bd30 versus e022cd4a32; cognitive >=30 537->537, >=50 191->191, cyclomatic >=30 248->248. No baseline/policy raise. Evidence test-results/2700-amendment2-profile-and-shared-native-complexity/. |
+
+Additional immutable receipt SHA256s:
+
+```text
+shared-original-red 1065bccbcb2e290b0ef08fedcabd9e2cd781d508e083cdaf6cfa32f8b8084990
+shared-role-race3 115626bd998fbd17969bb500590532274d32539b307fab3dcba65b5ec9bc9af5
+shared-http-fault-race3 bd682ec19464516215254542f8729c11ad3dd87351facd834571a56e89c95c41
+shared-once-only 04f6e7775ccf0416a86ea4ccf5b9c1a7ac2e257ba2a5af9e089be788ffe7dcfc
+shared-mock-original-red 9214107feb2f0ce7f4a1d45d29a6267d4365dc5729f30f3f83407861a73ee961
+profile-both-stores-red 23972b8923e0f02924a363e290941af8f0b86d8d60ab315d86119a520f1757d9
+profile-race3-green fe9665d7be188d318881132f5a722c51a346d5266e99d9789758bcae46c8f70f
+profile-shared-complexity 784df6b63c1a30eb507f9a579c5620b215cbe654f303ae7e7cacf4ea5a4a6bb0
+```
+
+The shared component fixtures do not establish full compiled-source/served
+admission. Dedicated actual-source HTTP/approval and E original-session
+receipts above keep their separate scopes. R04 native recovery-transaction
+ACK-loss/full resume remain E's explicit OPEN integration dependency; ordinary
+writer ACK-loss is not substituted. C's unapproved-fork positive RED stays
+visible. This is local widened-deletion evidence, not FINAL HEAD, permission
+to push before B, or a hosted qualification receipt. Final debt20m, regeneration,
+actual selection mapping and exact-head preflight remain owed after integration.
+
+## Current-Source Consumer Tail
+
+Signed5a6244455d removes only the retired authored scalar from SIX current
+positive fixtures: connector null-schema admission, selected connector source
+loading, CLI effect reachability, numeric activity parity, compiled lifecycle
+missing-response admission and the actual mailbox/provider journey. It does
+not change their assertions, intentional retired-syntax negatives, platform
+operation classes, historical packets or the user's bundles.
+
+The mailbox journey then exposed a remaining test-assembly prerequisite: its
+coordinator had no installed original journal. Signed76645089cf62c3eb27e6e64ac846b92c3524f8e9
+captures the genuine existing agentfixture generation, settles/admit probes,
+calls CaptureActivityJournal and installs that one journal BEFORE publication.
+Cleanup joins the original bus before the retained test process is released.
+The actual operator approval, one physical provider call, exact body, decision/
+request events, terminal native readback and row counts are unchanged. No
+production permission fallback or wider fixture-owner change is added.
+
+| Receipt | Result and boundary |
+| --- | --- |
+| amendment2-shared-fixture-and-profile-affected-guards-count1-candidate1.log | PASS all11 selected construction/event/lifecycle/writer guards: events2.949s, runtimepersistence6.661s, pipeline0.043s. |
+| amendment2-retired-fixture-source-tail-original-red.log | Original three-package RED: connector enum-null fixture, CLI reachability and flow-local selected-source loading rejected the stale authored class before their intended schema/source assertions. Pack-imported source loading remained PASS. |
+| amendment2-retired-fixture-source-tail-race3-candidate1.log | PASS race x3: packs1.044s, cliapp15.148s, runforkexecution5.326s. Existing direct/alias/null-schema, text/JSON teaching, structural/readiness separation, flow-local/pack-imported and disk/artifact assertions all retained. |
+| amendment2-retired-fixture-served-mailbox-consumers-race3-candidate1.log | Aggregate RED because API mailbox6 cells reached released-request state but no provider dispatch (apiv1 RED81.775s). Independently the serveapp package completes PASS173.764s, all18 actual numeric/mock/selected-fork parity cells x3 on both stores, including their original restart/source/result assertions. No whole-invocation GREEN claim. |
+| amendment2-mailbox-original-journal-race3-candidate2.log | PASS17.770s, all6 mailbox/provider cells on both stores x3 after the original-journal setup above. The existing10s provider wait and180s package bound remain unchanged. |
+| amendment2-keyfree-release-fixture-smoke-count1-candidate1.log | PASS31.203s, original active compiled SQLite lifecycle smoke. Actual verify-positive and missing-exact-response command refusal PASS before J1 graceful/restart follow-through. Existing60s startup/90s run boundaries retained; this is one focused smoke root, not the complete J1-J5 or hosted tier. |
+
+```text
+affected-guards dcd800c293c47839a5898496030ecd08c82289bbe88498a0c1f24548ae932f39
+source-tail-original-red f69285eec0fa730ed637db73e586f350a3d660cf8776ce06aec430c0cf75a921
+source-tail-race3-green 6c8d6b5b599d5e334fb2ad5035764445789d75093a2164f5fd42044cda112c3b
+mailbox-original-red-and-served-green 15e8521c6e5ead4db3a591c98fd38df5404387b4b4d517a0b03331adca551ab5
+mailbox-original-journal-green cd17c4a9545bb8eaf2aea8a81eb82289adc59b0d7475e57585996b5a7c91db71
+compiled-sqlite-smoke cbbaeaaff6c73514eb983bbace9561be51d461a3d958e57941f4dd6e838e80a4
+unused-diagnostic-red a7d983189c2a20c48d41495e17445babbde8ae885ad7987ea2793b8ab765a07b
+```
+
+The unused diagnostic reports ONE U1000: execution_test.go's
+seedSelectedExecutionTestAgent. It was already definition-only in common
+71d0dcae08, Ee515e07f5f and signed Bf98083f8ce; A's original2cb423adad
+still had three callers. No classifier/baseline change or deletion of B's
+helper is made here. The long scan overlapped later current-fixture edits,
+so it is explicitly NOT an exact-head unused receipt or qualification pass.
+Reconcile actual B and refresh the real exact-head check before the eventual
+permitted push.
+
+The remaining old five-policy execution fixture in
+runforkexecution/activity_fork_execution_test.go still contains its original
+authored-class/request policy packet. It is not silently grandfathered or
+credited as a current-contract execution proof. Its current-contract successor
+and the known C-owned unapproved-fork behavior must be reconciled without
+changing those retained historical assertions or inventing an approval/source
+to make them pass. This tail, E's recovery ACK-loss/full-resume dependency and
+final integrated qualification remain OPEN; no consolidated completion or
+FINAL review is requested by these intermediate evidence records.
