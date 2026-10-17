@@ -246,6 +246,8 @@ production permission fallback or wider fixture-owner change is added.
 | amendment2-retired-fixture-served-mailbox-consumers-race3-candidate1.log | Aggregate RED because API mailbox6 cells reached released-request state but no provider dispatch (apiv1 RED81.775s). Independently the serveapp package completes PASS173.764s, all18 actual numeric/mock/selected-fork parity cells x3 on both stores, including their original restart/source/result assertions. No whole-invocation GREEN claim. |
 | amendment2-mailbox-original-journal-race3-candidate2.log | PASS17.770s, all6 mailbox/provider cells on both stores x3 after the original-journal setup above. The existing10s provider wait and180s package bound remain unchanged. |
 | amendment2-keyfree-release-fixture-smoke-count1-candidate1.log | PASS31.203s, original active compiled SQLite lifecycle smoke. Actual verify-positive and missing-exact-response command refusal PASS before J1 graceful/restart follow-through. Existing60s startup/90s run boundaries retained; this is one focused smoke root, not the complete J1-J5 or hosted tier. |
+| amendment2-current-source-mailbox-affected-guards-count1-candidate2.log | PASS all11 affected guards after the source/mailbox fixture changes: events2.594s, runtimepersistence6.422s, pipeline0.042s. |
+| amendment2-current-source-mailbox-complexity-candidate1.log | PASS exact signed5b1c366119 versus0df756bd30; reviewed policy and hotspot counts537/191/248 unchanged. Evidence test-results/2700-amendment2-current-source-mailbox-complexity/. |
 
 ```text
 affected-guards dcd800c293c47839a5898496030ecd08c82289bbe88498a0c1f24548ae932f39
@@ -254,6 +256,7 @@ source-tail-race3-green 6c8d6b5b599d5e334fb2ad5035764445789d75093a2164f5fd42044c
 mailbox-original-red-and-served-green 15e8521c6e5ead4db3a591c98fd38df5404387b4b4d517a0b03331adca551ab5
 mailbox-original-journal-green cd17c4a9545bb8eaf2aea8a81eb82289adc59b0d7475e57585996b5a7c91db71
 compiled-sqlite-smoke cbbaeaaff6c73514eb983bbace9561be51d461a3d958e57941f4dd6e838e80a4
+current-source-mailbox-guards 5a2d83ea6704fbd926ec566e3e238d1309af6d339f6cb47d1538263335b385d5
 unused-diagnostic-red a7d983189c2a20c48d41495e17445babbde8ae885ad7987ea2793b8ab765a07b
 ```
 
