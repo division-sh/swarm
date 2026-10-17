@@ -15,11 +15,12 @@ type workflowStageEntryEventReader interface {
 }
 
 func (l *WorkflowTimerLifecycle) stageEntryOriginEvent(ctx context.Context, entry timeridentity.StageEntryRef) (events.Event, error) {
+	var empty events.Event
 	if err := entry.Validate(); err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	if l.entryEvents == nil || entry.Cause == "construction" {
-		return events.Event{}, fmt.Errorf("transition entry requires its native immutable publication reader")
+		return empty, fmt.Errorf("transition entry requires its native immutable publication reader")
 	}
 	originRun := entry.RunID
 	if entry.OriginRunID != "" {
@@ -27,10 +28,10 @@ func (l *WorkflowTimerLifecycle) stageEntryOriginEvent(ctx context.Context, entr
 	}
 	event, err := l.entryEvents.LoadWorkflowStageEntryEvent(ctx, originRun, entry.EventID)
 	if err != nil {
-		return events.Event{}, err
+		return empty, err
 	}
 	if event.ID() != entry.EventID || event.RunID() != originRun {
-		return events.Event{}, fmt.Errorf("stage entry publication disagrees with its exact origin")
+		return empty, fmt.Errorf("stage entry publication disagrees with its exact origin")
 	}
 	return event, nil
 }
