@@ -252,9 +252,7 @@ func TestActivityBoringProofRetryIsBoundedAndTraced(t *testing.T) {
 }
 
 func TestScenarioExecutionProfileMismatchFencesTerminalReplay(t *testing.T) {
-	pipeline.VerifyScenarioExecutionProfileMismatchFencesTerminalReplayForTest(t, func(t *testing.T) pipeline.WorkflowActivityNativeFixtureForTest {
-		return workflowActivityNativeFixture(t, "sqlite")
-	})
+	verifyNativeActivityBothStores(t, pipeline.VerifyScenarioExecutionProfileMismatchFencesTerminalReplayForTest)
 }
 
 func TestPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T) {

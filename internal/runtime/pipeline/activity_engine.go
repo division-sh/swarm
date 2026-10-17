@@ -32,6 +32,7 @@ import (
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -241,12 +242,27 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	if !ok {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassTargetUnreachable, "activity_tool_not_declared", "activity-runtime", "execute_activity", map[string]any{"tool": intent.Tool}))
 	}
+	return d.executeAdmittedActivityTool(ctx, intent, source, tool)
+}
+
+func (d pipelineActivityDispatcher) executeAdmittedActivityTool(ctx context.Context, intent runtimeengine.ActivityIntent, source semanticview.Source, tool runtimecontracts.ToolSchemaEntry) error {
+	var profile scenarioexecution.Profile
+	var profiled bool
+	if intent.ExecutionMode == runtimeeffects.ExecutionModeMock {
+		var err error
+		profile, profiled, err = d.coordinator.scenarioExecutionProfileForRun(ctx, intent.SourceRunID)
+		if err != nil {
+			return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "scenario_execution_profile_not_admitted", "activity-runtime", "admit_mock_activity", map[string]any{"tool": intent.Tool, "run_id": intent.SourceRunID}, err))
+		}
+	}
+	// The effective source must still be admitted for replay, but a retained
+	// terminal result does not need a responder for fresh mock execution.
 	if reused, err := d.reuseExistingNonIdempotentActivityAttempt(ctx, intent); err != nil || reused {
 		return err
 	}
 	var mockResponse *providerconnectors.AdmittedMockResponse
 	if intent.ExecutionMode == runtimeeffects.ExecutionModeMock {
-		responsePlan, err := d.coordinator.mockResponsePlanForRun(ctx, intent.SourceRunID, source)
+		responsePlan, err := d.coordinator.mockResponsePlanForProfile(source, profile, profiled)
 		if err != nil {
 			return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "scenario_execution_profile_not_admitted", "activity-runtime", "admit_mock_activity", map[string]any{"tool": intent.Tool, "run_id": intent.SourceRunID}, err))
 		}
@@ -259,25 +275,32 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	return d.executeNonIdempotentActivityIntent(ctx, intent, tool, mockResponse)
 }
 
-func (pc *PipelineCoordinator) mockResponsePlanForRun(ctx context.Context, runID string, source semanticview.Source) (*providerconnectors.MockResponsePlan, error) {
+func (pc *PipelineCoordinator) scenarioExecutionProfileForRun(ctx context.Context, runID string) (scenarioexecution.Profile, bool, error) {
 	if pc.scenarioProfiles == nil {
-		return pc.mockConnectorResponses, nil
+		return scenarioexecution.Profile{}, false, nil
 	}
 	profile, found, err := pc.scenarioProfiles.LoadScenarioExecutionProfile(ctx, strings.TrimSpace(runID))
 	if err != nil {
-		return nil, fmt.Errorf("load scenario execution profile for run %s: %w", runID, err)
+		return scenarioexecution.Profile{}, false, fmt.Errorf("load scenario execution profile for run %s: %w", runID, err)
 	}
 	if !found {
-		return pc.mockConnectorResponses, nil
+		return scenarioexecution.Profile{}, false, nil
 	}
 	if pc.executionPosture != executionposture.MockOnly {
-		return nil, fmt.Errorf("run %s has a scenario execution profile but runtime posture is %q", runID, pc.executionPosture)
+		return scenarioexecution.Profile{}, false, fmt.Errorf("run %s has a scenario execution profile but runtime posture is %q", runID, pc.executionPosture)
 	}
 	if err := pc.effectiveSource.Validate(); err != nil {
-		return nil, fmt.Errorf("runtime effective source identity is unavailable: %w", err)
+		return scenarioexecution.Profile{}, false, fmt.Errorf("runtime effective source identity is unavailable: %w", err)
 	}
 	if !profile.EffectiveSourceIdentity().Equal(pc.effectiveSource) {
-		return nil, fmt.Errorf("run %s scenario execution effective source mismatch: persisted=%s runtime=%s", runID, profile.EffectiveSourceIdentity().Digest(), pc.effectiveSource.Digest())
+		return scenarioexecution.Profile{}, false, fmt.Errorf("run %s scenario execution effective source mismatch: persisted=%s runtime=%s", runID, profile.EffectiveSourceIdentity().Digest(), pc.effectiveSource.Digest())
+	}
+	return profile, true, nil
+}
+
+func (pc *PipelineCoordinator) mockResponsePlanForProfile(source semanticview.Source, profile scenarioexecution.Profile, found bool) (*providerconnectors.MockResponsePlan, error) {
+	if !found {
+		return pc.mockConnectorResponses, nil
 	}
 	return providerconnectors.OverlayMockResponsePlan(pc.mockConnectorResponses, source, profile.ConnectorResponses())
 }

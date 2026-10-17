@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -31,6 +32,20 @@ type scenarioProfileMapReader map[string]scenarioexecution.Profile
 func (r scenarioProfileMapReader) LoadScenarioExecutionProfile(_ context.Context, runID string) (scenarioexecution.Profile, bool, error) {
 	profile, ok := r[runID]
 	return profile, ok, nil
+}
+
+type scenarioProfileReaderFunc func(context.Context, string) (scenarioexecution.Profile, bool, error)
+
+func (r scenarioProfileReaderFunc) LoadScenarioExecutionProfile(ctx context.Context, runID string) (scenarioexecution.Profile, bool, error) {
+	return r(ctx, runID)
+}
+
+func scenarioResponsePlanForRunForTest(ctx context.Context, coordinator *PipelineCoordinator, runID string, source semanticview.Source) (*providerconnectors.MockResponsePlan, error) {
+	profile, found, err := coordinator.scenarioExecutionProfileForRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	return coordinator.mockResponsePlanForProfile(source, profile, found)
 }
 
 func TestAuthoredScenarioWitnessResponsePlanNeverRescansMaterializedData(t *testing.T) {
@@ -80,7 +95,7 @@ connector_responses: {provider.send: "${{'marker': vars.marker}}"}
 		t.Fatal(err)
 	}
 	coordinator := &PipelineCoordinator{scenarioProfiles: scenarioProfileReaderStub{profile: profile}, effectiveSource: identity, executionPosture: executionposture.MockOnly}
-	plan, err := coordinator.mockResponsePlanForRun(context.Background(), "run-response", source)
+	plan, err := scenarioResponsePlanForRunForTest(context.Background(), coordinator, "run-response", source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +141,7 @@ func TestScenarioExecutionProfileResolvesExactPlanAfterCoordinatorRestart(t *tes
 		}
 	}
 	for _, lifecycle := range []string{"initial", "restarted"} {
-		plan, err := newCoordinator(identity, executionposture.MockOnly).mockResponsePlanForRun(context.Background(), "run-1", source)
+		plan, err := scenarioResponsePlanForRunForTest(context.Background(), newCoordinator(identity, executionposture.MockOnly), "run-1", source)
 		if err != nil {
 			t.Fatalf("%s coordinator resolve profile: %v", lifecycle, err)
 		}
@@ -143,10 +158,10 @@ func TestScenarioExecutionProfileResolvesExactPlanAfterCoordinatorRestart(t *tes
 		}
 	}
 	drifted, _ := scenarioexecution.NewEffectiveSourceIdentity(fact, "sha256:"+strings.Repeat("3", 64))
-	if _, err := newCoordinator(drifted, executionposture.MockOnly).mockResponsePlanForRun(context.Background(), "run-1", source); err == nil || !strings.Contains(err.Error(), "effective source mismatch") {
+	if _, err := scenarioResponsePlanForRunForTest(context.Background(), newCoordinator(drifted, executionposture.MockOnly), "run-1", source); err == nil || !strings.Contains(err.Error(), "effective source mismatch") {
 		t.Fatalf("drifted runtime error = %v", err)
 	}
-	if _, err := newCoordinator(identity, executionposture.Live).mockResponsePlanForRun(context.Background(), "run-1", source); err == nil || !strings.Contains(err.Error(), "runtime posture") {
+	if _, err := scenarioResponsePlanForRunForTest(context.Background(), newCoordinator(identity, executionposture.Live), "run-1", source); err == nil || !strings.Contains(err.Error(), "runtime posture") {
 		t.Fatalf("live runtime error = %v", err)
 	}
 }
@@ -195,7 +210,7 @@ func TestScenarioExecutionProfilesRemainIsolatedAcrossConcurrentRuns(t *testing.
 	for _, expected := range expectations {
 		expected := expected
 		go func() {
-			plan, planErr := coordinator.mockResponsePlanForRun(context.Background(), expected.runID, source)
+			plan, planErr := scenarioResponsePlanForRunForTest(context.Background(), coordinator, expected.runID, source)
 			if planErr != nil {
 				errs <- fmt.Errorf("%s resolve: %w", expected.runID, planErr)
 				return
@@ -261,7 +276,14 @@ func VerifyScenarioExecutionProfileMismatchFencesTerminalReplayForTest(t *testin
 	intent.ActivityID = "provider_send"
 	intent.ExecutionMode = executionmode.Mock
 	intent.Input = mustActivityInput(map[string]any{})
-	reader := scenarioProfileReaderStub{profile: profile}
+	profileReads := 0
+	reader := scenarioProfileReaderFunc(func(readCtx context.Context, readRunID string) (scenarioexecution.Profile, bool, error) {
+		if readCtx.Err() != nil || readRunID != runID {
+			t.Fatalf("profile admission lost its caller or run: run=%q err=%v", readRunID, readCtx.Err())
+		}
+		profileReads++
+		return profile, true, nil
+	})
 
 	firstBus := &recordingPipelineBus{}
 	first := fixture.NewCoordinator(firstBus, PipelineCoordinatorOptions{
@@ -273,6 +295,23 @@ func VerifyScenarioExecutionProfileMismatchFencesTerminalReplayForTest(t *testin
 	}
 	if len(firstBus.publishes) != 1 {
 		t.Fatalf("initial publications = %#v", firstBus.publishes)
+	}
+	if profileReads != 1 {
+		t.Fatalf("fresh execution profile reads = %d, want 1", profileReads)
+	}
+	original, found, err := fixture.Persistence.store.LoadActivityAttempt(ctx, activityRequestEventID(intent))
+	if err != nil || !found || original.Status != ActivityAttemptStatusSucceeded {
+		t.Fatalf("original profiled terminal attempt: %+v found=%t err=%v", original, found, err)
+	}
+	before, err := fixture.ReadJournal(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := (pipelineActivityDispatcher{coordinator: first}).executeActivityIntent(ctx, intent); err != nil {
+		t.Fatalf("reuse admitted profiled result: %v", err)
+	}
+	if profileReads != 2 || len(firstBus.publishes) != 2 || firstBus.publishes[1].ID() != firstBus.publishes[0].ID() {
+		t.Fatalf("admitted replay: profile reads=%d publications=%#v", profileReads, firstBus.publishes)
 	}
 
 	drifted, err := scenarioexecution.NewEffectiveSourceIdentity(fact, "sha256:"+strings.Repeat("8", 64))
@@ -296,6 +335,15 @@ func VerifyScenarioExecutionProfileMismatchFencesTerminalReplayForTest(t *testin
 	failure := requireActivityEventFailure(t, restartBus.publishes[0])
 	if failure.Detail.Code != "scenario_execution_profile_not_admitted" {
 		t.Fatalf("drifted failure = %#v", failure)
+	}
+	if profileReads != 3 {
+		t.Fatalf("rejected replay profile reads = %d, want 3 total", profileReads)
+	}
+	if after, err := fixture.ReadJournal(ctx, runID); err != nil || after != before {
+		t.Fatalf("profile replay or refusal changed native accounting: before=%+v after=%+v err=%v", before, after, err)
+	}
+	if retained, found, err := fixture.Persistence.store.LoadActivityAttempt(ctx, original.RequestEventID); err != nil || !found || !reflect.DeepEqual(retained, original) {
+		t.Fatalf("profile replay or refusal changed terminal evidence: before=%+v after=%+v found=%t err=%v", original, retained, found, err)
 	}
 }
 
