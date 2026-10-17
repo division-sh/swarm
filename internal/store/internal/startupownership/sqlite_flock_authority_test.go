@@ -35,6 +35,12 @@ func TestProductionAdvisoryLocksHaveNamedNonEngineTargets(t *testing.T) {
 		filepath.FromSlash("internal/runtime/pythonmodule/artifact_lock_unix.go"): {
 			"int(lock.Fd())": true,
 		},
+		filepath.FromSlash("internal/sessionprovider/invocation_state_unix.go"): {
+			"int(lock.Fd())": true,
+		},
+		filepath.FromSlash("internal/sessionprovider/session_directory_unix.go"): {
+			"int(lock.Fd())": true,
+		},
 		filepath.FromSlash("internal/store/devscratch/epoch_unix.go"): {
 			"fd":             true,
 			"int(file.Fd())": true,
@@ -102,6 +108,8 @@ func TestProductionAdvisoryLocksHaveNamedNonEngineTargets(t *testing.T) {
 		filepath.FromSlash("internal/runtime/credentials/file_lock_unix.go") + ":int(lock.Fd())":                           2,
 		filepath.FromSlash("internal/runtime/managedcredentials/file_lock_unix.go") + ":int(lock.Fd())":                    2,
 		filepath.FromSlash("internal/runtime/pythonmodule/artifact_lock_unix.go") + ":int(lock.Fd())":                      2,
+		filepath.FromSlash("internal/sessionprovider/invocation_state_unix.go") + ":int(lock.Fd())":                        1,
+		filepath.FromSlash("internal/sessionprovider/session_directory_unix.go") + ":int(lock.Fd())":                       1,
 		filepath.FromSlash("internal/store/devscratch/epoch_unix.go") + ":fd":                                              1,
 		filepath.FromSlash("internal/store/devscratch/epoch_unix.go") + ":int(file.Fd())":                                  1,
 		filepath.FromSlash("internal/store/internal/startupownership/sqlite_possession_unix.go") + ":int(coordinate.Fd())": 2,
