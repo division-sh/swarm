@@ -1,5 +1,20 @@
 # WhatsApp Physical Qualification Runbook
 
+## Authoritative Sitting Packet
+
+Use the [superseding self-contained runbook](https://github.com/division-sh/swarm/issues/2577#issuecomment-6226390068),
+accepted by [reviewer-g](https://github.com/division-sh/swarm/issues/2577#issuecomment-6226422781).
+The older command packets and source pins retained below are historical evidence,
+not alternative instructions. The publishing-head proof packet on #2614 supplies
+the exact source and binary identity after integration onto master.
+
+The accepted first-QR, expiry and same-operation replacement rehearsal was on
+trial `a19b6826a41e945b00512a8d17bfef1a43b5cf4d`; it is not a real-device
+P01-P09 or next-day receipt. Those checks remain unperformed. Keep the accepted
+paired-PostgreSQL resume residual separate from the retained pre-QR diagnostic
+REDs. No additional SDK attempt, account, credential or QR recording is implied
+by a publishing-base refresh.
+
 ## Upstream Follow-Up (2026-10-16)
 
 The [user amendment](https://github.com/division-sh/swarm/issues/2577#issuecomment-6223240045)
