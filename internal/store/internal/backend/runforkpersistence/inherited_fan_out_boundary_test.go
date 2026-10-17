@@ -33,6 +33,7 @@ func inheritedFanOutBoundaryAllowances() map[string]historicalBoundaryAllowance 
 	edge("runtime/bus::EnginePublicationPlan.ValidateDurablePublicationPlan", "runtime/bus::PublicationCommand.ValidateFanOut", "pure prepared-plan shape, not write authority")
 	edge("store/internal/backend/eventpersistence::commitFanOutPublicationTx", "runtime/bus::PublicationCommand.ValidateFanOut", "named transaction validates plan shape")
 	edge("store/internal/backend/eventpersistence::commitPublicationTx", "store/internal/backend/eventpersistence::commitValidatedPublicationTx", "generic publication rejects inherited class before private mutation")
+	edge("store/internal/backend/eventpersistence::commitInboundPublicationSQL", "store/internal/backend/eventpersistence::commitValidatedPublicationTx", "inbound command validates every publication against its exact inbound admission before the shared transaction handoff")
 	edge("store/internal/backend/eventpersistence::commitFanOutPublicationTx", "store/internal/backend/eventpersistence::commitValidatedPublicationTx", "named publication validates locked ordinal projection")
 	edge("store/internal/backend/pipelinepersistence::commitFanOutChunk", "store/internal/backend/pipelinepersistence::eventCommitTxStore.commitFanOutPublicationTx", "only named atomic chunk may submit this write")
 	for _, backend := range []string{"Postgres", "SQLite"} {
