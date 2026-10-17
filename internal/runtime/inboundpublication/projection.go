@@ -35,7 +35,8 @@ func ProjectOutputEvent(request Request, ordinal int, output providertriggers.De
 func ProjectEvidence(request Request, eventIDs, eventNames []string, posture executionposture.Posture) (events.Event, error) {
 	payload, err := BuildEvidencePayload(request, eventIDs, eventNames)
 	if err != nil {
-		return events.Event{}, err
+		var empty events.Event
+		return empty, err
 	}
 	return events.NewRunScopedDiagnosticDirectEvent(events.RunScopedRuntimeEventInput{Facts: events.EventFacts{
 		ID: request.MarkerEventID, Type: events.EventTypePlatformInboundRecord,
