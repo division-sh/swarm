@@ -5,6 +5,7 @@ package serveapp
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -131,6 +132,7 @@ func requireSessionConstructionHandoffRefusal(t *testing.T, backend, mode, cut s
 	}
 	selectRuntime := f.adapter.selectRuntime
 	var releases int
+	var releaseCallbackEntered atomic.Bool
 	f.adapter.selectRuntime = func(ctx context.Context, candidate channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error) {
 		owned, incoming, binding, done, err := selectRuntime(ctx, candidate)
 		if err != nil {
@@ -141,6 +143,7 @@ func requireSessionConstructionHandoffRefusal(t *testing.T, backend, mode, cut s
 			return nil, nil, processbinding.Binding{}, nil, errors.Join(err, done())
 		}
 		return owned, incoming, binding, func() error {
+			releaseCallbackEntered.Store(true)
 			releases++
 			err := errors.Join(done(), use.Done())
 			if cut == "handoff_cancels" {
@@ -195,7 +198,14 @@ func requireSessionConstructionHandoffRefusal(t *testing.T, backend, mode, cut s
 			t.Fatal("live original request lost its exact cancellation/release failure", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("original request did not promptly refuse at the handoff cut")
+		constructionDone := false
+		select {
+		case <-original.done:
+			constructionDone = true
+		default:
+		}
+		t.Fatalf("original request did not promptly refuse at the handoff cut: construction_done=%t release_callback_entered=%t caller_cancelled=%t",
+			constructionDone, releaseCallbackEntered.Load(), caller.Err() != nil)
 	}
 	if cut == "caller_cancels" && f.owner.ActiveCount() == 0 {
 		t.Fatal("caller cancellation discarded the counted constructor")
