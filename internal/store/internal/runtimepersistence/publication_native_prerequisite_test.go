@@ -20,13 +20,17 @@ import (
 
 func TestPublicationFaultPrerequisitesConsumeOneNativeConstructionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, cut := range []PublicationFailureCut{PublicationAfterMaterialization, PublicationBeforeReplayScope, PublicationBeforeAPICompletion} {
-			for _, scenario := range []string{"fields", "fieldless", "foreign_event", "foreign_run", "crossed_instance_readiness", "missing_declared_fields"} {
-				t.Run(fmt.Sprintf("%s/%d/%s", backend, cut, scenario), func(t *testing.T) {
-					proveNativePublicationPrerequisite(t, backend, cut, scenario)
+		t.Run(backend, func(t *testing.T) {
+			for _, cut := range []PublicationFailureCut{PublicationAfterMaterialization, PublicationBeforeReplayScope, PublicationBeforeAPICompletion} {
+				t.Run(fmt.Sprintf("%d", cut), func(t *testing.T) {
+					for _, scenario := range []string{"fields", "fieldless", "foreign_event", "foreign_run", "crossed_instance_readiness", "missing_declared_fields"} {
+						t.Run(scenario, func(t *testing.T) {
+							proveNativePublicationPrerequisite(t, backend, cut, scenario)
+						})
+					}
 				})
 			}
-		}
+		})
 	}
 }
 
