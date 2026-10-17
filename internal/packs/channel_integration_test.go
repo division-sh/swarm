@@ -199,7 +199,7 @@ func TestChannelSchemaYAMLAdmissionRejectsExplicitNullAtEveryBoundary(t *testing
 		},
 		{
 			name: "connector",
-			body: "provider: test\ntools:\n  test.send:\n    category: provider_connector\n    handler_type: http\n    effect_class: non_idempotent_write\n    input_schema:\n      type: string\n      enum: null\n    output_schema: {type: object}\n    response_success: {kind: http_status_2xx}\n    http: {method: POST, url: 'https://example.invalid/send'}\n",
+			body: "provider: test\ntools:\n  test.send:\n    category: provider_connector\n    handler_type: http\n    input_schema:\n      type: string\n      enum: null\n    output_schema: {type: object}\n    response_success: {kind: http_status_2xx}\n    http: {method: POST, url: 'https://example.invalid/send'}\n",
 			admit: func(_ *testing.T, body []byte) error {
 				var manifest providerconnectors.ConnectorManifest
 				if err := unmarshalToolTestYAML(body, &manifest); err != nil {

@@ -57,7 +57,6 @@ func mutateFullLifecycleFixtureWithoutExactConnectorResponse(t *testing.T, contr
 	writeReleaseFile(t, filepath.Join(contracts, "telegram-chat", "tools.yaml"), `telegram.send_message:
   description: Deliberately unmocked transport for source-admission proof.
   handler_type: http
-  effect_class: non_idempotent_write
   credentials: [telegram_bot_token]
   http:
     method: POST

@@ -100,7 +100,6 @@ func proveActivitySemanticResultExecutionParity(t *testing.T, mock, fork bool) {
 			tool := fmt.Sprintf(`numeric_provider:
   description: Numeric result integration fixture.
   handler_type: http
-  effect_class: non_idempotent_write
   http: {method: POST, url: %q}
   output_schema:
     type: object

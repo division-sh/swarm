@@ -725,7 +725,6 @@ func copySelectedForkConnectorFixture(t *testing.T, repoRoot string) string {
   category: provider_connector
   description: send Telegram messages
   handler_type: http
-  effect_class: non_idempotent_write
   credentials: [telegram_bot_token]
   input_schema:
     type: object

@@ -320,7 +320,6 @@ pins:
 	writeRunCompletionFixtureFile(t, root+"/tools.yaml", fmt.Sprintf(`provider_write:
   description: Send the exact approved support reply.
   handler_type: http
-  effect_class: non_idempotent_write
   http:
     method: POST
     url: %q
