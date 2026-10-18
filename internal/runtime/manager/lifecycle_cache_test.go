@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/google/uuid"
@@ -56,6 +57,30 @@ func newLifecycleCacheFixtureForSource(t *testing.T, source semanticview.Source)
 }
 
 func TestManagerFixtureRowOwnerSelectionIsExplicit(t *testing.T) {
+	t.Run("flow_activation_source_construction_preserves_retained_readiness", func(t *testing.T) {
+		source := loadRootAndFlowStaticAgentSource(t)
+		options, _, _ := sourceSetFixtureAdmission(t, source)
+		prior := runtimepipeline.DynamicFlowRuntimeReadiness{
+			InstancePath: "retained/instance", OwningRunSource: authorActivityTestSourceArtifactFact,
+			Phase: runtimepipeline.FlowAttachmentReady, PlanHash: "frozen-plan", AttemptOrdinal: 3,
+		}
+		if prior.OwningRunSource.BundleHash() == options.SourceArtifactFact.BundleHash() {
+			t.Fatal("retained readiness control must belong to a different captured source")
+		}
+		instances := &flowActivationTestInstanceStore{readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{"retained": prior}}
+		manager, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, source)
+		fact, found := correlation.SourceArtifactFactFromContext(ctx)
+		if !found || fact.BundleHash() != options.SourceArtifactFact.BundleHash() || manager.semanticSource != source || manager.semanticReadinessSource.fact.BundleHash() != fact.BundleHash() {
+			t.Fatal("flow activation construction lost its exact captured source")
+		}
+		binding, err := manager.lifecycle.persistence().(processExecutionBindingProvider).ProcessExecutionBinding()
+		if err != nil || binding.BundleHash != fact.BundleHash() {
+			t.Fatalf("flow activation construction lost its source-bound process: %+v err=%v", binding, err)
+		}
+		if len(instances.readiness) != 1 || !reflect.DeepEqual(instances.readiness["retained"], prior) {
+			t.Fatal("flow activation construction retargeted retained readiness evidence")
+		}
+	})
 	t.Run("native_panic_candidate_requires_selected_admission", func(t *testing.T) {
 		record := TerminalPanicFixture(t)
 		if !reflect.DeepEqual(record.Topology, runtimeagenttopology.Admission{}) || record.ProcessBinding != (ProcessExecutionBinding{}) || record.LifecycleGeneration != 0 || record.LifecycleEpoch != 0 || record.LifecyclePhase != "" {

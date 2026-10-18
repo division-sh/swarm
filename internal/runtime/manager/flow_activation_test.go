@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -374,16 +375,49 @@ func (o flowActivationOutcomeCommitter) CommitFlowInstanceActivation(ctx context
 
 func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersistence, stores ...ManagerPersistence) *AgentManager {
 	t.Helper()
+	manager := newFlowActivationManagerWithOptions(t, bus, instances, AgentManagerOptions{
+		BaseContext:        testAuthorActivityContext(context.Background()),
+		SourceArtifactFact: authorActivityTestSourceArtifactFact,
+	}, stores...)
+	manager.semanticSource = nil
+	manager.semanticReadinessSource = dynamicFlowRuntimeReadinessSource{}
+	return manager
+}
+
+func newFlowActivationManagerForSource(t *testing.T, bus Bus, instances flowInstancePersistence, source semanticview.Source, stores ...ManagerPersistence) (*AgentManager, context.Context) {
+	t.Helper()
+	options, _, binding := sourceSetFixtureAdmission(t, source)
+	bundle, _ := semanticview.Bundle(source)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), options.SourceArtifactFact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(binding.RuntimeInstanceID, binding.BundleHash))
+	options.BaseContext = ctx
+	manager := newFlowActivationManagerWithOptions(t, bus, instances, options, stores...)
+	manager.semanticReadinessSource = dynamicFlowRuntimeReadinessSource{fact: options.SourceArtifactFact, source: source}
+	return manager, ctx
+}
+
+func newFlowActivationManagerWithOptions(t *testing.T, bus Bus, instances flowInstancePersistence, options AgentManagerOptions, stores ...ManagerPersistence) *AgentManager {
+	t.Helper()
 	if len(stores) == 0 {
 		stores = []ManagerPersistence{&flowActivationTestStore{}}
 	}
 	var lifecycleStore AgentLifecyclePersistence
 	lifecycleStore, _ = stores[0].(AgentLifecyclePersistence)
 	if selected, ok := stores[0].(*flowActivationTestStore); ok {
-		lifecycleStore = &flowActivationTestGenerationStore{
+		generation := &flowActivationTestGenerationStore{
 			flowActivationTestStore: selected,
 			processBootID:           uuid.NewString(), grantID: uuid.NewString(), runtimeID: uuid.NewString(),
 		}
+		if options.SemanticSource != nil {
+			generation.bundleHash = options.SourceArtifactFact.BundleHash()
+			selected.bindingHash = generation.bundleHash
+		}
+		lifecycleStore = generation
 	}
 	var terminalOwner FlowInstanceTerminalMutationOwner
 	terminalOwner, _ = instances.(FlowInstanceTerminalMutationOwner)
@@ -406,20 +440,12 @@ func newFlowActivationManager(t *testing.T, bus Bus, instances flowInstancePersi
 		}
 		activationOwner = construction
 	}
-	manager := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
-		WorkflowInstances:  instances,
-		LifecycleStore:     lifecycleStore,
-		WorkOwner:          newTestManagerWorkOwner(t),
-		BaseContext:        testAuthorActivityContext(context.Background()),
-		SourceArtifactFact: authorActivityTestSourceArtifactFact,
-		PersistenceRoles: PersistenceRoles{
-			FlowActivation:  activationOwner,
-			FlowTermination: terminalOwner,
-		},
-	}, stores...)
-	manager.semanticSource = nil
-	manager.semanticReadinessSource = dynamicFlowRuntimeReadinessSource{}
-	return manager
+	options.WorkflowInstances = instances
+	options.LifecycleStore = lifecycleStore
+	options.WorkOwner = newTestManagerWorkOwner(t)
+	options.PersistenceRoles.FlowActivation = activationOwner
+	options.PersistenceRoles.FlowTermination = terminalOwner
+	return newTestAgentManagerWithOptions(t, bus, nil, options, stores...)
 }
 
 func setFlowActivationManagerSemanticSource(
