@@ -2872,44 +2872,91 @@ func TestFlowActivationRejectsForeignSemanticSourceBeforeAnyMutation(t *testing.
 	}
 }
 
+type readinessAttemptWaitContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (c *readinessAttemptWaitContext) Done() <-chan struct{} {
+	// Admission may inspect cancellation earlier. Only observe the retained
+	// readiness executor selecting this caller's wait, without a production hook.
+	var callers [16]uintptr
+	frames := runtime.CallersFrames(callers[:runtime.Callers(2, callers[:])])
+	for {
+		frame, more := frames.Next()
+		if strings.HasSuffix(frame.Function, ".reconcileDeclaredDynamicFlowRuntimeReadiness") {
+			c.once.Do(func() { close(c.waiting) })
+			break
+		}
+		if !more {
+			break
+		}
+	}
+	return c.Context.Done()
+}
+
 func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{respectReadinessContext: true}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	source := semanticview.Wrap(bundle)
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, source)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	intermediateSource := semanticview.Wrap(bundle)
-	revisedSource := semanticview.Wrap(bundle)
+	capturedCallbackSource := func(label string) *runtimecontracts.WorkflowContractBundle {
+		t.Helper()
+		root := t.TempDir()
+		for _, member := range bundle.SourceArtifact.Entries() {
+			body := string(member.Bytes())
+			if member.Label() == "review/schema.yaml" {
+				body += "\n# captured callback source " + label + "\n"
+			}
+			writeFlowActivationFixtureFile(t, filepath.Join(root, member.Label()), body)
+		}
+		repo := runtimepipeline.WorkflowRepoRoot()
+		captured, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatalf("capture callback source %s: %v", label, err)
+		}
+		return captured
+	}
+	intermediateBundle := capturedCallbackSource("B")
+	revisedBundle := capturedCallbackSource("C")
+	intermediateSource := semanticview.Wrap(intermediateBundle)
+	revisedSource := semanticview.Wrap(revisedBundle)
 	intermediateFact, err := runtimecorrelation.NewSourceArtifactFact(
-		"bundle-v2:sha256:" + strings.Repeat("b", 64),
+		intermediateBundle.SourceArtifact.BundleHash(),
 	)
 	if err != nil {
 		t.Fatalf("intermediate bundle source fact: %v", err)
 	}
 	revisedFact, err := runtimecorrelation.NewSourceArtifactFact(
-		"bundle-v2:sha256:" + strings.Repeat("c", 64),
+		revisedBundle.SourceArtifact.BundleHash(),
 	)
 	if err != nil {
 		t.Fatalf("revised bundle source fact: %v", err)
+	}
+	if intermediateFact.Matches(revisedFact) || intermediateFact.BundleHash() == bundle.SourceArtifact.BundleHash() || revisedFact.BundleHash() == bundle.SourceArtifact.BundleHash() {
+		t.Fatal("post-CAS callbacks require three distinct captured sources")
 	}
 	successorErr := make(chan error, 1)
 	key, err := newDynamicFlowRuntimeReadinessKey(req.TriggerEvent.RunID(), req.Instance.InstancePath)
 	if err != nil {
 		t.Fatalf("readiness key: %v", err)
 	}
-	activationCtx, cancelActivation := context.WithCancel(testAuthorActivityContext(context.Background()))
+	activationCtx, cancelActivation := context.WithCancel(ctx)
 	defer cancelActivation()
 	intermediateCtx := runtimecorrelation.WithSourceArtifactFact(
-		testAuthorActivityContext(context.Background()),
+		ctx,
 		intermediateFact,
 	)
-	successorCtx := runtimecorrelation.WithSourceArtifactFact(
-		testAuthorActivityContext(context.Background()),
+	revisedCtx := runtimecorrelation.WithSourceArtifactFact(
+		ctx,
 		revisedFact,
 	)
-	successorCtx, cancelSuccessor := context.WithCancel(successorCtx)
+	sameSourceCtx, cancelSuccessor := context.WithCancel(ctx)
 	defer cancelSuccessor()
+	successorCtx := &readinessAttemptWaitContext{Context: sameSourceCtx, waiting: make(chan struct{})}
 	barrierCtx, cancelBarrier := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelBarrier()
 	activationErr := make(chan error, 1)
@@ -2951,91 +2998,71 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	var staleSourceErr error
 	instances.afterTopologyMark = func(completed runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
 		defer markRevisionReady()
-		observed, found, err := instances.LoadDynamicFlowRuntimeReadiness(intermediateCtx, completed.RunID, completed.Identity.Route())
+		observed, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, completed.RunID, completed.Identity.Route())
 		if err != nil || !found {
-			revisionErr = errors.Join(err, errors.New("intermediate readiness observation not found"))
+			revisionErr = errors.Join(err, errors.New("post-CAS A readiness observation not found"))
 			return
 		}
-		intermediate := completed
-		intermediate.BundleHash = intermediateFact.BundleHash()
-		changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(
+		agentBefore, agentFound := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1")
+		if !agentFound {
+			revisionErr = errors.New("post-CAS A process agent not found")
+			return
+		}
+		processBefore := am.ListAgentConfigs()
+		armedBefore, publishedBefore := len(instances.armedEntries), len(bus.published)
+		staleErr = am.reconcileDynamicFlowRuntimeReadinessPlan(
 			intermediateCtx,
-			observed,
-			intermediate,
-			time.Now().UTC(),
+			completed,
+			observed.AttemptOrdinal,
+			intermediateSource,
 		)
-		if err != nil {
-			revisionErr = err
-			return
-		}
-		if !changed {
-			revisionErr = errors.New("post-CAS intermediate readiness plan was not revised")
-			return
-		}
-		observed, found, err = instances.LoadDynamicFlowRuntimeReadiness(successorCtx, completed.RunID, completed.Identity.Route())
-		if err != nil || !found {
-			revisionErr = errors.Join(err, errors.New("successor readiness observation not found"))
-			return
-		}
-		revised := intermediate
-		revised.BundleHash = revisedFact.BundleHash()
-		changed, err = instances.ReconcileDynamicFlowRuntimeReadinessPlan(
-			successorCtx,
-			observed,
-			revised,
-			time.Now().UTC(),
+		staleSourceErr = am.reconcileDynamicFlowRuntimeReadinessPlan(
+			revisedCtx,
+			completed,
+			observed.AttemptOrdinal,
+			revisedSource,
 		)
-		if err != nil {
-			revisionErr = err
+		for _, staleCtx := range []context.Context{intermediateCtx, revisedCtx} {
+			if err := am.reconcileDynamicFlowRuntimeReadinessPlan(staleCtx, completed, observed.AttemptOrdinal, source); !errors.Is(err, errDynamicFlowRuntimeReadinessSourceStale) {
+				revisionErr = errors.Join(err, errors.New("foreign captured source fact did not receive the exact source refusal"))
+				return
+			}
+		}
+		after, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, completed.RunID, completed.Identity.Route())
+		agentAfter, agentFound := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1")
+		if err != nil || !found || !reflect.DeepEqual(observed, after) || !agentFound || !reflect.DeepEqual(agentBefore, agentAfter) ||
+			!reflect.DeepEqual(processBefore, am.ListAgentConfigs()) || len(instances.armedEntries) != armedBefore || len(bus.published) != publishedBefore {
+			revisionErr = errors.Join(err, errors.New("foreign callbacks changed A readiness or process evidence before release"))
 			return
 		}
-		if !changed {
-			revisionErr = errors.New("post-CAS readiness plan was not revised")
-			return
-		}
-		intermediateRevision := observed.AttemptOrdinal
-		revisedRevision := intermediateRevision
-		setFlowActivationManagerSemanticSource(am, revisedSource, revisedFact)
 		close(successorStarted)
 		go func() {
 			defer close(successorDone)
 			successorErr <- am.reconcileDynamicFlowRuntimeReadinessPlan(
 				successorCtx,
-				revised,
-				revisedRevision,
-				revisedSource,
+				completed,
+				observed.AttemptOrdinal,
+				source,
 			)
 		}()
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			am.dynamicFlowReadinessMu.Lock()
-			attempt := am.dynamicFlowReadinessAttempts[key]
-			successorQueued := attempt != nil &&
-				attempt.successorRequired &&
-				attempt.successor != nil &&
-				attempt.successor.planHash != attempt.planHash
-			am.dynamicFlowReadinessMu.Unlock()
-			if successorQueued {
-				break
-			}
-			if time.Now().After(deadline) {
-				revisionErr = errors.New("post-CAS readiness successor was not queued")
-				return
-			}
-			runtime.Gosched()
+		// Observe the same-plan caller at the existing retained wait before canceling.
+		select {
+		case <-successorCtx.waiting:
+		case <-successorDone:
+			revisionErr = errors.New("same-plan caller returned before coalesced wait")
+			return
+		case <-barrierCtx.Done():
+			revisionErr = errors.New("same-plan caller did not reach the retained wait")
+			return
 		}
-		staleSourceErr = am.reconcileDynamicFlowRuntimeReadinessPlan(
-			intermediateCtx,
-			revised,
-			revisedRevision,
-			revisedSource,
-		)
-		staleErr = am.reconcileDynamicFlowRuntimeReadinessPlan(
-			intermediateCtx,
-			intermediate,
-			intermediateRevision,
-			intermediateSource,
-		)
+		am.dynamicFlowReadinessMu.Lock()
+		attempt := am.dynamicFlowReadinessAttempts[key]
+		coalesced := attempt != nil && attempt.attemptOrdinal == observed.AttemptOrdinal && attempt.planHash == observed.PlanHash && !attempt.successorRequired && attempt.successor == nil
+		am.dynamicFlowReadinessMu.Unlock()
+		if !coalesced {
+			revisionErr = errors.New("same-plan caller did not retain the exact A attempt")
+			return
+		}
 		cancelActivation()
 		cancelSuccessor()
 		markRevisionReady()
@@ -3057,7 +3084,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 		t.Fatalf("wait for post-CAS cancellation barrier: %v", barrierCtx.Err())
 	}
 	if revisionErr != nil {
-		t.Fatalf("inject post-CAS readiness revision: %v", revisionErr)
+		t.Fatalf("post-CAS source refusal and same-plan coalescing: %v", revisionErr)
 	}
 	if !errors.Is(staleErr, errDynamicFlowRuntimeReadinessSourceStale) {
 		t.Fatalf("delayed intermediate plan error = %v, want stale-source rejection", staleErr)
@@ -3068,7 +3095,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	select {
 	case err := <-activationErr:
 		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("canceled readiness caller returned %v, want context cancellation without canceling the retained successor", err)
+			t.Fatalf("canceled readiness caller returned %v, want context cancellation without canceling retained A work", err)
 		}
 	case <-barrierCtx.Done():
 		t.Fatalf("join canceled activation caller: %v", barrierCtx.Err())
@@ -3076,35 +3103,37 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	select {
 	case err := <-successorErr:
 		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("canceled post-CAS successor caller: %v", err)
+			t.Fatalf("canceled post-CAS same-plan caller: %v", err)
 		}
 	case <-barrierCtx.Done():
-		t.Fatalf("join canceled post-CAS successor caller: %v", barrierCtx.Err())
+		t.Fatalf("join canceled post-CAS same-plan caller: %v", barrierCtx.Err())
 	}
 	releaseCompletion()
-	if err := am.lifecycle.waitForWork(testAuthorActivityContext(barrierCtx)); err != nil {
-		t.Fatalf("join owned post-CAS successor: %v", err)
+	if err := am.lifecycle.waitForWork(barrierCtx); err != nil {
+		t.Fatalf("join owned post-CAS A work: %v", err)
 	}
 	readiness, found, loadErr := instances.LoadDynamicFlowRuntimeReadiness(
-		context.Background(),
+		ctx,
 		req.TriggerEvent.RunID(),
 		req.Instance.Route(),
 	)
 	if loadErr != nil || !found {
 		t.Fatalf("load post-CAS revised readiness: found=%v err=%v", found, loadErr)
 	}
-	revisedHash := revisedFact.BundleHash()
 	if readiness.Plan.WorkflowVersion != strings.TrimSpace(bundle.WorkflowVersion()) ||
-		readiness.Plan.BundleHash != revisedHash ||
+		readiness.Plan.BundleHash != bundle.SourceArtifact.BundleHash() ||
 		(readiness.Phase != runtimepipeline.FlowAttachmentReady) ||
 		readiness.Pending() {
-		t.Fatalf("post-CAS revised readiness successor did not complete: %#v", readiness)
+		t.Fatalf("post-CAS A readiness did not complete: %#v", readiness)
 	}
-	if !flowActivationAttemptReadyForTest(am, testAuthorActivityContext(barrierCtx), req) {
-		t.Fatal("post-CAS revised attachment has no exact owned activation attempt")
+	if !flowActivationAttemptReadyForTest(am, ctx, req) {
+		t.Fatal("post-CAS A attachment has no exact owned activation attempt")
 	}
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
-		t.Fatal("post-CAS revised topology agent was not published")
+		t.Fatal("post-CAS A topology agent was not published")
+	}
+	if err := am.Shutdown(); err != nil {
+		t.Fatalf("post-CAS A Manager cleanup: %v", err)
 	}
 }
 
@@ -3619,9 +3648,55 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 			t.Fatalf("coalesced follower: %v, want context cancellation from in-flight attempt", err)
 		}
 	}
+	liveCtx, cancelLive := context.WithCancel(ctx)
+	defer cancelLive()
+	liveResults := make(chan error, 3)
+	liveDone := []chan struct{}{make(chan struct{}), make(chan struct{}), make(chan struct{})}
+	liveStarted := 0
+	t.Cleanup(func() {
+		cancelLive()
+		joinCtx, cancelJoin := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelJoin()
+		for _, done := range liveDone[:liveStarted] {
+			select {
+			case <-done:
+			case <-joinCtx.Done():
+				t.Errorf("join non-cancelled coalescing control: %v", joinCtx.Err())
+			}
+		}
+	})
+	for i, call := range []func(context.Context) error{
+		func(c context.Context) error { _, err := am.EnsureFlowInstance(c, req); return err },
+		am.reconcilePendingDynamicFlowRuntimeReadiness,
+		func(c context.Context) error { return reconcileDynamicFlowRuntimeStartupForTest(am, c, fact, true) },
+	} {
+		observed := &readinessAttemptWaitContext{Context: liveCtx, waiting: make(chan struct{})}
+		liveStarted++
+		go func() {
+			defer close(liveDone[i])
+			liveResults <- call(observed)
+		}()
+		select {
+		case <-observed.waiting:
+		case err := <-liveResults:
+			t.Fatalf("non-cancelled follower %d returned before the retained wait: %v", i, err)
+		case <-waitCtx.Done():
+			t.Fatalf("non-cancelled follower %d did not reach the retained wait: %v", i, waitCtx.Err())
+		}
+	}
 	close(admissionRelease)
 	if err := receiveFlowActivationResult(t, leaderErr); err != nil {
 		t.Fatalf("coalesced leader: %v", err)
+	}
+	for range 3 {
+		select {
+		case err := <-liveResults:
+			if err != nil {
+				t.Fatalf("non-cancelled coalesced follower lost leader completion: %v", err)
+			}
+		case <-waitCtx.Done():
+			t.Fatalf("non-cancelled coalesced follower did not receive leader completion: %v", waitCtx.Err())
+		}
 	}
 	if len(instances.creates) != 1 || len(instances.armedEntries) != 1 || len(bus.published) != 1 || !flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatalf(
