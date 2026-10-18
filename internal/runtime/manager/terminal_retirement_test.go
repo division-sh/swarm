@@ -29,23 +29,24 @@ func TestPreparedTerminalCompletionSurvivesRetirementBeforeCommit(t *testing.T) 
 			t.Run(fmt.Sprintf("%s/abort_%t", scope, abort), func(t *testing.T) {
 				bus := &flowActivationTestBus{}
 				instances := &flowActivationTestInstanceStore{}
-				am := newFlowActivationManager(t, bus, instances, &flowActivationTestStore{})
 				bundle := testFlowBundle(t, "")
-				ctx := testAuthorActivityContext(context.Background())
-				if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+				am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), &flowActivationTestStore{})
+				activation := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+				if err := activateFlowInstanceForTest(am, ctx, activation); err != nil {
 					t.Fatal(err)
 				}
 				if err := am.lifecycle.waitForWork(ctx); err != nil {
 					t.Fatal(err)
 				}
 				request := runtimepipeline.FlowInstanceDeactivationRequest{
-					Instance: runtimeflowidentity.Stored(nil, "review", "review/inst-1", "inst-1", "ent-1", ""),
+					Instance: activation.Instance,
 				}
 				var companion interface {
 					worklifetime.Occurrence
 					RetireAndWait(context.Context) error
 				}
-				prepareCtx := flowActivationRunContext()
+				runCtx := runtimecorrelation.WithRunID(ctx, activation.TriggerEvent.RunID())
+				prepareCtx := runCtx
 				root := am.workOwner.(*worklifetime.RuntimeOccurrence)
 				switch scope {
 				case "standing":
@@ -88,7 +89,7 @@ func TestPreparedTerminalCompletionSurvivesRetirementBeforeCommit(t *testing.T) 
 						t.Fatalf("terminal completion lost exact parent ownership: %v", err)
 					}
 				}
-				if late, err := am.PrepareFlowInstanceDeactivation(flowActivationRunContext(), request); err == nil {
+				if late, err := am.PrepareFlowInstanceDeactivation(runCtx, request); err == nil {
 					_ = late.Abort()
 					t.Fatal("retired Manager admitted a new terminal completion")
 				}
@@ -141,9 +142,10 @@ func TestPreparedTerminalCompletionRetainsCommittedAuxiliaryError(t *testing.T) 
 	for _, after := range []bool{false, true} {
 		t.Run(fmt.Sprintf("committed_%t", after), func(t *testing.T) {
 			instances := &flowActivationTestInstanceStore{}
-			am := newFlowActivationManager(t, &flowActivationTestBus{}, instances, &flowActivationTestStore{})
-			ctx := testAuthorActivityContext(context.Background())
-			if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+			bundle := testFlowBundle(t, "")
+			am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle), &flowActivationTestStore{})
+			activation := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
+			if err := activateFlowInstanceForTest(am, ctx, activation); err != nil {
 				t.Fatal(err)
 			}
 			if err := am.lifecycle.waitForWork(ctx); err != nil {
@@ -151,7 +153,7 @@ func TestPreparedTerminalCompletionRetainsCommittedAuxiliaryError(t *testing.T) 
 			}
 			injected := errors.New("terminal auxiliary failure")
 			am.roles.FlowTermination = terminalCommitErrorProbe{next: am.roles.FlowTermination, after: after, err: injected}
-			err := deactivateFlowInstanceForTest(am, flowActivationRunContext(), "review", "inst-1", "review/inst-1", "ent-1")
+			err := am.DeactivateFlowInstanceModel(runtimecorrelation.WithRunID(ctx, activation.TriggerEvent.RunID()), runtimepipeline.FlowInstanceDeactivationRequest{Instance: activation.Instance})
 			if !errors.Is(err, injected) {
 				t.Fatalf("caller lost mutation outcome: %v", err)
 			}
