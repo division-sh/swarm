@@ -30,7 +30,7 @@ const debtR04HistoricalCollectorTo = "b37781f671f13fbf2995ddcb94b747b8fdd89cdf1c
 const debtR04ExecutionPath = "internal/runtime/runforkexecution/execution_test.go"
 const debtR04ExecutionBeforeSHA = "a83a5fcfa8e784937c21f1a1ad079714368aacff35c39c32b5d81877bc87c3da"
 const debtR04ExecutionAfterSHA = "42e79a42a17acb12ec3362a28457c08dc4d66509e0e14f6d9bb84ac68f52076a"
-const debtR04JoinedCollectorTo = "a696fe4827d211421982bc2e8e512f69226bfdf492dc47622a87c0fd3c8dce0f"
+const debtR04JoinedCollectorTo = "252bf4c09f8ede5dfdafbb110e0172c3404cc3932bff8d34527480dcc7790853"
 
 type debtR04CatchUpSource struct {
 	File, BeforeSHA256, AfterSHA256 string

@@ -2327,7 +2327,7 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := debtValidateCollectorIdentity(baseCollector, collector, trusted, head, collector, debtDeliveryRetirementProof{Root: root, Actual: actual}); err != nil {
-			t.Fatal(err)
+			t.Fatalf("%v; authenticated source: %v; current numeric frame: %v", err, debtCatchUpCollectorSource(root), authorityDebtRatchet(actual, head.Sites, head.Sites, head.Sites, debtDeliveryRetirementProof{Root: root, Actual: actual}))
 		}
 	}
 	if head.BootstrapSource != trusted.BootstrapSource || head.Collector != collector {
