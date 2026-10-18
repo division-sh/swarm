@@ -18357,7 +18357,8 @@ platform_tables:
             UNIQUE (execution_id, fork_run_id),
             FOREIGN KEY (execution_id, binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision, generation) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision, generation),
             FOREIGN KEY (execution_id, fork_event_id) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_event_id),
-            FOREIGN KEY (execution_id, fork_run_id, generation, execution_state) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_run_id, generation, state)
+            FOREIGN KEY (execution_id, fork_run_id, generation, execution_state) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_run_id, generation, state),
+            INDEX idx_selected_execution_detachments_binding (binding_id)
         );
     run_fork_selected_contract_activity_detachments:
       description: >-
@@ -18375,7 +18376,8 @@ platform_tables:
             row_fingerprint TEXT NOT NULL CHECK (row_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
             PRIMARY KEY (execution_id, request_event_id),
             FOREIGN KEY (execution_id, fork_run_id) REFERENCES run_fork_selected_contract_execution_detachments(execution_id, fork_run_id),
-            FOREIGN KEY (request_event_id, fork_run_id) REFERENCES activity_attempts(request_event_id, run_id)
+            FOREIGN KEY (request_event_id, fork_run_id) REFERENCES activity_attempts(request_event_id, run_id),
+            INDEX idx_selected_activity_detachments_request (request_event_id)
         );
     run_fork_selected_contract_turn_detachments:
       description: >-
@@ -18392,7 +18394,8 @@ platform_tables:
             row_fingerprint TEXT NOT NULL CHECK (row_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
             PRIMARY KEY (execution_id, turn_id),
             FOREIGN KEY (execution_id, fork_run_id) REFERENCES run_fork_selected_contract_execution_detachments(execution_id, fork_run_id),
-            FOREIGN KEY (turn_id, fork_run_id, completion_attempt_id, capability_surface_id) REFERENCES agent_turns(turn_id, run_id, completion_attempt_id, capability_surface_id)
+            FOREIGN KEY (turn_id, fork_run_id, completion_attempt_id, capability_surface_id) REFERENCES agent_turns(turn_id, run_id, completion_attempt_id, capability_surface_id),
+            INDEX idx_selected_turn_detachments_turn (turn_id)
         );
     run_fork_selected_contract_execution_live_parents:
       description: >-
