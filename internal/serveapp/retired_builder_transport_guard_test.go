@@ -61,6 +61,8 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		"platform-spec.yaml":                               50,
 	}
 	expectedUnrelatedTextCounts := map[string]int{
+		// Exact fixture/test/receipt lines, disposition 6249680064; semantic allowance stays zero.
+		".github/audit-artifacts/issue-2700-legacy-fork-integration-blocker.md": 3,
 		// Exact historical provider-request probe names, not the retired product.
 		".github/audit-artifacts/issue-2627-counterexamples.md":   1,
 		".github/audit-artifacts/issue-2627-preimplementation.md": 1,
@@ -228,6 +230,40 @@ func retiredBuilderCandidates(relative string, body []byte) ([]retiredBuilderCan
 }
 
 func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
+	t.Run("issue2700_exact_fixture_references", func(t *testing.T) {
+		const path = ".github/audit-artifacts/issue-2700-legacy-fork-integration-blocker.md"
+		body, err := os.ReadFile(filepath.Join(repoRootForTest(), path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidates, err := retiredBuilderCandidates(path, body)
+		if err != nil || len(candidates) != 3 {
+			t.Fatalf("exact fixture/test/receipt inventory changed: %+v, %v", candidates, err)
+		}
+		for _, candidate := range candidates {
+			if !isExplicitUnrelatedBuilderText(path, candidate.text) {
+				t.Fatal("original fixture/test/receipt reference lost exact disposition")
+			}
+			for _, changed := range []string{candidate.text + " additional builder reference", "changed " + candidate.text, strings.ToUpper(candidate.text)} {
+				if isExplicitUnrelatedBuilderText(path, changed) {
+					t.Fatal("changed or extended reference inherited exact disposition")
+				}
+			}
+			if isExplicitUnrelatedBuilderText(".github/audit-artifacts/foreign.md", candidate.text) {
+				t.Fatal("foreign path inherited exact disposition")
+			}
+		}
+		for _, extra := range []string{candidates[0].text, "Builder compatibility routes are available."} {
+			changed := append(append([]byte(nil), body...), []byte("\n"+extra+"\n")...)
+			got, err := retiredBuilderCandidates(path, changed)
+			if err != nil || len(got) != 4 {
+				t.Fatalf("duplicate/additional reference escaped exact three-reference inventory: %+v, %v", got, err)
+			}
+			if extra != candidates[0].text && isExplicitUnrelatedBuilderText(path, got[3].text) {
+				t.Fatal("additional product reference inherited fixture disposition")
+			}
+		}
+	})
 	const recipePath = "tools/fixture-codemod/pipeline-observations/recipes.json"
 	recipes, recipeErr := os.ReadFile(filepath.Join(repoRootForTest(), recipePath))
 	recipeCandidates, scanErr := retiredBuilderCandidates(recipePath, recipes)
@@ -362,6 +398,11 @@ func retiredBuilderCandidateLines(body []byte, include func(start, end int) bool
 func isExplicitUnrelatedBuilderText(relative, line string) bool {
 	lower := strings.ToLower(line)
 	switch {
+	case relative == ".github/audit-artifacts/issue-2700-legacy-fork-integration-blocker.md" &&
+		(line == "eventtest.ChildForProducerWithRoutingSource builder, not a guard exemption." ||
+			line == "TestTestEventFixturesUseFixtureBuilders and" ||
+			line == "Receipt: amendment2-parent-control-native-fixture-builder-guard-green.log;"):
+		return true
 	case (relative == ".github/audit-artifacts/issue-2627-counterexamples.md" ||
 		relative == ".github/audit-artifacts/issue-2627-preimplementation.md") && strings.Contains(line, "TestIssue2627AuditBuilderCounterexamples"):
 		return true
