@@ -200,6 +200,13 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	advance := func(previous runtimepipeline.FlowAttachmentPhase) (bool, error) {
 		result, err := am.workflowInstances.AdvanceFlowAttachment(ctx, active.receipt, previous, time.Now().UTC())
 		if !result.Acknowledged {
+			if am.cleanReadinessShutdownCancellation(ctx, result, err) {
+				if cleanupErr := am.settleDynamicFlowActiveAttempt(context.WithoutCancel(ctx), key, active, retirement, flowActivationFailedRetirement); cleanupErr != nil {
+					return false, errors.Join(err, cleanupErr)
+				}
+				activationAccepted = true
+				return false, &readinessShutdownCancellation{cause: err, key: key, ordinal: admission.attemptOrdinal, planHash: admission.planHash}
+			}
 			return false, errors.Join(err, errors.New("attachment progress was not acknowledged"))
 		}
 		if !result.Admitted() {
