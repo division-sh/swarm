@@ -443,7 +443,7 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 		t.Fatal(err)
 	}
 	forkRunID := uuid.NewString()
-	wantScope := runtimeauthoractivity.BundleScope("00000000-0000-0000-0000-000000000313", sourceFact.BundleHash())
+	wantScope := runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash())
 	initiatingCtx, cancel := context.WithCancel(runForkTestContext(t))
 	ctx := runtimecorrelation.WithSourceArtifactFact(initiatingCtx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
@@ -480,6 +480,10 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 		t.Fatalf("selected-contract declarations: %v", err)
 	}
 	processCapability := &selectedFailOnceGrantCapability{ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected)}
+	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, processCapability.ProcessCapability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	executionOwner := selectedContractExecutionOwnerForTest(t, selected)
 	topology, err := runtimeagenttopology.SelectedDeclarationAdmission(forkRunID, declarations)
 	if err != nil {

@@ -10,7 +10,7 @@ func TestRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapter(t *testing.
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runtimepkg.VerifyRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapterForTest(t, func(t *testing.T, artifact *sourceartifact.AdmittedSourceArtifact) runtimepkg.RuntimeLogNativeFixtureForTest {
-				return nativeRuntimeLogFixture(t, backend, artifact)
+				return nativeRuntimeLogFixture(t, backend, artifact, authorActivityTestRuntimeInstanceID)
 			})
 		})
 	}
@@ -20,7 +20,7 @@ func TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress(t *t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runtimepkg.VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressForTest(t, func(t *testing.T, artifact *sourceartifact.AdmittedSourceArtifact) runtimepkg.RuntimeLogNativeFixtureForTest {
-				return nativeRuntimeLogFixture(t, backend, artifact)
+				return nativeRuntimeLogFixture(t, backend, artifact, authorActivityTestRuntimeInstanceID)
 			})
 		})
 	}
@@ -30,7 +30,7 @@ func TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain(t *t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runtimepkg.VerifyRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrainForTest(t, func(t *testing.T, artifact *sourceartifact.AdmittedSourceArtifact) runtimepkg.RuntimeLogNativeFixtureForTest {
-				return nativeRuntimeLogFixture(t, backend, artifact)
+				return nativeRuntimeLogFixture(t, backend, artifact, authorActivityTestRuntimeInstanceID)
 			})
 		})
 	}
@@ -40,7 +40,7 @@ func TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runtimepkg.VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t, func(t *testing.T, artifact *sourceartifact.AdmittedSourceArtifact) runtimepkg.RuntimeLogNativeFixtureForTest {
-				return nativeRuntimeLogFixture(t, backend, artifact)
+				return nativeRuntimeLogFixture(t, backend, artifact, authorActivityTestRuntimeInstanceID)
 			})
 		})
 	}

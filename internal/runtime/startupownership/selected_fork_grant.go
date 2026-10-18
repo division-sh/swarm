@@ -95,7 +95,7 @@ func (p *processCapability) IssueSelectedForkGenerationGrant(ctx context.Context
 		RuntimeGeneration: binding.ExecutionGeneration, StateVersion: 1, State: GrantPrepared,
 		SelectedFork: &binding,
 	}
-	if err := p.session.RecordGenerationGrantTransition(ctx, nil, evidence); err != nil {
+	if err := p.session.RecordGenerationGrantTransition(p.processMutationContext(ctx), nil, evidence); err != nil {
 		err = p.retireOnPossessionFailure(err)
 		return nil, fmt.Errorf("record selected-fork generation grant: %w", err)
 	}

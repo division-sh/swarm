@@ -334,6 +334,7 @@ func seedRunControlPublicationRoot(t *testing.T, ctx context.Context, selected i
 
 func seedRunControlTestRun(t *testing.T, ctx context.Context, selected storetest.RunFixtureStore, runID string) {
 	t.Helper()
+	ctx = originalEventBusFixtureContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: authorActivityTestBundleHash})
 }
 

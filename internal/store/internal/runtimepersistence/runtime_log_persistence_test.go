@@ -82,6 +82,7 @@ func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.
 func TestSQLiteRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC()})
@@ -124,6 +125,7 @@ func TestPostgresRuntimeLogCarriesComputeModuleReplayEvidenceForReplayConsumer(t
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	pg := newTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	runID := uuid.NewString()
 	requireRunningRunForTest(t, ctx, pg, runID, time.Now().UTC())
 	envelope := computeModuleReplayEvidenceTestEnvelope()

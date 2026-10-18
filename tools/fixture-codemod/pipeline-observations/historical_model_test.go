@@ -64,23 +64,47 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 	if count != 24 {
 		t.Fatalf("mechanical repair target count=%d, want24", count)
 	}
-	var pins []fixtureSetupSuccessor2617
-	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 40 {
-		t.Fatalf("finite fixture receipt packet changed: %v", err)
-	}
-	// Reverse only Q1's appended wait/setup edits before checking the complete
-	// original digest, including every earlier live successor and assertion.
-	archived, err := q1RetryDecisionPriorRows(rows)
-	if err != nil {
-		t.Fatal(err)
-	}
-	digest, err := mechanicalReceiptDigest(archived)
-	if err != nil || digest != "637fcb76a19075ffc1dd93fc6a189652be2a50f2b199647d67cc0ffd58885fed" {
+	digest, err := mechanicalReceiptDigest(rows)
+	if err != nil || digest != "d185875ba3ecbd3a2526f55212d90c45af85134246a75a326edebd827b17e5ad" {
 		t.Fatalf("source-pinned mechanical/current receipts changed: %s/%v", digest, err)
 	}
 	// Retain the complete predecessor digest, including its old live Successors.
 	// Only the two appended #2287 join-presentation receipts may reverse it.
-	prior := append([]recipe(nil), archived...)
+	var pins []fixtureSetupSuccessor2617
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 112 {
+		t.Fatalf("finite presentation receipt packet changed: %v", err)
+	}
+	prior := append([]recipe(nil), rows...)
+	// Reverse only the seventy-three authorized current receipts before checking the
+	// complete predecessor digest, including its prior live Successors.
+	restoredSetup := 0
+	for pinIndex := len(pins) - 1; pinIndex >= 39; pinIndex-- {
+		pin := pins[pinIndex]
+		for index, row := range prior {
+			if !sameReviewedRecipeKey(row, pin.Original) {
+				continue
+			}
+			history := row
+			history.Successor = pin.Original.Successor
+			body, err := reverseReviewedSuccessor2617(row.Successor, pin.Edits)
+			oldBody := pin.Original.Successor
+			if oldBody == "" {
+				oldBody = pin.Original.After
+			}
+			if err != nil || body != oldBody || row.Successor != pin.Candidate || !reflect.DeepEqual(history, pin.Original) {
+				t.Fatalf("#2730 setup changed historical mechanical evidence: %s/%v", row.Function, err)
+			}
+			prior[index] = pin.Original
+			restoredSetup++
+		}
+	}
+	if restoredSetup != 73 {
+		t.Fatalf("#2730 exact setup endpoints restored=%d, want73", restoredSetup)
+	}
+	predecessorDigest, err := mechanicalReceiptDigest(prior)
+	if err != nil || predecessorDigest != "637fcb76a19075ffc1dd93fc6a189652be2a50f2b199647d67cc0ffd58885fed" {
+		t.Fatalf("#2730 changed its complete mechanical/current predecessor: %s/%v", predecessorDigest, err)
+	}
 	restored := 0
 	for _, pin := range pins[36:39] {
 		if pin.Original.Mechanical == nil {
@@ -163,16 +187,46 @@ func TestHistoricalMechanicalSnapshotsRejectInvalidAndCrossedCuts(t *testing.T) 
 }
 
 func TestHistoricalMechanicalCurrentHandlerAssemblyIsSourcePinned(t *testing.T) {
-	for _, pin := range []struct{ file, function, digest string }{
-		{"internal/runtime/pipeline/workflow_handler_native_external_test.go", "openWorkflowHandlerNativeFixture", "fa6ca50cc31122fef484b3dcb892798c18adb44ad1b86413bc3906969de22847"},
-		{"internal/runtime/pipeline/workflow_handler_native_external_test.go", "workflowHandlerNativeFixtureFromSelected", "d7d11a06f23ac10d626104a7875740c93b0a0da064c5fa8011b49d37c3762ca7"},
-		{"internal/runtime/pipeline/delivery_native_owner_external_test.go", "workflowHandlerNativeCoordinator", "21ef5b19dd26e1d1bb42825279b4b1cad5788f1ed6b96efc445fb2fdbcf256cd"},
+	for _, pin := range []struct{ file, function, digest, predecessor, beforeJoin string }{
+		{"internal/runtime/pipeline/workflow_handler_native_external_test.go", "openWorkflowHandlerNativeFixture", "fa6ca50cc31122fef484b3dcb892798c18adb44ad1b86413bc3906969de22847", "", ""},
+		{"internal/runtime/pipeline/workflow_handler_native_external_test.go", "workflowHandlerNativeFixtureFromSelected", "afe5a87932bb6b549ff9d2adc3f2fae1424c1d3d2c6b1ced3177a3218a9a13f5", "d7d11a06f23ac10d626104a7875740c93b0a0da064c5fa8011b49d37c3762ca7", "b40676927871515627d9e56bc3f921dcb735779b99038fda1ff3700fb028f02e"},
+		{"internal/runtime/pipeline/delivery_native_owner_external_test.go", "workflowHandlerNativeCoordinator", "a30adb20d7f51cca29085aabb47ff1c659282e7c330a91340bf9f47f6fa6a2ef", "", "21ef5b19dd26e1d1bb42825279b4b1cad5788f1ed6b96efc445fb2fdbcf256cd"},
 	} {
 		t.Run(pin.function, func(t *testing.T) {
 			source := selectedCausalObservationBody(t, pin.file, pin.function)
 			historical, err := historicalHandlerAssemblySource(source, pin.function)
 			if err != nil || !historicalCurrentSourcePinned(historical, pin.digest) {
 				t.Fatal("extracted native handler owner/cleanup/publication assembly changed")
+			}
+			prior := source
+			if pin.beforeJoin != "" {
+				var edits [][2]string
+				switch pin.function {
+				case "workflowHandlerNativeFixtureFromSelected":
+					edits = [][2]string{{"pc, _, _ := workflowHandlerNativeCoordinator", "pc, _ := workflowHandlerNativeCoordinator"}}
+				case "workflowHandlerNativeCoordinator":
+					edits = [][2]string{
+						{"(*pipeline.PipelineCoordinator, *runtimebus.EventBus, func(context.Context) error)", "(*pipeline.PipelineCoordinator, *runtimebus.EventBus)"},
+						{"\n\tvar joinMu sync.Mutex\n\tjoined := false\n\tjoinCoordinator := func(ctx context.Context) error {\n\t\tjoinMu.Lock()\n\t\tdefer joinMu.Unlock()\n\t\tif joined {\n\t\t\treturn nil\n\t\t}\n\t\tif err := bus.WaitForQuiescence(ctx); err != nil {\n\t\t\treturn err\n\t\t}\n\t\tjoined = true\n\t\treturn nil\n\t}\n", "\n"},
+						{"if err := joinCoordinator(join);", "if err := bus.WaitForQuiescence(join);"},
+						{"return pc, bus, joinCoordinator", "return pc, bus"},
+					}
+				}
+				for _, edit := range edits {
+					if strings.Count(prior, edit[0]) != 1 {
+						t.Fatal("native handler join continuation differs from its finite setup")
+					}
+					prior = strings.Replace(prior, edit[0], edit[1], 1)
+				}
+				if !historicalCurrentSourcePinned(prior, pin.beforeJoin) {
+					t.Fatal("native handler join changed its prior owner/cleanup/publication assembly")
+				}
+			}
+			if pin.predecessor != "" {
+				const setup = "\n\tctx = originalPipelineFixtureContext(t, ctx, selected)\n"
+				if strings.Count(prior, setup) != 1 || !historicalCurrentSourcePinned(strings.Replace(prior, setup, "\n", 1), pin.predecessor) {
+					t.Fatal("original process setup changed historical handler assembly")
+				}
 			}
 			for _, cut := range []string{"t.Helper()", "selected", "fact", "return"} {
 				mutant := strings.Replace(source, cut, "foreignCut", 1)

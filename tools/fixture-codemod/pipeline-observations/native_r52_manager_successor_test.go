@@ -32,6 +32,9 @@ var r52ManagerSuccessorPins = []r52ManagerSuccessorPin{
 
 // This reverses only the eight complete bodies authorized at 5848841d3.
 func reverseR52ManagerSuccessor(row recipe, actual string) (string, error) {
+	if original, err := fixtureSetupCurrentEndpoint2617(row, actual); err == nil {
+		row, actual = original, original.Successor
+	}
 	var pin *r52ManagerSuccessorPin
 	for i := range r52ManagerSuccessorPins {
 		if r52ManagerSuccessorPins[i].function == row.Function {

@@ -24,7 +24,7 @@ func (g *shutdownRetryGrant) Retire(ctx context.Context) error {
 
 func TestRuntimeShutdownRetriesFailedGenerationRetirement(t *testing.T) {
 	rt := &Runtime{workOccurrence: runtimeTestOccurrence(t, runtimeTestBundleHash)}
-	newShutdownFanOutRegistration(t, rt)
+	newShutdownFanOutRegistration(t, testAuthorActivityContext(context.Background()), rt)
 	underlying := rt.startupGrant
 	failure := errors.New("one-shot generation retirement refusal")
 	grant := &shutdownRetryGrant{LiveGenerationGrant: underlying, failure: failure}
@@ -51,5 +51,15 @@ func TestRuntimeShutdownRetriesFailedGenerationRetirement(t *testing.T) {
 	}
 	if rt.startupGrant != nil {
 		t.Error("successful retirement retained the completed generation handle")
+	}
+	if err := rt.Shutdown(); err != nil || grant.calls != 2 {
+		t.Fatalf("completed shutdown reacquired retired generation work: %v calls=%d", err, grant.calls)
+	}
+	if err := rt.ShutdownWithOptions(ShutdownOptions{Grace: -1}); err == nil {
+		t.Fatal("completed shutdown hid invalid grace")
+	}
+	completedFailure := &Runtime{replacementQuiesced: true, stopResult: failure}
+	if err := completedFailure.Shutdown(); !errors.Is(err, failure) {
+		t.Fatalf("completed shutdown hid its independent failure: %v", err)
 	}
 }
