@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -32,6 +34,10 @@ func TestNativeProposedEffectPublicFixtureRetainsAdmissionProviderReplayAndCount
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
+	source, err := os.ReadFile(filepath.Join("..", "..", "..", "internal/apiv1/operator_mailbox_proposed_effect_supported_surface_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	matched := 0
 	for _, row := range rows {
 		root := row.Function == "TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores"
@@ -50,7 +56,12 @@ func TestNativeProposedEffectPublicFixtureRetainsAdmissionProviderReplayAndCount
 		}
 		actual := selectedCausalObservationBody(t, row.File, row.Function)
 		value, sourceErr := canonicalFunction(actual)
-		written, writtenErr := canonicalFunction(row.After)
+		endpoint := row.After
+		if row.Function == "newProposedEffectMailboxHandler" {
+			proveProposedEffectJournalSuccessor(t, row, actual, string(source))
+			endpoint = row.Successor
+		}
+		written, writtenErr := canonicalFunction(endpoint)
 		if err != nil || afterErr != nil || sourceErr != nil || writtenErr != nil || want != got || value != written {
 			t.Fatalf("%s changed public effect workload beyond the exact native owner cuts", row.Function)
 		}
@@ -76,9 +87,106 @@ func TestNativeProposedEffectPublicFixtureRetainsAdmissionProviderReplayAndCount
 	if matched != 3 {
 		t.Fatalf("public effect recipes=%d,want3", matched)
 	}
-	source, err := os.ReadFile(filepath.Join("..", "..", "..", "internal/apiv1/operator_mailbox_proposed_effect_supported_surface_test.go"))
-	if err != nil || strings.Contains(string(source), "func insertProposedEffectAPIRun(") {
-		t.Fatalf("retired reconstructed run fixture survived: %v", err)
+	if strings.Contains(string(source), "func insertProposedEffectAPIRun(") {
+		t.Fatal("retired reconstructed run fixture survived")
+	}
+}
+
+const proposedEffectJournalInstallation = "\tinstallProposedEffectAPIJournal(t, persistence.(agentfixture.Store), bus, coordinator, fact)\n"
+
+func validateProposedEffectJournalSuccessor(row recipe, actual, source string) error {
+	// #2700/6251805014 and 6251798482 preserve both historical endpoints and
+	// bind this one-call continuation to its original journal grant and cleanup.
+	if row.Family != "native-proposed-effect-public-fixture" ||
+		row.File != "internal/apiv1/operator_mailbox_proposed_effect_supported_surface_test.go" ||
+		row.Function != "newProposedEffectMailboxHandler" || row.Removed || row.Mechanical != nil {
+		return fmt.Errorf("proposed-effect journal successor has a foreign recipe identity")
+	}
+	for _, pin := range []struct{ body, digest string }{
+		{row.Before, "8debf88c7da65052e2f3315635a7133327cd7e07b40524ff4eb30e1a2d502fa5"},
+		{row.After, "b6160a4b5946a508cbc73c00794b735f728f74165c8fb7f5a06097b13d2f6551"},
+		{row.Successor, "4938577d8874c655a9056355389397d47af3a30a0df4c38785efb8487e301f46"},
+		{source, "5909448c19121ecdcc5b500cb662fb79151f9dd5aa46b4fbde8f5f34ff21bfca"},
+	} {
+		if fmt.Sprintf("%x", sha256.Sum256([]byte(pin.body))) != pin.digest {
+			return fmt.Errorf("proposed-effect journal successor changed a reviewed snapshot or installation source")
+		}
+	}
+	if actual != row.Successor || strings.Count(actual, proposedEffectJournalInstallation) != 1 ||
+		strings.Replace(actual, proposedEffectJournalInstallation, "", 1) != row.After {
+		return fmt.Errorf("proposed-effect journal successor differs from its exact one-call continuation")
+	}
+	return nil
+}
+
+func proveProposedEffectJournalSuccessor(t *testing.T, row recipe, actual, source string) {
+	t.Helper()
+	if err := validateProposedEffectJournalSuccessor(row, actual, source); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, err := checkpointRecipes([]byte("package proof\n"+row.After), []recipe{row})
+	if err != nil || len(checkpoint) != 1 {
+		t.Fatalf("journal successor checkpoint: rows=%d err=%v", len(checkpoint), err)
+	}
+	updated, changed, err := rewriteFunction(row.File, []byte("package proof\n"+row.After), checkpoint[0])
+	if err != nil || !changed || string(updated) != "package proof\n"+actual {
+		t.Fatalf("journal successor did not append exactly its one installation: changed=%t err=%v", changed, err)
+	}
+	if _, changed, err := rewriteFunction(row.File, updated, checkpoint[0]); err != nil || changed {
+		t.Fatalf("journal successor is not inert on repetition: changed=%t err=%v", changed, err)
+	}
+	without := strings.Replace(actual, proposedEffectJournalInstallation, "", 1)
+	for name, body := range map[string]string{
+		"missing_installation":   without,
+		"duplicate_installation": strings.Replace(actual, proposedEffectJournalInstallation, strings.Repeat(proposedEffectJournalInstallation, 2), 1),
+		"changed_store":          strings.Replace(actual, "persistence.(agentfixture.Store)", "other.(agentfixture.Store)", 1),
+		"changed_bus":            strings.Replace(actual, "bus, coordinator, fact)", "otherBus, coordinator, fact)", 1),
+		"changed_coordinator":    strings.Replace(actual, "bus, coordinator, fact)", "bus, otherCoordinator, fact)", 1),
+		"changed_fact":           strings.Replace(actual, "bus, coordinator, fact)", "bus, coordinator, otherFact)", 1),
+		"changed_helper":         strings.Replace(actual, "installProposedEffectAPIJournal(t,", "installOtherJournal(t,", 1),
+		"changed_order":          strings.Replace(without, "\tcoordinator =", proposedEffectJournalInstallation+"\tcoordinator =", 1),
+		"unrelated_body":         strings.Replace(actual, "return handler, bus", "return nil, bus", 1),
+		"unrelated_assertion":    strings.Replace(actual, "persistence store does not implement MailboxAPIStore", "unreviewed mailbox assertion", 1),
+		"foreign_function":       strings.Replace(actual, "func newProposedEffectMailboxHandler(", "func otherMailboxHandler(", 1),
+	} {
+		t.Run("journal_"+name, func(t *testing.T) {
+			if body == actual {
+				t.Fatal("control did not change the reviewed source")
+			}
+			candidate := row
+			candidate.Successor = body
+			current := strings.Replace(source, actual, body, 1)
+			if validateProposedEffectJournalSuccessor(candidate, body, current) == nil ||
+				validateProposedEffectJournalSuccessor(row, body, current) == nil {
+				t.Fatal("changed journal installation/current-source pair accepted")
+			}
+		})
+	}
+	for name, edit := range map[string]func(*recipe){
+		"foreign_family": func(row *recipe) { row.Family = "other-family" },
+		"foreign_path":   func(row *recipe) { row.File = "internal/apiv1/other_test.go" },
+		"foreign_name":   func(row *recipe) { row.Function = "otherMailboxHandler" },
+		"before_rewrite": func(row *recipe) { row.Before = row.After },
+		"after_rewrite":  func(row *recipe) { row.After = row.Successor },
+	} {
+		t.Run("journal_"+name, func(t *testing.T) {
+			candidate := row
+			edit(&candidate)
+			if validateProposedEffectJournalSuccessor(candidate, actual, source) == nil {
+				t.Fatal("changed journal recipe identity/history accepted")
+			}
+		})
+	}
+	for name, replacement := range map[string]string{
+		"original_grant": strings.Replace(source, "grant.AdmitExecution(ctx)", "grant.AdmitExecution(context.Background())", 1),
+		"helper_cleanup": strings.Replace(source, "bus.WaitForQuiescence(cleanup)", "bus.WaitForQuiescence(ctx)", 1),
+		"source_current": source + "\n// Unreviewed source change.\n",
+	} {
+		t.Run("journal_"+name, func(t *testing.T) {
+			if replacement == source || validateProposedEffectJournalSuccessor(row, actual, replacement) == nil {
+				t.Fatal("changed original journal helper or source accepted")
+			}
+		})
 	}
 }
 
