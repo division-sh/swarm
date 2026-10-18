@@ -693,10 +693,9 @@ func TestPrepareDurableTopologySourceSetRebindSerializesDurableRegistration(t *t
 }
 
 type failSecondStaticTopologyRebindStore struct {
-	*lifecyclePersistenceProbe
-	calls   int
-	binding ProcessExecutionBinding
-	err     error
+	*sourceSetLifecycleCommitProbe
+	calls int
+	err   error
 }
 
 func (s *failSecondStaticTopologyRebindStore) CommitAgentLifecycleTransition(ctx context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
@@ -704,16 +703,29 @@ func (s *failSecondStaticTopologyRebindStore) CommitAgentLifecycleTransition(ctx
 	if s.calls == 2 {
 		return AgentLifecycleTransitionResult{}, s.err
 	}
-	return s.lifecyclePersistenceProbe.CommitAgentLifecycleTransition(ctx, req)
-}
-
-func (s *failSecondStaticTopologyRebindStore) ProcessExecutionBinding() (ProcessExecutionBinding, error) {
-	return s.binding, s.binding.Validate()
+	return s.sourceSetLifecycleCommitProbe.CommitAgentLifecycleTransition(ctx, req)
 }
 
 func TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCommit(t *testing.T) {
 	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
-	record := lifecycleTestPersistedAgent(t)
+	bundle, present := semanticview.Bundle(manager.semanticSource)
+	if !present || bundle == nil {
+		t.Fatal("partial rebind fixture requires its manager's compiled source")
+	}
+	coordinate, err := staticSourceCoordinate(manager.semanticSource, bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := lifecycleProbeProcessBinding()
+	binding.BundleHash = coordinate.BundleHash
+	admission := managerTestTopologyAdmissionForSource(t, manager.semanticSource)
+	record := PersistedAgent{
+		Config: managerTestAgentConfig(models.AgentConfig{
+			ExecutionMode: "live", ID: "agent-lifecycle-test", Role: "worker", Type: "sonnet", Model: "regular", FlowID: semanticview.RootExecutionFlowID(manager.semanticSource),
+			Identity: runtimeagentidentitytest.RootRuntime(t, "agent-lifecycle-test", "lifecycle-test"),
+		}),
+		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(), Topology: admission,
+	}
 	identity, err := record.Config.ConcreteIdentity()
 	if err != nil {
 		t.Fatalf("resolve lifecycle identity: %v", err)
@@ -722,13 +734,12 @@ func TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCo
 	if err != nil {
 		t.Fatalf("resolve lifecycle config revision: %v", err)
 	}
-	admission := managerTestTopologyAdmission(t)
 	first := &agentLifecycleCell{
-		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 31, Generation: 7, Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeStandard, Topology: admission, ProcessBinding: lifecycleProbeProcessBinding()},
+		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 31, Generation: 7, Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeStandard, Topology: admission, ProcessBinding: binding},
 	}
 	secondIdentity := runtimeagentidentitytest.RootRuntime(t, "second-survivor", "lifecycle-test")
 	second := &agentLifecycleCell{
-		identity: secondIdentity, view: AgentLifecycleState{Identity: secondIdentity, AgentID: secondIdentity.AgentID(), RuntimeEpoch: 32, Generation: 8, Phase: AgentLifecycleFailed, ConfigRevision: revision, RunMode: AgentRunModeStopped, Topology: admission, ProcessBinding: lifecycleProbeProcessBinding()},
+		identity: secondIdentity, view: AgentLifecycleState{Identity: secondIdentity, AgentID: secondIdentity.AgentID(), RuntimeEpoch: 32, Generation: 8, Phase: AgentLifecycleFailed, ConfigRevision: revision, RunMode: AgentRunModeStopped, Topology: admission, ProcessBinding: binding},
 	}
 	rowOwner := newLifecyclePersistenceProbe()
 	rowOwner.views[identity], rowOwner.views[secondIdentity] = first.view, second.view
@@ -738,24 +749,23 @@ func TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCo
 	first.opMu.Lock()
 	second.opMu.Lock()
 	prepared := &PreparedDurableTopologySourceSetRebind{
-		manager: manager, admission: admission, coordinate: runtimeagenttopology.SourceCoordinate{
-			BundleHash: managerTestTopologyBundleHash,
-		}, currentBinding: lifecycleProbeProcessBinding(), currentIsSuccessor: true,
+		manager: manager, admission: admission, coordinate: coordinate,
+		currentBinding: binding, currentIsSuccessor: true,
 		plan: runtimeagenttopology.SourceSetPlan{Revision: admission.Authority.Static.SourceSetRevision},
 		bindings: []durableTopologySourceSetBinding{
-			{identity: identity, identityKey: "first", cell: first, epoch: first.view.RuntimeEpoch, generation: first.view.Generation, phase: first.view.Phase, runMode: first.view.RunMode, revision: revision, currentTopology: admission, targetTopology: admission, currentBinding: lifecycleProbeProcessBinding()},
-			{identity: secondIdentity, identityKey: "second", cell: second, epoch: second.view.RuntimeEpoch, generation: second.view.Generation, phase: second.view.Phase, runMode: second.view.RunMode, revision: revision, currentTopology: admission, targetTopology: admission, currentBinding: lifecycleProbeProcessBinding()},
+			{identity: identity, identityKey: "first", cell: first, epoch: first.view.RuntimeEpoch, generation: first.view.Generation, phase: first.view.Phase, runMode: first.view.RunMode, revision: revision, currentTopology: admission, targetTopology: admission, currentBinding: binding},
+			{identity: secondIdentity, identityKey: "second", cell: second, epoch: second.view.RuntimeEpoch, generation: second.view.Generation, phase: second.view.Phase, runMode: second.view.RunMode, revision: revision, currentTopology: admission, targetTopology: admission, currentBinding: binding},
 		},
 		locked: []*agentLifecycleCell{first, second},
 	}
 	injected := errors.New("injected second lifecycle commit failure")
-	store := &failSecondStaticTopologyRebindStore{lifecyclePersistenceProbe: rowOwner, binding: lifecycleProbeProcessBinding(), err: injected}
+	store := &failSecondStaticTopologyRebindStore{sourceSetLifecycleCommitProbe: &sourceSetLifecycleCommitProbe{lifecyclePersistenceProbe: rowOwner, binding: binding}, err: injected}
 	if err := prepared.Commit(context.Background(), store, "88888888-8888-4888-8888-888888888888"); !errors.Is(err, injected) {
 		t.Fatalf("source-set rebind error = %v, want injected second commit failure", err)
 	}
 	manager.lifecycle.mu.Lock()
 	defer manager.lifecycle.mu.Unlock()
-	if !first.view.ProcessBinding.Equal(lifecycleProbeProcessBinding()) || !second.view.ProcessBinding.Equal(lifecycleProbeProcessBinding()) {
+	if !first.view.ProcessBinding.Equal(binding) || !second.view.ProcessBinding.Equal(binding) {
 		t.Fatalf("failed source-set rebind published partial bindings: first=%#v second=%#v", first.view.ProcessBinding, second.view.ProcessBinding)
 	}
 }
