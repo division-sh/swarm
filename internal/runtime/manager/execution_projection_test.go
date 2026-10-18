@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -134,7 +135,7 @@ func newNativeProjectionTestManager(t *testing.T, bus *projectionTestBus, factor
 	owner := newTestManagerWorkOwner(t)
 	bus.owner = owner
 	am := newTestAgentManagerWithOptions(t, bus, factory, AgentManagerOptions{
-		WorkOwner: owner, DeliveryStore: native, SourceArtifactFact: native.Authority.SourceArtifact(),
+		WorkOwner: owner, DeliveryStore: native, SourceArtifactFact: native.Authority.SourceArtifact(), SemanticSource: native.SemanticSource,
 	})
 	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, native.Authority.ExecutionID(), native.Authority.Generation(), "", "projection-test-actors", native.Authority.SourceArtifact().BundleHash(), nil)
 	if err != nil {
@@ -823,7 +824,8 @@ func ProveNativeExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing
 		LifecycleEpoch:      runtimebus.CurrentRuntimeEpoch(),
 		LifecycleGeneration: 4, LifecyclePhase: AgentLifecycleRunning, LifecycleRunMode: AgentRunModeStandard,
 	}
-	rec.Topology = managerTestEphemeralTopologyAdmission(t)
+	rec.Topology = managerTestTopologyAdmissionForSource(t, am.semanticSource)
+	rec.Topology.Lifetime = runtimeagenttopology.LifetimeEphemeral
 	if err := am.resolveAgentModel(&rec.Config); err != nil {
 		t.Fatal(err)
 	}

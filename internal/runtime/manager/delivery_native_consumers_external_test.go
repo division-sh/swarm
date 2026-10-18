@@ -120,7 +120,7 @@ func TestPersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *testing.
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -130,7 +130,7 @@ func TestExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeExecutionProjectionRecoveryStartsPersistedRunningCell(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -140,7 +140,7 @@ func TestExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t *testi
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -150,7 +150,7 @@ func TestAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDeli
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDelivery(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}

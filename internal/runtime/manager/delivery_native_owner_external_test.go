@@ -153,6 +153,16 @@ func openManagerNativeDelivery(t *testing.T, backend string, sources ...semantic
 	}
 }
 
+func managerProjectionDeliverySource(t *testing.T) semanticview.Source {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.WriteManagerExecutionProjection(t), contracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func managerSourceSetDeliverySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	rooted, _ := sourceartifactfixture.Rooted(t, "delivery", sourceartifactfixture.New("events.yaml", []byte("test.source_set_wait:\ntest.source_set_cancelled:\n")))
