@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -1001,24 +1002,20 @@ func (s projectionScriptedClaimStore) ClaimDelivery(ctx context.Context, authori
 	return s.result, s.err
 }
 
-func projectionDeliveryAuthorities(t *testing.T) map[string]runtimedelivery.ExecutionAuthority {
+func projectionDeliveryAuthorities(t *testing.T, source runtimecorrelation.SourceArtifactFact) map[string]runtimedelivery.ExecutionAuthority {
 	t.Helper()
-	source, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("e", 64))
-	if err != nil {
-		t.Fatalf("construct projection delivery source: %v", err)
-	}
 	normal, err := runtimedelivery.NewNormalExecutionAuthority(source, "manager-delivery-test", 1)
 	if err != nil {
 		t.Fatalf("construct normal projection authority: %v", err)
 	}
-	selected, err := runtimedelivery.NewSelectedExecutionAuthority(sourceartifactfixture.Fact(), eventtest.UUID("projection-selected-execution"), eventtest.UUID("projection-selected-run"), 1)
+	selected, err := runtimedelivery.NewSelectedExecutionAuthority(source, eventtest.UUID("projection-selected-execution"), eventtest.UUID("projection-selected-run"), 1)
 	if err != nil {
 		t.Fatalf("construct selected projection authority: %v", err)
 	}
 	return map[string]runtimedelivery.ExecutionAuthority{"normal": normal, "selected": selected}
 }
 
-func ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T, newNativeDelivery, newSelectedDelivery managerDeliveryNativeFactory) {
+func ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T, source semanticview.Source, newNativeDelivery, newSelectedDelivery managerDeliveryNativeFactory) {
 	type branch struct {
 		name         string
 		result       func(string) runtimedelivery.ClaimResult
@@ -1068,7 +1065,23 @@ func ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T, new
 		{name: "acquired_terminal_race", delegate: true, terminalRace: true, wantIntent: worklifetime.DeliveryContinuationConsume, wantRelease: 1},
 		{name: "acquired_success", delegate: true, wantIntent: worklifetime.DeliveryContinuationConsume, wantRelease: 1, wantHandled: true},
 	}
-	for authorityName, authority := range projectionDeliveryAuthorities(t) {
+	bundle, present := semanticview.Bundle(source)
+	if !present || bundle == nil {
+		t.Fatal("carrier disposition fixture requires its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
+	sourceCtx := runtimecorrelation.WithRootAdmission(testAuthorActivityContext(context.Background()), rooted.Admission())
+	sourceCtx = runtimecorrelation.WithSourceArtifactFact(sourceCtx, fact)
+	scope, present := authoractivity.ScopeFromContext(sourceCtx)
+	if !present {
+		t.Fatal("carrier disposition fixture requires its original author scope")
+	}
+	sourceCtx = authoractivity.WithScope(sourceCtx, authoractivity.BundleScope(scope.RuntimeInstanceID, fact.BundleHash()))
+	for authorityName, authority := range projectionDeliveryAuthorities(t, fact) {
 		for _, test := range branches {
 			if test.delegate != (newNativeDelivery != nil) {
 				continue
@@ -1092,7 +1105,7 @@ func ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T, new
 					runID = authority.ForkRunID()
 				}
 				route := managerAgentDeliveryRouteForRun(runID, agentID)
-				opts := AgentManagerOptions{}
+				opts := AgentManagerOptions{SemanticSource: source, SourceArtifactFact: fact}
 				if nativeDelivery != nil {
 					opts.DeliveryStore = nativeDelivery
 					opts.SemanticSource = nativeDelivery.SemanticSource
@@ -1115,25 +1128,25 @@ func ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T, new
 					if nativeDelivery != nil {
 						return nativeDelivery.Context
 					}
-					return testAuthorActivityContext(context.Background())
-				}(), PersistedAgent{Topology: managerTestEphemeralTopologyAdmission(t), Config: managerTestAgentConfig(models.AgentConfig{
+					return sourceCtx
+				}(), PersistedAgent{Topology: managerTestEphemeralTopologyAdmissionForSource(t, am.semanticSource), Config: managerTestAgentConfig(models.AgentConfig{
 					ExecutionMode: "live", ID: agentID,
 					Identity: route.AgentIdentity, Subscriptions: []string{string(eventType)},
 				})}, true); err != nil {
 					t.Fatalf("SpawnAgent: %v", err)
 				}
-				runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
+				runCtx, cancelRun := context.WithCancel(sourceCtx)
 				defer cancelRun()
-				managedCtx := managedExecutionTestContext(t, runCtx)
+				managedCtx := runCtx
 				if nativeDelivery != nil {
 					managedCtx = nativeDelivery.Context
-					if authorityName == "normal" {
-						admission, err := managedexecution.New(managedexecution.KindNormalRuntime, authority.ExecutionID(), authority.Generation(), "", "carrier-disposition-actors", authority.SourceArtifact().BundleHash(), nil)
-						if err != nil {
-							t.Fatal(err)
-						}
-						managedCtx = managedexecution.WithAdmission(managedCtx, admission)
+				}
+				if authorityName == "normal" {
+					admission, err := managedexecution.New(managedexecution.KindNormalRuntime, authority.ExecutionID(), authority.Generation(), "", "carrier-disposition-actors", authority.SourceArtifact().BundleHash(), nil)
+					if err != nil {
+						t.Fatal(err)
 					}
+					managedCtx = managedexecution.WithAdmission(managedCtx, admission)
 				}
 				if authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork && nativeDelivery == nil {
 					admission, err := managedexecution.New(

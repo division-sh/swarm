@@ -158,12 +158,15 @@ func TestAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDeli
 
 func TestRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T) {
 	t.Run("unit", func(t *testing.T) {
-		manager.ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t, nil, nil)
+		manager.ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t, managerProjectionDeliverySource(t), nil, nil)
 	})
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			manager.ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t,
-				func(t *testing.T) *manager.ManagerDeliveryNativeFixture { return openManagerNativeDelivery(t, backend) },
+			source := managerProjectionDeliverySource(t)
+			manager.ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t, source,
+				func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+					return openManagerNativeDelivery(t, backend, source)
+				},
 				func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
 					return openManagerNativeSelectedDelivery(t, backend)
 				},
