@@ -25,6 +25,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -825,19 +826,22 @@ func writeInboundCommitError(w http.ResponseWriter, logger *RuntimeLogger, reque
 	logInboundPublicationFailure(logger, requestCtx, provider, serviceID, providerEventID, err)
 	status := http.StatusServiceUnavailable
 	message := "publish inbound failed"
-	if errors.Is(err, runtimeinbound.ErrRequestIdentityConflict) || errors.Is(err, operatorchannel.ErrConflict) || errors.Is(err, operatorchannel.ErrRevisionConflict) {
+	if runtimefailures.OnlyBranches(err, func(cause error) bool {
+		return errors.Is(cause, runtimeinbound.ErrRequestIdentityConflict) || errors.Is(cause, operatorchannel.ErrConflict) || errors.Is(cause, operatorchannel.ErrRevisionConflict)
+	}) {
 		status = http.StatusConflict
-	} else {
-		var providerErr providertriggers.Error
-		if errors.As(err, &providerErr) {
-			status = providerErr.Status
-			message = providerErr.Error()
-		}
+	} else if providerErr, onlyProvider := inboundProviderError(err); onlyProvider {
+		status = providerErr.Status
+		message = providerErr.Error()
 	}
 	http.Error(w, message, status)
 }
 
 func logInboundPublicationFailure(logger *RuntimeLogger, requestCtx context.Context, provider, serviceID, providerEventID string, err error) {
+	// Durable failure envelopes normalize unknown errors; retain joined causes in
+	// the existing process diagnostic channel without exposing them over HTTP.
+	diaglog.ProcessLog(diaglog.LevelError, "inbound-gateway", "inbound publication failed",
+		"provider", provider, "service_id", serviceID, "provider_event_id", providerEventID, "error", err.Error())
 	if logger != nil {
 		handleRuntimeLogPersistenceError("inbound-gateway", "publish_failed", logger.Error(requestCtx, "inbound-gateway", "publish_failed", map[string]any{
 			"provider": provider, "service_id": serviceID, "provider_event_id": providerEventID,
