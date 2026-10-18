@@ -102,7 +102,7 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 					"business_brief": "An assessed brief", "attempt_count": float64(1), "note_supplied": false,
 				})
 				if err := process.stopAndWait(10 * time.Second); err != nil {
-					t.Fatal(err)
+					t.Fatalf("stop after completed projection: %v\n%s", err, process.output.String())
 				}
 				assertReleaseDeploymentAdmission(t, runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
 					"verify", contracts, "--config", config, "--json"))
