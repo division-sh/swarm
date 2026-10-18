@@ -93,7 +93,7 @@ func TestActivityExecutionGrantReadUsesExactHistoricalVersionBothStores(t *testi
 				control.Connector = native
 				return control
 			})
-			ctx := fixture.admissionContext
+			ctx := fixture.context
 			selected := fixture.store.(agentfixture.Store)
 			process, err := agentfixture.ProcessCapability(t, ctx, selected)
 			if err != nil {
