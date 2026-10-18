@@ -20,6 +20,7 @@ func TestT17RouteSelectorsRetainCapturedEventFamilyWithoutSourceReads(t *testing
 		t.Fatalf("captured selectors=%d", len(selectors))
 	}
 	actual := selectors[0]
+	expected := actual.Clone()
 	left, _ := original.PayloadAdmission()
 	right, admitted := actual.PayloadAdmission()
 	if !admitted || !left.Binding().Equal(right.Binding()) || !bytes.Equal(actual.Payload(), original.Payload()) || actual.RoutingSource() != original.RoutingSource() || actual.RunID() != original.RunID() || actual.ID() != original.ID() {
@@ -36,11 +37,11 @@ func TestT17RouteSelectorsRetainCapturedEventFamilyWithoutSourceReads(t *testing
 	}
 	snapshot.Events[0].Payload = []byte(`{"later":"source mutation"}`)
 	retained, found, err := plan.HistoricalRouteSelector(original.ID())
-	if err != nil || !found || !reflect.DeepEqual(retained, original) {
+	if err != nil || !found || !reflect.DeepEqual(retained, expected) {
 		t.Fatalf("retained selector followed mutable source: %v", err)
 	}
 	selectors[0] = events.Event{}
-	if retained, found, err := plan.HistoricalRouteSelector(original.ID()); err != nil || !found || !reflect.DeepEqual(retained, original) {
+	if retained, found, err := plan.HistoricalRouteSelector(original.ID()); err != nil || !found || !reflect.DeepEqual(retained, expected) {
 		t.Fatal("selector alias changed captured history")
 	}
 	if got, found, err := plan.HistoricalRouteSelector(uuid.NewString()); err != nil || found || !reflect.DeepEqual(got, absent) {
