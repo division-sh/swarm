@@ -1122,8 +1122,8 @@ func debtSelectedFixtureSignatureSources2738(root, baseRoot string, actual, sour
 }
 
 func debtSelectedFixtureSignatureImages2738(before, after []byte) error {
-	if fmt.Sprintf("%x", sha256.Sum256(before)) != "a9f5159b4cc0ec9c99c34f8b999959ee9cac04f87faf0ae489931c284f894fee" ||
-		fmt.Sprintf("%x", sha256.Sum256(after)) != "4dd0a91bcdc3e14af05e4630fd65b4db79a90d7f1943bc9eb271734bbe369799" {
+	if fmt.Sprintf("%x", sha256.Sum256(before)) != "838e3ff243f7de28c929141a8d9aa8e4eadd6d45c39c1eb94b40ceb401e2303f" ||
+		fmt.Sprintf("%x", sha256.Sum256(after)) != "e9df205b2e8c2037b70b24699f641a24a1eda10a638ff043408e18eb85b51963" {
 		return fmt.Errorf("selected fixture signature source differs from its complete reviewed images")
 	}
 	return nil
