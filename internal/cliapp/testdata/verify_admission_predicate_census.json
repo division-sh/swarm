@@ -1713,7 +1713,7 @@
     "owner": "internal/runtime/runtime.go::*Runtime.prepareStartLocked",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "01970884884e923386f45b9765f21af9e6c7c366a54fcadf250908700cc37c4f"
+    "body_sha256": "f362a17356975c5d074ee1499bdbe2e01b51900edefd9b71ab594a961516dc15"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.prepareStartupLifecycleLocked",
@@ -2085,7 +2085,7 @@
     "owner": "internal/runtime/runtime_claude_startup.go::validateSelectedBackendCredentialForActiveAgents",
     "audit_rows": "A11,A12,A18,A25",
     "proof_families": "P09,P10,P15,P21",
-    "body_sha256": "cdaadd67b9cde48847aff954d33dfe76f8dc8bcfa1d1af6bc9fbb89d1fe831c3"
+    "body_sha256": "49835b10bc3009d96f8315578a99268925c4146dbfb0c5c3dffca4a2b4ef9631"
   },
   {
     "owner": "internal/runtime/runtime_claude_startup.go::validateSelectedBackendCredentialForDeclaredAgents",
