@@ -98,6 +98,9 @@ func provePreparedSurfaceCustody(t *testing.T, backend string) {
 	if err := save(bound, surface.Authority, surface); err != nil || store.calls != 2 {
 		t.Fatalf("same-process preparation failed: calls=%d err=%v", store.calls, err)
 	}
+	forkControls := preparedForkCustodyControls(t, process, evidence, plan.Authority.Preparation.SelectedForkPreparationCoordinates)
+	forkControls(ctx, true)
+	forkControls(bound, true)
 	if startupownership.HasMutationAuthority(ctx) || startupownership.PreparedOperationEntered(store.retained, startupownership.PreparedManagedCapabilitySurface, store) {
 		t.Fatal("prepared command mutated its parent or retained an ended scope")
 	}
@@ -119,6 +122,7 @@ func provePreparedSurfaceCustody(t *testing.T, backend string) {
 		ctx  context.Context
 	}{{"foreign_original", foreignCtx}, {"refused_original", refusedCtx}, {"canceled", canceled}} {
 		t.Run(negative.name, func(t *testing.T) {
+			forkControls(negative.ctx, false)
 			if err := save(negative.ctx, surface.Authority, surface); err == nil || store.calls != 2 {
 				t.Fatalf("invalid original reached surface persistence: calls=%d err=%v", store.calls, err)
 			}
@@ -203,12 +207,14 @@ func provePreparedSurfaceCustody(t *testing.T, backend string) {
 	if err := save(frozen, surface.Authority, surface); err == nil || store.calls != 2 {
 		t.Fatalf("stale original reached surface persistence: calls=%d err=%v", store.calls, err)
 	}
+	forkControls(frozen, false)
 	if err := grant.Retire(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := save(original, surface.Authority, surface); err == nil || store.calls != 2 {
 		t.Fatalf("retired original reached surface persistence: calls=%d err=%v", store.calls, err)
 	}
+	forkControls(original, false)
 	store.refusal = errors.New("exact synchronous surface refusal")
 	if err := save(ctx, surface.Authority, surface); !errors.Is(err, store.refusal) || store.calls != 3 {
 		t.Fatalf("prepared command changed store refusal: calls=%d err=%v", store.calls, err)
@@ -216,6 +222,7 @@ func provePreparedSurfaceCustody(t *testing.T, backend string) {
 	if err := process.Release(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	forkControls(ctx, false)
 	if err := save(ctx, surface.Authority, surface); err == nil || store.calls != 3 {
 		t.Fatalf("released process reached persistence: calls=%d err=%v", store.calls, err)
 	}

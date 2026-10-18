@@ -48,6 +48,14 @@ type constructedInputAgent struct {
 }
 
 func (a *constructedInputAgent) OnEvent(ctx context.Context, event events.Event) ([]events.Event, error) {
+	if proof, ok := ctx.Value(selectedChildContextProofKey{}).(*selectedChildContextProofGrant); ok {
+		a.mu.Lock()
+		actor := a.cfg
+		a.mu.Unlock()
+		if err := proof.requireGatewayCustody(ctx, actor); err != nil {
+			return nil, err
+		}
+	}
 	if a.observe != nil {
 		if err := a.observe(ctx, event); err != nil {
 			return nil, err

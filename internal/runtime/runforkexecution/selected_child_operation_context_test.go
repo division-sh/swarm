@@ -80,6 +80,7 @@ type selectedChildContextProofGrant struct {
 	startupownership.GenerationGrant
 	proof *selectedChildContextProofCapability
 	ctx   context.Context
+	stale context.Context
 }
 
 type selectedChildContextProofKey struct{}
@@ -158,7 +159,10 @@ func (g *selectedChildContextProofGrant) BindSelectedForkMutationContext(ctx con
 	if err != nil || evidenceErr != nil || original.GrantEvidence().GrantID != evidence.GrantID {
 		t.Fatal("same-child reuse changed the genuine issuing owner")
 	}
-	g.ctx, err = owner.BindSelectedForkMutationContext(ctx)
+	g.ctx, err = owner.BindSelectedForkMutationContext(context.WithValue(ctx, selectedChildContextProofKey{}, g))
+	if err == nil && g.stale == nil {
+		g.stale, err = startupownership.FreezeMutationAuthority(g.ctx)
+	}
 	return g.ctx, err
 }
 

@@ -3797,6 +3797,15 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, bundle.SourceArtifact, forkRunID, preparedAgents)
 	ctx = selectedForkExecutionTestContext(t, ctx, authority)
 	badIdentity := selectedContractTestAgentIdentityForRun(t, authority.SelectedFork.ForkRunID, "bad-agent", "")
+	selectedAdmission, ok := managedexecution.FromContext(ctx)
+	if !ok {
+		t.Fatal("registration failure requires its actual selected admission")
+	}
+	selectedReceiver, err := eventreceiver.SelectedContractForkExecution(authority, selectedAdmission,
+		runtimeeffects.NewController(executionOwner.ports.effects), runtimecorrelation.RuntimeLineage{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	_, _, err = startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
 		Owner:        executionOwner,
@@ -3827,7 +3836,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 				Config:            &config.Config{},
 				LLMRuntime:        selectedContractCleanupRuntime{},
 				AgentManagerOptions: runtimemanager.AgentManagerOptions{
-					WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(),
+					WorkOwner: owner, ReceiverExecution: selectedReceiver,
 				},
 			},
 		},

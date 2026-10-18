@@ -594,6 +594,11 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		}
 		return runtimeOwner, admission, nil
 	}
+	receiverExecution, err := req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution.WithSelectedAdmission(admission)
+	if err != nil {
+		return nil, managedexecution.Admission{}, fmt.Errorf("bind selected-contract gateway receiver execution: %w", err)
+	}
+	req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution = receiverExecution
 	builder, err := buildSelectedContractAgentRuntimeFactory(req, generationGrant, bus, pipeline)
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
@@ -666,7 +671,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	if err := transferActivations(manager); err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
-	receiverExecution, err := builder.options.ReceiverExecution.WithSelectedAdmission(admission)
+	receiverExecution, err = builder.options.ReceiverExecution.WithSelectedAdmission(admission)
 	if err != nil {
 		return nil, managedexecution.Admission{}, fmt.Errorf("finalize selected-contract manager receiver execution: %w", err)
 	}
