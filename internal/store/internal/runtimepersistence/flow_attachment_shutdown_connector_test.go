@@ -17,6 +17,8 @@ import (
 // This fixed-purpose fixture gates one exact attachment UPDATE on a real native
 // transaction. It observes its terminal outcome, not transaction-count budgets.
 type attachmentProgressNativeBarrier struct {
+	statement                              string
+	args                                   []driver.NamedValue
 	mu                                     sync.Mutex
 	runID, path, attemptID, previous, hash string
 	armed                                  bool
@@ -34,20 +36,62 @@ func (b *attachmentProgressNativeBarrier) arm(attempt pipeline.DynamicFlowRuntim
 }
 
 func (b *attachmentProgressNativeBarrier) claim(query string, args []driver.NamedValue, tx *attachmentProgressNativeTx) bool {
-	const postgres = `UPDATE flow_instance_runtime_readiness SET phase=$1,updated_at=$2 WHERE run_id=$3::uuid AND instance_path=$4 AND activation_attempt_id=$5 AND phase=$6 AND plan_hash=$7`
-	const sqlite = `UPDATE flow_instance_runtime_readiness SET phase=?,updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND phase=? AND plan_hash=?`
-	if tx == nil || (query != postgres && query != sqlite) || len(args) != 7 {
-		return false
-	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if !b.armed || b.target != nil || args[0].Value != string(pipeline.FlowAttachmentAgentsRegistered) ||
+	if tx == nil || !b.armed || b.target != nil || !b.matchesStatement(query, args) {
+		return false
+	}
+	b.armed, b.target = false, tx
+	b.statement, b.args = query, append([]driver.NamedValue(nil), args...)
+	return true
+}
+
+func (b *attachmentProgressNativeBarrier) matchesStatement(query string, args []driver.NamedValue) bool {
+	const postgres = `UPDATE flow_instance_runtime_readiness SET phase=$1,updated_at=$2 WHERE run_id=$3::uuid AND instance_path=$4 AND activation_attempt_id=$5 AND phase=$6 AND plan_hash=$7`
+	const sqlite = `UPDATE flow_instance_runtime_readiness SET phase=?,updated_at=? WHERE run_id=? AND instance_path=? AND activation_attempt_id=? AND phase=? AND plan_hash=?`
+	if (query != postgres && query != sqlite) || len(args) != 7 {
+		return false
+	}
+	if args[0].Value != string(pipeline.FlowAttachmentAgentsRegistered) ||
 		args[2].Value != b.runID || args[3].Value != b.path || args[4].Value != b.attemptID ||
 		args[5].Value != b.previous || args[6].Value != b.hash {
 		return false
 	}
-	b.armed, b.target = false, tx
 	return true
+}
+
+func (b *attachmentProgressNativeBarrier) requireExactCoordinates(t *testing.T) {
+	t.Helper()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.matchesStatement(b.statement, b.args) {
+		t.Fatal("actual native statement lost its exact barrier binding")
+	}
+	for _, coordinate := range []int{0, 2, 3, 4, 5, 6} {
+		foreign := append([]driver.NamedValue(nil), b.args...)
+		foreign[coordinate].Value = "foreign-coordinate"
+		if b.matchesStatement(b.statement, foreign) {
+			t.Fatalf("native barrier accepted a foreign coordinate at argument %d", coordinate)
+		}
+	}
+	if b.matchesStatement(b.statement+" ", b.args) || b.matchesStatement(b.statement, b.args[:6]) {
+		t.Fatal("native barrier accepted a changed statement or missing binding")
+	}
+}
+
+func (b *attachmentProgressNativeBarrier) rollbackJoined() bool {
+	b.mu.Lock()
+	tx := b.target
+	b.mu.Unlock()
+	if tx == nil {
+		return false
+	}
+	select {
+	case <-tx.rolledBack:
+		return true
+	default:
+		return false
+	}
 }
 
 func (b *attachmentProgressNativeBarrier) releaseStatement() {

@@ -18,8 +18,9 @@ import (
 )
 
 type attachmentShutdownProgressObservation struct {
-	result pipeline.FlowAttachmentAdvanceResult
-	err    error
+	result                 pipeline.FlowAttachmentAdvanceResult
+	err                    error
+	rollbackJoinedAtReturn bool
 }
 
 type attachmentShutdownProgressWorkflow struct {
@@ -47,7 +48,7 @@ func (w *attachmentShutdownProgressWorkflow) AdvanceFlowAttachment(ctx context.C
 		<-w.release
 	}
 	result, err := w.PipelineCoordinator.AdvanceFlowAttachment(ctx, attempt, previous, at)
-	w.observed <- attachmentShutdownProgressObservation{result: result, err: err}
+	w.observed <- attachmentShutdownProgressObservation{result: result, err: err, rollbackJoinedAtReturn: w.barrier.rollbackJoined()}
 	return result, err
 }
 
@@ -115,6 +116,7 @@ func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 	if cut == "inside_progress" {
 		select {
 		case <-barrier.entered:
+			barrier.requireExactCoordinates(t)
 		case <-ctx.Done():
 			t.Fatal("exact attachment UPDATE did not enter its real native transaction")
 		}
@@ -155,7 +157,7 @@ func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 	if err != nil || !found || row.Phase != pipeline.FlowAttachmentPlanned || row.AttemptState != "aborted" {
 		t.Fatalf("exact cancelled attachment evidence: %+v found=%t err=%v", row, found, err)
 	}
-	t.Logf("shutdown progress pin: backend=%s cut=%s acknowledgement=%t phase=%s attempt=%s matched_statement=%t abandonment=acknowledged", backend, cut, observed.result.Acknowledged, row.Phase, row.AttemptState, barrier.matchedStatement())
+	t.Logf("shutdown progress pin: backend=%s cut=%s acknowledgement=%t phase=%s attempt=%s matched_statement=%t physical_rollback_joined_at_return=%t abandonment=acknowledged", backend, cut, observed.result.Acknowledged, row.Phase, row.AttemptState, barrier.matchedStatement(), observed.rollbackJoinedAtReturn)
 	select {
 	case err := <-finalized:
 		t.Logf("readiness caller returned after retirement handoff: %v", err)
