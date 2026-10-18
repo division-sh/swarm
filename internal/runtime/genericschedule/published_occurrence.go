@@ -10,9 +10,10 @@ import (
 )
 
 func occurrencePublicationEvent(activation Activation, occurrence Occurrence) (events.Event, error) {
+	var absent events.Event
 	payload, err := occurrencePublicationPayload(activation.Command)
 	if err != nil {
-		return events.Event{}, err
+		return absent, err
 	}
 	return occurrenceEvent(activation, occurrence, payload)
 }

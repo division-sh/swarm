@@ -216,12 +216,13 @@ func (p JoinContinuation) RetainedPublication(authorityStamp string) (joinruntim
 // Event projects the published cause into the child. It admits no new timer
 // occurrence and deliberately keeps producer identity separate from fork authority.
 func (p JoinContinuation) Event(forkEventID, authorityStamp string) (events.Event, error) {
+	var absent events.Event
 	publication, err := p.RetainedPublication(authorityStamp)
 	if err != nil {
-		return events.Event{}, err
+		return absent, err
 	}
 	if forkEventID != publication.EventID {
-		return events.Event{}, fmt.Errorf("published join continuation requires its deterministic child event")
+		return absent, fmt.Errorf("published join continuation requires its deterministic child event")
 	}
 	return (TransferredJoinOccurrence{Command: p.child, Publication: publication}).Event()
 }

@@ -93,18 +93,19 @@ func (o TransferredJoinOccurrence) Project(child AdmissionCommand, authorityStam
 // Event returns the expected immutable frame, without schema admission,
 // historical membership, prepared targets, or delivery/execution authority.
 func (o TransferredJoinOccurrence) Event() (events.Event, error) {
+	var absent events.Event
 	if err := o.Validate(); err != nil {
-		return events.Event{}, err
+		return absent, err
 	}
 	command := o.Command.Canonical()
 	lineage, err := events.NewSelectedForkLineage(command.RunID, o.Publication.SourceRunID, o.Publication.SourceEventID,
 		o.Publication.AuthorityStamp, command.TaskID, command.ExecutionMode)
 	if err != nil {
-		return events.Event{}, err
+		return absent, err
 	}
 	payload, err := occurrencePublicationPayload(command)
 	if err != nil {
-		return events.Event{}, err
+		return absent, err
 	}
 	return events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{
 		Facts:   occurrenceEventFacts(command, o.Publication.EventID, command.Due.Absolute, payload),
