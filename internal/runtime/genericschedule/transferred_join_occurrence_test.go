@@ -305,9 +305,8 @@ func TestTransferredJoinOccurrenceEvidenceBindsPublicationAndOrdinaryFrame(t *te
 
 func ordinaryTransferredOccurrenceFixture(t *testing.T, facts events.EventFacts, runID string) events.Event {
 	t.Helper()
-	ordinary := eventtest.RuntimeControlWithRoutingSource(facts.ID, facts.Type, facts.Producer.ID, facts.TaskID,
-		facts.Payload, facts.ChainDepth, runID, "", facts.Envelope, facts.RoutingSource, facts.CreatedAt)
-	ordinary = eventtest.InExecutionMode(ordinary, facts.ExecutionMode)
+	ordinary := eventtest.RuntimeControlWithRoutingSourceAndMode(facts.ID, facts.Type, facts.Producer.ID, facts.TaskID,
+		facts.Payload, facts.ChainDepth, runID, "", facts.Envelope, facts.RoutingSource, facts.CreatedAt, facts.ExecutionMode)
 	if !reflect.DeepEqual(publishedOccurrenceTestFacts(ordinary), facts) || ordinary.RunID() != runID ||
 		ordinary.ParentEventID() != "" || ordinary.AdmissionClass() != events.EventAdmissionRuntimeControl {
 		t.Fatalf("ordinary occurrence fixture changed retained facts or runtime-control class: got=%+v want=%+v", publishedOccurrenceTestFacts(ordinary), facts)

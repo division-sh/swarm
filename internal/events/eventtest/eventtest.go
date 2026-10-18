@@ -136,7 +136,13 @@ func RuntimeControl(id string, eventType events.EventType, sourceAgent, taskID s
 // RuntimeControlWithRoutingSource builds a runtime control fixture preserving
 // an exact admitted routing-source fact.
 func RuntimeControlWithRoutingSource(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
-	facts := fixtureFactsWithRoutingSource(id, eventType, events.EventProducerPlatform, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, executionmode.Live, source)
+	return RuntimeControlWithRoutingSourceAndMode(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, source, createdAt, executionmode.Live)
+}
+
+// RuntimeControlWithRoutingSourceAndMode preserves the exact source, envelope
+// and mode without rebuilding them from a normalized routing projection.
+func RuntimeControlWithRoutingSourceAndMode(id string, eventType events.EventType, sourceAgent, taskID string, payload json.RawMessage, chainDepth int, runID, parentEventID string, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time, mode executionmode.Mode) events.Event {
+	facts := fixtureFactsWithRoutingSource(id, eventType, events.EventProducerPlatform, sourceAgent, taskID, payload, chainDepth, envelope, createdAt, mode, source)
 	return mustEvent(runtimeControlFixture(facts, runID, parentEventID))
 }
 
