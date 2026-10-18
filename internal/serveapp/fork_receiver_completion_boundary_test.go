@@ -36,7 +36,7 @@ func TestSelectedForkReceiverCapabilityCompletionSnapshotBoundaryBothStores(t *t
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "validation.triggered", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"candidate": "fork-capability"}, "idempotency_key": "capability-source"})
 			waitServedBoundaryPublicationCompletion(t, rt, seed.RunID)
-			requireWorkspaceProofReceiverPublicReadback(t, rt.Endpoint, rt.Selected.RuntimeDeps().EventStore, seed.RunID)
+			requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID)
 			if err := waitExactOriginPublications(ctx, publication, seed.EventID); err != nil {
 				t.Fatal(err)
 			}
