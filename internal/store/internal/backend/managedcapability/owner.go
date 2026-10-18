@@ -82,6 +82,9 @@ func InsertPostgres(ctx context.Context, tx *sql.Tx, raw []byte) (managedcapabil
 	if err != nil {
 		return managedcapabilities.Surface{}, err
 	}
+	if err := requireSurfaceLiveParentsTx(ctx, tx, surface, true); err != nil {
+		return managedcapabilities.Surface{}, err
+	}
 	encoded, _ := json.Marshal(surface)
 	var existingRaw []byte
 	var stored StoredProjection
@@ -160,6 +163,9 @@ func advanceConflictingManagedCapabilitySurfacePostgres(ctx context.Context, tx 
 func InsertSQLite(ctx context.Context, tx *sql.Tx, raw []byte) (managedcapabilities.Surface, error) {
 	surface, err := Decode(raw)
 	if err != nil {
+		return managedcapabilities.Surface{}, err
+	}
+	if err := requireSurfaceLiveParentsTx(ctx, tx, surface, false); err != nil {
 		return managedcapabilities.Surface{}, err
 	}
 	encoded, _ := json.Marshal(surface)
