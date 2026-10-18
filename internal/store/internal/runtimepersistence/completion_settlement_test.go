@@ -1723,6 +1723,13 @@ func requireCompletionRecoveryRows(t *testing.T, fixture completionSettlementFix
 		t.Fatalf("completion recovery rows turns=%d spend=%d reservations=%d, want %d/%d/%d", turns, spend, reservations, wantTurns, wantSpend, wantReservations)
 	}
 	if wantTurns > 0 {
+		var paired int
+		if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM agent_turns t
+			JOIN agent_turn_live_parents p ON p.turn_id=t.turn_id AND p.run_id=t.run_id
+			AND p.completion_attempt_id=t.completion_attempt_id AND p.capability_surface_id=t.capability_surface_id
+			WHERE t.completion_attempt_id=$1`, attemptID).Scan(&paired); err != nil || paired != turns {
+			t.Fatalf("completion audit lost its exact live-parent pair: pairs=%d turns=%d error=%v", paired, turns, err)
+		}
 		requireCompletion2270FrozenNativeEvidence(t, fixture, attemptID)
 	}
 }
