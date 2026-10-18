@@ -102,7 +102,45 @@ func q10CurrentRecipe(row recipe) (recipe, error) {
 			return q10CurrentEndpointRecipe(row, pin)
 		}
 	}
+	if row.File == "internal/serveapp/receiver_restart_test.go" && row.Function == "TestReceiverCompositionRestartBothStores" {
+		for _, pin := range packet.Rows {
+			if pin.Original.File == row.File && pin.Original.Function == row.Function {
+				return q10EmbeddedSpecCurrentRecipe(row, pin)
+			}
+		}
+		return recipe{}, fmt.Errorf("missing exact Q10 restart composition")
+	}
 	return row, nil
+}
+
+// reviewer-e6248012287 composes only this complete delivered predecessor.
+func q10EmbeddedSpecCurrentRecipe(row recipe, pin fixtureSetupSuccessor2617) (recipe, error) {
+	if pin.Original.Family != "native-served-delivery-quiescence-owner" ||
+		pin.Original.File != "internal/serveapp/receiver_restart_test.go" ||
+		pin.Original.Function != "TestReceiverCompositionRestartBothStores" {
+		return recipe{}, fmt.Errorf("unlisted Q10 embedded-spec composition")
+	}
+	embedded, err := loadEmbeddedSpecSuccessors1801(embeddedSpecSuccessorBytes1801)
+	if err != nil {
+		return recipe{}, err
+	}
+	for _, prior := range embedded.Rows {
+		if !reflect.DeepEqual(prior.Original, pin.Original) {
+			continue
+		}
+		delivered := prior.Original
+		delivered.Successor = prior.Candidate
+		if !reflect.DeepEqual(row, delivered) {
+			return recipe{}, fmt.Errorf("Q10 restart changed complete delivered row or history")
+		}
+		current, err := q10CurrentEndpointRecipe(pin.Original, pin)
+		if err != nil {
+			return recipe{}, err
+		}
+		current.Successor, err = embeddedSpecFieldDeletion1801(current.Successor)
+		return current, err
+	}
+	return recipe{}, fmt.Errorf("Q10 restart has no exact embedded-spec predecessor")
 }
 
 func reverseReviewedSuccessor2617(source string, edits []reviewedSuccessorEdit) (string, error) {

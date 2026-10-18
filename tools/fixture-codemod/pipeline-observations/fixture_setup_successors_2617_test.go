@@ -192,7 +192,11 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 			if err != nil {
 				t.Fatal(err)
 			}
-			currentSource, err := q10FixtureSetupCurrentSource(row)
+			historical, _, err := embeddedSpecHistoricalPair1801(row, actual)
+			if err != nil {
+				t.Fatal(err)
+			}
+			currentSource, err := q10FixtureSetupCurrentSource(historical)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -2,47 +2,15 @@ package main
 
 import (
 	"crypto/sha256"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"reflect"
 	"strings"
 	"testing"
-
-	"golang.org/x/tools/go/ast/astutil"
 )
 
-// USER6197217312 and reviewer-g6201157565 retire only the spec selector.
-// Every earlier transformation and successor remains in this frozen packet.
-//
-//go:embed testdata/embedded_spec_successors_1801.json
-var embeddedSpecSuccessorBytes1801 []byte
-
 var errUnlistedEmbeddedSpecSuccessor1801 = errors.New("unlisted embedded-spec successor")
-
-type embeddedSpecSuccessorPacket1801 struct {
-	Source, Authorization, PopulationSHA256 string
-	Rows                                    []fixtureSetupSuccessor2617
-}
-
-func loadEmbeddedSpecSuccessors1801(raw []byte) (embeddedSpecSuccessorPacket1801, error) {
-	var packet embeddedSpecSuccessorPacket1801
-	if fmt.Sprintf("%x", sha256.Sum256(raw)) != "461fec6b4bf08382294ffa6120f66ac9cd92b999a6c493fc06657a3d30576ace" {
-		return packet, fmt.Errorf("embedded-spec successor evidence changed")
-	}
-	if err := json.Unmarshal(raw, &packet); err != nil {
-		return packet, err
-	}
-	if packet.Source != "53788da1332cbecaf805b13722316257d7ac6829" ||
-		packet.Authorization != "https://github.com/division-sh/swarm/issues/1801#issuecomment-6201157565" || len(packet.Rows) != 28 {
-		return packet, fmt.Errorf("wrong embedded-spec source, authorization or finite population")
-	}
-	return packet, nil
-}
 
 func embeddedSpecPriorEndpoint1801(row recipe, actual string) (recipe, string, error) {
 	packet, err := loadEmbeddedSpecSuccessors1801(embeddedSpecSuccessorBytes1801)
@@ -69,8 +37,12 @@ func reverseEmbeddedSpecSuccessor1801(row recipe, actual string, pin fixtureSetu
 	history := row
 	history.Successor = pin.Original.Successor
 	if !reflect.DeepEqual(history, pin.Original) || row.Successor == "" ||
-		!canonicalComparatorEqual2617(row.Successor, pin.Candidate) || !canonicalComparatorEqual2617(actual, pin.Candidate) {
+		!canonicalComparatorEqual2617(row.Successor, pin.Candidate) {
 		return recipe{}, "", fmt.Errorf("embedded-spec current source or historical receipt differs")
+	}
+	current, err := q10CurrentRecipe(row)
+	if err != nil || !canonicalComparatorEqual2617(actual, current.Successor) {
+		return recipe{}, "", fmt.Errorf("embedded-spec current source or exact composed successor differs: %v", err)
 	}
 	prior := pin.Original.After
 	if pin.Original.Successor != "" {
@@ -85,57 +57,6 @@ func reverseEmbeddedSpecSuccessor1801(row recipe, actual string, pin fixtureSetu
 		return recipe{}, "", fmt.Errorf("embedded-spec successor lost its prior current endpoint: %v", err)
 	}
 	return pin.Original, prior, nil
-}
-
-func embeddedSpecFieldDeletion1801(source string) (string, error) {
-	file, err := parser.ParseFile(token.NewFileSet(), "prior.go", "package proof\n"+source, 0)
-	if err != nil {
-		return "", err
-	}
-	astutil.Apply(file, func(cursor *astutil.Cursor) bool {
-		switch node := cursor.Node().(type) {
-		case *ast.Ident:
-			if node.Name == "CLISourcePlatformSpecPaths" {
-				node.Name = "CLISourcePaths"
-			}
-		case *ast.CompositeLit:
-			if node.Type == nil {
-				return true
-			}
-			switch formattedNativeReadNode(node.Type) {
-			case "cliapp.ServeOptions", "cliapp.CLISourcePlatformSpecPaths",
-				"admittedFixtureSelectedContractSourceLoader", "SourceArtifactSelectedContractSourceLoader",
-				"runforkexecution.SourceArtifactSelectedContractSourceLoader", "runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader":
-				var kept []ast.Expr
-				for _, field := range node.Elts {
-					if kv, ok := field.(*ast.KeyValueExpr); ok && formattedNativeReadNode(kv.Key) == "PlatformSpecPath" {
-						continue
-					}
-					kept = append(kept, field)
-				}
-				node.Elts = kept
-			}
-		case *ast.CallExpr:
-			switch formattedNativeReadNode(node.Fun) {
-			case "initializeServePlatformStateStores", "cliapp.NewSwarmWorkflowModule":
-				if len(node.Args) == 3 {
-					node.Args = node.Args[:2]
-				}
-			case "loadServePlatformSpecDocument":
-				if len(node.Args) == 1 {
-					node.Args = nil
-				}
-			}
-		case *ast.AssignStmt:
-			if node.Tok == token.ASSIGN && len(node.Lhs) == 1 && len(node.Rhs) == 1 &&
-				formattedNativeReadNode(node.Lhs[0]) == "opts.PlatformSpecPath" && formattedNativeReadNode(node.Rhs[0]) == "defaultPlatformSpecPath" {
-				cursor.Delete()
-				return false
-			}
-		}
-		return true
-	}, nil)
-	return canonicalFunction(formattedNativeReadNode(file.Decls[0]))
 }
 
 func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T) {
@@ -169,6 +90,7 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 	}
 	seen := map[string]bool{}
 	priorSuccessors := 0
+	q10Compositions := 0
 	for _, pin := range packet.Rows {
 		key := pin.Original.Family + "/" + pin.Original.File + "/" + pin.Original.Function
 		if seen[key] {
@@ -191,14 +113,120 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 			}
 			restored[i] = original
 			assertEmbeddedSpecSuccessorRefusals1801(t, row, actual, pin)
+			if row.File == "internal/serveapp/receiver_restart_test.go" && row.Function == "TestReceiverCompositionRestartBothStores" {
+				assertQ10EmbeddedSpecComposition1801(t, row, actual, pin)
+				q10Compositions++
+			}
 		}
 		if matches != 1 {
 			t.Fatalf("%s recipe multiplicity=%d", key, matches)
 		}
 	}
 	population, err := json.Marshal(restored)
-	if err != nil || fmt.Sprintf("%x", sha256.Sum256(population)) != packet.PopulationSHA256 || priorSuccessors != 12 {
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(population)) != packet.PopulationSHA256 || priorSuccessors != 12 || q10Compositions != 1 {
 		t.Fatal("embedded-spec successor overwrote historical evidence, prior chains or an unrelated row")
+	}
+}
+
+func assertQ10EmbeddedSpecComposition1801(t *testing.T, row recipe, actual string, embedded fixtureSetupSuccessor2617) {
+	t.Helper()
+	packet, err := q10CurrentEndpoints()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var matches []fixtureSetupSuccessor2617
+	for _, pin := range packet.Rows {
+		if reflect.DeepEqual(pin.Original, embedded.Original) {
+			matches = append(matches, pin)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("Q10/embedded restart intersection=%d, want exactly one full original row", len(matches))
+	}
+	pin := matches[0]
+	current, err := q10EmbeddedSpecCurrentRecipe(row, pin)
+	if err != nil || !canonicalComparatorEqual2617(current.Successor, actual) {
+		t.Fatalf("complete current restart composition differs: %v", err)
+	}
+	// Prove both orders, rather than assuming selector deletion and the header
+	// read commute. Each complete earlier endpoint remains in its frozen packet.
+	reversed := actual
+	for i := len(pin.Edits) - 1; i >= 0; i-- {
+		edit := pin.Edits[i]
+		from, to := strings.Join(edit.Current, ""), strings.Join(edit.Prior, "")
+		if from == "" || strings.Count(reversed, from) != 1 {
+			t.Fatal("missing or ambiguous Q10 restart edit after embedded-spec deletion")
+		}
+		reversed = strings.Replace(reversed, from, to, 1)
+	}
+	if !canonicalComparatorEqual2617(reversed, embedded.Candidate) {
+		t.Fatal("Q10 restart reversal did not recover the exact delivered embedded-spec endpoint")
+	}
+	prior, err := reverseReviewedSuccessor2617(pin.Candidate, pin.Edits)
+	if err != nil || !canonicalComparatorEqual2617(prior, embedded.Original.Successor) {
+		t.Fatalf("Q10 restart lost its exact pre-embedded historical endpoint: %v", err)
+	}
+	for _, field := range []string{"family", "file", "function", "before", "after", "successor", "removed", "mechanical", "old-row"} {
+		t.Run("q10-composition/row/"+field, func(t *testing.T) {
+			mutant := row
+			switch field {
+			case "family":
+				mutant.Family += "-foreign"
+			case "file":
+				mutant.File = "foreign.go"
+			case "function":
+				mutant.Function += "Foreign"
+			case "before":
+				mutant.Before += " "
+			case "after":
+				mutant.After += " "
+			case "successor":
+				mutant.Successor = actual
+			case "removed":
+				mutant.Removed = true
+			case "mechanical":
+				mutant.Mechanical = &mechanicalSnapshot{}
+			case "old-row":
+				mutant = embedded.Original
+			}
+			if _, err := q10EmbeddedSpecCurrentRecipe(mutant, pin); err == nil {
+				t.Fatal("changed or historical full predecessor admitted as the delivered restart row")
+			}
+		})
+	}
+	mutants := map[string]string{
+		"run-key":       strings.Replace(actual, "fi.run_id=es.run_id", "fi.run_id=fi.run_id", 1),
+		"path-key":      strings.Replace(actual, "fi.instance_path=es.flow_instance", "fi.instance_path=fi.instance_path", 1),
+		"entity-key":    strings.Replace(actual, "fi.entity_id=es.entity_id", "fi.entity_id=fi.entity_id", 1),
+		"stage":         strings.Replace(actual, "fi.current_state='done'", "fi.current_state='ready'", 1),
+		"exact-count":   strings.Replace(actual, "entities != 2", "entities != 1", 1),
+		"construction":  strings.Replace(actual, "!reflect.DeepEqual(constructionBefore, receipts)", "!reflect.DeepEqual(receipts, receipts)", 1),
+		"q10-only":      pin.Candidate,
+		"embedded-only": embedded.Candidate,
+		"historical":    embedded.Original.Successor,
+	}
+	for name, source := range mutants {
+		t.Run("q10-composition/source/"+name, func(t *testing.T) {
+			if source == actual {
+				t.Fatal("restart composition hostile control did not change source")
+			}
+			if _, _, err := embeddedSpecHistoricalPair1801(row, source); err == nil {
+				t.Fatal("changed membership, revision/conservation assertion or partial composition fell through")
+			}
+		})
+	}
+	for _, field := range []string{"history", "candidate"} {
+		t.Run("q10-composition/pin/"+field, func(t *testing.T) {
+			mutant := pin
+			if field == "history" {
+				mutant.Original.Before += " "
+			} else {
+				mutant.Candidate = strings.Replace(pin.Candidate, "entities != 2", "entities != 1", 1)
+			}
+			if _, err := q10EmbeddedSpecCurrentRecipe(row, mutant); err == nil {
+				t.Fatal("crossed immutable history or changed Q10 current pin admitted")
+			}
+		})
 	}
 }
 
