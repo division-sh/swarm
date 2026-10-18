@@ -533,6 +533,54 @@ func runtimeTestEphemeralManagerLifecycle(t testing.TB) (runtimestartupownership
 	return grant, runtimemanager.PersistenceRoles{LifecycleState: session, LifecycleOutcome: session}
 }
 
+// These are unit row facts only. Native delivery permission still comes from
+// the independently supplied original process, never this model's attribution.
+type runtimeTestEphemeralLifecycleRows struct {
+	*runtimeTestRetainedSession
+	binding runtimemanager.ProcessExecutionBinding
+}
+
+func (s *runtimeTestEphemeralLifecycleRows) ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error) {
+	return s.binding, s.binding.Validate()
+}
+
+func (s *runtimeTestEphemeralLifecycleRows) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	if !req.ProcessBinding.IsZero() && req.ProcessBinding != s.binding {
+		return runtimemanager.AgentLifecycleTransitionResult{}, errors.New("unit lifecycle row attribution differs from its explicit model")
+	}
+	req.ProcessBinding = s.binding
+	return s.runtimeTestRetainedSession.CommitAgentLifecycleTransition(ctx, req)
+}
+
+func (s *runtimeTestEphemeralLifecycleRows) ReadAgentLifecycleOutcome(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, bool, error) {
+	if !req.ProcessBinding.IsZero() && req.ProcessBinding != s.binding {
+		return runtimemanager.AgentLifecycleTransitionResult{}, false, errors.New("unit lifecycle row attribution differs from its explicit model")
+	}
+	req.ProcessBinding = s.binding
+	return s.runtimeTestRetainedSession.ReadAgentLifecycleOutcome(ctx, req)
+}
+
+func (s *runtimeTestEphemeralLifecycleRows) InspectRunExecutionOwnership(ctx context.Context, runID string) (runtimemanager.RunExecutionOwnership, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if runID != agentidentitytest.DefaultRunID {
+		return runtimemanager.RunExecutionForeign, nil
+	}
+	return runtimemanager.RunExecutionOwned, nil
+}
+
+func runtimeTestEphemeralManagerRows(t testing.TB) (runtimemanager.AgentLifecyclePersistence, runtimemanager.PersistenceRoles) {
+	t.Helper()
+	session := newRuntimeTestRetainedSession(t)
+	rows := &runtimeTestEphemeralLifecycleRows{runtimeTestRetainedSession: session, binding: runtimemanager.ProcessExecutionBinding{
+		ProcessAuthorityID: session.authority.AuthorityID, ProcessOwnerID: session.authority.OwnerID,
+		ProcessBootID: session.authority.BootID, GenerationGrantID: uuid.NewString(),
+		BundleHash: runtimeTestBundleHash, RuntimeInstanceID: session.authority.RuntimeInstanceID, RuntimeGeneration: 1,
+	}}
+	return rows, runtimemanager.PersistenceRoles{LifecycleState: session, LifecycleOutcome: rows}
+}
+
 type runtimeTestUnavailableProposedEffects struct {
 	decisioncard.ProposedEffectStore
 }

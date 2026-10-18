@@ -44,7 +44,7 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 						return owner
 					}
 				}
-				ctx := manager.TerminalPanicFixtureContext()
+				ctx := originalManagerFixtureContext(t, manager.TerminalPanicFixtureContext(), selected)
 				record := manager.ReconfigureMemoryNativeFixture(t, false)
 				if cut != "replacement" {
 					storetest.RequireRunningRun(t, ctx, selected.(storetest.RunFixtureStore), record.Config.Identity.RunID, time.Now().UTC())
@@ -100,7 +100,7 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					manager.ProveAgentRowNativeSpawnAdoption(t, grant, selected, selected.(manager.AgentLifecycleOutcomeReader), record, func() any {
+					manager.ProveAgentRowNativeSpawnAdoption(t, ctx, grant, selected, selected.(manager.AgentLifecycleOutcomeReader), record, func() any {
 						value, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 						if err != nil {
 							t.Fatal(err)
@@ -128,7 +128,7 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 				if !ok {
 					t.Fatal("selected store lacks the native immutable-outcome owner")
 				}
-				manager.ProveAgentRowNativeLostAckCacheAdoption(t, storetest.AgentLifecycleFixture(t, selected), selected, outcomes, record, func() any {
+				manager.ProveAgentRowNativeLostAckCacheAdoption(t, ctx, storetest.AgentLifecycleFixture(t, selected), selected, outcomes, record, func() any {
 					snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 					if err != nil {
 						t.Fatal(err)
@@ -137,7 +137,7 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 				}, func(candidate actors.AgentConfig) (manager.AgentLifecyclePersistence, agenttopology.Admission) {
 					return admitNativeReconfigureCandidate(t, selected, candidate)
 				}, func(controller agentcontrol.Controller) {
-					proveNativeAgentRestartAPICompletionLoss(t, selected, record.Config, controller)
+					proveNativeAgentRestartAPICompletionLoss(t, ctx, selected, record.Config, controller)
 				})
 			})
 		}

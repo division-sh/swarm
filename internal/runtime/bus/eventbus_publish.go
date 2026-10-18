@@ -2067,6 +2067,16 @@ func (eb *EventBus) admitSourceArtifactFact(ctx context.Context) (context.Contex
 			return ctx, err
 		}
 	}
+	return eb.sourceArtifactContext(ctx)
+}
+
+func (eb *EventBus) sourceArtifactContext(ctx context.Context) (context.Context, error) {
+	if eb == nil {
+		return ctx, errors.New("event bus is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	eb.mu.RLock()
 	runtimeInstanceID := eb.runtimeInstanceID
 	sourceFact := eb.sourceArtifactFact

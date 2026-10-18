@@ -351,6 +351,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	}
 	payloadAdmitter := runtimepkg.NewRuntimePayloadAdmitter(nil, req.LoadedSource.Source, req.LoadedSource.SourceArtifactFact)
 	bus, err := runtimebus.NewEventBusWithOptions(c.ports.events, runtimebus.EventBusOptions{
+		CarryMutationContext:        startupownership.CarryMutationAuthority,
 		ExecutionPosture:            req.AgentRuntime.Options.ExecutionPosture,
 		WorkOwner:                   forkOwner,
 		RuntimeInstanceID:           c.runtimeInstanceID,

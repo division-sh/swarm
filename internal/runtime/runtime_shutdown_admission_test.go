@@ -290,7 +290,7 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 	rt := &Runtime{Bus: bus, workOccurrence: workOwner}
 	t.Cleanup(func() { releaseWork(); _ = rt.Shutdown() })
 	managerStore := &runtimeShutdownManagerStore{}
-	lifecycle, roles := runtimeTestEphemeralManagerLifecycle(t)
+	lifecycle, roles := runtimeTestEphemeralManagerRows(t)
 	busRoles := runtimeTestManagerBusRoles(bus)
 	busRoles.LifecycleState, busRoles.LifecycleOutcome = roles.LifecycleState, roles.LifecycleOutcome
 	am := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
@@ -473,7 +473,7 @@ func VerifyRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrainFor
 	workOwner := runtimeTestEventBusRuntimeOccurrence(t, bus)
 	rt := &Runtime{Bus: bus, workOccurrence: workOwner}
 	t.Cleanup(func() { releaseWork(); _ = rt.Shutdown() })
-	lifecycle, roles := runtimeTestEphemeralManagerLifecycle(t)
+	lifecycle, roles := runtimeTestEphemeralManagerRows(t)
 	busRoles := runtimeTestManagerBusRoles(bus)
 	busRoles.LifecycleState, busRoles.LifecycleOutcome = roles.LifecycleState, roles.LifecycleOutcome
 	am := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
