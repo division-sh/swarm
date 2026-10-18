@@ -21326,27 +21326,27 @@ run_model:
       the committed transition to be replayed. Runtime-scoped external ingress pause/resume is a separate global
       control owned by api_specification.conventions.runtime_ingress.'
     stalled_run_escalation:
-      owner: policy.runtime.stalled_run_escalation
+      owner: internal/runtime/runstalled.Monitor
       event_owner: platform_events.catalog.platform.run_stalled
       diagnosis_owner: internal/operatorread/behavior.go.ProjectRunOperationalStatus
       progress_timestamp_owner: latest events.created_at for the run excluding platform.run_stalled self-alert rows
-      default_policy:
-        enabled: true
-        threshold_seconds: 300
-      policy_keys:
-        runtime.stalled_run_escalation.enabled: boolean
-        runtime.stalled_run_escalation.threshold_seconds: positive integer seconds
+      threshold_seconds: 300
       rule: >
         The serve runtime may emit platform.run_stalled only for runs whose canonical run diagnosis
         projects operational_state=stalled and whose latest non-platform.run_stalled event timestamp is
-        non-zero and at least threshold_seconds in the past. The platform.run_stalled event itself is
+        non-zero and at least 300 seconds in the past. The threshold is fixed; authored flow policy
+        cannot disable or tune it. policy remains a free-form literal map: the deleted
+        runtime.stalled_run_escalation keys are neither consumed nor specially refused.
+        The platform.run_stalled event itself is
         not progress evidence and must not advance the dedupe timestamp. Runs with terminal run-table
         status, active-delivery diagnosis, or zero non-alert progress timestamp do not emit in this slice.
       dedupe: >
         The runtime emits at most one platform.run_stalled event for a tuple of
-        (run_id, blocking_layer, blocking_reason, last_progress_at). A new event may be emitted only
-        when canonical progress advances LastEventAt or the diagnosis tuple changes while the run
-        remains stalled.
+        (run_id, last_progress_at, set of stalled-instance attributions). Input order or an identical
+        repeated set member does not create a new alert. A changed attribution set or canonical
+        progress allows a new alert while the run remains stalled. The envelope is the run, never
+        a selected sibling; payload.stalled_instances includes each current stalled instance with
+        its exact turn attribution, or its canonical blocking layer and reason when origin is unknown.
       attribution: >-
         The selected-store operator read owner loads one coherent snapshot of constructed
         instances, pinned stage authority, owed work, legitimate waits and immutable
@@ -21354,7 +21354,7 @@ run_model:
         both run.diagnose and this monitor. A waiting instance is not stalled; a stalled
         sibling remains visible in diagnostic attributions while active or waiting work
         keeps the run-level headline running. Final headers never manufacture completion.
-        Attribution does not change the run-level progress clock, threshold or dedup key.
+        Attribution does not change the run-level progress clock or fixed threshold.
         Provider completion precedes API tool execution: empty agent_turns.emitted_events
         is not final-turn silence evidence. A proposed emit without a proven publication
         remains unknown even after response consumption. An unused emit grant is not an
@@ -23149,10 +23149,10 @@ platform_events:
         - internal/runtime/runstalled/monitor.go
         - internal/serveapp/run_stalled_monitor.go
       routing_class: event_loop_routable
-      scope: flow or global
+      scope: run
       payload:
         run_id: uuid
-        flow_instance: string
+        stalled_instances: array
         operational_state: string
         blocking_layer: string
         blocking_reason: string
@@ -23160,7 +23160,6 @@ platform_events:
         threshold_seconds: integer
         stalled_for_seconds: integer
         emitted_at: string (ISO 8601)
-        attributions: array
       produced_by_type: platform
     platform.reset:
       description: Admin-initiated platform state reset. Emitted ONLY when a human administrator explicitly triggers a reset
@@ -41859,10 +41858,12 @@ api_specification:
       over the JSON-RPC API, returning operational_state + blocking_layer + blocking_reason + heuristics. The projection itself
       is the canonical owner for both API and monitor, including every relevant exact instance attribution and explicit
       unknown evidence; no second domain-specific interpretation lives in the API or serve adapter.
-    - platform.run_stalled is emitted by the serve runtime only after policy.runtime.stalled_run_escalation consumes
-      ProjectRunOperationalStatus plus the latest non-platform.run_stalled run event timestamp. The default policy is
-      enabled with threshold_seconds=300, and the producer dedupes by (run_id, blocking_layer, blocking_reason,
-      last_progress_at). The self-emitted platform.run_stalled alert is not progress evidence. Mailbox item creation,
+    - platform.run_stalled is emitted by the serve runtime only after ProjectRunOperationalStatus plus the latest
+      non-platform.run_stalled run event timestamp establish a stall for the fixed 300-second threshold.
+      Its envelope is the run and its payload lists every current stalled instance with canonical attribution.
+      The producer dedupes by (run_id, last_progress_at, set of stalled-instance attributions).
+      No authored per-flow enable/threshold policy is read or specially refused.
+      The self-emitted platform.run_stalled alert is not progress evidence. Mailbox item creation,
       incident records, dashboard alert UI, and CLI alert rendering are not owned by this slice.
     cli:
     - '`swarm run list`, `swarm run status`, `swarm run trace`, and `swarm health` consume /v1/rpc or /v1/ws methods, with no direct internal-package
