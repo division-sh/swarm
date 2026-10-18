@@ -253,6 +253,11 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	if opts.SessionResetter == nil {
 		opts.SessionResetter = sessions.NewInMemoryRegistry(0)
 	}
+	if native, ok := opts.DeliveryStore.(*ManagerDeliveryNativeFixture); ok {
+		if opts.BaseContext == nil {
+			opts.BaseContext = native.Context
+		}
+	}
 	if opts.LifecycleStore == nil && len(stores) > 0 {
 		opts.LifecycleStore, _ = any(stores[0]).(AgentLifecyclePersistence)
 	}
