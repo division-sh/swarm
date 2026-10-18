@@ -235,12 +235,14 @@ func (am *AgentManager) completeDeclaredDynamicFlowReadiness(admission dynamicFl
 func isReadinessShutdownRefusal(err error) bool {
 	// A stopped occurrence cannot become executable. Only its exact refusal,
 	// without an independent joined failure, is not a terminal completion.
-	return runtimefailures.OnlyBranches(err, func(branch error) bool {
-		failure, ok := branch.(*runtimefailures.Error)
-		return ok && failure.Failure.Class == runtimefailures.ClassLifecycleConflict &&
-			failure.Failure.Component == "agent-lifecycle" &&
-			failure.Failure.Operation == "verify_executable_readiness" &&
-			failure.Failure.Detail.Code == "agent_execution_not_ready" &&
-			failure.Failure.Detail.Attributes["manager_phase"] == string(runtimeLifecycleShuttingDown)
-	})
+	return runtimefailures.OnlyBranches(err, canonicalReadinessShutdownRefusal)
+}
+
+func canonicalReadinessShutdownRefusal(branch error) bool {
+	failure, ok := branch.(*runtimefailures.Error)
+	return ok && failure.Failure.Class == runtimefailures.ClassLifecycleConflict &&
+		failure.Failure.Component == "agent-lifecycle" &&
+		failure.Failure.Operation == "verify_executable_readiness" &&
+		failure.Failure.Detail.Code == "agent_execution_not_ready" &&
+		failure.Failure.Detail.Attributes["manager_phase"] == string(runtimeLifecycleShuttingDown)
 }
