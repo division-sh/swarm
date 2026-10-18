@@ -354,6 +354,7 @@ type Result[T any] struct {
 	acknowledged bool
 	err          error
 	phase        Phase
+	dialect      privateactivity.Dialect
 }
 
 func (r Result[T]) Acknowledged() bool { return r.acknowledged }
@@ -366,10 +367,14 @@ func (r Result[T]) CleanCancellation() (beforeAttempt, ok bool) {
 	if r.acknowledged {
 		return false, false
 	}
-	if before, clean := sqlitebackend.CleanCancellationBeforeCommit(r.err); clean {
-		return before, true
+	switch r.dialect {
+	case privateactivity.DialectSQLite:
+		return sqlitebackend.CleanCancellationBeforeCommit(r.err)
+	case privateactivity.DialectPostgres:
+		return postgresbackend.CleanCancellationBeforeCommit(r.err)
+	default:
+		return false, false
 	}
-	return postgresbackend.CleanCancellationBeforeCommit(r.err)
 }
 
 func (r Result[T]) Value() (T, bool) {
@@ -565,7 +570,7 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 		if nativeErr == nil {
 			nativeErr = errors.New("selected-store mutation commit was not acknowledged")
 		}
-		return Result[T]{err: nativeErr, phase: phase}
+		return Result[T]{err: nativeErr, phase: phase, dialect: dialect}
 	}
 	if previous != nil && previous.claimRetirement != nil {
 		nativeErr = errors.Join(nativeErr, previous.claimRetirement.RetireCommittedClaim(context.WithoutCancel(ctx)))
