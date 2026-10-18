@@ -127,6 +127,32 @@ func proveNativeTimeoutSelectedSettlement(t *testing.T, backend, phase string) {
 	})
 	started := time.Now()
 	out, err := executor.Execute(ctx, "web_search", map[string]any{"query": "swarm"})
+	defer func() {
+		if !t.Failed() {
+			return
+		}
+		failure, typed := failures.As(err)
+		stage := ""
+		class, code := "", ""
+		if typed {
+			stage, _ = failure.Failure.Detail.Attributes["stage"].(string)
+			class, code = string(failure.Failure.Class), failure.Failure.Detail.Code
+		}
+		t.Logf("native settlement diagnostic: phase=%s failure_type=%T class=%q code=%q stage=%q context_canceled=%t context_deadline=%t error_canceled=%t error_deadline=%t requests=%d completion_submits=%d output_present=%t",
+			phase, err, class, code, stage, errors.Is(ctx.Err(), context.Canceled), errors.Is(ctx.Err(), context.DeadlineExceeded), errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded), calls.Load(), sink.submits, out != nil)
+		readCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		rows, readErr := storetest.ReadExternalAttemptStorage(readCtx, selected)
+		t.Logf("native attempt readback: error_type=%T canceled=%t deadline=%t count=%d", readErr, errors.Is(readErr, context.Canceled), errors.Is(readErr, context.DeadlineExceeded), len(rows))
+		for i, row := range rows {
+			if i == 3 {
+				break
+			}
+			outcome, found, outcomeErr := selected.GetExternalEffectOutcome(readCtx, row.OperationID)
+			t.Logf("native attempt[%d]: state=%q outcome_found=%t outcome_error=%T operation_equal=%t outcome_state=%q outcome_attempt_state=%q",
+				i, row.State, found, outcomeErr, outcome.OperationID == row.OperationID, outcome.State, outcome.AttemptState)
+		}
+	}()
 	t.Logf("native selected phase=%s elapsed=%s requests=%d output=%#v err=%v", phase, time.Since(started), calls.Load(), out, err)
 	if calls.Load() != 0 {
 		<-joined
