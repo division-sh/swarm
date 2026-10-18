@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -37,20 +38,21 @@ type projectionTestRoute struct {
 }
 
 type projectionTestBus struct {
-	mu            sync.Mutex
-	signals       atomic.Int64
-	routes        map[string]projectionTestRoute
-	history       map[string][]projectionTestRoute
-	removed       []runtimeeffects.LifecycleToken
-	store         runtimebus.EventStore
-	owner         worklifetime.Occurrence
-	authority     runtimedelivery.ExecutionAuthority
-	continuations runtimebus.DeliveryContinuationOwner
-	prepareErr    bool
-	publishErr    error
-	runtimeLogs   []runtimepipeline.RuntimeLogEntry
-	beforePublish func()
-	deliveryCtx   context.Context
+	mu                 sync.Mutex
+	signals            atomic.Int64
+	routes             map[string]projectionTestRoute
+	history            map[string][]projectionTestRoute
+	removed            []runtimeeffects.LifecycleToken
+	store              runtimebus.EventStore
+	owner              worklifetime.Occurrence
+	authority          runtimedelivery.ExecutionAuthority
+	continuations      runtimebus.DeliveryContinuationOwner
+	prepareErr         bool
+	publishErr         error
+	runtimeLogs        []runtimepipeline.RuntimeLogEntry
+	beforePublish      func()
+	deliveryCtx        context.Context
+	sourceArtifactFact runtimecorrelation.SourceArtifactFact
 }
 
 func TestAgentManagerWithOptionsRejectsUnconfiguredReceiverExecution(t *testing.T) {
@@ -134,8 +136,17 @@ func newNativeProjectionTestManager(t *testing.T, bus *projectionTestBus, factor
 	return am, managedexecution.WithAdmission(native.Context, admission)
 }
 
-func (*projectionTestBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
-	return admitManagerTestBusContext(ctx)
+func (b *projectionTestBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
+	if b.sourceArtifactFact.Validate() != nil {
+		return admitManagerTestBusContext(ctx)
+	}
+	fact := b.sourceArtifactFact
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	scope, found := authoractivity.ScopeFromContext(ctx)
+	if !found {
+		scope = authoractivity.BundleScope("11111111-1111-1111-1111-111111111111", fact.BundleHash())
+	}
+	return authoractivity.WithScope(ctx, authoractivity.BundleScope(scope.RuntimeInstanceID, fact.BundleHash())), nil
 }
 func (*projectionTestBus) Publish(context.Context, events.Event) error { return nil }
 func (b *projectionTestBus) PublishDirect(_ context.Context, event events.Event, recipients []string) error {
@@ -257,7 +268,11 @@ func (b *projectionTestBus) send(agentID string, event events.Event) error {
 		if deliveryCtx == nil {
 			deliveryCtx = context.Background()
 		}
-		delivery, err := b.owner.NewRoutedEventDelivery(testAuthorActivityContext(deliveryCtx), event, deliveryRoute)
+		deliveryCtx, err := b.AdmitSourceArtifactFact(deliveryCtx)
+		if err != nil {
+			return err
+		}
+		delivery, err := b.owner.NewRoutedEventDelivery(deliveryCtx, event, deliveryRoute)
 		if err != nil {
 			return err
 		}
@@ -1086,6 +1101,7 @@ func ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T, new
 					opts.DeliveryStore = nativeDelivery
 					opts.SemanticSource = nativeDelivery.SemanticSource
 					opts.SourceArtifactFact = authority.SourceArtifact()
+					bus.sourceArtifactFact = authority.SourceArtifact()
 					if authorityName == "selected" {
 						route = nativeDelivery.SelectedRoute
 						agentID = route.AgentIdentity.AgentID()

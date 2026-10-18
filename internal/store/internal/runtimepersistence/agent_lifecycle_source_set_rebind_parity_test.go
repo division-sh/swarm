@@ -162,6 +162,7 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 					db = selected.backend.ConstructionHandle()
 				}
 				identity := testAgentIdentity(t, "census-drift-agent", "")
+				ctx = originalStoreFixtureContext(t, ctx, store)
 				requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
 				seedTestAgentRow(t, ctx, db, postgres, identity, "active")
 				fields := testAgentIdentityStorageFields(t, identity)
@@ -205,12 +206,15 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 					t.Fatalf("read predecessor lifecycle binding: %v", err)
 				}
 
-				request := testStartupAcquireRequest("census-drift-successor")
-				capability, err := store.AcquireProcessCapability(ctx, request)
+				capability, err := agentfixture.ProcessCapability(t, ctx, store.(agentfixture.Store))
 				if err != nil {
 					t.Fatalf("acquire census-drift capability: %v", err)
 				}
 				t.Cleanup(func() { _ = capability.Release(context.Background()) })
+				authority, err := capability.Evidence()
+				if err != nil {
+					t.Fatal(err)
+				}
 				plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{
 					BundleHash: testAgentTopologyBundleHash,
 				}}, nil)
@@ -222,7 +226,7 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 				}
 				grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
 					BundleHash:        testAgentTopologyBundleHash,
-					RuntimeInstanceID: request.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+					RuntimeInstanceID: authority.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
 				})
 				if err != nil {
 					t.Fatalf("issue census-drift successor grant: %v", err)

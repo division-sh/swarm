@@ -44,14 +44,14 @@ func (s *spawnCommitFault) CommitAgentLifecycleTransition(ctx context.Context, r
 	return result, err
 }
 
-func ProveAgentRowNativeSpawnAdoption(t *testing.T, store AgentLifecyclePersistence, reader AgentLifecycleStateReader, outcomes AgentLifecycleOutcomeReader, rec PersistedAgent, snapshot func() any, retireProcess func(), cut string) {
+func ProveAgentRowNativeSpawnAdoption(t *testing.T, original context.Context, store AgentLifecyclePersistence, reader AgentLifecycleStateReader, outcomes AgentLifecycleOutcomeReader, rec PersistedAgent, snapshot func() any, retireProcess func(), cut string) {
 	t.Helper()
 	binding := store.(processExecutionBindingProvider)
 	fault := &spawnCommitFault{agentRowResponseLoss: &agentRowResponseLoss{AgentLifecyclePersistence: store, binding: binding, runOwner: store.(RunExecutionOwner)}}
 	readback := &spawnReadbackFault{AgentLifecycleStateReader: reader}
 	bus := newProjectionTestBus()
 	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{LLMBackend: rec.Config.LLMBackend, LifecycleStore: fault, PersistenceRoles: PersistenceRoles{LifecycleState: readback, LifecycleOutcome: outcomes}})
-	ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
+	ctx, cancel := context.WithCancel(testAuthorActivityContext(original))
 	defer cancel()
 	builds := 0
 	build := func() (Agent, error) {

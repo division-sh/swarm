@@ -40,6 +40,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -293,6 +294,7 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
+	ctx := originalEventBusFixtureContext(t, testAuthorActivityContextForSource(context.Background(), source), selected)
 	opts := runtimebus.EventBusOptions{ContractBundle: source}
 	for _, reader := range originReaders {
 		opts.Durable.RunOrigins = reader(selected)
@@ -301,7 +303,6 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	ctx := testAuthorActivityContextForSource(context.Background(), source)
 	createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	if origin.Kind() == runtimerunlifecycle.OriginStandingGeneration {
@@ -651,9 +652,7 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	if err != nil {
 		t.Fatalf("construct complete-event source set: %v", err)
 	}
-	capability, err := f.store.AcquireProcessCapability(f.ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "complete-event-dispatch-fixture", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	})
+	capability, err := agentfixture.ProcessCapability(t, f.ctx, f.store)
 	if err != nil {
 		t.Fatalf("acquire complete-event process capability: %v", err)
 	}

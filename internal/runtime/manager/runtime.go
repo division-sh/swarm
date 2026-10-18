@@ -161,7 +161,7 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	if transition == nil {
 		// A prior run may already be joined while exact activation cleanup is
 		// retained after a failed durable settlement.
-		return am.retireDynamicFlowAttemptsAfterJoin(context.Background())
+		return am.retireDynamicFlowAttemptsAfterJoin(context.WithoutCancel(am.runtimeContext()))
 	}
 	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(transition, runtimeLifecycleTransitionShutdown)
 	if err != nil {
@@ -1029,9 +1029,10 @@ func (am *AgentManager) completeClaimedShutdownTransition(transition *runtimeLif
 	for _, wait := range done {
 		<-wait
 	}
-	runSettleErr := am.lifecycle.retireRunOwner(context.Background())
+	cleanupCtx := context.WithoutCancel(am.runtimeContext())
+	runSettleErr := am.lifecycle.retireRunOwner(cleanupCtx)
 	if runSettleErr == nil {
-		runSettleErr = am.retireDynamicFlowAttemptsAfterJoin(context.Background())
+		runSettleErr = am.retireDynamicFlowAttemptsAfterJoin(cleanupCtx)
 	}
 	settleErr := executor.Done()
 	am.lifecycle.completeShutdownTransition(transition, errors.Join(runSettleErr, settleErr))
@@ -1788,7 +1789,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 					AgentID: agent.ID(), Failure: &failure.Failure,
 				})
 			}
-			_ = am.projectLifecycleDiagnostics(context.Background())
+			_ = am.projectLifecycleDiagnostics(context.WithoutCancel(parent))
 			if settleErr := workLease.Done(); settleErr != nil {
 				diaglog.ProcessLog(diaglog.LevelError, "agent-manager", "agent execution loop work settlement failed",
 					"agent_id", agent.ID(),
@@ -1866,8 +1867,8 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							}
 							route := delivery.HandoffRoute()
 							evtCtx, closeEvtCtx, contextErr := agentDeliveryExecutionContext(
-								eventWork.Context(), executionLease.Context, token, deliveryOwner, evt, route, am.receiverExecution,
-								am.bus.AdmitSourceArtifactFact,
+								eventWork.Context(), executionLease.Context, loopCtx, token, deliveryOwner, evt, route, am.receiverExecution,
+								am.bus.AdmitSourceArtifactFact, am.carryMutationContext, am.bindRuntimeOperationContext,
 							)
 							if contextErr != nil {
 								if am.bus != nil {
@@ -2088,13 +2089,15 @@ func (am *AgentManager) reportDeliveryCarrierFailure(ctx context.Context, agentI
 }
 
 func agentDeliveryExecutionContext(
-	deliveryCtx, loopCtx context.Context,
+	deliveryCtx, executionCtx, loopCtx context.Context,
 	token runtimeeffects.LifecycleToken,
 	deliveryOwner worklifetime.Occurrence,
 	evt events.Event,
 	route events.DeliveryRoute,
 	variant eventreceiver.ExecutionVariant,
 	admitSourceArtifactFact func(context.Context) (context.Context, error),
+	carryMutationContext func(context.Context, context.Context) context.Context,
+	bindMutationContext func(context.Context) (context.Context, error),
 ) (context.Context, func(), error) {
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(deliveryCtx)
 	sourceArtifactFact, _ := runtimecorrelation.SourceArtifactFactFromContext(deliveryCtx)
@@ -2108,7 +2111,16 @@ func agentDeliveryExecutionContext(
 	}
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceArtifactFact)
+	if carryMutationContext != nil {
+		ctx = carryMutationContext(ctx, loopCtx)
+	}
 	var err error
+	if bindMutationContext != nil {
+		ctx, err = bindMutationContext(ctx)
+		if err != nil {
+			return fail(err)
+		}
+	}
 	ctx, err = admitSourceArtifactFact(ctx)
 	if err != nil {
 		return fail(fmt.Errorf("admit agent receiver bundle source: %w", err))
@@ -2123,13 +2135,13 @@ func agentDeliveryExecutionContext(
 		return fail(err)
 	}
 	if variant.Kind() == eventreceiver.ExecutionNormal {
-		if controller, found := runtimeeffects.ControllerFromContext(loopCtx); found {
+		if controller, found := runtimeeffects.ControllerFromContext(executionCtx); found {
 			ctx = runtimeeffects.WithController(ctx, controller)
 		}
-		if admission, found := managedexecution.FromContext(loopCtx); found {
+		if admission, found := managedexecution.FromContext(executionCtx); found {
 			ctx = managedexecution.WithAdmission(ctx, admission)
 		}
-		if process, found := worklifetime.ProcessFromContext(loopCtx); found {
+		if process, found := worklifetime.ProcessFromContext(executionCtx); found {
 			ctx = worklifetime.WithProcess(ctx, process)
 		}
 	}

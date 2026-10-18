@@ -20,8 +20,29 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
+
+// Native component construction keeps its genuine original process owner;
+// source metadata or a delivery tag alone is not mutation admission.
+func originalEventBusFixtureContext(t *testing.T, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	original, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("native event-bus fixture lacks its original process owner: %T", selected)
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
 const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
@@ -62,6 +83,9 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 	opts := runtimebus.EventBusOptions{}
 	if len(options) > 0 {
 		opts = options[0]
+	}
+	if opts.CarryMutationContext == nil {
+		opts.CarryMutationContext = startupownership.CarryMutationAuthority
 	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()

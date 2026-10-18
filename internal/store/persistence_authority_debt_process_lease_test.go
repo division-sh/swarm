@@ -165,12 +165,12 @@ func debtProcessLeaseCustodyFinding(finding authorityFinding) bool {
 
 func debtClassifyProcessLeaseCustody(root string, findings []authorityFinding) {
 	digest, err := debtProcessLeaseCustodyDigest(root)
-	if err != nil || digest != debtProcessLeaseCustodyPin {
+	if err != nil || (digest != debtProcessLeaseCustodyPin && digest != debtProcessFenceCustodyPin) {
 		return // Unproven/changed custody remains visible, unclassified debt.
 	}
 	for i := range findings {
 		if debtProcessLeaseCustodyFinding(findings[i]) {
-			findings[i].Disposition = "native-process-lease-custody:" + digest
+			findings[i].Disposition = "native-process-lease-custody:" + debtProcessLeaseCustodyPin
 		}
 	}
 }

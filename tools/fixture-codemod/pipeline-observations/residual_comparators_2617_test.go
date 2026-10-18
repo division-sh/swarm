@@ -51,6 +51,9 @@ func residualComparatorMatches2617(row recipe, actual string, corpus []recipe, p
 	if err != nil {
 		return false
 	}
+	if original, err := fixtureSetupCurrentEndpoint2617(row, actual); err == nil {
+		row, actual = original, original.Successor
+	}
 	for _, pin := range packet.Rows {
 		if row.Family != pin.Family || row.File != pin.File || row.Function != pin.Function {
 			continue

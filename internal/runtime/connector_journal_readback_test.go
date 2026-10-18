@@ -38,7 +38,7 @@ func TestRuntimeConnectorJournalWitnessesPreserveToolSourceAndEarliestAttemptBot
 			} else {
 				selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t)
 			}
-			ctx := testAuthorActivityContext(context.Background())
+			ctx := originalRuntimeFixtureContext(t, testAuthorActivityContext(context.Background()), selected)
 			runID, otherRun, source, otherSource := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 			for _, run := range []string{runID, otherRun} {
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: run, Origin: storetest.ScenarioSetupOrigin()})

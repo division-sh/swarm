@@ -270,28 +270,11 @@ func inspectCurrentRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evid
 		return 0, errors.New("run execution ownership requires a transaction")
 	}
 	if lock {
-		if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+		if err := generationauthority.RequireCurrentGrantTx(ctx, tx, evidence, sqlite); err != nil {
 			return 0, err
 		}
-	}
-	var raw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT snapshot FROM runtime_generation_grants WHERE grant_id=$1 ORDER BY state_version DESC LIMIT 1`, evidence.GrantID).Scan(&raw); err != nil {
-		return 0, fmt.Errorf("load run execution generation grant: %w", err)
-	}
-	var current startupownership.GrantEvidence
-	if err := canonicaljson.DecodeInto(raw, &current); err != nil {
+	} else if err := generationauthority.ObserveCurrentGrantTx(ctx, tx, evidence); err != nil {
 		return 0, err
-	}
-	actual, err := canonicaljson.Bytes(current)
-	if err != nil {
-		return 0, err
-	}
-	expected, err := canonicaljson.Bytes(evidence)
-	if err != nil {
-		return 0, err
-	}
-	if string(actual) != string(expected) {
-		return 0, errors.New("run execution generation grant is no longer current")
 	}
 	return inspectRunExecutionOwnershipModeTx(ctx, tx, evidence, runID, sqlite, lock)
 }

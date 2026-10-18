@@ -132,6 +132,14 @@ type selectedFailOnceGrant struct {
 	failNext bool
 }
 
+func (g *selectedFailOnceGrant) BindSelectedForkMutationContext(ctx context.Context) (context.Context, error) {
+	owner, ok := g.GenerationGrant.(runtimestartupownership.SelectedForkMutationContextOwner)
+	if !ok {
+		return nil, errors.New("retained test grant has no native selected child context owner")
+	}
+	return owner.BindSelectedForkMutationContext(ctx)
+}
+
 func (g *selectedFailOnceGrant) Retire(ctx context.Context) error {
 	if g.failNext {
 		g.failNext = false

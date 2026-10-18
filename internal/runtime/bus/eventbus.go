@@ -81,6 +81,8 @@ type EventBus struct {
 	standingRunWorkOwner        StandingRunWorkOwner
 	sourceArtifactFact          runtimecorrelation.SourceArtifactFact
 	runtimeInstanceID           string
+	mutationContext             func(context.Context) (context.Context, error)
+	carryMutationContext        func(context.Context, context.Context) context.Context
 	testLifecycleProbe          runtimelifecycleprobe.Observer
 	providerOutputVerifier      ProviderOutputAuthorizationVerifier
 	outboxSweeperActive         bool
@@ -301,6 +303,8 @@ type EventBusOptions struct {
 	RunDispatchGate             RunDispatchGate
 	SourceArtifactFact          runtimecorrelation.SourceArtifactFact
 	RuntimeInstanceID           string
+	MutationContext             func(context.Context) (context.Context, error)
+	CarryMutationContext        func(context.Context, context.Context) context.Context
 	TestLifecycleProbe          runtimelifecycleprobe.Observer
 	ProviderOutputVerifier      ProviderOutputAuthorizationVerifier
 	WorkOwner                   worklifetime.Occurrence
@@ -547,6 +551,8 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		runDispatchGate:             opts.RunDispatchGate,
 		sourceArtifactFact:          opts.SourceArtifactFact,
 		runtimeInstanceID:           strings.TrimSpace(opts.RuntimeInstanceID),
+		mutationContext:             opts.MutationContext,
+		carryMutationContext:        opts.CarryMutationContext,
 		testLifecycleProbe:          opts.TestLifecycleProbe,
 		providerOutputVerifier:      opts.ProviderOutputVerifier,
 		workOwner:                   opts.WorkOwner,
@@ -719,7 +725,7 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	if eb == nil {
 		return nil
 	}
-	cleanupCtx, err := eb.admitSourceArtifactFact(context.Background())
+	cleanupCtx, err := eb.sourceArtifactContext(context.Background())
 	if err != nil {
 		return err
 	}
@@ -801,9 +807,10 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	retirementSucceeded = true
 	var releaseErr error
 	for _, operation := range pendingOperations {
-		releaseErr = errors.Join(releaseErr, operation.publicationClaim.Release(cleanupCtx))
-	}
-	for _, operation := range pendingOperations {
+		if err := operation.publicationClaim.Release(cleanupCtx); err != nil {
+			releaseErr = errors.Join(releaseErr, err)
+			continue
+		}
 		eb.removePendingOutboxOperation(operation.intent.Event.ID(), operation.sequence)
 	}
 
@@ -845,7 +852,7 @@ func (eb *EventBus) WaitForQuiescence(ctx context.Context) error {
 		return nil
 	}
 	var err error
-	ctx, err = eb.admitSourceArtifactFact(ctx)
+	ctx, err = eb.sourceArtifactContext(ctx)
 	if err != nil {
 		return err
 	}
