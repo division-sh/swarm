@@ -22,6 +22,7 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	bundle := conversationForkConstructionBundle(t)
 	ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
 	s := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, s)
 	if _, err := s.backend.ExecContext(ctx, `PRAGMA journal_mode = WAL`); err != nil {
 		t.Fatalf("enable production SQLite journal mode: %v", err)
 	}

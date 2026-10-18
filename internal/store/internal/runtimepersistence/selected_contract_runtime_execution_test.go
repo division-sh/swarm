@@ -1459,6 +1459,13 @@ func newSelectedCompletionFixture(t *testing.T, store selectedCompletionAuthorit
 func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool, process startupownership.ProcessCapability, sourceArtifacts ...*sourceartifact.AdmittedSourceArtifact) selectedCompletionFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	if len(sourceArtifacts) != 0 {
+		ctx = testAuthorActivityContextForBundle(sourceArtifacts[0].BundleHash())
+	}
+	ctx, err := startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 	sourceRun := uuid.NewString()
 	forkRun := uuid.NewString()
@@ -1475,7 +1482,6 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	registerTestAuthorActivityCatalog(t, registrar)
 	if len(sourceArtifacts) != 0 {
 		artifact := sourceArtifacts[0]
-		ctx = testAuthorActivityContextForBundle(artifact.BundleHash())
 		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, StartedAt: now})
 		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: forkRun, Origin: forkOrigin, Artifact: artifact, State: runtimerunlifecycle.StatePaused, StartedAt: now})
 	} else {
