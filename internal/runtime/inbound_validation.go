@@ -24,6 +24,9 @@ func inboundPublicationErrorResponse(err error) (int, string) {
 		}
 		return http.StatusBadRequest, message
 	}
+	if runtimebus.IsRootConstructorKeyConflict(err) {
+		return http.StatusServiceUnavailable, "root input contradicts its immutable constructor key"
+	}
 	if providerErr, onlyProvider := inboundProviderError(err); onlyProvider {
 		return providerErr.Status, providerErr.Message
 	}
