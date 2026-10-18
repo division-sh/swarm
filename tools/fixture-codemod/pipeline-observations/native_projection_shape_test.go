@@ -187,23 +187,43 @@ func TestNativeProjectionShapeOracleRejectsWeakenedErrorAndRowAssertions(t *test
 	}
 }
 
-func TestNativeProjectionShapeDiagnosticOwnerSuccessorPreservesExactHistory(t *testing.T) {
-	row := projectionShapeRecipe(t)
-	if row.File != "internal/runtime/pipeline/workflow_instance_store_projection_test.go" || row.Function != "TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes" ||
+func projectionShapeDiagnosticPredecessor(row recipe, source []byte) (recipe, error) {
+	if row.Family != "native-projection-shapes" || row.File != "internal/runtime/pipeline/workflow_instance_store_projection_test.go" || row.Function != "TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes" ||
 		fmt.Sprintf("%x", sha256.Sum256([]byte(row.Before))) != "7c04e6b699650edc874d8c5e1b438aa2d2071d16be0a92e0a3fc1f3377cc2c69" ||
 		fmt.Sprintf("%x", sha256.Sum256([]byte(row.After))) != "62e03290fee8388610495540f2a57f3fa99c26c5790370fa15f1d4d3fa0775b6" {
-		t.Fatal("diagnostic successor changed its historical source or owner")
+		return recipe{}, fmt.Errorf("diagnostic successor changed its historical source or owner")
 	}
 	want := row.After
 	for _, field := range []string{"gates", "accumulator"} {
 		prior := "entity_state." + field
 		if strings.Count(want, prior) != 1 {
-			t.Fatalf("historical diagnostic multiplicity changed: %s", field)
+			return recipe{}, fmt.Errorf("historical diagnostic multiplicity changed: %s", field)
 		}
 		want = strings.Replace(want, prior, "flow_instances."+field, 1)
 	}
-	if row.Successor != want {
-		t.Fatal("diagnostic successor changed more than the two exact owner labels")
+	expected := recipe{Family: row.Family, File: row.File, Function: row.Function, Before: row.Before, After: row.After, Successor: want}
+	if !reflect.DeepEqual(row, expected) {
+		return recipe{}, fmt.Errorf("diagnostic successor changed more than the two exact owner labels")
+	}
+	current, err := checkpointRecipes(source, []recipe{row})
+	if err != nil {
+		return recipe{}, err
+	}
+	if _, changes, err := rewriteSource(row.File, source, current); err != nil || len(changes) != 0 {
+		return recipe{}, fmt.Errorf("diagnostic successor is not the exact live endpoint: %v", err)
+	}
+	expected.Successor = ""
+	return expected, nil
+}
+
+func TestNativeProjectionShapeDiagnosticOwnerSuccessorPreservesExactHistory(t *testing.T) {
+	row := projectionShapeRecipe(t)
+	source, err := os.ReadFile(filepath.Join("..", "..", "..", row.File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projectionShapeDiagnosticPredecessor(row, source); err != nil {
+		t.Fatal(err)
 	}
 	if files, changes, err := prepareFiles("../../..", []recipe{row}); err != nil || len(files) != 0 || len(changes) != 0 {
 		t.Fatalf("current diagnostic successor is not inert: %v", err)
