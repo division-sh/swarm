@@ -39,7 +39,7 @@ func reconfigureMemoryIdentity(t testing.TB, am *AgentManager, agentID, flowInst
 
 func acquireReconfigureMemory(t *testing.T, am *AgentManager, registry *sessions.InMemoryRegistry, cfg models.AgentConfig) *sessions.Lease {
 	t.Helper()
-	ctx := effects.WithDifferentOwner(models.WithActor(testAuthorActivityContext(context.Background()), cfg), effects.OwnerBuildTestInfrastructure)
+	ctx := effects.WithDifferentOwner(models.WithActor(am.runtimeContext(), cfg), effects.OwnerBuildTestInfrastructure)
 	lease, err := registry.Acquire(ctx, reconfigureMemoryIdentity(t, am, cfg.ID, cfg.CanonicalFlowPath()), "reconfigure-test")
 	if err != nil {
 		t.Fatalf("Acquire memory: %v", err)
@@ -48,15 +48,19 @@ func acquireReconfigureMemory(t *testing.T, am *AgentManager, registry *sessions
 }
 
 func TestReconfigureAgent_PersistenceFailureLeavesPriorProjection(t *testing.T) {
-	probe := newLifecyclePersistenceProbe()
+	source := loadRootAndFlowStaticAgentSource(t)
+	ctx, _, probe := newLifecycleCacheFixtureForSource(t, source)
+	options, _, _ := sourceSetFixtureAdmission(t, source)
+	options.BaseContext, options.LifecycleStore = ctx, probe
 	am := newTestAgentManagerWithOptions(t, nil, func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{LifecycleStore: probe})
+	}, options)
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker",
 		Identity:      managerRuntimeAgentIdentityForFlowPath("worker", "review/inst-1"),
 		FlowPath:      "review/inst-1",
+		FlowID:        semanticview.RootExecutionFlowID(source),
 		Tools:         []string{"tool-old"},
 	})
 	if err := spawnManagerTestAgent(am, cfg); err != nil {
@@ -88,21 +92,28 @@ func TestReconfigureAgent_PersistenceFailureLeavesPriorProjection(t *testing.T) 
 func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInvocation(t *testing.T) {
 	builds := 0
 	registry := sessions.NewInMemoryRegistry(0)
+	source := loadRootAndFlowStaticAgentSource(t)
+	ctx, _, probe := newLifecycleCacheFixtureForSource(t, source)
+	options, _, _ := sourceSetFixtureAdmission(t, source)
+	options.BaseContext, options.LifecycleStore, options.Sessions = ctx, &ephemeralLifecyclePersistenceProbe{probe}, registry
 	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), func(cfg models.AgentConfig) (Agent, error) {
 		builds++
 		return &reconfigureTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{Sessions: registry})
+	}, options)
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "same-current-agent", Tools: []string{"tool-a"},
+		FlowID: semanticview.RootExecutionFlowID(source),
 		Memory: agentmemory.Plan{Enabled: true}, FlowPath: "same-current/instance",
 	})
 	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
-	am.Run(managedExecutionTestContext(t, runCtx))
+	if err := am.Run(managedExecutionTestContextForCapturedSource(t, runCtx)); err != nil {
+		t.Fatal(err)
+	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
 	beforeExecution, ok := testExecutionSnapshot(t, am, cfg.ID, cfg.FlowPath)
 	if !ok {
@@ -136,19 +147,26 @@ func TestReconfigureAgent_SameCurrentPreservesExecutionIdentityWithoutFactoryInv
 
 func TestReconfigureAgent_TopologyOnlyRebindPreservesMemory(t *testing.T) {
 	registry := sessions.NewInMemoryRegistry(0)
+	source := loadRootAndFlowStaticAgentSource(t)
+	ctx, _, probe := newLifecycleCacheFixtureForSource(t, source)
+	options, _, _ := sourceSetFixtureAdmission(t, source)
+	options.BaseContext, options.LifecycleStore, options.Sessions = ctx, &ephemeralLifecyclePersistenceProbe{probe}, registry
 	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{Sessions: registry})
+	}, options)
 	cfg := managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live", ID: "topology-memory-agent",
+		FlowID: semanticview.RootExecutionFlowID(source),
 		Memory: agentmemory.Plan{Enabled: true}, FlowPath: "review/instance-1",
 	})
 	if err := spawnManagerTestAgent(am, cfg); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
-	runCtx, cancelRun := context.WithCancel(context.Background())
+	runCtx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
-	am.Run(managedExecutionTestContext(t, runCtx))
+	if err := am.Run(managedExecutionTestContextForCapturedSource(t, runCtx)); err != nil {
+		t.Fatal(err)
+	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
 	currentConfig, err := am.ResolveAgentConfig(managerIdentityTestRunID, cfg.ID, cfg.FlowPath)
 	if err != nil {
