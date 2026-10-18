@@ -29,6 +29,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storetest "github.com/division-sh/swarm/internal/store/storetest"
@@ -324,6 +325,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	t.Cleanup(cleanup)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := seedRuntimeTestRunForSource(t, pg, source)
+	managerContext := startupRecoverySourceContext(runtimeTestSourceArtifactFact(t, source), templateInstanceDeliveryRunID)
 	durable := externalRuntimeTestDurableDependencies(pg)
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -355,7 +357,7 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 
 	manager = ownRuntimeTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:   executionposture.Live,
-		BaseContext:        ctx,
+		BaseContext:        managerContext,
 		SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		SemanticSource:     source,
 		WorkOwner:          runtimeTestEventBusWorkOwner(t, bus),
@@ -365,7 +367,11 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 		DeliveryStore:      pg, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, pg))
 	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(manager.FinalizeCommittedAgentReadiness))
-	admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
+	grant := admitExternalManagerTestGeneration(t, ctx, pg, manager, source)
+	ctx, err = runtimestartupownership.WithRuntimeMutationAuthority(managerContext, grant)
+	if err != nil {
+		t.Fatal(err)
+	}
 	constructExternalRuntimeTestRoot(t, ctx, manager, source)
 	bus.SetInterceptors(pc)
 

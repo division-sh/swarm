@@ -405,6 +405,24 @@ func prepareExternalRuntimeFixtureProcess(t testing.TB, ctx context.Context, sel
 	return capability
 }
 
+func externalRuntimeProcessContext(t testing.TB, ctx context.Context, capability runtimestartupownership.ProcessCapability) context.Context {
+	t.Helper()
+	bound, err := runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bound
+}
+
+func externalRuntimeGenerationContext(t testing.TB, ctx context.Context, grant runtimestartupownership.LiveGenerationGrant) context.Context {
+	t.Helper()
+	bound, err := runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bound
+}
+
 func installExternalManagerTestGeneration(
 	t testing.TB,
 	ctx context.Context,
@@ -436,7 +454,7 @@ func installExternalManagerTestGeneration(
 	}
 }
 
-func admitExternalManagerTestGeneration(t testing.TB, ctx context.Context, selected agentfixture.Store, manager *runtimemanager.AgentManager, source semanticview.Source) {
+func admitExternalManagerTestGeneration(t testing.TB, ctx context.Context, selected agentfixture.Store, manager *runtimemanager.AgentManager, source semanticview.Source) runtimestartupownership.LiveGenerationGrant {
 	t.Helper()
 	fact, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !present || fact.Validate() != nil {
@@ -462,6 +480,7 @@ func admitExternalManagerTestGeneration(t testing.TB, ctx context.Context, selec
 		t.Fatalf("admit external manager fixture execution: %v", err)
 	}
 	installExternalManagerTestGeneration(t, ctx, manager, grant)
+	return grant
 }
 
 type externalRuntimeTestDurableEventStore interface {

@@ -134,7 +134,12 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 			entityID := uuid.NewString()
 			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "25ms")
 			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
-			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
+			prepared := prepareExternalRuntimeFixtureProcess(t, ctx, selected)
+			constructionCtx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, prepared)
+			if err != nil {
+				t.Fatal(err)
+			}
+			storetest.RequireRun(t, constructionCtx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 
 			proof := startuphandoff.New()
 			defer proof.Release()
@@ -177,7 +182,11 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 			if err != nil {
 				t.Fatalf("NewRuntime: %v", err)
 			}
-			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, rt)
+			capability, grant := installExternalRuntimeTestGeneration(t, ctx, selected, rt, prepared)
+			ctx, err = runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
+			if err != nil {
+				t.Fatal(err)
+			}
 			t.Cleanup(func() {
 				if err := closeExternalRuntimeTestGeneration(rt, process, capability); err != nil {
 					t.Errorf("close workflow timer generation: %v", err)
@@ -384,12 +393,14 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			genericEntityID := uuid.NewString()
 			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "1s")
 			ctx := workflowTimerStartupContext(sourceFact)
+			prepared := prepareExternalRuntimeFixtureProcess(t, ctx, selected)
+			constructionCtx := externalRuntimeProcessContext(t, ctx, prepared)
 			workflowCtx := runtimecorrelation.WithRunID(ctx, workflowRunID)
 			genericCtx := runtimecorrelation.WithRunID(ctx, genericRunID)
 			for _, run := range []struct {
 				ctx   context.Context
 				runID string
-			}{{workflowCtx, workflowRunID}, {genericCtx, genericRunID}} {
+			}{{runtimecorrelation.WithRunID(constructionCtx, workflowRunID), workflowRunID}, {runtimecorrelation.WithRunID(constructionCtx, genericRunID), genericRunID}} {
 				storetest.RequireRun(t, run.ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: run.runID, Artifact: bundle.SourceArtifact})
 			}
 
@@ -437,7 +448,8 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			}
 
 			seedRuntime, seedProcess := newRuntime(selected)
-			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(workflowCtx, seedRuntime.WorkOccurrence()))
+			seedCapability, seedGrant := installExternalRuntimeTestGeneration(t, ctx, selected, seedRuntime, prepared)
+			seedCtx := externalRuntimeGenerationContext(t, testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(workflowCtx, seedRuntime.WorkOccurrence())), seedGrant)
 			occurredAt := time.Now().UTC()
 			construction383Ctx := seedCtx
 			construction383At := occurredAt
@@ -471,7 +483,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 			if err != nil || !result.Created {
 				t.Fatalf("materialize withheld workflow timer: result=%v err=%v", result, err)
 			}
-			closeRuntime("seed", seedRuntime, seedProcess, nil)
+			closeRuntime("seed", seedRuntime, seedProcess, seedCapability)
 			dueAt := occurredAt.Add(time.Second)
 
 			routingSource, err := events.NewRootRoutingSource(genericEntityID)
@@ -485,7 +497,8 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 				EventType:     "generic.tick", EntityID: genericEntityID, Payload: semanticvalue.EmptyObject(),
 				RoutingSource: routingSource, Due: runtimegenericschedule.AbsoluteDue(dueAt), ExecutionMode: executionmode.Mock,
 			}
-			genericCommit, err := selected.AdmitGenericScheduleOutcome(genericCtx, genericCommand)
+			preparedSuccessor := prepareExternalRuntimeFixtureProcess(t, ctx, selected)
+			genericCommit, err := selected.AdmitGenericScheduleOutcome(externalRuntimeProcessContext(t, genericCtx, preparedSuccessor), genericCommand)
 			if err != nil || !genericCommit.Acknowledged {
 				t.Fatalf("persist overdue generic schedule: commit=%+v err=%v", genericCommit, err)
 			}
@@ -521,7 +534,7 @@ func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletes
 				},
 			}
 			failedRuntime, failedProcess := newRuntime(failureOwner)
-			failedCapability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, failedRuntime)
+			failedCapability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, failedRuntime, preparedSuccessor)
 			err = failedRuntime.Start(ctx)
 			if err == nil || !strings.Contains(err.Error(), "workflow version changed") {
 				closeRuntime("unexpected successful topology-failure", failedRuntime, failedProcess, failedCapability)
@@ -811,7 +824,8 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 					runID := uuid.NewString()
 					bundle, sourceFact := workflowTimerStartupRecoverySource(t, "25ms")
 					ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
-					storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
+					prepared := prepareExternalRuntimeFixtureProcess(t, ctx, selected)
+					storetest.RequireRun(t, externalRuntimeProcessContext(t, ctx, prepared), selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 
 					// Native construction persists the due occurrence without arming the
 					// seed runtime. The restarted runtime owns both held startup handoffs.
@@ -865,21 +879,22 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 						}
 						return rt, process
 					}
-					shutdown := func(label string, rt *swarmruntime.Runtime, process *worklifetime.Process) {
+					shutdown := func(label string, rt *swarmruntime.Runtime, process *worklifetime.Process, capability runtimestartupownership.ProcessCapability) {
 						t.Helper()
-						if err := closeExternalRuntimeTestGeneration(rt, process, nil); err != nil {
+						if err := closeExternalRuntimeTestGeneration(rt, process, capability); err != nil {
 							t.Fatalf("close %s runtime: %v", label, err)
 						}
 					}
 
 					seedRuntime, seedProcess := newRuntime()
+					seedCapability, seedGrant := installExternalRuntimeTestGeneration(t, ctx, selected, seedRuntime, prepared)
 					if err := seedRuntime.Scheduler.PrepareStartup(); err != nil {
 						t.Fatal(err)
 					}
 					rootIdentity := runtimeflowidentity.Stored(source, ".", runID, runID, "", "")
 					rootOwner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: rootIdentity.Route()}
 					occurredAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
-					seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
+					seedCtx := externalRuntimeGenerationContext(t, testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence())), seedGrant)
 					construction757Ctx := seedCtx
 					construction757At := occurredAt
 					rootSchema, declared := source.FlowSchemaByID(".")
@@ -919,7 +934,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 					if !result.Created {
 						t.Fatalf("initial materialization result = %v, want created", result)
 					}
-					shutdown("seed", seedRuntime, seedProcess)
+					shutdown("seed", seedRuntime, seedProcess, seedCapability)
 					timers, err := selected.ListWorkflowTimerActivations(ctx, runID, rootIdentity.EntityID, true)
 					if err != nil || len(timers) != 1 {
 						t.Fatalf("seed exact dormant timer: timers=%+v err=%v", timers, err)
@@ -935,10 +950,12 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 						t.Fatalf("seeding runtime consumed overdue occurrence: %+v", evidence)
 					}
 					pending := eventtest.ExistingRunRootIngress(uuid.NewString(), "generic.tick", "api.v1", "startup-recovery", []byte(`{}`), 0, runID, events.EnvelopeForEntityID(events.EventEnvelope{}, runID), occurredAt.Add(time.Second))
-					storetest.CommitSemanticEventWithRoutes(t, ctx, selected, pending, nil, runtimepipelineobligation.ScopeSubscribed)
+					preparedSuccessor := prepareExternalRuntimeFixtureProcess(t, ctx, selected)
+					storetest.CommitSemanticEventWithRoutes(t, externalRuntimeProcessContext(t, ctx, preparedSuccessor), selected, pending, nil, runtimepipelineobligation.ScopeSubscribed)
 
 					restarted, restartedProcess := newRuntime()
-					capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, restarted)
+					capability, grant := installExternalRuntimeTestGeneration(t, ctx, selected, restarted, preparedSuccessor)
+					ctx = externalRuntimeGenerationContext(t, ctx, grant)
 					var held runtimepipelineobligation.ClaimedWork
 					if exit == "blocked" {
 						held, err = selected.PipelineObligations().ClaimEvent(ctx, pending.ID(), runtimepipelineobligation.PurposeRecovery)
