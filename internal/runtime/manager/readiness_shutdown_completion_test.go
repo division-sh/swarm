@@ -247,6 +247,7 @@ func proveReadinessShutdownCancellationDisposition(t *testing.T) {
 				})
 			}
 			cancelled := &readinessShutdownCancellation{cause: cancellation, key: key, ordinal: attempt.attemptOrdinal, planHash: attempt.planHash}
+			refusal := executableReadinessError(lifecycleTestPersistedAgent(t).Config.Identity, runtimeLifecycleShuttingDown, AgentLifecycleState{}, "shutdown")
 			for _, tc := range []struct {
 				name string
 				err  error
@@ -254,10 +255,12 @@ func proveReadinessShutdownCancellationDisposition(t *testing.T) {
 			}{
 				{"exact", cancelled, true},
 				{"wrapped", fmt.Errorf("attachment: %w", cancelled), true},
+				{"both closed shutdown outcomes", errors.Join(cancelled, refusal), true},
 				{"lease failure", errors.Join(cancelled, errors.New("lease join")), false},
 				{"independent cancellation", errors.Join(cancelled, context.Canceled), false},
 				{"grace", errors.Join(cancelled, context.DeadlineExceeded), false},
 				{"classified domain failure", runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "storage", "storage", "cleanup", nil, cancelled), false},
+				{"classified failure wrapping canonical refusal", runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "storage", "storage", "cleanup", nil, refusal), false},
 				{"wrong run", &readinessShutdownCancellation{cause: cancellation, key: dynamicFlowRuntimeReadinessKey{runID: "foreign", instancePath: key.instancePath}, ordinal: attempt.attemptOrdinal, planHash: attempt.planHash}, false},
 				{"wrong instance", &readinessShutdownCancellation{cause: cancellation, key: dynamicFlowRuntimeReadinessKey{runID: key.runID, instancePath: "review/foreign"}, ordinal: attempt.attemptOrdinal, planHash: attempt.planHash}, false},
 				{"wrong ordinal", &readinessShutdownCancellation{cause: cancellation, key: key, ordinal: 4, planHash: attempt.planHash}, false},

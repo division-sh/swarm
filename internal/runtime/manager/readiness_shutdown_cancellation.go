@@ -40,11 +40,8 @@ func isReadinessShutdownCompletion(err error, key dynamicFlowRuntimeReadinessKey
 			attempt != nil && cancelled.key == key &&
 			cancelled.ordinal == attempt.attemptOrdinal && cancelled.planHash == attempt.planHash
 	}
-	if isReadinessShutdownRefusal(err) {
-		return true
-	}
 	if _, classified := err.(*runtimefailures.Error); classified {
-		return false
+		return canonicalReadinessShutdownRefusal(err) && isReadinessShutdownRefusal(err)
 	}
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		branches := joined.Unwrap()
