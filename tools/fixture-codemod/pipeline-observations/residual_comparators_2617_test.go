@@ -77,12 +77,6 @@ func residualComparatorMatches2617(row recipe, actual string, corpus []recipe, p
 	return row.Successor == "" && canonicalComparatorEqual2617(actual, row.After)
 }
 
-func canonicalComparatorEqual2617(left, right string) bool {
-	a, err := canonicalFunction(left)
-	b, otherErr := canonicalFunction(right)
-	return err == nil && otherErr == nil && a == b
-}
-
 func residualComparatorCurrent2617(t *testing.T, row recipe, actual string) bool {
 	t.Helper()
 	if _, err := fixtureSetupCurrentEndpoint2617(row, actual); err == nil {
