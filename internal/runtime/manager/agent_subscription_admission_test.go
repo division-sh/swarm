@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -40,6 +41,16 @@ func testManagerSubscriptionAdmission(t *testing.T, cfg runtimeactors.AgentConfi
 	return admission
 }
 
+func capturedSubscriptionManagerOptions(t *testing.T) AgentManagerOptions {
+	t.Helper()
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.WriteManagerSubscriptionAdmission(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return AgentManagerOptions{SemanticSource: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact)}
+}
+
 func TestSpawnAgentRejectsForeignExactAndPatternBeforeRegistration(t *testing.T) {
 	for _, subscription := range []string{"foreign/task.ready", "foreign/**/task.ready"} {
 		t.Run(strings.ReplaceAll(subscription, "/", "_"), func(t *testing.T) {
@@ -50,9 +61,9 @@ func TestSpawnAgentRejectsForeignExactAndPatternBeforeRegistration(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			am := newTestAgentManager(t, eb, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+			am := newTestAgentManagerWithOptions(t, eb, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 				return subscriptionAdmissionTestAgent{id: cfg.ID}, nil
-			})
+			}, capturedSubscriptionManagerOptions(t))
 			err = spawnManagerTestAgent(am, managerTestAgentConfig(runtimeactors.AgentConfig{
 				ExecutionMode: "live",
 				ID:            "reviewer",
@@ -78,9 +89,9 @@ func TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmiss
 	if err != nil {
 		t.Fatal(err)
 	}
-	am := newTestAgentManager(t, eb, func(cfg runtimeactors.AgentConfig) (Agent, error) {
+	am := newTestAgentManagerWithOptions(t, eb, func(cfg runtimeactors.AgentConfig) (Agent, error) {
 		return subscriptionAdmissionTestAgent{id: cfg.ID}, nil
-	})
+	}, capturedSubscriptionManagerOptions(t))
 	initial := managerTestAgentConfig(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "reviewer",
