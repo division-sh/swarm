@@ -143,6 +143,7 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 		{"provider_cleanup", errors.Join(providertriggers.Error{Status: 400, Message: "invalid provider request"}, cleanup), 503},
 		{"cleanup_provider", errors.Join(cleanup, providertriggers.Error{Status: 400, Message: "invalid provider request"}), 503},
 		{"lookalike_text", errors.New("schema validation failed: $.data.user_id is required"), 503},
+		{"lookalike_constructor_conflict", errors.New("root input key private-key-name contradicts its immutable constructor key"), 503},
 	} {
 		t.Run(cell.name, func(t *testing.T) {
 			status, message := inboundPublicationErrorResponse(cell.err)
