@@ -119,37 +119,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	defer func() { probe.Finish(err) }()
 	defer func() {
 		cleanupStarted := time.Now()
-		var cleanupErr error
-		rolledBack := false
-		if tx != nil {
-			probe.RollbackAttempted()
-		}
-		rollbackErr := joinTransactionRollback(tx, stopReadRollback, readRollbackDone, probe)
-		releaseOrdering()
-		if tx != nil {
-			rolledBack = rollbackErr == nil
-			if rollbackErr != nil {
-				discard = true
-				if rollbackErr != sql.ErrTxDone {
-					cleanupErr = rollbackErr
-				}
-			}
-		} else if rollbackErr != nil && rollbackErr != sql.ErrTxDone {
-			discard = true
-			cleanupErr = rollbackErr
-		}
-		if discard {
-			rawErr := conn.Raw(func(any) error { return driver.ErrBadConn })
-			if rawErr == driver.ErrBadConn || rawErr == sql.ErrConnDone {
-				rawErr = nil
-			}
-			cleanupErr = errors.Join(cleanupErr, rawErr)
-		}
-		closeErr := conn.Close()
-		if closeErr == sql.ErrConnDone {
-			closeErr = nil
-		}
-		cleanupErr = errors.Join(cleanupErr, closeErr)
+		rolledBack, cleanupErr := rollbackAndCloseTransactionConnection(conn, tx, discard, stopReadRollback, readRollbackDone, probe, releaseOrdering)
 		if cleanupErr != nil {
 			slog.Error("postgres transaction cleanup failed", "error", cleanupErr)
 			err = errors.Join(err, cleanupErr)
@@ -216,6 +186,44 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	probe.Committed()
 	tx = nil
 	return true, nil
+}
+
+func rollbackAndCloseTransactionConnection(conn *sql.Conn, tx *sql.Tx, discard bool, stopReadRollback func() bool, readRollbackDone <-chan error, probe *transactiontest.Attempt, releaseOrdering func()) (bool, error) {
+	var cleanupErr error
+	rolledBack := false
+	if tx != nil {
+		probe.RollbackAttempted()
+	}
+	rollbackErr := joinTransactionRollback(tx, stopReadRollback, readRollbackDone, probe)
+	releaseOrdering()
+	if tx != nil {
+		rolledBack = rollbackErr == nil
+		if rollbackErr != nil {
+			discard = true
+			if rollbackErr != sql.ErrTxDone {
+				cleanupErr = rollbackErr
+			}
+		}
+	} else if rollbackErr != nil && rollbackErr != sql.ErrTxDone {
+		discard = true
+		cleanupErr = rollbackErr
+	}
+	return rolledBack, closeTransactionConnection(conn, discard, cleanupErr)
+}
+
+func closeTransactionConnection(conn *sql.Conn, discard bool, cleanupErr error) error {
+	if discard {
+		rawErr := conn.Raw(func(any) error { return driver.ErrBadConn })
+		if rawErr == driver.ErrBadConn || rawErr == sql.ErrConnDone {
+			rawErr = nil
+		}
+		cleanupErr = errors.Join(cleanupErr, rawErr)
+	}
+	closeErr := conn.Close()
+	if closeErr == sql.ErrConnDone {
+		closeErr = nil
+	}
+	return errors.Join(cleanupErr, closeErr)
 }
 
 func joinTransactionRollback(tx *sql.Tx, stopReadRollback func() bool, readRollbackDone <-chan error, probe *transactiontest.Attempt) error {
