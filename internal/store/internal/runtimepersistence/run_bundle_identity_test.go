@@ -8,8 +8,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -19,10 +21,12 @@ var testCanonicalBundleHash = testCanonicalSourceArtifact.BundleHash()
 func TestPostgresStore_RunConsumesCanonicalSourceArtifactIdentity(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	seedStoreTestPersistedArtifact(t, db, testCanonicalSourceArtifact)
+	rooted, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
 
 	runID := uuid.NewString()
 	ctx := testAuthorActivityContextForBundle(testCanonicalBundleHash)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	sourceartifactfixture.RequireArtifact(t, ctx, pg, rooted.Artifact())
 	registerTestAuthorActivityCatalogForContext(t, pg, ctx)
 	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(
 		uuid.NewString(), "scan.requested", "test", "", []byte(`{}`), 0,
@@ -44,10 +48,12 @@ func TestRunLifecycleOwnerRejectsSourceWithoutArtifact(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	runID := uuid.NewString()
+	rooted, _ := sourceartifactfixture.Rooted(t, "canonical-run-bundle", testCanonicalSourceArtifact)
+	ctx := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(testCanonicalBundleHash), rooted.Admission())
 
-	_, err := pg.CreateRun(testAuthorActivityContext(), storerunlifecycle.CreateRequest{
+	_, err := pg.CreateRun(ctx, storerunlifecycle.CreateRequest{
 		RunID: runID, Origin: storerunlifecycle.ScenarioSetupRunOrigin(),
-		Source: mustStoreTestSourceArtifactFact(testCanonicalBundleHash), StartedAt: time.Now().UTC(),
+		Source: mustStoreTestSourceArtifactFact(testCanonicalBundleHash), RootAdmission: rooted.Admission(), StartedAt: time.Now().UTC(),
 	})
 	if !errors.Is(err, storerunlifecycle.ErrSourceArtifactUnavailable) {
 		t.Fatalf("EnsureActive error = %v, want ErrSourceArtifactUnavailable", err)
