@@ -95,7 +95,7 @@ func normalizeObjectOptionalNulls(path string, schema map[string]any, value map[
 		fieldSchema, declared := properties[name]
 		if !declared {
 			if item == nil {
-				return fmt.Errorf("schema validation failed: %s.%s null is not a declared optional field", path, name)
+				return violation(path+"."+name, "additionalProperties", "declared optional field", "null", "%s.%s null is not a declared optional field", path, name)
 			}
 			if additionalSchema != nil {
 				if err := normalizeNestedOptionalNulls(path+"."+name, additionalSchema, item); err != nil {
@@ -106,7 +106,7 @@ func normalizeObjectOptionalNulls(path string, schema map[string]any, value map[
 		}
 		if item == nil {
 			if _, isRequired := required[name]; isRequired {
-				return fmt.Errorf("schema validation failed: %s.%s is required and cannot be null", path, name)
+				return violation(path+"."+name, "required", "non-null value", "null", "%s.%s is required and cannot be null", path, name)
 			}
 			delete(value, name)
 			continue
@@ -120,7 +120,7 @@ func normalizeObjectOptionalNulls(path string, schema map[string]any, value map[
 
 func normalizeNestedOptionalNulls(path string, schema map[string]any, value any) error {
 	if value == nil {
-		return fmt.Errorf("schema validation failed: %s cannot be null", path)
+		return violation(path, "type", "non-null value", "null", "%s cannot be null", path)
 	}
 	schemaType := strings.TrimSpace(asString(schema["type"]))
 	if schemaType == "" {
@@ -147,7 +147,7 @@ func normalizeNestedOptionalNulls(path string, schema map[string]any, value any)
 		for index, item := range items {
 			itemPath := fmt.Sprintf("%s[%d]", path, index)
 			if item == nil {
-				return fmt.Errorf("schema validation failed: %s cannot be null", itemPath)
+				return violation(itemPath, "type", "non-null value", "null", "%s cannot be null", itemPath)
 			}
 			if itemSchema != nil {
 				if err := normalizeNestedOptionalNulls(itemPath, itemSchema, item); err != nil {
