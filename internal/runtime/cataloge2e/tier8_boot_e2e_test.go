@@ -195,7 +195,7 @@ func startRuntimeForBootTest(t testing.TB, rt *runtime.Runtime) {
 }
 
 func startRuntimeAndReturnError(rt *runtime.Runtime) error {
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 2*time.Second)
+	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), rt.Options.SourceArtifactFact), 2*time.Second)
 	defer cancel()
 	if err := rt.Start(ctx); err != nil {
 		return err
