@@ -736,8 +736,8 @@ func (m *ManagerRunOccurrence) Retire() {
 
 type managerShutdownCancellation struct{ owner *ManagerRunOccurrence }
 
-func (*managerShutdownCancellation) Error() string { return ErrRetired.Error() }
-func (*managerShutdownCancellation) Unwrap() error { return ErrRetired }
+func (*managerShutdownCancellation) Error() string        { return ErrRetired.Error() }
+func (*managerShutdownCancellation) Is(target error) bool { return target == ErrRetired }
 
 // RetireForShutdown changes only the cancellation disposition of this existing
 // occurrence. Reset and all other retirement paths retain Retire's cause.
