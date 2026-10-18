@@ -2563,14 +2563,13 @@ func TestDynamicFlowRuntimeReadinessAutomaticRetryCompletesWithoutEnsureOrRestar
 func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 
 	var revisionErr error
 	instances.beforeTopologyMark = func(expected runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
-		observed, found, err := instances.LoadDynamicFlowRuntimeReadiness(context.Background(), expected.RunID, expected.Identity.Route())
+		observed, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, expected.RunID, expected.Identity.Route())
 		if err != nil || !found {
 			revisionErr = errors.Join(err, errors.New("concurrent readiness observation not found"))
 			return
@@ -2578,7 +2577,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 		revised := expected
 		revised.WorkflowVersion += "-concurrent-revision"
 		changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(
-			context.Background(),
+			ctx,
 			observed,
 			revised,
 			time.Now().UTC(),
@@ -2592,7 +2591,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 		}
 	}
 
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+	err := activateFlowInstanceForTest(am, ctx, req)
 	if revisionErr != nil {
 		t.Fatalf("inject concurrent readiness revision: %v", revisionErr)
 	}
@@ -2600,7 +2599,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 		t.Fatalf("ActivateFlowInstance error = %v, want exact-plan topology completion rejection", err)
 	}
 	readiness, found, loadErr := instances.LoadDynamicFlowRuntimeReadiness(
-		context.Background(),
+		ctx,
 		req.TriggerEvent.RunID(),
 		req.Instance.Route(),
 	)
@@ -2612,7 +2611,7 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 		!readiness.Pending() {
 		t.Fatalf("concurrently revised readiness was falsely completed: %#v", readiness)
 	}
-	if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+	if flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatal("stale topology attempt retained an executable activation receipt")
 	}
 }
@@ -2620,11 +2619,9 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 func TestDynamicFlowRuntimeReadinessRejectsRevisionAfterAdmissionBeforeExecution(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
@@ -2691,11 +2688,9 @@ func TestDynamicFlowRuntimeReadinessRejectsRevisionAfterAdmissionBeforeExecution
 func TestDynamicFlowRuntimeReadinessRejectsABAAfterAdmissionBeforeExecution(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
