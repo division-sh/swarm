@@ -1,10 +1,12 @@
 package genericschedule_test
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -47,14 +49,17 @@ func TestGenericSchedulePublishedOccurrenceAcceptsPreparedTargetProjection(t *te
 			if err := activation.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			event, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{RunID: runID, Facts: events.EventFacts{
-				ID: activation.CurrentEventID, Type: events.EventType(command.EventType),
-				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: genericschedule.OccurrenceProducerID()},
-				TaskID:   command.TaskID, Payload: []byte(`{}`), RoutingSource: source,
-				Envelope: events.EventEnvelope{EntityID: entityID, FlowInstance: path}, CreatedAt: due, ExecutionMode: executionmode.Live,
-			}})
-			if err != nil {
-				t.Fatal(err)
+			envelope := events.EventEnvelope{EntityID: entityID, FlowInstance: path}
+			event := eventtest.RuntimeControlWithRoutingSource(activation.CurrentEventID,
+				events.EventType(command.EventType), genericschedule.OccurrenceProducerID(), command.TaskID,
+				[]byte(`{}`), 0, runID, "", envelope, source, due)
+			if event.AdmissionClass() != events.EventAdmissionRuntimeControl || event.ID() != activation.CurrentEventID ||
+				event.RunID() != runID || event.ParentEventID() != "" || event.TaskID() != command.TaskID ||
+				event.Type() != events.EventType(command.EventType) || event.ProducerType() != events.EventProducerPlatform ||
+				event.SourceAgent() != genericschedule.OccurrenceProducerID() || string(event.Payload()) != "{}" ||
+				event.RoutingSource() != source || !reflect.DeepEqual(event.Envelope(), events.EnvelopeForSourceRoute(envelope, source.Route())) ||
+				event.ExecutionMode() != executionmode.Live || event.ChainDepth() != 0 || !event.CreatedAt().Equal(due) {
+				t.Fatalf("runtime-control fixture changed the exact occurrence: %+v", event)
 			}
 			first := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "worker", "first")),
 				Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "worker", FlowInstance: "worker/one", EntityID: uuid.NewString()})}

@@ -21,8 +21,10 @@ import (
 
 type activityGrantHistoryConnector struct {
 	driver.Connector
-	fault string
-	reads int
+	fault       string
+	reads       int
+	cohortFault string
+	cohortReads int
 }
 
 func (c *activityGrantHistoryConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -43,9 +45,22 @@ func (c *activityGrantHistoryConn) BeginTx(ctx context.Context, options driver.T
 }
 
 func (c *activityGrantHistoryConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	cohort := strings.Contains(query, "FROM runtime_generation_grants WHERE selected_execution_id=$1 OR ")
+	if cohort {
+		c.control.cohortReads++
+		if c.control.cohortFault == "query_error" {
+			return nil, errSelectedGrantHistoryRead
+		}
+		if strings.HasPrefix(c.control.cohortFault, "snapshot_only") {
+			query = strings.Replace(query, "selected_execution_id=$1 OR ", "FALSE OR ", 1)
+		}
+	}
 	rows, err := c.pipelineCrashConn.QueryContext(ctx, query, args)
 	if err != nil {
 		return nil, err
+	}
+	if cohort {
+		return &selectedGrantCohortRows{Rows: rows, fault: c.control.cohortFault}, nil
 	}
 	if !strings.Contains(query, "FROM runtime_generation_grants WHERE grant_id=$1 AND state_version=$2") {
 		return rows, nil
@@ -180,6 +195,7 @@ func TestActivityExecutionGrantReadUsesExactHistoricalVersionBothStores(t *testi
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("historical reads changed durable rows: %v", err)
 			}
+			proveRetiredSelectedGrantHistory(t, fixture, process, control)
 		})
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -64,6 +65,42 @@ func TestActivityInstalledGrantCaptureIsImmutable(t *testing.T) {
 			if role, err := captureActivityExecutionGrant(invalid); err == nil || role != nil {
 				t.Fatalf("nonadmitted role %s was captured", state)
 			}
+		}
+		if selected {
+			proveSelectedGrantHistoryAllowsEarlyRetirement(t)
+		}
+	}
+}
+
+func proveSelectedGrantHistoryAllowsEarlyRetirement(t *testing.T) {
+	t.Helper()
+	for _, settled := range []bool{false, true} {
+		first := activityInstalledGrantForTest(true)
+		first.State, first.StateVersion, first.ProbeSurfaceIDs = runtimeownership.GrantPrepared, 1, nil
+		facts := []SelectedGrantFact{{Evidence: first}}
+		last := first
+		if settled {
+			last.State, last.StateVersion = runtimeownership.GrantProbeSettled, 2
+			last.ProbeSurfaceIDs = []string{"original-probe"}
+			if err := validateSelectedGrantHistoryPrefix(facts, last); err != nil {
+				t.Fatal(err)
+			}
+			facts = append(facts, SelectedGrantFact{Evidence: last})
+		}
+		before, err := canonicaljson.Bytes(facts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last.State, last.StateVersion = runtimeownership.GrantRetired, last.StateVersion+1
+		if err := validateSelectedGrantHistoryPrefix(facts, last); err != nil {
+			t.Fatalf("original early retirement refused: settled=%t err=%v", settled, err)
+		}
+		after, err := canonicaljson.Bytes(facts)
+		if err != nil || string(before) != string(after) {
+			t.Fatal("history validation modified the retained predecessor")
+		}
+		if captured, err := captureActivityExecutionGrant(last); err == nil || captured != nil {
+			t.Fatal("retired history became an installed activity role")
 		}
 	}
 }
