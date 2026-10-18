@@ -27,6 +27,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -219,6 +220,18 @@ func TestSavedProofRebindStandingLockOrderDiagnosticBothStores(t *testing.T) {
 func runQuotedACKStandingDiagnostic(t *testing.T) {
 	f := newActiveInputFixtureWithProof(t, "postgres", true, true)
 	activateLockCyclePredecessor(t, f)
+	device, err := f.state.device(f.ctx)
+	if err != nil {
+		lockCycleStop(t, "ack_native_device_read", err)
+	}
+	if err := f.sender.Sessions.MigratePNToLID(f.ctx, device.ID.ToNonAD(), device.LID); err != nil {
+		lockCycleStop(t, "ack_sender_session_migration", err)
+	}
+	to, err := types.ParseJID(f.binding.ConversationRef)
+	if err != nil {
+		lockCycleStop(t, "ack_confirmed_recipient", err)
+	}
+	f.peer.admitMessageRecipient(to, 1)
 	for _, phase := range []channelonboarding.Phase{channelonboarding.PhasePromotingRegistration,
 		channelonboarding.PhaseRetiringPredecessor, channelonboarding.PhaseDeliveringConfirmation, channelonboarding.PhaseSucceeded} {
 		var err error
