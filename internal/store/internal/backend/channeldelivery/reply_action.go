@@ -27,6 +27,17 @@ func AdmitReplyActionTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 		action, found, err := loadReplyActionTx(ctx, tx, text, postgres)
 		return action, found, false, err
 	}
+	discovered, err := findReplyControlTx(ctx, tx, text, postgres, nil)
+	if err != nil {
+		return render.PendingAction{}, false, false, err
+	}
+	var parent actionParent
+	if discovered.Token != "" {
+		parent, err = lockActionParentTx(ctx, tx, discovered, postgres)
+		if err != nil {
+			return render.PendingAction{}, false, false, err
+		}
+	}
 	if _, _, _, err := currentTextResponseAudienceTx(ctx, tx, text, postgres); err != nil {
 		return render.PendingAction{}, false, false, err
 	}
@@ -34,9 +45,15 @@ func AdmitReplyActionTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 	if err != nil || state != "pending" {
 		return render.PendingAction{}, false, false, fmt.Errorf("reply text changed before control admission: %w", err)
 	}
-	selected, err := findReplyControlTx(ctx, tx, text, postgres)
+	if discovered.Token == "" {
+		return render.PendingAction{}, false, false, nil
+	}
+	selected, err := findReplyControlTx(ctx, tx, text, postgres, &parent)
 	if err != nil || selected.Token == "" {
 		return render.PendingAction{}, false, false, err
+	}
+	if selected != discovered {
+		return render.PendingAction{}, false, false, fmt.Errorf("quoted channel action changed before admission")
 	}
 	query := `SELECT recorded_at FROM operator_channel_text_intents WHERE publication_id=?`
 	if postgres {
@@ -62,7 +79,7 @@ func AdmitReplyActionTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 	return render.PendingAction{PublicationID: text.PublicationID, Fact: action, ReceivedAt: receivedAt}, true, true, nil
 }
 
-func findReplyControlTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool) (operatorchannel.ActionFact, error) {
+func findReplyControlTx(ctx context.Context, tx *sql.Tx, text operatorchannel.InboundText, postgres bool, parent *actionParent) (operatorchannel.ActionFact, error) {
 	var selected operatorchannel.ActionFact
 	cursor := "00000000-0000-0000-0000-000000000000"
 	for {
@@ -80,7 +97,14 @@ func findReplyControlTx(ctx context.Context, tx *sql.Tx, text operatorchannel.In
 				ConversationRef: text.ConversationRef, ConversationScope: text.ConversationScope,
 				MessageReference: text.ReplyToReference, Token: item.token,
 			}
-			resolved, found, err := ResolveActionFactForMutationTx(ctx, tx, fact, postgres)
+			var resolved render.ResolvedAction
+			var found bool
+			var err error
+			if parent == nil {
+				resolved, found, err = ResolveActionFactTx(ctx, tx, fact, postgres)
+			} else {
+				resolved, found, err = parent.resolve(ctx, tx, fact, postgres)
+			}
 			if err != nil {
 				return operatorchannel.ActionFact{}, err
 			}
