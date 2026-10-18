@@ -72,9 +72,66 @@ func newChannelCommand(opts rootCommandOptions) *cobra.Command {
 		newChannelListCommand(opts),
 		newChannelStatusCommand(opts),
 		newChannelUnbindCommand(opts),
+		newChannelLogoutCommand(opts),
 		newChannelProofRevokeCommand(opts),
 	)
 	return cmd
+}
+
+func newChannelLogoutCommand(opts rootCommandOptions) *cobra.Command {
+	commandOpts := opts
+	var output cliOutputOptions
+	var idempotencyKey string
+	cmd := &cobra.Command{
+		Use:   "logout <operation-id>",
+		Short: "Unlink one exact paired connection and delete its local pairing state.",
+		Args:  argcount.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChannelLogout(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], idempotencyKey, commandOpts, output)
+		},
+	}
+	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
+	bindCLIAPIConnectionFlagsWithClass(cmd, &commandOpts, cliAPICommandClassControl, "swarm channel logout")
+	bindCLIOutputFlags(cmd, &output)
+	return cmd
+}
+
+func runChannelLogout(ctx context.Context, out, errOut io.Writer, operationID, idempotencyKey string, opts rootCommandOptions, output cliOutputOptions) error {
+	client, err := newCLIAPIClient(opts)
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	var retained channelOnboardingResult
+	if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": operationID}, &retained); err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	if retained.Operation.OperationID != operationID || retained.Operation.Revision < 1 {
+		return returnCLIValidationError(errOut, errors.New("channel readback does not identify the requested operation"))
+	}
+	revision := retained.Operation.Revision
+	if retained.Logout != nil {
+		if retained.Logout.OperationID != operationID || retained.Logout.ExpectedRevision < 1 {
+			return returnCLIValidationError(errOut, errors.New("channel logout readback contradicts the requested operation"))
+		}
+		revision = retained.Logout.ExpectedRevision
+	}
+	params := map[string]any{"operation_id": operationID, "expected_revision": revision}
+	if strings.TrimSpace(idempotencyKey) != "" {
+		params["idempotency_key"] = strings.TrimSpace(idempotencyKey)
+	}
+	var result channelonboarding.SessionLogoutReadback
+	if err := client.call(ctx, "channel.logout", params, &result); err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	if err := result.Validate(); err != nil || result.OperationID != operationID || result.ExpectedRevision != revision {
+		return returnCLIValidationError(errOut, errors.New("channel logout response contradicts the requested responsibility"))
+	}
+	human := func(w io.Writer) {
+		fmt.Fprintf(w, "Logout %s: %s (revision %d).\n", result.Teardown.TeardownID, result.Teardown.Phase, result.Teardown.Revision)
+	}
+	quiet := func() ([]string, error) { return []string{result.Teardown.TeardownID}, nil }
+	return renderCLIOutput(out, errOut, output, result, human, quiet)
 }
 
 func newChannelLifecycleCommand(opts rootCommandOptions, verb string) *cobra.Command {
@@ -264,17 +321,9 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if strings.TrimSpace(opts.idempotencyKey) != "" {
 		params["idempotency_key"] = strings.TrimSpace(opts.idempotencyKey)
 	}
-	if opts.verb == "connect" || opts.credentialStdin {
-		credential, readErr := readSecretValue(opts.apiOptions.input, errOut, false)
-		if readErr != nil {
-			return returnCLIValidationError(errOut, fmt.Errorf("read %s provider credential: %w", provider, readErr))
-		}
-		params["provider_credential"] = credential
-		defer delete(params, "provider_credential")
-	}
-	var begun channelOnboardingResult
-	if err := client.call(ctx, "channel.onboarding_start", params, &begun); err != nil {
-		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	begun, err := startCLIChannelOnboarding(ctx, client, params, opts, errOut)
+	if err != nil {
+		return err
 	}
 	progressOut := out
 	if opts.output.asJSON || opts.output.quiet {
@@ -284,12 +333,7 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if err != nil {
 		return err
 	}
-	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
-		fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)
-		writeChannelNativeQualification(w, result)
-	}, func() ([]string, error) {
-		return []string{result.Operation.OperationID}, nil
-	})
+	return renderChannelOnboardingResult(out, errOut, opts.output, result)
 }
 
 func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID string, opts channelConnectOptions) error {
@@ -307,6 +351,9 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 	var current channelOnboardingResult
 	if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": operationID}, &current); err != nil {
 		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	if current.Operation.OperationID != operationID {
+		return returnCLIValidationError(errOut, errors.New("channel readback does not identify the requested operation"))
 	}
 	if opts.clientLanguage != "" {
 		var updated channelOnboardingResult
@@ -326,9 +373,9 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 		return returnCLIValidationError(errOut, errors.New("channel claimant confirmation requires a terminal or --yes"))
 	}
 	if opts.credentialStdin {
-		credential, readErr := readSecretValue(opts.apiOptions.input, errOut, false)
+		credential, readErr := readSelectedChannelCredential(current, opts, errOut)
 		if readErr != nil {
-			return returnCLIValidationError(errOut, fmt.Errorf("read replacement provider credential: %w", readErr))
+			return readErr
 		}
 		opts.resumeCredential = credential
 		defer func() { opts.resumeCredential = "" }()
@@ -341,12 +388,7 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 	if err != nil {
 		return err
 	}
-	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
-		fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)
-		writeChannelNativeQualification(w, result)
-	}, func() ([]string, error) {
-		return []string{result.Operation.OperationID}, nil
-	})
+	return renderChannelOnboardingResult(out, errOut, opts.output, result)
 }
 
 func writeChannelNativeQualification(out io.Writer, result channelOnboardingResult) {
@@ -370,7 +412,16 @@ func writeChannelNativeQualification(out io.Writer, result channelOnboardingResu
 func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer) (channelOnboardingResult, error) {
 	identityAnnounced := false
 	sharedAudienceAnnounced := false
+	advancePending := opts.verb == "resume"
 	for {
+		pending, err := validateCLIChannelProgress(result)
+		if err != nil {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
+		}
+		if pending && !advancePending && opts.resumeCredential == "" {
+			return result, nil
+		}
+		advancePending = false
 		switch result.Operation.Phase {
 		case "succeeded":
 			if result.Readiness == nil || !result.Readiness.Ready {
@@ -419,8 +470,12 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 		}
 		delete(params, "provider_credential")
 		opts.resumeCredential = ""
-		if next.Operation.Revision == result.Operation.Revision && next.Operation.Phase == result.Operation.Phase {
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding is blocked in %s; retry after resolving the reported prerequisite", next.Operation.Phase))
+		pending, pendingErr := validateCLIChannelContinuation(result, next)
+		if pendingErr != nil {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, pendingErr)
+		}
+		if pending {
+			return next, nil
 		}
 		result = next
 	}

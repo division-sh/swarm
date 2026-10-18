@@ -19,8 +19,8 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 		}
 		tools[installed.ToolID] = installed.Tool
 	}
-	if got := len(tools); got != 12 {
-		t.Fatalf("shipped connector tool count = %d, want 12", got)
+	if got := len(tools); got != 13 {
+		t.Fatalf("shipped connector tool count = %d, want 13", got)
 	}
 
 	flowLocal := withOutputSchema(t, telegramConnectorTool("https://example.test"), runtimecontracts.MustToolInputSchema(
@@ -58,7 +58,10 @@ func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministicall
 		t.Fatalf("CompileMockResponsePlan second: %v", err)
 	}
 	if len(first.responses) != 13 || len(second.responses) != 13 {
-		t.Fatalf("compiled response counts = %d, %d, want 13", len(first.responses), len(second.responses))
+		t.Fatalf("compiled HTTP response counts = %d, %d, want 13", len(first.responses), len(second.responses))
+	}
+	if _, exists := first.responses["whatsapp.send_text"]; exists {
+		t.Fatal("HTTP response generation fabricated native provider authority")
 	}
 	for toolID, firstValue := range first.responses {
 		firstRaw, err := canonicaljson.Encode(firstValue)

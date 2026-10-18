@@ -20,6 +20,7 @@ const (
 	ToolHandlerChannel
 	ToolHandlerWasm
 	ToolHandlerPython
+	ToolHandlerInProcess
 )
 
 func (k ToolHandlerKind) String() string {
@@ -38,6 +39,8 @@ func (k ToolHandlerKind) String() string {
 		return "wasm"
 	case ToolHandlerPython:
 		return "python"
+	case ToolHandlerInProcess:
+		return "in_process"
 	default:
 		return ""
 	}
@@ -59,6 +62,8 @@ func ParseToolHandlerKind(raw string) (ToolHandlerKind, error) {
 		return ToolHandlerWasm, nil
 	case "python":
 		return ToolHandlerPython, nil
+	case "in_process":
+		return ToolHandlerInProcess, nil
 	default:
 		return ToolHandlerUnspecified, fmt.Errorf("unsupported handler_type %q", raw)
 	}
@@ -86,6 +91,7 @@ type toolSchemaEntryValue struct {
 	hasHTTP              bool
 	mcp                  ToolMCPBinding
 	hasMCP               bool
+	inProcess            ToolInProcessTarget
 	responseMapping      ToolResponseMapping
 	hasResponseMapping   bool
 	responseSuccess      ToolResponseSuccessPolicy
@@ -361,6 +367,9 @@ func (e ToolSchemaEntry) validate() error {
 	}
 	if (e.value.hasResponseMapping || e.value.hasResponseSuccess) && e.value.handler != ToolHandlerHTTP {
 		return fmt.Errorf("HTTP response execution semantics require handler_type http")
+	}
+	if err := e.validateInProcess(); err != nil {
+		return err
 	}
 	return e.validateModule()
 }
@@ -671,6 +680,9 @@ func (e ToolSchemaEntry) CanonicalValue() (map[string]any, error) {
 	if e.value.hasMCP {
 		out["mcp"] = map[string]any{"server": e.value.mcp.Server(), "remote": e.value.mcp.Remote()}
 	}
+	if target, present := e.InProcess(); present {
+		out["in_process"] = target.String()
+	}
 	if e.value.hasResponseMapping {
 		out["response_mapping"] = e.value.responseMapping.syntax()
 	}
@@ -741,6 +753,9 @@ func (e ToolSchemaEntry) MarshalYAML() (any, error) {
 	}
 	if value, ok := e.HTTP(); ok {
 		out["http"] = value.declarationValue()
+	}
+	if target, present := e.InProcess(); present {
+		out["in_process"] = target.String()
 	}
 	if value, ok := e.ResponseMapping(); ok {
 		out["response_mapping"] = value

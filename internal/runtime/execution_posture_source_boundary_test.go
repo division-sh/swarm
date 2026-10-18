@@ -24,6 +24,16 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 		"internal/store/internal/backend/agentpersistence/projection.go":          true,
 		"internal/store/internal/backend/pipelinepersistence/standing_service.go": true,
 	}
+	// Exact session owners: three read-only mode comparisons, the process-posture
+	// admission call, and the original logout owner's fenced effect/context pair.
+	namedSessionSites := map[string]int{
+		"internal/runtime/pipeline/channel_native_activity.go::withNativeChannelActivityLaunch":          1,
+		"internal/runtime/pipeline/channel_session_activity.go::prepareSessionActivityIntent":            1,
+		"internal/runtime/pipeline/channel_session_activity.go::validateSessionActivityRequestSelection": 1,
+		"internal/serveapp/channel_logout.go::PrepareSessionLogout":                                      1,
+		"internal/sessionprovider/runtime_logout_unix.go::admitSessionLogout":                            2,
+	}
+	seenSessionSites := map[string]int{}
 	skippedPrefixes := []string{
 		"internal/events/eventtest/",
 		"internal/runtime/effects/effecttest/",
@@ -69,6 +79,26 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 				aliases[name] = importPath
 			}
 			comparisons := map[*ast.SelectorExpr]bool{}
+			sessionSites := map[*ast.SelectorExpr]bool{}
+			for _, declaration := range parsed.Decls {
+				fn, ok := declaration.(*ast.FuncDecl)
+				if !ok || namedSessionSites[rel+"::"+fn.Name.Name] == 0 {
+					continue
+				}
+				ast.Inspect(fn.Body, func(node ast.Node) bool {
+					selector, ok := node.(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					qualifier, ok := selector.X.(*ast.Ident)
+					if ok && (aliases[qualifier.Name] == "github.com/division-sh/swarm/internal/runtime/executionmode" && selector.Sel.Name == "Live" ||
+						aliases[qualifier.Name] == "github.com/division-sh/swarm/internal/runtime/effects" && selector.Sel.Name == "ExecutionModeLive") {
+						sessionSites[selector] = true
+						seenSessionSites[rel+"::"+fn.Name.Name]++
+					}
+					return true
+				})
+			}
 			if rel == "internal/runtime/runfork/preparation.go" {
 				// The persisted preparation decoder tests whether a probe is required.
 				// Only equality operands in this predicate are exempt, never constructors.
@@ -100,7 +130,7 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 				importPath := aliases[qualifier.Name]
 				isLive := importPath == "github.com/division-sh/swarm/internal/runtime/executionmode" && selector.Sel.Name == "Live"
 				isEffectsLive := importPath == "github.com/division-sh/swarm/internal/runtime/effects" && selector.Sel.Name == "ExecutionModeLive"
-				if (isLive || isEffectsLive) && !allowed[rel] && !comparisons[selector] {
+				if (isLive || isEffectsLive) && !allowed[rel] && !comparisons[selector] && !sessionSites[selector] {
 					violations = append(violations, rel+":"+selector.Sel.Name)
 				}
 				return true
@@ -109,6 +139,11 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 		})
 		if err != nil {
 			t.Fatalf("scan production source under %s: %v", root, err)
+		}
+	}
+	for owner, want := range namedSessionSites {
+		if got := seenSessionSites[owner]; got != want {
+			t.Errorf("session live-authority owner %s has %d sites, want exactly %d", owner, got, want)
 		}
 	}
 	sort.Strings(violations)
