@@ -72,6 +72,23 @@ func (c Candidate) MarshalJSON() ([]byte, error) {
 	}{readback: readback(c), Capabilities: c.Plan.Capabilities().Vector()})
 }
 
+func (c *Candidate) UnmarshalJSON(raw []byte) error {
+	type readback Candidate
+	var decoded struct {
+		readback
+		ProviderCredentialRole *string `json:"provider_credential_role"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	if decoded.ProviderCredentialRole == nil {
+		return fmt.Errorf("channel candidate readback requires an explicit provider credential role")
+	}
+	*c = Candidate(decoded.readback)
+	c.ProviderCredentialRole = *decoded.ProviderCredentialRole
+	return nil
+}
+
 func (c Candidate) Validate() error {
 	if err := c.ValidateDeclaration(); err != nil {
 		return err
@@ -79,10 +96,7 @@ func (c Candidate) Validate() error {
 	if err := c.Coordinate.Validate(); err != nil {
 		return err
 	}
-	if c.Posture == ActivationWebhookRegistration {
-		return c.Target.Validate()
-	}
-	return nil
+	return c.Target.Validate()
 }
 
 func (c Candidate) ValidateDeclaration() error {
@@ -115,6 +129,12 @@ func (c Candidate) ValidateDeclaration() error {
 	case ActivationSessionConnection:
 		if strings.TrimSpace(c.SigningCredentialRole) != "" || strings.TrimSpace(c.ConnectionHealth) == "" {
 			return fmt.Errorf("session channel onboarding candidate requires connection health and forbids signing credential")
+		}
+		if c.Target.Generation != c.Coordinate.TargetGeneration || c.Target.SigningCredentialKey != "" {
+			return fmt.Errorf("session declaration contradicts its target generation or carries webhook signing")
+		}
+		if err := c.Target.ValidateDeclaration(); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -196,6 +216,15 @@ func (c *CandidateCatalog) Resolve(selection CandidateSelection) (Candidate, err
 // FindExact returns only a candidate owned by the same current runtime
 // occurrence.
 func (c *CandidateCatalog) FindExact(provider string, identity operatorchannel.InterfaceIdentity, coordinate ChannelRuntimeContextCoordinate, targetSelector string) (Candidate, bool) {
+	if coordinate.Validate() != nil {
+		return Candidate{}, false
+	}
+	return c.FindExactDeclaration(provider, identity, coordinate, targetSelector)
+}
+
+// FindExactDeclaration retains exact source/plan/runtime identity without
+// inventing the executable target that declaration-first pairing must precede.
+func (c *CandidateCatalog) FindExactDeclaration(provider string, identity operatorchannel.InterfaceIdentity, coordinate ChannelRuntimeContextCoordinate, targetSelector string) (Candidate, bool) {
 	if c == nil {
 		return Candidate{}, false
 	}
@@ -203,7 +232,7 @@ func (c *CandidateCatalog) FindExact(provider string, identity operatorchannel.I
 	identity = identity.Normalized()
 	targetSelector = strings.TrimSpace(targetSelector)
 	for _, candidate := range c.candidates {
-		if candidate.Provider == provider && candidate.Interface.Normalized() == identity && candidate.Target.Selector == targetSelector && candidate.Coordinate.Matches(coordinate) {
+		if candidate.Provider == provider && candidate.Interface.Normalized() == identity && candidate.Target.Selector == targetSelector && candidate.Coordinate.MatchesDeclaration(coordinate) {
 			return candidate, true
 		}
 	}

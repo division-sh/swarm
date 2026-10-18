@@ -86,3 +86,36 @@ func TestStandingRestartRejectsEligibilityStateContradictions(t *testing.T) {
 		}
 	}
 }
+
+func TestStandingSessionDormancyPreservesHistoryAndRefusesExecution(t *testing.T) {
+	for _, override := range []string{"none", "suspended"} {
+		fact := StandingRestartFact{ExactCurrent: true, ServiceID: "11111111-1111-4111-8111-111111111111",
+			RunID: "22222222-2222-4222-8222-222222222222", Generation: 3,
+			DeclarationPresent: true, EffectiveState: "session_required", OperatorOverride: override, RunState: "paused"}
+		got, err := ClassifyStandingRestart(fact)
+		if err != nil || got.Kind != StandingRestartSessionDormant || got.Executable() || got.UsesGenericRecovery() ||
+			got.Generation != 3 || got.OperatorOverride != override || !strings.Contains(got.RunControlGuidance(), "channel connect") {
+			t.Fatal("session dormancy changed standing authority or remediation", got, err)
+		}
+		fact.RunState = "running"
+		if got, err := ClassifyStandingRestart(fact); err != nil || got.Kind != StandingRestartInvalidCurrent {
+			t.Fatal("unquiesced session-required run gained execution", got, err)
+		}
+		fact.RunState = "completed"
+		if got, err := ClassifyStandingRestart(fact); err != nil || got.Kind != StandingRestartTerminalDeclared {
+			t.Fatal("session dormancy hid terminal precedence", got, err)
+		}
+		fact.BindingEnabled = true
+		if _, err := ClassifyStandingRestart(fact); err == nil {
+			t.Fatal("session-required state accepted enabled authority")
+		}
+	}
+	if err := StandingBindingSessionRequired.Validate(false); err != nil ||
+		StandingBindingSessionRequired.EffectiveState() != "session_required" ||
+		StandingBindingSessionRequired.QuiescenceReason() != "ingress_session_admission_required" {
+		t.Fatal("session required block reason lost its canonical projection", err)
+	}
+	if StandingBindingSessionRequired.Validate(true) == nil {
+		t.Fatal("unadmitted session binding validated as enabled")
+	}
+}

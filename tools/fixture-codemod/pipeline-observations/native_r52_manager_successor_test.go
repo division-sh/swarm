@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -17,6 +18,49 @@ import (
 
 type r52ManagerSuccessorPin struct {
 	function, predecessorHash, successorHash string
+}
+
+//go:embed testdata/manager-settlement-readback-2614.json
+var managerSettlementReadback2614 []byte
+
+func reverseManagerSettlementReadback2614(row recipe, actual string) (string, error) {
+	if row.Family != "native-manager-delivery-caller" || row.File != "internal/runtime/manager/failure_test.go" || row.Function != "TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim" {
+		return "", fmt.Errorf("unlisted Manager readback continuation")
+	}
+	if fmt.Sprintf("%x", sha256.Sum256(managerSettlementReadback2614)) != "e4a1fb43d0d1feb1139dae6f8907dad6fb6375ba333b8030ce20a912b784947b" {
+		return "", fmt.Errorf("Manager readback continuation evidence changed")
+	}
+	var proof struct {
+		Family, File, Function, PreviousSuccessor, CurrentSuccessor   string
+		PreviousSHA256, CurrentSHA256, Diagnostic, FollowingStatement string
+	}
+	if err := json.Unmarshal(managerSettlementReadback2614, &proof); err != nil {
+		return "", err
+	}
+	if proof.Family != row.Family || proof.File != row.File || proof.Function != row.Function {
+		return "", fmt.Errorf("Manager readback continuation identity changed")
+	}
+	current, err := canonicalFunction(actual)
+	if err != nil {
+		return "", err
+	}
+	previous, err := canonicalFunction(proof.PreviousSuccessor)
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256([]byte(previous))) != proof.PreviousSHA256 {
+		return "", fmt.Errorf("Manager readback predecessor changed")
+	}
+	endpoint, err := canonicalFunction(proof.CurrentSuccessor)
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256([]byte(endpoint))) != proof.CurrentSHA256 || current != endpoint {
+		return "", fmt.Errorf("Manager readback endpoint changed")
+	}
+	reviewed, err := canonicalFunction(row.Successor)
+	if err != nil || reviewed != current {
+		return "", fmt.Errorf("Manager readback source differs from its exact endpoint")
+	}
+	cut := proof.Diagnostic + proof.FollowingStatement
+	if proof.Diagnostic == "" || proof.FollowingStatement == "" || strings.Count(actual, cut) != 1 || strings.Replace(actual, cut, proof.FollowingStatement, 1) != proof.PreviousSuccessor {
+		return "", fmt.Errorf("Manager readback inverse changed work beyond its exact failure-only defer")
+	}
+	return previous, nil
 }
 
 var r52ManagerSuccessorPins = []r52ManagerSuccessorPin{
@@ -48,7 +92,17 @@ func reverseR52ManagerSuccessor(row recipe, actual string) (string, error) {
 		return "", fmt.Errorf("R5.2 predecessor metadata changed: %s", row.Function)
 	}
 	current, err := canonicalFunction(actual)
-	if err != nil || fmt.Sprintf("%x", sha256.Sum256([]byte(current))) != pin.successorHash {
+	if err != nil {
+		return "", err
+	}
+	if row.Function == "TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim" {
+		current, err = reverseManagerSettlementReadback2614(row, actual)
+		if err != nil {
+			return "", err
+		}
+		row.Successor = current
+	}
+	if fmt.Sprintf("%x", sha256.Sum256([]byte(current))) != pin.successorHash {
 		return "", fmt.Errorf("R5.2 complete successor changed: %s", row.Function)
 	}
 	reviewed, err := canonicalFunction(row.Successor)
@@ -162,6 +216,18 @@ func TestR52ManagerFixtureSuccessorsPreserveNativeSetupAndHostility(t *testing.T
 				"duplicate_registration": strings.Replace(actual, "{", "{ am.spawnAgentInternal(ctx, record, true);", 1),
 				"delivery_owner":         strings.Replace(actual, "stores[0]", "stores[1]", 1),
 				"raw_fallback":           strings.Replace(actual, "{", "{ opts.DeliveryStore = newManagerDeliveryTestStore(t);", 1),
+			}
+			if pin.function == "TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim" {
+				var proof struct{ Diagnostic, FollowingStatement string }
+				if err := json.Unmarshal(managerSettlementReadback2614, &proof); err != nil {
+					t.Fatal(err)
+				}
+				cut := proof.Diagnostic + proof.FollowingStatement
+				mutants["diagnostic_guard"] = strings.Replace(actual, "if !t.Failed() {", "if t.Failed() {", 1)
+				mutants["diagnostic_delivery"] = strings.Replace(actual, "baseStore.Snapshot(readCtx, deliveryID)", `baseStore.Snapshot(readCtx, "foreign-delivery")`, 1)
+				mutants["diagnostic_position"] = strings.Replace(actual, cut, proof.FollowingStatement+proof.Diagnostic, 1)
+				mutants["diagnostic_duplicate"] = strings.Replace(actual, cut, proof.Diagnostic+cut, 1)
+				mutants["diagnostic_removed"] = strings.Replace(actual, cut, proof.FollowingStatement, 1)
 			}
 			if pin.function != "newTestAgentManagerWithOptions" {
 				changed, err := parser.ParseFile(token.NewFileSet(), "hostile.go", "package proof\n"+actual, parser.AllErrors)

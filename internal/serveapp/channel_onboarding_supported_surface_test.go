@@ -663,7 +663,8 @@ func serveRuntimeAPIListenerFromOutputIfPresent(output string) string {
 type channelOnboardingJourneyReadback struct {
 	Identity struct {
 		Interface struct {
-			Selector string `json:"selector"`
+			Selector      string `json:"selector"`
+			ChannelPackID string `json:"channel_pack_id"`
 		} `json:"interface"`
 		Status            string `json:"status"`
 		BindingRevision   int64  `json:"binding_revision"`

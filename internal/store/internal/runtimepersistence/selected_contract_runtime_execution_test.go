@@ -201,7 +201,7 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 	}
 	for _, registration := range runtimeeffects.Registrations() {
 		switch registration.Kind {
-		case runtimeeffects.KindChannelDelivery, runtimeeffects.KindChannelActionAck, runtimeeffects.KindChannelNativeSetting:
+		case runtimeeffects.KindChannelDelivery, runtimeeffects.KindChannelActionAck, runtimeeffects.KindChannelLogout, runtimeeffects.KindChannelNativeSetting:
 			if _, err := runtimeeffects.Begin(providerCtx, registration.Adapter, []byte(registration.Adapter), nil); err == nil || !strings.Contains(err.Error(), string(registration.Kind)+"_authority_invalid") {
 				t.Fatalf("selected fork authority admitted channel effect %s: %v", registration.Adapter, err)
 			}
