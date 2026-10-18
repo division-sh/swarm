@@ -116,11 +116,9 @@ func TestStartupFinalizationConsumesRetainedPreparationAttempt(t *testing.T) {
 		t.Run(predecessor, func(t *testing.T) {
 			instances := &flowActivationTestInstanceStore{}
 			agents := &flowActivationTestStore{}
-			first := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
 			bundle := testFlowBundle(t, "")
-			setFlowActivationManagerSemanticSource(first, semanticview.Wrap(bundle))
+			first, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle), agents)
 			req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-			ctx := testAuthorActivityContext(context.Background())
 			switch predecessor {
 			case "planned":
 				plan, err := first.PrepareFlowInstanceActivation(ctx, req)
@@ -156,8 +154,7 @@ func TestStartupFinalizationConsumesRetainedPreparationAttempt(t *testing.T) {
 				t.Fatalf("preparation entry: found=%v state=%s err=%v", found, item.AttemptState, err)
 			}
 			bus := &flowActivationTestBus{}
-			restarted := newFlowActivationManager(t, bus, instances, agents)
-			setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
+			restarted, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
 			source, err := restarted.dynamicFlowRuntimeReadinessSource(ctx)
 			if err != nil {
 				t.Fatal(err)
@@ -203,11 +200,9 @@ func TestFlowActivationPostMarkFailureReturnsToPendingRetry(t *testing.T) {
 		t.Run(outcome, func(t *testing.T) {
 			instances := &flowActivationTestInstanceStore{}
 			bus := &flowActivationTestBus{}
-			am := newFlowActivationManager(t, bus, instances)
 			bundle := testFlowBundle(t, "")
-			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+			am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 			req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-			ctx := testAuthorActivityContext(context.Background())
 			activationCtx, cancel := context.WithCancel(ctx)
 			defer cancel()
 			var canceledAttemptDone <-chan struct{}
