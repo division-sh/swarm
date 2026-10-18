@@ -368,7 +368,6 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 	now = now.UTC()
 	o.mu.RLock()
 	output := Snapshot{RuntimeReady: o.runtimeReady, PublicIngressEnabled: o.enabled}
-	startupCurrent := o.startupCurrent
 	credentialsCurrent := o.credentialObservationTokensCurrent
 	effectCurrent := o.effectAuthorityCurrent
 	selectionCurrent := o.selectionCurrent
@@ -382,7 +381,7 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 		output.Exposure = &copy
 		exposure = &copy
 	}
-	exposureReady, exposureFailure := exposureCurrentness(ctx, now, output.PublicIngressEnabled, exposure, startupCurrent)
+	exposureReady, exposureFailure := o.exposureCurrentness(ctx, now, output.PublicIngressEnabled, exposure)
 	if exposureFailure != "" {
 		output.Failure = exposureFailure
 	}
@@ -426,7 +425,10 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 	return evaluatedRegistrationSnapshot{snapshot: process, output: output, current: currentByKey, exposureReady: exposureReady}
 }
 
-func exposureCurrentness(ctx context.Context, now time.Time, enabled bool, exposure *ExposureEvidence, startupCurrent func(context.Context, string) (bool, error)) (bool, string) {
+func (o *ReadinessOwner) exposureCurrentness(ctx context.Context, now time.Time, enabled bool, exposure *ExposureEvidence) (bool, string) {
+	o.mu.RLock()
+	startupCurrent := o.startupCurrent
+	o.mu.RUnlock()
 	ready := !enabled
 	if exposure != nil {
 		ready = exposure.Failure == "" && now.Before(exposure.ExpiresAt)
@@ -450,10 +452,10 @@ func (o *ReadinessOwner) exposureCurrent(ctx context.Context, now time.Time) boo
 		return false
 	}
 	o.mu.RLock()
-	enabled, startupCurrent := o.enabled, o.startupCurrent
+	enabled := o.enabled
 	o.mu.RUnlock()
 	exposure, revision := o.registration.captureExposure()
-	current, _ := exposureCurrentness(ctx, now.UTC(), enabled, exposure, startupCurrent)
+	current, _ := o.exposureCurrentness(ctx, now.UTC(), enabled, exposure)
 	return enabled && exposure != nil && current && o.registration.currentExposureRevision(revision)
 }
 
