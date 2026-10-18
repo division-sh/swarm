@@ -143,8 +143,10 @@ jobs:
           private="$RUNNER_TEMP/diagnostic-2614-private"
           mkdir -p "$private"
           date -u +%FT%TZ > "$private/started.txt"
+          set +e
           bash .github/scripts/run-proof-batch.sh > "$private/stdout.log" 2> "$private/stderr.log"
           code=$?
+          set -e
           printf '%s\n' "$code" > "$private/wrapper-exit.txt"
           date -u +%FT%TZ > "$private/finished.txt"
           printf 'DIAGNOSTIC ONLY: canonical wrapper exit=%s; no qualification credit.\n' "$code"
