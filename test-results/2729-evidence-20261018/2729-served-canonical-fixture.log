@@ -1,0 +1,122 @@
+Precompile outside test slot: environment=0.003s build=11.713s cleanup=0.000s total=11.717s
+Test slot acquired after 25ms. Starting go test ./internal/serveapp -run ^TestServeRequiredCredentialSourceReadbackBothStores$ -count=1 -v
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/sqlite
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/sqlite/concise
+    credential_sources_test.go:76: stock-pq investigation served exit=0 transcript:
+        swarm serve · 004
+        
+          config · bundle           ready · 1 flow · 0 agents · 11 tools
+        credential telegram_bot_token · source env:TELEGRAM_BOT_TOKEN
+        credential telegram_bot_token · source file:/tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteconci4258087932/003/per-instance-credentials.json
+          store                      sqlite · /tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteconci4258087932/005/lifecycle.sqlite
+          workspace                  not required
+          recovery                   clean start
+          packs                      embedded · 14 packs
+          listeners                  api 127.0.0.1:44747 · mcp 127.0.0.1:34147
+          operator notices           ⚠ 0 unread
+        
+          ready in 680ms
+          standing ingress           none configured
+        
+        WARNING: using the built-in development API token on loopback; configure serve.api_token_file before exposing the listener
+        shutdown · complete
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/sqlite/verbose
+    credential_sources_test.go:76: stock-pq investigation served exit=0 transcript:
+        [1/22] process_start                      ok
+        [2/22] config_load                        ok  (config=explicit_config:/tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteverbo399411795/006/swarm.yaml source=/tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteverbo399411795/004)
+        [3/22] db_connection                      ok  (backend=sqlite path=/tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteverbo399411795/005/lifecycle.sqlite)
+        [4/22] bundle_load                        ok  (test-boot-success@1.0.0, nodes=1 agents=0 events=1 tools=11)
+        [5/22] startup_ownership_lease            ok  (grant=8462d13c-fdcd-4f62-b110-8dcd62967d86)
+        [6/22] recovery_snapshot_inspection       ok  (no recovery state)
+        [7/22] recovery_decision                  allowed  (recovery_disabled_no_persisted_work)
+        [8/22] pipeline_maintenance               started
+        [9/22] system_nodes_start                 ok  (0 nodes subscribed)
+        [10/22] manager_recovery_if_enabled        skipped  (startup recovery disabled)
+        [11/22] schedule_restoration               ok  (generic schedules reconciled; workflow timers restored)
+        [12/22] static_agents_bootstrap            ok  (declaration plans validated; concrete agents materialize per admitted run)
+        [13/22] flow_required_agents               ok  (declaration plans validated; concrete agents materialize per admitted run)
+        [14/22] workspace_validation_and_system_containers ok  (0 system containers)
+        [15/22] mcp_tool_validation                ok  (0 capability surfaces settled)
+        [16/22] manager_event_loop_start           ok
+        [17/22] outbox_sweeper                     started
+        [18/22] boot_self_check_optional           ok  (platform.boot self-check subscribed)
+        [19/22] platform_boot_event_published      ok  (cdff2057-3653-4ef4-959d-f2bf5e3a4ed0)
+        [20/22] http_listener_bind                 ok  (api_listener=127.0.0.1:33539 api_routes=/healthz /readyz /v1/rpc /v1/ws /webhooks/ mcp_listener=127.0.0.1:33581 mcp_routes=/mcp /tools/)
+        [21/22] health_endpoints_respond           ok  (/healthz)
+        [22/22] ready                              ok  (total=537ms state_stores=verified 107 generated tables)
+        credential telegram_bot_token · source env:TELEGRAM_BOT_TOKEN
+        credential telegram_bot_token · source file:/tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteverbo399411795/003/per-instance-credentials.json
+          store                      sqlite · /tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteverbo399411795/005/lifecycle.sqlite
+          workspace                  not required
+          recovery                   clean start
+          packs                      embedded · 14 packs · base sha256:5335874874366213046c3477f8862e05b1146ed3e7281a587d7d25df3be39d31 · effective sha256:23fa537745f0149a73c14b587f6947307e2df9d712a76887f7f6d9ce26f81f65
+          listeners                  api 127.0.0.1:33539 · mcp 127.0.0.1:33581
+          operator notices           ⚠ 0 unread
+          standing ingress           none configured
+        WARNING: using the built-in development API token on loopback; configure serve.api_token_file before exposing the listener
+        shutdown · complete
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/postgres
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/postgres/concise
+    credential_sources_test.go:76: stock-pq investigation served exit=0 transcript:
+        swarm serve · 004
+        
+          config · bundle           ready · 1 flow · 0 agents · 11 tools
+        credential telegram_bot_token · source env:TELEGRAM_BOT_TOKEN
+        credential telegram_bot_token · source file:/tmp/TestServeRequiredCredentialSourceReadbackBothStorespostgrescon397444770/003/per-instance-credentials.json
+          store                      postgres · path not applicable
+          workspace                  host · agent work runs on this machine
+          recovery                   clean start
+          packs                      embedded · 14 packs
+          listeners                  api 127.0.0.1:36591 · mcp 127.0.0.1:40793
+          operator notices           ⚠ 0 unread
+        
+          ready in 379ms
+          standing ingress           none configured
+        
+        WARNING: using the built-in development API token on loopback; configure serve.api_token_file before exposing the listener
+        shutdown · complete
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/postgres/verbose
+    credential_sources_test.go:76: stock-pq investigation served exit=0 transcript:
+        [1/22] process_start                      ok
+        [2/22] config_load                        ok  (config=explicit_config:/tmp/TestServeRequiredCredentialSourceReadbackBothStorespostgresver1212193445/005/swarm-postgres.yaml source=/tmp/TestServeRequiredCredentialSourceReadbackBothStorespostgresver1212193445/004)
+        [3/22] db_connection                      ok  (backend=postgres path=not_applicable)
+        [4/22] bundle_load                        ok  (test-boot-success@1.0.0, nodes=1 agents=0 events=1 tools=11)
+        [5/22] startup_ownership_lease            ok  (grant=ad5ab8d0-b441-411e-a8cb-633e94d7a92a)
+        [6/22] recovery_snapshot_inspection       ok  (no recovery state)
+        [7/22] recovery_decision                  allowed  (recovery_disabled_no_persisted_work)
+        [8/22] pipeline_maintenance               started
+        [9/22] system_nodes_start                 ok  (0 nodes subscribed)
+        [10/22] manager_recovery_if_enabled        skipped  (startup recovery disabled)
+        [11/22] schedule_restoration               ok  (generic schedules reconciled; workflow timers restored)
+        [12/22] static_agents_bootstrap            ok  (declaration plans validated; concrete agents materialize per admitted run)
+        [13/22] flow_required_agents               ok  (declaration plans validated; concrete agents materialize per admitted run)
+        [14/22] workspace_validation_and_system_containers ok  (0 system containers)
+        [15/22] mcp_tool_validation                ok  (0 capability surfaces settled)
+        [16/22] manager_event_loop_start           ok
+        [17/22] outbox_sweeper                     started
+        [18/22] boot_self_check_optional           ok  (platform.boot self-check subscribed)
+        [19/22] platform_boot_event_published      ok  (93817dff-ebf1-4b82-9484-ec222ac91e8d)
+        [20/22] http_listener_bind                 ok  (api_listener=127.0.0.1:38695 api_routes=/healthz /readyz /v1/rpc /v1/ws /webhooks/ mcp_listener=127.0.0.1:35039 mcp_routes=/mcp /tools/)
+        [21/22] health_endpoints_respond           ok  (/healthz)
+        [22/22] ready                              ok  (total=1.194s state_stores=verified 107 generated tables)
+        credential telegram_bot_token · source env:TELEGRAM_BOT_TOKEN
+        credential telegram_bot_token · source file:/tmp/TestServeRequiredCredentialSourceReadbackBothStorespostgresver1212193445/003/per-instance-credentials.json
+          store                      postgres · path not applicable
+          workspace                  host · agent work runs on this machine
+          recovery                   clean start
+          packs                      embedded · 14 packs · base sha256:5335874874366213046c3477f8862e05b1146ed3e7281a587d7d25df3be39d31 · effective sha256:23fa537745f0149a73c14b587f6947307e2df9d712a76887f7f6d9ce26f81f65
+          listeners                  api 127.0.0.1:38695 · mcp 127.0.0.1:35039
+          operator notices           ⚠ 0 unread
+          standing ingress           none configured
+        WARNING: using the built-in development API token on loopback; configure serve.api_token_file before exposing the listener
+        shutdown · complete
+--- PASS: TestServeRequiredCredentialSourceReadbackBothStores (3.89s)
+    --- PASS: TestServeRequiredCredentialSourceReadbackBothStores/sqlite (1.38s)
+        --- PASS: TestServeRequiredCredentialSourceReadbackBothStores/sqlite/concise (0.76s)
+        --- PASS: TestServeRequiredCredentialSourceReadbackBothStores/sqlite/verbose (0.62s)
+    --- PASS: TestServeRequiredCredentialSourceReadbackBothStores/postgres (2.51s)
+        --- PASS: TestServeRequiredCredentialSourceReadbackBothStores/postgres/concise (0.92s)
+        --- PASS: TestServeRequiredCredentialSourceReadbackBothStores/postgres/verbose (1.59s)
+PASS
+ok  	github.com/division-sh/swarm/internal/serveapp	3.903s

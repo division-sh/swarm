@@ -1,0 +1,3 @@
+Precompile outside test slot: environment=0.003s build=2.120s cleanup=0.000s total=2.123s
+Test slot acquired after 21ms. Starting go test ./internal/runtime/credentials -run TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically|TestFileStore_SetGetDeleteInspect|TestOverlayStore_EnvOverridesFile|TestEnvStoreRejectsSwarmCredentialBackdoor|TestSecretBindingProjectionFrozenReadNeverObservesOrAddsAuthority|TestCredentialValueSealUsesEffectiveOverlayValueAndDurableKeyHome -count=1
+ok  	github.com/division-sh/swarm/internal/runtime/credentials	0.028s

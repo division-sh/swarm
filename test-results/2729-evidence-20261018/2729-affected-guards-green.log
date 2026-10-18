@@ -1,0 +1,7 @@
+Precompile outside test slot: environment=0.003s build=7.746s cleanup=0.000s total=7.749s
+Test slot acquired after 7ms. Starting go test ./internal/runtime/credentials ./internal/runtime/bootverify ./internal/runtime ./internal/cliapp ./internal/serveapp -run ^(TestCredentialValueCurrentnessHasOneProductionOwnerAndNoEpochSurvivors|TestChannelConfirmationConsumesOneSealValidatedCredentialObservation|TestIngressSigningUsabilityHasNoSecondProductionInterpreter|TestChannelActivationExecutableReaderCensus|TestChannelActivationExecutionConsumersUseCanonicalOwner|TestWorkflowAdmissionAccountsForPostRegistryClauses|TestRuntimeDepsValidateOwnsRequiredBootInputs|TestRuntimeDepsValidatedDerivesCanonicalBootGraph|TestSemanticOwnershipProducerConsumerLedgerIsClosed|TestCLIIdentifierRegistry.*|TestCLIOutputConformanceRegistry.*|TestVerifyBootStartupPredicateCensus|TestAdmissionPredicateRatchet.*|TestSwarmEnvGuard.*|TestServeLifecycleOwnerRejectsParallelTerminalWriters|TestPlatformSpecOwnsServeLifecycleAndDoctorSchemaPresentation|TestAdmissionReportAccountsForEveryRegisteredClause|TestCredentialAdmission.*|TestSecretsSetListCheckAndRemoveUseFileTierWithoutLeakingValues)$ -count=1
+ok  	github.com/division-sh/swarm/internal/runtime/credentials	0.394s
+ok  	github.com/division-sh/swarm/internal/runtime/bootverify	0.010s
+ok  	github.com/division-sh/swarm/internal/runtime	2.330s
+ok  	github.com/division-sh/swarm/internal/cliapp	0.526s
+ok  	github.com/division-sh/swarm/internal/serveapp	0.253s

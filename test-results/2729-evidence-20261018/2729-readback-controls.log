@@ -1,0 +1,66 @@
+Precompile outside test slot: environment=0.003s build=12.217s cleanup=0.000s total=12.219s
+Test slot acquired after 2ms. Starting go test ./internal/runtime/credentials ./internal/cliapp ./internal/serveapp -run ^(TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically|TestSecretBindingProjectionFrozenReadNeverObservesOrAddsAuthority|TestServeLifecyclePresenterConciseReadinessUsesTypedFacts|TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment|TestDoctorIsSourceFreeAcrossHostileInvocationTrees|TestSecretsSetListCheckAndRemoveUseFileTierWithoutLeakingValues|TestServeRequiredCredentialSourceReadbackBothStores)$ -count=1 -v
+=== RUN   TestSecretBindingProjectionFrozenReadNeverObservesOrAddsAuthority
+--- PASS: TestSecretBindingProjectionFrozenReadNeverObservesOrAddsAuthority (0.00s)
+=== RUN   TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically
+=== RUN   TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically/source_locator_is_not_authority
+--- PASS: TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically (0.00s)
+    --- PASS: TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically/source_locator_is_not_authority (0.00s)
+PASS
+ok  	github.com/division-sh/swarm/internal/runtime/credentials	0.009s
+=== RUN   TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment
+=== RUN   TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment/default_and_explicit_file_tier
+--- PASS: TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment (0.00s)
+    --- PASS: TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment/default_and_explicit_file_tier (0.00s)
+=== RUN   TestDoctorIsSourceFreeAcrossHostileInvocationTrees
+--- PASS: TestDoctorIsSourceFreeAcrossHostileInvocationTrees (0.19s)
+=== RUN   TestSecretsSetListCheckAndRemoveUseFileTierWithoutLeakingValues
+--- PASS: TestSecretsSetListCheckAndRemoveUseFileTierWithoutLeakingValues (0.00s)
+PASS
+ok  	github.com/division-sh/swarm/internal/cliapp	0.212s
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/sqlite
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/sqlite/concise
+    clock_schedule_supported_surface_test.go:42: Run exited before ready line with code 1
+        output:
+        WARNING: using the built-in development API token on loopback; configure serve.api_token_file before exposing the listener
+        ERROR: serve failed · bundle load · parse tools.yaml: tool "credential_probe": $["credential_probe"]["output_schema"] at tools.yaml:6:18 (introduced at tools.yaml:6:18, resolved at tools.yaml:6:18): explicit output_schema object schema repeats the implicit default and is not supported
+          store                      sqlite · /tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteconci2774944217/005/lifecycle.sqlite
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/sqlite/verbose
+    clock_schedule_supported_surface_test.go:42: Run exited before ready line with code 1
+        output:
+        WARNING: using the built-in development API token on loopback; configure serve.api_token_file before exposing the listener
+        [1/22] process_start                      ok
+        [2/22] config_load                        ok  (config=explicit_config:/tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteverbo3023322989/006/swarm.yaml source=/tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteverbo3023322989/004)
+        [3/22] db_connection                      ok  (backend=sqlite path=/tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteverbo3023322989/005/lifecycle.sqlite)
+        [4/22] bundle_load                        FAILED  (parse tools.yaml: tool "credential_probe": $["credential_probe"]["output_schema"] at tools.yaml:6:18 (introduced at tools.yaml:6:18, resolved at tools.yaml:6:18): explicit output_schema object schema repeats the implicit default and is not supported)
+        ERROR: serve failed · bundle load · parse tools.yaml: tool "credential_probe": $["credential_probe"]["output_schema"] at tools.yaml:6:18 (introduced at tools.yaml:6:18, resolved at tools.yaml:6:18): explicit output_schema object schema repeats the implicit default and is not supported
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/postgres
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/postgres/concise
+    clock_schedule_supported_surface_test.go:42: Run exited before ready line with code 1
+        output:
+        WARNING: using the built-in development API token on loopback; configure serve.api_token_file before exposing the listener
+        ERROR: serve failed · bundle load · parse tools.yaml: tool "credential_probe": $["credential_probe"]["output_schema"] at tools.yaml:6:18 (introduced at tools.yaml:6:18, resolved at tools.yaml:6:18): explicit output_schema object schema repeats the implicit default and is not supported
+          store                      postgres · path not applicable
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/postgres/verbose
+    clock_schedule_supported_surface_test.go:42: Run exited before ready line with code 1
+        output:
+        WARNING: using the built-in development API token on loopback; configure serve.api_token_file before exposing the listener
+        [1/22] process_start                      ok
+        [2/22] config_load                        ok  (config=explicit_config:/tmp/TestServeRequiredCredentialSourceReadbackBothStorespostgresver2672940710/005/swarm-postgres.yaml source=/tmp/TestServeRequiredCredentialSourceReadbackBothStorespostgresver2672940710/004)
+        [3/22] db_connection                      ok  (backend=postgres path=not_applicable)
+        [4/22] bundle_load                        FAILED  (parse tools.yaml: tool "credential_probe": $["credential_probe"]["output_schema"] at tools.yaml:6:18 (introduced at tools.yaml:6:18, resolved at tools.yaml:6:18): explicit output_schema object schema repeats the implicit default and is not supported)
+        ERROR: serve failed · bundle load · parse tools.yaml: tool "credential_probe": $["credential_probe"]["output_schema"] at tools.yaml:6:18 (introduced at tools.yaml:6:18, resolved at tools.yaml:6:18): explicit output_schema object schema repeats the implicit default and is not supported
+--- FAIL: TestServeRequiredCredentialSourceReadbackBothStores (1.49s)
+    --- FAIL: TestServeRequiredCredentialSourceReadbackBothStores/sqlite (0.64s)
+        --- FAIL: TestServeRequiredCredentialSourceReadbackBothStores/sqlite/concise (0.41s)
+        --- FAIL: TestServeRequiredCredentialSourceReadbackBothStores/sqlite/verbose (0.23s)
+    --- FAIL: TestServeRequiredCredentialSourceReadbackBothStores/postgres (0.84s)
+        --- FAIL: TestServeRequiredCredentialSourceReadbackBothStores/postgres/concise (0.65s)
+        --- FAIL: TestServeRequiredCredentialSourceReadbackBothStores/postgres/verbose (0.19s)
+=== RUN   TestServeLifecyclePresenterConciseReadinessUsesTypedFacts
+--- PASS: TestServeLifecyclePresenterConciseReadinessUsesTypedFacts (0.00s)
+FAIL
+FAIL	github.com/division-sh/swarm/internal/serveapp	1.505s
+FAIL
+exit status 1

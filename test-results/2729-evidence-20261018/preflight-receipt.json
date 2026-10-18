@@ -1,0 +1,1152 @@
+{
+  "plan": {
+    "version": 1,
+    "head_sha": "5919825fcf057442f82b6556d231f2a513f8fe83",
+    "base_sha": "909222b50cf88232d81af10b6fcc46ab78916fbe",
+    "build_context": {
+      "goos": "linux",
+      "goarch": "amd64",
+      "cgo_enabled": "1",
+      "gowork": "",
+      "goversion": "go1.26.8"
+    },
+    "packages": [
+      {
+        "package": "github.com/division-sh/swarm/cmd/swarm-test",
+        "run": "^(TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution|TestPreflightCurrentSourceUsesAllFiniteOwners)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/cmd/swarm-test",
+            "name": "TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution"
+          },
+          {
+            "package": "github.com/division-sh/swarm/cmd/swarm-test",
+            "name": "TestPreflightCurrentSourceUsesAllFiniteOwners"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+        "run": "^(TestFailureObservationRetainsNativeBoundaries)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+            "name": "TestFailureObservationRetainsNativeBoundaries"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/cliapp",
+        "run": "^(TestVerifyBootStartupPredicateCensus)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/cliapp",
+            "name": "TestVerifyBootStartupPredicateCensus"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/releasee2e",
+        "run": "^(TestReleaseE2ECapacityFixtureImportBoundary|TestReleaseE2EImportBoundaryRejectsRuntimeAndUnscopedPlanning|TestReleaseE2EPackageStaysAtPublicProcessBoundary)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/releasee2e",
+            "name": "TestReleaseE2ECapacityFixtureImportBoundary"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/releasee2e",
+            "name": "TestReleaseE2EImportBoundaryRejectsRuntimeAndUnscopedPlanning"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/releasee2e",
+            "name": "TestReleaseE2EPackageStaysAtPublicProcessBoundary"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime",
+        "run": "^(TestAgentLifecycleDependenciesAreExplicit|TestAgentManagerDeliveryRolesAreExplicit|TestAgentManagerPersistenceRolesAreExplicit|TestCanonicalEventCatalogCloneSeamRejectsReconstruction|TestChannelActivationExecutableReaderCensus|TestChannelActivationExecutionConsumersUseCanonicalOwner|TestEffectiveSourceHasNoChannelDeploymentInterpreter|TestEntityWorkspacePersistenceSeamIsRetired|TestEventBusConstructorsDoNotClassifyStoreCapabilities|TestEventBusDurableDependenciesAreExplicit|TestEventBusRoutePersistenceDependenciesAreExplicit|TestEventSchemaRequiredProjectionHasNoBehavioralConsumers|TestRawProjectFlowModeGuardDistinguishesMethodsFromFields|TestRegisteredToolSemanticReconstructionIsAbsent|TestRetiredFlattenedExecutableNodeReadersStayAbsent|TestRunScopedLiveIdentityStructuralRatchet|TestRuntimeContextLoadedStateHasOneVisibilityPublisher|TestRuntimeCorePersistenceRolesAreConstructorInputs|TestRuntimeSemanticModelsHaveSingleConsumerOwner|TestSchemaToolPlanPackagesRejectFreeSemanticStringsAndConsumerNormalization|TestSelectedContractExecutionUsesSemanticPorts|TestSelectedContractSourceLoaderIsExact|TestSemanticOwnershipProducerConsumerLedgerIsClosed|TestServeCompositionProvidesExactRuntimePorts|TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners|TestStructuralReadersDoNotConstructChannelActivation|TestUnleasedToolDefinitionReadersDoNotProjectChannelActivations|TestWorkflowMutationExecutorDoesNotEscapeOpaquePersistence|TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestAgentLifecycleDependenciesAreExplicit"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestAgentManagerDeliveryRolesAreExplicit"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestAgentManagerPersistenceRolesAreExplicit"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestCanonicalEventCatalogCloneSeamRejectsReconstruction"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestChannelActivationExecutableReaderCensus"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestChannelActivationExecutionConsumersUseCanonicalOwner"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestEffectiveSourceHasNoChannelDeploymentInterpreter"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestEntityWorkspacePersistenceSeamIsRetired"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestEventBusConstructorsDoNotClassifyStoreCapabilities"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestEventBusDurableDependenciesAreExplicit"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestEventBusRoutePersistenceDependenciesAreExplicit"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestEventSchemaRequiredProjectionHasNoBehavioralConsumers"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestRawProjectFlowModeGuardDistinguishesMethodsFromFields"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestRegisteredToolSemanticReconstructionIsAbsent"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestRetiredFlattenedExecutableNodeReadersStayAbsent"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestRunScopedLiveIdentityStructuralRatchet"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestRuntimeContextLoadedStateHasOneVisibilityPublisher"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestRuntimeCorePersistenceRolesAreConstructorInputs"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestRuntimeSemanticModelsHaveSingleConsumerOwner"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestSchemaToolPlanPackagesRejectFreeSemanticStringsAndConsumerNormalization"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestSelectedContractExecutionUsesSemanticPorts"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestSelectedContractSourceLoaderIsExact"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestSemanticOwnershipProducerConsumerLedgerIsClosed"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestServeCompositionProvidesExactRuntimePorts"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestStructuralReadersDoNotConstructChannelActivation"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestUnleasedToolDefinitionReadersDoNotProjectChannelActivations"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestWorkflowMutationExecutorDoesNotEscapeOpaquePersistence"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime",
+            "name": "TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/conformance",
+        "run": "^(TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/conformance",
+            "name": "TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/core/worklifetime",
+        "run": "^(TestProductionAsyncSitesAreClassified)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/core/worklifetime",
+            "name": "TestProductionAsyncSitesAreClassified"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/deliverycontinuation",
+        "run": "^(TestExecutableDeliveryContinuationHasClosedProductionConsumers)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/deliverycontinuation",
+            "name": "TestExecutableDeliveryContinuationHasClosedProductionConsumers"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/effects",
+        "run": "^(TestDirectPrimitiveOwnershipManifestIsTotal)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/effects",
+            "name": "TestDirectPrimitiveOwnershipManifestIsTotal"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/manager",
+        "run": "^(TestDynamicFlowRuntimeReadinessProductionConsumersStatic)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/manager",
+            "name": "TestDynamicFlowRuntimeReadinessProductionConsumersStatic"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+        "run": "^(TestSelectedForkReceiverOwnershipBoundary)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+            "name": "TestSelectedForkReceiverOwnershipBoundary",
+            "children": [
+              "hostile",
+              "production"
+            ]
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+        "run": "^(Test2376AdmissionSealsCompiledExecutionIdentity|TestAdmissionPreservesLoaderAdmittedEffectiveSourceContext|TestAdmissionRejectsIncompleteOrForeignBindings|TestAdmissionRequiresPositiveSealForEmptyProjection|TestAdmissionRetainsExactRunlessPromptWithoutPersistingIt|TestAdmissionSealsCompleteProjectionAndResolvedAgentAuthority|TestAdmissionSealsResolvedModelRevision|TestSelectedAgentConstructionUsesExactFixedHeader|TestSelectedConstructedActorProjectionCompleteCensus|TestSelectedContractAdmissionBindsHistoricalStateKindsAndPresence|TestSelectedContractHeaderMissingHistoricalEvidenceFailsClosed|TestSelectedContractHeaderRejectsEveryReceiverConfigCopy|TestSelectedContractRejectsContradictoryRecordedHeader|TestSelectedReadinessRequiresCompleteConstruction)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "Test2376AdmissionSealsCompiledExecutionIdentity"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "TestAdmissionPreservesLoaderAdmittedEffectiveSourceContext"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "TestAdmissionRejectsIncompleteOrForeignBindings"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "TestAdmissionRequiresPositiveSealForEmptyProjection"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "TestAdmissionRetainsExactRunlessPromptWithoutPersistingIt"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "TestAdmissionSealsCompleteProjectionAndResolvedAgentAuthority"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "TestAdmissionSealsResolvedModelRevision"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "TestSelectedAgentConstructionUsesExactFixedHeader"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "TestSelectedConstructedActorProjectionCompleteCensus"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "TestSelectedContractAdmissionBindsHistoricalStateKindsAndPresence"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "TestSelectedContractHeaderMissingHistoricalEvidenceFailsClosed"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "TestSelectedContractHeaderRejectsEveryReceiverConfigCopy"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "TestSelectedContractRejectsContradictoryRecordedHeader"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+            "name": "TestSelectedReadinessRequiresCompleteConstruction"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/serveapp",
+        "run": "^(TestRetiredBuilderNegativeControlReferenceCountRemainsExact|TestRetiredBuilderSemanticReferencesStayExplicit|TestRetiredDashboardBoundaryRejectsReintroduction|TestRetiredDashboardTransportCannotReturn)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/serveapp",
+            "name": "TestRetiredBuilderNegativeControlReferenceCountRemainsExact"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/serveapp",
+            "name": "TestRetiredBuilderSemanticReferencesStayExplicit"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/serveapp",
+            "name": "TestRetiredDashboardBoundaryRejectsReintroduction"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/serveapp",
+            "name": "TestRetiredDashboardTransportCannotReturn"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/store",
+        "run": "^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet|TestPersistenceAuthorityDebtRunFixturePolicyDestinationMatchesSource|TestPersistenceAuthorityFindingRegistry|TestPersistenceEffectiveMethodSetsDoNotExposeRawAuthority)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/store",
+            "name": "TestNativeFixtureFamiliesDoNotReceiveRawAuthority",
+            "children": [
+              "TestInboundSetupSeedDoesNotReceiveRawAuthority",
+              "TestNativeAPIReadSetupDoesNotReceiveRawAuthority",
+              "TestNativeActivitySetupDoesNotReceiveRawAuthority",
+              "TestNativeBookkeepingFixturesDoNotReceiveRawAuthority",
+              "TestNativeChannelTerminalFixturesDoNotReceiveRawAuthority",
+              "TestNativeHandlerFixturesDoNotReceiveRawAuthority",
+              "TestNativeJournalFixturesDoNotReceiveRawAuthority",
+              "TestNativeLookupMissFixturesDoNotReceiveRawAuthority",
+              "TestNativeLoopClaimFixturesDoNotReceiveRawAuthority",
+              "TestNativeMockFixturesDoNotReceiveRawAuthority",
+              "TestNativeMutationSeedFixturesDoNotReceiveRawAuthority",
+              "TestNativeProjectionHeaderFixturesDoNotReceiveRawAuthority",
+              "TestNativeProjectionRoundTripFixturesDoNotReceiveRawAuthority",
+              "TestNativeProjectionShapeFixturesDoNotReceiveRawAuthority",
+              "TestNativeProjectionStorageFixturesDoNotReceiveRawAuthority",
+              "TestNativeStorageIdentityFixturesDoNotReceiveRawAuthority"
+            ]
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store",
+            "name": "TestPersistenceAuthorityDebtRatchet"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store",
+            "name": "TestPersistenceAuthorityDebtRunFixturePolicyDestinationMatchesSource"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store",
+            "name": "TestPersistenceAuthorityFindingRegistry"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store",
+            "name": "TestPersistenceEffectiveMethodSetsDoNotExposeRawAuthority"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity",
+        "run": "^(TestOrderingScopeConstructorInventoryIsClosed)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity",
+            "name": "TestOrderingScopeConstructorInventoryIsClosed"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+        "run": "^(TestA2CollectionMinimalRunFixtureClassificationIsExact|TestActivityResultExistenceProjectionCannotOwnEventPayload|TestAgentTopologyMutationProductionConsumersStatic|TestBranchDivergenceMinimalRunFixtureClassificationIsExact|TestCandidateHandoffGuardRejectsDomainAssembler|TestCandidateHandoffRetryProtocolIsSoleAssembler|TestCounterRunOracleClassificationDoesNotPermitWriters|TestDevModeDoesNotImplicitlyAbandonRuns|TestEventAdmittedPersistenceBoundaryGuard|TestEventFixtureWritersUseSemanticOwners|TestExecutableDeliverySQLHasClosedOwners|TestHostileEventObservationMarkerClassificationIsExact|TestHostileEventRecordConsumerClassificationDoesNotGrantSQL|TestInboundStandingAdmissionConsumesCanonicalRestartDisposition|TestOperatorLineageHostileRunFixtureClassificationIsExact|TestOrdinaryForkAbsentCutFaultOwnsExactOriginCAS|TestReceiverHistoryMinimalRunFixtureClassificationIsExact|TestReplayScopesAreNotExecutableDeliveries|TestRepositoryEventBusSourceOperationLedgerHostileControls|TestRetiredGenericDeliveryReadersHaveNoProductionConsumers|TestRetiredStandingRestartInterpretersStayAbsent|TestRunForkRevisionAttemptResetOwnersAreClosed|TestRunForkRevisionEnumeratedWriterContributions|TestRunForkRevisionExactContributorGuardHostileControls|TestRunForkRevisionExactWriterContributions|TestRunForkRevisionExplicitBroadWriterContributions|TestRunForkRevisionFreshEffectsStayInsideRetryOwners|TestRunForkRevisionJoinedPhysicalWriterGuardHostileControls|TestRunForkRevisionProjectionContributorCensusIsClosed|TestRunForkRevisionRetiredEntityDiffGuardHostileControls|TestRunForkRevisionRetryOwnerGuardHostileControls|TestRunForkRevisionStateAccessorInventoryIsClosed|TestRunLifecycleCompletionReadsOnlyOwnerSummaries|TestRunLifecycleFixtureGuardRejectsSiblingWrites|TestRunLifecycleOwnershipBoundaryGuard|TestSelectedStoreAbstractionGuardMatrixCoversApprovedBoundary|TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs|TestSelectedStoreProofCensusRejectsForeignOnlyDeclaration|TestSemanticRunFixturesUseLifecycleOwner|TestStandingRestartClassificationHasOneProductionOwner|TestStandingRestartSchemaRejectsAutomaticRepair|TestUnrevisionedDeliveryFixtureSQLAllowanceIsExact|TestUnrevisionedEventFixtureConsumerAllowanceIsExact|TestUnrevisionedEventFixtureHasOnlyStoretestConsumers|TestUnrevisionedEventFixtureSQLAllowanceIsExact)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestA2CollectionMinimalRunFixtureClassificationIsExact"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestActivityResultExistenceProjectionCannotOwnEventPayload"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestAgentTopologyMutationProductionConsumersStatic"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestBranchDivergenceMinimalRunFixtureClassificationIsExact"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestCandidateHandoffGuardRejectsDomainAssembler"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestCandidateHandoffRetryProtocolIsSoleAssembler"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestCounterRunOracleClassificationDoesNotPermitWriters"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestDevModeDoesNotImplicitlyAbandonRuns"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestEventAdmittedPersistenceBoundaryGuard"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestEventFixtureWritersUseSemanticOwners"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestExecutableDeliverySQLHasClosedOwners"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestHostileEventObservationMarkerClassificationIsExact"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestHostileEventRecordConsumerClassificationDoesNotGrantSQL"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestInboundStandingAdmissionConsumesCanonicalRestartDisposition"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestOperatorLineageHostileRunFixtureClassificationIsExact"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestOrdinaryForkAbsentCutFaultOwnsExactOriginCAS"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestReceiverHistoryMinimalRunFixtureClassificationIsExact"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestReplayScopesAreNotExecutableDeliveries"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRepositoryEventBusSourceOperationLedgerHostileControls"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRetiredGenericDeliveryReadersHaveNoProductionConsumers"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRetiredStandingRestartInterpretersStayAbsent"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunForkRevisionAttemptResetOwnersAreClosed"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunForkRevisionEnumeratedWriterContributions"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunForkRevisionExactContributorGuardHostileControls"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunForkRevisionExactWriterContributions"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunForkRevisionExplicitBroadWriterContributions"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunForkRevisionFreshEffectsStayInsideRetryOwners"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunForkRevisionJoinedPhysicalWriterGuardHostileControls"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunForkRevisionProjectionContributorCensusIsClosed"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunForkRevisionRetiredEntityDiffGuardHostileControls"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunForkRevisionRetryOwnerGuardHostileControls"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunForkRevisionStateAccessorInventoryIsClosed"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunLifecycleCompletionReadsOnlyOwnerSummaries"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunLifecycleFixtureGuardRejectsSiblingWrites"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestRunLifecycleOwnershipBoundaryGuard"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestSelectedStoreAbstractionGuardMatrixCoversApprovedBoundary"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestSelectedStoreProofCensusRejectsForeignOnlyDeclaration"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestSemanticRunFixturesUseLifecycleOwner"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestStandingRestartClassificationHasOneProductionOwner"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestStandingRestartSchemaRejectsAutomaticRepair"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestUnrevisionedDeliveryFixtureSQLAllowanceIsExact"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestUnrevisionedEventFixtureConsumerAllowanceIsExact"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestUnrevisionedEventFixtureHasOnlyStoretestConsumers"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+            "name": "TestUnrevisionedEventFixtureSQLAllowanceIsExact"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/testplanning",
+        "run": "^(TestCurrentProofPlansBindActiveRequiredRoots|TestPreflightPlanIntegrityAndSourceRefusals|TestPreflightSelectionRefusesMissingDuplicateAndForeignRoots|TestPreflightStructuralSelectionUsesCanonicalOwner)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/testplanning",
+            "name": "TestCurrentProofPlansBindActiveRequiredRoots"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/testplanning",
+            "name": "TestPreflightPlanIntegrityAndSourceRefusals"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/testplanning",
+            "name": "TestPreflightSelectionRefusesMissingDuplicateAndForeignRoots"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/testplanning",
+            "name": "TestPreflightStructuralSelectionUsesCanonicalOwner"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/testtiming",
+        "run": "^(TestFailureLedgerFrozen2353SourceIndex|TestFailureLedgerMatchingNeverAdoptsForeignAttribution|TestFailureLedgerRefusesAmbiguousAndUnreviewedEvidence|TestFailurePopulationRetainsUnknownMixedAndEarlierAttempts|TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres|TestPreflightReportRefusesIncompleteAndForeignProof)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/testtiming",
+            "name": "TestFailureLedgerFrozen2353SourceIndex"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/testtiming",
+            "name": "TestFailureLedgerMatchingNeverAdoptsForeignAttribution"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/testtiming",
+            "name": "TestFailureLedgerRefusesAmbiguousAndUnreviewedEvidence"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/testtiming",
+            "name": "TestFailurePopulationRetainsUnknownMixedAndEarlierAttempts"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/testtiming",
+            "name": "TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres"
+          },
+          {
+            "package": "github.com/division-sh/swarm/internal/testtiming",
+            "name": "TestPreflightReportRefusesIncompleteAndForeignProof"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/internal/testutil",
+        "run": "^(TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/internal/testutil",
+            "name": "TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/scripts/rewrite-stages-2566",
+        "run": "^(TestRewrite2566NoFinalRootCensusIsExplicitlyClassified)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/scripts/rewrite-stages-2566",
+            "name": "TestRewrite2566NoFinalRootCensusIsExplicitlyClassified"
+          }
+        ]
+      },
+      {
+        "package": "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations",
+        "run": "^(TestNativeRunSetupWholeFamilySnapshotsAndHostility|TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork)$",
+        "required": [
+          {
+            "package": "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations",
+            "name": "TestNativeRunSetupWholeFamilySnapshotsAndHostility"
+          },
+          {
+            "package": "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations",
+            "name": "TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork"
+          }
+        ]
+      }
+    ],
+    "digest": "cfc6ecf9fddfbad047796b4f227866abef1cc98df451d5a5af7e304c71e6c3d0",
+    "comparison": {
+      "origin_master_sha": "909222b50cf88232d81af10b6fcc46ab78916fbe",
+      "diff_sha256": "09c27e6598ff19d46c26ddf6f370fee61d159f1dfd56659e4b6aa0eb64005c0b",
+      "debt_required": true
+    }
+  },
+  "attestation": {
+    "repository": "division-sh/swarm",
+    "repository_node_id": "R_kgDORZEbQw",
+    "attempt_id": "bce67a05-cdbe-48a1-b692-3e2cd4e65686",
+    "receipt_id": "20261018T171750.554106483-bce67a05-cdbe-48a1-b692-3e2cd4e65686",
+    "start_status_id": 56638174981
+  },
+  "started": "2026-10-18T17:17:50.554106483Z",
+  "end_to_end_seconds": 715.148968727,
+  "queue_wait_seconds": 0,
+  "execution_seconds": 707.7558231529999,
+  "cleanup_seconds": 0.0017161569999999998,
+  "setup_seconds": 7.391429417000073,
+  "complete": true,
+  "phases": [
+    {
+      "name": "format",
+      "args": [
+        "gofmt",
+        "-l",
+        "."
+      ],
+      "started": "2026-10-18T17:17:55.226808678Z",
+      "completed": "2026-10-18T17:17:56.75355959Z",
+      "seconds": 1.5267509019999999,
+      "setup_seconds": 0.04050154599999988,
+      "execution_seconds": 1.486191705,
+      "cleanup_seconds": 0.000057650999999999994,
+      "passed": true
+    },
+    {
+      "name": "openrpc",
+      "args": [
+        "go",
+        "run",
+        "./cmd/swarm-openrpc-gen",
+        "--check"
+      ],
+      "started": "2026-10-18T17:17:56.792443877Z",
+      "completed": "2026-10-18T17:17:57.127888915Z",
+      "seconds": 0.335445038,
+      "setup_seconds": 0.038879209,
+      "execution_seconds": 0.296532129,
+      "cleanup_seconds": 0.000033700000000000006,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/runtime/core/worklifetime",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestProductionAsyncSitesAreClassified)$",
+        "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+      ],
+      "started": "2026-10-18T17:17:57.167379826Z",
+      "completed": "2026-10-18T17:17:57.918106596Z",
+      "seconds": 0.75072678,
+      "setup_seconds": 0.03823646400000003,
+      "execution_seconds": 0.712450036,
+      "cleanup_seconds": 0.00004028,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/runtime/effects",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestDirectPrimitiveOwnershipManifestIsTotal)$",
+        "github.com/division-sh/swarm/internal/runtime/effects"
+      ],
+      "started": "2026-10-18T17:17:57.956927853Z",
+      "completed": "2026-10-18T17:17:58.693740005Z",
+      "seconds": 0.736812152,
+      "setup_seconds": 0.0576377610000001,
+      "execution_seconds": 0.6791223,
+      "cleanup_seconds": 0.000052091,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/runtime/deliverycontinuation",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestExecutableDeliveryContinuationHasClosedProductionConsumers)$",
+        "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
+      ],
+      "started": "2026-10-18T17:17:58.731270826Z",
+      "completed": "2026-10-18T17:18:00.044089891Z",
+      "seconds": 1.312819075,
+      "setup_seconds": 0.04342178200000007,
+      "execution_seconds": 1.2693212919999999,
+      "cleanup_seconds": 0.00007600099999999999,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/runtime/manager",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestDynamicFlowRuntimeReadinessProductionConsumersStatic)$",
+        "github.com/division-sh/swarm/internal/runtime/manager"
+      ],
+      "started": "2026-10-18T17:18:00.085849344Z",
+      "completed": "2026-10-18T17:18:17.331525746Z",
+      "seconds": 17.245676402,
+      "setup_seconds": 0.04924468599999952,
+      "execution_seconds": 17.196384165,
+      "cleanup_seconds": 0.000047551,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/testutil",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector)$",
+        "github.com/division-sh/swarm/internal/testutil"
+      ],
+      "started": "2026-10-18T17:18:17.370465894Z",
+      "completed": "2026-10-18T17:18:20.522290028Z",
+      "seconds": 3.151824144,
+      "setup_seconds": 0.041485121000000104,
+      "execution_seconds": 3.1102846729999998,
+      "cleanup_seconds": 0.00005435,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/scripts/rewrite-stages-2566",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestRewrite2566NoFinalRootCensusIsExplicitlyClassified)$",
+        "github.com/division-sh/swarm/scripts/rewrite-stages-2566"
+      ],
+      "started": "2026-10-18T17:18:20.562603754Z",
+      "completed": "2026-10-18T17:18:23.043562306Z",
+      "seconds": 2.480958562,
+      "setup_seconds": 0.04246566800000019,
+      "execution_seconds": 2.438431063,
+      "cleanup_seconds": 0.000061831,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestOrderingScopeConstructorInventoryIsClosed)$",
+        "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+      ],
+      "started": "2026-10-18T17:18:23.083560759Z",
+      "completed": "2026-10-18T17:18:25.33036675Z",
+      "seconds": 2.246805991,
+      "setup_seconds": 0.040560735999999806,
+      "execution_seconds": 2.206191394,
+      "cleanup_seconds": 0.000053861,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestFailureObservationRetainsNativeBoundaries)$",
+        "github.com/division-sh/swarm/cmd/swarm-test-timing"
+      ],
+      "started": "2026-10-18T17:18:25.37145301Z",
+      "completed": "2026-10-18T17:18:26.798532044Z",
+      "seconds": 1.4270790340000001,
+      "setup_seconds": 0.06071667900000007,
+      "execution_seconds": 1.366318415,
+      "cleanup_seconds": 0.00004394,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/testtiming",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestFailureLedgerFrozen2353SourceIndex|TestFailureLedgerMatchingNeverAdoptsForeignAttribution|TestFailureLedgerRefusesAmbiguousAndUnreviewedEvidence|TestFailurePopulationRetainsUnknownMixedAndEarlierAttempts|TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres|TestPreflightReportRefusesIncompleteAndForeignProof)$",
+        "github.com/division-sh/swarm/internal/testtiming"
+      ],
+      "started": "2026-10-18T17:18:26.85673129Z",
+      "completed": "2026-10-18T17:18:27.186811897Z",
+      "seconds": 0.330080597,
+      "setup_seconds": 0.044039307,
+      "execution_seconds": 0.28600253,
+      "cleanup_seconds": 0.000038759999999999995,
+      "passed": true
+    },
+    {
+      "name": "complexity",
+      "args": [
+        "go",
+        "run",
+        "./cmd/swarm-complexity",
+        "-head",
+        "5919825fcf057442f82b6556d231f2a513f8fe83",
+        "-base",
+        "909222b50cf88232d81af10b6fcc46ab78916fbe"
+      ],
+      "started": "2026-10-18T17:18:27.229073254Z",
+      "completed": "2026-10-18T17:18:37.675799874Z",
+      "seconds": 10.44672662,
+      "setup_seconds": 0.040751487999999905,
+      "execution_seconds": 10.405896961,
+      "cleanup_seconds": 0.00007817100000000001,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/cmd/swarm-test",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution|TestPreflightCurrentSourceUsesAllFiniteOwners)$",
+        "github.com/division-sh/swarm/cmd/swarm-test"
+      ],
+      "started": "2026-10-18T17:18:37.717027585Z",
+      "completed": "2026-10-18T17:18:54.244328486Z",
+      "seconds": 16.527300921,
+      "setup_seconds": 0.04494945199999739,
+      "execution_seconds": 16.482301059,
+      "cleanup_seconds": 0.00005041,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/cliapp",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestVerifyBootStartupPredicateCensus)$",
+        "github.com/division-sh/swarm/internal/cliapp"
+      ],
+      "started": "2026-10-18T17:18:54.286702633Z",
+      "completed": "2026-10-18T17:18:57.78753923Z",
+      "seconds": 3.500836607,
+      "setup_seconds": 0.04081441700000027,
+      "execution_seconds": 3.459958649,
+      "cleanup_seconds": 0.00006354100000000001,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/releasee2e",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestReleaseE2ECapacityFixtureImportBoundary|TestReleaseE2EImportBoundaryRejectsRuntimeAndUnscopedPlanning|TestReleaseE2EPackageStaysAtPublicProcessBoundary)$",
+        "github.com/division-sh/swarm/internal/releasee2e"
+      ],
+      "started": "2026-10-18T17:18:57.829115303Z",
+      "completed": "2026-10-18T17:19:00.179927026Z",
+      "seconds": 2.350811713,
+      "setup_seconds": 0.042426437999999914,
+      "execution_seconds": 2.3083142150000002,
+      "cleanup_seconds": 0.00007106,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/runtime",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestAgentLifecycleDependenciesAreExplicit|TestAgentManagerDeliveryRolesAreExplicit|TestAgentManagerPersistenceRolesAreExplicit|TestCanonicalEventCatalogCloneSeamRejectsReconstruction|TestChannelActivationExecutableReaderCensus|TestChannelActivationExecutionConsumersUseCanonicalOwner|TestEffectiveSourceHasNoChannelDeploymentInterpreter|TestEntityWorkspacePersistenceSeamIsRetired|TestEventBusConstructorsDoNotClassifyStoreCapabilities|TestEventBusDurableDependenciesAreExplicit|TestEventBusRoutePersistenceDependenciesAreExplicit|TestEventSchemaRequiredProjectionHasNoBehavioralConsumers|TestRawProjectFlowModeGuardDistinguishesMethodsFromFields|TestRegisteredToolSemanticReconstructionIsAbsent|TestRetiredFlattenedExecutableNodeReadersStayAbsent|TestRunScopedLiveIdentityStructuralRatchet|TestRuntimeContextLoadedStateHasOneVisibilityPublisher|TestRuntimeCorePersistenceRolesAreConstructorInputs|TestRuntimeSemanticModelsHaveSingleConsumerOwner|TestSchemaToolPlanPackagesRejectFreeSemanticStringsAndConsumerNormalization|TestSelectedContractExecutionUsesSemanticPorts|TestSelectedContractSourceLoaderIsExact|TestSemanticOwnershipProducerConsumerLedgerIsClosed|TestServeCompositionProvidesExactRuntimePorts|TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners|TestStructuralReadersDoNotConstructChannelActivation|TestUnleasedToolDefinitionReadersDoNotProjectChannelActivations|TestWorkflowMutationExecutorDoesNotEscapeOpaquePersistence|TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape)$",
+        "github.com/division-sh/swarm/internal/runtime"
+      ],
+      "started": "2026-10-18T17:19:00.22346913Z",
+      "completed": "2026-10-18T17:19:12.254905655Z",
+      "seconds": 12.031436535,
+      "setup_seconds": 0.04495429099999888,
+      "execution_seconds": 11.986409604,
+      "cleanup_seconds": 0.00007264,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/runtime/conformance",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified)$",
+        "github.com/division-sh/swarm/internal/runtime/conformance"
+      ],
+      "started": "2026-10-18T17:19:12.300604222Z",
+      "completed": "2026-10-18T17:22:37.742569673Z",
+      "seconds": 205.441965451,
+      "setup_seconds": 0.03924030899999702,
+      "execution_seconds": 205.402661632,
+      "cleanup_seconds": 0.00006351000000000001,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/runtime/runforkexecution",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestSelectedForkReceiverOwnershipBoundary)$",
+        "github.com/division-sh/swarm/internal/runtime/runforkexecution"
+      ],
+      "started": "2026-10-18T17:22:37.781458681Z",
+      "completed": "2026-10-18T17:22:43.866686487Z",
+      "seconds": 6.085227806,
+      "setup_seconds": 0.03889747799999979,
+      "execution_seconds": 6.046274017,
+      "cleanup_seconds": 0.000056311,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/runtime/runforkreadiness",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(Test2376AdmissionSealsCompiledExecutionIdentity|TestAdmissionPreservesLoaderAdmittedEffectiveSourceContext|TestAdmissionRejectsIncompleteOrForeignBindings|TestAdmissionRequiresPositiveSealForEmptyProjection|TestAdmissionRetainsExactRunlessPromptWithoutPersistingIt|TestAdmissionSealsCompleteProjectionAndResolvedAgentAuthority|TestAdmissionSealsResolvedModelRevision|TestSelectedAgentConstructionUsesExactFixedHeader|TestSelectedConstructedActorProjectionCompleteCensus|TestSelectedContractAdmissionBindsHistoricalStateKindsAndPresence|TestSelectedContractHeaderMissingHistoricalEvidenceFailsClosed|TestSelectedContractHeaderRejectsEveryReceiverConfigCopy|TestSelectedContractRejectsContradictoryRecordedHeader|TestSelectedReadinessRequiresCompleteConstruction)$",
+        "github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+      ],
+      "started": "2026-10-18T17:22:43.905423154Z",
+      "completed": "2026-10-18T17:22:49.00231755Z",
+      "seconds": 5.096894396,
+      "setup_seconds": 0.04441157799999948,
+      "execution_seconds": 5.052396337,
+      "cleanup_seconds": 0.000086481,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/serveapp",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestRetiredBuilderNegativeControlReferenceCountRemainsExact|TestRetiredBuilderSemanticReferencesStayExplicit|TestRetiredDashboardBoundaryRejectsReintroduction|TestRetiredDashboardTransportCannotReturn)$",
+        "github.com/division-sh/swarm/internal/serveapp"
+      ],
+      "started": "2026-10-18T17:22:49.041938661Z",
+      "completed": "2026-10-18T17:22:58.502743462Z",
+      "seconds": 9.460804791,
+      "setup_seconds": 0.04159404199999999,
+      "execution_seconds": 9.419149088,
+      "cleanup_seconds": 0.000061661,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/store",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-timeout=20m",
+        "-run",
+        "^(TestNativeFixtureFamiliesDoNotReceiveRawAuthority|TestPersistenceAuthorityDebtRatchet|TestPersistenceAuthorityDebtRunFixturePolicyDestinationMatchesSource|TestPersistenceAuthorityFindingRegistry|TestPersistenceEffectiveMethodSetsDoNotExposeRawAuthority)$",
+        "github.com/division-sh/swarm/internal/store"
+      ],
+      "started": "2026-10-18T17:22:58.542475415Z",
+      "completed": "2026-10-18T17:25:41.25443672Z",
+      "seconds": 162.711961365,
+      "setup_seconds": 0.04226270600000556,
+      "execution_seconds": 162.669628418,
+      "cleanup_seconds": 0.000070241,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestA2CollectionMinimalRunFixtureClassificationIsExact|TestActivityResultExistenceProjectionCannotOwnEventPayload|TestAgentTopologyMutationProductionConsumersStatic|TestBranchDivergenceMinimalRunFixtureClassificationIsExact|TestCandidateHandoffGuardRejectsDomainAssembler|TestCandidateHandoffRetryProtocolIsSoleAssembler|TestCounterRunOracleClassificationDoesNotPermitWriters|TestDevModeDoesNotImplicitlyAbandonRuns|TestEventAdmittedPersistenceBoundaryGuard|TestEventFixtureWritersUseSemanticOwners|TestExecutableDeliverySQLHasClosedOwners|TestHostileEventObservationMarkerClassificationIsExact|TestHostileEventRecordConsumerClassificationDoesNotGrantSQL|TestInboundStandingAdmissionConsumesCanonicalRestartDisposition|TestOperatorLineageHostileRunFixtureClassificationIsExact|TestOrdinaryForkAbsentCutFaultOwnsExactOriginCAS|TestReceiverHistoryMinimalRunFixtureClassificationIsExact|TestReplayScopesAreNotExecutableDeliveries|TestRepositoryEventBusSourceOperationLedgerHostileControls|TestRetiredGenericDeliveryReadersHaveNoProductionConsumers|TestRetiredStandingRestartInterpretersStayAbsent|TestRunForkRevisionAttemptResetOwnersAreClosed|TestRunForkRevisionEnumeratedWriterContributions|TestRunForkRevisionExactContributorGuardHostileControls|TestRunForkRevisionExactWriterContributions|TestRunForkRevisionExplicitBroadWriterContributions|TestRunForkRevisionFreshEffectsStayInsideRetryOwners|TestRunForkRevisionJoinedPhysicalWriterGuardHostileControls|TestRunForkRevisionProjectionContributorCensusIsClosed|TestRunForkRevisionRetiredEntityDiffGuardHostileControls|TestRunForkRevisionRetryOwnerGuardHostileControls|TestRunForkRevisionStateAccessorInventoryIsClosed|TestRunLifecycleCompletionReadsOnlyOwnerSummaries|TestRunLifecycleFixtureGuardRejectsSiblingWrites|TestRunLifecycleOwnershipBoundaryGuard|TestSelectedStoreAbstractionGuardMatrixCoversApprovedBoundary|TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs|TestSelectedStoreProofCensusRejectsForeignOnlyDeclaration|TestSemanticRunFixturesUseLifecycleOwner|TestStandingRestartClassificationHasOneProductionOwner|TestStandingRestartSchemaRejectsAutomaticRepair|TestUnrevisionedDeliveryFixtureSQLAllowanceIsExact|TestUnrevisionedEventFixtureConsumerAllowanceIsExact|TestUnrevisionedEventFixtureHasOnlyStoretestConsumers|TestUnrevisionedEventFixtureSQLAllowanceIsExact)$",
+        "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
+      ],
+      "started": "2026-10-18T17:25:41.297975923Z",
+      "completed": "2026-10-18T17:27:08.450337643Z",
+      "seconds": 87.15236172,
+      "setup_seconds": 0.2567613739999976,
+      "execution_seconds": 86.895332483,
+      "cleanup_seconds": 0.00026786299999999997,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/internal/testplanning",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestCurrentProofPlansBindActiveRequiredRoots|TestPreflightPlanIntegrityAndSourceRefusals|TestPreflightSelectionRefusesMissingDuplicateAndForeignRoots|TestPreflightStructuralSelectionUsesCanonicalOwner)$",
+        "github.com/division-sh/swarm/internal/testplanning"
+      ],
+      "started": "2026-10-18T17:27:08.493482445Z",
+      "completed": "2026-10-18T17:27:19.638613678Z",
+      "seconds": 11.145131233,
+      "setup_seconds": 0.051766220000000134,
+      "execution_seconds": 11.093293232,
+      "cleanup_seconds": 0.000071781,
+      "passed": true
+    },
+    {
+      "name": "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations",
+      "args": [
+        "go",
+        "test",
+        "-json",
+        "-count=1",
+        "-run",
+        "^(TestNativeRunSetupWholeFamilySnapshotsAndHostility|TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork)$",
+        "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations"
+      ],
+      "started": "2026-10-18T17:27:19.692270168Z",
+      "completed": "2026-10-18T17:27:28.127054518Z",
+      "seconds": 8.43478435,
+      "setup_seconds": 0.06667987399999976,
+      "execution_seconds": 8.368034276,
+      "cleanup_seconds": 0.0000702,
+      "passed": true
+    },
+    {
+      "name": "vet",
+      "args": [
+        "go",
+        "vet",
+        "./..."
+      ],
+      "started": "2026-10-18T17:27:28.224606254Z",
+      "completed": "2026-10-18T17:29:45.70303517Z",
+      "seconds": 137.478428906,
+      "setup_seconds": 0.359413154999992,
+      "execution_seconds": 137.11894348,
+      "cleanup_seconds": 0.000072271,
+      "passed": true
+    }
+  ],
+  "unstarted": []
+}

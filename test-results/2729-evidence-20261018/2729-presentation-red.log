@@ -1,0 +1,8 @@
+Precompile outside test slot: environment=0.003s build=30.420s cleanup=0.000s total=30.423s
+Test slot acquired after 9ms. Starting go test ./internal/serveapp -run ^TestServeLifecyclePresenterConciseReadinessUsesTypedFacts$ -count=1
+--- FAIL: TestServeLifecyclePresenterConciseReadinessUsesTypedFacts (0.00s)
+    serve_lifecycle_presentation_test.go:59: serve presenter omits required credential source facts
+FAIL
+FAIL	github.com/division-sh/swarm/internal/serveapp	0.008s
+FAIL
+exit status 1

@@ -1,0 +1,8 @@
+Precompile outside test slot: environment=0.003s build=7.166s cleanup=0.000s total=7.169s
+Test slot acquired after 13ms. Starting go test ./internal/runtime/credentials ./internal/runtime/bootverify ./internal/runtime/llm ./internal/runtime ./internal/cliapp ./internal/serveapp -run Credential|SecretBinding|Secrets|TestDoctorIsSourceFreeAcrossHostileInvocationTrees|TestServeLifecyclePresenter|TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces -count=1
+ok  	github.com/division-sh/swarm/internal/runtime/credentials	0.554s
+ok  	github.com/division-sh/swarm/internal/runtime/bootverify	4.362s
+ok  	github.com/division-sh/swarm/internal/runtime/llm	0.089s
+ok  	github.com/division-sh/swarm/internal/runtime	13.053s
+ok  	github.com/division-sh/swarm/internal/cliapp	0.592s
+ok  	github.com/division-sh/swarm/internal/serveapp	65.076s

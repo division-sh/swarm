@@ -1,0 +1,12 @@
+Precompile outside test slot: environment=0.003s build=28.808s cleanup=0.000s total=28.811s
+Test slot acquired after 25ms. Starting go test ./internal/runtime/credentials ./internal/runtime/bootverify ./internal/runtime ./internal/cliapp ./internal/serveapp -run ^(TestCredentialValueCurrentnessHasOneProductionOwnerAndNoEpochSurvivors|TestChannelConfirmationConsumesOneSealValidatedCredentialObservation|TestIngressSigningUsabilityHasNoSecondProductionInterpreter|TestChannelActivationExecutableReaderCensus|TestChannelActivationExecutionConsumersUseCanonicalOwner|TestWorkflowAdmissionAccountsForPostRegistryClauses|TestRuntimeDepsValidateOwnsRequiredBootInputs|TestRuntimeDepsValidatedDerivesCanonicalBootGraph|TestSemanticOwnershipProducerConsumerLedgerIsClosed|TestCLIIdentifierRegistry.*|TestCLIOutputConformanceRegistry.*|TestVerifyBootStartupPredicateCensus|TestSwarmEnvGuard.*|TestServeLifecycleOwnerRejectsParallelTerminalWriters|TestPlatformSpecOwnsServeLifecycleAndDoctorSchemaPresentation|TestAdmissionReportAccountsForEveryRegisteredClause|TestCredentialAdmission.*)$ -count=1
+ok  	github.com/division-sh/swarm/internal/runtime/credentials	0.276s
+ok  	github.com/division-sh/swarm/internal/runtime/bootverify	0.008s
+ok  	github.com/division-sh/swarm/internal/runtime	1.726s
+--- FAIL: TestVerifyBootStartupPredicateCensus (0.08s)
+    verify_predicate_census_test.go:193: startup predicate/consumer changed: internal/cliapp/local_preflight.go::*LocalPreflightReport.checkContractSecrets; refresh owner, callers and execution proof for A15,A16,A17,A18,A27 (P13,P14,P15,P16), not merely the check registry
+FAIL
+FAIL	github.com/division-sh/swarm/internal/cliapp	0.276s
+ok  	github.com/division-sh/swarm/internal/serveapp	0.097s
+FAIL
+exit status 1

@@ -1,0 +1,38 @@
+Precompile outside test slot: environment=0.003s build=10.748s cleanup=0.000s total=10.752s
+Test slot acquired after 15ms. Starting go test ./internal/serveapp -run ^TestServeRequiredCredentialSourceReadbackBothStores$ -count=1 -v
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/sqlite
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/sqlite/concise
+    clock_schedule_supported_surface_test.go:42: Run exited before ready line with code 1
+        output:
+        ERROR: serve failed · config load · swarm.yaml config blockers:; /tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteconci716298950/006/swarm.yaml:channels.bindings.source-proof.credentials: unknown config key "channels.bindings.source-proof.credentials" (line 19, column 7) Valid fields: destination, pack. Use one of the supported config fields.; remediation: Use one of the supported config fields.
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/sqlite/verbose
+    clock_schedule_supported_surface_test.go:42: Run exited before ready line with code 1
+        output:
+        [1/22] process_start                      ok
+        [2/22] config_load                        FAILED  (swarm.yaml config blockers:
+        /tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteverbo2861874806/006/swarm.yaml:channels.bindings.source-proof.credentials: unknown config key "channels.bindings.source-proof.credentials" (line 19, column 7) Valid fields: destination, pack. Use one of the supported config fields.; remediation: Use one of the supported config fields.)
+        ERROR: serve failed · config load · swarm.yaml config blockers:; /tmp/TestServeRequiredCredentialSourceReadbackBothStoressqliteverbo2861874806/006/swarm.yaml:channels.bindings.source-proof.credentials: unknown config key "channels.bindings.source-proof.credentials" (line 19, column 7) Valid fields: destination, pack. Use one of the supported config fields.; remediation: Use one of the supported config fields.
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/postgres
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/postgres/concise
+    clock_schedule_supported_surface_test.go:42: Run exited before ready line with code 1
+        output:
+        ERROR: serve failed · config load · swarm.yaml config blockers:; /tmp/TestServeRequiredCredentialSourceReadbackBothStorespostgrescon9705357/005/swarm-postgres.yaml:channels.bindings.source-proof.credentials: unknown config key "channels.bindings.source-proof.credentials" (line 28, column 7) Valid fields: destination, pack. Use one of the supported config fields.; remediation: Use one of the supported config fields.
+=== RUN   TestServeRequiredCredentialSourceReadbackBothStores/postgres/verbose
+    clock_schedule_supported_surface_test.go:42: Run exited before ready line with code 1
+        output:
+        [1/22] process_start                      ok
+        [2/22] config_load                        FAILED  (swarm.yaml config blockers:
+        /tmp/TestServeRequiredCredentialSourceReadbackBothStorespostgresver257553376/005/swarm-postgres.yaml:channels.bindings.source-proof.credentials: unknown config key "channels.bindings.source-proof.credentials" (line 28, column 7) Valid fields: destination, pack. Use one of the supported config fields.; remediation: Use one of the supported config fields.)
+        ERROR: serve failed · config load · swarm.yaml config blockers:; /tmp/TestServeRequiredCredentialSourceReadbackBothStorespostgresver257553376/005/swarm-postgres.yaml:channels.bindings.source-proof.credentials: unknown config key "channels.bindings.source-proof.credentials" (line 28, column 7) Valid fields: destination, pack. Use one of the supported config fields.; remediation: Use one of the supported config fields.
+--- FAIL: TestServeRequiredCredentialSourceReadbackBothStores (0.71s)
+    --- FAIL: TestServeRequiredCredentialSourceReadbackBothStores/sqlite (0.03s)
+        --- FAIL: TestServeRequiredCredentialSourceReadbackBothStores/sqlite/concise (0.03s)
+        --- FAIL: TestServeRequiredCredentialSourceReadbackBothStores/sqlite/verbose (0.00s)
+    --- FAIL: TestServeRequiredCredentialSourceReadbackBothStores/postgres (0.69s)
+        --- FAIL: TestServeRequiredCredentialSourceReadbackBothStores/postgres/concise (0.60s)
+        --- FAIL: TestServeRequiredCredentialSourceReadbackBothStores/postgres/verbose (0.09s)
+FAIL
+FAIL	github.com/division-sh/swarm/internal/serveapp	0.723s
+FAIL
+exit status 1

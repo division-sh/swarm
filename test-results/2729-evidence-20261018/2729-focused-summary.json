@@ -1,0 +1,96 @@
+{
+  "file": "test-results/2729-rebased-focused-and-guards.jsonl",
+  "roots": 73,
+  "cases": 133,
+  "fails": 0,
+  "skips": 0,
+  "served": [
+    {
+      "Time": "2026-10-18T17:17:18.769033181Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/serveapp",
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores/sqlite/concise",
+      "Elapsed": 0.93
+    },
+    {
+      "Time": "2026-10-18T17:17:19.340298168Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/serveapp",
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores/sqlite/verbose",
+      "Elapsed": 0.57
+    },
+    {
+      "Time": "2026-10-18T17:17:19.340309298Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/serveapp",
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores/sqlite",
+      "Elapsed": 1.5
+    },
+    {
+      "Time": "2026-10-18T17:17:20.242247234Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/serveapp",
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores/postgres/concise",
+      "Elapsed": 0.9
+    },
+    {
+      "Time": "2026-10-18T17:17:20.711308928Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/serveapp",
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores/postgres/verbose",
+      "Elapsed": 0.47
+    },
+    {
+      "Time": "2026-10-18T17:17:20.711320378Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/serveapp",
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores/postgres",
+      "Elapsed": 1.37
+    },
+    {
+      "Time": "2026-10-18T17:17:20.711336718Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/serveapp",
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores",
+      "Elapsed": 2.87
+    }
+  ],
+  "packages": [
+    {
+      "Time": "2026-10-18T17:17:16.732518366Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/runtime/credentials",
+      "Elapsed": 0.365
+    },
+    {
+      "Time": "2026-10-18T17:17:16.784675598Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/runtime/llm",
+      "Elapsed": 0.01
+    },
+    {
+      "Time": "2026-10-18T17:17:16.785339582Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/runtime/bootverify",
+      "Elapsed": 0.011
+    },
+    {
+      "Time": "2026-10-18T17:17:18.13790949Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/cliapp",
+      "Elapsed": 0.488
+    },
+    {
+      "Time": "2026-10-18T17:17:19.372194726Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/runtime",
+      "Elapsed": 1.903
+    },
+    {
+      "Time": "2026-10-18T17:17:20.810368563Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/serveapp",
+      "Elapsed": 2.98
+    }
+  ]
+}

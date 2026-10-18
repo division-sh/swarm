@@ -1,0 +1,6 @@
+<!-- receipt v1 -->
+receipt: head=5919825fcf057442f82b6556d231f2a513f8fe83 tree=e37fe94e564750eee5f166b4a77d656bff42db53 parent=909222b50cf88232d81af10b6fcc46ab78916fbe branch=agent-d/2729-credential-source signed=G dirty_files=0
+preflight: test-results/preflight/20261018T171750.554106483-bce67a05-cdbe-48a1-b692-3e2cd4e65686/receipt.json sha256=faf06c8a708aa31af801c617a3a09863bdcc2779a0999d43acca84de43c07ae8 (exact-head complete unstarted=0)
+tests: 2729 Gate D source 5919825fcf: named RED to GREEN; owner/currentness/provider and source-free/redaction controls PASS; both-store concise/verbose served proof PASS; race x3 carried across identical-patch clean rebase; 73 roots/133 cases exact-head focused+guards PASS; emitted lifecycle memberships verified; exact-head preflight PASS; no PR push or hosted dispatch
+regenerated: not-claimed
+generated: 2026-10-18T17:30:11Z

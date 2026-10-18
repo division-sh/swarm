@@ -1,0 +1,28 @@
+Precompile outside test slot: environment=0.004s build=62.808s cleanup=0.000s total=62.812s
+Test slot acquired after 9ms. Starting go test ./internal/runtime/credentials ./internal/runtime/llm ./internal/runtime/bootverify ./internal/cliapp ./internal/serveapp -run CredentialSnapshot|SecretBindingProjection|ProviderCredential|TestCredentialChecksRetainAgentFreeToolRequirement|TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment|TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces|TestServeRequiredCredentialSourceReadbackBothStores|TestServeLifecyclePresenterConciseReadinessUsesTypedFacts -race -count=3
+ok  	github.com/division-sh/swarm/internal/runtime/credentials	1.093s
+ok  	github.com/division-sh/swarm/internal/runtime/llm	2.083s
+ok  	github.com/division-sh/swarm/internal/runtime/bootverify	1.737s
+--- FAIL: TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment (0.00s)
+    --- FAIL: TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment/preflight_uses_required_observations_only (0.00s)
+panic: input_schema: $ schema is missing [recovered, repanicked]
+
+goroutine 36 [running]:
+testing.tRunner.func1.2({0x58ad940, 0xc0003d0160})
+	/home/youmew/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.8.linux-amd64/src/testing/testing.go:1974 +0x419
+testing.tRunner.func1()
+	/home/youmew/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.8.linux-amd64/src/testing/testing.go:1977 +0x67f
+panic({0x58ad940?, 0xc0003d0160?})
+	/home/youmew/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.8.linux-amd64/src/runtime/panic.go:860 +0x13a
+github.com/division-sh/swarm/internal/runtime/contracts.MustToolSchemaEntry(...)
+	/home/youmew/dev/wt/agent-d/scratch/internal/runtime/contracts/tool_schema_entry_value.go:308
+github.com/division-sh/swarm/internal/cliapp.TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment.func2(0xc0002f7688)
+	/home/youmew/dev/wt/agent-d/scratch/internal/cliapp/credential_stores_test.go:88 +0xb6e
+testing.tRunner(0xc0002f7688, 0xc000017128)
+	/home/youmew/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.8.linux-amd64/src/testing/testing.go:2036 +0x21d
+created by testing.(*T).Run in goroutine 35
+	/home/youmew/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.8.linux-amd64/src/testing/testing.go:2101 +0xb13
+FAIL	github.com/division-sh/swarm/internal/cliapp	2.893s
+ok  	github.com/division-sh/swarm/internal/serveapp	46.306s
+FAIL
+exit status 1

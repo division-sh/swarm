@@ -1,0 +1,15 @@
+Precompile outside test slot: environment=0.003s build=3.678s cleanup=0.000s total=3.681s
+Test slot acquired after 9ms. Starting go test ./internal/runtime/llm -run ^TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles$ -count=1
+--- FAIL: TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles (0.00s)
+    --- FAIL: TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles/anthropic (0.00s)
+        provider_credentials_test.go:61: provider value and source bypass the same atomic observation
+    --- FAIL: TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles/claude_cli (0.00s)
+        provider_credentials_test.go:61: provider value and source bypass the same atomic observation
+    --- FAIL: TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles/openai_compatible (0.00s)
+        provider_credentials_test.go:61: provider value and source bypass the same atomic observation
+    --- FAIL: TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles/openai_responses (0.00s)
+        provider_credentials_test.go:61: provider value and source bypass the same atomic observation
+FAIL
+FAIL	github.com/division-sh/swarm/internal/runtime/llm	0.007s
+FAIL
+exit status 1

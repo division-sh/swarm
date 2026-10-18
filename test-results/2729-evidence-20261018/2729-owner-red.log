@@ -1,0 +1,21 @@
+Precompile outside test slot: environment=0.003s build=2.427s cleanup=0.000s total=2.431s
+Test capacity is busy.
+Queue position: 2
+Active slots: 3/3
+Estimated start: unknown
+Estimated completion: unknown
+Waiting for a test slot... updates every 30s
+Test capacity is busy.
+Queue position: 2
+Active slots: 3/3
+Estimated start: unknown
+Estimated completion: unknown
+Waiting for a test slot... updates every 30s
+Test slot acquired after 57s. Starting go test ./internal/runtime/credentials -run ^TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically$ -count=1
+--- FAIL: TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically (0.00s)
+    --- FAIL: TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically/source_locator_is_not_authority (0.00s)
+        snapshot_test.go:398: credential observation lacks its winning source reference
+FAIL
+FAIL	github.com/division-sh/swarm/internal/runtime/credentials	0.006s
+FAIL
+exit status 1

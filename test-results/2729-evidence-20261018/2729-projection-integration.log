@@ -1,0 +1,13 @@
+Precompile outside test slot: environment=0.003s build=24.926s cleanup=0.000s total=24.929s
+Precompile compile tests diagnostics (not test evidence):
+ok  	github.com/division-sh/swarm/internal/runtime/credentials	0.001s
+ok  	github.com/division-sh/swarm/internal/runtime/bootverify	0.001s
+ok  	github.com/division-sh/swarm/internal/runtime/llm	0.001s
+ok  	github.com/division-sh/swarm/internal/runtime	0.001s
+FAIL	github.com/division-sh/swarm/internal/cliapp [build failed]
+FAIL	github.com/division-sh/swarm/internal/serveapp [build failed]
+FAIL
+# github.com/division-sh/swarm/internal/cliapp
+internal/cliapp/bundle_packs.go:31:19: assignment mismatch: 2 variables but compileChannelBindings returns 3 values
+precompile before test admission: compile tests: exit status 1
+exit status 1

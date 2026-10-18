@@ -1,0 +1,47 @@
+[
+  {
+    "unit": "broad-08",
+    "package": "github.com/division-sh/swarm/internal/runtime/bootverify",
+    "name": "TestCredentialChecksRetainAgentFreeToolRequirement"
+  },
+  {
+    "unit": "broad-10",
+    "package": "github.com/division-sh/swarm/internal/runtime/credentials",
+    "name": "TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically"
+  },
+  {
+    "unit": "catalog-required-verify",
+    "package": "github.com/division-sh/swarm/internal/cliapp",
+    "name": "TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces"
+  },
+  {
+    "unit": "catalog-required-verify",
+    "package": "github.com/division-sh/swarm/internal/cliapp",
+    "name": "TestDoctorIsSourceFreeAcrossHostileInvocationTrees"
+  },
+  {
+    "unit": "catalog-required-verify",
+    "package": "github.com/division-sh/swarm/internal/cliapp",
+    "name": "TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment"
+  },
+  {
+    "unit": "catalog-required-verify",
+    "package": "github.com/division-sh/swarm/internal/cliapp",
+    "name": "TestVerifyBootStartupPredicateCensus"
+  },
+  {
+    "unit": "runtime-full",
+    "package": "github.com/division-sh/swarm/internal/runtime",
+    "name": "TestWorkflowAdmissionAccountsForPostRegistryClauses"
+  },
+  {
+    "unit": "api-llm-bus-full",
+    "package": "github.com/division-sh/swarm/internal/runtime/llm",
+    "name": "TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles"
+  },
+  {
+    "unit": "serveapp-journeys-first",
+    "package": "github.com/division-sh/swarm/internal/serveapp",
+    "name": "TestServeRequiredCredentialSourceReadbackBothStores"
+  }
+]

@@ -1,0 +1,8 @@
+Precompile outside test slot: environment=0.003s build=14.166s cleanup=0.000s total=14.169s
+Test slot acquired after 1ms. Starting go test ./internal/runtime/credentials ./internal/runtime/bootverify ./internal/runtime/llm ./internal/runtime ./internal/cliapp ./internal/serveapp -run ^(TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically|TestServeLifecyclePresenterConciseReadinessUsesTypedFacts|TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment|TestDoctorIsSourceFreeAcrossHostileInvocationTrees|TestCommandMockStartupDoesNotRequireLiveCredential|TestCommandLiveStartupRequiresCredentialDespiteSourceDoubles|TestValidateSelectedBackendCredentialForDeclaredAgents_UnmockedAgentWithCredentialPasses)$ -count=1
+ok  	github.com/division-sh/swarm/internal/runtime/credentials	0.038s
+ok  	github.com/division-sh/swarm/internal/runtime/bootverify	0.024s [no tests to run]
+ok  	github.com/division-sh/swarm/internal/runtime/llm	0.021s [no tests to run]
+ok  	github.com/division-sh/swarm/internal/runtime	0.177s
+ok  	github.com/division-sh/swarm/internal/cliapp	0.204s
+ok  	github.com/division-sh/swarm/internal/serveapp	0.010s
