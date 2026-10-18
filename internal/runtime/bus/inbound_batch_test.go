@@ -119,6 +119,48 @@ func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthori
 	if got := len(plan.CommitCommands()); got != 2 {
 		t.Fatalf("CommitCommands = %d, want 2", got)
 	}
+	for _, command := range plan.CommitCommands() {
+		if err := command.ValidateInbound(plan.Admission()); err != nil {
+			t.Fatalf("sealed inbound command: %v", err)
+		}
+		if err := command.Validate(); err == nil {
+			t.Fatal("fresh inbound command entered generic publication")
+		}
+		unsealed := command
+		unsealed.Commit.inbound = nil
+		if err := unsealed.Validate(); err == nil {
+			t.Fatal("removing the seal admitted fresh provider input")
+		}
+
+		original := command.Commit.Event.Event()
+		replay, err := events.NewReplayEvent(events.ReplayEventInput{
+			Facts: events.EventFacts{
+				ID: eventtest.UUID("provider-replay-" + original.ID()), Type: original.Type(),
+				Producer: events.ProducerClaim{Type: original.ProducerType(), ID: original.SourceAgent()},
+				Payload:  original.Payload(), Envelope: original.Envelope(), RoutingSource: original.RoutingSource(),
+				CreatedAt: original.CreatedAt().Add(time.Second), ExecutionMode: original.ExecutionMode(),
+			},
+			Lineage: events.EventLineage{RunID: original.RunID(), ParentEventID: original.ID(), ExecutionMode: original.ExecutionMode()},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		admitted, err := events.AdmitForPersistence(replay, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		replayCommand := unsealed
+		replayCommand.Commit.Event = admitted
+		replayCommand.Activations = nil
+		replayCommand.StageFeedback = nil
+		if err := replayCommand.Validate(); err != nil {
+			t.Fatalf("recorded replay keeps provider provenance without becoming fresh input: %v", err)
+		}
+		replayCommand.Commit.inbound = command.Commit.inbound
+		if err := replayCommand.Validate(); err == nil {
+			t.Fatal("replay repurposed an original inbound output seal")
+		}
+	}
 }
 
 func TestPrepareInboundDeliveryBatchRejectsNonExclusiveOrMisorderedOutputsBeforeMutation(t *testing.T) {
