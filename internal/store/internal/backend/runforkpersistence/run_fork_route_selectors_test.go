@@ -2,6 +2,7 @@ package runforkpersistence
 
 import (
 	"bytes"
+	"reflect"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -25,18 +26,25 @@ func TestT17RouteSelectorsRetainCapturedEventFamilyWithoutSourceReads(t *testing
 		t.Fatalf("fixed selector changed publication/schema/source: %+v", actual)
 	}
 	plan := (runfork.RunForkPlan{SourceRunID: snapshot.RunID, ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: original.ID(), Revision: snapshot.Revision}}).WithHistoricalEvents(snapshot.Revision, []string{original.ID()})
+	var absent events.Event
+	if got, found, err := plan.HistoricalRouteSelector(original.ID()); err != nil || found || !reflect.DeepEqual(got, absent) {
+		t.Fatalf("unbound selector is not exact absence: found=%t error=%v", found, err)
+	}
 	plan, err = plan.WithHistoricalRouteSelectors(snapshot.Revision, selectors)
 	if err != nil {
 		t.Fatal(err)
 	}
 	snapshot.Events[0].Payload = []byte(`{"later":"source mutation"}`)
 	retained, found, err := plan.HistoricalRouteSelector(original.ID())
-	if err != nil || !found || !bytes.Equal(retained.Payload(), original.Payload()) {
+	if err != nil || !found || !reflect.DeepEqual(retained, original) {
 		t.Fatalf("retained selector followed mutable source: %v", err)
 	}
 	selectors[0] = events.Event{}
-	if retained, found, err := plan.HistoricalRouteSelector(original.ID()); err != nil || !found || !bytes.Equal(retained.Payload(), original.Payload()) {
+	if retained, found, err := plan.HistoricalRouteSelector(original.ID()); err != nil || !found || !reflect.DeepEqual(retained, original) {
 		t.Fatal("selector alias changed captured history")
+	}
+	if got, found, err := plan.HistoricalRouteSelector(uuid.NewString()); err != nil || found || !reflect.DeepEqual(got, absent) {
+		t.Fatalf("missing selector is not exact absence: found=%t error=%v", found, err)
 	}
 	for _, name := range []string{"foreign_run", "foreign_revision", "missing_membership"} {
 		t.Run(name, func(t *testing.T) {
@@ -49,7 +57,7 @@ func TestT17RouteSelectorsRetainCapturedEventFamilyWithoutSourceReads(t *testing
 			case "missing_membership":
 				changed = changed.WithHistoricalEvents(snapshot.Revision, nil)
 			}
-			if _, _, err := changed.HistoricalRouteSelector(original.ID()); err == nil {
+			if got, found, err := changed.HistoricalRouteSelector(original.ID()); err == nil || found || !reflect.DeepEqual(got, absent) {
 				t.Fatal("foreign/missing selector accepted")
 			}
 		})
@@ -134,7 +142,8 @@ func TestT17RouteSelectorsDoNotDecodeUnrelatedDiagnosticInternalOrMinimalHistory
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, found, err := plan.HistoricalRouteSelector(unrelated.EventID); err != nil || found {
+			var absent events.Event
+			if got, found, err := plan.HistoricalRouteSelector(unrelated.EventID); err != nil || found || !reflect.DeepEqual(got, absent) {
 				t.Fatalf("unrelated publication gained selector permission: found=%t error=%v", found, err)
 			}
 		})

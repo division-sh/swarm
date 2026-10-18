@@ -68,20 +68,21 @@ func (p RunForkPlan) WithHistoricalRouteSelectors(revision int64, publications [
 }
 
 func (p RunForkPlan) HistoricalRouteSelector(eventID string) (events.Event, bool, error) {
+	var absent events.Event
 	bound := p.historicalRouteSelectors
 	if bound == nil {
-		return events.Event{}, false, nil
+		return absent, false, nil
 	}
 	if bound.runID != p.SourceRunID || bound.point != p.ForkPoint || bound.point.Revision != p.historicalRevision {
-		return events.Event{}, false, fmt.Errorf("route selectors do not belong to this fixed cut")
+		return absent, false, fmt.Errorf("route selectors do not belong to this fixed cut")
 	}
 	event, found := bound.events[eventID]
 	if !found {
-		return events.Event{}, false, nil
+		return absent, false, nil
 	}
 	ids, known := p.HistoricalEventIDs(bound.point.Revision)
 	if !known || !slices.Contains(ids, eventID) || event.RunID() != p.SourceRunID {
-		return events.Event{}, false, fmt.Errorf("route selector is outside fixed source history")
+		return absent, false, fmt.Errorf("route selector is outside fixed source history")
 	}
 	return event.Clone(), true, nil
 }
