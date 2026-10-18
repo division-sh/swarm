@@ -620,6 +620,7 @@ typed-process-local	callback-type	typed	internal/runtime/inbound.go	(*github.com
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	InboundGateway	field:admitCredentials	func(context.Context, github.com/division-sh/swarm/internal/runtime.InboundTarget) (github.com/division-sh/swarm/internal/runtime/credentials.SecretBinding, func(context.Context) error, error)
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	InboundGateway	field:beginAdmission	func(context.Context) (context.Context, func(), bool)
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	InboundGateway	field:shutdownAdmissionClosed	func() bool
+typed-process-local	callback-type	typed	internal/runtime/inbound.go	InboundTarget	field:registrationAdmission	func(context.Context) error
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	NewInboundGateway	param:shutdownAdmissionClosed	func() bool
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	projectInboundPublication	param:selectBare	func(github.com/division-sh/swarm/internal/operatorchannel.InboundText) (bool, error)
 typed-process-local	callback-type	typed	internal/runtime/inbound.go	projectOperatorInboundOutput	param:selectBare	func(github.com/division-sh/swarm/internal/operatorchannel.InboundText) (bool, error)
