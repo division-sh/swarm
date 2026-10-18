@@ -1770,10 +1770,16 @@
     "body_sha256": "da00f7d8993d4a3f1d11ff0a7e131714d86d9df0b3af57fa087c7b09e905662a"
   },
   {
+    "owner": "internal/runtime/runtime.go::*Runtime.stopWithGraceLocked",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "67601fca619436c475cf0137f4b166f2258f3a69f4ca55381266d42496947e3c"
+  },
+  {
     "owner": "internal/runtime/runtime.go::*Runtime.stopWithOptions",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "d913f5434cf5c4099c6fed55445f9a93ab7a74ffff343baac943431ca9d9e180"
+    "body_sha256": "10ae9cab9c3e7bd5265b76eb112969b9762cba74160d8724f21213b9ea04aaf4"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.verifyBootPublished",
@@ -2862,6 +2868,12 @@
     "body_sha256": "4a931937f9481804f6465554909ba349d755d9d073dcf50e0ba9b6b34977762f"
   },
   {
+    "owner": "internal/serveapp/main.go::bindCompositionProcessCapability",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "7188d10fcc2f0d05546f3d57b523cc854448b4be5d1b912114353b19589bd07a"
+  },
+  {
     "owner": "internal/serveapp/main.go::buildForkChatSandboxLLMRuntimes",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
@@ -3543,7 +3555,7 @@
     "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.runTransactionOutcome",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
-    "body_sha256": "b3c220b21ef53082bcb5bb76258f10d9c47625d53dbaf18f7e64da91b5c65d91"
+    "body_sha256": "5ab0c8e80a534525373596123ec6c7800125b7845a1000a8d23e579a4cb33615"
   },
   {
     "owner": "internal/store/internal/backend/postgres/transaction.go::*rolledBackSerializationConflict.Error",
@@ -3564,6 +3576,12 @@
     "body_sha256": "79e1e66c3f167c6692dee5a2bc53db0c75749bccf66cce0119560504d949607e"
   },
   {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::admitOptionalMutationTx",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "c68734ea8821b9502ab84e11193375b59de45bd03337eec4c35d7bec2a4bc273"
+  },
+  {
     "owner": "internal/store/internal/backend/postgres/transaction.go::exactSerializationConflict",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
@@ -3574,6 +3592,12 @@
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
     "body_sha256": "353dcd9e2d2e69e8d3070f8cd28acd3dd4de74364c5e1ce1bb0093c1a15381e1"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::prepareOptionalMutationAdmission",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "530e2ea3f30204188ea3463c0c01403c40a7e3f5710023e6c62df566e455c3fa"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkPostgresOwner.ListSelectedForkRecoveryEntries",
