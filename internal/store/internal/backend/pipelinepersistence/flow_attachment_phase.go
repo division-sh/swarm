@@ -99,5 +99,8 @@ func advanceFlowAttachment(ctx context.Context, postgres bool, attempt pipeline.
 	})
 	result, acknowledged := outcome.Value()
 	result.Acknowledged = acknowledged
+	if before, clean := outcome.CleanCancellation(); clean {
+		return result.WithCleanCancellation(outcome.Err(), before)
+	}
 	return result, standalonePipelineMutationError(outcome)
 }

@@ -1283,13 +1283,21 @@ func (c *agentLifecycleCoordinator) waitForWork(ctx context.Context) error {
 }
 
 func (c *agentLifecycleCoordinator) retireWorkAdmission() bool {
+	return c.retireWorkAdmissionAs(false)
+}
+
+func (c *agentLifecycleCoordinator) retireWorkAdmissionAs(shutdown bool) bool {
 	c.workMu.Lock()
 	defer c.workMu.Unlock()
 	if c.runOwner == nil {
 		return false
 	}
 	c.workRetiring = true
-	c.runOwner.Retire()
+	if shutdown {
+		c.runOwner.RetireForShutdown()
+	} else {
+		c.runOwner.Retire()
+	}
 	return true
 }
 
@@ -1302,7 +1310,7 @@ func (c *agentLifecycleCoordinator) requestShutdownTransition() *runtimeLifecycl
 	var transition *runtimeLifecycleTransition
 	switch c.phase {
 	case runtimeLifecycleRunning:
-		c.retireWorkAdmission()
+		c.retireWorkAdmissionAs(true)
 		transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
 		c.transition = transition
 		c.phase = runtimeLifecycleShuttingDown
@@ -1310,7 +1318,7 @@ func (c *agentLifecycleCoordinator) requestShutdownTransition() *runtimeLifecycl
 	case runtimeLifecycleShuttingDown, runtimeLifecycleResetting:
 		transition = c.transition
 	case runtimeLifecycleStopped:
-		if c.retireWorkAdmission() {
+		if c.retireWorkAdmissionAs(true) {
 			transition = newRuntimeLifecycleTransition(runtimeLifecycleTransitionShutdown)
 			c.transition = transition
 			c.phase = runtimeLifecycleShuttingDown
