@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 )
 
@@ -31,11 +32,15 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 		return
 	}
 	if acquireErr != nil {
-		http.Error(w, fmt.Sprintf("ingress target %q provider %q cannot admit work: %v", alias, provider, acquireErr), http.StatusServiceUnavailable)
+		diaglog.ProcessLog(diaglog.LevelWarn, "serve-ingress", "runtime acquisition refused",
+			"alias", alias, "provider", provider, "error", acquireErr.Error())
+		http.Error(w, "ingress target is unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if !lookup.Loaded() || use == nil || use.Runtime() == nil || use.Runtime().InboundGateway == nil {
-		http.Error(w, fmt.Sprintf("ingress target %q provider %q is unavailable: %s", alias, provider, lookup.Cause), http.StatusServiceUnavailable)
+		diaglog.ProcessLog(diaglog.LevelWarn, "serve-ingress", "runtime target unavailable",
+			"alias", alias, "provider", provider, "state", lookup.State, "cause", lookup.Cause)
+		http.Error(w, "ingress target is unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	defer func() { _ = use.Done() }()
