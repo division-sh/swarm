@@ -9,8 +9,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -18,6 +20,9 @@ func TestRunStopStoragePreservesExactRunCountsAndOriginalReadBothStores(t *testi
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "stop.storage", "runtime", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 			sibling := eventtest.RunCreatingRootIngress(uuid.NewString(), "stop.storage.sibling", "runtime", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, event.CreatedAt())
 			if err := commitSemanticEventFixtureWithAgents(ctx, fixture.store, event, []string{"worker", "other-worker"}); err != nil {
