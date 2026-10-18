@@ -82,6 +82,9 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/store/internal/startupownership/sqlite_inspection_absence_unix.go", "A19,A28", "2567-P07,P08"},
 	{"internal/store/internal/backend/postgres/backend.go", "A19,A20,A28", "P18,P19,P24"},
 	{"internal/store/internal/backend/postgres/transaction.go", "A19,A28", "P18,P24"},
+	// #2734 changes native cleanup disposition, not the read-only admission
+	// contract; the exact owners/callers and read proofs are recorded alongside.
+	{"internal/store/internal/backend/postgres/transaction_cancellation.go", "A19,A28", "P18,P24"},
 	{"internal/store/internal/backend/postgres/inspection.go", "A19,A28", "P18,P24"},
 	{"internal/store/internal/backend/postgres/inspection_io.go", "A19,A28", "P18,P24,2591-PG-IO"},
 	{"internal/store/internal/backend/postgres/possession_observation.go", "A20,A28", "P19,P22,P24,2591-PG-IO"},
@@ -195,6 +198,7 @@ func TestVerifyBootStartupPredicateCensus(t *testing.T) {
 }
 
 func TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal(t *testing.T) {
+	t.Run("native cancellation owner hostiles", proveNativeCancellationPredicateCensus)
 	surface := admissionPredicateSurface{"internal/runtime/runtime.go", "A11,A25", "P09,P15,P21"}
 	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", surface.File), nil, 0)
 	if err != nil {
@@ -227,6 +231,46 @@ func TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal(t *testing.T) {
 	}
 	if err := compareAdmissionPredicateBodies(expected, measured); err == nil || !strings.Contains(err.Error(), "runtime.go::newRuntime") || !strings.Contains(err.Error(), "P09") {
 		t.Fatalf("uncovered boot-local guard escaped owner/caller/proof ratchet: %v", err)
+	}
+}
+
+func proveNativeCancellationPredicateCensus(t *testing.T) {
+	surface := admissionPredicateSurface{"internal/store/internal/backend/postgres/transaction_cancellation.go", "A19,A28", "P18,P24"}
+	for _, target := range []string{"Error", "Unwrap", "CleanCancellationBeforeCommit", "onlyCallerCancellation"} {
+		t.Run(target, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", surface.File), nil, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expected, err := admissionPredicateFileBodies(surface, file)
+			if err != nil || len(expected) != 4 {
+				t.Fatalf("exact native cancellation owners: count=%d err=%v", len(expected), err)
+			}
+			guard, err := parser.ParseExpr(`func() { if true { panic("unreviewed native cancellation predicate") } }`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed := 0
+			for _, declaration := range file.Decls {
+				if function, ok := declaration.(*ast.FuncDecl); ok && function.Name.Name == target {
+					function.Body.List = append(guard.(*ast.FuncLit).Body.List, function.Body.List...)
+					changed++
+				}
+			}
+			if changed != 1 {
+				t.Fatalf("exact native owner %s changed %d declarations", target, changed)
+			}
+			measured, err := admissionPredicateFileBodies(surface, file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := compareAdmissionPredicateBodies(expected, measured); err == nil || !strings.Contains(err.Error(), target) || !strings.Contains(err.Error(), "A19,A28") || !strings.Contains(err.Error(), "P18,P24") {
+				t.Fatalf("native owner %s escaped startup accounting: %v", target, err)
+			}
+			if err := compareAdmissionPredicateBodies(expected, measured[:len(measured)-1]); err == nil {
+				t.Fatal("native owner deletion escaped startup accounting")
+			}
+		})
 	}
 }
 
