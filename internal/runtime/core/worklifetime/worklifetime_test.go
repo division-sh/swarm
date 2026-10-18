@@ -298,6 +298,13 @@ func proveManagerShutdownCancellationOwner(t *testing.T) {
 			if mode != "caller_cancel" && !errors.Is(context.Cause(lease.Context()), ErrRetired) {
 				t.Fatal("retirement lost its original public cause")
 			}
+			if mode == "shutdown" {
+				t.Run("legacy branch traversal retains closed origin", func(t *testing.T) {
+					if errors.Unwrap(context.Cause(lease.Context())) != nil {
+						t.Error("branch traversal strips the owning Manager identity before comparing its cancellation cause")
+					}
+				})
+			}
 			if err := lease.Done(); err != nil {
 				t.Fatal(err)
 			}
