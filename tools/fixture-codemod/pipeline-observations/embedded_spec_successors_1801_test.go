@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -122,9 +124,126 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 			t.Fatalf("%s recipe multiplicity=%d", key, matches)
 		}
 	}
+	restored, err = q10HistoricalComparison1801(restored, readQ10ComparisonSource1801)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertQ10HistoricalComparisonRefusals1801(t, rows)
 	population, err := json.Marshal(restored)
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(population)) != packet.PopulationSHA256 || priorSuccessors != 12 || q10Compositions != 1 {
 		t.Fatalf("embedded-spec successor overwrote historical evidence, prior chains or an unrelated row: population=%x want=%s prior-successors=%d want=12 Q10-compositions=%d want=1 marshal=%v", sha256.Sum256(population), packet.PopulationSHA256, priorSuccessors, q10Compositions, err)
+	}
+}
+
+func readQ10ComparisonSource1801(row recipe) ([]byte, error) {
+	return os.ReadFile(filepath.Join("..", "..", "..", row.File))
+}
+
+// These three reversals exist only in the isolated historical hash comparison
+// (reviewer-e6248331993). Current recipes and candidate preparation keep their
+// validated successors and live retirement unchanged.
+func q10HistoricalComparison1801(rows []recipe, read func(recipe) ([]byte, error)) ([]recipe, error) {
+	restored := append([]recipe(nil), rows...)
+	for _, identity := range [][3]string{
+		{"native-projection-shapes", "internal/runtime/pipeline/workflow_instance_store_projection_test.go", "TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes"},
+		{"native-missing-run", "internal/runtime/pipeline/workflow_instance_store_run_scope_test.go", "TestWorkflowInstanceStore_RequiresRunContext"},
+		{"native-run-setup-family144", "internal/runtime/tools/executor_entity_test.go", "ensureEntityToolTestRun"},
+	} {
+		index := -1
+		for i, row := range rows {
+			if [3]string{row.Family, row.File, row.Function} == identity {
+				if index != -1 {
+					return nil, fmt.Errorf("duplicate Q10 historical comparison identity: %v", identity)
+				}
+				index = i
+			}
+		}
+		if index == -1 {
+			return nil, fmt.Errorf("missing Q10 historical comparison identity: %v", identity)
+		}
+		row := rows[index]
+		source, err := read(row)
+		if err != nil {
+			return nil, err
+		}
+		switch identity[0] {
+		case "native-projection-shapes":
+			restored[index], err = projectionShapeDiagnosticPredecessor(row, source)
+		case "native-missing-run":
+			restored[index], err = missingRunCurrentPredecessor(row, source)
+		case "native-run-setup-family144":
+			restored[index], err = runSetupRetiredHelperPredecessor(row, source)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%v: %w", identity, err)
+		}
+	}
+	return restored, nil
+}
+
+func assertQ10HistoricalComparisonRefusals1801(t *testing.T, rows []recipe) {
+	t.Helper()
+	original := append([]recipe(nil), rows...)
+	for index, row := range rows {
+		if row.Family != "native-projection-shapes" && row.Family != "native-missing-run" && row.Function != "ensureEntityToolTestRun" {
+			continue
+		}
+		for _, field := range []string{"family", "file", "function", "before", "after", "successor", "removed", "mechanical", "duplicate", "missing"} {
+			t.Run("historical-comparison/"+row.Function+"/"+field, func(t *testing.T) {
+				mutants := append([]recipe(nil), rows...)
+				mutant := &mutants[index]
+				switch field {
+				case "family":
+					mutant.Family += "-foreign"
+				case "file":
+					mutant.File = "foreign.go"
+				case "function":
+					mutant.Function += "Foreign"
+				case "before":
+					mutant.Before += " "
+				case "after":
+					mutant.After += " "
+				case "successor":
+					mutant.Successor = row.After
+				case "removed":
+					mutant.Removed = !row.Removed
+				case "mechanical":
+					mutant.Mechanical = &mechanicalSnapshot{}
+				case "duplicate":
+					mutants = append(mutants, row)
+				case "missing":
+					mutants = append(mutants[:index], mutants[index+1:]...)
+				}
+				if _, err := q10HistoricalComparison1801(mutants, readQ10ComparisonSource1801); err == nil {
+					t.Fatal("changed complete row or identity multiplicity accepted")
+				}
+			})
+		}
+		for name, source := range map[string]string{
+			"historical-before": "package proof\n" + row.Before,
+			"historical-after":  "package proof\n" + row.After,
+			"missing-live":      "package proof\n",
+			"foreign-live":      "package proof\n" + strings.Replace(row.Successor, "if ", "if false && ", 1),
+		} {
+			// An empty file is the correct live state only for the retired helper.
+			if row.Removed && (name == "missing-live" || name == "foreign-live") {
+				continue
+			}
+			t.Run("historical-comparison/"+row.Function+"/"+name, func(t *testing.T) {
+				read := func(current recipe) ([]byte, error) {
+					if sameReviewedRecipeKey(current, row) {
+						return []byte(source), nil
+					}
+					return readQ10ComparisonSource1801(current)
+				}
+				if _, err := q10HistoricalComparison1801(rows, read); err == nil {
+					t.Fatal("historical fallback, changed live source or resurrected helper accepted")
+				}
+			})
+		}
+	}
+	if !reflect.DeepEqual(rows, original) {
+		t.Fatal("comparison-only predecessor escaped into the current recipe population")
 	}
 }
 
