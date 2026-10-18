@@ -1,0 +1,262 @@
+Private workspace base setup (not qualification)	Set up job	﻿2026-10-18T12:46:25.3157763Z Current runner version: '2.337.0'
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3182163Z ##[group]Runner Image Provisioner
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3183151Z Hosted Compute Agent
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3183733Z Version: 20261012.601
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3184326Z Commit: f3dc54e1fb89da6852db922499a0233137369e1d
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3185079Z Build Date: 2026-10-12T17:48:21Z
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3185724Z Worker ID: {08cd2461-8dc2-417b-b709-75ab685d13f6}
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3186424Z Region: westus3
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3186963Z Cloud: Azure
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3187489Z ##[endgroup]
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3188887Z ##[group]Operating System
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3189502Z Ubuntu
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3190173Z 24.04.5
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3190707Z LTS
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3191204Z ##[endgroup]
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3191763Z ##[group]Runner Image
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3192346Z Image: ubuntu-24.04
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3192896Z Version: 20261012.334.1
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3194003Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3195669Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261012.334
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3196610Z ##[endgroup]
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3198127Z ##[group]GITHUB_TOKEN Permissions
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3200525Z Contents: read
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3201101Z Metadata: read
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3201768Z Packages: write
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3202310Z ##[endgroup]
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3204312Z Secret source: Actions
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3205172Z Cache mode: write
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3205891Z Prepare workflow directory
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3517903Z Prepare all required actions
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.3568153Z Getting action download info
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.6652156Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:25.7760517Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+Private workspace base setup (not qualification)	Set up job	2026-10-18T12:46:26.0207797Z Complete job name: Private workspace base setup (not qualification)
+Private workspace base setup (not qualification)	Run actions/checkout@v4	﻿2026-10-18T12:46:26.0964037Z ##[group]Run actions/checkout@v4
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0964982Z with:
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0965504Z   repository: division-sh/swarm
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0969255Z   token: ***
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0969948Z   ssh-strict: true
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0970485Z   ssh-user: git
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0971045Z   persist-credentials: true
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0971597Z   clean: true
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0972126Z   sparse-checkout-cone-mode: true
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0972745Z   fetch-depth: 1
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0973248Z   fetch-tags: false
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0973769Z   show-progress: true
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0974278Z   lfs: false
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0974801Z   submodules: false
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0975350Z   set-safe-directory: true
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0975912Z   allow-unsafe-pr-checkout: false
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.0976660Z ##[endgroup]
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2007653Z Syncing repository: division-sh/swarm
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2010610Z ##[group]Getting Git version info
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2011692Z Working directory is '/home/runner/work/swarm/swarm'
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2013480Z [command]/usr/bin/git version
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2096063Z git version 2.55.0
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2114735Z ##[endgroup]
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2130972Z Temporarily overriding HOME='/home/runner/work/_temp/3d8013c9-f80c-4042-a605-0ccb01af7284' before making global git config changes
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2133126Z Adding repository directory to the temporary git global config as a safe directory
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2137516Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/swarm/swarm
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2184813Z Deleting the contents of '/home/runner/work/swarm/swarm'
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2190531Z ##[group]Initializing the repository
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2194744Z [command]/usr/bin/git init /home/runner/work/swarm/swarm
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2305396Z hint: Using 'master' as the name for the initial branch. This default branch name
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2307736Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2310090Z hint: to use in all of your new repositories, which will suppress this warning,
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2311613Z hint: call:
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2312683Z hint:
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2313743Z hint: 	git config --global init.defaultBranch <name>
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2314939Z hint:
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2316066Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2317582Z hint: 'development'. The just-created branch can be renamed via this command:
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2319056Z hint:
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2320615Z hint: 	git branch -m <name>
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2321544Z hint:
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2322531Z hint: Disable this message with "git config set advice.defaultBranchName false"
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2323933Z Initialized empty Git repository in /home/runner/work/swarm/swarm/.git/
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2326669Z [command]/usr/bin/git remote add origin https://github.com/division-sh/swarm
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2373801Z ##[endgroup]
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2375072Z ##[group]Disabling automatic garbage collection
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2376663Z [command]/usr/bin/git config --local gc.auto 0
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2405815Z ##[endgroup]
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2409595Z ##[group]Setting up auth
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2417533Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2446578Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2787679Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.2818070Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.3061429Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.3089915Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.3272234Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.3308329Z ##[endgroup]
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.3309546Z ##[group]Fetching the repository
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:26.3317813Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +4077a0e675ba33b7c1a8c1ab4496f40fc79d1276:refs/remotes/origin/agent-d/2718-private-workspace-base
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.1087146Z From https://github.com/division-sh/swarm
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.1089005Z  * [new ref]         4077a0e675ba33b7c1a8c1ab4496f40fc79d1276 -> origin/agent-d/2718-private-workspace-base
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.1093133Z ##[endgroup]
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.1094581Z ##[group]Determining the checkout info
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.1099189Z ##[endgroup]
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.1111019Z [command]/usr/bin/git sparse-checkout disable
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.1160751Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.1192806Z ##[group]Checking out the ref
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.1198074Z [command]/usr/bin/git checkout --progress --force -B agent-d/2718-private-workspace-base refs/remotes/origin/agent-d/2718-private-workspace-base
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.7319400Z Switched to a new branch 'agent-d/2718-private-workspace-base'
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.7321380Z branch 'agent-d/2718-private-workspace-base' set up to track 'origin/agent-d/2718-private-workspace-base'.
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.7339496Z ##[endgroup]
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.7385033Z [command]/usr/bin/git log -1 --format=%H
+Private workspace base setup (not qualification)	Run actions/checkout@v4	2026-10-18T12:46:31.7409679Z 4077a0e675ba33b7c1a8c1ab4496f40fc79d1276
+Private workspace base setup (not qualification)	Bind reviewed setup source	﻿2026-10-18T12:46:31.7625656Z ##[group]Run set -euo pipefail
+Private workspace base setup (not qualification)	Bind reviewed setup source	2026-10-18T12:46:31.7626473Z ^[[36;1mset -euo pipefail^[[0m
+Private workspace base setup (not qualification)	Bind reviewed setup source	2026-10-18T12:46:31.7626910Z ^[[36;1m[[ "$REVIEWED_HEAD" =~ ^[0-9a-f]{40}$ ]]^[[0m
+Private workspace base setup (not qualification)	Bind reviewed setup source	2026-10-18T12:46:31.7627589Z ^[[36;1mtest "$GITHUB_REPOSITORY" = division-sh/swarm^[[0m
+Private workspace base setup (not qualification)	Bind reviewed setup source	2026-10-18T12:46:31.7628060Z ^[[36;1m[[ "$GITHUB_REF" == refs/heads/* ]]^[[0m
+Private workspace base setup (not qualification)	Bind reviewed setup source	2026-10-18T12:46:31.7628495Z ^[[36;1mtest "$GITHUB_SHA" = "$REVIEWED_HEAD"^[[0m
+Private workspace base setup (not qualification)	Bind reviewed setup source	2026-10-18T12:46:31.7629034Z ^[[36;1mtest "$(git rev-parse HEAD)" = "$REVIEWED_HEAD"^[[0m
+Private workspace base setup (not qualification)	Bind reviewed setup source	2026-10-18T12:46:31.7629652Z ^[[36;1msha256sum Dockerfile.workspace-base-link .github/scripts/verify-workspace-base.py^[[0m
+Private workspace base setup (not qualification)	Bind reviewed setup source	2026-10-18T12:46:31.7817043Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Private workspace base setup (not qualification)	Bind reviewed setup source	2026-10-18T12:46:31.7817741Z env:
+Private workspace base setup (not qualification)	Bind reviewed setup source	2026-10-18T12:46:31.7818180Z   REVIEWED_HEAD: 4077a0e675ba33b7c1a8c1ab4496f40fc79d1276
+Private workspace base setup (not qualification)	Bind reviewed setup source	2026-10-18T12:46:31.7819289Z ##[endgroup]
+Private workspace base setup (not qualification)	Bind reviewed setup source	2026-10-18T12:46:31.7942656Z 999173d2849d55b7ff9ba5065c110d1f913c8c51205c04230988faf89be39f76  Dockerfile.workspace-base-link
+Private workspace base setup (not qualification)	Bind reviewed setup source	2026-10-18T12:46:31.7945277Z ca1ac4c06ea3999f736a469f3fde505f2c803dfc3dc859fdabcb077ab61ad1fc  .github/scripts/verify-workspace-base.py
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	﻿2026-10-18T12:46:31.7992635Z ##[group]Run set -euo pipefail
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7993299Z ^[[36;1mset -euo pipefail^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7993932Z ^[[36;1mattempt_root=$(mktemp -d "$RUNNER_TEMP/workspace-base-attempt.XXXXXX")^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7994512Z ^[[36;1mcredential_root="$attempt_root/auth"^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7994991Z ^[[36;1mresult_file="$attempt_root/verified.json"^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7995574Z ^[[36;1mfinal_result="$RUNNER_TEMP/workspace-base-setup.json"^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7996047Z ^[[36;1mcleanup() {^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7996479Z ^[[36;1m  status=$?^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7996857Z ^[[36;1m  trap - EXIT^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7997270Z ^[[36;1m  if rm -r -- "$attempt_root"; then^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7997705Z ^[[36;1m    :^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7998097Z ^[[36;1m  else^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7998491Z ^[[36;1m    cleanup_status=$?^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7998943Z ^[[36;1m    if [ "$status" -eq 0 ]; then status=$cleanup_status; fi^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.7999434Z ^[[36;1m  fi^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8000047Z ^[[36;1m  if [ "$status" -ne 0 ] && { [ -e "$final_result" ] || [ -L "$final_result" ]; }; then^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8000726Z ^[[36;1m    rm -- "$final_result" || true^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8001158Z ^[[36;1m  fi^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8001508Z ^[[36;1m  exit "$status"^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8001886Z ^[[36;1m}^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8002226Z ^[[36;1mtrap cleanup EXIT^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8002598Z ^[[36;1mmkdir -- "$credential_root"^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8003171Z ^[[36;1mif [ -e "$final_result" ] || [ -L "$final_result" ]; then rm -- "$final_result"; fi^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8003713Z ^[[36;1mexport DOCKER_CONFIG="$credential_root"^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8004263Z ^[[36;1mcase "$DOCKER_CONFIG/" in "$GITHUB_WORKSPACE/"*) exit 1 ;; esac^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8004881Z ^[[36;1mprintf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8005707Z ^[[36;1msource='public.ecr.aws/docker/library/golang:1.25-bookworm@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437'^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8006524Z ^[[36;1mmirror='ghcr.io/division-sh/swarm-workspace-golang'^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8007123Z ^[[36;1mdigest='sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437'^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8007902Z ^[[36;1mif python3 .github/scripts/verify-workspace-base.py --verify-if-present > "$result_file"; then^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8008514Z ^[[36;1m  acquisition=already-present^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8008914Z ^[[36;1melse^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8009273Z ^[[36;1m  status=$?^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8009671Z ^[[36;1m  if [ "$status" -ne 3 ]; then exit "$status"; fi^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8010583Z ^[[36;1m  python3 .github/scripts/verify-workspace-base.py --before-publication^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8011275Z ^[[36;1m  docker build -t "$mirror:repository-link" -f Dockerfile.workspace-base-link .^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8012573Z ^[[36;1m  docker image inspect "$mirror:repository-link" | jq -e 'length == 1 and .[0].Config.Labels["org.opencontainers.image.source"] == "https://github.com/division-sh/swarm" and (.[0].RootFS.Layers // [] | length) == 0 and .[0].Config.Cmd == null and .[0].Config.Entrypoint == null' >/dev/null^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8013885Z ^[[36;1m  docker push "$mirror:repository-link"^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8014445Z ^[[36;1m  python3 .github/scripts/verify-workspace-base.py --association-only^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8015133Z ^[[36;1m  docker buildx imagetools create --prefer-index=false --tag "$mirror:1.25-bookworm" "$source"^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8015820Z ^[[36;1m  python3 .github/scripts/verify-workspace-base.py > "$result_file"^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8016356Z ^[[36;1m  acquisition=copied^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8016772Z ^[[36;1mfi^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8017123Z ^[[36;1mtest -s "$result_file"^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8017696Z ^[[36;1mjq -e --arg digest "$digest" --arg head "$GITHUB_SHA" --argjson repository "$GITHUB_REPOSITORY_ID" '^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8018388Z ^[[36;1m  .qualification == false and .repository == "division-sh/swarm" and^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8019268Z ^[[36;1m  .package == "swarm-workspace-golang" and .visibility == "private" and^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8020160Z ^[[36;1m  .digest == $digest and .source_head == $head and .repository_id == $repository and^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8020803Z ^[[36;1m  (.package_id | type == "number" and . > 0 and . == floor) and^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8021343Z ^[[36;1m  (.manifests | type == "object" and has($digest)) and^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8021885Z ^[[36;1m  (.manifests[$digest] | type == "number" and . > 0) and^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8022394Z ^[[36;1m  (.verified_blobs | type == "object" and length > 0)^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8022856Z ^[[36;1m' "$result_file" >/dev/null^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8023271Z ^[[36;1mdocker pull "$mirror@$digest"^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8023733Z ^[[36;1mmv -- "$result_file" "$final_result"^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8024381Z ^[[36;1mprintf 'Private workspace base setup path: %s; no qualification or tier attestation\n' "$acquisition"^[[0m
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8062382Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8062930Z env:
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8065686Z   GH_TOKEN: ***
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:31.8066062Z ##[endgroup]
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:32.4863507Z 
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:32.4864293Z Login Succeeded
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:32.4865921Z WARNING! Your credentials are stored unencrypted in '/home/runner/work/_temp/workspace-base-attempt.aHnYiv/auth/config.json'.
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:32.4867189Z Configure a credential helper to remove this warning. See
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:32.4868061Z https://docs.docker.com/go/credential-store/
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:46:32.4868704Z 
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:36.6714345Z ghcr.io/division-sh/swarm-workspace-golang@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437: Pulling from division-sh/swarm-workspace-golang
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:36.9609545Z 3af9207d3799: Pulling fs layer
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:36.9610354Z 6b02178232c4: Pulling fs layer
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:36.9611236Z c5a4625b5331: Pulling fs layer
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:36.9611886Z e0cd61b868fd: Pulling fs layer
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:36.9612469Z 2129e38f8eb9: Pulling fs layer
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:36.9612932Z 74f587f6b877: Pulling fs layer
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:36.9613400Z 4f4fb700ef54: Pulling fs layer
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:36.9613933Z 2129e38f8eb9: Waiting
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:36.9614418Z 74f587f6b877: Waiting
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:36.9614893Z 4f4fb700ef54: Waiting
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:36.9615296Z e0cd61b868fd: Waiting
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:37.4368845Z 6b02178232c4: Verifying Checksum
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:37.4370181Z 6b02178232c4: Download complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:38.2128763Z 3af9207d3799: Verifying Checksum
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:38.2130416Z 3af9207d3799: Download complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:38.9177405Z c5a4625b5331: Verifying Checksum
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:38.9178536Z c5a4625b5331: Download complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:39.3365596Z 74f587f6b877: Download complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:39.4810923Z e0cd61b868fd: Verifying Checksum
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:39.4811706Z e0cd61b868fd: Download complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:39.6266705Z 2129e38f8eb9: Verifying Checksum
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:39.6267720Z 2129e38f8eb9: Download complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:39.6666466Z 4f4fb700ef54: Verifying Checksum
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:39.6667900Z 4f4fb700ef54: Download complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:39.7141058Z 3af9207d3799: Pull complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:42.3738012Z 6b02178232c4: Pull complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:45.2131055Z c5a4625b5331: Pull complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:48.3671514Z e0cd61b868fd: Pull complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:53.0536875Z 2129e38f8eb9: Pull complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:53.0621344Z 74f587f6b877: Pull complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:53.0702716Z 4f4fb700ef54: Pull complete
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:53.0750838Z Digest: sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:53.0758909Z Status: Downloaded newer image for ghcr.io/division-sh/swarm-workspace-golang@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:53.0769384Z ghcr.io/division-sh/swarm-workspace-golang@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437
+Private workspace base setup (not qualification)	Publish and verify immutable workspace base	2026-10-18T12:47:53.0793607Z Private workspace base setup path: already-present; no qualification or tier attestation
+Private workspace base setup (not qualification)	Retain workspace base setup result	﻿2026-10-18T12:47:53.0910859Z ##[group]Run actions/upload-artifact@v4
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.0911258Z with:
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.0911649Z   name: workspace-base-setup-4077a0e675ba33b7c1a8c1ab4496f40fc79d1276
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.0912231Z   path: /home/runner/work/_temp/workspace-base-setup.json
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.0912638Z   if-no-files-found: error
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.0913015Z   compression-level: 6
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.0913320Z   overwrite: false
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.0913619Z   include-hidden-files: false
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.0914008Z ##[endgroup]
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.2545176Z (node:2156) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.2546497Z (Use `node --trace-deprecation ...` to show where the warning was created)
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.2589601Z With the provided path, there will be 1 file uploaded
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.2600986Z Artifact name is valid!
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.2607031Z Root directory input is valid!
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.5983352Z Beginning upload of artifact content to blob storage
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.6235451Z (node:2156) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.8266639Z Uploaded bytes 2853
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.8840887Z Finished uploading artifact content to blob storage!
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.8842428Z SHA256 digest of uploaded artifact zip is e6c985cf4dbc5596aced1277f5aa5602acb4416a16c5ebe0790a0c14435f884d
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:53.8843518Z Finalizing artifact upload
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:54.1416944Z Artifact workspace-base-setup-4077a0e675ba33b7c1a8c1ab4496f40fc79d1276.zip successfully finalized. Artifact ID 12136803868
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:54.1418126Z Artifact workspace-base-setup-4077a0e675ba33b7c1a8c1ab4496f40fc79d1276 has been successfully uploaded! Final size is 2853 bytes. Artifact ID is 12136803868
+Private workspace base setup (not qualification)	Retain workspace base setup result	2026-10-18T12:47:54.1421926Z Artifact download URL: https://github.com/division-sh/swarm/actions/runs/39128682998/artifacts/12136803868
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	﻿2026-10-18T12:47:54.1616665Z Post job cleanup.
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	2026-10-18T12:47:54.2448112Z [command]/usr/bin/git version
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	2026-10-18T12:47:54.2492134Z git version 2.55.0
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	2026-10-18T12:47:54.2533021Z Temporarily overriding HOME='/home/runner/work/_temp/498ddde0-376c-4e46-a3e6-e7932eb4c14a' before making global git config changes
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	2026-10-18T12:47:54.2534259Z Adding repository directory to the temporary git global config as a safe directory
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	2026-10-18T12:47:54.2539212Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/swarm/swarm
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	2026-10-18T12:47:54.2575455Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	2026-10-18T12:47:54.2606952Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	2026-10-18T12:47:54.2820828Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	2026-10-18T12:47:54.2843080Z http.https://github.com/.extraheader
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	2026-10-18T12:47:54.2852012Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	2026-10-18T12:47:54.2883607Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	2026-10-18T12:47:54.3108835Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+Private workspace base setup (not qualification)	Post Run actions/checkout@v4	2026-10-18T12:47:54.3147856Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+Private workspace base setup (not qualification)	Complete job	﻿2026-10-18T12:47:54.3488470Z Cleaning up orphan processes
+Private workspace base setup (not qualification)	Complete job	2026-10-18T12:47:54.3787059Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/upload-artifact@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
