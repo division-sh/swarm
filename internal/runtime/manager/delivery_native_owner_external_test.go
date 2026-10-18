@@ -220,20 +220,21 @@ func TestManagerDeliveryNativeOwnerRequiresExplicitPublicationBothStores(t *test
 func TestManagerDeliveryStorageOnlySourceRefusesSelectedExecutionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			fixture := openManagerNativeDelivery(t, backend)
+			fixture := openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			selected, ok := fixture.Store.(runforkexecution.SourceArtifactSelectedContractSourceStore)
 			if !ok {
 				t.Fatal("original native delivery owner has no retained selected source role")
 			}
 			repo := canonicalrouting.RepoRoot(t)
 			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected}
-			ctx := manager.TerminalPanicFixtureContext()
+			ctx := fixture.Context
+			hash := fixture.Authority.SourceArtifact().BundleHash()
 			admitted, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
-				Responsibility: runforkexecution.FreshSelectedSource(sourceartifactfixture.BundleHash),
-				BundleHash:     sourceartifactfixture.BundleHash,
-				Selection:      runfork.RunForkContractSelection{Mode: "bundle_hash", BundleHash: sourceartifactfixture.BundleHash},
+				Responsibility: runforkexecution.FreshSelectedSource(hash),
+				BundleHash:     hash,
+				Selection:      runfork.RunForkContractSelection{Mode: "bundle_hash", BundleHash: hash},
 			})
-			if err != nil || admitted.Source == nil || admitted.Module == nil || admitted.SourceArtifactFact.BundleHash() != sourceartifactfixture.BundleHash || admitted.RuntimeProjection != nil || admitted.Cleanup != nil {
+			if err != nil || admitted.Source == nil || admitted.Module == nil || admitted.SourceArtifactFact.BundleHash() != hash || admitted.RuntimeProjection != nil || admitted.Cleanup != nil {
 				t.Fatalf("admitted source inspection changed authority or materialized execution: %+v,error=%v", admitted, err)
 			}
 			writer, ok := fixture.Store.(sourceartifactfixture.Writer)
@@ -242,16 +243,19 @@ func TestManagerDeliveryStorageOnlySourceRefusesSelectedExecutionBothStores(t *t
 			}
 			// The shared fixture is now valid; this negative requires a declaration
 			// whose bytes can be stored but whose agent intent is not admitted.
-			storageOnly := sourceartifactfixture.New("agents.yaml", []byte("storage-only: {}\n"))
-			if err := sourceartifactfixture.EnsureArtifact(ctx, writer, storageOnly); err != nil {
+			storageRoot, _ := sourceartifactfixture.Rooted(t, "storage-only", sourceartifactfixture.New("agents.yaml", []byte("storage-only: {}\n")))
+			storageOnly := storageRoot.Artifact()
+			storageCtx := correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(storageOnly))
+			storageCtx = correlation.WithRootAdmission(storageCtx, storageRoot.Admission())
+			if err := sourceartifactfixture.EnsureArtifact(storageCtx, writer, storageOnly); err != nil {
 				t.Fatal(err)
 			}
-			before, err := selected.GetSourceArtifact(ctx, storageOnly.BundleHash())
+			before, err := selected.GetSourceArtifact(storageCtx, storageOnly.BundleHash())
 			if err != nil {
 				t.Fatal(err)
 			}
 			probe := storetest.CollectTransactions(t, fixture.Store, storetest.TransactionProbeOptions{})
-			_, err = loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
+			_, err = loader.InspectRunForkSelectedContractSourceForRequest(storageCtx, runforkexecution.SelectedContractSourceLoadRequest{
 				Responsibility: runforkexecution.FreshSelectedSource(storageOnly.BundleHash()),
 				BundleHash:     storageOnly.BundleHash(),
 				Selection:      runfork.RunForkContractSelection{Mode: "bundle_hash", BundleHash: storageOnly.BundleHash()},
@@ -259,7 +263,7 @@ func TestManagerDeliveryStorageOnlySourceRefusesSelectedExecutionBothStores(t *t
 			if err == nil || !strings.Contains(err.Error(), "BUNDLE_DATA_INTEGRITY_ERROR") || !strings.Contains(err.Error(), "agent intent source is required") {
 				t.Fatalf("storage-only artifact must not mint executable selected authority: %v", err)
 			}
-			after, err := selected.GetSourceArtifact(ctx, storageOnly.BundleHash())
+			after, err := selected.GetSourceArtifact(storageCtx, storageOnly.BundleHash())
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("refused inspection changed its stored source: before=%+v,after=%+v,error=%v", before, after, err)
 			}
