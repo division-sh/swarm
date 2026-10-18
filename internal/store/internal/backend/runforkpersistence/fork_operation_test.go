@@ -180,8 +180,17 @@ func TestForkOperationDeploymentRevisionIsDurableAndEventlessBothStores(t *testi
 					t.Fatalf("eventless result lost exact point: %+v found=%t err=%v", loaded, found, err)
 				}
 			})
+			if _, err := db.ExecContext(ctx, `UPDATE run_fork_operations SET fork_revision=8 WHERE operation_id=$1`, request.OperationID); err == nil {
+				t.Fatal("canonical revision changed beneath its exact live-parent association")
+			}
 			withForkOperationTx(t, db, func(tx *sql.Tx) {
+				if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_operation_live_parents WHERE operation_id=$1`, request.OperationID); err != nil {
+					t.Fatal(err)
+				}
 				if _, err := tx.ExecContext(ctx, `UPDATE run_fork_operations SET fork_revision=8 WHERE operation_id=$1`, request.OperationID); err != nil {
+					t.Fatal(err)
+				}
+				if err := insertForkOperationLiveParentsTx(ctx, tx, request.OperationID); err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -205,6 +214,9 @@ func forkOperationTestDatabase(t *testing.T, backend string) *sql.DB {
 	} else {
 		db, err = sql.Open("sqlite", filepath.Join(t.TempDir(), "fork-operation.db"))
 		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = db.Close() })
