@@ -43,6 +43,11 @@ func (b *Backend) RunTransaction(ctx context.Context, label string, operation fu
 
 // RunAdmittedTransactionOutcome requires original runtime/process evidence;
 // native construction and control retain their separate existing entrance.
+func (b *Backend) RunAdmittedTransaction(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) error {
+	_, err := b.RunAdmittedTransactionOutcome(ctx, label, operation)
+	return err
+}
+
 func (b *Backend) RunAdmittedTransactionOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) (bool, error) {
 	ctx, err := generationauthority.PrepareMutationAdmission(ctx)
 	if err != nil {

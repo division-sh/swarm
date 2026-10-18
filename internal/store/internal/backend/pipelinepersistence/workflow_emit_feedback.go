@@ -102,7 +102,7 @@ func (s *PipelinePostgresOwner) CommitWorkflowEmitFeedback(ctx context.Context, 
 	if err := s.requireCurrentSchema(); err != nil {
 		return result, err
 	}
-	ack, err := s.backend.RunTransactionOutcome(ctx, func(ctx context.Context, tx *sql.Tx) error {
+	ack, err := s.backend.RunAdmittedTransactionOutcome(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		result, err = commitWorkflowEmitFeedbackTx(ctx, tx, true, candidate)
 		return err
 	})
@@ -117,7 +117,7 @@ func (s *PipelineSQLiteOwner) CommitWorkflowEmitFeedback(ctx context.Context, ca
 	if err := s.requireCurrentSchema(); err != nil {
 		return result, err
 	}
-	ack, err := s.backend.RunTransactionOutcome(ctx, "sqlite workflow emit feedback", func(ctx context.Context, tx *sql.Tx) error {
+	ack, err := s.backend.RunAdmittedTransactionOutcome(ctx, "sqlite workflow emit feedback", func(ctx context.Context, tx *sql.Tx) error {
 		result, err = commitWorkflowEmitFeedbackTx(ctx, tx, false, candidate)
 		return err
 	})

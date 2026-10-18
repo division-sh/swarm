@@ -56,7 +56,7 @@ func (s *BudgetPostgresOwner) RecordSpend(ctx context.Context, rec budgetspend.S
 	if err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.backend.RunAdmittedTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		if rec.EntityID != "" {
 			runID, err := runtimecurrentstate.RequireRunID(txctx)
 			if err != nil {
@@ -193,7 +193,7 @@ func (s *BudgetSQLiteOwner) RecordSpend(ctx context.Context, rec budgetspend.Spe
 	if err != nil {
 		return err
 	}
-	if err := s.backend.RunTransaction(ctx, "sqlite budget spend record", func(txctx context.Context, tx *sql.Tx) error {
+	if err := s.backend.RunAdmittedTransaction(ctx, "sqlite budget spend record", func(txctx context.Context, tx *sql.Tx) error {
 		if rec.EntityID != "" {
 			runID, err := runtimecurrentstate.RequireRunID(txctx)
 			if err != nil {

@@ -13,6 +13,7 @@ import (
 	runtimelifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privatefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -426,6 +427,8 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 	if write == nil || native == nil {
 		return failed[T](errors.New("selected-store mutation writer and native runner are required"))
 	}
+	callerCtx := ctx
+	ctx, admission := generationauthority.ObserveMutationAdmission(ctx)
 	if evidence != Story && evidence != AuthorityFence && evidence != RevisionOnly {
 		return failed[T](fmt.Errorf("unsupported mutation evidence mode %d", evidence))
 	}
@@ -469,7 +472,8 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 	var nativeErr error
 	retryDelay := time.Millisecond
 	for {
-		phase = AcquireFence
+		phase = BeforeAttempt
+		admissionAttempts := admission.Attempts()
 		acknowledged, nativeErr = native(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			if previous != nil {
 				previous.active = false
@@ -480,7 +484,7 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 					return err
 				}
 			}
-			attempt := &Attempt{tx: tx, dialect: dialect, evidence: evidence, kind: kind, effects: baseline.effects, handoff: handoff, candidates: candidates, active: true, callerCtx: ctx, runAdmissions: make(activeRunSources)}
+			attempt := &Attempt{tx: tx, dialect: dialect, evidence: evidence, kind: kind, effects: baseline.effects, handoff: handoff, candidates: candidates, active: true, callerCtx: callerCtx, runAdmissions: make(activeRunSources)}
 			txctx = context.WithValue(txctx, sqlAttemptKey{}, attempt)
 			previous = attempt
 			defer func() { attempt.active = false }()
@@ -519,6 +523,9 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 			phase = CommitAdmission
 			return nil
 		})
+		if phase == BeforeAttempt && admission.Attempts() != admissionAttempts {
+			phase = AcquireFence
+		}
 		// The native outcome boolean is not rollback proof. Only a sealed,
 		// clean pre-COMMIT abort at the fence permits a fresh transaction.
 		if acknowledged || dialect != privateactivity.DialectPostgres || phase != AcquireFence || domainEntered || !postgresbackend.IsRolledBackSerializationConflict(nativeErr) {
