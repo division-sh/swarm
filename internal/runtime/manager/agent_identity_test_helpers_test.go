@@ -95,6 +95,13 @@ func managerTestEphemeralTopologyAdmission(t testing.TB) runtimeagenttopology.Ad
 	return admission
 }
 
+func managerTestEphemeralTopologyAdmissionForSource(t testing.TB, source semanticview.Source) runtimeagenttopology.Admission {
+	t.Helper()
+	admission := managerTestTopologyAdmissionForSource(t, source)
+	admission.Lifetime = runtimeagenttopology.LifetimeEphemeral
+	return admission
+}
+
 func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfig) (PersistedAgent, error) {
 	var err error
 	cfg, err = managerTestBindRuntimeCreatedIdentity(cfg, managerIdentityTestRunID, "manager.test.static_agent")

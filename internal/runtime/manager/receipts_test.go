@@ -475,7 +475,7 @@ func registerReceiptTestAgent(t *testing.T, am *AgentManager, cfg runtimeactors.
 	} else {
 		cfg.Identity = managerRuntimeAgentIdentityForFlowPath(cfg.ID, cfg.FlowPath)
 	}
-	if err := am.lifecycle.registerExecution(testAuthorActivityContext(context.Background()), PersistedAgent{Config: cfg, Status: "active", HiredBy: "test", Topology: managerTestEphemeralTopologyAdmission(t)}, true, panicStubAgent{id: cfg.ID}, testManagerSubscriptionAdmission(t, cfg)); err != nil {
+	if err := am.lifecycle.registerExecution(testAuthorActivityContext(context.Background()), PersistedAgent{Config: cfg, Status: "active", HiredBy: "test", Topology: managerTestEphemeralTopologyAdmissionForSource(t, am.semanticSource)}, true, panicStubAgent{id: cfg.ID}, testManagerSubscriptionAdmission(t, cfg)); err != nil {
 		t.Fatalf("register receipt test agent: %v", err)
 	}
 }
