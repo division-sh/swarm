@@ -17,6 +17,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -460,6 +461,7 @@ func TestRunOriginStorageConstraintParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := context.Background()
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
 			eventID := uuid.NewString()
 			sourceRunID := uuid.NewString()
 			sourceEventID := uuid.NewString()
@@ -487,7 +489,7 @@ func TestRunOriginStorageConstraintParity(t *testing.T) {
 				test := test
 				t.Run(test.name, func(t *testing.T) {
 					err := insertRawRunOrigin(
-						ctx, fixture.db, backend, uuid.NewString(),
+						ctx, fixture.db, backend, uuid.NewString(), rooted.Admission(),
 						test.kind, test.eventID, test.eventType, test.serviceID, test.generation,
 						test.sourceRunID, test.sourceEventID,
 					)
@@ -499,7 +501,7 @@ func TestRunOriginStorageConstraintParity(t *testing.T) {
 
 			runID := uuid.NewString()
 			if err := insertRawRunOrigin(
-				ctx, fixture.db, backend, runID,
+				ctx, fixture.db, backend, runID, rooted.Admission(),
 				string(runtimerunlifecycle.OriginStandingGeneration), "", "", serviceID, 1, "", "",
 			); err != nil {
 				t.Fatalf("insert standing origin without relation: %v", err)
@@ -660,6 +662,7 @@ func insertRawRunOrigin(
 	db *sql.DB,
 	backend string,
 	runID string,
+	root sourceartifact.RootAdmission,
 	kind string,
 	eventID string,
 	eventType string,
@@ -670,7 +673,7 @@ func insertRawRunOrigin(
 ) error {
 	snapshot := runlifecyclefixture.CorruptSnapshot{
 		RunID: runID, State: string(runtimerunlifecycle.StateRunning),
-		BundleHash: runLifecycleCandidateParityBundleHash,
+		BundleHash: root.BundleHash(), RootDirectory: root.RootDirectory(),
 		OriginKind: kind, TriggerEventID: eventID, TriggerEventType: eventType,
 		OriginServiceID: serviceID, OriginGeneration: generation,
 		ForkedFromRunID: sourceRunID, ForkedFromEventID: sourceEventID,
