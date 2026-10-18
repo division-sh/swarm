@@ -296,7 +296,8 @@ func TestDormantIngressCannotMaskStructuralRefusal(t *testing.T) {
 					}
 					schema.Instance = field
 				case "invalid_alias":
-					schema.Ingress.Alias = "unreachable/alias"
+					alias := "unreachable/alias"
+					schema.Ingress.Alias = &alias
 				}
 			})
 			if defect == "invalid_alias" {

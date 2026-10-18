@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -69,47 +68,7 @@ func AdmitFlowSchemaValue(root yamlsource.Value) (FlowSchemaDocument, error) {
 	if len(out.Schedules) > 0 && !out.Instance.Empty() {
 		return FlowSchemaDocument{}, nodeValueError(fields["schedules"], fmt.Errorf("schedules fire per run; per-instance cadence is not supported"))
 	}
-	out.admissionProvenance = map[string]EffectiveValueProvenance{"declaration": authoredSourceProvenance(root)}
-	if err := collectNodeValueProvenance(root, "", out.admissionProvenance, nil); err != nil {
-		return FlowSchemaDocument{}, err
-	}
-	deriveSchemaProvenance(&out)
 	return out, nil
-}
-
-func deriveSchemaProvenance(out *FlowSchemaDocument) {
-	out.admissionProvenance["mode"] = EffectiveValueProvenance{Origin: EffectiveValueOriginDerived, RuleID: "flow.shape_from_instance", InputPaths: []string{"instance"}}
-	if out.Instance.Empty() {
-		fact := out.admissionProvenance["mode"]
-		fact.SourcePresence = "missing"
-		out.admissionProvenance["mode"] = fact
-	}
-	for _, direction := range []string{"inputs", "outputs"} {
-		count := len(out.Pins.Inputs.EventPins)
-		if direction == "outputs" {
-			count = len(out.Pins.Outputs.EventPins)
-		}
-		for i := 0; i < count; i++ {
-			path := fmt.Sprintf("pins.%s[%d]", direction, i)
-			if fact := out.admissionProvenance[path]; fact.SourcePresence == yamlsource.PresenceScalar.String() {
-				out.admissionProvenance[path+".event"] = EffectiveValueProvenance{Origin: EffectiveValueOriginDerived, RuleID: "flow.pin_local_event_identity", InputPaths: []string{path}}
-			}
-		}
-	}
-	for _, stage := range out.StageDeclarations.Entries {
-		for i := range stage.Timers {
-			path := NodeProvenanceMapPath("stages", stage.ID) + fmt.Sprintf(".timers[%d]", i)
-			if _, authored := out.admissionProvenance[path+".id"]; !authored {
-				inputs := []string{NodeProvenanceMapPath("stages", stage.ID)}
-				for _, key := range []string{"emit", "advances_to"} {
-					if _, present := out.admissionProvenance[path+"."+key]; present {
-						inputs = append(inputs, path+"."+key)
-					}
-				}
-				out.admissionProvenance[path+".id"] = EffectiveValueProvenance{Origin: EffectiveValueOriginDerived, RuleID: "flow.stage_timer_default_id", InputPaths: inputs}
-			}
-		}
-	}
 }
 
 func schemaValueFields(value yamlsource.Value, owner string, allowed map[string]struct{}, nonempty bool) (map[string]yamlsource.Value, error) {
@@ -238,29 +197,4 @@ func projectSchemaRequiredAgentsValue(value yamlsource.Value) ([]FlowRequiredAge
 		out = append(out, row)
 	}
 	return out, nil
-}
-
-func populateEffectiveSchemaProvenance(bundle *WorkflowContractBundle, builder *effectiveProvenanceBuilder) {
-	for _, source := range sortedFlowSources(bundle.FlowSources) {
-		schema, ok := bundle.FlowSchemaByID(source.FlowPath)
-		if !ok {
-			continue
-		}
-		prefix := "schemas[" + strconv.Quote(source.FlowPath) + "]"
-		for relative, fact := range schema.admissionProvenance {
-			fact.InputPaths = qualifyEffectiveEventInputPaths(prefix, fact.InputPaths)
-			builder.set(prefix+"."+relative, fact)
-		}
-		if alias, present := bundle.Semantics.flowIngressAliases[source.FlowPath]; present {
-			builder.set(prefix+".ingress.alias", alias.provenance)
-		}
-		for _, fact := range bundle.FlowRequiredAgentFacts(source.FlowPath) {
-			if fact.Source != RequiredAgentSourceInferred {
-				continue
-			}
-			builder.set(prefix+".effective_required_agents["+strconv.Quote(fact.Role)+"]", EffectiveValueProvenance{
-				Origin: EffectiveValueOriginDerived, RuleID: "flow.required_agents_from_local_agent_keys", InputPaths: []string{fact.SourceFile + "[" + strconv.Quote(fact.Role) + "]"}, SourceFile: fact.SourceFile,
-			})
-		}
-	}
 }

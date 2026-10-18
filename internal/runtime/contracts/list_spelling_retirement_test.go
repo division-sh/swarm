@@ -35,7 +35,7 @@ func listRetirementDecode(t testing.TB, surface string, value yamlsource.Value) 
 		field, err := projectEntityFieldDecl(value)
 		return field.Type, field.IsOptional, field.Initial, err
 	case "events":
-		field, optional, _, err := admitEventPayloadField(value)
+		field, optional, err := admitEventPayloadField(value)
 		return field.Type, optional, nil, err
 	case "nodes":
 		field, err := projectNodeStateFieldValue("items", value)
@@ -204,8 +204,8 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if artifact.BundleHash() != bundle.SourceArtifact.BundleHash() || !bytes.Equal(artifact.LogicalBlob(), bundle.SourceArtifact.LogicalBlob()) || !reflect.DeepEqual(loaded.ScopedNodeRecords(), bundle.ScopedNodeRecords()) || !reflect.DeepEqual(loaded.RootTypes, bundle.RootTypes) || !reflect.DeepEqual(loaded.RootEntities, bundle.RootEntities) || !reflect.DeepEqual(loaded.Events, bundle.Events) || !reflect.DeepEqual(loaded.EffectiveProvenance().Entries(), bundle.EffectiveProvenance().Entries()) {
-						t.Fatal("retained source erased type/style/presence or provenance")
+					if artifact.BundleHash() != bundle.SourceArtifact.BundleHash() || !bytes.Equal(artifact.LogicalBlob(), bundle.SourceArtifact.LogicalBlob()) || !reflect.DeepEqual(loaded.ScopedNodeRecords(), bundle.ScopedNodeRecords()) || !reflect.DeepEqual(loaded.RootTypes, bundle.RootTypes) || !reflect.DeepEqual(loaded.RootEntities, bundle.RootEntities) || !reflect.DeepEqual(loaded.Events, bundle.Events) {
+						t.Fatal("retained source erased type/style/presence")
 					}
 				}
 			})

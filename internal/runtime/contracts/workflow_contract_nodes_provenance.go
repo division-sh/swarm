@@ -1,7 +1,6 @@
 package contracts
 
 import (
-	"fmt"
 	"strconv"
 	"unicode"
 
@@ -36,42 +35,7 @@ func nodeHandlerAnnotations(value yamlsource.Value) ([]yamlsource.Value, error) 
 	return annotations, nil
 }
 
-func collectNodeValueProvenance(value yamlsource.Value, prefix string, out map[string]EffectiveValueProvenance, annotations []yamlsource.Value) error {
-	for _, note := range annotations {
-		if note.SemanticPath() == value.SemanticPath() {
-			return nil
-		}
-	}
-	switch value.Presence() {
-	case yamlsource.PresenceMapping, yamlsource.PresenceEmptyMapping:
-		fields, err := value.Mapping()
-		if err != nil {
-			return err
-		}
-		for _, field := range fields {
-			path := NodeProvenanceMapPath(prefix, field.Name)
-			out[path] = authoredSourceProvenance(field.Value)
-			if err := collectNodeValueProvenance(field.Value, path, out, annotations); err != nil {
-				return err
-			}
-		}
-	case yamlsource.PresenceSequence, yamlsource.PresenceEmptySequence:
-		items, err := value.Sequence()
-		if err != nil {
-			return err
-		}
-		for index, item := range items {
-			path := prefix + fmt.Sprintf("[%d]", index)
-			out[path] = authoredSourceProvenance(item)
-			if err := collectNodeValueProvenance(item, path, out, annotations); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// NodeProvenanceMapPath encodes an exact map key in the admitted source ledger.
+// NodeProvenanceMapPath encodes an exact map key in a diagnostic source slot.
 func NodeProvenanceMapPath(prefix, key string) string {
 	simple := key != ""
 	for index, r := range key {
