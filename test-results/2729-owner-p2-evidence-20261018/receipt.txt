@@ -1,0 +1,6 @@
+<!-- receipt v1 -->
+receipt: head=ab2d9305757b2c5ace6a1e933cefe1ced5ddcae9 tree=b241c1065361f4caafbb45414aad8023580cac12 parent=5919825fcf057442f82b6556d231f2a513f8fe83 branch=agent-d/2729-credential-source signed=G dirty_files=0
+preflight: test-results/preflight/20261018T180742.031701422-a6903369-bac1-4268-ba42-eaba2dc06dd3/receipt.json sha256=02aad1e99dc5afee6ecd5c6b63daad430541a9e6f939814ac177be7b7c5001e3 (exact-head complete unstarted=0)
+tests: 2729 owner SourceFacts P2: named RED reproduced; credentials package race x3 PASS on exact repair tree; signed-head focused+guards PASS 73 roots/133 cases including both-store concise/verbose boot; membership check PASS; Preflight: pass (641.338s), exact signed head; lifecycle/focused, no extra units
+regenerated: not-claimed
+generated: 2026-10-18T18:48:31Z

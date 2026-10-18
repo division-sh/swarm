@@ -1,0 +1,74 @@
+[
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/bootverify",
+    "name": "TestCredentialChecksRetainAgentFreeToolRequirement",
+    "expected_unit": "broad-08",
+    "actual_units": [
+      "broad-08"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/credentials",
+    "name": "TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically",
+    "expected_unit": "broad-10",
+    "actual_units": [
+      "broad-10"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/cliapp",
+    "name": "TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces",
+    "expected_unit": "catalog-required-verify",
+    "actual_units": [
+      "catalog-required-verify"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/cliapp",
+    "name": "TestDoctorIsSourceFreeAcrossHostileInvocationTrees",
+    "expected_unit": "catalog-required-verify",
+    "actual_units": [
+      "catalog-required-verify"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/cliapp",
+    "name": "TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment",
+    "expected_unit": "catalog-required-verify",
+    "actual_units": [
+      "catalog-required-verify"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/cliapp",
+    "name": "TestVerifyBootStartupPredicateCensus",
+    "expected_unit": "catalog-required-verify",
+    "actual_units": [
+      "catalog-required-verify"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime",
+    "name": "TestWorkflowAdmissionAccountsForPostRegistryClauses",
+    "expected_unit": "runtime-full",
+    "actual_units": [
+      "runtime-full"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/llm",
+    "name": "TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles",
+    "expected_unit": "api-llm-bus-full",
+    "actual_units": [
+      "api-llm-bus-full"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/serveapp",
+    "name": "TestServeRequiredCredentialSourceReadbackBothStores",
+    "expected_unit": "serveapp-journeys-first",
+    "actual_units": [
+      "serveapp-journeys-first"
+    ]
+  }
+]

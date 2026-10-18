@@ -1,0 +1,45 @@
+{
+  "roots": 73,
+  "cases": 133,
+  "fails": 0,
+  "skips": 0,
+  "p2": [
+    {
+      "Time": "2026-10-18T18:07:24.637183434Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/runtime/credentials",
+      "Test": "TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically/source_locator_is_not_authority",
+      "Elapsed": 0
+    }
+  ],
+  "served": [
+    {
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores/sqlite/concise",
+      "Elapsed": 0.85
+    },
+    {
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores/sqlite/verbose",
+      "Elapsed": 0.63
+    },
+    {
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores/sqlite",
+      "Elapsed": 1.48
+    },
+    {
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores/postgres/concise",
+      "Elapsed": 0.94
+    },
+    {
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores/postgres/verbose",
+      "Elapsed": 0.52
+    },
+    {
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores/postgres",
+      "Elapsed": 1.46
+    },
+    {
+      "Test": "TestServeRequiredCredentialSourceReadbackBothStores",
+      "Elapsed": 2.94
+    }
+  ]
+}

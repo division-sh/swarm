@@ -1,0 +1,9 @@
+Precompile outside test slot: environment=0.003s build=2.115s cleanup=0.000s total=2.119s
+Test slot acquired after 21ms. Starting go test ./internal/runtime/credentials -run ^TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically/source_locator_is_not_authority$ -count=1
+--- FAIL: TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically (0.01s)
+    --- FAIL: TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically/source_locator_is_not_authority (0.00s)
+        snapshot_test.go:408: retained source facts=[{provenance.key-name env:provenance.key-name}], want env:provenance_key_name
+FAIL
+FAIL	github.com/division-sh/swarm/internal/runtime/credentials	0.015s
+FAIL
+exit status 1

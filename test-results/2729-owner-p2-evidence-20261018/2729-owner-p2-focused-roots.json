@@ -1,0 +1,105 @@
+[
+  {
+    "package": "github.com/division-sh/swarm/internal/cliapp",
+    "roots": [
+      "TestAdmissionPredicateRatchetRejectsRemovedVerifyConsumer",
+      "TestAdmissionPredicateRatchetRejectsUncoveredProviderPrerequisite",
+      "TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal",
+      "TestCLIIdentifierRegistryCoversVisiblePositionalsAndStringFlags",
+      "TestCLIIdentifierRegistryMatchesAuthoritativeSpec",
+      "TestCLIIdentifierRegistryRejectsUnknownFamily",
+      "TestCLIIdentifierRegistryRejectsUnsupportedFamilyPolicy",
+      "TestCLIIdentifierRegistryRowsReferToLiveInputs",
+      "TestCLIOutputConformanceRegistryCoversImplementedCommandCatalogRows",
+      "TestCLIOutputConformanceRegistryCoversVisibleCommandTree",
+      "TestCLIOutputConformanceRegistryRowsAreWellFormed",
+      "TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces",
+      "TestDoctorIsSourceFreeAcrossHostileInvocationTrees",
+      "TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment",
+      "TestSecretsSetListCheckAndRemoveUseFileTierWithoutLeakingValues",
+      "TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegation",
+      "TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegationFromSelectedFile",
+      "TestSwarmEnvGuardBlocksGeneratedBoundaryParentEnv",
+      "TestSwarmEnvGuardBlocksRetiredArtifactRoot",
+      "TestSwarmEnvGuardBlocksRetiredRuntimeLLMConfigEnv",
+      "TestSwarmEnvGuardBlocksRetiredStoreDatabaseConfigEnv",
+      "TestSwarmEnvGuardBlocksUnknownWithSuggestion",
+      "TestSwarmEnvGuardDoesNotSkipVersionServerEqualsTrue",
+      "TestSwarmEnvGuardDoesNotSkipWhenHelpIsCommandData",
+      "TestSwarmEnvGuardEmptyRetiredEnvUsesNonEmptyBoundary",
+      "TestSwarmEnvGuardHonorsTypedDatabasePasswordEnvClearOverride",
+      "TestSwarmEnvGuardIgnoresProjectTypedDatabasePasswordEnvDelegation",
+      "TestSwarmEnvGuardRejectsExecutableAdjacentTypedDatabasePasswordEnvDelegation",
+      "TestSwarmEnvGuardSkipsPureSubcommandHelpFlags",
+      "TestSwarmEnvGuardSkipsPureVersionAndCompletion",
+      "TestVerifyBootStartupPredicateCensus"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime",
+    "roots": [
+      "TestChannelActivationExecutableReaderCensus",
+      "TestChannelActivationExecutionConsumersUseCanonicalOwner",
+      "TestRuntimeDepsValidateOwnsRequiredBootInputs",
+      "TestRuntimeDepsValidatedDerivesCanonicalBootGraph",
+      "TestSemanticOwnershipProducerConsumerLedgerIsClosed",
+      "TestWorkflowAdmissionAccountsForPostRegistryClauses"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/bootverify",
+    "roots": [
+      "TestAdmissionReportAccountsForEveryRegisteredClause",
+      "TestCredentialAdmissionDoesNotDiscloseUnderlyingReadError",
+      "TestCredentialAdmissionRejectsMissingInspectionPort",
+      "TestCredentialChecksRetainAgentFreeToolRequirement"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/credentials",
+    "roots": [
+      "TestChannelConfirmationConsumesOneSealValidatedCredentialObservation",
+      "TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically",
+      "TestCredentialValueCurrentnessHasOneProductionOwnerAndNoEpochSurvivors",
+      "TestIngressSigningUsabilityHasNoSecondProductionInterpreter",
+      "TestSecretBindingProjectionFrozenReadNeverObservesOrAddsAuthority"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/runtime/llm",
+    "roots": [
+      "TestProviderCredentialResolverMissingPortIsUnavailableNotMissingSecret",
+      "TestProviderCredentialResolverReadFailurePreservesCauseWithoutSecretDisclosure",
+      "TestProviderCredentialResolver_ActiveCredentiallessProfileNeedsNoSyntheticKey",
+      "TestProviderCredentialResolver_EnvOnlyFailsClosed",
+      "TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles"
+    ]
+  },
+  {
+    "package": "github.com/division-sh/swarm/internal/serveapp",
+    "roots": [
+      "TestPlatformSpecOwnsServeLifecycleAndDoctorSchemaPresentation",
+      "TestServeLifecycleOwnerRejectsParallelTerminalWriters",
+      "TestServeLifecyclePresenterConciseReadinessUsesTypedFacts",
+      "TestServeLifecyclePresenterDoesNotContradictRuntimeFailureWithCleanShutdown",
+      "TestServeLifecyclePresenterDoesNotTreatRecoveryAdmissionAsRestoration",
+      "TestServeLifecyclePresenterFailureNeverPrintsReadiness",
+      "TestServeLifecyclePresenterFailureUsesDiagnosticChannel",
+      "TestServeLifecyclePresenterJoinsEarlyFailureAndCleanupOnce",
+      "TestServeLifecyclePresenterMasksProofReuseFallbackPresentation",
+      "TestServeLifecyclePresenterPreReadyRuntimeFailureSuppressesCommit",
+      "TestServeLifecyclePresenterPreservesWarningsOnLateStartupFailure",
+      "TestServeLifecyclePresenterProjectsBootFactsByMode",
+      "TestServeLifecyclePresenterProjectsRecoveryOutcomesWithoutBookkeeping",
+      "TestServeLifecyclePresenterPublishesAdmissionBeforeVisibleReadiness",
+      "TestServeLifecyclePresenterRendersZeroIngressAndShutdownFailure",
+      "TestServeLifecyclePresenterStylesOnlyWaitingToken",
+      "TestServeLifecyclePresenterUnhandledDiagnosticFallsBackToGenericFailure",
+      "TestServeLifecyclePresenterUsesAuthorSafeMultiContextWorkspaceProjection",
+      "TestServeLifecyclePresenterUsesResolvedStoreSelectionVerbatim",
+      "TestServeLifecyclePresenterVerboseFailureCoalescesCanonicalSequence",
+      "TestServeLifecyclePresenterVerbosePreservesExactlyCanonicalBootSequence",
+      "TestServeRequiredCredentialSourceReadbackBothStores"
+    ]
+  }
+]
