@@ -35,6 +35,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -4797,6 +4798,13 @@ func TestValidateAutoEmitPayload_RejectsListTypeViolation(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "$.sources must be array") {
 		t.Fatalf("validateAutoEmitPayload error = %v, want list-type detail", err)
+	}
+	var violation *runtimeeventschema.Violation
+	if !errors.Is(err, runtimebus.ErrPayloadValidation) || !errors.As(err, &violation) || violation.Path != "$.sources" {
+		t.Fatalf("generated validation lost its canonical typed cause: %v", err)
+	}
+	if _, permanent := runtimebus.SubmittedInboundValidationPath(err); permanent {
+		t.Fatal("internally generated auto-emission was blamed on the submitted input")
 	}
 }
 

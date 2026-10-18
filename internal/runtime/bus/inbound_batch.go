@@ -233,7 +233,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		}
 		preparedCtx, admitted, err := eb.admitPublishEvent(itemCtx, item.Event)
 		if err != nil {
-			return release(err)
+			return release(markSubmittedInboundValidation(err))
 		}
 		runProposal, err = eb.preparePublicationRunProposal(preparedCtx, admitted, runProposal)
 		if err != nil {
