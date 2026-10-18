@@ -27,6 +27,8 @@ import (
 // reviewer-c6173181699 retains the exact admitted keyed-parent tree proof.
 // #2287/6148375122 appends the CAS and two join presentation endpoints;
 // every prior setup, mechanical receipt and execution assertion is retained.
+// #2730/6244508696 appends seven original-process setup endpoints; the first
+// 39 receipts and every historical Before/After/Mechanical field are retained.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
@@ -48,18 +50,25 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 		"native-pipeline-delivery-exact-join-semantic/internal/runtime/pipeline/workflow_join_lifecycle_test.go/TestWorkflowJoinCountWaitsDespiteEmptyStateMembersOnBothStores",
 		"native-pipeline-delivery-exact-join-semantic/internal/runtime/pipeline/workflow_join_lifecycle_test.go/TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog",
 		"native-shared-coordinator-authority/internal/runtime/node_delivery_startup_recovery_test.go/TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity",
-		"native-shared-coordinator-authority/internal/runtime/node_delivery_startup_recovery_test.go/TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries":
+		"native-shared-coordinator-authority/internal/runtime/node_delivery_startup_recovery_test.go/TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries",
+		"native-bus-terminal-refusal-state/internal/runtime/bus/eventbus_publish_test.go/TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres",
+		"native-bus-terminal-refusal-state/internal/runtime/bus/eventbus_publish_test.go/TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite",
+		"native-bus-selected-run-construction/internal/runtime/bus/eventbus_publish_test.go/eventBusTestRunContextForSource",
+		"native-bus-run-control-construction/internal/runtime/bus/run_control_dispatch_test.go/seedRunControlTestRun",
+		"native-bus-source-hash/internal/runtime/bus/eventbus_publish_test.go/TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycleOwner",
+		"native-bus-target-construction/internal/runtime/bus/target_owner_store_parity_test.go/TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends",
+		"native-bus-dispatch-seed/internal/runtime/bus/event_identity_dispatch_surface_test.go/newCompleteEventDispatchFixtureWithOrigin":
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "501485801119fc04c640401945b123bff6fd2644afad7e48ad7b85d548a36528" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "57eb4fbbb427650f944e99000dadf9ada9e0d5d156883832f804090d7cd209a1" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 39 {
+	if len(pins) != 46 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -114,7 +123,14 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			row.Function != "TestWorkflowJoinCountWaitsDespiteEmptyStateMembersOnBothStores" &&
 			row.Function != "TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog" &&
 			row.Function != "TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity" &&
-			row.Function != "TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries" {
+			row.Function != "TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries" &&
+			row.Function != "TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres" &&
+			row.Function != "TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite" &&
+			row.Function != "eventBusTestRunContextForSource" &&
+			row.Function != "seedRunControlTestRun" &&
+			row.Function != "TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycleOwner" &&
+			row.Function != "TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends" &&
+			row.Function != "newCompleteEventDispatchFixtureWithOrigin" {
 			continue
 		}
 		matched++
@@ -160,13 +176,13 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			}
 		})
 	}
-	if matched != 8 {
-		t.Fatalf("fixture comparator endpoints=%d, want8", matched)
+	if matched != 15 {
+		t.Fatalf("fixture comparator endpoints=%d, want15", matched)
 	}
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "501485801119fc04c640401945b123bff6fd2644afad7e48ad7b85d548a36528" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "57eb4fbbb427650f944e99000dadf9ada9e0d5d156883832f804090d7cd209a1" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -177,8 +193,12 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 39 {
+	if len(pins) != 46 {
 		t.Fatal("fixture successor row count changed")
+	}
+	prefix, err := json.Marshal(pins[:39])
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "daf060dec5ac400e00a35c4a7dea0321a38feeaae8e3bbcb4b20c87cbab0b5b2" {
+		t.Fatal("#2730 changed the immutable 39-receipt predecessor prefix")
 	}
 	for index, pin := range pins {
 		t.Run(pin.Original.Function, func(t *testing.T) {
