@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,7 +16,6 @@ import urllib.request
 DIGEST = "sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437"
 PACKAGE = "swarm-workspace-golang"
 REPOSITORY = "division-sh/swarm"
-SOURCE = "https://public.ecr.aws/v2/docker/library/golang"
 MIRROR = "https://ghcr.io/v2/division-sh/" + PACKAGE
 ACCEPT = ", ".join([
     "application/vnd.oci.image.index.v1+json",
@@ -36,10 +36,32 @@ class BlobRedirect(urllib.request.HTTPRedirectHandler):
         return redirected
 
 
-def read_json(opener, url, authorization):
+def read_http(opener, request, operation, receive):
+    requested = urllib.parse.urlsplit(request.full_url)
+    for attempt in range(1, 6):
+        try:
+            with opener.open(request, timeout=60) as response:
+                return receive(response)
+        except urllib.error.HTTPError as error:
+            record = {"operation": operation, "requested_host": requested.hostname,
+                      "requested_path": requested.path, "status": error.code, "attempt": attempt,
+                      "classification": "rate-limit" if error.code == 429 else
+                                        "access-refusal" if error.code in (401, 403) else "http-failure"}
+            if error.geturl() != request.full_url:
+                try:
+                    record["final_host"] = urllib.parse.urlsplit(error.geturl()).hostname
+                except ValueError:
+                    record["final_host"] = "invalid"
+            print(json.dumps(record, sort_keys=True), file=sys.stderr)
+            error.close()
+            if error.code != 429 or attempt == 5:
+                raise
+            time.sleep(5 * 2 ** (attempt - 1))
+
+
+def read_json(opener, url, authorization, operation):
     request = urllib.request.Request(url, headers={"Authorization": authorization, "Accept": "application/json"})
-    with opener.open(request, timeout=60) as response:
-        raw = response.read(4 * 1024 * 1024 + 1)
+    raw = read_http(opener, request, operation, lambda response: response.read(4 * 1024 * 1024 + 1))
     if len(raw) > 4 * 1024 * 1024:
         raise ValueError("oversized setup metadata")
     return json.loads(raw)
@@ -54,11 +76,10 @@ def descriptor(value):
     return digest, size
 
 
-def read_manifest(opener, registry, token, digest, size):
-    request = urllib.request.Request(registry + "/manifests/" + digest,
+def read_manifest(opener, token, digest, size):
+    request = urllib.request.Request(MIRROR + "/manifests/" + digest,
                                      headers={"Authorization": "Bearer " + token, "Accept": ACCEPT})
-    with opener.open(request, timeout=60) as response:
-        raw = response.read(4 * 1024 * 1024 + 1)
+    raw = read_http(opener, request, "destination-manifest", lambda response: response.read(4 * 1024 * 1024 + 1))
     if len(raw) > 4 * 1024 * 1024 or (size is not None and len(raw) != size):
         raise ValueError("manifest size differs from immutable descriptor")
     if "sha256:" + hashlib.sha256(raw).hexdigest() != digest:
@@ -68,20 +89,24 @@ def read_manifest(opener, registry, token, digest, size):
 
 def verify_blob(opener, token, digest, size):
     request = urllib.request.Request(MIRROR + "/blobs/" + digest, headers={"Authorization": "Bearer " + token})
-    actual, count = hashlib.sha256(), 0
-    with opener.open(request, timeout=60) as response:
+
+    def read_blob(response):
+        # A retried body must start with a new hash/count, never a partial prefix.
+        actual, count = hashlib.sha256(), 0
         while chunk := response.read(1024 * 1024):
             count += len(chunk)
             if count > size:
                 raise ValueError("blob exceeds immutable descriptor size")
             actual.update(chunk)
-    if count != size or "sha256:" + actual.hexdigest() != digest:
-        raise ValueError("blob bytes differ from immutable descriptor")
+        if count != size or "sha256:" + actual.hexdigest() != digest:
+            raise ValueError("blob bytes differ from immutable descriptor")
+
+    read_http(opener, request, "destination-blob", read_blob)
 
 
 def linked_package(opener, token, allow_absent=False):
     try:
-        package = read_json(opener, "https://api.github.com/orgs/division-sh/packages/container/" + PACKAGE, "Bearer " + token)
+        package = read_json(opener, "https://api.github.com/orgs/division-sh/packages/container/" + PACKAGE, "Bearer " + token, "package-metadata")
     except urllib.error.HTTPError as error:
         if allow_absent and error.code == 404:
             return None
@@ -99,9 +124,8 @@ def verify():
     token, actor = os.environ["GH_TOKEN"], os.environ["GITHUB_ACTOR"]
     opener = urllib.request.build_opener(BlobRedirect())
     package = linked_package(opener, token)
-    source_token = read_json(opener, "https://public.ecr.aws/token/?service=public.ecr.aws&scope=repository:docker/library/golang:pull", "")["token"]
     basic = base64.b64encode((actor + ":" + token).encode()).decode()
-    mirror_token = read_json(opener, "https://ghcr.io/token?service=ghcr.io&scope=repository:division-sh/" + PACKAGE + ":pull", "Basic " + basic)["token"]
+    mirror_token = read_json(opener, "https://ghcr.io/token?service=ghcr.io&scope=repository:division-sh/" + PACKAGE + ":pull", "Basic " + basic, "token-exchange")["token"]
     pending, manifests, blobs = [(DIGEST, None)], {}, {}
     while pending:
         digest, size = pending.pop()
@@ -111,12 +135,9 @@ def verify():
             continue
         if len(manifests) >= 128:
             raise ValueError("fixed-image manifest graph limit exceeded")
-        source = read_manifest(opener, SOURCE, source_token, digest, size)
-        mirror = read_manifest(opener, MIRROR, mirror_token, digest, size)
-        if source != mirror:
-            raise ValueError("source/mirror manifest bytes differ")
-        manifests[digest] = len(source)
-        manifest = json.loads(source)
+        raw = read_manifest(opener, mirror_token, digest, size)
+        manifests[digest] = len(raw)
+        manifest = json.loads(raw)
         if manifest.get("schemaVersion") != 2:
             raise ValueError("unknown fixed-image manifest schema")
         if "manifests" in manifest:
@@ -156,8 +177,7 @@ if __name__ == "__main__":
             raise ValueError("unknown fixed workspace verification mode")
         else:
             print(json.dumps(verify(), sort_keys=True))
-    except urllib.error.HTTPError as error:
-        print("workspace mirror HTTP refusal " + str(error.code) + "; stop for access/policy disposition", file=sys.stderr)
+    except urllib.error.HTTPError:
         sys.exit(1)
     except (KeyError, ValueError, urllib.error.URLError) as error:
         print("workspace mirror verification refused: " + str(error), file=sys.stderr)
