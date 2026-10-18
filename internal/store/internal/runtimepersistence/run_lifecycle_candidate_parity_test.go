@@ -457,7 +457,8 @@ func TestRunLifecycleCreateIsInsertOrExactNoopParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
-			sourceartifactfixture.Require(t, ctx, fixture.store)
+			rooted, _ := sourceartifactfixture.Rooted(t, "candidate-source", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, rooted.Artifact())
 			source, err := runtimecorrelation.NewSourceArtifactFact(runLifecycleCandidateParityBundleHash)
 			if err != nil {
 				t.Fatal(err)
@@ -471,7 +472,7 @@ func TestRunLifecycleCreateIsInsertOrExactNoopParity(t *testing.T) {
 				}
 				request := runtimerunlifecycle.CreateRequest{
 					RunID: uuid.NewString(), Origin: origin,
-					Source: source, StartedAt: at,
+					Source: source, RootAdmission: rooted.Admission(), StartedAt: at,
 				}
 				if got, err := createRunLifecycleParity(fixture, ctx, request); err != nil || got != runtimerunlifecycle.MutationApplied {
 					t.Fatalf("first create = %s/%v", got, err)
@@ -492,7 +493,7 @@ func TestRunLifecycleCreateIsInsertOrExactNoopParity(t *testing.T) {
 				runID := uuid.NewString()
 				request := runtimerunlifecycle.CreateRequest{
 					RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
-					Source: source, StartedAt: at,
+					Source: source, RootAdmission: rooted.Admission(), StartedAt: at,
 				}
 				if got, err := createRunLifecycleParity(fixture, ctx, request); err != nil || got != runtimerunlifecycle.MutationApplied {
 					t.Fatalf("first create = %s/%v", got, err)
