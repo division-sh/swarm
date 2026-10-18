@@ -16,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -185,11 +186,17 @@ func TestConversationForkAtomicCreationControls(t *testing.T) {
 func TestConversationForkLostHTTPResponseReplays(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			_, selected, db, now, sessionID, turnID := newConversationForkCommitFixture(t, backend)
+			ctx, selected, db, now, sessionID, turnID := newConversationForkCommitFixture(t, backend)
 			makeHandler := func(s forkCommitOmissionProbeStore) *Handler {
-				return testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorConversationForkHandlers(testOperatorCapabilities{
+				handlers := testOperatorConversationForkHandlers(testOperatorCapabilities{
 					ConversationForkLifecycle: s, ConversationForks: s, Idempotency: s, Now: func() time.Time { return now },
-				})})
+				})
+				for name, handler := range handlers {
+					handlers[name] = func(work context.Context, req Request) (any, error) {
+						return handler(startupownership.CarryMutationAuthority(work, ctx), req)
+					}
+				}
+				return testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: handlers})
 			}
 			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"lost-response","method":"conversation.fork","params":{"source_session_id":%q,"fork_point":{"kind":"turn","turn_id":%q},"idempotency_key":"lost-response-key"}}`, sessionID, turnID)
 			handler := makeHandler(selected)

@@ -19,8 +19,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -78,6 +80,14 @@ func newConversationForkCommitFixture(t *testing.T, backend string) (context.Con
 		db = pg
 		selected = storetest.AdmitPostgresRuntimeStore(t, db)
 	}
+	process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	storetest.RequireRun(t, ctx, selected, runFixture)
 	const agentID = "fork-commit-omission-source"
 	identity := sqliteAgentUsageIdentityForRun(t, runID, agentID)
@@ -123,9 +133,15 @@ func TestConversationForkCommitBeforeAPICompletionProbe(t *testing.T) {
 			t.Run(backend+"/"+phase, func(t *testing.T) {
 				ctx, selected, db, now, sessionID, turnID := newConversationForkCommitFixture(t, backend)
 				makeHandler := func(owner ConversationForkLifecycleStore) *Handler {
-					return testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorConversationForkHandlers(testOperatorCapabilities{
+					handlers := testOperatorConversationForkHandlers(testOperatorCapabilities{
 						ConversationForkLifecycle: owner, ConversationForks: selected, Idempotency: selected, Now: func() time.Time { return now },
-					})})
+					})
+					for name, handler := range handlers {
+						handlers[name] = func(work context.Context, req Request) (any, error) {
+							return handler(startupownership.CarryMutationAuthority(work, ctx), req)
+						}
+					}
+					return testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: handlers})
 				}
 				const key = "fork-commit-omission-key"
 				body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"fork-probe","method":"conversation.fork","params":{"source_session_id":%q,"fork_point":{"kind":"turn","turn_id":%q},"idempotency_key":%q}}`, sessionID, turnID, key)
