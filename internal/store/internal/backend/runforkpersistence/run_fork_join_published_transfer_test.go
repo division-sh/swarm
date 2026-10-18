@@ -56,17 +56,12 @@ func publishedArrivalTransferFixture(t *testing.T, root, completion bool, status
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
-		RunID: source.Command.RunID,
-		Facts: events.EventFacts{ID: source.CurrentEventID, Type: events.EventType(source.Command.EventType),
-			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: genericschedule.OccurrenceProducerID()},
-			TaskID:   source.Command.TaskID, Payload: payload, RoutingSource: source.Command.RoutingSource,
-			Envelope:  events.EventEnvelope{EntityID: source.Command.EntityID, FlowInstance: source.Command.FlowInstance},
-			CreatedAt: source.CurrentDueAt, ExecutionMode: source.Command.ExecutionMode},
+	event := retainedRuntimeControlPublicationFixture(t, source.Command.RunID, events.EventFacts{ID: source.CurrentEventID, Type: events.EventType(source.Command.EventType),
+		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: genericschedule.OccurrenceProducerID()},
+		TaskID:   source.Command.TaskID, Payload: payload, RoutingSource: source.Command.RoutingSource,
+		Envelope:  events.EventEnvelope{EntityID: source.Command.EntityID, FlowInstance: source.Command.FlowInstance},
+		CreatedAt: source.CurrentDueAt, ExecutionMode: source.Command.ExecutionMode,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	ref := join.JoinRef()
 	schema, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
 		BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), FlowID: ref.FlowPath(), EventKey: source.Command.EventType,

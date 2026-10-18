@@ -11,6 +11,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -42,17 +43,12 @@ func selectedGenericPublicationFixture(t *testing.T, root, completion bool) (gen
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
-		RunID: activation.Command.RunID,
-		Facts: events.EventFacts{ID: activation.CurrentEventID, Type: events.EventType(activation.Command.EventType),
-			Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: genericschedule.OccurrenceProducerID()},
-			TaskID:   activation.Command.TaskID, Payload: payload,
-			Envelope:      events.EventEnvelope{EntityID: activation.Command.EntityID, FlowInstance: activation.Command.FlowInstance},
-			RoutingSource: activation.Command.RoutingSource, CreatedAt: activation.CurrentDueAt, ExecutionMode: activation.Command.ExecutionMode},
+	event := retainedRuntimeControlPublicationFixture(t, activation.Command.RunID, events.EventFacts{ID: activation.CurrentEventID, Type: events.EventType(activation.Command.EventType),
+		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: genericschedule.OccurrenceProducerID()},
+		TaskID:   activation.Command.TaskID, Payload: payload,
+		Envelope:      events.EventEnvelope{EntityID: activation.Command.EntityID, FlowInstance: activation.Command.FlowInstance},
+		RoutingSource: activation.Command.RoutingSource, CreatedAt: activation.CurrentDueAt, ExecutionMode: activation.Command.ExecutionMode,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	flowID := activation.Command.RoutingSource.Route().FlowID
 	if flowID == "" {
 		flowID = "."
@@ -89,6 +85,22 @@ func selectedGenericPublicationFixture(t *testing.T, root, completion bool) (gen
 		t.Fatal(err)
 	}
 	return activation, record
+}
+
+func retainedRuntimeControlPublicationFixture(t *testing.T, runID string, facts events.EventFacts) events.Event {
+	t.Helper()
+	event := eventtest.RuntimeControlWithRoutingSourceAndMode(facts.ID, facts.Type, facts.Producer.ID, facts.TaskID,
+		facts.Payload, facts.ChainDepth, runID, "", facts.Envelope, facts.RoutingSource, facts.CreatedAt, facts.ExecutionMode)
+	expectedEnvelope := facts.Envelope
+	expectedEnvelope.Source = facts.RoutingSource.Route()
+	if event.ID() != facts.ID || event.Type() != facts.Type || event.RunID() != runID || event.ParentEventID() != "" ||
+		event.AdmissionClass() != events.EventAdmissionRuntimeControl || event.ProducerType() != facts.Producer.Type ||
+		event.Producer().ID() != facts.Producer.ID || event.TaskID() != facts.TaskID || event.ChainDepth() != facts.ChainDepth ||
+		event.ExecutionMode() != facts.ExecutionMode || event.RoutingSource() != facts.RoutingSource || !event.CreatedAt().Equal(facts.CreatedAt) ||
+		!reflect.DeepEqual(event.Payload(), facts.Payload) || !reflect.DeepEqual(event.Envelope(), expectedEnvelope.Normalized()) {
+		t.Fatal("retained runtime-control fixture changed the original publication facts")
+	}
+	return event
 }
 
 func TestSelectedGenericOccurrenceLineageRequiresExactPublicationBothDialects(t *testing.T) {

@@ -98,15 +98,12 @@ func publishedBarrierEvidenceFixture(t *testing.T, root bool, mode executionmode
 	at := timer.FireAt.Add(time.Second)
 	timer.Status, timer.FiredAt, timer.AcceptedAt, timer.OccurrenceAdmittedAt = "fired", &at, &at, &at
 	timer.OccurrenceEventID = genericschedule.OccurrenceEventID(timer.TimerID, timer.FireAt)
-	event, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{RunID: snapshot.RunID, Facts: events.EventFacts{
+	event := retainedRuntimeControlPublicationFixture(t, snapshot.RunID, events.EventFacts{
 		ID: timer.OccurrenceEventID, Type: events.EventType(command.EventType),
 		Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: genericschedule.OccurrenceProducerID()},
 		TaskID:   command.TaskID, Payload: timer.FirePayload, ExecutionMode: mode, CreatedAt: timer.FireAt,
 		Envelope: events.EventEnvelope{EntityID: command.EntityID, FlowInstance: command.FlowInstance}, RoutingSource: command.RoutingSource,
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	})
 	schema, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{BundleHash: registration.PlanRef.BundleHash,
 		FlowID: registration.IntentKey.ElementRef.FlowPath, EventKey: command.EventType,
 		SchemaDigest: "sha256:" + strings.Repeat("b", 64), SchemaClass: events.PayloadSchemaPlatform})

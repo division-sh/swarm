@@ -2,10 +2,12 @@ package pipeline
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
@@ -107,10 +109,26 @@ func TestActivityResultEmitterAndLineageAgreeOnExactParent(t *testing.T) {
 						}
 						altered, err = events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{Facts: facts, Lineage: root})
 					} else {
-						altered, err = events.NewChildEvent(events.ChildEventInput{Facts: facts, Lineage: frame})
+						altered = eventtest.ChildForProducerWithRoutingSource(facts.ID, facts.Type,
+							eventtest.Producer(facts.Producer.Type, facts.Producer.ID), facts.TaskID, facts.Payload,
+							facts.ChainDepth, frame, facts.Envelope, facts.RoutingSource, facts.CreatedAt)
 					}
 					if err != nil {
 						t.Fatalf("hostile must reach lineage validator: %v", err)
+					}
+					expectedEnvelope := facts.Envelope
+					expectedEnvelope.Source = facts.RoutingSource.Route()
+					expectedClass := events.EventAdmissionChild
+					if frame.ParentEventID == "" {
+						expectedClass = events.EventAdmissionSelectedForkReplay
+					}
+					if altered.AdmissionClass() != expectedClass || altered.ID() != facts.ID || altered.Type() != facts.Type || altered.RunID() != frame.RunID ||
+						altered.ParentEventID() != frame.ParentEventID || altered.TaskID() != facts.TaskID ||
+						altered.ProducerType() != facts.Producer.Type || altered.Producer().ID() != facts.Producer.ID ||
+						altered.ChainDepth() != facts.ChainDepth || altered.ExecutionMode() != frame.ExecutionMode ||
+						altered.RoutingSource() != facts.RoutingSource || !altered.CreatedAt().Equal(facts.CreatedAt) ||
+						!reflect.DeepEqual(altered.Payload(), facts.Payload) || !reflect.DeepEqual(altered.Envelope(), expectedEnvelope.Normalized()) {
+						t.Fatal("result fixture changed a coordinate before the lineage validator")
 					}
 					if err := lineage.ValidateResult(altered); err == nil {
 						t.Fatal("foreign result frame accepted")
