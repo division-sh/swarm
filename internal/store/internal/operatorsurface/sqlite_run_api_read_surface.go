@@ -201,7 +201,7 @@ func (s *RunSQLite) loadRunDebugReport(ctx context.Context, runID string, opts o
 	report.TestQuiescence.FanOutUnsettled = report.FanOut.Unsettled
 	report.TestQuiescence.FanOutBarriers = report.FanOut.BarrierArmed + report.FanOut.BarrierPending
 	report.TestQuiescence.Ready = runTestQuiescenceReady(report.TestQuiescence)
-	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorSQLiteDelivery, s.sources, s.pipeline, s.timers, header, report.TestQuiescence, s.now())
+	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorSQLiteDelivery, s.sources, s.sourceMemo, s.pipeline, s.timers, header, report.TestQuiescence, s.now())
 	if err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
