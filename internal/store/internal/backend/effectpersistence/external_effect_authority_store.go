@@ -58,7 +58,7 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 	case runtimeeffects.AuthorityChannelActionAck:
 		return channelActionAckAuthorityCurrent(ctx, q, authority, true, false)
 	case runtimeeffects.AuthorityChannelNativeSetting:
-		return channelNativeSettingAuthorityCurrent(ctx, q, authority, true, false)
+		return channelNativeSettingAuthorityCurrent(ctx, q, authority, true, false, "")
 	case runtimeeffects.AuthorityChannelLogout:
 		return channelonboarding.LogoutEffectAuthorityCurrent(ctx, q, authority, true, false)
 	default:
@@ -114,7 +114,7 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 	case runtimeeffects.AuthorityChannelActionAck:
 		return channelActionAckAuthorityCurrent(ctx, q, authority, false, false)
 	case runtimeeffects.AuthorityChannelNativeSetting:
-		return channelNativeSettingAuthorityCurrent(ctx, q, authority, false, false)
+		return channelNativeSettingAuthorityCurrent(ctx, q, authority, false, false, "")
 	case runtimeeffects.AuthorityChannelLogout:
 		return channelonboarding.LogoutEffectAuthorityCurrent(ctx, q, authority, false, false)
 	default:

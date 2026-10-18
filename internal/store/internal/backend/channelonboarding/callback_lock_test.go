@@ -19,9 +19,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	credentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	onboardingowner "github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
+	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	identityowner "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -433,6 +435,9 @@ func TestNativeInboxAttachmentPublicationLockOrderBothStores(t *testing.T) {
 					PackID:                       activation.Interface.ChannelPackID, PackVersion: activation.Interface.ChannelPackVersion,
 					PackManifestHash: activation.Interface.ChannelManifestHash, PlanGeneration: activation.Coordinate.PlanGeneration, EntryContractHash: hash,
 				}
+				t.Run("parent_order", func(t *testing.T) {
+					proveNativeInboxParentOrder(t, f, admission, activation, now)
+				})
 				successor := f.prepare(t, verb, now.Add(time.Minute))
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
@@ -496,6 +501,82 @@ func TestNativeInboxAttachmentPublicationLockOrderBothStores(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func proveNativeInboxParentOrder(t *testing.T, f callbackLockFixture, admission channelnative.Admission, activation domain.ConnectedChannelActivation, now time.Time) {
+	t.Helper()
+	var setting channelnative.Setting
+	for _, owner := range []string{"attachment", "effect", "qualification"} {
+		t.Run(owner, func(t *testing.T) {
+			observation := &neutralQueryObservation{}
+			ctx := context.WithValue(context.Background(), neutralLockOrderObservation{}, observation)
+			err := f.run(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				switch owner {
+				case "attachment":
+					var err error
+					setting, _, err = channeldelivery.AttachNativeInboxSettingTx(ctx, tx, admission, f.postgres)
+					return err
+				case "effect":
+					authority := runtimeeffects.Authority{
+						Kind: runtimeeffects.AuthorityChannelNativeSetting, ID: setting.InstallOperationID,
+						ExecutionOwner: "native-lock-order", LeaseExpiresAt: time.Now().Add(5 * time.Minute),
+						FenceGeneration: uint64(setting.Generation), ExecutionMode: runtimeeffects.ExecutionModeLive,
+						ChannelNativeSetting: runtimeeffects.ChannelNativeSettingAuthority{
+							EffectOperationID: setting.InstallOperationID, SettingID: setting.SettingID, SettingGeneration: setting.Generation,
+							Provider: admission.Provider, ResourceSlotID: admission.ResourceSlotID, ConversationRef: admission.ConversationReference,
+							ScopeKind: setting.ScopeKind, MemberReference: setting.MemberReference, PrincipalID: admission.PrincipalID,
+							EntryContractHash: admission.EntryContractHash, EntryCommand: setting.EntryCommand,
+							PackID: admission.PackID, PackVersion: admission.PackVersion, PackManifestHash: admission.PackManifestHash,
+							ActivationID: activation.ActivationID, ActivationRevision: activation.Revision, BindingRevision: activation.BindingRevision,
+							BundleHash: activation.Coordinate.BundleHash, BundleIdentity: activation.Coordinate.BundleIdentity,
+							PackInventoryGeneration: activation.Coordinate.PackInventoryGeneration, RuntimeInstanceID: activation.Coordinate.RuntimeInstanceID,
+							ContextPublicationGeneration: activation.Coordinate.ContextPublicationGeneration,
+							PlanGeneration:               activation.Coordinate.PlanGeneration, TargetGeneration: activation.Coordinate.TargetGeneration,
+						},
+					}
+					if f.postgres {
+						return (&effectpersistence.EffectPostgresOwner{}).RequireExternalEffectAuthorityTx(ctx, tx, authority, false)
+					}
+					return (&effectpersistence.EffectSQLiteOwner{}).RequireExternalEffectAuthorityTx(ctx, tx, authority, false)
+				default:
+					_, err := channeldelivery.RecordNativeInboxQualificationTx(ctx, tx, channelnative.QualificationRequest{
+						ActivationID: admission.ActivationID, SettingID: setting.SettingID, SettingGeneration: setting.Generation,
+						ActivationRevision: admission.ActivationRevision, BindingRevision: admission.BindingRevision,
+						ContextGeneration: admission.ContextPublicationGeneration, EntryContractHash: admission.EntryContractHash,
+						ClientLanguage: setting.ClientLanguage, LocaleRevision: setting.ClientLocaleRevision,
+						State: channelnative.QualificationMissing, ObservedAt: now,
+					}, f.postgres)
+					return err
+				}
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			parent, principal, dependent := false, false, false
+			for _, query := range observation.queries {
+				if strings.Contains(query, "FROM channel_onboarding_operations") && strings.Contains(query, "WHERE operation_id=(SELECT operation_id FROM connected_channel_activations") {
+					parent = true
+					continue
+				}
+				if principalFenceQuery(query) {
+					if !parent {
+						t.Error("principal fence precedes exact parent lock")
+					}
+					principal = true
+				}
+				if strings.HasPrefix(strings.TrimSpace(query), "SELECT ") && strings.Contains(query, "JOIN channel_onboarding_operations") {
+					dependent = true
+					if !parent || (owner != "qualification" && !principal) ||
+						(!strings.Contains(query, "AND o.operation_id=") && !strings.Contains(query, "AND onboarding.operation_id=")) {
+						t.Error("native admission did not retain the prelocked parent before dependent locks")
+					}
+				}
+			}
+			if !parent || !dependent || (owner == "qualification" && principal) {
+				t.Errorf("native owner order: parent=%t principal=%t dependent=%t", parent, principal, dependent)
+			}
+		})
 	}
 }
 
