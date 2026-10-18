@@ -474,7 +474,9 @@ func TestPublishedJoinContinuationValidateEventOwnsLineageAndImmutableFrame(t *t
 			}
 			candidate, err := events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{Facts: facts, Lineage: lineage})
 			if fault == "class" {
-				candidate, err = events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: child.RunID})
+				candidate = eventtest.RuntimeControlWithRoutingSource(facts.ID, facts.Type, facts.Producer.ID,
+					facts.TaskID, facts.Payload, facts.ChainDepth, child.RunID, "",
+					facts.Envelope, facts.RoutingSource, facts.CreatedAt)
 			}
 			if err != nil {
 				t.Fatalf("substitution fixture: %v", err)
