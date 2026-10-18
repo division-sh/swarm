@@ -141,7 +141,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow_a", FlowInstance: "flow_a", EntityID: entityID}),
 			}
 			sourceEvent := fixture.seedSource(t, ctx, loaded, sourceRunID, entityID, sourceRequestEventID, at, activityRoute, routingSource)
-			seedSelectedContractActivityLoop(t, fixture, loaded, sourceEvent, entityID, activation, at)
+			seedSelectedContractActivityLoop(t, ctx, fixture, loaded, sourceEvent, entityID, activation, at)
 			seedSelectedContractActivityRequest(t, db, sourceRunID, sourceRequestEventID, selectedContractActivityRequestPayload{
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
 				EffectClass: string(tt.effectClass), SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
@@ -547,14 +547,14 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 	return semanticview.Wrap(bundle)
 }
 
-func seedSelectedContractActivityLoop(t *testing.T, fixture activityForkFixture, loaded LoadedSelectedContractSource, sourceEvent events.Event, entityID string, activation loopruntime.Activation, at time.Time) {
+func seedSelectedContractActivityLoop(t *testing.T, ctx context.Context, fixture activityForkFixture, loaded LoadedSelectedContractSource, sourceEvent events.Event, entityID string, activation loopruntime.Activation, at time.Time) {
 	t.Helper()
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatalf("store source loop activation: %v", err)
 	}
 	runID := sourceEvent.RunID()
-	ctx := effects.WithExecutionMode(runtimecorrelation.WithInboundEvent(runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), loaded.SourceArtifactFact), runID), sourceEvent), executionmode.Live)
+	ctx = effects.WithExecutionMode(runtimecorrelation.WithInboundEvent(runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), runID), sourceEvent), executionmode.Live)
 	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute("flow_a", "flow_a", "flow_a"))
 	if err != nil {
 		t.Fatal(err)
