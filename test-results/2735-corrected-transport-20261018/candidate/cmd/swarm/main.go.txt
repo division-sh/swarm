@@ -1,0 +1,123 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"runtime"
+	"runtime/trace"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/workspace/worker"
+	"github.com/division-sh/swarm/internal/serveapp"
+)
+
+var (
+	binaryVersion = "dev"
+	binaryCommit  = "unknown"
+	binaryDate    = "unknown"
+)
+
+func main() {
+	finishDiagnostic := start2735Diagnostic()
+	worker.ConfigureBuildMetadata(binaryVersion, binaryCommit)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if len(os.Args) == 2 {
+		if code, handled := worker.RunArgument(ctx, os.Args[1], os.Stdin, os.Stdout); handled {
+			finishDiagnostic()
+			os.Exit(code)
+		}
+	}
+	cliapp.ConfigureBuildMetadata(cliapp.BuildMetadata{
+		Version: binaryVersion,
+		Commit:  binaryCommit,
+		Date:    binaryDate,
+	})
+	code := cliapp.Execute(ctx, os.Args[1:], os.Stdout, os.Stderr, runServingProcess, serveapp.RunTestSession)
+	finishDiagnostic()
+	os.Exit(code)
+}
+
+// Diagnostic-build only: bounded stdlib trace storage, with all file I/O
+// outside the observed command and after the runtime trace writer joins.
+type diagnostic2735Buffer struct {
+	bytes.Buffer
+	overflow bool
+}
+
+func (b *diagnostic2735Buffer) Write(p []byte) (int, error) {
+	if b.Len()+len(p) > 64<<20 {
+		b.overflow = true
+		return len(p), nil
+	}
+	return b.Buffer.Write(p)
+}
+
+func start2735Diagnostic() func() {
+	dir := os.Getenv("RELEASE_E2E_DIAG_DIR")
+	if dir == "" {
+		return func() {}
+	}
+	entry := time.Now()
+	buffer := &diagnostic2735Buffer{}
+	if err := trace.Start(buffer); err != nil {
+		panic(err)
+	}
+	trace.Logf(context.Background(), "2735-process", "entry_wall_ns=%d pid=%d gomaxprocs=%d inherited_gomaxprocs=%q go=%s", entry.UnixNano(), os.Getpid(), runtime.GOMAXPROCS(0), os.Getenv("GOMAXPROCS"), runtime.Version())
+	return sync.OnceFunc(func() {
+		trace.Logf(context.Background(), "2735-process", "exit_wall_ns=%d", time.Now().UnixNano())
+		trace.Stop()
+		prefix := filepath.Join(dir, fmt.Sprintf("process-%d", os.Getpid()))
+		metadata, _ := json.Marshal(map[string]any{"pid": os.Getpid(), "entry_wall_ns": entry.UnixNano(), "exit_wall_ns": time.Now().UnixNano(), "go": runtime.Version(), "gomaxprocs": runtime.GOMAXPROCS(0), "inherited_gomaxprocs": os.Getenv("GOMAXPROCS"), "trace_overflow": buffer.overflow, "trace_bytes": buffer.Len()})
+		if err := os.WriteFile(prefix+".trace", buffer.Bytes(), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, "2735 diagnostic trace retention:", err)
+		}
+		if err := os.WriteFile(prefix+".json", metadata, 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, "2735 diagnostic metadata retention:", err)
+		}
+	})
+}
+
+func runServingProcess(ctx context.Context, root cliapp.InvocationRoot, opts cliapp.ServeOptions) int {
+	grace, err := manager.ResolveShutdownGrace(opts.ShutdownGrace)
+	if err != nil {
+		return serveapp.Run(ctx, root, opts)
+	}
+	stopped := make(chan struct{})
+	opts.ProcessStop = sync.OnceFunc(func() { close(stopped) })
+	return withServingExitDeadline(stopped, grace, func() int { return serveapp.Run(ctx, root, opts) })
+}
+
+// The deadline bounds actual process death, never an internal join or lease
+// release. A stuck native waiter or accepted producer keeps ownership until exit.
+func withServingExitDeadline(stopped <-chan struct{}, grace time.Duration, run func() int) int {
+	done, joined := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(joined)
+		select {
+		case <-done:
+			return
+		case <-stopped:
+		}
+		timer := time.NewTimer(grace)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+			os.Exit(1)
+		}
+	}()
+	code := run()
+	close(done)
+	<-joined
+	return code
+}

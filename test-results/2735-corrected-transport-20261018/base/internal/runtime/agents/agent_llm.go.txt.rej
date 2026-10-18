@@ -1,0 +1,10 @@
+diff a/test-results/2735-slow-transport-20261018/base/internal/runtime/agents/agent_llm.go.txt b/test-results/2735-slow-transport-20261018/base/internal/runtime/agents/agent_llm.go.txt	(rejected hunks)
+@@ -151,6 +156,8 @@
+ 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
+ 	ctx = runtimebus.WithInboundEvent(ctx, evt)
+ 	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, a.cfg.Identity)
++	diagnosticRecorder, diagnosticInherited := runtimebus.EmittedEventsRecorderFromContext(ctx)
++	trace.Logf(ctx, "2735-recorder", "entry_ns=%d run=%s event=%s inherited=%t recorder=%p", time.Now().UnixNano(), evt.RunID(), evt.ID(), diagnosticInherited, diagnosticRecorder)
+ 	if recorder, found := runtimebus.EmittedEventsRecorderFromContext(ctx); !found || recorder == nil {
+ 		ctx = runtimebus.WithEmittedEventsRecorder(ctx, runtimebus.NewEmittedEventsRecorder())
+ 	}

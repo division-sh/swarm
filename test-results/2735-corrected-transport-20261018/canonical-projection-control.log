@@ -1,0 +1,10 @@
+=== RUN   TestCompiledWorkspaceWorkerIdentityEntry
+=== RUN   TestCompiledWorkspaceWorkerIdentityEntry/2735_canonical_byte_input_projection
+=== RUN   TestCompiledWorkspaceWorkerIdentityEntry/2735_canonical_byte_input_projection/initial
+=== RUN   TestCompiledWorkspaceWorkerIdentityEntry/2735_canonical_byte_input_projection/continuation
+--- PASS: TestCompiledWorkspaceWorkerIdentityEntry (22.65s)
+    --- PASS: TestCompiledWorkspaceWorkerIdentityEntry/2735_canonical_byte_input_projection (0.00s)
+        --- PASS: TestCompiledWorkspaceWorkerIdentityEntry/2735_canonical_byte_input_projection/initial (0.00s)
+        --- PASS: TestCompiledWorkspaceWorkerIdentityEntry/2735_canonical_byte_input_projection/continuation (0.00s)
+PASS
+ok  	github.com/division-sh/swarm/internal/releasee2e	22.652s

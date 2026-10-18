@@ -1,0 +1,26 @@
+=== RUN   TestWorkspaceMCPCompiledDockerConformance
+=== RUN   TestWorkspaceMCPCompiledDockerConformance/disconnect=false
+    workspace_gateway_docker_test.go:516: release command swarm: wall=16.411021553s user=17.035007s system=1.609551s
+    workspace_gateway_docker_test.go:543: real Docker public read/emit/store assertion: exit status 3
+        selected-store observation={Observed:true Finished:true AgentDeliveries:1 Delivered:1 Emitted:1}
+        tests/transport.yaml: step 1: test quiescence deadline reached for run 4dad9cc0-65ce-41bf-8824-d4f7c2982aa3 with active_deliveries=1 unsettled_pipeline_events=0 due_timers=0 active_session_leases=0
+        tests/transport.yaml: step 1: test quiescence deadline reached for run 4dad9cc0-65ce-41bf-8824-d4f7c2982aa3 with active_deliveries=1 unsettled_pipeline_events=0 due_timers=0 active_session_leases=0
+        private test session failed (exit 1)
+    workspace_gateway_docker_test.go:512: failure evidence observations.jsonl (read error=<nil>):
+        {"started_at":"2026-10-18T14:11:41.30834414Z","finished_at":"2026-10-18T14:11:41.473077547Z","container":"cec8fc6df71c473702fc6e46c6ca06fdef09f33e1724a9b327ccecf4bffa6b56","mode":"probe"}
+        {"started_at":"2026-10-18T14:11:41.880697782Z","finished_at":"2026-10-18T14:11:42.055226108Z","container":"4ec12b0c3b7cf2218113754e7c0300fb18f4637accfabaa34a6d4a6533cb4090","mode":"probe"}
+        {"started_at":"2026-10-18T14:11:42.712835108Z","finished_at":"2026-10-18T14:11:42.899368757Z","container":"c3ef24c3476bf7c2f94e8c9b62fff38914bb2a889ea744a5533aa4e6aad24ae5","mode":"probe"}
+        {"started_at":"2026-10-18T14:11:42.953085495Z","finished_at":"2026-10-18T14:11:44.634454619Z","container":"c3ef24c3476bf7c2f94e8c9b62fff38914bb2a889ea744a5533aa4e6aad24ae5","mode":"model","model":true}
+        {"started_at":"2026-10-18T14:11:50.183555989Z","finished_at":"2026-10-18T14:11:50.360074617Z","container":"c3ef24c3476bf7c2f94e8c9b62fff38914bb2a889ea744a5533aa4e6aad24ae5","mode":"call","tool":"read_flow_data"}
+        {"started_at":"2026-10-18T14:11:50.496095968Z","finished_at":"2026-10-18T14:11:50.671779573Z","container":"c3ef24c3476bf7c2f94e8c9b62fff38914bb2a889ea744a5533aa4e6aad24ae5","mode":"probe"}
+        {"started_at":"2026-10-18T14:11:50.730025059Z","finished_at":"2026-10-18T14:11:51.280681934Z","container":"c3ef24c3476bf7c2f94e8c9b62fff38914bb2a889ea744a5533aa4e6aad24ae5","mode":"model","model":true}
+        {"started_at":"2026-10-18T14:11:51.436823911Z","finished_at":"2026-10-18T14:11:51.649972307Z","container":"c3ef24c3476bf7c2f94e8c9b62fff38914bb2a889ea744a5533aa4e6aad24ae5","mode":"call","tool":"emit_work_completed"}
+    workspace_gateway_docker_test.go:512: failure evidence workspace-observer-last-snapshot.json (read error=<nil>):
+        {"at":"2026-10-18T14:11:51.362750184Z","phases":{"Deliveries":[{"DeliveryID":"f9eb7764-81d7-5ef1-a758-70264d483843","EventID":"266813eb-c353-5b8a-8f2f-72411b1c5c8e","RunID":"4dad9cc0-65ce-41bf-8824-d4f7c2982aa3","SubscriberType":"node","SubscriberID":"Lg.aW50YWtl","Status":"delivered","ClaimVersion":1,"CreatedAt":"2026-10-18 14:11:41.537 +0000 UTC","UpdatedAt":"2026-10-18 14:11:42.142 +0000 UTC","SettledAt":"2026-10-18 14:11:42.142 +0000 UTC","HandoffAt":"2026-10-18 14:11:42","AttemptStartedAt":"2026-10-18 14:11:42.128 +0000 UTC","AttemptExpiresAt":"2026-10-18 14:16:42.141 +0000 UTC","AttemptClosureKind":"settled","AttemptOutcome":"delivered","AttemptCompletedAt":"2026-10-18 14:11:42.142 +0000 UTC","AttemptOpenMarker":false},{"DeliveryID":"7c1f421c-ca4a-5305-bd67-881a68d8a55a","EventID":"a415bae2-643a-4739-bdf7-c76902c9c2fd","RunID":"4dad9cc0-65ce-41bf-8824-d4f7c2982aa3","SubscriberType":"agent","SubscriberID":"worker","Status":"in_progress","ClaimVersion":1,"CreatedAt":"2026-10-18 14:11:42.14 +0000 UTC","UpdatedAt":"2026-10-18 14:11:51.306 +0000 UTC","SettledAt":null,"HandoffAt":"2026-10-18 14:11:42","AttemptStartedAt":"2026-10-18 14:11:42.158 +0000 UTC","AttemptExpiresAt":"2026-10-18 14:13:51.306 +0000 UTC","AttemptClosureKind":"open","AttemptOutcome":null,"AttemptCompletedAt":null,"AttemptOpenMarker":true}],"Effects":[{"AttemptID":"10f443c3-0a0f-5948-bd3a-95aaa0e5e247","OperationID":"1ac51328-be49-5769-9457-b0c29d4ac344","State":"settled","AuthorizedAt":"2026-10-18 14:11:42.9231671 +0000 UTC","LaunchedAt":"2026-10-18 14:11:42.928905727 +0000 UTC","ResponseObservedAt":"2026-10-18 14:11:50.078017412 +0000 UTC","CompletedAt":"2026-10-18 14:11:50.081732 +0000 UTC"},{"AttemptID":"bd82e37d-fefd-580e-8c03-252bd1c7d3e3","OperationID":"d82cbe54-4d6a-51f3-88d8-ae9bb6ec6d31","State":"settled","AuthorizedAt":"2026-10-18 14:11:50.694771883 +0000 UTC","LaunchedAt":"2026-10-18 14:11:50.701262431 +0000 UTC","ResponseObservedAt":"2026-10-18 14:11:51.304430315 +0000 UTC","CompletedAt":"2026-10-18 14:11:51.307872 +0000 UTC"}]}}
+    workspace_gateway_docker_test.go:512: failure evidence workspace-observer-last-snapshot.json.timing.json (read error=<nil>):
+        {"samples":12,"total_nanos":8225476,"maximum_nanos":4886865,"unavailable":false}
+--- FAIL: TestWorkspaceMCPCompiledDockerConformance (25.95s)
+    --- FAIL: TestWorkspaceMCPCompiledDockerConformance/disconnect=false (16.44s)
+FAIL
+FAIL	github.com/division-sh/swarm/internal/releasee2e	25.957s
+FAIL

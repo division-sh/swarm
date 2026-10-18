@@ -1,0 +1,19 @@
+diff a/test-results/2735-slow-transport-20261018/base/internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go.txt b/test-results/2735-slow-transport-20261018/base/internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go.txt	(rejected hunks)
+@@ -113,11 +114,17 @@
+ }
+ 
+ func (s *RunSQLite) LoadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
++	trace.Logf(ctx, "2735-report", "entry_ns=%d run=%s", time.Now().UnixNano(), runID)
++	defer func() { trace.Logf(ctx, "2735-report", "return_ns=%d run=%s", time.Now().UnixNano(), runID) }()
+ 	if s == nil || s.backend == nil {
+ 		return operatorread.RunDebugReport{}, fmt.Errorf("sqlite store is required")
+ 	}
+ 	var report operatorread.RunDebugReport
+ 	err := s.backend.InspectSnapshot(ctx, func(snapshot context.Context) (err error) {
++		trace.Logf(snapshot, "2735-report-snapshot", "entry_ns=%d run=%s", time.Now().UnixNano(), runID)
++		defer func() {
++			trace.Logf(snapshot, "2735-report-snapshot", "exit_ns=%d run=%s error=%v", time.Now().UnixNano(), runID, err)
++		}()
+ 		report, err = s.loadRunDebugReport(snapshot, runID, opts)
+ 		return err
+ 	})

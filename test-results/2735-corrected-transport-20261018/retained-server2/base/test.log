@@ -1,0 +1,7 @@
+=== RUN   TestWorkspaceMCPCompiledDockerConformance
+=== RUN   TestWorkspaceMCPCompiledDockerConformance/disconnect=false
+    workspace_gateway_docker_test.go:516: release command swarm: wall=16.335300865s user=9.279977s system=1.006118s
+--- PASS: TestWorkspaceMCPCompiledDockerConformance (25.84s)
+    --- PASS: TestWorkspaceMCPCompiledDockerConformance/disconnect=false (16.37s)
+PASS
+ok  	github.com/division-sh/swarm/internal/releasee2e	25.843s

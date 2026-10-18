@@ -1,0 +1,8 @@
+{"started_at":"2026-10-18T14:11:13.332901401Z","finished_at":"2026-10-18T14:11:13.470011826Z","container":"d1f513ed150826ac36d79d9fa188c8ec178f306329c23d65da8d2214af559e51","mode":"probe"}
+{"started_at":"2026-10-18T14:11:13.877822966Z","finished_at":"2026-10-18T14:11:14.037512214Z","container":"b128c630401053394cc35e45019e50e98f73fd2324762f1f37df37f55f0e3090","mode":"probe"}
+{"started_at":"2026-10-18T14:11:14.640861817Z","finished_at":"2026-10-18T14:11:14.818283946Z","container":"1f9617e9d4b973a0806df4a458ca7c25e4f27eb55f3c82ab92f4119abd667be4","mode":"probe"}
+{"started_at":"2026-10-18T14:11:14.871163599Z","finished_at":"2026-10-18T14:11:16.58050576Z","container":"1f9617e9d4b973a0806df4a458ca7c25e4f27eb55f3c82ab92f4119abd667be4","mode":"model","model":true}
+{"started_at":"2026-10-18T14:11:22.080548681Z","finished_at":"2026-10-18T14:11:22.257933709Z","container":"1f9617e9d4b973a0806df4a458ca7c25e4f27eb55f3c82ab92f4119abd667be4","mode":"call","tool":"read_flow_data"}
+{"started_at":"2026-10-18T14:11:22.366002493Z","finished_at":"2026-10-18T14:11:22.537664644Z","container":"1f9617e9d4b973a0806df4a458ca7c25e4f27eb55f3c82ab92f4119abd667be4","mode":"probe"}
+{"started_at":"2026-10-18T14:11:22.585876687Z","finished_at":"2026-10-18T14:11:23.185316095Z","container":"1f9617e9d4b973a0806df4a458ca7c25e4f27eb55f3c82ab92f4119abd667be4","mode":"model","model":true}
+{"started_at":"2026-10-18T14:11:23.303557213Z","finished_at":"2026-10-18T14:11:23.492302884Z","container":"1f9617e9d4b973a0806df4a458ca7c25e4f27eb55f3c82ab92f4119abd667be4","mode":"call","tool":"emit_work_completed"}

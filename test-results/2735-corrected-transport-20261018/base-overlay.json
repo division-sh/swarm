@@ -1,0 +1,14 @@
+{
+  "Replace": {
+    "/home/youmew/dev/wt/agent-d/main/cmd/swarm/main.go": "/home/youmew/dev/wt/agent-d/evidence-2735-corrected-20261018/base/cmd/swarm/main.go.txt",
+    "/home/youmew/dev/wt/agent-d/main/internal/cliapp/test_command.go": "/home/youmew/dev/wt/agent-d/evidence-2735-corrected-20261018/base/internal/cliapp/test_command.go.txt",
+    "/home/youmew/dev/wt/agent-d/main/internal/releasee2e/workspace_gateway_docker_test.go": "/home/youmew/dev/wt/agent-d/evidence-2735-corrected-20261018/base/internal/releasee2e/workspace_gateway_docker_test.go.txt",
+    "/home/youmew/dev/wt/agent-d/main/internal/runtime/agents/agent_llm.go": "/home/youmew/dev/wt/agent-d/evidence-2735-corrected-20261018/base/internal/runtime/agents/agent_llm.go.txt",
+    "/home/youmew/dev/wt/agent-d/main/internal/runtime/bus/turn_context.go": "/home/youmew/dev/wt/agent-d/evidence-2735-corrected-20261018/base/internal/runtime/bus/turn_context.go.txt",
+    "/home/youmew/dev/wt/agent-d/main/internal/runtime/effects/effects.go": "/home/youmew/dev/wt/agent-d/evidence-2735-corrected-20261018/base/internal/runtime/effects/effects.go.txt",
+    "/home/youmew/dev/wt/agent-d/main/internal/runtime/llm/completion_authority.go": "/home/youmew/dev/wt/agent-d/evidence-2735-corrected-20261018/base/internal/runtime/llm/completion_authority.go.txt",
+    "/home/youmew/dev/wt/agent-d/main/internal/runtime/manager/receipts.go": "/home/youmew/dev/wt/agent-d/evidence-2735-corrected-20261018/base/internal/runtime/manager/receipts.go.txt",
+    "/home/youmew/dev/wt/agent-d/main/internal/runtime/tools/executor_emit.go": "/home/youmew/dev/wt/agent-d/evidence-2735-corrected-20261018/base/internal/runtime/tools/executor_emit.go.txt",
+    "/home/youmew/dev/wt/agent-d/main/internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go": "/home/youmew/dev/wt/agent-d/evidence-2735-corrected-20261018/base/internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go.txt"
+  }
+}
