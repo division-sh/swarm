@@ -679,9 +679,7 @@ func (c *ProviderRegistrationController) ExposureCurrent(ctx context.Context) bo
 	if c == nil || c.snapshot == nil || c.opts.Readiness == nil || c.opts.Now == nil {
 		return false
 	}
-	evaluated := c.opts.Readiness.evaluate(ctx, c.opts.Now().UTC())
-	return evaluated.output.PublicIngressEnabled && evaluated.output.Exposure != nil && evaluated.exposureReady &&
-		c.snapshot.currentRevision(evaluated.snapshot.revision)
+	return c.opts.Readiness.exposureCurrent(ctx, c.opts.Now().UTC())
 }
 
 // OwnsRoute also retains unresolved withdrawn registrations. It is only an

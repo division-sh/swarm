@@ -356,12 +356,19 @@ type RuntimeContextLookup struct {
 }
 
 type RuntimeIngressContextLookup struct {
-	Context    *BundleContext
-	Target     StandingTarget
-	State      RuntimeContextState
-	Cause      string
-	Found      bool
-	AliasFound bool
+	Context       *BundleContext
+	Target        StandingTarget
+	State         RuntimeContextState
+	Cause         string
+	Found         bool
+	AliasFound    bool
+	authorIngress bool
+}
+
+// DeclaresAuthorIngress is a route-classification hint, never execution
+// admission. Publication still requires the one acquired context and its fence.
+func (l RuntimeIngressContextLookup) DeclaresAuthorIngress() bool {
+	return l.Found && l.authorIngress
 }
 
 func (l RuntimeIngressContextLookup) Loaded() bool {
@@ -2745,6 +2752,7 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 				continue
 			}
 			lookup := RuntimeIngressContextLookup{Target: target, Found: true, AliasFound: true, State: entry.state, Cause: entry.cause}
+			lookup.authorIngress = declaredAuthorIngress(entry.runtime, entry.context, target)
 			if lookup.State == "" {
 				lookup.State = RuntimeContextStateLoaded
 			}

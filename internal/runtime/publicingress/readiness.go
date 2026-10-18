@@ -69,11 +69,12 @@ type ChannelRegistrationCurrentness struct {
 // are cloned before publication so readers never observe partial selection,
 // replacement, or revocation.
 type registrationProcessSnapshot struct {
-	revision      uint64
-	exposure      *ExposureEvidence
-	registrations map[string]registrationState
-	routes        map[string]struct{}
-	failure       string
+	revision         uint64
+	exposureRevision uint64
+	exposure         *ExposureEvidence
+	registrations    map[string]registrationState
+	routes           map[string]struct{}
+	failure          string
 }
 
 type RegistrationSnapshotOwner struct {
@@ -106,6 +107,22 @@ func (o *RegistrationSnapshotOwner) currentRevision(revision uint64) bool {
 	return o.snapshot.revision == revision
 }
 
+func (o *RegistrationSnapshotOwner) captureExposure() (*ExposureEvidence, uint64) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if o.snapshot.exposure == nil {
+		return nil, o.snapshot.exposureRevision
+	}
+	exposure := *o.snapshot.exposure
+	return &exposure, o.snapshot.exposureRevision
+}
+
+func (o *RegistrationSnapshotOwner) currentExposureRevision(revision uint64) bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.snapshot.exposureRevision == revision
+}
+
 func (o *RegistrationSnapshotOwner) mutate(change func(*registrationProcessSnapshot)) {
 	if o == nil {
 		return
@@ -120,6 +137,7 @@ func (o *RegistrationSnapshotOwner) mutate(change func(*registrationProcessSnaps
 
 func (o *RegistrationSnapshotOwner) setExposure(evidence ExposureEvidence) {
 	o.mutate(func(next *registrationProcessSnapshot) {
+		next.exposureRevision++
 		copy := evidence
 		next.exposure = &copy
 		next.failure = strings.TrimSpace(evidence.Failure)
@@ -128,6 +146,7 @@ func (o *RegistrationSnapshotOwner) setExposure(evidence ExposureEvidence) {
 
 func (o *RegistrationSnapshotOwner) revokeExposure(cause string) {
 	o.mutate(func(next *registrationProcessSnapshot) {
+		next.exposureRevision++
 		next.exposure = nil
 		next.failure = strings.TrimSpace(cause)
 	})
@@ -248,10 +267,11 @@ func (o *RegistrationSnapshotOwner) routeSelected(alias, provider string) bool {
 
 func cloneRegistrationProcessSnapshot(source registrationProcessSnapshot) registrationProcessSnapshot {
 	out := registrationProcessSnapshot{
-		revision:      source.revision,
-		registrations: make(map[string]registrationState, len(source.registrations)),
-		routes:        make(map[string]struct{}, len(source.routes)),
-		failure:       source.failure,
+		revision:         source.revision,
+		exposureRevision: source.exposureRevision,
+		registrations:    make(map[string]registrationState, len(source.registrations)),
+		routes:           make(map[string]struct{}, len(source.routes)),
+		failure:          source.failure,
 	}
 	if source.exposure != nil {
 		copy := *source.exposure
@@ -356,22 +376,15 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 
 	process := o.registration.capture()
 	output.Failure = process.failure
-	exposureReady := !o.enabled
+	var exposure *ExposureEvidence
 	if process.exposure != nil {
 		copy := *process.exposure
 		output.Exposure = &copy
-		exposureReady = copy.Failure == "" && now.Before(copy.ExpiresAt)
+		exposure = &copy
 	}
-	if exposureReady && output.Exposure != nil && startupCurrent != nil {
-		current, err := startupCurrent(ctx, output.Exposure.StartupAuthorityID)
-		if err != nil || !current {
-			exposureReady = false
-			if err != nil {
-				output.Failure = err.Error()
-			} else {
-				output.Failure = "public ingress startup authority is no longer current"
-			}
-		}
+	exposureReady, exposureFailure := exposureCurrentness(ctx, now, output.PublicIngressEnabled, exposure, startupCurrent)
+	if exposureFailure != "" {
+		output.Failure = exposureFailure
 	}
 
 	keys := make([]string, 0, len(process.registrations))
@@ -411,6 +424,37 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 	output.PublicIngressReady = exposureReady && registrationsReady
 	output.Ready = output.RuntimeReady && output.PublicIngressReady
 	return evaluatedRegistrationSnapshot{snapshot: process, output: output, current: currentByKey, exposureReady: exposureReady}
+}
+
+func exposureCurrentness(ctx context.Context, now time.Time, enabled bool, exposure *ExposureEvidence, startupCurrent func(context.Context, string) (bool, error)) (bool, string) {
+	ready := !enabled
+	if exposure != nil {
+		ready = exposure.Failure == "" && now.Before(exposure.ExpiresAt)
+	}
+	if ready && exposure != nil && startupCurrent != nil {
+		current, err := startupCurrent(ctx, exposure.StartupAuthorityID)
+		if err != nil {
+			return false, err.Error()
+		}
+		if !current {
+			return false, "public ingress startup authority is no longer current"
+		}
+	}
+	return ready, ""
+}
+
+// Exposure-only readers share the policy above without observing registrations
+// or coupling an author request to unrelated registration snapshot changes.
+func (o *ReadinessOwner) exposureCurrent(ctx context.Context, now time.Time) bool {
+	if o == nil || o.registration == nil {
+		return false
+	}
+	o.mu.RLock()
+	enabled, startupCurrent := o.enabled, o.startupCurrent
+	o.mu.RUnlock()
+	exposure, revision := o.registration.captureExposure()
+	current, _ := exposureCurrentness(ctx, now.UTC(), enabled, exposure, startupCurrent)
+	return enabled && exposure != nil && current && o.registration.currentExposureRevision(revision)
 }
 
 func registrationSelectionCurrent(ctx context.Context, pair RegistrationPair, selectionCurrent func(context.Context, RegistrationPair) (bool, error)) (bool, string) {

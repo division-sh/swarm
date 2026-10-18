@@ -190,6 +190,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	effectsStore := &supportedRegistrationEffectStore{Harness: effecttest.New()}
 	transport := &supportedTelegramRegistrationTransport{}
 	readiness := runtimepublicingress.NewReadinessOwner(true)
+	registrationNow := time.Now().UTC()
 	startup := runtimestartupownership.GrantEvidence{
 		GrantID: uuid.NewString(), ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "serve-owner",
 		ProcessBootID: uuid.NewString(), BundleHash: bundleHash,
@@ -206,6 +207,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		StartupAuthority: func() (runtimestartupownership.GrantEvidence, error) { return startup, nil },
 		SelectionCurrent: func(context.Context, runtimepublicingress.RegistrationPair, bool) (bool, error) { return true, nil },
 		Readiness:        readiness,
+		Now:              func() time.Time { return registrationNow },
 	})
 	if err != nil {
 		t.Fatalf("NewProviderRegistrationController: %v", err)
@@ -330,6 +332,82 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	handler.ServeHTTP(newSecretRecorder, newSecret)
 	if newSecretRecorder.Code != http.StatusServiceUnavailable || len(eventsStore.events) != 2 {
 		t.Fatalf("provider registration alone refreshed runtime admission status/events=%d/%d, want 503/2", newSecretRecorder.Code, len(eventsStore.events))
+	}
+
+	// Invariant reach: callback authorization precedes every availability
+	// response, including after the executable registration has disappeared.
+	assertManagedFence := func(t *testing.T) {
+		t.Helper()
+		for _, callback := range []string{"/webhooks/chat/telegram", "/webhooks/chat/telegram?swarm_callback_generation=", "/webhooks/chat/telegram?swarm_callback_generation=foreign", initial.Registrations[0].CallbackURL} {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, callback, strings.NewReader(rotatedBody)))
+			if response.Code != http.StatusNotFound || len(eventsStore.events) != 2 {
+				t.Fatalf("managed availability disclosed before token fence: callback=%s status=%d events=%d", callback, response.Code, len(eventsStore.events))
+			}
+		}
+		valid := httptest.NewRecorder()
+		handler.ServeHTTP(valid, httptest.NewRequest(http.MethodPost, rotated.Registrations[0].CallbackURL, strings.NewReader(rotatedBody)))
+		if valid.Code != http.StatusServiceUnavailable || len(eventsStore.events) != 2 {
+			t.Fatalf("valid callback lost its independent runtime refusal: status=%d events=%d", valid.Code, len(eventsStore.events))
+		}
+		registrationNow = registrationNow.Add(runtimepublicingress.EvidenceTTL)
+		expired := httptest.NewRecorder()
+		handler.ServeHTTP(expired, httptest.NewRequest(http.MethodPost, rotated.Registrations[0].CallbackURL, strings.NewReader(rotatedBody)))
+		registrationNow = registrationNow.Add(-runtimepublicingress.EvidenceTTL)
+		if expired.Code != http.StatusNotFound || len(eventsStore.events) != 2 {
+			t.Fatalf("expired callback reached availability: status=%d events=%d", expired.Code, len(eventsStore.events))
+		}
+	}
+	t.Run("loaded_callback_fence", assertManagedFence)
+	t.Run("suppressed_callback_fence", func(t *testing.T) {
+		transition, err := manager.BeginStandingServiceTransition(t.Context(), target.ServiceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := transition.Restore(context.Background()); err != nil {
+				t.Error(err)
+			}
+		}()
+		assertManagedFence(t)
+	})
+	t.Run("acquisition_failed_callback_fence", func(t *testing.T) {
+		if err := workOwner.Fence(); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := workOwner.Reopen(); err != nil {
+				t.Error(err)
+			}
+		}()
+		assertManagedFence(t)
+	})
+	t.Run("unloaded_callback_fence", func(t *testing.T) {
+		result := manager.DeactivateBundleHash(bundleHash, "managed callback availability control")
+		if !result.Found || result.State != runtimepkg.RuntimeContextStateUnloaded || result.ShutdownErr != nil {
+			t.Fatalf("unloaded callback precondition: %+v", result)
+		}
+		assertManagedFence(t)
+	})
+	readiness.RevokeExposure("managed callback revocation control")
+	revoked := httptest.NewRecorder()
+	handler.ServeHTTP(revoked, httptest.NewRequest(http.MethodPost, rotated.Registrations[0].CallbackURL, strings.NewReader(rotatedBody)))
+	if revoked.Code != http.StatusNotFound || len(eventsStore.events) != 2 {
+		t.Fatalf("revoked callback reached availability: status=%d events=%d", revoked.Code, len(eventsStore.events))
+	}
+	readiness.SetExposure(runtimepublicingress.ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: registrationNow, ExpiresAt: registrationNow.Add(runtimepublicingress.EvidenceTTL)})
+	if err := controller.Reconcile(t.Context(), exposure, nil); err != nil {
+		t.Fatal(err)
+	}
+	if controller.OwnsRoute("chat", "telegram") {
+		t.Fatal("withdrawal control retained current registration ownership")
+	}
+	for _, callback := range []string{rotated.Registrations[0].CallbackURL, "/webhooks/chat/telegram?swarm_callback_generation=", "/webhooks/chat/telegram?swarm_callback_generation=%zz"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, callback, strings.NewReader(rotatedBody)))
+		if response.Code != http.StatusNotFound || len(eventsStore.events) != 2 {
+			t.Fatalf("withdrawn generation fell through to author admission: status=%d events=%d", response.Code, len(eventsStore.events))
+		}
 	}
 }
 
