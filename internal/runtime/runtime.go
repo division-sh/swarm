@@ -2162,6 +2162,12 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	}
 	rt.generationMu.Lock()
 	defer rt.generationMu.Unlock()
+	rt.lifecycleMu.Lock()
+	completed := rt.replacementQuiesced && rt.startupGrant == nil
+	rt.lifecycleMu.Unlock()
+	if completed {
+		return nil
+	}
 	grace, err := runtimemanager.ResolveShutdownGrace(opts.Grace)
 	if err != nil {
 		return err

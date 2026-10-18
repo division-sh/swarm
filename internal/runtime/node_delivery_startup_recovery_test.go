@@ -37,6 +37,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -404,6 +405,11 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 
 					currentRunID := eventtest.UUID("recovery-disabled-current-" + backend + "-" + mode.name + "-" + test.name)
 					currentCtx := startupRecoverySourceContext(currentSource, currentRunID)
+					preparedProcess := prepareExternalRuntimeFixtureProcess(t, currentCtx, selected)
+					currentCtx, err = startupownership.WithProcessMutationAuthority(currentCtx, preparedProcess)
+					if err != nil {
+						t.Fatal(err)
+					}
 					seedStartupRecoverySourceRun(t, currentCtx, selected, currentSource, currentArtifact, currentRunID)
 
 					var (
@@ -419,6 +425,10 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 							eventSource = foreignSource
 							eventRunID = eventtest.UUID("recovery-disabled-foreign-" + backend + "-" + mode.name)
 							eventCtx = startupRecoverySourceContext(eventSource, eventRunID)
+							eventCtx, err = startupownership.WithProcessMutationAuthority(eventCtx, preparedProcess)
+							if err != nil {
+								t.Fatal(err)
+							}
 							seedStartupRecoverySourceRun(t, eventCtx, selected, eventSource, foreignArtifact, eventRunID)
 						}
 						var route events.DeliveryRoute
@@ -520,7 +530,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 					if runtimeErr != nil {
 						t.Fatalf("NewRuntime: %v", runtimeErr)
 					}
-					capability, _ := installExternalRuntimeTestGeneration(t, currentCtx, selected, runtime)
+					capability, _ := installExternalRuntimeTestGeneration(t, currentCtx, selected, runtime, preparedProcess)
 					t.Cleanup(func() {
 						if closeErr := closeExternalRuntimeTestGeneration(runtime, processOwner, capability); closeErr != nil {
 							t.Errorf("close startup-decision generation: %v", closeErr)

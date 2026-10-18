@@ -138,6 +138,16 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 	if opts.CarryMutationContext == nil {
 		opts.CarryMutationContext = startupownership.CarryMutationAuthority
 	}
+	if opts.MutationContext == nil {
+		original := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
+		opts.MutationContext = func(ctx context.Context) (context.Context, error) {
+			if !startupownership.HasMutationAuthority(ctx) {
+				ctx = startupownership.CarryMutationAuthority(ctx, original)
+			}
+			_, err := startupownership.CaptureMutationAuthority(ctx)
+			return ctx, err
+		}
+	}
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live
 	}

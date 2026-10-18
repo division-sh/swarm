@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
@@ -349,6 +350,9 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	if err = ctx.Err(); err != nil {
 		return false, err
 	}
+	ctx = transactiontest.WithWorkflowDomainNotification(ctx, func(notify context.Context, claim deliverylifecycle.Claim) error {
+		return b.testTransactions.WorkflowDomainExit(notify, claim, nil)
+	})
 	if err = operation(ctx, tx); err != nil {
 		return false, err
 	}

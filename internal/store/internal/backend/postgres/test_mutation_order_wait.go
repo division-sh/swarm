@@ -6,6 +6,10 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 // MutationOrderWaitForTest is confined to one live pooled workflow attempt.
@@ -22,7 +26,11 @@ type MutationOrderWaitForTest struct {
 	closed   bool
 }
 
-func (b *Backend) CaptureMutationOrderWaitForTest(ctx context.Context, tx *sql.Tx) (*MutationOrderWaitForTest, error) {
+func (b *Backend) HoldWorkflowDomainForTest(original startupownership.MutationAuthority, claim deliverylifecycle.Claim) (*transactiontest.WorkflowDomainObservation, error) {
+	return b.testTransactions.HoldWorkflowDomainForTest(original, claim)
+}
+
+func (b *Backend) captureMutationOrderWait(ctx context.Context, tx *sql.Tx) (*MutationOrderWaitForTest, error) {
 	if !b.Valid() || b.inspectionConfig == nil || tx == nil {
 		return nil, errors.New("mutation-order observation requires its live native attempt")
 	}
