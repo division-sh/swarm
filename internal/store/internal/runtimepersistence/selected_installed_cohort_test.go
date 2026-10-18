@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
@@ -112,7 +113,7 @@ func (r *selectedInstalledHistoryRows) Next(values []driver.Value) error {
 	}
 }
 
-func completeSelectedHistoryJournal(t *testing.T, ctx context.Context, original runtimeownership.GenerationGrant, grant runtimeownership.GrantEvidence, runID, sourceID string) pipeline.ActivityAttemptRecord {
+func completeSelectedHistoryJournal(t *testing.T, ctx context.Context, original runtimeownership.GenerationGrant, grant runtimeownership.GrantEvidence, runID, sourceID, status string) pipeline.ActivityAttemptRecord {
 	t.Helper()
 	journal, err := runtimeownership.CaptureActivityJournal(ctx, original, grant)
 	if err != nil {
@@ -126,16 +127,37 @@ func completeSelectedHistoryJournal(t *testing.T, ctx context.Context, original 
 	if err != nil || !inserted {
 		t.Fatalf("start original installed selected journal: inserted=%t err=%v", inserted, err)
 	}
-	record.Status, record.ResultEventID, record.ResultEventType = pipeline.ActivityAttemptStatusSucceeded, uuid.NewString(), record.SuccessEvent
+	record.Status, record.ResultEventID, record.ResultEventType = status, uuid.NewString(), record.SuccessEvent
 	record.ResultPayload = map[string]any{"value": "original output"}
-	record, acknowledged, err := journal.CompleteActivityAttempt(ctx, record)
+	if status != pipeline.ActivityAttemptStatusSucceeded {
+		class := failures.ClassConnectorFailure
+		if status == pipeline.ActivityAttemptStatusUncertain {
+			class = failures.ClassOutcomeUncertain
+		}
+		failure, ok := failures.EnvelopeFromError(failures.New(class, "selected_history_"+status, "activity-runtime", "execute", map[string]any{"status": status}))
+		if !ok || failure.Class != class {
+			t.Fatal("terminal history fixture has no exact canonical failure")
+		}
+		record.Failure, record.ResultEventType = &failure, record.FailureEvent
+		record.ResultPayload = map[string]any{"value": "recorded " + status}
+	}
+	settle := journal.CompleteActivityAttempt
+	if status == pipeline.ActivityAttemptStatusUncertain {
+		settle = journal.MarkActivityAttemptUncertain
+	}
+	record, acknowledged, err := settle(ctx, record)
 	if err != nil || !acknowledged {
 		t.Fatalf("complete original installed selected journal: acknowledged=%t err=%v", acknowledged, err)
+	}
+	if record.Status != status || record.CompletedAt == nil {
+		t.Fatalf("original terminal journal lost its physical disposition: %+v want=%s", record, status)
 	}
 	return record
 }
 
-func proveClosedSelectedInstalledJournalCohort(t *testing.T, fixture completionSettlementFixture, selected selectedCompletionFixture, firstGrant runtimeownership.GrantEvidence, firstJournal pipeline.ActivityAttemptRecord, control *activityGrantHistoryConnector) {
+// Reach: all three physical journal outcomes retain their original claim and
+// failure under each of two retired generations, not just successful results.
+func proveClosedSelectedInstalledJournalCohort(t *testing.T, fixture completionSettlementFixture, selected selectedCompletionFixture, firstGrant runtimeownership.GrantEvidence, firstJournals []pipeline.ActivityAttemptRecord, control *activityGrantHistoryConnector) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	issued, err := selected.store.IssueRunForkSelectedContractRuntimeExecution(ctx, selected.request)
@@ -165,7 +187,14 @@ func proveClosedSelectedInstalledJournalCohort(t *testing.T, fixture completionS
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondJournal := completeSelectedHistoryJournal(t, ctx, grant, admitted, selected.forkRun, selected.eventID)
+	want := make(map[string]pipeline.ActivityAttemptRecord)
+	for _, record := range firstJournals {
+		want[record.RequestEventID] = record
+	}
+	for _, status := range []string{pipeline.ActivityAttemptStatusSucceeded, pipeline.ActivityAttemptStatusFailed, pipeline.ActivityAttemptStatusUncertain} {
+		record := completeSelectedHistoryJournal(t, ctx, grant, admitted, selected.forkRun, selected.eventID, status)
+		want[record.RequestEventID] = record
+	}
 	read := func(readCtx context.Context) (runforkpersistence.ClosedSelectedInstalledJournalCohort, error) {
 		var captured runforkpersistence.ClosedSelectedInstalledJournalCohort
 		err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(txctx context.Context, tx *sql.Tx) error {
@@ -229,10 +258,9 @@ func proveClosedSelectedInstalledJournalCohort(t *testing.T, fixture completionS
 				}
 				return
 			}
-			if err != nil || len(got.Generations) != 2 || len(got.Journals) != 2 {
+			if err != nil || len(got.Generations) != 2 || len(got.Journals) != 6 || len(want) != 6 {
 				t.Fatalf("all generations and actual installed journals: %+v err=%v", got, err)
 			}
-			want := map[string]pipeline.ActivityAttemptRecord{firstJournal.RequestEventID: firstJournal, secondJournal.RequestEventID: secondJournal}
 			for i, fact := range got.Generations {
 				if fact.Execution.Generation != uint64(i+1) || len(fact.Grants) != 4 || fact.Execution.State != "closed" || fact.TerminalAt.IsZero() {
 					t.Fatalf("cohort omitted physical generation or grant versions: %+v", fact)

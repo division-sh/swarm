@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
@@ -170,7 +171,10 @@ func proveRetiredSelectedGrantHistory(t *testing.T, fixture completionSettlement
 		t.Fatal(err)
 	}
 	expected = append(expected, admitted)
-	firstJournal := completeSelectedHistoryJournal(t, ctx, grant, admitted, selected.forkRun, selected.eventID)
+	var firstJournals []pipeline.ActivityAttemptRecord
+	for _, status := range []string{pipeline.ActivityAttemptStatusSucceeded, pipeline.ActivityAttemptStatusFailed, pipeline.ActivityAttemptStatusUncertain} {
+		firstJournals = append(firstJournals, completeSelectedHistoryJournal(t, ctx, grant, admitted, selected.forkRun, selected.eventID, status))
+	}
 	if err := store.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
 		t.Fatal(err)
 	}
@@ -282,5 +286,5 @@ func proveRetiredSelectedGrantHistory(t *testing.T, fixture completionSettlement
 	if err := grant.ProveCurrent(ctx); err == nil {
 		t.Fatal("historical grant evidence restored retired execution permission")
 	}
-	proveClosedSelectedInstalledJournalCohort(t, fixture, selected, admitted, firstJournal, control)
+	proveClosedSelectedInstalledJournalCohort(t, fixture, selected, admitted, firstJournals, control)
 }
