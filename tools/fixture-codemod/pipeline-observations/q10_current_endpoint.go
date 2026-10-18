@@ -130,15 +130,18 @@ func q10EmbeddedSpecCurrentRecipe(row recipe, pin fixtureSetupSuccessor2617) (re
 		}
 		delivered := prior.Original
 		delivered.Successor = prior.Candidate
-		if !reflect.DeepEqual(row, delivered) {
-			return recipe{}, fmt.Errorf("Q10 restart changed complete delivered row or history")
-		}
 		current, err := q10CurrentEndpointRecipe(pin.Original, pin)
 		if err != nil {
 			return recipe{}, err
 		}
 		current.Successor, err = embeddedSpecFieldDeletion1801(current.Successor)
-		return current, err
+		if err != nil {
+			return recipe{}, err
+		}
+		if !reflect.DeepEqual(row, delivered) && !reflect.DeepEqual(row, current) {
+			return recipe{}, fmt.Errorf("Q10 restart changed complete delivered row or history")
+		}
+		return current, nil
 	}
 	return recipe{}, fmt.Errorf("Q10 restart has no exact embedded-spec predecessor")
 }
