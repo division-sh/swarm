@@ -92,6 +92,10 @@ func pipelineDeliveryNativeFixture(t *testing.T, backend string, source semantic
 
 func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview.Source, base pipeline.WorkflowHandlerNativeFixtureForTest, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore, probe *storetest.TransactionCollector) *pipeline.PipelineDeliveryNativeFixtureForTest {
 	t.Helper()
+	original, err := agentfixture.ProcessCapability(t, base.Context, selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
 	bundle, _ := semanticview.Bundle(source)
 	fact := sourceartifactfixture.RequireArtifact(t, base.Context, selected.(sourceartifactfixture.Writer), bundle.SourceArtifact)
 	authority, err := deliverylifecycle.NewNormalExecutionAuthority(fact, authorActivityTestRuntimeInstanceID, 1)
@@ -167,6 +171,9 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		}
 		retire()
 		projectionOnly = true
+		if err := original.Release(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 		if err := selected.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -179,6 +186,9 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		}
 		retire()
 		projectionOnly = true
+		if err := original.Release(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 		if err := selected.Close(); err != nil {
 			t.Fatal(err)
 		}

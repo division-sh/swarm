@@ -28,6 +28,7 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 	}
 	var request *pipeline.DynamicFlowRuntimeActivationRequest
 	var attempt pipeline.DynamicFlowRuntimeActivationAttempt
+	var grant startupownership.LiveGenerationGrant
 	var once sync.Once
 	closeOwner := func() {
 		t.Helper()
@@ -46,8 +47,10 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 					t.Errorf("retire joined native timer attachment: %v", err)
 				}
 			}
-			if err := process.Release(cleanup); err != nil {
-				t.Errorf("release native timer process owner: %v", err)
+			if grant != nil {
+				if err := grant.Retire(cleanup); err != nil {
+					t.Errorf("retire native timer attachment generation: %v", err)
+				}
 			}
 		})
 	}
@@ -67,7 +70,7 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 	} else if _, err := process.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: set}); err != nil {
 		t.Fatal(err)
 	}
-	grant, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{
+	grant, err = process.IssueGenerationGrant(ctx, startupownership.GrantRequest{
 		BundleHash: fact.BundleHash(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: set.Revision,
 	})
