@@ -78,3 +78,35 @@ and all24 wrong-parent/ID/run/route/mode/task/depth/producer/payload controls.
 Receipt: amendment2-c-owned-parent-control-original-red.log under the same
 local directory. Its actual EXIT=0 is retained, not relabelled RED-to-GREEN.
 The legacy terminal/policy integration question above remains the blocker.
+
+## Ruling Received; Donor Dependency Remains
+
+Reviewer-a's [bounded disposition](https://github.com/division-sh/swarm/issues/2700#issuecomment-6244535912)
+supersedes the open questions above without erasing either original RED.
+C supplies ONE isolated signed declaration/origin transplant against A's exact
+d08b7b7b0d, preserving the current B/E native binding and recovery owners.
+The donor is still pending; A has not imported C's unrelated source tree or
+implemented a competing approval/origin owner.
+
+The two legacy no-attempt cells now have explicit successors: owed HTTP without
+settled evidence refuses before any child call, with exact rollback conservation;
+the retired read-only reexecution cell becomes lawful recorded GET reuse with
+actual child result consumption, zero child calls and one exact copied terminal
+journal. The succeeded/failed/uncertain terminal positives keep their oracles.
+These fixture dispositions are authorized but have NOT yet run green. Genuine
+approved uncertain work must still refuse. No declaration/evidence inference
+or permission exception is authorized by that disposition.
+
+Parent fixture/guard correction at signed476b6b6fc1 uses the existing
+eventtest.ChildForProducerWithRoutingSource builder, not a guard exemption.
+TestTestEventFixturesUseFixtureBuilders and
+TestActivityResultEmitterAndLineageAgreeOnExactParent PASS together, count1,
+unchanged180s package limit: internal/events2.958s, pipeline0.019s, EXIT=0.
+The ordinary/selected-root positives and all24 negative controls are unchanged.
+This remains a passing component control on A, NOT production repair credit.
+Receipt: amendment2-parent-control-native-fixture-builder-guard-green.log;
+SHA256 cf7bb8ddcb37c127600763c70c66103c0c03bedd767350d3bab9447b57c37ec4.
+
+While the donor is prepared, the separate read-only S2 plan amendment is posted
+at [6244581737](https://github.com/division-sh/swarm/issues/2549#issuecomment-6244581737).
+No S2 production implementation, push or hosted qualification has started.
