@@ -2096,9 +2096,8 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 				},
 			}
 			agentStore := &flowActivationTestStore{}
-			am := newFlowActivationManager(t, bus, instances, agentStore)
 			bundle := testFlowBundleWithTwoAgents(t, "task.started")
-			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+			am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agentStore)
 			req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 
 			switch boundary {
@@ -2116,7 +2115,7 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 				instances.creationMarkErr = errors.New("injected completion mark failure")
 			}
 
-			err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+			err := activateFlowInstanceForTest(am, ctx, req)
 			if err == nil {
 				t.Fatal("direct activation succeeded across injected finalization failure")
 			}
@@ -2127,7 +2126,7 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 					0,
 				)
 			}
-			if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+			if flowActivationAttemptReadyForTest(am, ctx, req) {
 				t.Fatal("failed readiness attempt retained an executable activation receipt")
 			}
 			wantTimerRetirements := 0
@@ -2155,7 +2154,13 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 			instances.readinessLoadErr = nil
 			bus.publishErr = nil
 			instances.creationMarkErr = nil
-			if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+			runCtx := managedExecutionTestContextForCapturedSource(t, ctx)
+			execution, executionOK := managedexecution.FromContext(runCtx)
+			captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+			if !executionOK || !capturedOK || execution.BundleHash != captured.BundleHash() {
+				t.Fatalf("retry managed execution source differs from captured source: execution=%t/%s captured=%t/%s", executionOK, execution.BundleHash, capturedOK, captured.BundleHash())
+			}
+			if err := am.Run(runCtx); err != nil {
 				t.Fatalf("Run automatic readiness owner: %v", err)
 			}
 			select {
@@ -2181,7 +2186,7 @@ func TestDynamicFlowRuntimeReadinessRecoversEveryFinalizationBoundary(t *testing
 			if len(instances.armedEntries) == 0 {
 				t.Fatal("initial timers were not armed after readiness recovery")
 			}
-			recoveryCtx := testAuthorActivityContext(context.Background())
+			recoveryCtx := ctx
 			readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(recoveryCtx, req.TriggerEvent.RunID(), req.Instance.Route())
 			if err != nil || !found || (readiness.Phase != runtimepipeline.FlowAttachmentReady) || readiness.CreationEventEmittedAt.IsZero() {
 				t.Fatalf("completed readiness: found=%v readiness=%#v err=%v", found, readiness, err)
@@ -2519,17 +2524,22 @@ func TestDynamicFlowRuntimeReadinessAutomaticRetryCompletesWithoutEnsureOrRestar
 		}
 		return nil
 	}
-	am := newFlowActivationManager(t, bus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err == nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
 		t.Fatal("ActivateFlowInstance succeeded across injected first readiness failure")
 	}
 	if armCalls != 1 || len(bus.published) != 0 {
 		t.Fatalf("first committed readiness attempt: arms=%d published=%d", armCalls, len(bus.published))
 	}
-	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+	runCtx := managedExecutionTestContextForCapturedSource(t, ctx)
+	execution, executionOK := managedexecution.FromContext(runCtx)
+	captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !executionOK || !capturedOK || execution.BundleHash != captured.BundleHash() {
+		t.Fatalf("retry managed execution source differs from captured source: execution=%t/%s captured=%t/%s", executionOK, execution.BundleHash, capturedOK, captured.BundleHash())
+	}
+	if err := am.Run(runCtx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	select {
@@ -2538,7 +2548,7 @@ func TestDynamicFlowRuntimeReadinessAutomaticRetryCompletesWithoutEnsureOrRestar
 		t.Fatal("automatic readiness retry did not complete durable readiness")
 	}
 	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(
-		context.Background(),
+		ctx,
 		req.TriggerEvent.RunID(),
 		req.Instance.Route(),
 	)
