@@ -17,11 +17,15 @@ import (
 )
 
 func (s *EventSQLiteOwner) CommitInboundPublication(ctx context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
+	ctx, release := command.WithNativeLifetime(ctx)
+	defer release()
 	if err := command.Validate(); err != nil {
 		return runtimeinbound.CommitResult{}, err
 	}
 	request := command.Request.Normalized()
 	outcome := runSQLiteEventMutationResult(ctx, s, "sqlite inbound publication", true, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimeinbound.CommitResult, error) {
+		txctx, release := command.WithNativeLifetime(txctx)
+		defer release()
 		var result runtimeinbound.CommitResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			existing, found, err := loadSQLiteInboundPublicationTx(txctx, tx, request.Identity())
@@ -38,7 +42,7 @@ func (s *EventSQLiteOwner) CommitInboundPublication(ctx context.Context, command
 				result.Record = existing
 				return nil
 			}
-			if err := admitSQLiteInboundStandingTargetTx(txctx, s, tx, request); err != nil {
+			if err := admitSQLiteInboundStandingTargetTx(txctx, s, tx, command); err != nil {
 				return err
 			}
 			if err := insertSQLiteInboundPublicationPreparedTx(txctx, tx, request); err != nil {
@@ -238,7 +242,11 @@ func loadSQLiteInboundPublicationChildren(ctx context.Context, db inboundPublica
 	return children, nil
 }
 
-func admitSQLiteInboundStandingTargetTx(ctx context.Context, s *EventSQLiteOwner, tx *sql.Tx, request runtimeinbound.Request) error {
+func admitSQLiteInboundStandingTargetTx(ctx context.Context, s *EventSQLiteOwner, tx *sql.Tx, command runtimeinbound.CommitCommand) error {
+	if err := admitNativeInboundPublicationTx(ctx, tx, false, command); err != nil {
+		return err
+	}
+	request := command.Request.Normalized()
 	var flowPath, runID, publicationState string
 	var generation, publicationSequence int64
 	err := tx.QueryRowContext(ctx, `
@@ -252,7 +260,7 @@ func admitSQLiteInboundStandingTargetTx(ctx context.Context, s *EventSQLiteOwner
 	if err != nil {
 		return fmt.Errorf("lock sqlite inbound standing service: %w", err)
 	}
-	if flowPath != request.FlowPath || runID != request.ResolvedRunID || generation != request.ExpectedGeneration || publicationSequence != request.ExpectedPublicationSequence {
+	if flowPath != request.FlowPath || runID != request.ResolvedRunID || generation != request.ExpectedGeneration || publicationSequence != command.PublicationSequence() {
 		return fmt.Errorf("stale or conflicting sqlite inbound standing target")
 	}
 	disposition, err := storestandingdisposition.ReadByRun(ctx, tx, false, request.ResolvedRunID)

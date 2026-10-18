@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -229,7 +230,8 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	process.waitForReadyLine()
 	waitForInboundAdmissionServeOutput(t, process, "[WARN] inbound_unsigned_webhook")
 	serveOutput := process.outputString()
-	for _, want := range []string{"packs                      embedded · 14 packs", "effective sha256:", "project provider.telegram"} {
+	wantInventory := fmt.Sprintf("packs                      embedded · %d packs", len(packfixture.EmbeddedInventory(t).Entries()))
+	for _, want := range []string{wantInventory, "effective sha256:", "project provider.telegram"} {
 		if !strings.Contains(serveOutput, want) {
 			t.Fatalf("serve readback omitted imported Telegram inventory fact %q:\n%s", want, serveOutput)
 		}

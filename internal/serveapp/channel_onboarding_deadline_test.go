@@ -33,6 +33,7 @@ func channelClaimDeadlineAtReadback(t *testing.T, admitted func(channelonboardin
 	t.Cleanup(func() { expire(context.Canceled) })
 	ctx := channelClaimDeadlineContext{controlled}
 	base := http.DefaultTransport
+	credentialReadbackOperationID := ""
 	http.DefaultTransport = servePublicIngressRoundTripper(func(req *http.Request) (*http.Response, error) {
 		if req.Context().Value(channelClaimDeadlineKey{}) != controlled || req.GetBody == nil {
 			return base.RoundTrip(req)
@@ -64,7 +65,21 @@ func channelClaimDeadlineAtReadback(t *testing.T, admitted func(channelonboardin
 					return
 				}
 				result := envelope.Result
+				// Credential discovery reads the retained responsibility before the
+				// real claim wait. Admit that one read without expiring the clock.
+				if len(envelope.Error) == 0 || string(envelope.Error) == "null" {
+					if result.Operation.Phase == channelonboarding.PhasePreparing && result.IdentityOperation == nil {
+						role, err := result.ProviderCredentialRequirement()
+						if err != nil || role == "" || credentialReadbackOperationID != "" {
+							t.Errorf("credential discovery did not identify one retained provider requirement: %v", err)
+							return
+						}
+						credentialReadbackOperationID = result.Operation.OperationID
+						return
+					}
+				}
 				if (len(envelope.Error) != 0 && string(envelope.Error) != "null") || result.Operation.OperationID == "" ||
+					(credentialReadbackOperationID != "" && result.Operation.OperationID != credentialReadbackOperationID) ||
 					result.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity ||
 					result.IdentityOperation == nil || result.IdentityOperation.State != "awaiting_claim" {
 					t.Errorf("deadline cut did not reach real awaiting-identity readback: %s", raw.Bytes())
