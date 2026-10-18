@@ -93,16 +93,23 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
+		if err == context.Canceled && drain {
+			return false, &cleanTransactionCancellation{cause: err, beforeAttempt: true}
+		}
 		return false, err
 	}
 	poolStarted := time.Now()
 	conn, err := b.db.Conn(ctx)
 	if err != nil {
+		if drain && ctx.Err() == context.Canceled && onlyCallerCancellation(err) {
+			return false, &cleanTransactionCancellation{cause: err, beforeAttempt: true}
+		}
 		return false, err
 	}
 	poolWait := time.Since(poolStarted)
 	discard := false
 	serializationConflict := false
+	beginAttempted, commitAttempted := false, false
 	var tx *sql.Tx
 	releaseOrdering := func() {}
 	defer func() { releaseOrdering() }()
@@ -114,6 +121,9 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		cleanupStarted := time.Now()
 		var cleanupErr error
 		rolledBack := false
+		if _, nested := CleanCancellationBeforeCommit(err); nested {
+			err = fmt.Errorf("postgres transaction callback: %w", err)
+		}
 		if tx != nil {
 			probe.RollbackAttempted()
 		}
@@ -139,6 +149,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 			cleanupErr = errors.Join(cleanupErr, rawErr)
 		}
 		closeErr := conn.Close()
+		cleanClose := closeErr == nil && !discard
 		if closeErr == sql.ErrConnDone {
 			closeErr = nil
 		}
@@ -149,6 +160,10 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		}
 		if serializationConflict && rolledBack && cleanupErr == nil && ctx.Err() == nil {
 			err = &rolledBackSerializationConflict{cause: err}
+		}
+		if drain && !commitAttempted && !committed && cleanClose && cleanupErr == nil &&
+			(!beginAttempted || rolledBack) && ctx.Err() == context.Canceled && onlyCallerCancellation(err) {
+			err = &cleanTransactionCancellation{cause: err, beforeAttempt: !beginAttempted}
 		}
 		probe.RecordCleanup(time.Since(cleanupStarted))
 	}()
@@ -164,6 +179,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	beginStarted := time.Now()
 	// The owner must join rollback before Raw/discard/close. Read queries still
 	// use the caller context; only the SQL transaction's finalizer is owner-held.
+	beginAttempted = true
 	tx, err = conn.BeginTx(context.WithoutCancel(ctx), opts)
 	probe.RecordAdmission(0, poolWait, time.Since(beginStarted))
 	if err != nil {
@@ -199,6 +215,7 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		return false, err
 	}
 	probe.BeforeCommit()
+	commitAttempted = true
 	commitErr := tx.Commit()
 	if commitErr != nil {
 		probe.CommitFailed()

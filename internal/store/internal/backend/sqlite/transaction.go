@@ -62,6 +62,9 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, opera
 		current := mutationOperation{label: label, phase: mutationPhaseFirstAttempt, attempt: busyAttempts + 1}
 		if err := ctx.Err(); err != nil {
 			b.observeFirstCancellation(current, "before_attempt", err)
+			if err == context.Canceled && busyAttempts == 0 {
+				return false, &cleanTransactionCancellation{cause: err, beforeAttempt: true}
+			}
 			return false, err
 		}
 
@@ -82,6 +85,9 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, opera
 		if err := b.acquireMutation(attemptCtx, current); err != nil {
 			cancelAttempt()
 			if callerErr := ctx.Err(); callerErr != nil {
+				if callerErr == context.Canceled && busyAttempts == 0 && onlyCallerCancellation(err) {
+					return false, &cleanTransactionCancellation{cause: err, beforeAttempt: true}
+				}
 				return false, callerErr
 			}
 			if recovering && errors.Is(err, context.DeadlineExceeded) {
@@ -104,6 +110,9 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, opera
 
 		if callerErr := ctx.Err(); callerErr != nil {
 			b.observeFirstCancellation(current, "attempt", callerErr)
+			if _, clean := CleanCancellationBeforeCommit(err); clean && busyAttempts == 0 {
+				return false, err
+			}
 			return false, errors.Join(callerErr, err)
 		}
 		if err == nil {
@@ -266,13 +275,26 @@ func (b *Backend) runTransactionOnce(ctx context.Context, opts *sql.TxOptions, o
 }
 
 func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+	write := opts == nil || !opts.ReadOnly
+	if err := ctx.Err(); err != nil {
+		if err == context.Canceled && write {
+			return false, &cleanTransactionCancellation{cause: err, beforeAttempt: true}
+		}
+		return false, err
+	}
 	poolStarted := time.Now()
 	conn, err := b.db.Conn(ctx)
 	if err != nil {
+		if write && ctx.Err() == context.Canceled && onlyCallerCancellation(err) {
+			return false, &cleanTransactionCancellation{cause: err, beforeAttempt: true}
+		}
 		return false, err
 	}
 	poolWait := time.Since(poolStarted)
 	var tx *sql.Tx
+	beginAttempted, commitAttempted := false, false
+	var stopRollback func() bool
+	var rollbackDone <-chan error
 	releaseOrdering := func() {}
 	defer func() { releaseOrdering() }()
 	discard := false
@@ -281,9 +303,25 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	defer func() {
 		cleanupStarted := time.Now()
 		var cleanupErr error
+		rolledBack := false
+		if _, nested := CleanCancellationBeforeCommit(err); nested {
+			// A callback's receipt belongs to that callback's transaction, not ours.
+			err = fmt.Errorf("sqlite transaction callback: %w", err)
+		}
 		if tx != nil {
 			probe.RollbackAttempted()
-			rollbackErr := tx.Rollback()
+		}
+		rollbackErr := func() error {
+			if stopRollback != nil && !stopRollback() {
+				return <-rollbackDone
+			}
+			if tx != nil {
+				return tx.Rollback()
+			}
+			return nil
+		}()
+		if tx != nil {
+			rolledBack = rollbackErr == nil
 			probe.OrderingRolledBack(rollbackErr)
 			releaseOrdering()
 			// ErrTxDone describes Go's handle, not the physical transaction. A
@@ -294,24 +332,53 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 					cleanupErr = rollbackErr
 				}
 			}
+		} else if rollbackErr != nil && rollbackErr != sql.ErrTxDone {
+			discard = true
+			cleanupErr = rollbackErr
 		}
-		cleanupErr = errors.Join(cleanupErr, CloseConnection(conn, discard))
+		var closeErr error
+		if write && !discard {
+			closeErr = conn.Close()
+		} else {
+			closeErr = CloseConnection(conn, discard)
+		}
+		cleanupErr = errors.Join(cleanupErr, closeErr)
 		if cleanupErr != nil {
 			// This also reports cleanup failure while the original callback panic
 			// unwinds. No recover here: the original panic remains authoritative.
 			slog.Error("sqlite transaction cleanup failed", "error", cleanupErr)
 			err = &transactionTerminationError{errors.Join(err, cleanupErr)}
 		}
+		if write && !commitAttempted && !committed && !discard && cleanupErr == nil &&
+			(!beginAttempted || rolledBack) && ctx.Err() == context.Canceled && onlyCallerCancellation(err) {
+			err = &cleanTransactionCancellation{cause: err, beforeAttempt: !beginAttempted}
+		}
 		probe.RecordCleanup(time.Since(cleanupStarted))
 	}()
+	if err = ctx.Err(); err != nil {
+		return false, err
+	}
 	beginStarted := time.Now()
-	tx, err = conn.BeginTx(ctx, opts)
+	transactionCtx := ctx
+	if write {
+		// Keep the original callback/admission context. Only the SQL handle's
+		// finalizer is owner-held so cancellation rollback can be joined exactly.
+		transactionCtx = context.WithoutCancel(ctx)
+	}
+	beginAttempted = true
+	tx, err = conn.BeginTx(transactionCtx, opts)
 	probe.RecordAdmission(permitWait, poolWait, time.Since(beginStarted))
 	if err != nil {
 		discard = true
 		return false, err
 	}
 	probe.Begun()
+	if write {
+		rollbackTx := tx
+		done := make(chan error, 1)
+		rollbackDone = done
+		stopRollback = context.AfterFunc(ctx, func() { done <- rollbackTx.Rollback() })
+	}
 	ctx, releaseOrdering = authoractivity.BindTransaction(ctx, ctx, tx, authoractivity.DialectSQLite)
 	ctx = transactiontest.WithAttempt(ctx, probe)
 	if err = ctx.Err(); err != nil {
@@ -324,6 +391,7 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		return false, err
 	}
 	probe.BeforeCommit()
+	commitAttempted = true
 	err = tx.Commit()
 	if err == nil {
 		probe.OrderingCommitted()

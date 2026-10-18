@@ -261,7 +261,15 @@ func TestPostgresTransactionCancellationRollbackOrders(t *testing.T) {
 						if callbackFailure && !errors.Is(err, primary) {
 							t.Fatalf("lost independent failure: %v", err)
 						}
-						if !callbackFailure && err != ctx.Err() {
+						comparisonErr := err
+						before, clean := CleanCancellationBeforeCommit(err)
+						if clean != (!read && !deadline && !callbackFailure) || (clean && before) {
+							t.Fatalf("native cancellation evidence: before=%t clean=%t read=%t deadline=%t callback_error=%t err=%v", before, clean, read, deadline, callbackFailure, err)
+						}
+						if clean {
+							comparisonErr = err.(*cleanTransactionCancellation).cause
+						}
+						if !callbackFailure && comparisonErr != ctx.Err() {
 							t.Fatalf("manufactured transaction failure: %v", err)
 						}
 						next, stop := context.WithTimeout(context.Background(), time.Second)
@@ -277,6 +285,31 @@ func TestPostgresTransactionCancellationRollbackOrders(t *testing.T) {
 }
 
 func TestPostgresTransactionPanicAndFailureExits(t *testing.T) {
+	t.Run("foreign native cancellation receipt", func(t *testing.T) {
+		b, _ := newExitProbe(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, foreign := b.RunTransactionOutcome(ctx, func(context.Context, *sql.Tx) error {
+			t.Fatal("cancelled callback entered")
+			return nil
+		})
+		if before, clean := CleanCancellationBeforeCommit(foreign); !before || !clean {
+			t.Fatalf("missing native before-entry control: %v", foreign)
+		}
+		for _, cancelOuter := range []bool{false, true} {
+			ctx, cancel := context.WithCancel(context.Background())
+			_, err := b.RunTransactionOutcome(ctx, func(context.Context, *sql.Tx) error {
+				if cancelOuter {
+					cancel()
+				}
+				return foreign
+			})
+			cancel()
+			if _, clean := CleanCancellationBeforeCommit(err); clean || !errors.Is(err, context.Canceled) {
+				t.Fatalf("callback supplied another transaction's cancellation evidence: %v", err)
+			}
+		}
+	})
 	for _, read := range []bool{false, true} {
 		for _, scenario := range []string{"success", "panic", "panic_rollback_failure", "callback", "callback_canceled", "callback_tx_done", "commit_canceled", "rollback_failure"} {
 			t.Run(fmt.Sprintf("read=%t/%s", read, scenario), func(t *testing.T) {
@@ -327,6 +360,9 @@ func TestPostgresTransactionPanicAndFailureExits(t *testing.T) {
 						return nil
 					})
 				}()
+				if _, clean := CleanCancellationBeforeCommit(err); clean {
+					t.Fatalf("independent callback/cleanup or COMMIT outcome inherited cancellation evidence: scenario=%s err=%v", scenario, err)
+				}
 				switch scenario {
 				case "panic", "panic_rollback_failure":
 					if got != primary {
