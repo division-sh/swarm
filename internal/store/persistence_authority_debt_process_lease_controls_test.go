@@ -2,6 +2,8 @@ package store_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"go/ast"
 	"go/format"
 	"go/parser"
@@ -15,6 +17,9 @@ import (
 
 // Excluded from the collector payload to avoid a self-referential fingerprint.
 const debtProcessLeaseCollectorTo = "1a353f6c8e5cfe2e2fce2163231e4ac4832df0776daa8dbea177c6edb274bd90"
+
+const debtProcessFenceCustodyPin = "e91d3e1b04948d4e07c157a9a66cb8a1f93b4c3221ad040b3ddf97ab98b7006d"
+const debtProcessFenceCollectorTo = "e841ab0fc56bbc524f8987f1e4a95a24c49bf8cf083398bf40f4e971b8d1de78"
 
 func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 	root, base := persistenceAuthorityRepoRoot(t), t.TempDir()
@@ -34,11 +39,121 @@ func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 			}
 		}
 	}
-	if digest, err := debtProcessLeaseCustodyDigest(root); err != nil || digest != debtProcessLeaseCustodyPin {
+	if digest, err := debtProcessLeaseCustodyDigest(root); err != nil || digest != debtProcessFenceCustodyPin {
 		t.Errorf("custody pin=%q error=%v", digest, err)
 	}
-	if digest, err := debtCollectorDigest(root); err != nil || digest != debtProcessLeaseCollectorTo {
+	debtRequireOriginalConstructionCustodyContinuation(t, root)
+	if digest, err := debtCollectorDigest(root); err != nil || digest != debtProcessFenceCollectorTo {
 		t.Errorf("collector pin=%q error=%v", digest, err)
+	}
+}
+
+// Authenticate the complete additions before building a historical comparison
+// view. The live census still scans every source declaration unchanged.
+func debtRequireOriginalConstructionCustodyContinuation(t *testing.T, root string) {
+	t.Helper()
+	const dir = "internal/store/internal/startupownership"
+	digest, err := debtProcessLeaseCustodyDigest(root)
+	if err != nil || digest != debtProcessFenceCustodyPin {
+		t.Fatalf("original-construction custody source changed: %s/%v", digest, err)
+	}
+	projected := t.TempDir()
+	entries, err := os.ReadDir(filepath.Join(root, dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragments := map[string]string{
+		"AcquireProcessCapability":      "fb87cc63082df6bdb949ac9f144c437bca4036eab2dc3d1a79c6fb260b0de5f8",
+		"CaptureOriginalProcessForTest": "ffd050e3dcf0d1d9b4fa31966d207e61cd74a911a32961b714c8c6a1228ced5d",
+		"observeConstructedProcess":     "b629ef1d287ed729af1ebcc42d73c4f36172d51b91717f8cda07ec4e4c1f0e56",
+	}
+	removed := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			continue
+		}
+		path := dir + "/" + entry.Name()
+		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, path), nil, parser.AllErrors)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var declarations []ast.Decl
+		for _, decl := range file.Decls {
+			if group, ok := decl.(*ast.GenDecl); ok {
+				for _, spec := range group.Specs {
+					named, ok := spec.(*ast.TypeSpec)
+					if !ok || named.Name.Name != "StartupPostgresOwner" {
+						continue
+					}
+					shape, ok := named.Type.(*ast.StructType)
+					if !ok {
+						t.Fatal("native custody carrier is not a struct")
+					}
+					var fields []*ast.Field
+					for _, field := range shape.Fields.List {
+						if len(field.Names) == 1 && field.Names[0].Name == "originalObservation" {
+							pointer, pointerOK := field.Type.(*ast.StarExpr)
+							var named *ast.Ident
+							if pointerOK {
+								named, _ = pointer.X.(*ast.Ident)
+							}
+							if !pointerOK || named == nil || named.Name != "OriginalProcessCaptureForTest" || field.Tag != nil {
+								t.Fatal("original observation field changed")
+							}
+							removed++
+							continue
+						}
+						fields = append(fields, field)
+					}
+					shape.Fields.List = fields
+				}
+			}
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || len(fn.Recv.List) != 1 {
+				declarations = append(declarations, decl)
+				continue
+			}
+			pointer, ok := fn.Recv.List[0].Type.(*ast.StarExpr)
+			if !ok {
+				declarations = append(declarations, decl)
+				continue
+			}
+			owner, ok := pointer.X.(*ast.Ident)
+			pin := fragments[fn.Name.Name]
+			if !ok || owner.Name != "StartupPostgresOwner" || pin == "" {
+				declarations = append(declarations, decl)
+				continue
+			}
+			var body bytes.Buffer
+			if err := format.Node(&body, token.NewFileSet(), fn); err != nil || fmt.Sprintf("%x", sha256.Sum256(body.Bytes())) != pin {
+				t.Fatalf("original construction fragment changed: %s", fn.Name.Name)
+			}
+			removed++
+			if fn.Name.Name == "AcquireProcessCapability" {
+				cut := len(fn.Body.List) - 3
+				if cut < 0 {
+					t.Fatal("original constructor lost its publication boundary")
+				}
+				var call bytes.Buffer
+				if err := format.Node(&call, token.NewFileSet(), fn.Body.List[cut]); err != nil || call.String() != "s.observeConstructedProcess(session, capability)" {
+					t.Fatal("original construction notification moved")
+				}
+				fn.Body.List = append(fn.Body.List[:cut], fn.Body.List[cut+1:]...)
+				declarations = append(declarations, decl)
+			}
+		}
+		file.Decls = declarations
+		var b bytes.Buffer
+		if err := format.Node(&b, token.NewFileSet(), file); err != nil {
+			t.Fatal(err)
+		}
+		debtWriteModuleSource(t, projected, path, b.String())
+	}
+	if removed != 4 {
+		t.Fatalf("original custody continuation fragments=%d, want4", removed)
+	}
+	if prior, err := debtProcessLeaseCustodyDigest(projected); err != nil || prior != debtProcessLeaseCustodyPin {
+		t.Fatalf("original construction changed its custody predecessor: %s/%v", prior, err)
 	}
 }
 
@@ -115,6 +230,43 @@ func TestPersistenceAuthorityDebtProcessLeaseRelocationsAreOneWay(t *testing.T) 
 }
 
 func TestPersistenceAuthorityDebtProcessLeaseCollectorTransitionIsBounded(t *testing.T) {
+	t.Run("original-construction-continuation", func(t *testing.T) {
+		inherited := debtControlSite("call:QueryRow", 2)
+		trusted := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: debtProcessLeaseCollectorTo, Sites: debtControlSet(inherited)}
+		head := trusted
+		head.Collector = debtProcessFenceCollectorTo
+		for _, mutation := range []string{"exact", "downward", "landed", "addition", "increase", "foreign", "reverse", "stale-destination", "rebootstrap"} {
+			t.Run(mutation, func(t *testing.T) {
+				base, candidate := trusted, head
+				base.Sites, candidate.Sites = maps.Clone(trusted.Sites), maps.Clone(head.Sites)
+				switch mutation {
+				case "downward":
+					delete(candidate.Sites, inherited.identity())
+				case "landed":
+					base = candidate
+				case "addition":
+					added := debtControlSite("call:Exec", 1)
+					candidate.Sites[added.identity()] = added
+				case "increase":
+					increased := inherited
+					increased.Multiplicity++
+					candidate.Sites[inherited.identity()] = increased
+				case "foreign":
+					base.Collector = strings.Repeat("a", 64)
+				case "reverse":
+					base, candidate = candidate, base
+				case "stale-destination":
+					candidate.Collector = debtForkProofCollectorTo
+				case "rebootstrap":
+					candidate.BootstrapSource = strings.Repeat("b", 40)
+				}
+				accept := mutation == "exact" || mutation == "downward" || mutation == "landed"
+				if err := debtValidateCollectorIdentity(base.Collector, candidate.Collector, base, candidate, ""); (err == nil) != accept {
+					t.Fatalf("original construction collector accept=%v error=%v", accept, err)
+				}
+			})
+		}
+	})
 	for _, donor := range []string{debtForkProofCollectorTo} {
 		t.Run(donor[:8], func(t *testing.T) {
 			before, after := debtControlSet(), debtControlSet()
@@ -248,7 +400,7 @@ func TestPersistenceAuthorityDebtProcessLeaseCustodyIsSourceBound(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mutation := range []string{"actual", "raw-field", "raw-getter", "sql-callback", "forwarder", "custody-change", "construction-wiring"} {
+	for _, mutation := range []string{"actual", "raw-field", "raw-getter", "sql-callback", "forwarder", "custody-change", "construction-wiring", "observation-field", "observation-constructor-cut", "observation-installer", "observation-binding", "fifth-change"} {
 		t.Run(mutation, func(t *testing.T) {
 			copy := t.TempDir()
 			for _, entry := range entries {
@@ -263,6 +415,18 @@ func TestPersistenceAuthorityDebtProcessLeaseCustodyIsSourceBound(t *testing.T) 
 				if entry.Name() == "owner.go" && mutation == "raw-field" {
 					text = strings.ReplaceAll(text, "constructionLease", "ConstructionLease")
 				}
+				if entry.Name() == "owner.go" && mutation == "observation-field" {
+					text = strings.Replace(text, "originalObservation", "foreignObservation", 1)
+				}
+				if entry.Name() == "owner.go" && mutation == "observation-constructor-cut" {
+					text = strings.Replace(text, "s.observeConstructedProcess(session, capability)", "s.observeConstructedProcess(session, nil)", 1)
+				}
+				if entry.Name() == "test_original_session_interruption.go" && mutation == "observation-installer" {
+					text = strings.Replace(text, "s.originalObservation = p", "s.originalObservation = nil", 1)
+				}
+				if entry.Name() == "test_original_session_interruption.go" && mutation == "observation-binding" {
+					text = strings.Replace(text, "p.session, p.capability = session, capability", "p.session, p.capability = nil, capability", 1)
+				}
 				if entry.Name() == "postgres_construction.go" && mutation == "custody-change" {
 					text = strings.Replace(text, "return lease, capacity, nil", "return s.acquireConstructionPossession(ctx)", 1)
 				}
@@ -275,6 +439,7 @@ func TestPersistenceAuthorityDebtProcessLeaseCustodyIsSourceBound(t *testing.T) 
 				"raw-getter":   "func(s *StartupPostgresOwner)Raw()any{return s.constructionLease}",
 				"sql-callback": "func(s *StartupPostgresOwner)Call(f func(any)){f(s.constructionLease)}",
 				"forwarder":    "func(s *StartupPostgresOwner)Forward()any{return s.Raw()}",
+				"fifth-change": "func(s *StartupPostgresOwner)Fifth(){panic(\"unreviewed\")}",
 			}
 			if extra := additions[mutation]; extra != "" {
 				debtWriteModuleSource(t, copy, dir+"/escape.go", "package startupownership\n"+extra)

@@ -55,11 +55,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimesemanticview "github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	runtimeworkspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -205,6 +207,14 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	pg := storetest.StartPostgresRuntimeStore(t)
+	process, err := agentfixture.ProcessCapability(t, ctx, pg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	requireCanonicalConversationSurface(t, ctx, pg)
 	runID := uuid.NewString()
