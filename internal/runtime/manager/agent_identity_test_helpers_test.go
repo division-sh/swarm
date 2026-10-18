@@ -96,7 +96,6 @@ func managerTestEphemeralTopologyAdmission(t testing.TB) runtimeagenttopology.Ad
 }
 
 func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfig) (PersistedAgent, error) {
-	ensureManagerTestSemanticSource(am)
 	var err error
 	cfg, err = managerTestBindRuntimeCreatedIdentity(cfg, managerIdentityTestRunID, "manager.test.static_agent")
 	if err != nil {
@@ -243,7 +242,6 @@ func installManagerTestStaticTopology(
 }
 
 func registerManagerTestEphemeralAgent(ctx context.Context, am *AgentManager, rec PersistedAgent) error {
-	ensureManagerTestSemanticSource(am)
 	var err error
 	rec.Topology, err = runtimeagenttopology.NewEphemeralAdmission("11111111-1111-4111-8111-111111111111", "runtime_shard")
 	if err != nil {

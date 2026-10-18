@@ -214,7 +214,6 @@ func (s *recoveryTestStore) CommitAgentLifecycleTransition(ctx context.Context, 
 
 func installRecoveryTestStaticTopology(t testing.TB, am *AgentManager, store *recoveryTestStore) {
 	t.Helper()
-	ensureManagerTestSemanticSource(am)
 	bundle, present := semanticview.Bundle(am.semanticSource)
 	if !present || bundle == nil {
 		t.Fatal("recovery topology fixture requires its compiled source")
@@ -752,7 +751,6 @@ func TestRecover_UsesCanonicalLoadedAgentMetadata(t *testing.T) {
 		hydrated = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
 	}, store)
-	ensureManagerTestSemanticSource(am)
 	if err := bindCanonicalAgentPrompt(am.semanticSource, &store.agents[0].Config); err != nil {
 		t.Fatal(err)
 	}

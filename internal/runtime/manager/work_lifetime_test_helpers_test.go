@@ -18,7 +18,6 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -183,51 +182,6 @@ func newTestManagerEventBus(t *testing.T) (*runtimebus.EventBus, error) {
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		},
 	})
-}
-
-func managerTestSemanticSource() semanticview.Source {
-	events := map[string]runtimecontracts.EventCatalogEntry{}
-	for _, eventName := range []string{
-		"review.ready",
-		"task.ready",
-		"test.in",
-		"test.intervention",
-		"test.intervention.settlement",
-		"test.lane.child",
-		"test.lane.root",
-		"test.new",
-		"test.old",
-		"test.source_set_cancelled",
-		"test.source_set_wait",
-		"test.transition",
-	} {
-		events[eventName] = runtimecontracts.EventCatalogEntry{}
-	}
-	review := runtimecontracts.FlowContractView{
-		Path:   "review",
-		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "review"},
-		Events: events,
-	}
-	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Events: events, Children: []runtimecontracts.FlowContractView{review}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				".":      &root,
-				"review": &root.Children[0],
-			},
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
-	}
-	return semanticview.Wrap(bundle)
-}
-
-func ensureManagerTestSemanticSource(am *AgentManager) {
-	if am != nil && am.semanticSource == nil {
-		am.semanticSource = managerTestSemanticSource()
-	}
 }
 
 func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory, opts AgentManagerOptions, stores ...ManagerPersistence) *AgentManager {
