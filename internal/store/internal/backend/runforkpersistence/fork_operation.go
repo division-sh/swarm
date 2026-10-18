@@ -128,6 +128,9 @@ func lookupForkOperationTx(ctx context.Context, tx *sql.Tx, actor, key, transpor
 			OriginalRequestHash: record.Request.TransportHash, ConflictingRequestHash: transportHash,
 		}
 	}
+	if err := requireForkLiveParentsTx(ctx, tx, record.Request.OperationID, false); err != nil {
+		return runfork.ForkOperationRecord{}, false, err
+	}
 	return record, true, nil
 }
 
@@ -142,7 +145,14 @@ func loadForkOperationByIDTx(ctx context.Context, tx *sql.Tx, operationID string
 	if lock {
 		query += ` FOR SHARE`
 	}
-	return decodeForkOperationRow(tx.QueryRowContext(ctx, query, operationID))
+	record, found, err := decodeForkOperationRow(tx.QueryRowContext(ctx, query, operationID))
+	if err != nil || !found {
+		return record, found, err
+	}
+	if err := requireForkLiveParentsTx(ctx, tx, operationID, false); err != nil {
+		return runfork.ForkOperationRecord{}, false, err
+	}
+	return record, true, nil
 }
 
 func decodeForkOperationRow(row *sql.Row) (runfork.ForkOperationRecord, bool, error) {
@@ -311,6 +321,9 @@ func bindForkOperationTx(ctx context.Context, tx *sql.Tx, request runfork.ForkOp
 		return runfork.ForkOperationRecord{}, false, err
 	}
 	if inserted == 1 {
+		if err := insertForkOperationLiveParentsTx(ctx, tx, canonical.OperationID); err != nil {
+			return runfork.ForkOperationRecord{}, false, err
+		}
 		return record, false, nil
 	}
 	if canonical.IdempotencyKey == "" {

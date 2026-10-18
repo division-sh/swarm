@@ -267,6 +267,8 @@ func platformTableOrder(name string) int {
 		return 18
 	case "run_fork_selected_contract_executions":
 		return 19
+	case "run_fork_selected_contract_execution_live_parents", "run_fork_operation_live_parents":
+		return 19
 	case "run_fork_selected_contract_branch_divergences":
 		return 20
 	case "run_fork_selected_contract_route_recoveries":

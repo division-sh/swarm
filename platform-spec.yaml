@@ -18248,7 +18248,9 @@ platform_tables:
             CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             CHECK ((state = 'activated' AND result_json IS NOT NULL AND failure_json IS NULL) OR (state = 'materialized' AND result_json IS NULL AND failure_json IS NULL) OR (state IN ('failed', 'uncertain') AND result_json IS NULL AND failure_json IS NOT NULL)),
             UNIQUE (fork_run_id),
-            UNIQUE (selected_binding_id)
+            UNIQUE (selected_binding_id),
+            UNIQUE (operation_id, selected_binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision),
+            UNIQUE (operation_id, fork_event_id)
         );
         CREATE UNIQUE INDEX idx_run_fork_operations_actor_key
             ON run_fork_operations (actor, idempotency_key)
@@ -18293,6 +18295,8 @@ platform_tables:
             CHECK ((state IN ('prepared', 'running') AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND lease_expires_at IS NOT NULL AND terminal_at IS NULL) OR (state = 'quiesced' AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND terminal_at IS NOT NULL) OR (state IN ('failed', 'closed') AND terminal_at IS NOT NULL)),
             CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             UNIQUE (execution_id, fork_run_id, generation),
+            UNIQUE (execution_id, binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision, generation),
+            UNIQUE (execution_id, fork_event_id),
             UNIQUE (fork_run_id, generation),
             UNIQUE (fork_run_id, executable_coordinate_fingerprint, generation),
             INDEX idx_run_fork_selected_contract_runtime_executions_recovery (state, lease_expires_at, updated_at)
@@ -18300,6 +18304,48 @@ platform_tables:
         CREATE UNIQUE INDEX idx_run_fork_selected_contract_runtime_executions_current
             ON run_fork_selected_contract_runtime_executions (fork_run_id)
             WHERE state <> 'closed';
+    run_fork_selected_contract_execution_live_parents:
+      description: >-
+        Exact live-parent association for one canonical selected runtime execution.
+        Its non-null typed coordinates and exact optional event pair must match the
+        immutable canonical execution. This association is not execution permission.
+        Detachment requires the separately admitted retained completion cohort and
+        may never be inferred from an absent association.
+      ddl: |
+        CREATE TABLE run_fork_selected_contract_execution_live_parents (
+            execution_id UUID PRIMARY KEY REFERENCES run_fork_selected_contract_runtime_executions(execution_id),
+            binding_id UUID NOT NULL REFERENCES run_fork_selected_contract_bindings(binding_id),
+            fork_run_id UUID NOT NULL REFERENCES runs(run_id),
+            source_run_id UUID NOT NULL REFERENCES runs(run_id),
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
+            fork_revision BIGINT NOT NULL CHECK (fork_revision > 0),
+            generation BIGINT NOT NULL CHECK (generation > 0),
+            fork_event_id UUID REFERENCES events(event_id),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
+            FOREIGN KEY (execution_id, binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision, generation) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision, generation),
+            FOREIGN KEY (execution_id, fork_event_id) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_event_id),
+            FOREIGN KEY (fork_event_id, source_run_id) REFERENCES events(event_id, run_id)
+        );
+    run_fork_operation_live_parents:
+      description: >-
+        Exact live-parent association for a permanent selected fork operation.
+        The typed cut, original source and child, binding and optional event must
+        match that operation's canonical coordinates. Missing or contradictory
+        association evidence never implies ordinary ownership or an ACK replay.
+      ddl: |
+        CREATE TABLE run_fork_operation_live_parents (
+            operation_id UUID PRIMARY KEY REFERENCES run_fork_operations(operation_id),
+            selected_binding_id UUID NOT NULL REFERENCES run_fork_selected_contract_bindings(binding_id),
+            fork_run_id UUID NOT NULL REFERENCES runs(run_id),
+            source_run_id UUID NOT NULL REFERENCES runs(run_id),
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
+            fork_revision BIGINT NOT NULL CHECK (fork_revision > 0),
+            fork_event_id UUID REFERENCES events(event_id),
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
+            FOREIGN KEY (operation_id, selected_binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision) REFERENCES run_fork_operations(operation_id, selected_binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision),
+            FOREIGN KEY (operation_id, fork_event_id) REFERENCES run_fork_operations(operation_id, fork_event_id),
+            FOREIGN KEY (fork_event_id, source_run_id) REFERENCES events(event_id, run_id)
+        );
     run_fork_selected_contract_executions:
       description: Source-to-fork lineage table for mutating selected-contract fixed-event fork execution. The runtime
         selected-contract execution owner publishes fresh fork-local events under the fork run_id and records which source

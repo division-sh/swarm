@@ -274,6 +274,9 @@ func issueSelectedContractRuntimeExecution(ctx context.Context, tx *sql.Tx, dial
 	if _, err := tx.ExecContext(ctx, dialect.insertSQL(), args...); err != nil {
 		return runfork.SelectedContractRuntimeExecution{}, fmt.Errorf("insert selected-contract runtime execution: %w", err)
 	}
+	if err := insertSelectedExecutionLiveParentsTx(ctx, tx, issued.ExecutionID); err != nil {
+		return runfork.SelectedContractRuntimeExecution{}, err
+	}
 	return issued, nil
 }
 
