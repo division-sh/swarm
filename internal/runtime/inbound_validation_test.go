@@ -19,6 +19,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -64,6 +65,9 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 		{"cleanup_last", "$.data.user_id", func(e error) error { return errors.Join(e, cleanup) }, 503},
 		{"cleanup_first", "$.data.user_id", func(e error) error { return errors.Join(cleanup, e) }, 503},
 		{"nested_cleanup", "$.data.user_id", func(e error) error { return errors.Join(fmt.Errorf("wrapped: %w", errors.Join(e, cleanup)), e) }, 503},
+		{"typed_cleanup", "$.data.user_id", func(e error) error {
+			return runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "unclassified_runtime_error", "inbound-gateway", "prepare", nil, errors.Join(e, cleanup))
+		}, 503},
 		{"control_key", "$.data.user\n\r\t\x00_id", nil, 400},
 		{"quoted_key", "$.data.\"injected\\key\"", nil, 400},
 		{"unicode_key", "$.data.\u2028user", nil, 400},
@@ -108,17 +112,19 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 			found := 0
 			for _, line := range strings.Split(processLogs.String(), "\n") {
 				var diagnostic struct {
-					Message         string `json:"message"`
-					ProviderEventID string `json:"provider_event_id"`
-					Error           string `json:"error"`
+					Message         string   `json:"message"`
+					ProviderEventID string   `json:"provider_event_id"`
+					Error           string   `json:"error"`
+					Causes          []string `json:"causes"`
 				}
 				_, payload, ok := strings.Cut(line, "detail=")
 				if !ok || json.Unmarshal([]byte(payload), &diagnostic) != nil || diagnostic.Message != "inbound publication failed" || diagnostic.ProviderEventID != cell.name {
 					continue
 				}
 				found++
-				if !strings.Contains(diagnostic.Error, failure.Error()) || strings.Contains(cell.name, "cleanup") && !strings.Contains(diagnostic.Error, cleanup.Error()) {
-					t.Fatalf("original causes lost from process diagnostics: %q", diagnostic.Error)
+				detail := strings.Join(append([]string{diagnostic.Error}, diagnostic.Causes...), "\n")
+				if !strings.Contains(detail, failure.Error()) || strings.Contains(cell.name, "cleanup") && !strings.Contains(detail, cleanup.Error()) {
+					t.Fatalf("original causes lost from process diagnostics: %q", detail)
 				}
 			}
 			if found != 1 {
