@@ -45,6 +45,15 @@ func TestSecretsSetListCheckAndRemoveUseFileTierWithoutLeakingValues(t *testing.
 	if strings.Contains(stdout+stderr, secretValue) {
 		t.Fatalf("list output leaked secret value stdout=%q stderr=%q", stdout, stderr)
 	}
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"--swarm-dir", t.TempDir(), "secrets", "list"}, "")
+	if code != 0 || !strings.Contains(stdout, "sendgrid_api_key") || strings.Contains(stdout+stderr, secretValue) {
+		t.Fatalf("runtime-state directory changed credential scope or disclosure: code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"--help"}, "")
+	help := strings.Join(strings.Fields(stdout), " ")
+	if code != 0 || !strings.Contains(help, "not credential scope") || !strings.Contains(help, "SWARM_CREDENTIALS_FILE") || strings.Contains(help, "Swarm user/global state directory") {
+		t.Fatalf("help still implies runtime-directory credential scope: code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
 
 	code, stdout, stderr = executeRootCommandWithInput(context.Background(), repo, []string{"secrets", "rm", "sendgrid_api_key"}, "")
 	if code != 0 {

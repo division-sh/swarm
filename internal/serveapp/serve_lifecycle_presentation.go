@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -83,12 +84,13 @@ type serveLifecyclePresenter struct {
 	verbose bool
 	waiting func(string) string
 
-	bootEvents       map[int]runtime.BootProgressEvent
-	store            *storebackend.Selection
-	workspaces       []serveLifecycleWorkspaceFact
-	warnings         []runtimebootverify.Finding
-	operatorWarnings []string
-	notices          []serveLifecycleNotice
+	bootEvents        map[int]runtime.BootProgressEvent
+	store             *storebackend.Selection
+	workspaces        []serveLifecycleWorkspaceFact
+	credentialSources []runtimecredentials.SourceFact
+	warnings          []runtimebootverify.Finding
+	operatorWarnings  []string
+	notices           []serveLifecycleNotice
 
 	ready              bool
 	failed             bool
@@ -129,6 +131,15 @@ func (p *serveLifecyclePresenter) runtimeSink() func(runtime.BootProgressEvent) 
 		return nil
 	}
 	return p.observeBoot
+}
+
+func (p *serveLifecyclePresenter) recordCredentialSources(facts []runtimecredentials.SourceFact) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.credentialSources = append(p.credentialSources, facts...)
 }
 
 func (p *serveLifecyclePresenter) boot(step int, name, status, detail string) {
@@ -634,6 +645,9 @@ func (p *serveLifecyclePresenter) writeConciseReadyLocked(facts serveLifecycleRe
 }
 
 func (p *serveLifecyclePresenter) writeResolvedFactsLocked(facts serveLifecycleReadyFacts) {
+	for _, line := range cliapp.CredentialSourceLines(p.credentialSources) {
+		fmt.Fprintln(p.out, line)
+	}
 	if p.store != nil {
 		if p.store.Backend == storebackend.BackendSQLite {
 			p.writeResolvedFactLocked("store", "sqlite · "+strings.TrimSpace(p.store.SQLitePath))

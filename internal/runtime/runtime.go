@@ -169,6 +169,7 @@ type validatedRuntimeDeps struct {
 	BootEffectReachability     runtimebootverify.SourceBootEffectReachability
 	ExecutionPosture           executionposture.Posture
 	ProviderCredentialResolver llm.ProviderCredentialResolver
+	ProviderCredentialSource   runtimecredentials.SourceFact
 	Authority                  runtimeauthority.Provider
 	EmitRegistry               *runtimetools.EmitRegistry
 	SourceArtifactFact         runtimecorrelation.SourceArtifactFact
@@ -230,6 +231,7 @@ type BootProgressEvent struct {
 }
 
 type Runtime struct {
+	bootCredentialSources       []runtimecredentials.SourceFact
 	standingCredentialMu        sync.Mutex
 	standingCredentialAdmission *standingCredentialAdmission
 	generationMu                sync.Mutex
@@ -898,8 +900,10 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		return validatedRuntimeDeps{}, fmt.Errorf("llm model alias validation failed: %w", err)
 	}
 	providerCredentialResolver := providerCredentialResolverForRuntimeOptions(opts)
+	var providerCredentialSource runtimecredentials.SourceFact
 	if opts.LLMRuntime == nil {
-		if err := validateSelectedBackendCredentialForDeclaredAgents(context.Background(), cfg, opts, source); err != nil {
+		providerCredentialSource, err = validateSelectedBackendCredentialForDeclaredAgents(context.Background(), cfg, opts, source)
+		if err != nil {
 			return validatedRuntimeDeps{}, fmt.Errorf("llm backend credential validation failed: %w", err)
 		}
 	}
@@ -925,6 +929,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 		BootEffectReachability:     bootEffectReachability,
 		ExecutionPosture:           posture,
 		ProviderCredentialResolver: providerCredentialResolver,
+		ProviderCredentialSource:   providerCredentialSource,
 		Authority:                  authorityProvider,
 		EmitRegistry:               emitRegistry,
 		SourceArtifactFact:         opts.SourceArtifactFact,
@@ -1144,6 +1149,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		return nil, err
 	}
 	rt := &Runtime{
+		bootCredentialSources:     []runtimecredentials.SourceFact{boot.ProviderCredentialSource},
 		Config:                    cfg,
 		ExecutionPosture:          boot.ExecutionPosture,
 		EffectiveSourceIdentity:   boot.EffectiveSourceIdentity,
@@ -1371,9 +1377,19 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 		ManagedCredentials: rt.ManagedCredentials,
 		EffectReachability: boot.BootEffectReachability,
 	}
-	if missing, err := runtimebootverify.MissingStaticCredentialRequirements(ctx, source, credentialValidationOptions); err != nil {
+	if observed, err := runtimebootverify.InspectStaticCredentialRequirements(ctx, source, credentialValidationOptions); err != nil {
 		return nil, fmt.Errorf("credential validation failed: %w", err)
 	} else {
+		var missing []runtimecredentials.Descriptor
+		for _, descriptor := range observed {
+			if descriptor.Present {
+				if fact := descriptor.SourceFact(); fact.Reference != "" {
+					rt.bootCredentialSources = append(rt.bootCredentialSources, fact)
+				}
+			} else {
+				missing = append(missing, descriptor)
+			}
+		}
 		if bootWarningsFatal() && len(missing) > 0 {
 			parts := make([]string, 0, len(missing))
 			liveAgentIDs := boot.BootEffectReachability.LiveAgentIDs()

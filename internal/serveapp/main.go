@@ -1306,6 +1306,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return 1
 		}
 		runtimeContexts = append(runtimeContexts, contextDef)
+		presenter.recordCredentialSources(contextDef.validation.CredentialSources())
+		presenter.recordCredentialSources(packLoad.Channels.CredentialSources())
 		runtimeRequests = append(runtimeRequests, request)
 		supervisor.resetContexts = runtimeContexts
 		supervisor.resetRequests = runtimeRequests
@@ -1735,6 +1737,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return 1
 		}
 		presenter.recordIneligibleIngress(dormant)
+		presenter.recordCredentialSources(contextDef.runtime.CredentialSources())
 	}
 	initialRegistrationPairs := []runtimepublicingress.RegistrationPair{}
 	if publicIngressEnabled {

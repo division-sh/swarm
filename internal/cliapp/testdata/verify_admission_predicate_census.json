@@ -135,7 +135,7 @@
     "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.checkContractSecrets",
     "audit_rows": "A15,A16,A17,A18,A27",
     "proof_families": "P13,P14,P15,P16",
-    "body_sha256": "23d8ac03a33f0b114f9a356ebc20b09ba21a9207333356bc1313975d2f7f5742"
+    "body_sha256": "814c884f44be66b1a269f933f67e43346a434acadbceac7d9867b0ea7021f149"
   },
   {
     "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.checkGatewayEnv",
@@ -183,7 +183,7 @@
     "owner": "internal/cliapp/local_preflight.go::WriteLocalPreflightText",
     "audit_rows": "A15,A16,A17,A18,A27",
     "proof_families": "P13,P14,P15,P16",
-    "body_sha256": "ea8d4e2e52a42dbebdbde6cc70cc30ec019cd3c803f629c29493048da2d314db"
+    "body_sha256": "3ccf49dd187ec7a999201c9424b1930ec09d5d332c0ab2a813857f477c968f21"
   },
   {
     "owner": "internal/cliapp/local_preflight.go::WriteWorkspaceBackendDecisionFailure",
@@ -219,7 +219,7 @@
     "owner": "internal/cliapp/local_preflight.go::loadLocalPreflightCapabilitySource",
     "audit_rows": "A15,A16,A17,A18,A27",
     "proof_families": "P13,P14,P15,P16",
-    "body_sha256": "c8ca06e507c6b7ee570d1cbd48bcd4e28f3c219a6b3ff9c41abdeb44a702bdcb"
+    "body_sha256": "8ecc48531ce52744e1e5a99381f4c4107cdf370454f13d2d4be76aea287b1273"
   },
   {
     "owner": "internal/cliapp/local_preflight.go::loadLocalPreflightSource",
@@ -261,7 +261,7 @@
     "owner": "internal/cliapp/local_preflight.go::runLocalClaudeCLIPreflight",
     "audit_rows": "A15,A16,A17,A18,A27",
     "proof_families": "P13,P14,P15,P16",
-    "body_sha256": "348050e8d8608c56cb2866de5514a4188fb7eb9ebd7f4476215e8d7e86794d30"
+    "body_sha256": "d7d384a13c319e95b459eca4df4d0aaec8b7e03119dfc6fb31a269f35407a1ce"
   },
   {
     "owner": "internal/cliapp/local_preflight.go::serveLocalPreflightMode",
@@ -972,6 +972,12 @@
     "body_sha256": "eb789d74f3db5d0c46dae59d2f14f797ad8996bab17b6ae2bab924ec13927d77"
   },
   {
+    "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredential.SourceFact",
+    "audit_rows": "A12",
+    "proof_families": "P10,P21",
+    "body_sha256": "36f4e6892301a92a4fd54a7d3a579519b34bf82387f5bd44f152c1c5d5833faa"
+  },
+  {
     "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialKey",
     "audit_rows": "A12",
     "proof_families": "P10,P21",
@@ -981,13 +987,13 @@
     "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialResolver.Inspect",
     "audit_rows": "A12",
     "proof_families": "P10,P21",
-    "body_sha256": "c24dab0748fc5d25ae7ba19c609498ea73803123e9046c222957065b92dc2347"
+    "body_sha256": "80f50d90db338953f328e1260734c63e777da9858df78b204d2882c60530cdaa"
   },
   {
     "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialResolver.Resolve",
     "audit_rows": "A12",
     "proof_families": "P10,P21",
-    "body_sha256": "7a62e8f57bcb27cc00a8fdd72417e408836bb33671a28aceacfa0eb4eef6baac"
+    "body_sha256": "67aca6bd7a0afa818b09883ca4e53d76eb51b3fb0cd6cd6f662f101b29bdb100"
   },
   {
     "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialResolver.envPresent",
@@ -999,7 +1005,7 @@
     "owner": "internal/runtime/llm/provider_credentials.go::ProviderCredentialResolver.storeValue",
     "audit_rows": "A12",
     "proof_families": "P10,P21",
-    "body_sha256": "ff6f4da2254491098d3ee6832139a08f782eef885df3b752895d36a9f0258e6c"
+    "body_sha256": "56b9c19ea06757fc6cd991ee20bc1a3d803885bc1453b9bba8f36ee5813da2a7"
   },
   {
     "owner": "internal/runtime/llm/provider_credentials.go::inspectProviderCredentialStore",
@@ -1809,7 +1815,7 @@
     "owner": "internal/runtime/runtime.go::RuntimeDeps.validated",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "8ceb54088d56e9e8def3e0493795351cfb99da9e614f2971ba28450424c1d125"
+    "body_sha256": "c322f1d88b1588d8f6f0e1713a6c1e793199b160cdf8026c9807182a2891af65"
   },
   {
     "owner": "internal/runtime/runtime.go::bindRuntimeStorePayloadAdmitter",
@@ -1869,7 +1875,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "96737500997020a514836cb9b1f96d0be26f2aafc249b83daaa9163e5a9eb346"
+    "body_sha256": "9ce1b87184fd387256889e8006cad4c2c08aebc524062973c4cf4e8ad97612e8"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
@@ -2073,19 +2079,19 @@
     "owner": "internal/runtime/runtime_claude_startup.go::validateSelectedBackendCredential",
     "audit_rows": "A11,A12,A18,A25",
     "proof_families": "P09,P10,P15,P21",
-    "body_sha256": "3b3ba7ced9d1993d66696420a16a9e4be0af79e379137e4fbd50dc5144bed2ff"
+    "body_sha256": "7eb3a7d0eacb43382246eab36df37a130f28b7569a33f68f025023083b338a87"
   },
   {
     "owner": "internal/runtime/runtime_claude_startup.go::validateSelectedBackendCredentialForActiveAgents",
     "audit_rows": "A11,A12,A18,A25",
     "proof_families": "P09,P10,P15,P21",
-    "body_sha256": "7696137fa16b31aa872ef88942a03666a1c81dc0995ebf32fee40b38271619a1"
+    "body_sha256": "cdaadd67b9cde48847aff954d33dfe76f8dc8bcfa1d1af6bc9fbb89d1fe831c3"
   },
   {
     "owner": "internal/runtime/runtime_claude_startup.go::validateSelectedBackendCredentialForDeclaredAgents",
     "audit_rows": "A11,A12,A18,A25",
     "proof_families": "P09,P10,P15,P21",
-    "body_sha256": "261d7acf01dff7c8cac9a24af6a715d9ffce720f0285b4274913909686de66a9"
+    "body_sha256": "430c673fa5ff07a2c0aa24dadf0c92f4876aca0bba830ea210fbc577c13fd388"
   },
   {
     "owner": "internal/runtime/runtime_claude_startup.go::workflowSourceDeclaresAgents",
@@ -2409,7 +2415,13 @@
     "owner": "internal/runtime/workflow_validation.go::ValidateWorkflowContractSurface",
     "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
     "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
-    "body_sha256": "f2358a34fb451a5364b2d6ed85ee46b9134d0f46ca322d5e67dc8132ad602d78"
+    "body_sha256": "1ae43dfe10c285f6f5ca4e78e5b11a82ffce82125beaf6af4d24d0448b76610e"
+  },
+  {
+    "owner": "internal/runtime/workflow_validation.go::WorkflowContractValidationResult.CredentialSources",
+    "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
+    "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
+    "body_sha256": "a7e5a3b167f492f196eee9f821480d5e21f2a8af26243d7e292306949c5da959"
   },
   {
     "owner": "internal/runtime/workflow_validation.go::filterWorkflowValidationFindings",
@@ -2865,7 +2877,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "7877f29de6095029847a5b0be52ce8eb6acc1c4c979ed6be10d1b2ee9c3142a8"
+    "body_sha256": "ce8428ad2fd89ec33cab40aaa9cbd12f918a371172ea0174fa1522f101e3db29"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",

@@ -11438,6 +11438,19 @@ tool_model:
         precedence: 2
       resolution_rule: On get, check env tier first. If present, return env value. Otherwise, check file tier. If present,
         return file value. Otherwise, credential is missing.
+      operator_source_readback: >
+        Serve prints `credential <key> · source file:<path>` or `credential <key> · source env:<actual-name>` for required
+        credentials observed during boot. Provenance comes from the same winning value observation; environment candidate
+        names are not inferred. Identical source facts may be coalesced, but a tool environment source and a provider/channel
+        file source for the same key both remain visible. Values, seals and receipts never appear. Control characters in
+        keys and locators are escaped. Existing preflight credential readback uses the same presentation; doctor remains
+        source-free and does not discover bundle requirements. Source locators are presentation only, never receipt, seal
+        or observation-token authority, and do not extend unrelated public credential DTOs.
+      file_scope: >
+        The file tier is shared by invocations using the user-config default. `--swarm-dir` selects runtime state, not
+        credentials. `SWARM_CREDENTIALS_FILE` selects an explicit per-instance file tier for both secrets commands and serve;
+        it does not scope environment credentials or managed/OAuth stores. Existing environment candidate order and
+        file-only provider/channel credential policies are unchanged.
       list_rule: List returns merged keys from both tiers. Each entry includes the source tier (env or file) and whether
         it is writable (env = false, file = true). If a key exists in both tiers, source shows "env" (effective source)
         and shadowed is true to show that a file-tier value exists but is ignored by env precedence.
@@ -28970,6 +28983,7 @@ cli_specification:
       storage_path:
         default: os.UserConfigDir()/swarm/credentials.json
         override: SWARM_CREDENTIALS_FILE
+        scope: Independent of --swarm-dir; the override isolates only the file tier, not environment or managed/OAuth credentials.
         examples:
           macos: ~/Library/Application Support/swarm/credentials.json
           linux: ~/.config/swarm/credentials.json
