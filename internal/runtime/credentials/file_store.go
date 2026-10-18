@@ -230,6 +230,7 @@ func (s *FileStore) Snapshot(_ context.Context, key string) (AtomicSnapshot, err
 	if item, ok := doc.Entries[key]; ok {
 		snapshot.Present = true
 		snapshot.Source = SourceFile
+		snapshot.sourceReference = "file:" + s.path
 		snapshot.UpdatedAt = timePtr(item.UpdatedAt)
 		snapshot.value = item.Value
 	}

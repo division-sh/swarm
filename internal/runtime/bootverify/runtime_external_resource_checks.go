@@ -24,7 +24,7 @@ func (c *checkerContext) credentials() []Finding {
 	c.credentialLoaded = true
 	c.credentialObservation = &AdmissionObservation{Status: AdmissionPassed, StartedAt: time.Now().UTC()}
 	defer func() { c.credentialObservation.FinishedAt = time.Now().UTC() }()
-	missing, err := MissingStaticCredentialRequirements(c.ctx, c.source, c.opts)
+	observed, err := InspectStaticCredentialRequirements(c.ctx, c.source, c.opts)
 	if err != nil {
 		c.credentialObservation.Status, c.credentialObservation.Reason = AdmissionUnavailable, "required static credential inspection failed"
 		c.credentialObservation.FailureClass = failures.ClassDependencyUnavailable
@@ -37,7 +37,13 @@ func (c *checkerContext) credentials() []Finding {
 		})
 		return c.credentialFindings
 	}
-	for _, item := range missing {
+	for _, item := range observed {
+		if item.Present {
+			if fact := item.SourceFact(); fact.Reference != "" {
+				c.credentialSources = append(c.credentialSources, fact)
+			}
+			continue
+		}
 		requiredBy := make([]string, 0, len(item.RequiredBy))
 		toolRequirements := []string{}
 		for _, ref := range item.RequiredBy {
@@ -121,6 +127,22 @@ func AppendLiveEffectReachability(message string, reachability SourceBootEffectR
 }
 
 func MissingStaticCredentialRequirements(ctx context.Context, source semanticview.Source, opts Options) ([]runtimecredentials.Descriptor, error) {
+	observed, err := InspectStaticCredentialRequirements(ctx, source, opts)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]runtimecredentials.Descriptor, 0, len(observed))
+	for _, descriptor := range observed {
+		if !descriptor.Present {
+			out = append(out, descriptor)
+		}
+	}
+	return out, nil
+}
+
+// InspectStaticCredentialRequirements retains the provenance from the same
+// observations used by the missing-credential admission check.
+func InspectStaticCredentialRequirements(ctx context.Context, source semanticview.Source, opts Options) ([]runtimecredentials.Descriptor, error) {
 	index := runtimecredentials.BuildRequirementIndex(source)
 	keys := sortedSetKeysLocal(index)
 	out := make([]runtimecredentials.Descriptor, 0, len(keys))
@@ -137,9 +159,7 @@ func MissingStaticCredentialRequirements(ctx context.Context, source semanticvie
 			return nil, staticCredentialInspectionError(key, err)
 		}
 		descriptor.RequiredBy = requirements
-		if !descriptor.Present {
-			out = append(out, descriptor)
-		}
+		out = append(out, descriptor)
 	}
 	return out, nil
 }

@@ -167,6 +167,11 @@ type Report struct {
 	SourceArtifactHash   string
 	mcpTools             map[string]runtimemcp.DiscoveredTool
 	mcpObservation       *AdmissionObservation
+	credentialSources    []runtimecredentials.SourceFact
+}
+
+func (r Report) CredentialSources() []runtimecredentials.SourceFact {
+	return append([]runtimecredentials.SourceFact(nil), r.credentialSources...)
 }
 
 // DiscoveredToolAdmission returns only the catalog from this completed
@@ -234,6 +239,7 @@ func Run(ctx context.Context, source semanticview.Source, opts Options) Report {
 		report.runAdmissionCheck(checkCtx, check)
 	}
 	report.mcpTools = maps.Clone(checkCtx.mcpDiscoveredTools)
+	report.credentialSources = append(report.credentialSources, checkCtx.credentialSources...)
 	if checkCtx.mcpObservation != nil {
 		observation := *checkCtx.mcpObservation
 		report.mcpObservation = &observation

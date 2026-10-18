@@ -24,7 +24,7 @@ func TestCommandMockStartupDoesNotRequireLiveCredential(t *testing.T) {
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
-	err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
+	_, err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
 		ExecutionPosture:    executionposture.MockOnly,
 		ProviderCredentials: testProviderCredentialStore(t, "ANTHROPIC_API_KEY", ""),
 	}, fullyMockedRuntimeAgentMemorySource(t))
@@ -38,7 +38,7 @@ func TestCommandLiveStartupRequiresCredentialDespiteSourceDoubles(t *testing.T) 
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
-	err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
+	_, err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
 		ExecutionPosture:    executionposture.Live,
 		ProviderCredentials: testProviderCredentialStore(t, "ANTHROPIC_API_KEY", ""),
 	}, fullyMockedRuntimeAgentMemorySource(t))
@@ -56,7 +56,7 @@ func TestValidateSelectedBackendCredentialForDeclaredAgents_UnmockedAgentWithCre
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
-	err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
+	_, err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
 		ExecutionPosture:    executionposture.Live,
 		ProviderCredentials: testProviderCredentialStore(t, "ANTHROPIC_API_KEY", "sk-test"),
 	}, partiallyMockedRuntimeAgentMemorySource(t, 1))

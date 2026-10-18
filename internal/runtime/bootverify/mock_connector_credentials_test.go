@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -100,6 +101,23 @@ func TestCredentialChecksRetainAgentFreeToolRequirement(t *testing.T) {
 	}).credentials()
 	if !credentialFindingContains(findings, "provider_credential", "tool provider.send") {
 		t.Fatalf("agent-free credential findings = %#v, want outbound tool requirement retained", findings)
+	}
+	file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Set(t.Context(), "provider_credential", "private-static-value"); err != nil {
+		t.Fatal(err)
+	}
+	checker := newCheckerContext(t.Context(), agentFree, Options{Credentials: file, EffectReachability: reachability})
+	if findings := checker.credentials(); len(findings) != 0 || len(checker.credentialSources) != 1 {
+		t.Fatalf("healthy agent-free admission lost required-source evidence: findings=%v sources=%v", findings, checker.credentialSources)
+	}
+	if checker.credentialSources[0].Key != "provider_credential" || !strings.HasPrefix(checker.credentialSources[0].Reference, "file:") {
+		t.Fatalf("required-source evidence = %+v", checker.credentialSources)
+	}
+	if missing, err := MissingStaticCredentialRequirements(t.Context(), agentFree, Options{Credentials: file, EffectReachability: reachability}); err != nil || len(missing) != 0 {
+		t.Fatalf("provenance changed credential admission: missing=%v err=%v", missing, err)
 	}
 }
 

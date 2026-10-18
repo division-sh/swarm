@@ -87,6 +87,33 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 	if len(report.CapabilitySubjects) != 2 {
 		t.Fatalf("preflight channel subjects = %#v, want structural and outbound", report.CapabilitySubjects)
 	}
+	t.Run("source_projects_the_mapped_native_observation", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "channel-credentials.json")
+		file, err := runtimecredentials.NewFileStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := file.Set(t.Context(), "exact.channel.key", "private-channel-token"); err != nil {
+			t.Fatal(err)
+		}
+		binding := cfg.Channels.Bindings["ops"]
+		binding.Credentials = map[string]string{"telegram_bot_token": "exact.channel.key"}
+		mappedConfig := *cfg
+		mappedConfig.Channels.Bindings = map[string]config.ChannelBindingConfig{"ops": binding}
+		mapped, err := LoadConfiguredChannelPacks(t.Context(), RuntimeConfigLoadResult{Config: &mappedConfig}, projection, file, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		facts := mapped.CredentialSources()
+		if len(facts) == 0 {
+			t.Fatal("mapped native channel observation lost source provenance")
+		}
+		for _, fact := range facts {
+			if fact.Key != "exact.channel.key" || fact.Reference != "file:"+path {
+				t.Fatalf("channel invented a logical key or a different source: %+v", fact)
+			}
+		}
+	})
 
 	connectorDescriptors := projection.ProviderConnectors.PackDescriptors()
 	for index := range connectorDescriptors {
@@ -110,7 +137,7 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 	if err != nil {
 		t.Fatalf("CompileChannelInventory: %v", err)
 	}
-	if _, err := compileChannelBindings(context.Background(), cfg, conflicting, nil, nil); err == nil {
+	if _, _, err := compileChannelBindings(context.Background(), cfg, conflicting, nil, nil); err == nil {
 		t.Fatal("incompatible same-key channel credential requirements were accepted")
 	}
 }
