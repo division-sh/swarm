@@ -1,0 +1,17 @@
+Exact source remains 7dc9ac1eab1391d2371e4accb150ed635085d4d3.
+No production, accounting, timeout or test edits after the rebase packet.
+
+Preflight stopped after 63.716s with:
+preflight trusted origin/master identity changed
+Captured trust anchor: 1d3cb55f05f738dc40fb112bac78bd975490e778.
+Observed new origin/master: 66b5be60ef6785d287eb4812f0fe040c9c90c4e8.
+The new commit deletes four dependency-closed helper files. There is no file
+overlap with the N19 branch, and read-only merge-tree is clean (6b6ba38f65d63db36bdea06d7416326e716e5077).
+
+12 phases passed; the 13th phase's cmd/swarm-test package also passed with zero
+actual failing test actions, but comparison validation then correctly refused.
+12 phases remain unstarted. This is not a failing product or proof assertion,
+not the #2701 signature, and not a completed preflight.
+
+No repeat is started. A stable-origin/master window is requested before the
+next exact-head preflight. No gate bypass or hosted run is requested.

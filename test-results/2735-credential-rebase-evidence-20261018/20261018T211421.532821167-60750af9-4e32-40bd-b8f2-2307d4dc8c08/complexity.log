@@ -1,0 +1,1428 @@
+{
+  "policy_verdict": "equal-reviewed-policy; independently-measured-base-and-head",
+  "base": "1d3cb55f05f738dc40fb112bac78bd975490e778",
+  "head": "7dc9ac1eab1391d2371e4accb150ed635085d4d3",
+  "base_summary": {
+    "cognit": {
+      "callables": 22624,
+      "at_least_30": 539,
+      "at_least_50": 192,
+      "maximum": 302
+    },
+    "cyclo": {
+      "callables": 22624,
+      "at_least_30": 247,
+      "at_least_50": 57,
+      "maximum": 186
+    }
+  },
+  "head_summary": {
+    "cognit": {
+      "callables": 22647,
+      "at_least_30": 539,
+      "at_least_50": 192,
+      "maximum": 302
+    },
+    "cyclo": {
+      "callables": 22647,
+      "at_least_30": 247,
+      "at_least_50": 57,
+      "maximum": 186
+    }
+  },
+  "hotspot_count_increased": false,
+  "removed_file_facts": [
+    {
+      "path": "internal/store/internal/operatorsurface/run_operational_status_read_surface.go",
+      "class": "authored"
+    }
+  ],
+  "added_file_facts": [
+    {
+      "path": "internal/apiv1/run_stall_attribution_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/operatorread/run_operational_facts.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/operatorread/run_operational_status_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/runtime/effects/completion_evidence_read_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/runtime/llm/completion_output_evidence.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/runtime/llm/completion_output_evidence_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/runtime/runstalled/escalation.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/runtime/testfixtures/canonicalrouting/completion_stall_attribution.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/store/internal/operatorsurface/run_operational_evidence.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/store/internal/operatorsurface/run_operational_source_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/store/internal/operatorsurface/run_turn_attribution_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/run_operational_snapshot_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/run_stall_attribution_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/run_stall_publication_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/run_stall_wait_test.go",
+      "class": "test"
+    }
+  ],
+  "callable_changes": [
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/cliapp/diagnostics.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "validateDiagnosticRunDiagnosis",
+        "occurrence": 1
+      },
+      "before": 14,
+      "after": 16
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/cliapp/diagnostics.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "writeDiagnosticRunDiagnosis",
+        "occurrence": 1
+      },
+      "before": 13,
+      "after": 21
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/operatorread/behavior.go",
+        "package": "operatorread",
+        "kind": "declaration",
+        "name": "ProjectRunOperationalStatus",
+        "occurrence": 1
+      },
+      "before": 11,
+      "after": 20
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/operatorread/run_operational_facts.go",
+        "package": "operatorread",
+        "kind": "declaration",
+        "name": "(RunInstanceWork).active",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/operatorread/run_operational_facts.go",
+        "package": "operatorread",
+        "kind": "declaration",
+        "name": "(RunInstanceWork).waiting",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/operatorread/run_operational_facts.go",
+        "package": "operatorread",
+        "kind": "declaration",
+        "name": "compareFlowInstance",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 3
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/operatorread/run_operational_facts.go",
+        "package": "operatorread",
+        "kind": "declaration",
+        "name": "detachedRunAttribution",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/operatorread/run_operational_facts.go",
+        "package": "operatorread",
+        "kind": "declaration",
+        "name": "projectRunInstances",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 18
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/agents/agent_llm.go",
+        "package": "agents",
+        "kind": "declaration",
+        "name": "(*LLMAgent).OnEvent",
+        "occurrence": 1
+      },
+      "before": 9,
+      "after": 11
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_paths.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "loadYAMLFile",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 5
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/effects/effects.go",
+        "package": "effects",
+        "kind": "declaration",
+        "name": "AdmitCompletionContinuation",
+        "occurrence": 1
+      },
+      "before": 16,
+      "after": 10
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/effects/effects.go",
+        "package": "effects",
+        "kind": "declaration",
+        "name": "ReadCompletionContinuationPayload",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/effects/effects.go",
+        "package": "effects",
+        "kind": "declaration",
+        "name": "readCompletionContinuationEvidence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 8
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/llm/completion_output_evidence.go",
+        "package": "llm",
+        "kind": "declaration",
+        "name": "ReadCompletionOutputCandidates",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 10
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/llm/types.go",
+        "package": "llm",
+        "kind": "declaration",
+        "name": "completionToolCallIdentity",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/runstalled/escalation.go",
+        "package": "runstalled",
+        "kind": "declaration",
+        "name": "(EscalationKey).MatchesPayload",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 9
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/runstalled/escalation.go",
+        "package": "runstalled",
+        "kind": "declaration",
+        "name": "canonicalStalledInstances",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 11
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/runstalled/monitor.go",
+        "package": "runstalled",
+        "kind": "declaration",
+        "name": "(*Monitor).resolvePolicy",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/runstalled/monitor.go",
+        "package": "runstalled",
+        "kind": "declaration",
+        "name": "DefaultPolicy",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/completion_stall_attribution.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "CopyRootIngressServedCompletionEmit",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/completion_stall_attribution.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "CopyRootIngressServedCompletionSiblings",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/completion_stall_attribution.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "copyRootIngressServedCompletionAttribution",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "(*serveRunStalledReader).LoadRunSnapshot",
+        "occurrence": 1
+      },
+      "before": 6,
+      "after": 5
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "(*serveRunStalledReader).StalledRunEscalationExists",
+        "occurrence": 1
+      },
+      "before": 8,
+      "after": 7
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "payloadString",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "runStalledFlowIDForInstance",
+        "occurrence": 1
+      },
+      "before": 9,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "runStalledPolicyBool",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "runStalledPolicySeconds",
+        "occurrence": 1
+      },
+      "before": 7,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "runStalledSnapshotFromDebugReport",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": 3
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "serveRunStalledPolicyResolver",
+        "occurrence": 1
+      },
+      "before": 9,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "serveRunStalledPolicyScope",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/delivery/adapter.go",
+        "package": "delivery",
+        "kind": "declaration",
+        "name": "(*Adapter).RunOperationalEvidence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 17
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/owner.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "NewRunPostgres",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/owner.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "NewRunSQLite",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_debug_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*RunPostgres).LoadRunDebugReport",
+        "occurrence": 1
+      },
+      "before": 36,
+      "after": 4
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_debug_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*RunPostgres).loadRunDebugReport",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 38
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_evidence.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*runOperationalSourceMemo).load",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 16
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_evidence.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadRunOperationalEvidence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 19
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_evidence.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadRunOperationalInstances",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 11
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_evidence.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadRunOperationalSessions",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 9
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_evidence.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadRunOperationalWaits",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 5
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_evidence.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "newRunOperationalSourceMemo",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_status_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "ProjectRunOperationalStatus",
+        "occurrence": 1
+      },
+      "before": 11,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_status_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "runOperationalStatusHeuristics",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(completionAttributionRow).addEvidence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 14
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(completionAttributionRow).deliverySurface",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 10
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "countDeliveryPublicationOrigins",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadAttributionEvent",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadDeliveryAcceptedEmissions",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 17
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadDeliveryCompletionEvidence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 13
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadDeliveryTurnAttribution",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 17
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadRunTurnAttributions",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 14
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "matchDeliveryEmissionOrigin",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 14
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "validateAttributedEmissionReceipt",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*RunSQLite).LoadRunDebugReport",
+        "occurrence": 1
+      },
+      "before": 13,
+      "after": 4
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*RunSQLite).loadRunDebugReport",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 15
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/cliapp/diagnostics.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "validateDiagnosticRunDiagnosis",
+        "occurrence": 1
+      },
+      "before": 14,
+      "after": 16
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/cliapp/diagnostics.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "writeDiagnosticRunDiagnosis",
+        "occurrence": 1
+      },
+      "before": 16,
+      "after": 27
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/operatorread/behavior.go",
+        "package": "operatorread",
+        "kind": "declaration",
+        "name": "ProjectRunOperationalStatus",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": 19
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/operatorread/run_operational_facts.go",
+        "package": "operatorread",
+        "kind": "declaration",
+        "name": "(RunInstanceWork).active",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/operatorread/run_operational_facts.go",
+        "package": "operatorread",
+        "kind": "declaration",
+        "name": "(RunInstanceWork).waiting",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/operatorread/run_operational_facts.go",
+        "package": "operatorread",
+        "kind": "declaration",
+        "name": "compareFlowInstance",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/operatorread/run_operational_facts.go",
+        "package": "operatorread",
+        "kind": "declaration",
+        "name": "detachedRunAttribution",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/operatorread/run_operational_facts.go",
+        "package": "operatorread",
+        "kind": "declaration",
+        "name": "projectRunInstances",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 14
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/agents/agent_llm.go",
+        "package": "agents",
+        "kind": "declaration",
+        "name": "(*LLMAgent).OnEvent",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": 12
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_paths.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "loadYAMLFile",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 5
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/effects/effects.go",
+        "package": "effects",
+        "kind": "declaration",
+        "name": "AdmitCompletionContinuation",
+        "occurrence": 1
+      },
+      "before": 12,
+      "after": 9
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/effects/effects.go",
+        "package": "effects",
+        "kind": "declaration",
+        "name": "ReadCompletionContinuationPayload",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/effects/effects.go",
+        "package": "effects",
+        "kind": "declaration",
+        "name": "readCompletionContinuationEvidence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/llm/completion_output_evidence.go",
+        "package": "llm",
+        "kind": "declaration",
+        "name": "ReadCompletionOutputCandidates",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 12
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/llm/types.go",
+        "package": "llm",
+        "kind": "declaration",
+        "name": "completionToolCallIdentity",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/runstalled/escalation.go",
+        "package": "runstalled",
+        "kind": "declaration",
+        "name": "(EscalationKey).MatchesPayload",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 7
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/runstalled/escalation.go",
+        "package": "runstalled",
+        "kind": "declaration",
+        "name": "canonicalStalledInstances",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 12
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/runstalled/monitor.go",
+        "package": "runstalled",
+        "kind": "declaration",
+        "name": "(*Monitor).resolvePolicy",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/runstalled/monitor.go",
+        "package": "runstalled",
+        "kind": "declaration",
+        "name": "DefaultPolicy",
+        "occurrence": 1
+      },
+      "before": 0,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/completion_stall_attribution.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "CopyRootIngressServedCompletionEmit",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/completion_stall_attribution.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "CopyRootIngressServedCompletionSiblings",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/completion_stall_attribution.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "copyRootIngressServedCompletionAttribution",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "(*serveRunStalledReader).LoadRunSnapshot",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": 4
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "(*serveRunStalledReader).StalledRunEscalationExists",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": 8
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "payloadString",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "runStalledFlowIDForInstance",
+        "occurrence": 1
+      },
+      "before": 16,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "runStalledPolicyBool",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "runStalledPolicySeconds",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "runStalledSnapshotFromDebugReport",
+        "occurrence": 1
+      },
+      "before": 0,
+      "after": 3
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "serveRunStalledPolicyResolver",
+        "occurrence": 1
+      },
+      "before": 16,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/serveapp/run_stalled_monitor.go",
+        "package": "serveapp",
+        "kind": "declaration",
+        "name": "serveRunStalledPolicyScope",
+        "occurrence": 1
+      },
+      "before": 6,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/delivery/adapter.go",
+        "package": "delivery",
+        "kind": "declaration",
+        "name": "(*Adapter).RunOperationalEvidence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 23
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_debug_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*RunPostgres).LoadRunDebugReport",
+        "occurrence": 1
+      },
+      "before": 41,
+      "after": 3
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_debug_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*RunPostgres).loadRunDebugReport",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 43
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_evidence.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*runOperationalSourceMemo).load",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 10
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_evidence.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadRunOperationalEvidence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 22
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_evidence.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadRunOperationalInstances",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 15
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_evidence.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadRunOperationalSessions",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 14
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_evidence.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadRunOperationalWaits",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 7
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_evidence.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "newRunOperationalSourceMemo",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_status_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "ProjectRunOperationalStatus",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_operational_status_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "runOperationalStatusHeuristics",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(completionAttributionRow).addEvidence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 18
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(completionAttributionRow).deliverySurface",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 5
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "countDeliveryPublicationOrigins",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadAttributionEvent",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadDeliveryAcceptedEmissions",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 27
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadDeliveryCompletionEvidence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 12
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadDeliveryTurnAttribution",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 17
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "loadRunTurnAttributions",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 20
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "matchDeliveryEmissionOrigin",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 13
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/run_turn_attribution.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "validateAttributedEmissionReceipt",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*RunSQLite).LoadRunDebugReport",
+        "occurrence": 1
+      },
+      "before": 12,
+      "after": 3
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*RunSQLite).loadRunDebugReport",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 14
+    }
+  ]
+}
