@@ -148,6 +148,9 @@ func assertQ10EmbeddedSpecComposition1801(t *testing.T, row recipe, actual strin
 	if err != nil || !canonicalComparatorEqual2617(current.Successor, actual) {
 		t.Fatalf("complete current restart composition differs: %v", err)
 	}
+	if repeated, err := q10CurrentRecipe(current); err != nil || !reflect.DeepEqual(repeated, current) {
+		t.Fatalf("complete composed restart endpoint was not inert: %v", err)
+	}
 	// Prove both orders, rather than assuming selector deletion and the header
 	// read commute. Each complete earlier endpoint remains in its frozen packet.
 	reversed := actual
@@ -185,7 +188,7 @@ func assertQ10EmbeddedSpecComposition1801(t *testing.T, row recipe, actual strin
 			case "after":
 				mutant.After += " "
 			case "successor":
-				mutant.Successor = actual
+				mutant.Successor = actual + "\nfunc foreignEndpoint() {}"
 			case "removed":
 				mutant.Removed = true
 			case "mechanical":
