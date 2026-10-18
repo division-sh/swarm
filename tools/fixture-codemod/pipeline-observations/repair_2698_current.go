@@ -213,6 +213,16 @@ func repair2698CurrentRecipes(root, path string, source []byte, rows []recipe) (
 }
 
 func completionRebase2698RecipeEndpoint(root string, row recipe, source []byte, originals []recipe) (string, error) {
+	if row.File == selectedreadrole.OperatorRebase2698Path {
+		if _, err := selectedreadrole.CompletionRebase2698HistoricalRecipes(root, recipeBytes); err != nil {
+			return "", err
+		}
+		before, _, err := selectedreadrole.OperatorRebase2698Images(root)
+		if err != nil {
+			return "", err
+		}
+		return selectedreadrole.Body(before, row.Function)
+	}
 	endpoint := row.Successor
 	if endpoint == "" {
 		endpoint = row.After

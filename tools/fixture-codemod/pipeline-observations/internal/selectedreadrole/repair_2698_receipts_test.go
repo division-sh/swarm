@@ -3,10 +3,12 @@ package selectedreadrole
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -89,7 +91,7 @@ func assertCompletionRebase2698Inverse(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	const packet = "tools/fixture-codemod/pipeline-observations/testdata/capability_completion_successor_2707.json"
-	for _, path := range []string{CompletionRebase2698Path, packet} {
+	for _, path := range []string{CompletionRebase2698Path, OperatorRebase2698Path, "tools/fixture-codemod/pipeline-observations/recipes.json", packet} {
 		raw, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
 			t.Fatal(err)
@@ -113,9 +115,124 @@ func assertCompletionRebase2698Inverse(t *testing.T, root string) {
 		t.Fatal("pristine gitdir concealed missing completion source")
 	}
 	writeReadRoleSource(t, copy, CompletionRebase2698Path, string(after))
+	assertOperatorRebase2698Inverse(t, copy)
+	assertRebase2698LedgerHostility(t, copy)
 	writeReadRoleSource(t, copy, packet, "{}\n")
 	if _, _, err := CompletionRebase2698Images(copy); err == nil {
 		t.Fatal("changed completion packet accepted")
+	}
+}
+
+func assertOperatorRebase2698Inverse(t *testing.T, root string) {
+	t.Helper()
+	before, after, err := OperatorRebase2698Images(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := operatorRebase2698HistoricalSource(root, OperatorRebase2698Path, after)
+	if err != nil || !bytes.Equal(previous, before) {
+		t.Fatal("operator inverse lost its complete signed predecessor:", err)
+	}
+	once, err := operatorRebase2698HistoricalSource(root, OperatorRebase2698Path, previous)
+	if err != nil || !bytes.Equal(once, previous) {
+		t.Fatal("operator inverse consumed its predecessor twice:", err)
+	}
+	foreign, err := operatorRebase2698HistoricalSource(root, OperatorRebase2698Path+".foreign", after)
+	if err != nil || !bytes.Equal(foreign, after) {
+		t.Fatal("foreign operator source acquired an inverse:", err)
+	}
+	old, err := Body(before, OperatorRebase2698Prior)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Body(after, OperatorRebase2698Current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const beforeRows = "\t\t\t\tbeforeRows, err := storetest.ReadFiniteRunStartStorageCounts(ctx, fixture.primary)\n\t\t\t\tif err != nil {\n\t\t\t\t\tt.Fatal(err)\n\t\t\t\t}\n"
+	const call = "\t\t\t\tresponse := rpcCall(t, handler, body)\n"
+	for _, changed := range [][]byte{
+		before,
+		append(bytes.Clone(after), '\n'),
+		bytes.Replace(after, []byte(beforeRows), nil, 1),
+		bytes.Replace(after, []byte("beforeRows != afterRows"), []byte("false"), 1),
+		bytes.Replace(bytes.Replace(after, []byte(beforeRows), nil, 1), []byte(call), []byte(call+beforeRows), 1),
+		bytes.Replace(after, []byte(OperatorRebase2698Current), []byte(OperatorRebase2698Prior), 1),
+		bytes.Replace(after, []byte(OperatorRebase2698Current), []byte("TestForeignRebaseOperator"), 1),
+		append(bytes.Clone(after), []byte("\n"+old+"\n")...),
+		append(bytes.Clone(after), []byte("\n"+current+"\n")...),
+		bytes.Replace(after, []byte("apiCompletions != 0"), []byte("apiCompletions < 0"), 1),
+	} {
+		if bytes.Equal(changed, after) {
+			t.Fatal("operator hostile did not mutate its current target")
+		}
+		writeReadRoleSource(t, root, OperatorRebase2698Path, string(changed))
+		if _, err := operatorRebase2698HistoricalSource(root, OperatorRebase2698Path, after); err == nil {
+			t.Fatal("warm operator inverse accepted lost/moved/changed checks, rename ambiguity or supplied source")
+		}
+	}
+	if err := os.Remove(filepath.Join(root, OperatorRebase2698Path)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := operatorRebase2698HistoricalSource(root, OperatorRebase2698Path, after); err == nil {
+		t.Fatal("pristine gitdir concealed missing operator source")
+	}
+	writeReadRoleSource(t, root, OperatorRebase2698Path, string(after))
+}
+
+func assertRebase2698LedgerHostility(t *testing.T, root string) {
+	t.Helper()
+	const path = "tools/fixture-codemod/pipeline-observations/recipes.json"
+	actual, err := os.ReadFile(filepath.Join(root, path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := CompletionRebase2698HistoricalRecipes(root, actual)
+	if err != nil || bytes.Equal(prior, actual) {
+		t.Fatal("exact three-edge ledger did not recover its signed predecessor:", err)
+	}
+	once, err := CompletionRebase2698HistoricalRecipes(root, prior)
+	if err != nil || !bytes.Equal(once, prior) {
+		t.Fatal("ledger inverse consumed a stale/reversed endpoint twice:", err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(actual, &rows); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutation := range []func([]map[string]any) []map[string]any{
+		func(rows []map[string]any) []map[string]any { rows[0]["Before"] = "foreign"; return rows },
+		func(rows []map[string]any) []map[string]any { return rows[1:] },
+		func(rows []map[string]any) []map[string]any { return append(rows, rows[0]) },
+		func(rows []map[string]any) []map[string]any { rows[0], rows[1] = rows[1], rows[0]; return rows },
+		func(rows []map[string]any) []map[string]any {
+			for _, row := range rows {
+				if row["File"] == OperatorRebase2698Path || row["File"] == CompletionRebase2698Path {
+					delete(row, "Successor")
+				}
+			}
+			return rows
+		},
+	} {
+		var changed []map[string]any
+		if err := json.Unmarshal(actual, &changed); err != nil {
+			t.Fatal(err)
+		}
+		mutant := mutation(changed)
+		raw, err := json.Marshal(mutant)
+		if err != nil || reflect.DeepEqual(mutant, rows) {
+			t.Fatal("ledger hostile did not alter its target:", err)
+		}
+		writeReadRoleSource(t, root, path, string(raw))
+		if _, err := CompletionRebase2698HistoricalRecipes(root, raw); err == nil {
+			t.Fatal("warm/copy ledger accepted altered, missing, duplicate, reordered or reverse rows")
+		}
+		if _, err := CatchUp2542HistoricalRecipes(root, actual, false); err == nil {
+			t.Fatal("supplied pristine ledger concealed changed actual recipe input")
+		}
+	}
+	writeReadRoleSource(t, root, path, string(actual))
+	if _, err := CatchUp2542HistoricalRecipes(root, actual, false); err != nil {
+		t.Fatal("restored complete ledger refused:", err)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 )
 
 // #2698/6247420399: this view is only for historical comparisons.
@@ -20,6 +21,184 @@ const CompletionRebase2698Before = "af47497e27bcc0cca593fb56f5767ff68f201ce1"
 const CompletionRebase2698After = "297b495eb876585c317e3ff59ce51e26b3bc02c3"
 const CompletionRebase2698BeforeSHA = "c22bdc13e1a0f3b4a3c8beb2f8ccfcc138439ca9c7f2eea7618f7b152d06129a"
 const CompletionRebase2698AfterSHA = "264fbaa1318ff6c6f9858489a714c319e91f8e70057ba5a6fa9e998ee7c567d4"
+const OperatorRebase2698Path = "internal/apiv1/operator_deployment_run_start_test.go"
+const OperatorRebase2698Feed = "TestDeploymentRunStartFeedOnlyAcrossSelectedStores"
+const OperatorRebase2698Prior = "TestRunStartRejectsDeclaredFeedWithoutOutputPinBeforeMutation"
+const OperatorRebase2698Current = "TestRunStartRejectsDeclaredFeedWithoutInputPinBeforeMutation"
+const operatorRebase2698BeforeSHA = "289d76066fd81ff411710827269800d6f1319f0a30e91bd918afe48a22260852"
+const operatorRebase2698AfterSHA = "6622171eb6599be90d287f6930bc82234587188526a7d3b9c5048ef38c0ec6ca"
+
+// #2698/6247777206: only these two complete signed declarations may compose.
+func OperatorRebase2698Images(root string) ([]byte, []byte, error) {
+	before, err := exec.Command("git", "-C", root, "show", CompletionRebase2698Before+":"+OperatorRebase2698Path).Output()
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(before)) != operatorRebase2698BeforeSHA {
+		return nil, nil, fmt.Errorf("operator rebase lost its complete signed predecessor: %v", err)
+	}
+	after, err := exec.Command("git", "-C", root, "show", CompletionRebase2698After+":"+OperatorRebase2698Path).Output()
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(after)) != operatorRebase2698AfterSHA {
+		return nil, nil, fmt.Errorf("operator rebase lost its complete signed endpoint: %v", err)
+	}
+	actual, err := os.ReadFile(filepath.Join(root, OperatorRebase2698Path))
+	if err != nil || !bytes.Equal(actual, after) {
+		return nil, nil, fmt.Errorf("operator rebase actual source changed: %v", err)
+	}
+	feed, feedErr := Body(after, OperatorRebase2698Feed)
+	refusal, refusalErr := Body(after, OperatorRebase2698Current)
+	if _, err := Body(after, OperatorRebase2698Prior); err == nil || feedErr != nil || refusalErr != nil {
+		return nil, nil, fmt.Errorf("operator rebase lost its unique renamed declarations")
+	}
+	restored, err := operatorRebase2698Inverse(after, feed, refusal)
+	if err != nil || !bytes.Equal(restored, before) {
+		return nil, nil, fmt.Errorf("operator rebase changed outside its finite declarations: %v", err)
+	}
+	return before, after, nil
+}
+
+func operatorRebase2698Inverse(after []byte, feed, refusal string) ([]byte, error) {
+	for _, edit := range []struct{ body, current, prior string }{
+		{feed, "event plus feed admits exact root input", "event plus feed admits exact output pin"},
+		{refusal, OperatorRebase2698Current, OperatorRebase2698Prior},
+		{refusal, "\t\t\t\tbeforeRows, err := storetest.ReadFiniteRunStartStorageCounts(ctx, fixture.primary)\n\t\t\t\tif err != nil {\n\t\t\t\t\tt.Fatal(err)\n\t\t\t\t}\n", ""},
+		{refusal, "no exact declared root input pin", "no exact declared output pin"},
+		{refusal, "rejection did not come from compiled root-input admission", "rejection did not come from compiled output-pin admission"},
+		{refusal, "\t\t\t\tafterRows, err := storetest.ReadFiniteRunStartStorageCounts(ctx, fixture.primary)\n\t\t\t\tif err != nil || beforeRows != afterRows {\n\t\t\t\t\tt.Fatalf(\"failed admission changed durable rows or API completions: before=%+v after=%+v err=%v\", beforeRows, afterRows, err)\n\t\t\t\t}\n", ""},
+		{refusal, "prepare non-input-pinned resource", "prepare non-output-pinned resource"},
+	} {
+		cut := []byte(edit.current)
+		if bytes.Count([]byte(edit.body), cut) != 1 || bytes.Count(after, cut) != 1 {
+			return nil, fmt.Errorf("operator rebase lost a unique declared edit: %s", edit.current)
+		}
+		after = bytes.Replace(after, cut, []byte(edit.prior), 1)
+	}
+	return after, nil
+}
+
+func operatorRebase2698HistoricalSource(root, path string, current []byte) ([]byte, error) {
+	if path != OperatorRebase2698Path || fmt.Sprintf("%x", sha256.Sum256(current)) != operatorRebase2698AfterSHA {
+		return current, nil
+	}
+	before, after, err := OperatorRebase2698Images(root)
+	if err != nil || !bytes.Equal(current, after) {
+		return nil, fmt.Errorf("operator inverse does not describe actual copied source: %v", err)
+	}
+	return bytes.Clone(before), nil
+}
+
+// One view for all old ledger consumers; every unlisted row stays byte-semantic
+// identical to the signed frozen ledger, including historical fields and order.
+func CompletionRebase2698HistoricalRecipes(root string, current []byte) ([]byte, error) {
+	const path = "tools/fixture-codemod/pipeline-observations/recipes.json"
+	actual, err := os.ReadFile(filepath.Join(root, path))
+	if err != nil {
+		return nil, err
+	}
+	var rows, supplied []map[string]any
+	if json.Unmarshal(actual, &rows) != nil || json.Unmarshal(current, &supplied) != nil {
+		return nil, fmt.Errorf("completion rebase ledger is not valid JSON")
+	}
+	if !reflect.DeepEqual(rows, supplied) {
+		return current, nil // A historical/intermediate ledger acquires no inverse.
+	}
+	prior, err := exec.Command("git", "-C", root, "show", CompletionRebase2698Before+":"+path).Output()
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prior)) != "b264aa83aa40d870752ba1dd2ce8cf7b0a05f12185fe4a33c37e7922a8119d2f" {
+		return nil, fmt.Errorf("completion rebase lost its complete signed ledger: %v", err)
+	}
+	var expected []map[string]any
+	if err := json.Unmarshal(prior, &expected); err != nil {
+		return nil, err
+	}
+	if err := completionRebase2698RecipeEdges(root, expected); err != nil {
+		return nil, err
+	}
+	if !reflect.DeepEqual(expected, rows) {
+		for index := range expected {
+			if index < len(rows) && !reflect.DeepEqual(expected[index], rows[index]) {
+				return nil, fmt.Errorf("completion rebase ledger changed outside its exact three Successors: row %d %v/%v", index, expected[index]["File"], expected[index]["Function"])
+			}
+		}
+		return nil, fmt.Errorf("completion rebase ledger changed outside its exact three Successors")
+	}
+	return prior, nil
+}
+
+func completionRebase2698RecipeEdges(root string, rows []map[string]any) error {
+	before, after, err := CompletionRebase2698Images(root)
+	if err != nil {
+		return err
+	}
+	operatorBefore, operatorAfter, err := OperatorRebase2698Images(root)
+	if err != nil {
+		return err
+	}
+	for _, edge := range []struct {
+		path, old, current, family string
+		before, after              []byte
+	}{
+		{CompletionRebase2698Path, CompletionRebase2698Function, CompletionRebase2698Function, "native-served-delivery-quiescence-caller", before, after},
+		{OperatorRebase2698Path, OperatorRebase2698Feed, OperatorRebase2698Feed, "native-durable-resource-carrier-family145", operatorBefore, operatorAfter},
+		{OperatorRebase2698Path, OperatorRebase2698Prior, OperatorRebase2698Current, "native-durable-resource-carrier-family145", operatorBefore, operatorAfter},
+	} {
+		old, oldErr := Body(edge.before, edge.old)
+		current, currentErr := Body(edge.after, edge.current)
+		if oldErr != nil || currentErr != nil {
+			return fmt.Errorf("completion rebase lost a unique recipe declaration")
+		}
+		matched := 0
+		for _, row := range rows {
+			if row["File"] != edge.path || row["Function"] != edge.old {
+				continue
+			}
+			matched++
+			endpoint := row["Successor"]
+			if endpoint == nil || endpoint == "" {
+				endpoint = row["After"]
+			}
+			if row["Family"] != edge.family || endpoint != old {
+				return fmt.Errorf("completion rebase changed a signed recipe endpoint: %s", edge.old)
+			}
+			successor := current
+			if edge.path == CompletionRebase2698Path {
+				successor, err = completionRebase2698SignedRecipe(root, row, current)
+				if err != nil {
+					return err
+				}
+			}
+			row["Successor"] = successor
+		}
+		if matched != 1 {
+			return fmt.Errorf("completion rebase lost a unique recipe row: %s", edge.old)
+		}
+	}
+	return nil
+}
+
+func completionRebase2698SignedRecipe(root string, original map[string]any, current string) (string, error) {
+	raw, err := exec.Command("git", "-C", root, "show", CompletionRebase2698After+":tools/fixture-codemod/pipeline-observations/recipes.json").Output()
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(raw)) != "0430b0c467f39bc3afade666a8a47e2c877da1526fb310b6513fcb75eb72eff8" {
+		return "", fmt.Errorf("completion rebase lost its signed common-descendant ledger: %v", err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		return "", err
+	}
+	matched, successor := 0, ""
+	for _, row := range rows {
+		if row["File"] != CompletionRebase2698Path || row["Function"] != CompletionRebase2698Function {
+			continue
+		}
+		matched++
+		successor, _ = row["Successor"].(string)
+		body, err := Body([]byte("package proof\n"+successor), CompletionRebase2698Function)
+		row["Successor"] = original["Successor"]
+		if err != nil || body != current || !reflect.DeepEqual(row, original) {
+			return "", fmt.Errorf("completion rebase changed its exact signed source/recipe pair")
+		}
+	}
+	if matched != 1 {
+		return "", fmt.Errorf("completion rebase lost its unique signed recipe")
+	}
+	return successor, nil
+}
 
 func CompletionRebase2698Images(root string) ([]byte, []byte, error) {
 	const packetPath = "tools/fixture-codemod/pipeline-observations/testdata/capability_completion_successor_2707.json"
@@ -145,6 +324,9 @@ func repair2698CleanupHistoricalSource(root, path string, actual []byte) ([]byte
 }
 
 func Repair2698SuccessorHistoricalSource(root, path string, current []byte) ([]byte, error) {
+	if path == OperatorRebase2698Path {
+		return operatorRebase2698HistoricalSource(root, path, current)
+	}
 	if path == CompletionRebase2698Path {
 		return CompletionRebase2698HistoricalSource(root, path, current)
 	}
