@@ -56,6 +56,6 @@ func inboundValidationCauses(err error, submitted bool) (*eventschema.Violation,
 	case interface{ Unwrap() error }:
 		return inboundValidationCauses(err.Unwrap(), submitted)
 	default:
-		return nil, err == ErrPayloadValidation
+		return nil, submitted && err == ErrPayloadValidation
 	}
 }

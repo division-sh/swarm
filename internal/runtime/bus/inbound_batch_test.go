@@ -160,7 +160,11 @@ func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthori
 				t.Fatalf("input/independent release disposition: path=%q permanent=%t error=%v", path, permanent, err)
 			}
 			if !cleanupFails {
-				for _, joined := range []error{errors.Join(err, cleanup), errors.Join(cleanup, err), errors.Join(fmt.Errorf("outer: %w", errors.Join(cleanup, err)), err)} {
+				for _, joined := range []error{
+					errors.Join(err, cleanup), errors.Join(cleanup, err), errors.Join(fmt.Errorf("outer: %w", errors.Join(cleanup, err)), err),
+					errors.Join(err, ErrPayloadValidation), errors.Join(ErrPayloadValidation, err),
+					errors.Join(err, &eventschema.Violation{Path: "$.generated", Detail: "independent internal validation"}),
+				} {
 					if _, permanent := SubmittedInboundValidationPath(joined); permanent {
 						t.Fatalf("nested/ordered independent release was hidden: %v", joined)
 					}
