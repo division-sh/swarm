@@ -28,7 +28,7 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now, nil)
+	source := seedConversationForkSource(t, db, now, s)
 
 	created, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
@@ -154,7 +154,7 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now, nil)
+	source := seedConversationForkSource(t, db, now, s)
 
 	_, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
@@ -200,7 +200,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	bundle := conversationForkConstructionBundle(t)
 	ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now, nil, bundle)
+	source := seedConversationForkSource(t, db, now, s, bundle)
 	entityID := uuid.NewString()
 
 	construction := prepareNativeConversationForkConstruction(t, ctx, s, bundle, ConversationForkSourceFixture{RunID: source.runID, EntityID: entityID, Turn1At: source.turn1At, kind: conversationForkNativeChat})
@@ -426,7 +426,7 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now, nil)
+	source := seedConversationForkSource(t, db, now, s)
 	fork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
 		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
