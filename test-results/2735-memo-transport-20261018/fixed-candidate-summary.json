@@ -1,0 +1,55 @@
+{
+  "head": "55adb583b9de0572f69e6e4adb23776ac0851ed1",
+  "run": "44298cbb-d36d-4df0-8870-034d0f8338fc",
+  "delivery": "d76969cc-a71f-54b7-a73e-d60e1e88dc70",
+  "invocation": "authorized fixed candidate N=1; no new base or replacement",
+  "outcome": "PASS",
+  "created_ns": "1792337580657835978",
+  "deadline_ns": "1792337590657835978",
+  "acknowledgement_ns": "1792337590618889107",
+  "acknowledgement_minus_deadline_ms": -38.946871,
+  "native_receipt_call_ms": 3.112747,
+  "emit_ns": "1792337590582259866",
+  "emit_minus_deadline_ms": -75.576112,
+  "ready_ns": "1792337590633263603",
+  "ready_minus_deadline_ms": -24.572375,
+  "last_negative_sample_ns": "1792337590599800270",
+  "last_negative_return_ns": "1792337590602609332",
+  "last_negative_return_minus_deadline_ms": -55.226646,
+  "contract_loads": 1,
+  "contract_total_elapsed_ms": 271.987712,
+  "memo_hits": 334,
+  "retained_source_reads": 335,
+  "models": 2,
+  "reads": 1,
+  "emits": 1,
+  "trace_bytes": 6553731,
+  "trace_overflow": false,
+  "go": "go1.26.8",
+  "actual_cli_gomaxprocs": 2,
+  "inherited_cli_gomaxprocs": "",
+  "release": {
+    "started_at": "2026-10-18T15:33:02.023744066Z",
+    "transport_done_at": "2026-10-18T15:33:03.699373621Z",
+    "target_at": "2026-10-18T15:33:09.113744066Z",
+    "hold_released_at": "2026-10-18T15:33:09.118243134Z",
+    "forward_completed_at": "2026-10-18T15:33:09.118321775Z",
+    "canceled": false,
+    "matched": true
+  },
+  "previous_pair": [
+    {
+      "arm": "base",
+      "acknowledgement_minus_deadline_ms": -22.96462,
+      "contract_loads": 0,
+      "contract_total_elapsed_ms": 0
+    },
+    {
+      "arm": "candidate",
+      "acknowledgement_minus_deadline_ms": 150.379737,
+      "contract_loads": 34,
+      "contract_total_elapsed_ms": 9166.017869
+    }
+  ],
+  "limits": "Elapsed spans are not CPU or SQL-lock measurements; N=1 does not prove sole cause of original hosted RED; prior base/candidate remain attributed, not resampled."
+}

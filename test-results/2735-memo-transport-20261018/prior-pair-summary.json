@@ -1,0 +1,54 @@
+[
+  {
+    "arm": "base",
+    "created_ns": "1792332673545665476",
+    "deadline_ns": "1792332683545665476",
+    "acknowledgement_ns": "1792332683522700856",
+    "acknowledgement_minus_deadline_ms": -22.96462,
+    "native_receipt_call_ms": 4.517869,
+    "emit_minus_deadline_ms": -60.521321,
+    "last_sample_ns": "1792332683537551092",
+    "last_report_return_ns": "1792332683538424675",
+    "contract_loads": 0,
+    "contract_total_elapsed_ms": 0,
+    "last_contract_elapsed_ms": null,
+    "models": 2,
+    "reads": 1,
+    "emits": 1,
+    "release": {
+      "started_at": "2026-10-18T14:11:14.871163599Z",
+      "transport_done_at": "2026-10-18T14:11:16.58050576Z",
+      "target_at": "2026-10-18T14:11:21.961163599Z",
+      "hold_released_at": "2026-10-18T14:11:21.962481786Z",
+      "forward_completed_at": "2026-10-18T14:11:21.962583747Z",
+      "canceled": false,
+      "matched": true
+    }
+  },
+  {
+    "arm": "candidate",
+    "created_ns": "1792332701542805958",
+    "deadline_ns": "1792332711542805958",
+    "acknowledgement_ns": "1792332711693185695",
+    "acknowledgement_minus_deadline_ms": 150.379737,
+    "native_receipt_call_ms": 3.423053,
+    "emit_minus_deadline_ms": 98.447446,
+    "last_sample_ns": "1792332711423862634",
+    "last_report_return_ns": "1792332711711501264",
+    "contract_loads": 34,
+    "contract_total_elapsed_ms": 9166.017869,
+    "last_contract_elapsed_ms": 284.830307,
+    "models": 2,
+    "reads": 1,
+    "emits": 1,
+    "release": {
+      "started_at": "2026-10-18T14:11:42.953085495Z",
+      "transport_done_at": "2026-10-18T14:11:44.634454619Z",
+      "target_at": "2026-10-18T14:11:50.043085495Z",
+      "hold_released_at": "2026-10-18T14:11:50.046140616Z",
+      "forward_completed_at": "2026-10-18T14:11:50.046228178Z",
+      "canceled": false,
+      "matched": true
+    }
+  }
+]

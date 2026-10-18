@@ -1,0 +1,23 @@
+INHERITED_GOMAXPROCS=<unset>
+Previous HEAD position was 0b7f1188a6 fix(accounting): retain authenticated operation and comparison read cuts
+HEAD is now at 55adb583b9 fix(store): reuse exact operational source semantics per reader
+go version go1.26.8 linux/amd64
+go1.26.8
+linux
+amd64
+1
+/home/youmew/.cache/go-build
+/home/youmew/go/pkg/mod
+62902e2474f215c2bd820f0da154d8977126956bb2a52b4da826c94b2c6453d4  /home/youmew/dev/wt/agent-d/scratch/Dockerfile.workspace
+31f04e94a2c4ecd472ccecaec5d814244eddf50d1a87f5abf2b97c7b93bee6b8  /home/youmew/dev/wt/agent-d/evidence-2735-memo-20261018/candidate-overlay.json
+7c999b83aa5c2b08ad613d2a20d5a30d6e29f347dbfa7974ba69a39d750c4724  /home/youmew/dev/wt/agent-d/evidence-2735-memo-20261018/run-candidate.sh
+EXIT=0
+ARM_END_UTC=2026-10-18T15:33:11.500468018Z
+0.97 0.26 0.13 1/369 324002
+ok  	github.com/division-sh/swarm/internal/releasee2e	25.762s
+AUTHORIZED_DIAGNOSTIC_COMPLETE=1/1; no replacement or base resample
+Previous HEAD position was 55adb583b9 fix(store): reuse exact operational source semantics per reader
+HEAD is now at 0b7f1188a6 fix(accounting): retain authenticated operation and comparison read cuts
+RESTORED_SCRATCH=0b7f1188a63cf375f4da11d03d1699edfbf5faf1
+UNMODIFIED_IMAGE=sha256:0c09f37b09828ac8460ef68fccb8aea5891a9cbcdc1c73c91f6b1e13da8073b1
+CLEANUP_UTC=2026-10-18T15:33:11.646036067Z

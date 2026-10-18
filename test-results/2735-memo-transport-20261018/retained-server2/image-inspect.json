@@ -1,0 +1,72 @@
+[
+    {
+        "Id": "sha256:0c09f37b09828ac8460ef68fccb8aea5891a9cbcdc1c73c91f6b1e13da8073b1",
+        "RepoTags": [
+            "swarm-workspace:jobflow-v5w2",
+            "swarm-workspace:latest"
+        ],
+        "RepoDigests": [],
+        "Parent": "sha256:88bd71a7e7df690a443f89555a3922a34aef897c416604b3fcd409229fa48fd1",
+        "Comment": "",
+        "Created": "2026-10-03T23:01:20.703620132Z",
+        "DockerVersion": "26.1.5+dfsg1",
+        "Author": "",
+        "Config": {
+            "Hostname": "",
+            "Domainname": "",
+            "User": "agent",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "PATH=/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "GOLANG_VERSION=1.25.14",
+                "GOTOOLCHAIN=local",
+                "GOPATH=/go"
+            ],
+            "Cmd": [
+                "bash"
+            ],
+            "Image": "sha256:88bd71a7e7df690a443f89555a3922a34aef897c416604b3fcd409229fa48fd1",
+            "Volumes": null,
+            "WorkingDir": "/workspace",
+            "Entrypoint": null,
+            "OnBuild": null,
+            "Labels": null
+        },
+        "Architecture": "amd64",
+        "Os": "linux",
+        "Size": 1125646428,
+        "GraphDriver": {
+            "Data": {
+                "LowerDir": "/var/lib/docker/overlay2/728b5f68e408bc5ad24f490cefa966e7a70312b07aad4b493115d5479f3aa53d/diff:/var/lib/docker/overlay2/9c8f207fd36632d4735bfd5bd37d0f0022b0fcea9b6b9722775a0c704925c344/diff:/var/lib/docker/overlay2/6359b72b145e1973120c0ada9999f4a893934712cc9db884f71b9f6d9346c3a3/diff:/var/lib/docker/overlay2/f44452b1a79a284e04bd4ca2ec695c21c873cca45b0349efec67f198e0a32747/diff:/var/lib/docker/overlay2/9bfd50a92b08efec05c373b547a8f9257840ea3a38de7150ac9a53528c76d515/diff:/var/lib/docker/overlay2/6695f892982a024213f0ec2f85808d4b05b170fcb86f244db5ae3c45e274735f/diff:/var/lib/docker/overlay2/06b1feb10d6fcd596cb55fbff0f6379388e8b9261be23dc821d6cf4fbc86e8b1/diff:/var/lib/docker/overlay2/d74f1092315f024782f565f5e7f96dde6e1fe8201d82dc0e07e0959bbfa4415b/diff:/var/lib/docker/overlay2/6d614e3b7255e1f619dfd882bec43db701ec9f2adcfdd1f106835958544584b3/diff:/var/lib/docker/overlay2/0ca7593f60ba419e6f331c8dbd29a57a2b47bfe5695d8237cdc3195df3d2c60f/diff",
+                "MergedDir": "/var/lib/docker/overlay2/8f43f7239bba4f8a2fff212025333bafb04069aa9891e7cf1aa5228c195fdce2/merged",
+                "UpperDir": "/var/lib/docker/overlay2/8f43f7239bba4f8a2fff212025333bafb04069aa9891e7cf1aa5228c195fdce2/diff",
+                "WorkDir": "/var/lib/docker/overlay2/8f43f7239bba4f8a2fff212025333bafb04069aa9891e7cf1aa5228c195fdce2/work"
+            },
+            "Name": "overlay2"
+        },
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:63ecca237e30aca8ae79232ae01dddab7d8b42302f654f343f7cc7ddae60d57c",
+                "sha256:e62aadfda549a23e76f5bb43a9a5c652f9e7312aba9edf5c1411f7d0aed54eed",
+                "sha256:3acdb7d9b7ebcd7f62d99a996099a57b8367821f4d9a3f4b52239934425a7b98",
+                "sha256:6278c1f4144901e76b467bbd4cdbd2bce7e026411d615ae510ae8832c56278a2",
+                "sha256:b2fa6852ca3126152f0b8e37ec1c9318fd684702c72caa36bcbb66b83ff4af4f",
+                "sha256:2fad1eb2f9d90c59cab28cda133057efaaff2592ef762f9d7615a87b20ef202e",
+                "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+                "sha256:a198fe7815873aef58fb17685c3ca0f2e2ca65ae4f7d296d9ccff763c54f1fd4",
+                "sha256:53ff1b9ba0032c460cbbafd9b4e9840edb0e9e3266ea944795c5ac19b4d38ec8",
+                "sha256:7c6443bbfe0f663f3d4bf5f76a25cc76c0977123b01174418c5d4bb2a3d0cb32",
+                "sha256:090bca55059f63303938fd50c944216719401d61d203e26a0dc577895f1b4e01"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "2026-10-18T10:20:31.058548076+02:00"
+        }
+    }
+]

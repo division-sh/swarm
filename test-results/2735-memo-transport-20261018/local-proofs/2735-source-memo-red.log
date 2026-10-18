@@ -1,0 +1,8 @@
+Precompile outside test slot: environment=0.003s build=3.033s cleanup=0.000s total=3.036s
+Test slot acquired after 2ms. Starting go test ./internal/store/internal/operatorsurface -run ^TestRunOperationalSourceMemoRetainsOnlyValidatedImmutableSemantics$ -count=1
+--- FAIL: TestRunOperationalSourceMemoRetainsOnlyValidatedImmutableSemantics (0.15s)
+    run_operational_source_test.go:44: repeated exact-source polling recompiled immutable semantics
+FAIL
+FAIL	github.com/division-sh/swarm/internal/store/internal/operatorsurface	0.160s
+FAIL
+exit status 1

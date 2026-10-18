@@ -1,0 +1,13 @@
+candidate/cmd/swarm/main.go.txt: OK
+candidate/internal/cliapp/test_command.go.txt: OK
+candidate/internal/releasee2e/workspace_gateway_docker_test.go.txt: OK
+candidate/internal/runtime/agents/agent_llm.go.txt: OK
+candidate/internal/runtime/bus/turn_context.go.txt: OK
+candidate/internal/runtime/effects/effects.go.txt: OK
+candidate/internal/runtime/llm/completion_authority.go.txt: OK
+candidate/internal/runtime/manager/receipts.go.txt: OK
+candidate/internal/runtime/tools/executor_emit.go.txt: OK
+candidate/internal/store/internal/operatorsurface/run_operational_evidence.go.txt: OK
+candidate/internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go.txt: OK
+candidate-overlay.json: OK
+run-candidate.sh: OK

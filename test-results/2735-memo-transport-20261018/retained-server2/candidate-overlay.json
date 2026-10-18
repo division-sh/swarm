@@ -1,0 +1,15 @@
+{
+  "Replace": {
+    "/home/youmew/dev/wt/agent-d/scratch/cmd/swarm/main.go": "/home/youmew/dev/wt/agent-d/evidence-2735-memo-20261018/candidate/cmd/swarm/main.go.txt",
+    "/home/youmew/dev/wt/agent-d/scratch/internal/cliapp/test_command.go": "/home/youmew/dev/wt/agent-d/evidence-2735-memo-20261018/candidate/internal/cliapp/test_command.go.txt",
+    "/home/youmew/dev/wt/agent-d/scratch/internal/releasee2e/workspace_gateway_docker_test.go": "/home/youmew/dev/wt/agent-d/evidence-2735-memo-20261018/candidate/internal/releasee2e/workspace_gateway_docker_test.go.txt",
+    "/home/youmew/dev/wt/agent-d/scratch/internal/runtime/agents/agent_llm.go": "/home/youmew/dev/wt/agent-d/evidence-2735-memo-20261018/candidate/internal/runtime/agents/agent_llm.go.txt",
+    "/home/youmew/dev/wt/agent-d/scratch/internal/runtime/bus/turn_context.go": "/home/youmew/dev/wt/agent-d/evidence-2735-memo-20261018/candidate/internal/runtime/bus/turn_context.go.txt",
+    "/home/youmew/dev/wt/agent-d/scratch/internal/runtime/effects/effects.go": "/home/youmew/dev/wt/agent-d/evidence-2735-memo-20261018/candidate/internal/runtime/effects/effects.go.txt",
+    "/home/youmew/dev/wt/agent-d/scratch/internal/runtime/llm/completion_authority.go": "/home/youmew/dev/wt/agent-d/evidence-2735-memo-20261018/candidate/internal/runtime/llm/completion_authority.go.txt",
+    "/home/youmew/dev/wt/agent-d/scratch/internal/runtime/manager/receipts.go": "/home/youmew/dev/wt/agent-d/evidence-2735-memo-20261018/candidate/internal/runtime/manager/receipts.go.txt",
+    "/home/youmew/dev/wt/agent-d/scratch/internal/runtime/tools/executor_emit.go": "/home/youmew/dev/wt/agent-d/evidence-2735-memo-20261018/candidate/internal/runtime/tools/executor_emit.go.txt",
+    "/home/youmew/dev/wt/agent-d/scratch/internal/store/internal/operatorsurface/run_operational_evidence.go": "/home/youmew/dev/wt/agent-d/evidence-2735-memo-20261018/candidate/internal/store/internal/operatorsurface/run_operational_evidence.go.txt",
+    "/home/youmew/dev/wt/agent-d/scratch/internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go": "/home/youmew/dev/wt/agent-d/evidence-2735-memo-20261018/candidate/internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go.txt"
+  }
+}
