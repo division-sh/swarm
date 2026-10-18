@@ -19,8 +19,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -52,6 +54,18 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 		t.Fatal(err)
 	}
 	ctx := manager.TerminalPanicFixtureContext()
+	original, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("native manager fixture lacks its original process owner: %T", selected)
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := sourceartifactfixture.Ensure(ctx, selected); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +145,7 @@ func TestManagerDeliveryNativeOwnerRequiresExplicitPublicationBothStores(t *test
 		t.Run(backend, func(t *testing.T) {
 			fixture := openManagerNativeDelivery(t, backend)
 			source := sourceartifactfixture.Fact()
-			ctx := correlation.WithSourceArtifactFact(context.Background(), source)
+			ctx := correlation.WithSourceArtifactFact(fixture.Context, source)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("11111111-1111-1111-1111-111111111111", source.BundleHash()))
 			runID := uuid.NewString()
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
