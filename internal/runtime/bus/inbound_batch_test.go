@@ -105,6 +105,31 @@ func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBef
 }
 
 func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthorizationIntoMutation(t *testing.T) {
+	t.Run("immutable_root_key_refusal_boundary", func(t *testing.T) {
+		conflict := &rootConstructorKeyConflict{key: "private-key-name"}
+		cleanup := errors.New("independent publication cleanup")
+		for _, cell := range []struct {
+			name string
+			err  error
+			want bool
+		}{
+			{"exact", conflict, true},
+			{"wrapped", fmt.Errorf("internal prefix: %w", conflict), true},
+			{"same_refusal_join", errors.Join(conflict, fmt.Errorf("wrapped: %w", conflict)), true},
+			{"cleanup_last", errors.Join(conflict, cleanup), false},
+			{"cleanup_first", errors.Join(cleanup, conflict), false},
+			{"nested_cleanup", errors.Join(fmt.Errorf("wrapped: %w", errors.Join(conflict, cleanup)), conflict), false},
+			{"lookalike_text", errors.New(conflict.Error()), false},
+			{"missing", nil, false},
+			{"typed_nil", (*rootConstructorKeyConflict)(nil), false},
+		} {
+			t.Run(cell.name, func(t *testing.T) {
+				if got := IsRootConstructorKeyConflict(cell.err); got != cell.want {
+					t.Fatalf("root constructor refusal classification=%t, want %t", got, cell.want)
+				}
+			})
+		}
+	})
 	source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
 	store := newTargetRouteMemoryStore()
 	bus, err := newScopedTestEventBus(store, EventBusOptions{

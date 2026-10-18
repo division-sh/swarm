@@ -12637,7 +12637,9 @@ tool_model:
         store or dispatch failure is not evidence of invalid submitted input. Independent failures dominate even under
         nested joins: return a fixed HTTP 503 response and retain every cause in internal diagnostics. Existing provider
         validation/authentication responses, signature 401, exact duplicate 200, conflicting-body 409 and accepted 202
-        remain unchanged. An acknowledged publication with successful post-commit handoff retains its accepted/duplicate
+        remain unchanged. An exact immutable root-constructor key conflict retains its HTTP 503 refusal with a fixed
+        constructor-key message, never payload or key values; independent joined failures still use the generic 503.
+        An acknowledged publication with successful post-commit handoff retains its accepted/duplicate
         response despite later cleanup failure; it must not become a fresh input refusal or invite redispatch.
       raw_body_structural_teaching:
         rule: >
