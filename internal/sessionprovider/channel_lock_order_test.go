@@ -229,10 +229,19 @@ func proveLockOrderBeginAdmission(t *testing.T, f *activeInputFixture, request o
 	if err != nil {
 		lockOrderStop(t, "begin_before_admission_controls", err)
 	}
+	var durable operatorchannel.Operation
+	for _, operation := range before {
+		if operation.OperationID == created.OperationID {
+			durable = operation
+		}
+	}
+	if durable.OperationID == "" {
+		t.Fatal("created identity has no exact durable row")
+	}
 	replay := request
 	replay.OperationID = uuid.NewString()
 	repeated, err := f.selected.BeginChannelBinding(f.ctx, replay)
-	if err != nil || !reflect.DeepEqual(repeated, created) {
+	if err != nil || !reflect.DeepEqual(repeated, durable) {
 		lockOrderStop(t, "begin_exact_replay", err)
 	}
 	conflicting := request
