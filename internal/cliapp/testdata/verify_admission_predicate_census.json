@@ -1773,7 +1773,7 @@
     "owner": "internal/runtime/runtime.go::*Runtime.stopWithOptions",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "217fb2f8733e69cf5e66ae16610f45355741d2351fc5f5026b23f62052e31558"
+    "body_sha256": "d913f5434cf5c4099c6fed55445f9a93ab7a74ffff343baac943431ca9d9e180"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.verifyBootPublished",
