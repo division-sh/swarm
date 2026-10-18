@@ -130,6 +130,10 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 				ctx := runForkTestContext(t)
 				process, _ := worklifetime.ProcessFromContext(ctx)
 				capability := selectedContractTestProcessCapability(t, ctx, authorityStore)
+				ctx, bindErr := startupownership.WithProcessMutationAuthority(ctx, capability)
+				if bindErr != nil {
+					t.Fatal(bindErr)
+				}
 				root := runForkExecutionRepoRoot(t)
 				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: filepath.Join(root, "tests/tier1-primitives/test-emits-multiple")}
 				loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
@@ -162,7 +166,12 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 								t.Error(err)
 							}
 						})
+						ctx = runForkTestContext(t)
 						capability = selectedContractTestProcessCapability(t, ctx, authorityStore)
+						ctx, bindErr = startupownership.WithProcessMutationAuthority(ctx, capability)
+						if bindErr != nil {
+							t.Fatal(bindErr)
+						}
 						owner = newOwner()
 						if err := owner.BindSelectedProcess(ctx, freshProcess, capability); err != nil {
 							t.Fatal(err)

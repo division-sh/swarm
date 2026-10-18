@@ -64,6 +64,7 @@ func (a *constructedInputAgent) OnEvent(ctx context.Context, event events.Event)
 // materialization, delivery, agent admission and settlement execute normally.
 func TestSelectedConstructedAgentInputExecutesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend+"/prepared_surface_custody", func(t *testing.T) { provePreparedSurfaceCustody(t, backend) })
 		t.Run(backend, func(t *testing.T) { proveSelectedConstructedAgentInput(t, backend, false, false) })
 		t.Run(backend+"/parent_runtime", func(t *testing.T) {
 			var afterRelease func()

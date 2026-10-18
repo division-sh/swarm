@@ -42,6 +42,7 @@ func captureSelectedForkExecutionErrors(t *testing.T) {
 			executor.ExecuteSelectedContractRunFork = func(ctx context.Context, req runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
 				result, err := execute(ctx, req)
 				if err != nil {
+					t.Logf("selected execution progress: materialized=%s issued_container=%t published=%d", result.Materialization.ForkRunID, result.ForkLocalRuntimeContainer != nil, result.ExecutedEventCount)
 					t.Logf("selected execution failure before public error presentation: %v", err)
 				}
 				return result, err

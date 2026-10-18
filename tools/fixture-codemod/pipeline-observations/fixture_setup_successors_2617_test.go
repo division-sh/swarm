@@ -53,6 +53,8 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 	switch row.Family + "/" + row.File + "/" + row.Function {
 	case "native-catalog-preconstruction/internal/runtime/cataloge2e/runtime_harness_test.go/newRuntimeHarnessWithTerminalProvider",
 		"native-run-setup-family144/internal/runtime/runforkexecution/constructed_agent_input_execution_test.go/proveSelectedConstructedAgentInput",
+		"native-run-setup-family144/internal/runtime/runforkexecution/execution_test.go/TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation",
+		"native-run-setup-family144/internal/runtime/runforkexecution/execution_test.go/TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority",
 		"native-fanout-barrier-authority/internal/store/internal/runtimepersistence/fan_out_delivery_barrier_selected_store_test.go/TestFanOutDeliveryBarrierCompletionAndSupersessionWinnerMatrixOnBothStores",
 		"native-pipeline-delivery-exact-join-semantic/internal/runtime/pipeline/workflow_join_lifecycle_test.go/TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores",
 		"native-pipeline-delivery-exact-join-semantic/internal/runtime/pipeline/workflow_join_lifecycle_test.go/TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores",
@@ -122,14 +124,14 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "5dbfc419249caf03cefc07be54adef4708908955e6d2ee7f5d8d8594fd7bb2bd" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "f04e8836e1d93e697e60b75018cf88a6de2ee023d97bf611e216f72a0502ea19" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 106 {
+	if len(pins) != 108 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -195,6 +197,8 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 		}
 		if row.Function != "newRuntimeHarnessWithTerminalProvider" &&
 			row.Function != "proveSelectedConstructedAgentInput" &&
+			row.Function != "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation" &&
+			row.Function != "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority" &&
 			row.Function != "TestFanOutDeliveryBarrierCompletionAndSupersessionWinnerMatrixOnBothStores" &&
 			row.Function != "TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores" &&
 			row.Function != "TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores" &&
@@ -306,13 +310,13 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			}
 		})
 	}
-	if matched != 68 {
-		t.Fatalf("fixture comparator endpoints=%d, want68", matched)
+	if matched != 70 {
+		t.Fatalf("fixture comparator endpoints=%d, want70", matched)
 	}
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "5dbfc419249caf03cefc07be54adef4708908955e6d2ee7f5d8d8594fd7bb2bd" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "f04e8836e1d93e697e60b75018cf88a6de2ee023d97bf611e216f72a0502ea19" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -323,7 +327,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 106 {
+	if len(pins) != 108 {
 		t.Fatal("fixture successor row count changed")
 	}
 	prefix, err := json.Marshal(pins[:39])
@@ -350,6 +354,10 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "b0100cc4d23704ede593a9215e9497b751db504b06d8a21ef8dbce29715fc849" {
 		t.Fatal("selected child changed the immutable 105-receipt predecessor")
 	}
+	prefix, err = json.Marshal(pins[:106])
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "1d35c91dd5a592a1fce5e60c7dea95d8b4069cfdaa9076915ccafaa9765edb90" {
+		t.Fatal("selected setup changed the immutable 106-receipt predecessor")
+	}
 	for index, pin := range pins {
 		t.Run(pin.Original.Function, func(t *testing.T) {
 			latest := fixtureSetupLatestSuccessor2617(t, pins, index)
@@ -369,7 +377,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 				t.Fatal(err)
 			}
 			valid := func(candidate recipe, source string) bool {
-				if index != 105 {
+				if index != 105 && index != 106 {
 					var err error
 					candidate, source, err = embeddedSpecHistoricalPair1801(candidate, source)
 					if err != nil {

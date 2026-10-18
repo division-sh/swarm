@@ -59,8 +59,8 @@ func embeddedSpecPriorEndpoint1801(row recipe, actual string) (recipe, string, e
 
 func embeddedSpecHistoricalPair1801(row recipe, actual string) (recipe, string, error) {
 	if row.Family == "native-run-setup-family144" &&
-		row.File == "internal/runtime/runforkexecution/constructed_agent_input_execution_test.go" &&
-		row.Function == "proveSelectedConstructedAgentInput" {
+		((row.File == "internal/runtime/runforkexecution/constructed_agent_input_execution_test.go" && row.Function == "proveSelectedConstructedAgentInput") ||
+			(row.File == "internal/runtime/runforkexecution/execution_test.go" && row.Function == "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation")) {
 		original, err := fixtureSetupCurrentEndpoint2617(row, actual)
 		if err != nil {
 			return recipe{}, "", err
@@ -161,8 +161,8 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 	}
 	restored := append([]recipe(nil), rows...)
 	var setup []fixtureSetupSuccessor2617
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "5dbfc419249caf03cefc07be54adef4708908955e6d2ee7f5d8d8594fd7bb2bd" ||
-		json.Unmarshal(fixtureSetupSuccessorBytes2617, &setup) != nil || len(setup) != 106 {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "f04e8836e1d93e697e60b75018cf88a6de2ee023d97bf611e216f72a0502ea19" ||
+		json.Unmarshal(fixtureSetupSuccessorBytes2617, &setup) != nil || len(setup) != 108 {
 		t.Fatal("native fixture continuation packet changed")
 	}
 	// Undo only the independently pinned #2730 setup changes before comparing
@@ -189,8 +189,8 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 			restoredSetup++
 		}
 	}
-	if restoredSetup != 67 {
-		t.Fatalf("native fixture continuations restored=%d, want67", restoredSetup)
+	if restoredSetup != 69 {
+		t.Fatalf("native fixture continuations restored=%d, want69", restoredSetup)
 	}
 	completionSuccessors := 0
 	for i, row := range rows {

@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
@@ -71,6 +72,11 @@ func proveMaterializedTargetLookup(t *testing.T, selected materializedTargetTest
 	runID := uuid.NewString()
 	ctx := correlation.WithSourceArtifactFact(correlation.WithRunID(context.Background(), runID), loaded.SourceArtifactFact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
+	capability := selectedContractTestProcessCapability(t, ctx, selected.(startupownership.Store))
+	ctx, bindErr := startupownership.WithProcessMutationAuthority(ctx, capability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	bundle, _ := semanticview.Bundle(loaded.Source)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, BundleHash: loaded.SourceArtifactFact.BundleHash()})
 	root := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")

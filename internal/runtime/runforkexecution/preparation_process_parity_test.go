@@ -37,6 +37,10 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 			ctx := runForkTestContext(t)
 			process, _ := worklifetime.ProcessFromContext(ctx)
 			capability := selectedContractTestProcessCapability(t, ctx, selected)
+			ctx, bindErr := startupownership.WithProcessMutationAuthority(ctx, capability)
+			if bindErr != nil {
+				t.Fatal(bindErr)
+			}
 			repo := runForkExecutionRepoRoot(t)
 			fixtureLoader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")}
 			loaded, err := fixtureLoader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})

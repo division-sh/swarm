@@ -135,6 +135,11 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			_, db, _ := testutil.StartPostgres(t)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			ctx := runForkTestContext(t)
+			setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+			ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+			if bindErr != nil {
+				t.Fatal(bindErr)
+			}
 			repoRoot := runForkExecutionRepoRoot(t)
 			contractsRoot := filepath.Join(repoRoot, test.fixture)
 			if test.fanOutBarrier {
@@ -150,6 +155,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			entityID := uuid.NewString()
 			seedSelectedExecutionSourceRunWithPrimaryRoute(
 				t,
+				ctx,
 				db,
 				sourceRunID,
 				entityID,
@@ -208,7 +214,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 				ContractSelection: runfork.RunForkContractSelection{
 					Mode: runfork.RunForkContractSelectionModeSelectedContracts,
 				},
-				AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+				AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: setupCapability},
 			})
 			failure, ok := runtimefailures.EnvelopeFromError(err)
 			if err == nil || !ok || failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != test.wantCode {
@@ -497,6 +503,11 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 			_, db, _ := testutil.StartPostgres(t)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			ctx := runForkTestContext(t)
+			setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+			ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+			if bindErr != nil {
+				t.Fatal(bindErr)
+			}
 			repoRoot := runForkExecutionRepoRoot(t)
 			contractsRoot := filepath.Join(repoRoot, test.fixture)
 			if test.fanOutBarrier {
@@ -534,7 +545,7 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 					t.Fatalf("construct state-only joined receiver: %+v %v", committed, err)
 				}
 			} else if test.stateOnly {
-				seedSelectedExecutionStateOnlySourceRun(t, db, sourceRunID, sourceEventID, test.eventName, at, loaded.SourceArtifactFact)
+				seedSelectedExecutionStateOnlySourceRun(t, ctx, db, sourceRunID, sourceEventID, test.eventName, at, loaded.SourceArtifactFact)
 			} else {
 				route := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", sourceRunID)
 				route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: sourceRunID, EntityID: sourceRunID})
@@ -723,6 +734,11 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -771,7 +787,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 			loaded.Source,
 		),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly,
-			ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+			ProcessCapability: setupCapability},
 	}
 	missingProcess := request
 	missingProcess.AgentRuntime.ProcessCapability = nil
@@ -786,7 +802,12 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		t.Fatalf("retired process refusal = %v", err)
 	}
 	assertNoSelectedContractExecutionMutationForSource(t, db, sourceRunID, sourceEventID)
+	ctx = runForkTestContext(t)
 	request.AgentRuntime.ProcessCapability = selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr = runtimestartupownership.WithProcessMutationAuthority(ctx, request.AgentRuntime.ProcessCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	// A successor process gets a new owner; a retired owner's binding is immutable.
 	request.Owner = newSelectedContractExecutionOwnerForTest(t, pg)
 	fixtureValue, _ := runForkTestWorkFixtures.Load(t)
@@ -968,6 +989,11 @@ func TestExecuteSelectedContractRunForkAdmitsExactSourceModeBeforeMaterializatio
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{
@@ -1014,7 +1040,7 @@ func TestExecuteSelectedContractRunForkAdmitsExactSourceModeBeforeMaterializatio
 		),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{
 			ExecutionPosture:  executionposture.MockOnly,
-			ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg),
+			ProcessCapability: setupCapability,
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "command-selected mock execution rejects live execution") {
@@ -1055,6 +1081,11 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := canonicalrouting.ExampleRoot(t, canonicalrouting.TemplateCreateMintedKey)
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -1201,7 +1232,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: setupCapability},
 	})
 	failure, ok := runtimefailures.EnvelopeFromError(err)
 	if err == nil || !ok || failure.Class != runtimefailures.ClassDependencyUnavailable ||
@@ -1237,6 +1268,11 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -1273,7 +1309,7 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			semanticview.Wrap(bundle),
 		),
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: setupCapability},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
@@ -1306,6 +1342,11 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := canonicalrouting.CopyForkChronologicalDispatch(t)
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -1349,7 +1390,7 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 		SourceRunID: sourceRunID, At: laterEventID, AllowSourceFreeze: true,
 		Owner: selectedContractExecutionOwnerForTest(t, pg), SourceLoader: loader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-		AgentRuntime:      SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+		AgentRuntime:      SelectedContractAgentRuntimeOptions{ProcessCapability: setupCapability},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
@@ -1370,6 +1411,11 @@ func TestExecuteSelectedContractRunForkConstructsAgentRecipientWithoutHandlerMat
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -1379,7 +1425,7 @@ func TestExecuteSelectedContractRunForkConstructsAgentRecipientWithoutHandlerMat
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
-	processCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	processCapability := setupCapability
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002201, 0).UTC()
@@ -1430,6 +1476,11 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -1442,7 +1493,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	if _, ok := loaded.Source.ExecutableNodeEventHandler(runForkSourceNode(t, loaded.Source, "complete-node"), "task.completed"); !ok {
 		t.Fatal("selected source omitted complete-node task.completed handler")
 	}
-	processCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	processCapability := setupCapability
 
 	sourceRunID := uuid.NewString()
 	entityID := sourceRunID
@@ -1677,6 +1728,11 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			_, db, _ := testutil.StartPostgres(t)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			ctx := runForkTestContext(t)
+			setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+			ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+			if bindErr != nil {
+				t.Fatal(bindErr)
+			}
 			repoRoot := runForkExecutionRepoRoot(t)
 			lookupCalls := atomic.Int32{}
 			lookup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -1691,7 +1747,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			if err != nil {
 				t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 			}
-			processCapability := selectedContractTestProcessCapability(t, ctx, pg)
+			processCapability := setupCapability
 
 			var cfg *config.Config
 			var providerCalls atomic.Int32
@@ -2070,6 +2126,10 @@ func proveSelectedForkClaudeOAuth(t *testing.T, backend string, db *sql.DB, sele
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
 	processCapability := selectedContractTestProcessCapability(t, ctx, selected)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, processCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 
 	captureDir := t.TempDir()
 	dockerPath := filepath.Join(captureDir, "fake-docker.sh")
@@ -2581,6 +2641,10 @@ func proveSelectedForkPreparedPreflight(t *testing.T, db *sql.DB, selected inter
 	t.Helper()
 	ctx := runForkTestContext(t)
 	process := selectedContractTestProcessCapability(t, ctx, selected)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	processEvidence, err := process.Evidence()
 	if err != nil {
 		t.Fatal(err)
@@ -2865,6 +2929,12 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostileAdmission(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := runForkTestContext(t)
+	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	process := selectedContractTestProcessCapability(t, ctx, selected)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	container := buildSelectedForkProofContainer(t, ctx, db)
 	proof := container.Proof()
 	var requests atomic.Int32
@@ -3027,6 +3097,11 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -3034,7 +3109,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
-	processCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	processCapability := setupCapability
 	var providerCalls atomic.Int32
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		providerCalls.Add(1)
@@ -3122,6 +3197,17 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	dsn, db, _ := testutil.StartPostgres(t)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	servedDB, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatalf("open served PostgreSQL handle: %v", err)
+	}
+	defer servedDB.Close()
+	servedStore := storetest.AdmitPostgresRuntimeStore(t, servedDB)
+	processCapability := selectedContractTestProcessCapability(t, ctx, servedStore)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, processCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -3150,11 +3236,6 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		t.Fatalf("seed selected-contract container competition binding: %v", err)
 	}
 
-	servedDB, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatalf("open served PostgreSQL handle: %v", err)
-	}
-	defer servedDB.Close()
 	standaloneDB, err := sql.Open("postgres", dsn)
 	if err != nil {
 		t.Fatalf("open standalone PostgreSQL handle: %v", err)
@@ -3166,9 +3247,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	if err := standaloneDB.PingContext(ctx); err != nil {
 		t.Fatalf("ping standalone PostgreSQL handle: %v", err)
 	}
-	servedStore := storetest.AdmitPostgresRuntimeStore(t, servedDB)
 	standaloneStore := storetest.AdmitPostgresRuntimeStore(t, standaloneDB)
-	processCapability := selectedContractTestProcessCapability(t, ctx, servedStore)
 	fixtureValue, _ := runForkTestWorkFixtures.Load(t)
 	process := fixtureValue.(*runForkTestWorkFixture).process
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, servedStore)
@@ -3702,11 +3781,16 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	ctx := runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), sourceFact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()))
 	declarations, err := runtimeagenttopology.NewSelectedDeclarationPlan(sourceFact.BundleHash(), []runtimeagenttopology.DesiredAgent{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	processCapability := &selectedFailOnceGrantCapability{ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected)}
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, processCapability.ProcessCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	executionOwner := selectedContractExecutionOwnerForTest(t, selected)
 	loaded := LoadedSelectedContractSource{SourceArtifactFact: sourceFact, EffectiveSourceIdentity: testEffectiveSourceIdentity(sourceFact)}
 	preparedAgents := selectedContractAgentRuntimePlan{Declarations: declarations, Options: SelectedContractAgentRuntimeOptions{ProcessCapability: processCapability}}
@@ -3785,6 +3869,11 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -3806,7 +3895,7 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 	at := time.Unix(1700002215, 0).UTC()
 	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
-	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
+	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, ctx, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -3818,7 +3907,7 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: setupCapability},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
@@ -3880,6 +3969,11 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -3910,7 +4004,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 		Store:             pg,
 		ExecutionOwner:    selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:      loader,
-		AgentRuntime:      SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+		AgentRuntime:      SelectedContractAgentRuntimeOptions{ProcessCapability: setupCapability},
 	})
 	if err != nil {
 		t.Fatalf("ActivateSelectedContractRunFork: %v", err)
@@ -3990,6 +4084,11 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4014,7 +4113,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
-	seedSelectedExecutionPostForkSourceEvent(t, db, sourceRunID, afterEventID, entityID, at.Add(time.Second))
+	seedSelectedExecutionPostForkSourceEvent(t, ctx, db, sourceRunID, afterEventID, entityID, at.Add(time.Second))
 	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, afterEventID, "replay_scope_direct", at.Add(time.Second))
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID,
 		runforkrevision.FamilyEvents,
@@ -4028,7 +4127,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 		Store:             pg,
 		ExecutionOwner:    selectedContractExecutionOwnerForTest(t, pg),
 		SourceLoader:      loader,
-		AgentRuntime:      SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+		AgentRuntime:      SelectedContractAgentRuntimeOptions{ProcessCapability: setupCapability},
 	})
 	if err == nil || !strings.Contains(err.Error(), "source_committed_replay_scope_advanced_after_fork_point") {
 		t.Fatalf("ActivateSelectedContractRunFork error = %v, want post-T marker blocker", err)
@@ -4052,6 +4151,15 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runForkTestRuntimeInstanceID)
+	setupCapability, setupErr := agentfixture.ProcessCapability(t, ctx, pg)
+	if setupErr != nil {
+		t.Fatal(setupErr)
+	}
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4154,6 +4262,15 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runForkTestRuntimeInstanceID)
+	setupCapability, setupErr := agentfixture.ProcessCapability(t, ctx, pg)
+	if setupErr != nil {
+		t.Fatal(setupErr)
+	}
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4288,6 +4405,15 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runForkTestRuntimeInstanceID)
+	setupCapability, setupErr := agentfixture.ProcessCapability(t, ctx, pg)
+	if setupErr != nil {
+		t.Fatal(setupErr)
+	}
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4413,6 +4539,11 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4440,7 +4571,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: setupCapability},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
@@ -4482,6 +4613,11 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4525,7 +4661,7 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: setupCapability},
 	})
 	if err == nil || !strings.Contains(err.Error(), "committed pipeline scope conflicts") {
 		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want atomic same-event replay-scope conflict", err)
@@ -4540,6 +4676,11 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := canonicalrouting.CopyUnresolvedSelectedForkInput(t)
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4566,7 +4707,7 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: setupCapability},
 	})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerContractFrontierRouteUnresolved) {
 		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want unresolved frontier blocker", err)
@@ -4588,6 +4729,11 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4629,7 +4775,7 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: setupCapability},
 	})
 	if err == nil || !strings.Contains(err.Error(), "forced selected execution lineage failure") {
 		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want forced lineage publish failure", err)
@@ -4648,6 +4794,11 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	setupCapability := selectedContractTestProcessCapability(t, ctx, pg)
+	ctx, bindErr := runtimestartupownership.WithProcessMutationAuthority(ctx, setupCapability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4705,7 +4856,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 		ContractSelection: runforkadmission.SelectedContractSelection(
 			loaded.Source,
 		),
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: setupCapability},
 	})
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
@@ -5468,13 +5619,13 @@ func selectedExecutionFixtureAgentConfig(t testing.TB, identity agentidentity.Id
 
 func seedSelectedExecutionStateOnlySourceRun(
 	t *testing.T,
+	ctx context.Context,
 	db *sql.DB,
 	sourceRunID, sourceEventID, eventName string,
 	at time.Time,
 	sourceFacts ...runtimecorrelation.SourceArtifactFact,
 ) {
 	t.Helper()
-	ctx := runForkTestContext(t)
 	sourceFact := testEphemeralSourceArtifactFact(runForkTestBundleHash)
 	if len(sourceFacts) > 0 {
 		sourceFact = sourceFacts[0]
@@ -5514,6 +5665,7 @@ func selectedExecutionEntitylessNodeRoute(nodeID string) events.DeliveryRoute {
 
 func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	t *testing.T,
+	ctx context.Context,
 	db *sql.DB,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
@@ -5527,7 +5679,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	routingSource := events.NoRoutingSource()
 	envelope := events.EventEnvelope{}
 	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
-		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
+		t, ctx, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
 		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, selectedExecutionInputFixture{}, sourceFacts...,
 	)
 }
@@ -5539,6 +5691,7 @@ type selectedExecutionInputFixture struct {
 
 func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	t *testing.T,
+	ctx context.Context,
 	db *sql.DB,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
@@ -5556,7 +5709,6 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	if entityType == "" {
 		t.Fatal("selected-execution source fixture requires an exact entity type")
 	}
-	ctx := runForkTestContext(t)
 	sourceFact := testEphemeralSourceArtifactFact(runForkTestBundleHash)
 	if len(sourceFacts) > 0 {
 		sourceFact = sourceFacts[0]
@@ -5682,9 +5834,8 @@ func seedSourceOutcomeThatMustNotSuppressFork(t *testing.T, db *sql.DB, sourceEv
 	}
 }
 
-func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB, sourceRunID, diagnosticEventID string, at time.Time) {
+func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, diagnosticEventID string, at time.Time) {
 	t.Helper()
-	ctx := context.Background()
 	payload, _ := json.Marshal(map[string]any{
 		"level":   "info",
 		"message": "diagnostic platform row must remain lineage-only",
@@ -5725,9 +5876,9 @@ func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sour
 	}
 }
 
-func seedSelectedExecutionPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, entityID string, at time.Time) {
+func seedSelectedExecutionPostForkSourceEvent(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, sourceEventID, entityID string, at time.Time) {
 	t.Helper()
-	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, authoractivityfixture.DialectPostgres, sourceEventID, sourceRunID, "source.after",
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, sourceEventID, sourceRunID, "source.after",
 		eventtest.Producer(events.EventProducerExternal, "source-runtime"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
 }

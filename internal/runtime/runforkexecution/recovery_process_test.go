@@ -273,6 +273,10 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	}
 	ctx := runForkTestContext(t)
 	capability := selectedContractTestProcessCapability(t, ctx, capabilityStore)
+	ctx, bindErr := startupownership.WithProcessMutationAuthority(ctx, capability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	root := runForkExecutionRepoRoot(t)
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: filepath.Join(root, "tests/tier1-primitives/test-emits-multiple")}
 	cut := os.Getenv("SWARM_SELECTED_CRASH_CUT")

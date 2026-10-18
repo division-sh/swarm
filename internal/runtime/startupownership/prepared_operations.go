@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -24,6 +25,7 @@ const (
 	PreparedForkClaim
 	PreparedForkRecover
 	PreparedForkStop
+	PreparedManagedCapabilitySurface
 )
 
 // PreparedProcessOperation is a closed synchronous store command. Only the
@@ -99,6 +101,87 @@ func (p *processCapability) RunPreparedOperation(ctx context.Context, operation 
 		err = p.retireOnPossessionFailure(err)
 	}
 	return errors.Join(err, p.requireLive())
+}
+
+// PreparedManagedCapabilitySurfaceOperation owns only one synchronous save of
+// an exact prospective actor's receipt. Probing and transport remain outside it.
+func PreparedManagedCapabilitySurfaceOperation(ctx context.Context, process ProcessCapability, store managedcapabilities.Persistence, authority managedcapabilities.Authority, surface managedcapabilities.Surface) (PreparedProcessOperation, error) {
+	p, ok := process.(*processCapability)
+	if !ok || p == nil || ctx == nil || store == nil {
+		return PreparedProcessOperation{}, ErrProcessNotCurrent
+	}
+	if authority.Kind != managedcapabilities.AuthorityStartupProbe || authority.ExecutionKind != managedcapabilities.ExecutionSelectedForkPreparation {
+		return PreparedProcessOperation{}, errors.New("prepared surface requires non-executable startup authority")
+	}
+	if err := authority.Validate(); err != nil {
+		return PreparedProcessOperation{}, err
+	}
+	surface = surface.Clone()
+	if err := surface.Validate(); err != nil {
+		return PreparedProcessOperation{}, err
+	}
+	actual := surface.Authority
+	if actual.Preparation == nil || *actual.Preparation != *authority.Preparation {
+		return PreparedProcessOperation{}, errors.New("prepared surface differs from its exact actor and catalog")
+	}
+	actual.Preparation = authority.Preparation
+	if actual != authority {
+		return PreparedProcessOperation{}, errors.New("prepared surface differs from its exact probe and preparation")
+	}
+	preparation := *authority.Preparation
+	op := PreparedProcessOperation{kind: PreparedManagedCapabilitySurface, target: store,
+		coordinates: processbinding.LeaseCoordinates{LeaseID: preparation.ProcessAuthorityID, OwnerID: preparation.ProcessOwnerID, BootID: preparation.ProcessBootID}}
+	op.run = func(owned context.Context) error {
+		// RunPreparedOperation has proved this process under opMu. Check the
+		// caller's retained original before its derived process context is used.
+		if err := p.requirePreparedSurfaceOriginal(ctx); err != nil {
+			return err
+		}
+		return store.SaveManagedCapabilitySurface(owned, surface)
+	}
+	return op, nil
+}
+
+func (p *processCapability) requirePreparedSurfaceOriginal(ctx context.Context) error {
+	var grant *generationGrant
+	var version uint64
+	switch original := ctx.Value(mutationAuthorityContextKey{}).(type) {
+	case nil:
+		return nil
+	case refusedMutationAuthority:
+		return original.err
+	case *processCapability:
+		if original != p {
+			return ErrProcessNotCurrent
+		}
+		return nil
+	case *generationGrant:
+		grant = original
+	case MutationAuthority:
+		if err := original.Validate(); err != nil {
+			return err
+		}
+		if original.owner != p {
+			return ErrProcessNotCurrent
+		}
+		if original.grant == nil {
+			return nil
+		}
+		grant, version = original.grant, original.evidence.StateVersion
+	default:
+		return ErrMutationAuthorityMissing
+	}
+	if grant == nil || grant.owner != p {
+		return ErrProcessNotCurrent
+	}
+	evidence, err := grant.Evidence()
+	if err != nil {
+		return err
+	}
+	if version != 0 && version != evidence.StateVersion {
+		return errors.New("prepared surface has stale original custody")
+	}
+	return grant.requireExecutionAuthorityLocked(ctx, evidence)
 }
 
 type PreparedEffectStore interface {
