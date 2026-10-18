@@ -1,0 +1,15 @@
+=== RUN   TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends/sqlite
+    golden_agent_workload_test.go:244: proof_surface=H; exact mock workload/restart proof, not public serve/test
+    golden_agent_workload_test.go:244: release command swarm: wall=2.819477014s user=7.752212s system=248.423ms
+    golden_agent_workload_test.go:769: serve exited before readiness: exit status 1
+        === RUN   TestOwnedMockLifecycleProcessEntry
+            owned_mock_lifecycle_process_test.go:77: proof_surface=H internal retained lifecycle posture=mock_only; not public serve or private test
+        lifecycle evidence available pid=7528
+        ERROR: serve failed · channel onboarding · activate serve runtime after channel teardown recovery: prepare runtime lifecycle: prepare static declaration topology: reconcile external effect attempts: author activity turn.lifecycle/failed requires exact bundle scope in context
+          store                      sqlite · /tmp/tmp.akos5b43EK/TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends2625243092/001/sqlite-restart/runtime.db
+          workspace                  host · agent work runs on this machine
+            owned_mock_lifecycle_process_test.go:81: internal lifecycle exit=1: <nil>
+        --- FAIL: TestOwnedMockLifecycleProcessEntry (1.09s)
+        FAIL
+        
+--- FAIL: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends/sqlite (8.61s)

@@ -1,0 +1,13 @@
+Precompile outside test slot: environment=0.003s build=2.146s cleanup=0.000s total=2.149s
+Test slot acquired after 10ms. Starting go test ./internal/releasee2e -run ^TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends$/sqlite$ -count=1 -v
+=== RUN   TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends
+=== RUN   TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends/sqlite
+    golden_agent_workload_test.go:244: proof_surface=H; exact mock workload/restart proof, not public serve/test
+    golden_agent_workload_test.go:244: release command swarm: wall=3.282718374s user=11.603111s system=513.482ms
+    golden_agent_workload_test.go:244: conversation.list count = 4, want one scout and 2 candidate conversations: []releasee2e.goldenConversation{releasee2e.goldenConversation{SessionID:"c5de753f-aad1-4162-819c-0d447e4f350d", AgentID:"scout-worker", ExecutionMode:"mock", RunID:"280a328a-066e-4822-ab20-30db4f6caf3e", TurnCount:1, MessageCount:1, Status:"active"}, releasee2e.goldenConversation{SessionID:"725b830d-e1ce-4464-988e-c2c1c4ec5693", AgentID:"candidate-worker", ExecutionMode:"mock", RunID:"280a328a-066e-4822-ab20-30db4f6caf3e", TurnCount:1, MessageCount:1, Status:"active"}, releasee2e.goldenConversation{SessionID:"e201e452-46ff-4076-814a-3bcb0515942c", AgentID:"candidate-worker", ExecutionMode:"mock", RunID:"280a328a-066e-4822-ab20-30db4f6caf3e", TurnCount:1, MessageCount:1, Status:"active"}, releasee2e.goldenConversation{SessionID:"5da80887-27ff-478c-bafd-688eeb0af069", AgentID:"scout-worker", ExecutionMode:"mock", RunID:"280a328a-066e-4822-ab20-30db4f6caf3e", TurnCount:1, MessageCount:1, Status:"active"}}
+--- FAIL: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends (33.27s)
+    --- FAIL: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends/sqlite (21.19s)
+FAIL
+FAIL	github.com/division-sh/swarm/internal/releasee2e	33.280s
+FAIL
+exit status 1

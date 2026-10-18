@@ -1,0 +1,7 @@
+100644 blob 65873a2dc64f5e3e4cc7f45478664872068c67d9	internal/releasee2e/golden_agent_workload_test.go
+100644 blob 4813794850d087ab3130f21c6bf85300f21a5dd8	internal/runtime/authoractivity/scope.go
+100644 blob 0e521632d3c04f3fdfc58161e266a0164d9194ba	internal/runtime/manager/runtime.go
+100644 blob 07ce665b847112428ea98293e5301862a017e859	internal/runtime/manager/static_topology.go
+100644 blob 4ee9d3a940a0e82b3ecef1e5f0a4563446694134	internal/store/internal/backend/effectpersistence/completion_recovery.go
+100644 blob 5cbbebd92f4f610f18d1060621795b1aa7d0fe04	internal/store/internal/backend/effectpersistence/runtime_external_effects.go
+100644 blob 107599718febceeadb9d7161e212e5836d116f34	internal/store/internal/backend/llmpersistence/author_activity_turns.go

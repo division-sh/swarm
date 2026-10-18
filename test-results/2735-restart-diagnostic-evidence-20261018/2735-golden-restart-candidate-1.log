@@ -1,0 +1,12 @@
+Precompile outside test slot: environment=0.003s build=2.097s cleanup=0.000s total=2.100s
+Test slot acquired after 1ms. Starting go test ./internal/releasee2e -run ^TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends$/sqlite$ -count=1 -v
+=== RUN   TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends
+=== RUN   TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends/sqlite
+    golden_agent_workload_test.go:244: proof_surface=H; exact mock workload/restart proof, not public serve/test
+    golden_agent_workload_test.go:244: release command swarm: wall=3.111055998s user=11.611511s system=437.035ms
+    golden_agent_workload_test.go:244: release command swarm: wall=984.73297ms user=983.321ms system=79.944ms
+    golden_agent_workload_test.go:244: release command swarm: wall=1.532911588s user=1.061217s system=122.448ms
+--- PASS: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends (33.95s)
+    --- PASS: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends/sqlite (21.61s)
+PASS
+ok  	github.com/division-sh/swarm/internal/releasee2e	33.967s
