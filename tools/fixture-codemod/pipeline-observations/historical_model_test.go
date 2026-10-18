@@ -59,18 +59,47 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 		t.Fatalf("mechanical repair target count=%d, want24", count)
 	}
 	digest, err := mechanicalReceiptDigest(rows)
-	if err != nil || digest != "637fcb76a19075ffc1dd93fc6a189652be2a50f2b199647d67cc0ffd58885fed" {
+	if err != nil || digest != "eba2c8f2136f786dd64d27be031c85fbc9cefb0ca3d26e245e76e6b86033c7c1" {
 		t.Fatalf("source-pinned mechanical/current receipts changed: %s/%v", digest, err)
 	}
 	// Retain the complete predecessor digest, including its old live Successors.
 	// Only the two appended #2287 join-presentation receipts may reverse it.
 	var pins []fixtureSetupSuccessor2617
-	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 39 {
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 46 {
 		t.Fatalf("finite presentation receipt packet changed: %v", err)
 	}
 	prior := append([]recipe(nil), rows...)
+	// Reverse only the seven authorized setup endpoints before checking the
+	// complete predecessor digest, including its prior live Successors.
+	restoredSetup := 0
+	for _, pin := range pins[39:] {
+		for index, row := range prior {
+			if !sameReviewedRecipeKey(row, pin.Original) {
+				continue
+			}
+			history := row
+			history.Successor = pin.Original.Successor
+			body, err := reverseReviewedSuccessor2617(row.Successor, pin.Edits)
+			oldBody := pin.Original.Successor
+			if oldBody == "" {
+				oldBody = pin.Original.After
+			}
+			if err != nil || body != oldBody || row.Successor != pin.Candidate || !reflect.DeepEqual(history, pin.Original) {
+				t.Fatalf("#2730 setup changed historical mechanical evidence: %s/%v", row.Function, err)
+			}
+			prior[index] = pin.Original
+			restoredSetup++
+		}
+	}
+	if restoredSetup != 7 {
+		t.Fatalf("#2730 exact setup endpoints restored=%d, want7", restoredSetup)
+	}
+	predecessorDigest, err := mechanicalReceiptDigest(prior)
+	if err != nil || predecessorDigest != "637fcb76a19075ffc1dd93fc6a189652be2a50f2b199647d67cc0ffd58885fed" {
+		t.Fatalf("#2730 changed its complete mechanical/current predecessor: %s/%v", predecessorDigest, err)
+	}
 	restored := 0
-	for _, pin := range pins[36:] {
+	for _, pin := range pins[36:39] {
 		if pin.Original.Mechanical == nil {
 			continue
 		}
