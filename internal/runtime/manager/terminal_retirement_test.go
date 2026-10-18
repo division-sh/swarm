@@ -794,16 +794,14 @@ func ProveTerminalPanicMutationFailure(t *testing.T, persistence AgentLifecycleP
 func TestTerminalReadinessRetirementReleasesAttemptBeforeJoin(t *testing.T) {
 	for _, mode := range []string{"success", "agent_fence_panic"} {
 		t.Run(mode, func(t *testing.T) {
-			probe := newLifecyclePersistenceProbe()
+			ctx, rec, probe := newLifecycleCacheFixture(t)
 			c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
-			rec := lifecycleTestPersistedAgent(t)
 			rec.Config.Identity = runtimeagentidentitytest.RuntimeForRun(t, rec.Config.Identity.RunID, rec.Config.ID, "lifecycle-test", "review", "inst-1", "review/inst-1")
 			rec.Config.FlowPath = "review/inst-1"
-			ctx := testAuthorActivityContext(context.Background())
 			if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
 				t.Fatal(err)
 			}
-			beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+			beginCoordinatorRun(t, c, managedExecutionTestContextForCapturedSource(t, ctx), AgentRunModeStandard)
 			_, token, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 			if err != nil {
 				t.Fatal(err)
