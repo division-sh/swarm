@@ -794,24 +794,10 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if err != nil {
 		return selectedContractAgentRuntimeFactory{}, err
 	}
-	var custody *selectedGatewayCustody
-	if req.Prepared != nil {
-		grant, ok := lifecycle.(runtimestartupownership.GenerationGrant)
-		if !ok {
-			_ = gatewayWork.Done()
-			return selectedContractAgentRuntimeFactory{}, errors.New("selected gateway requires its retained native child grant")
-		}
-		bound, err := managerOptions.ReceiverExecution.Bind(context.Background(), options.ExecutionPosture.RootMode())
-		if err != nil {
-			_ = gatewayWork.Done()
-			return selectedContractAgentRuntimeFactory{}, err
-		}
-		admission, ok := managedexecution.FromContext(bound)
-		if !ok {
-			_ = gatewayWork.Done()
-			return selectedContractAgentRuntimeFactory{}, errors.New("selected gateway requires its retained child admission")
-		}
-		custody = &selectedGatewayCustody{grant: grant, admission: admission, preparation: req.Prepared.evidence()}
+	custody, err := selectedContractGatewayCustody(req, lifecycle, managerOptions)
+	if err != nil {
+		_ = gatewayWork.Done()
+		return selectedContractAgentRuntimeFactory{}, err
 	}
 	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, mcpTurns, gatewayWork, func(identity agentidentity.Identity) (runtimeactors.AgentConfig, bool) {
 		if managerRef == nil {
@@ -952,6 +938,25 @@ type selectedGatewayCustody struct {
 	grant       runtimestartupownership.GenerationGrant
 	admission   managedexecution.Admission
 	preparation runfork.SelectedForkPreparation
+}
+
+func selectedContractGatewayCustody(req publishSelectedContractForkEventsRequest, lifecycle runtimemanager.AgentLifecyclePersistence, options runtimemanager.AgentManagerOptions) (*selectedGatewayCustody, error) {
+	if req.Prepared == nil {
+		return nil, nil
+	}
+	grant, ok := lifecycle.(runtimestartupownership.GenerationGrant)
+	if !ok {
+		return nil, errors.New("selected gateway requires its retained native child grant")
+	}
+	bound, err := options.ReceiverExecution.Bind(context.Background(), req.AgentRuntime.Options.ExecutionPosture.RootMode())
+	if err != nil {
+		return nil, err
+	}
+	admission, ok := managedexecution.FromContext(bound)
+	if !ok {
+		return nil, errors.New("selected gateway requires its retained child admission")
+	}
+	return &selectedGatewayCustody{grant: grant, admission: admission, preparation: req.Prepared.evidence()}, nil
 }
 
 func (c *selectedGatewayCustody) hooks(hooks runtimemcp.GatewayHooks) runtimemcp.GatewayHooks {

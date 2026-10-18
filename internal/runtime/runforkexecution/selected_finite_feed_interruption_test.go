@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -40,12 +42,26 @@ func TestSelectedFiniteFeedProcessRetirementPreservesRecoverablePredecessor(t *t
 		{"event-retired", runfork.RunForkPointEvent, worklifetime.ErrRetired, 1, 1},
 	} {
 		t.Run(cell.name, func(t *testing.T) {
+			owner, _, ctx := contextLifetimeOwner(t)
+			prepared := failureDiscardPreparation(t, owner, ctx)
+			bindContextLifetimePreparation(t, owner, prepared)
+			evidence, err := prepared.processOwner.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			identity := prepared.operation.selected.Identity()
+			authority := effects.Authority{Kind: effects.AuthoritySelectedContractFork, ID: identity.ExecutionID,
+				ExecutionOwner: evidence.OwnerID, FenceGeneration: evidence.AuthorityGeneration, LeaseExpiresAt: time.Now().Add(time.Minute), ExecutionMode: effects.ExecutionModeLive,
+				SelectedFork: effects.SelectedContractForkAuthority{ExecutionID: identity.ExecutionID, ForkRunID: identity.RunID, Generation: identity.Generation,
+					AdmissionFingerprint: strings.Repeat("1", 64), ContainerPlanFingerprint: strings.Repeat("2", 64), ActorCensusFingerprint: strings.Repeat("3", 64), EffectiveConfigFingerprint: strings.Repeat("4", 64)}}
 			store := &selectedInterruptionExecutionStore{}
 			container := selectedContractForkLocalRuntimeContainer{
 				proof: SelectedContractForkLocalRuntimeContainer{ForkPoint: runfork.RunForkPoint{Kind: cell.kind}},
 				ports: &selectedContractExecutionPorts{runtimeExecution: store},
+				req:   publishSelectedContractForkEventsRequest{Prepared: prepared}, authority: authority,
+				preparation: runfork.SelectedForkPreparationBinding{SelectedForkPreparation: prepared.evidence(), ForkRunID: identity.RunID},
 			}
-			err := container.Fail(context.Background(), cell.cause)
+			err = container.Fail(context.Background(), cell.cause)
 			if cell.wantFailures == 0 {
 				if !errors.Is(err, worklifetime.ErrRetired) {
 					t.Fatalf("retirement was not retained for recovery: %v", err)

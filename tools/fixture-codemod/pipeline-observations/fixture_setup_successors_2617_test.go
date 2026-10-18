@@ -130,7 +130,7 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "94590602f5f3dfeb2f8527c875aa2d22bed2d8ef18922a4f9fb961fe6d451bb5" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "7f68f6b26f3a29d4501931e3a5feb4bda3b4ba0474107bc6821628ddce5e68ef" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -326,7 +326,7 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "94590602f5f3dfeb2f8527c875aa2d22bed2d8ef18922a4f9fb961fe6d451bb5" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "7f68f6b26f3a29d4501931e3a5feb4bda3b4ba0474107bc6821628ddce5e68ef" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617

@@ -90,7 +90,7 @@ func preparedForkCustodyControls(t *testing.T, process startupownership.ProcessC
 		t.Fatal(err)
 	}
 	probe := &preparedForkCustodyProbe{t: t, process: original}
-	var events []runfork.RunForkSelectedContractSourceEvent
+	var events startupownership.PreparedForkSourceEventsResult
 	var activation runfork.RunForkActivation
 	constructors := map[string]func(context.Context) (startupownership.PreparedProcessOperation, error){
 		"source": func(ctx context.Context) (startupownership.PreparedProcessOperation, error) {
@@ -134,7 +134,7 @@ func preparedForkCustodyControls(t *testing.T, process startupownership.ProcessC
 			if err != nil || probe.calls != before+1 {
 				t.Fatalf("exact %s custody failed: calls=%d err=%v", name, probe.calls-before, err)
 			}
-			if name == "source" && !reflect.DeepEqual(events, []runfork.RunForkSelectedContractSourceEvent{{}}) || name == "activation" && !activation.Activated {
+			if name == "source" && !reflect.DeepEqual(events.Events, []runfork.RunForkSelectedContractSourceEvent{{}}) || name == "activation" && !activation.Activated {
 				t.Fatalf("exact %s result changed", name)
 			}
 			probe.failure = errors.New("exact native committed-result error")
@@ -145,10 +145,52 @@ func preparedForkCustodyControls(t *testing.T, process startupownership.ProcessC
 			if !errors.Is(err, probe.failure) || probe.calls != before+2 {
 				t.Fatalf("%s changed semantic error/result: %v", name, err)
 			}
+			if name == "source" {
+				_, native := events.Outcome(err)
+				if native != probe.failure {
+					t.Fatal("source command erased its exact semantic result")
+				}
+				joined := errors.Join(err, context.Canceled)
+				if _, preserved := events.Outcome(joined); preserved != joined {
+					t.Fatal("source result hid independent cancellation or possession failure")
+				}
+			}
 			probe.failure = nil
 			if startupownership.PreparedOperationEntered(probe.retained, startupownership.PreparedForkSourceEvents, probe) {
 				t.Fatal("completed preparation scope escaped its synchronous command")
 			}
+		}
+		if admitted {
+			saved := binding
+			for _, field := range []string{"process", "owner", "boot", "generation", "fork"} {
+				binding = saved
+				switch field {
+				case "process":
+					binding.Coordinates.ProcessAuthorityID = uuid.NewString()
+				case "owner":
+					binding.Coordinates.ProcessOwnerID = "foreign-owner"
+				case "boot":
+					binding.Coordinates.ProcessBootID = uuid.NewString()
+				case "generation":
+					binding.ProcessGeneration++
+				case "fork":
+					binding.ForkRunID = uuid.NewString()
+				}
+				for name, construct := range constructors {
+					if field == "fork" && (name == "construction_fail" || name == "construction_discard") {
+						continue // The native construction owner validates these run-only commands.
+					}
+					before := probe.calls
+					operation, err := construct(ctx)
+					if err == nil {
+						err = process.RunPreparedOperation(ctx, operation)
+					}
+					if err == nil || probe.calls != before {
+						t.Fatalf("crossed %s/%s reached its semantic owner: %v", name, field, err)
+					}
+				}
+			}
+			binding = saved
 		}
 	}
 }

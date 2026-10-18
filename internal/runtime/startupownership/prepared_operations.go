@@ -214,9 +214,31 @@ func validatePreparedSelectedExecution(binding runfork.SelectedForkPreparationBi
 	return nil
 }
 
+type PreparedForkSourceEventsResult struct {
+	Events  []runfork.RunForkSelectedContractSourceEvent
+	failure *preparedSourceEventsFailure
+}
+
+type preparedSourceEventsFailure struct{ cause error }
+
+func (e *preparedSourceEventsFailure) Error() string { return e.cause.Error() }
+func (e *preparedSourceEventsFailure) Unwrap() error { return e.cause }
+
+// Preserve the exact native outcome only across this command's own transparent
+// process join. A second error (including a possession failure) stays joined.
+func (r PreparedForkSourceEventsResult) Outcome(err error) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok && r.failure != nil {
+		causes := joined.Unwrap()
+		if len(causes) == 1 && causes[0] == r.failure {
+			err = r.failure.cause
+		}
+	}
+	return r.Events, err
+}
+
 func PreparedForkSourceEventsOperation(ctx context.Context, process ProcessCapability, store interface {
 	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error)
-}, binding runfork.SelectedForkPreparationBinding, authority effects.Authority, eventIDs []string, carriage semanticview.OriginalLoopCarriage, result *[]runfork.RunForkSelectedContractSourceEvent) (PreparedProcessOperation, error) {
+}, binding runfork.SelectedForkPreparationBinding, authority effects.Authority, eventIDs []string, carriage semanticview.OriginalLoopCarriage, result *PreparedForkSourceEventsResult) (PreparedProcessOperation, error) {
 	op, p, err := preparedSelectedForkOperation(ctx, process, store, binding)
 	if err != nil {
 		return PreparedProcessOperation{}, err
@@ -242,8 +264,13 @@ func PreparedForkSourceEventsOperation(ctx context.Context, process ProcessCapab
 			return err
 		}
 		var err error
-		*result, err = store.LoadRunForkSelectedContractSourceEvents(owned, binding.SourceRunID, binding.ForkRunID, ids, carriage)
-		return err
+		result.Events, err = store.LoadRunForkSelectedContractSourceEvents(owned, binding.SourceRunID, binding.ForkRunID, ids, carriage)
+		if err == nil {
+			result.failure = nil
+			return nil
+		}
+		result.failure = &preparedSourceEventsFailure{cause: err}
+		return result.failure
 	}
 	return op, nil
 }

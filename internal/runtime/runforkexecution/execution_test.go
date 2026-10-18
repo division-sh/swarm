@@ -2844,9 +2844,8 @@ func (selectedForkStartupVisibleSurfaceProbe) ProbeStartupVisibleToolSurface(ctx
 	return response, runtimellm.ValidateCLIProviderCapabilitySurface(observed, response)
 }
 
-func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, selected *store.PostgresStore, process runtimestartupownership.ProcessCapability) selectedContractForkLocalRuntimeContainer {
+func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.DB, selected *store.PostgresStore, process runtimestartupownership.ProcessCapability) selectedContractForkLocalRuntimeContainer {
 	t.Helper()
-	db := storetest.Database(selected)
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -2935,7 +2934,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	if bindErr != nil {
 		t.Fatal(bindErr)
 	}
-	container := buildSelectedForkProofContainer(t, ctx, selected, process)
+	container := buildSelectedForkProofContainer(t, ctx, db, selected, process)
 	proof := container.Proof()
 	var requests atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -3000,7 +2999,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 		AgentIdentity: actorIdentity, SessionID: sessionID, Memory: agentmemory.Plan{},
 		FlowInstance: actorIdentity.FlowInstance(),
 	})
-	effectCtx = runtimeeffects.WithController(effectCtx, liveTestEffectController(storetest.AdmitPostgresRuntimeStore(t, db)))
+	effectCtx = runtimeeffects.WithController(effectCtx, liveTestEffectController(selected))
 	effectCtx = managedexecution.WithAdmission(effectCtx, container.admission)
 	effectCtx = managedcapabilities.WithContext(effectCtx, surface)
 	for _, definition := range executor.ToolDefinitionsForActorInContext(effectCtx, actor) {

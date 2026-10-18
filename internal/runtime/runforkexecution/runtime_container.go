@@ -307,12 +307,13 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		}
 	}
 	process := req.Prepared.processOwner
-	var sourceEvents []runfork.RunForkSelectedContractSourceEvent
-	sourceOperation, err := startupownership.PreparedForkSourceEventsOperation(ctx, process, c.ports.replay, c.preparation, c.authority, req.SourceEvents, req.OriginalLoopCarriage, &sourceEvents)
+	var sourceResult startupownership.PreparedForkSourceEventsResult
+	sourceOperation, err := startupownership.PreparedForkSourceEventsOperation(ctx, process, c.ports.replay, c.preparation, c.authority, req.SourceEvents, req.OriginalLoopCarriage, &sourceResult)
 	if err != nil {
 		return nil, err
 	}
 	err = process.RunPreparedOperation(ctx, sourceOperation)
+	sourceEvents, err := sourceResult.Outcome(err)
 	if err != nil {
 		sourceRunID, forkRunID, committed, ok := isolatedSelectedForkSourceEventsCommit(err)
 		if !ok {
