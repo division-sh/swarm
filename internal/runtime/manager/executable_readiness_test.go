@@ -14,7 +14,9 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -720,7 +722,13 @@ func TestDynamicReadinessRejectsRegisteredStoppedAsProcessReady(t *testing.T) {
 	restartBus := &flowActivationTestBus{}
 	restarted, ctx := newFlowActivationManagerForSource(t, restartBus, instances, semanticview.Wrap(bundle), agents)
 	runCtx, cancelRun := context.WithCancel(ctx)
-	if err := restarted.Run(managedExecutionTestContext(t, runCtx)); err != nil {
+	runCtx = managedExecutionTestContextForCapturedSource(t, runCtx)
+	execution, executionOK := managedexecution.FromContext(runCtx)
+	captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !executionOK || !capturedOK || execution.BundleHash != captured.BundleHash() {
+		t.Fatalf("startup managed execution source differs from captured source: execution=%t/%s captured=%t/%s", executionOK, execution.BundleHash, capturedOK, captured.BundleHash())
+	}
+	if err := restarted.Run(runCtx); err != nil {
 		t.Fatalf("start restarted manager: %v", err)
 	}
 	t.Cleanup(func() {
@@ -764,7 +772,13 @@ func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *t
 	restartBus := &flowActivationTestBus{}
 	restarted, ctx := newFlowActivationManagerForSource(t, restartBus, instances, semanticview.Wrap(bundle), agents)
 	runCtx, cancelRun := context.WithCancel(ctx)
-	if err := restarted.Run(managedExecutionTestContext(t, runCtx)); err != nil {
+	runCtx = managedExecutionTestContextForCapturedSource(t, runCtx)
+	execution, executionOK := managedexecution.FromContext(runCtx)
+	captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !executionOK || !capturedOK || execution.BundleHash != captured.BundleHash() {
+		t.Fatalf("startup managed execution source differs from captured source: execution=%t/%s captured=%t/%s", executionOK, execution.BundleHash, capturedOK, captured.BundleHash())
+	}
+	if err := restarted.Run(runCtx); err != nil {
 		t.Fatalf("start restarted manager: %v", err)
 	}
 	t.Cleanup(func() {
@@ -842,7 +856,13 @@ func TestSourceScopedStartupPreparesEverySiblingBeforeFirstPendingFinalizer(t *t
 		t.Fatalf("canonicalize sibling startup topology: %v", err)
 	}
 	runCtx, cancelRun := context.WithCancel(ctx)
-	if err := restarted.Run(managedExecutionTestContext(t, runCtx)); err != nil {
+	runCtx = managedExecutionTestContextForCapturedSource(t, runCtx)
+	execution, executionOK := managedexecution.FromContext(runCtx)
+	captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !executionOK || !capturedOK || execution.BundleHash != captured.BundleHash() {
+		t.Fatalf("startup managed execution source differs from captured source: execution=%t/%s captured=%t/%s", executionOK, execution.BundleHash, capturedOK, captured.BundleHash())
+	}
+	if err := restarted.Run(runCtx); err != nil {
 		cancelRun()
 		t.Fatalf("start sibling topology manager: %v", err)
 	}
