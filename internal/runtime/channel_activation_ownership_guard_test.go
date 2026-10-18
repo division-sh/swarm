@@ -28,6 +28,7 @@ func TestChannelActivationExecutableReaderCensus(t *testing.T) {
 		"internal/runtime/publicingress/readiness.go",
 		"internal/runtime/publicingress/registration.go",
 		"internal/runtime/runtime.go",
+		"internal/runtime/standing_ingress_registration.go",
 		"internal/runtime/tools/channel_runtime.go",
 		"internal/runtime/workflow_validation.go",
 		"internal/serveapp/channel_onboarding.go",
