@@ -26,6 +26,7 @@ type activityGrantHistoryConnector struct {
 	cohortFault    string
 	cohortReads    int
 	installedFault string
+	permanentFault string
 }
 
 func (c *activityGrantHistoryConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -46,6 +47,10 @@ func (c *activityGrantHistoryConn) BeginTx(ctx context.Context, options driver.T
 }
 
 func (c *activityGrantHistoryConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	permanent := permanentForkEvidenceQuery(query) && c.control.permanentFault != ""
+	if permanent && c.control.permanentFault == "query_error" {
+		return nil, errSelectedGrantHistoryRead
+	}
 	closed := strings.Contains(query, "AS history_max_generation")
 	installed := strings.Contains(query, "FROM activity_attempts") && strings.HasSuffix(query, " ORDER BY request_event_id")
 	if (closed || installed) && c.control.installedFault == "query_error" {
@@ -64,6 +69,9 @@ func (c *activityGrantHistoryConn) QueryContext(ctx context.Context, query strin
 	rows, err := c.pipelineCrashConn.QueryContext(ctx, query, args)
 	if err != nil {
 		return nil, err
+	}
+	if permanent {
+		return &permanentForkEvidenceRows{Rows: rows, fault: c.control.permanentFault, query: query}, nil
 	}
 	if closed || installed {
 		return &selectedInstalledHistoryRows{Rows: rows, fault: c.control.installedFault, closed: closed}, nil
@@ -205,6 +213,7 @@ func TestActivityExecutionGrantReadUsesExactHistoricalVersionBothStores(t *testi
 				t.Fatalf("historical reads changed durable rows: %v", err)
 			}
 			proveRetiredSelectedGrantHistory(t, fixture, process, control)
+			proveClosedSelectedPermanentForkCohort(t, backend)
 		})
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -295,12 +296,13 @@ func TestTransferredJoinOccurrenceEvidenceBindsPublicationAndOrdinaryFrame(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	ordinary, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
-		Facts: occurrenceEventFacts(source.Command, source.Publication.EventID, source.Command.Due.Absolute, payload),
-		RunID: source.Command.RunID,
-	})
-	if err != nil {
-		t.Fatal(err)
+	facts := occurrenceEventFacts(source.Command, source.Publication.EventID, source.Command.Due.Absolute, payload)
+	ordinary := eventtest.RuntimeControlWithRoutingSource(facts.ID, facts.Type, facts.Producer.ID, facts.TaskID,
+		facts.Payload, facts.ChainDepth, source.Command.RunID, "", facts.Envelope, facts.RoutingSource, facts.CreatedAt)
+	ordinary = eventtest.InExecutionMode(ordinary, facts.ExecutionMode)
+	if !reflect.DeepEqual(publishedOccurrenceTestFacts(ordinary), facts) || ordinary.RunID() != source.Command.RunID ||
+		ordinary.ParentEventID() != "" || ordinary.AdmissionClass() != original.AdmissionClass() {
+		t.Fatal("ordinary occurrence fixture changed retained facts or admission class")
 	}
 	if !reflect.DeepEqual(ordinary.Envelope(), original.Envelope()) || !reflect.DeepEqual(ordinary.Payload(), original.Payload()) {
 		t.Fatal("transferred event changed ordinary occurrence envelope or numeric payload projection")
