@@ -105,7 +105,7 @@ func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
 			liveAuthority.BudgetScopes = []runtimeeffects.BudgetAdmissionScope{{Kind: "system", CapUSD: 1}}
 			liveCtx := fixture.normal.contextFor(liveAuthority)
 			// Budget accounting compares separate work, not a mode change within one turn.
-			liveOrigin := claimCompletionOriginForTest(t, testAuthorActivityContext(), fixture.normal.store, liveAuthority, time.Now().UTC())
+			liveOrigin := claimCompletionOriginForTest(t, liveCtx, fixture.normal.store, liveAuthority, time.Now().UTC())
 			if liveOrigin.Same(fixture.normal.origin) {
 				t.Fatal("mock and live budget probes reused one logical delivery")
 			}

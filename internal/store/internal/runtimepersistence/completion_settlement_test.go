@@ -52,6 +52,7 @@ type completionSettlementFixture struct {
 	authority   runtimeeffects.Authority
 	origin      runtimedelivery.Claim
 	context     context.Context
+	original    context.Context
 	sessionID   string
 	agentID     string
 	leaseHolder string
@@ -1561,7 +1562,7 @@ func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettl
 		completionCtx = runtimeeffects.WithSessionGrant(completionCtx, runtimeeffects.SessionGrant{SessionID: sessionID, GrantID: grantID, LockOwner: leaseHolder})
 	}
 	return completionSettlementFixture{
-		store: store, lifecycle: agentfixture.Lifecycle(t, store), agentOwner: t, db: db, sqlite: sqlite, authority: authority, origin: origin, context: completionCtx,
+		store: store, lifecycle: agentfixture.Lifecycle(t, store), agentOwner: t, db: db, sqlite: sqlite, authority: authority, origin: origin, context: completionCtx, original: ctx,
 		sessionID: sessionID, agentID: agentID, leaseHolder: leaseHolder, grantID: grantID,
 	}
 }
@@ -1589,7 +1590,7 @@ func claimCompletionOriginEventForTest(t testing.TB, ctx context.Context, store 
 }
 
 func (f completionSettlementFixture) contextFor(authority runtimeeffects.Authority) context.Context {
-	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), newCompletionControllerForTest(f.store))
+	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(f.original, authority), newCompletionControllerForTest(f.store))
 	if authority.Target.Memory.Enabled {
 		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{SessionID: f.sessionID, GrantID: f.grantID, LockOwner: f.leaseHolder})
 	}
