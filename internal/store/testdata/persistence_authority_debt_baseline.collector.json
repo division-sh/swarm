@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "collector": "b37781f671f13fbf2995ddcb94b747b8fdd89cdf1c28ef5f06920ad5091a3e8b",
+  "collector": "a696fe4827d211421982bc2e8e512f69226bfdf492dc47622a87c0fd3c8dce0f",
   "baseline_sha256": "c7667aea0d357f97492c1dd5b07dddf4fc38f86b298dc8af5d6e1658c8e145be",
   "predecessor": "b42ea974646e7b666459091174645baa501d91da16871813568db23858def7b7"
 }

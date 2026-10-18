@@ -195,7 +195,7 @@ func TestPersistenceAuthorityDebtNativeEntryCatchUpForwardAndForeignProvenance(t
 			t.Fatal(err)
 		}
 		if err := debtValidateCollectorIdentity(prior.Collector, head.Collector, prior, head, "", proof); err != nil {
-			t.Fatalf("exact native-entry forward input refused: %s: %v", input[0], err)
+			t.Fatalf("exact native-entry forward input refused: %s: %v; predecessor comparison: %v", input[0], err, debtCatchUpNativeEntryPredecessors(root, proof.Actual, head.Sites))
 		}
 		proveNativeEntryForeignProvenance(t, prior, head, proof)
 	}
