@@ -44,7 +44,7 @@ func privateDescriptor(file *os.File, directory bool) error {
 	if directory {
 		want = unix.S_IFDIR
 	}
-	if stat.Mode&unix.S_IFMT != want || stat.Mode&0o077 != 0 || stat.Uid != uint32(os.Geteuid()) || !directory && stat.Nlink != 1 {
+	if uint32(stat.Mode)&unix.S_IFMT != want || stat.Mode&0o077 != 0 || stat.Uid != uint32(os.Geteuid()) || !directory && stat.Nlink != 1 {
 		return errSessionProtection
 	}
 	return nil
