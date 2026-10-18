@@ -60,7 +60,13 @@ func RequireChosenInputDraftTx(ctx context.Context, tx *sql.Tx, action operatorc
 	if tx == nil || at.IsZero() {
 		return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, fmt.Errorf("draft choice is incomplete")
 	}
+	var parent actionParent
 	if lock {
+		var err error
+		parent, err = lockActionParentTx(ctx, tx, action.ActionFact, postgres)
+		if err != nil {
+			return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, fmt.Errorf("draft choice is no longer current: %w", err)
+		}
 		if _, _, err := LockCurrentPrincipalTx(ctx, tx, postgres); err != nil {
 			return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, err
 		}
@@ -75,7 +81,7 @@ func RequireChosenInputDraftTx(ctx context.Context, tx *sql.Tx, action operatorc
 	var resolved render.ResolvedAction
 	var found bool
 	if lock {
-		resolved, found, err = ResolveActionFactForMutationTx(ctx, tx, action.ActionFact, postgres)
+		resolved, found, err = parent.resolve(ctx, tx, action.ActionFact, postgres)
 	} else {
 		resolved, found, err = ResolveActionFactTx(ctx, tx, action.ActionFact, postgres)
 	}
@@ -158,7 +164,13 @@ func RequireCurrentSkipActionTx(ctx context.Context, tx *sql.Tx, action operator
 	if tx == nil || at.IsZero() {
 		return render.ResolvedAction{}, decisioncard.InputFieldProgress{}, decisioncard.InputDraft{}, fmt.Errorf("channel skip requires exact action time")
 	}
+	var parent actionParent
 	if lock {
+		var err error
+		parent, err = lockActionParentTx(ctx, tx, action.ActionFact, postgres)
+		if err != nil {
+			return render.ResolvedAction{}, decisioncard.InputFieldProgress{}, decisioncard.InputDraft{}, err
+		}
 		if _, _, err := LockCurrentPrincipalTx(ctx, tx, postgres); err != nil {
 			return render.ResolvedAction{}, decisioncard.InputFieldProgress{}, decisioncard.InputDraft{}, err
 		}
@@ -173,7 +185,7 @@ func RequireCurrentSkipActionTx(ctx context.Context, tx *sql.Tx, action operator
 	var resolved render.ResolvedAction
 	var found bool
 	if lock {
-		resolved, found, err = ResolveActionFactForMutationTx(ctx, tx, action.ActionFact, postgres)
+		resolved, found, err = parent.resolve(ctx, tx, action.ActionFact, postgres)
 	} else {
 		resolved, found, err = ResolveActionFactTx(ctx, tx, action.ActionFact, postgres)
 	}
