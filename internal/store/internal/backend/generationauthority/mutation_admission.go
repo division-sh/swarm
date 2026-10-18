@@ -12,6 +12,18 @@ import (
 )
 
 type nativeMutationAdmissionKey struct{}
+type mutationAdmissionObservationKey struct{}
+
+// AdmissionObservation reports entrance into the native fence, including an
+// attempt that subsequently fails cleanup. It grants no mutation or retry right.
+type AdmissionObservation struct{ attempts atomic.Uint64 }
+
+func ObserveMutationAdmission(ctx context.Context) (context.Context, *AdmissionObservation) {
+	observation := &AdmissionObservation{}
+	return context.WithValue(ctx, mutationAdmissionObservationKey{}, observation), observation
+}
+
+func (o *AdmissionObservation) Attempts() uint64 { return o.attempts.Load() }
 
 type nativeMutationAdmission struct {
 	tx       *sql.Tx
@@ -35,6 +47,9 @@ func AdmitMutationTx(ctx context.Context, tx *sql.Tx, sqlite bool) (context.Cont
 	original, err := runtimeownership.CaptureMutationAuthority(ctx)
 	if err != nil {
 		return nil, nil, err
+	}
+	if observation, ok := ctx.Value(mutationAdmissionObservationKey{}).(*AdmissionObservation); ok {
+		observation.attempts.Add(1)
 	}
 	if err := RequireCurrentRuntimeMutationTx(ctx, tx, original, sqlite); err != nil {
 		return nil, nil, err

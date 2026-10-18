@@ -66,6 +66,11 @@ func (b *Backend) RunTransactionWithOptionsOutcome(ctx context.Context, opts *sq
 
 // RunAdmittedTransactionOutcome is the runtime-write entrance. Construction and
 // closed native control owners retain their distinct RunTransaction owner.
+func (b *Backend) RunAdmittedTransaction(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
+	_, err := b.RunAdmittedTransactionOutcome(ctx, operation)
+	return err
+}
+
 func (b *Backend) RunAdmittedTransactionOutcome(ctx context.Context, operation func(context.Context, *sql.Tx) error) (bool, error) {
 	return b.RunAdmittedTransactionWithOptionsOutcome(ctx, nil, operation)
 }

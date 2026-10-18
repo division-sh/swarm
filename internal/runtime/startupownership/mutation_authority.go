@@ -24,6 +24,34 @@ type MutationAuthority struct {
 	evidence GrantEvidence
 }
 
+// WithProcessMutationAuthority is for process composition before runtime grant
+// issuance. It cannot replace an operation's existing process or widen a grant.
+func WithProcessMutationAuthority(ctx context.Context, process ProcessCapability) (context.Context, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	owner, ok := process.(*processCapability)
+	if !ok || owner == nil {
+		return context.WithValue(ctx, mutationAuthorityContextKey{}, refusedMutationAuthority{ErrMutationAuthorityMissing}), ErrMutationAuthorityMissing
+	}
+	if HasMutationAuthority(ctx) {
+		original, err := CaptureMutationAuthority(ctx)
+		if err != nil {
+			return ctx, err
+		}
+		if original.owner != owner {
+			err := errors.New("process mutation cannot replace its original owner")
+			return context.WithValue(ctx, mutationAuthorityContextKey{}, refusedMutationAuthority{err}), err
+		}
+		return ctx, nil
+	}
+	ctx = owner.processMutationContext(ctx)
+	if _, err := owner.Evidence(); err != nil {
+		return ctx, err
+	}
+	return ctx, nil
+}
+
 // WithRuntimeMutationAuthority binds the actual issuing owner, not copied grant
 // coordinates. An already-bound operation cannot change its original grant.
 func WithRuntimeMutationAuthority(ctx context.Context, grant GenerationGrant) (context.Context, error) {
