@@ -25,6 +25,9 @@ type sqliteNormalRunCompletionFixture struct {
 func seedSQLiteNormalRunCompletionFixture(t *testing.T, store *SQLiteRuntimeStore, state string) sqliteNormalRunCompletionFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, store, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	now := time.Now().UTC()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
