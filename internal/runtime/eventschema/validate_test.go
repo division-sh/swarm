@@ -71,17 +71,27 @@ func TestNormalizeOptionalFieldNullsRecursivelyLowersOnlyOptionalObjectFields(t 
 
 func TestNormalizeOptionalFieldNullsRejectsRequiredAndCollectionNulls(t *testing.T) {
 	cases := map[string]struct {
-		schema  map[string]any
-		payload map[string]any
-		want    string
+		schema     map[string]any
+		payload    map[string]any
+		want       string
+		path       string
+		constraint string
 	}{
 		"required": {
 			schema:  map[string]any{"type": "object", "required": []any{"value"}, "properties": map[string]any{"value": map[string]any{"type": "string"}}},
-			payload: map[string]any{"value": nil}, want: "required and cannot be null",
+			payload: map[string]any{"value": nil}, want: "required and cannot be null", path: "$.value", constraint: "required",
 		},
 		"list item": {
 			schema:  map[string]any{"type": "object", "required": []any{"values"}, "properties": map[string]any{"values": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}},
-			payload: map[string]any{"values": []any{nil}}, want: "$ .values[0]",
+			payload: map[string]any{"values": []any{nil}}, want: "$ .values[0]", path: "$.values[0]", constraint: "type",
+		},
+		"map value": {
+			schema:  map[string]any{"type": "object", "properties": map[string]any{"values": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}},
+			payload: map[string]any{"values": map[string]any{"one": nil}}, want: "null is not a declared optional field", path: "$.values.one", constraint: "additionalProperties",
+		},
+		"undeclared member": {
+			schema:  map[string]any{"type": "object", "additionalProperties": false},
+			payload: map[string]any{"extra": nil}, want: "null is not a declared optional field", path: "$.extra", constraint: "additionalProperties",
 		},
 	}
 	for name, tc := range cases {
@@ -93,6 +103,10 @@ func TestNormalizeOptionalFieldNullsRejectsRequiredAndCollectionNulls(t *testing
 			needle := strings.ReplaceAll(tc.want, " ", "")
 			if !strings.Contains(strings.ReplaceAll(err.Error(), " ", ""), needle) {
 				t.Fatalf("normalization error = %v, want %q", err, tc.want)
+			}
+			var typed *Violation
+			if !errors.As(err, &typed) || typed.Path != tc.path || typed.Constraint != tc.constraint || typed.Actual != "null" {
+				t.Fatalf("null refusal lost typed schema evidence: error=%v violation=%+v", err, typed)
 			}
 		})
 	}
