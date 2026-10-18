@@ -11,8 +11,8 @@ import (
 func TestProjectRunOperationalStatus_UsesDeliveryLifecycleWhenRunIsOperationallyStalled(t *testing.T) {
 	report := operatorread.RunDebugReport{
 		OperationalFacts: idleRunOperationalFactsForTest(),
-		RunTableStatus: "running",
-		LastEventAt:    time.Unix(1700000000, 0).UTC(),
+		RunTableStatus:   "running",
+		LastEventAt:      time.Unix(1700000000, 0).UTC(),
 		Deliveries: []operatorread.RunDebugDeliveryCount{
 			{SubscriberID: "agent-1", Status: "delivered", Count: 2},
 			{SubscriberID: "agent-2", Status: "failed", Count: 1},
@@ -34,8 +34,8 @@ func TestProjectRunOperationalStatus_UsesDeliveryLifecycleWhenRunIsOperationally
 func TestProjectRunOperationalStatus_DoesNotInferDomainSpecificObligations(t *testing.T) {
 	report := operatorread.RunDebugReport{
 		OperationalFacts: idleRunOperationalFactsForTest(),
-		RunTableStatus: "running",
-		LastEventAt:    time.Unix(1700000000, 0).UTC(),
+		RunTableStatus:   "running",
+		LastEventAt:      time.Unix(1700000000, 0).UTC(),
 		EventCounts: []operatorread.RunDebugEventCount{
 			{EventName: "scoring/scoring.requested", Count: 1},
 		},
@@ -59,8 +59,8 @@ func TestProjectRunOperationalStatus_DoesNotInferDomainSpecificObligations(t *te
 func TestProjectRunOperationalStatus_TreatsScopedShortlistAsTerminalScoringOutcome(t *testing.T) {
 	report := operatorread.RunDebugReport{
 		OperationalFacts: idleRunOperationalFactsForTest(),
-		RunTableStatus: "running",
-		LastEventAt:    time.Unix(1700000000, 0).UTC(),
+		RunTableStatus:   "running",
+		LastEventAt:      time.Unix(1700000000, 0).UTC(),
 		EventCounts: []operatorread.RunDebugEventCount{
 			{EventName: "scoring/scoring.requested", Count: 1},
 			{EventName: "scoring/vertical.shortlisted", Count: 1},
