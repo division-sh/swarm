@@ -733,6 +733,7 @@ func TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCo
 	binding := lifecycleProbeProcessBinding()
 	binding.BundleHash = coordinate.BundleHash
 	admission := managerTestTopologyAdmissionForSource(t, manager.semanticSource)
+	successor := sourceSetSuccessorProcessBinding(binding)
 	record := PersistedAgent{
 		Config: managerTestAgentConfig(models.AgentConfig{
 			ExecutionMode: "live", ID: "agent-lifecycle-test", Role: "worker", Type: "sonnet", Model: "regular", FlowID: semanticview.RootExecutionFlowID(manager.semanticSource),
@@ -764,7 +765,7 @@ func TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCo
 	second.opMu.Lock()
 	prepared := &PreparedDurableTopologySourceSetRebind{
 		manager: manager, admission: admission, coordinate: coordinate,
-		currentBinding: binding, currentIsSuccessor: true,
+		currentBinding: binding, currentIsSuccessor: false,
 		plan: runtimeagenttopology.SourceSetPlan{Revision: admission.Authority.Static.SourceSetRevision},
 		bindings: []durableTopologySourceSetBinding{
 			{identity: identity, identityKey: "first", cell: first, epoch: first.view.RuntimeEpoch, generation: first.view.Generation, phase: first.view.Phase, runMode: first.view.RunMode, revision: revision, currentTopology: admission, targetTopology: admission, currentBinding: binding},
@@ -773,9 +774,12 @@ func TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCo
 		locked: []*agentLifecycleCell{first, second},
 	}
 	injected := errors.New("injected second lifecycle commit failure")
-	store := &failSecondStaticTopologyRebindStore{sourceSetLifecycleCommitProbe: &sourceSetLifecycleCommitProbe{lifecyclePersistenceProbe: rowOwner, binding: binding}, err: injected}
+	store := &failSecondStaticTopologyRebindStore{sourceSetLifecycleCommitProbe: &sourceSetLifecycleCommitProbe{lifecyclePersistenceProbe: rowOwner, binding: successor}, err: injected}
 	if err := prepared.Commit(context.Background(), store, "88888888-8888-4888-8888-888888888888"); !errors.Is(err, injected) {
 		t.Fatalf("source-set rebind error = %v, want injected second commit failure", err)
+	}
+	if store.calls != 2 {
+		t.Fatalf("source-set lifecycle commit calls = %d, want 2", store.calls)
 	}
 	manager.lifecycle.mu.Lock()
 	defer manager.lifecycle.mu.Unlock()
