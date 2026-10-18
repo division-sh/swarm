@@ -52,6 +52,7 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 			for _, invalid := range []struct{ id, body string }{
 				{"missing-user", `{"delivery_id":"missing-user"}`},
 				{"wrong-user-type", `{"delivery_id":"wrong-user-type","user_id":7}`},
+				{"null-user", `{"delivery_id":"null-user","user_id":null}`},
 			} {
 				code, response := a9PostSignedRawIngress(t, endpoint, secret, invalid.body)
 				t.Logf("typed invalid id=%s status=%d body=%s", invalid.id, code, response)
