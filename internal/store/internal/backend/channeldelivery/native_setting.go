@@ -108,9 +108,11 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 			WHERE operation_id=(SELECT operation_id FROM connected_channel_activations WHERE activation_id=$1::uuid) FOR UPDATE`
 	}
 	var parentID string
-	if err := tx.QueryRowContext(ctx, query, admission.ActivationID).Scan(&parentID); errors.Is(err, sql.ErrNoRows) {
-		return channelnative.Setting{}, false, fmt.Errorf("native inbox activation is not exact-current")
-	} else if err != nil {
+	err := tx.QueryRowContext(ctx, query, admission.ActivationID).Scan(&parentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = fmt.Errorf("native inbox activation is not exact-current")
+	}
+	if err != nil {
 		return channelnative.Setting{}, false, err
 	}
 	if err := LockPrincipalTx(ctx, tx, admission.PrincipalID, postgres); err != nil {
@@ -139,15 +141,16 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	err = tx.QueryRowContext(ctx, query, admission.Provider, admission.ResourceSlotID, admission.ConversationReference, setting.ScopeKind, setting.MemberReference).
 		Scan(&setting.SettingID, &stored.principal, &stored.pack, &stored.version, &stored.manifest,
 			&stored.contract, &stored.command, &stored.commands, &setting.Generation, &setting.State, &setting.InstallOperationID, &readbackHash)
-	if errors.Is(err, sql.ErrNoRows) {
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
 		setting, err = createNativeInboxSettingTx(ctx, tx, admission, setting, postgres)
 		if err != nil {
 			return channelnative.Setting{}, false, err
 		}
 		changed = true
-	} else if err != nil {
+	case err != nil:
 		return channelnative.Setting{}, false, err
-	} else {
+	default:
 		setting.EntryCommand, err = channelnative.EntryCommand(setting.SettingID, setting.Generation)
 		if err != nil {
 			return channelnative.Setting{}, false, err
