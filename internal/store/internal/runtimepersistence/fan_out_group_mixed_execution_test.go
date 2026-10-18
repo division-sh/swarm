@@ -589,7 +589,14 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 		WorkOwner:         f.occurrence, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, f.raw.(manager.ManagerPersistence))
 	f.bus.SetCommittedAgentReadinessFinalizer(bus.CommittedAgentReadinessFinalizerFunc(am.FinalizeCommittedAgentReadiness))
-	coordinate := agenttopology.SourceCoordinate{BundleHash: f.seed.bundleHash}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired, err := am.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
 		t.Fatal(err)
