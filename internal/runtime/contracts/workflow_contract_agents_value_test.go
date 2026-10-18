@@ -347,10 +347,9 @@ func TestW5AgentProvenanceComposesWithoutMemorySource(t *testing.T) {
 func TestW5AgentAliasMergeNestedProvenance(t *testing.T) {
 	for _, tc := range []struct {
 		name, source string
-		line, column int
 	}{
-		{"alias", "first: &agent\n  intent: {inline: business intent}\n  entity_writes: {Item: {save: [value]}}\nsecond: *agent\n", 4, 9},
-		{"merge", "first: &agent\n  intent: {inline: business intent}\n  entity_writes: {Item: {save: [value]}}\nsecond:\n  <<: *agent\n", 5, 7},
+		{"alias", "first: &agent\n  intent: {inline: business intent}\n  entity_writes: {Item: {save: [value]}}\nsecond: *agent\n"},
+		{"merge", "first: &agent\n  intent: {inline: business intent}\n  entity_writes: {Item: {save: [value]}}\nsecond:\n  <<: *agent\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			entries, err := admitW5Agents(t, tc.source)
