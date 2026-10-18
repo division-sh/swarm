@@ -151,6 +151,22 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 		t.Fatal("embedded-spec deletion changed the finite recipe population")
 	}
 	restored := append([]recipe(nil), rows...)
+	completionSuccessors := 0
+	for i, row := range rows {
+		if row.Function != "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores" {
+			continue
+		}
+		actual := selectedCausalObservationBody(t, row.File, row.Function)
+		prior, err := capabilityCompletionPredecessor2707(row, actual)
+		if err != nil {
+			t.Fatalf("preserve independently reviewed completion successor: %v", err)
+		}
+		restored[i].Successor = prior
+		completionSuccessors++
+	}
+	if completionSuccessors != 1 {
+		t.Fatalf("completion successors=%d, want the one independently reviewed row", completionSuccessors)
+	}
 	seen := map[string]bool{}
 	priorSuccessors := 0
 	for _, pin := range packet.Rows {

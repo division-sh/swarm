@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/scripts/rewrite-stages-2566/formatproof"
 )
 
 const embeddedSpecFiniteFile = "internal/runtime/conformance/data_text_file_journey_2456_test.go"
@@ -86,6 +87,7 @@ func finiteFixtureRootWithEmbeddedSpecSuccessor(t *testing.T, root string) strin
 	// still checks every member against the unchanged historical ledger.
 	mirror := t.TempDir()
 	writeEmbeddedSpecFiniteEvidence(t, mirror, "finite-fixtures.json", ledger)
+	writeEmbeddedSpecFiniteEvidence(t, mirror, formatproof.Successors, readEmbeddedSpecFiniteEvidence(t, root, formatproof.Successors))
 	for _, c := range p.Changes {
 		body := readEmbeddedSpecFiniteEvidence(t, root, c.File)
 		if c.File == embeddedSpecFiniteFile {
