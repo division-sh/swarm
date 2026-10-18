@@ -31,6 +31,9 @@ import (
 // 39 receipts and every historical Before/After/Mechanical field are retained.
 // #2730/6244831965 appends six mapped setup-chain endpoints, retaining
 // those 46 receipts and every prior Successor.
+// #2730/6246451663 and6246457824 append the 27 mapped fixture endpoints
+// and two exact callback continuations plus the timer-reopen endpoint,
+// retaining all 52 prior receipts and the complete mechanical history.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
@@ -65,18 +68,44 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 		"native-run-setup-family144/internal/store/internal/runtimepersistence/reset_inventory_parity_test.go/TestResetInventoryAndOperationLeaseBothStores",
 		"native-pipeline-source-work-owner/internal/runtime/pipeline/author_activity_external_test_context_test.go/newScopedTestEventBus",
 		"native-conversation-session-owner/internal/runtime/conformance/persisted_surfaces_test.go/TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader",
-		"native-pipeline-delivery-shared-tail-semantic/internal/runtime/pipeline/workflow_timer_attachment_fixture_external_test.go/newTimerReplayAttachmentOwner":
+		"native-pipeline-delivery-shared-tail-semantic/internal/runtime/pipeline/workflow_timer_attachment_fixture_external_test.go/newTimerReplayAttachmentOwner",
+		"native-shared-coordinator-authority/internal/runtime/channel_runtime_supported_surface_test.go/TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedStores",
+		"native-shared-coordinator-authority/internal/runtime/final_flow_instance_authoring_runtime_test.go/TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTemplateInstance",
+		"native-manager-explicit-delivery-configuration/internal/runtime/manager/work_lifetime_test_helpers_test.go/newTestAgentManagerWithOptions",
+		"native-manager-delivery-caller/internal/runtime/manager/delivery_claim_ack_test.go/TestManagerClaimPostcommitErrorConsumesOnlyAcknowledgedClaim",
+		"native-manager-delivery-caller/internal/runtime/manager/receipt_settlement_outcome_test.go/TestWriteReceiptPreservesCommittedSettlementAndContinuation",
+		"native-manager-delivery-caller/internal/runtime/manager/receipt_settlement_outcome_test.go/TestProcessEventDoesNotResettleAcknowledgedReceiptError",
+		"native-manager-delivery-caller/internal/runtime/manager/receipts_test.go/TestProcessEventRenewsExactClaimAroundAgentHandler",
+		"native-manager-delivery-caller/internal/runtime/manager/receipts_test.go/TestProcessEventHeartbeatCoversBlockedOutputAndPreventsReclaim",
+		"native-manager-delivery-caller/internal/runtime/manager/receipts_test.go/TestProcessEventSettlementFailureIsNotReportedAsReplayed",
+		"native-manager-delivery-caller/internal/runtime/manager/receipts_test.go/TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions",
+		"native-manager-delivery-caller/internal/runtime/manager/receipts_test.go/TestWriteReceiptUsesCanonicalHandlerRetryBase",
+		"native-manager-delivery-caller/internal/runtime/manager/receipts_test.go/TestWriteReceipt_ContextCancellationReturnsFailureAndLeavesClaimForLeaseRecovery",
+		"native-manager-delivery-owner/internal/runtime/manager/receipts_test.go/TestWriteReceiptLongRunningClaimUsesExactRenewalTime",
+		"native-manager-delivery-caller/internal/runtime/manager/failure_test.go/TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim",
+		"native-manager-delivery-owner/internal/runtime/manager/failure_test.go/TestProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay",
+		"native-manager-delivery-owner/internal/runtime/manager/execution_projection_test.go/TestRunningManagerDeliveryCarrierDispositionMatrix",
+		"native-run-setup-family144/internal/runtime/budget_recovery_parity_test.go/TestCompletionBudgetRecoveryProjectionParity",
+		"native-run-setup-family144/internal/runtime/manager/delivery_native_selected_external_test.go/openManagerNativeSelectedDelivery",
+		"native-run-setup-family144/internal/runtime/runtime_log_native_external_test.go/nativeRuntimeLogFixture",
+		"native-run-setup-family144/internal/runtime/runtime_shutdown_admission_test.go/TestRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapter",
+		"native-run-setup-family144/internal/runtime/runtime_shutdown_admission_test.go/TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain",
+		"native-run-setup-family144/internal/runtime/runtime_shutdown_admission_test.go/TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress",
+		"native-run-setup-family144/internal/runtime/runtime_shutdown_fan_out_test.go/TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive",
+		"native-run-setup-family144/internal/runtime/runtime_startup_readiness_test.go/newStartupReadinessTestRuntime",
+		"native-run-setup-family144/internal/runtime/workflow_timer_startup_recovery_test.go/TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersOnBothStores",
+		"native-handler-source-coordinator/internal/runtime/pipeline/workflow_timer_replay_selected_store_external_test.go/TestWorkflowTimerCauseReplayReopenAndIsolationBothStores":
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "6808e28b1441525beef44d9f85b6b6996e8af360cdf8e9131b2b5642d532f482" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "72ffda3b4e39eb978c9f082051d8efb6df2b871541bb89c0dcaafc73a6594ddb" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 52 {
+	if len(pins) != 82 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -134,6 +163,9 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			continue
 		}
 		name := row.Function
+		if row.Successor != "" {
+			name = projectionShapeFunction(t, row.Successor).Name.Name
+		}
 		if row.Family == "native-pipeline-delivery-exact-join-semantic" {
 			name = nativePipelineRecipeReplacementName(t, row)
 		}
@@ -157,7 +189,33 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			row.Function != "TestResetInventoryAndOperationLeaseBothStores" &&
 			row.Function != "newScopedTestEventBus" &&
 			row.Function != "TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader" &&
-			row.Function != "newTimerReplayAttachmentOwner" {
+			row.Function != "newTimerReplayAttachmentOwner" &&
+			row.Function != "TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedStores" &&
+			row.Function != "TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTemplateInstance" &&
+			row.Function != "newTestAgentManagerWithOptions" &&
+			row.Function != "TestManagerClaimPostcommitErrorConsumesOnlyAcknowledgedClaim" &&
+			row.Function != "TestWriteReceiptPreservesCommittedSettlementAndContinuation" &&
+			row.Function != "TestProcessEventDoesNotResettleAcknowledgedReceiptError" &&
+			row.Function != "TestProcessEventRenewsExactClaimAroundAgentHandler" &&
+			row.Function != "TestProcessEventHeartbeatCoversBlockedOutputAndPreventsReclaim" &&
+			row.Function != "TestProcessEventSettlementFailureIsNotReportedAsReplayed" &&
+			row.Function != "TestWriteReceipt_LogsRetryingAndExhaustedDeliveryLifecycleTransitions" &&
+			row.Function != "TestWriteReceiptUsesCanonicalHandlerRetryBase" &&
+			row.Function != "TestWriteReceipt_ContextCancellationReturnsFailureAndLeavesClaimForLeaseRecovery" &&
+			row.Function != "TestWriteReceiptLongRunningClaimUsesExactRenewalTime" &&
+			row.Function != "TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim" &&
+			row.Function != "TestProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay" &&
+			row.Function != "TestRunningManagerDeliveryCarrierDispositionMatrix" &&
+			row.Function != "TestCompletionBudgetRecoveryProjectionParity" &&
+			row.Function != "openManagerNativeSelectedDelivery" &&
+			row.Function != "nativeRuntimeLogFixture" &&
+			row.Function != "TestRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapter" &&
+			row.Function != "TestRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrain" &&
+			row.Function != "TestRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngress" &&
+			row.Function != "TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive" &&
+			row.Function != "newStartupReadinessTestRuntime" &&
+			row.Function != "TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersOnBothStores" &&
+			row.Function != "TestWorkflowTimerCauseReplayReopenAndIsolationBothStores" {
 			continue
 		}
 		matched++
@@ -203,13 +261,13 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			}
 		})
 	}
-	if matched != 21 {
-		t.Fatalf("fixture comparator endpoints=%d, want21", matched)
+	if matched != 47 {
+		t.Fatalf("fixture comparator endpoints=%d, want47", matched)
 	}
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "6808e28b1441525beef44d9f85b6b6996e8af360cdf8e9131b2b5642d532f482" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "72ffda3b4e39eb978c9f082051d8efb6df2b871541bb89c0dcaafc73a6594ddb" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -220,7 +278,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 52 {
+	if len(pins) != 82 {
 		t.Fatal("fixture successor row count changed")
 	}
 	prefix, err := json.Marshal(pins[:39])
@@ -230,6 +288,10 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	prefix, err = json.Marshal(pins[:46])
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "b9f77e265a38ef4729f1b497c637271afc580c01908284dccc91e2983a97bf97" {
 		t.Fatal("#2730 changed the immutable 46-receipt setup predecessor")
+	}
+	prefix, err = json.Marshal(pins[:52])
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "4499a4f76b279ef56f5d28abb97f55fac5a29f5719090fcb5345d2e09764e1ed" {
+		t.Fatal("#2730 changed the immutable 52-receipt setup predecessor")
 	}
 	for index, pin := range pins {
 		t.Run(pin.Original.Function, func(t *testing.T) {

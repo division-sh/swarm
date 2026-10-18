@@ -113,7 +113,9 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 
 			bus, err := newRuntimeTestEventBusWithOptions(t, selected, runtimebus.EventBusOptions{
 				MutationContext: func(input context.Context) (context.Context, error) {
-					input = runtimestartupownership.CarryMutationAuthority(input, ctx)
+					if !runtimestartupownership.HasMutationAuthority(input) {
+						input = runtimestartupownership.CarryMutationAuthority(input, ctx)
+					}
 					_, err := runtimestartupownership.CaptureMutationAuthority(input)
 					return input, err
 				},

@@ -88,6 +88,7 @@ func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				selected = reopen()
+				ctx = activityReplayContext(t, selected, source, intent.SourceRunID)
 				replayBus := newActivityJournalProofBus(t, selected, source)
 				unavailableCredentials := &activityReplayCredentialProbe{}
 				replay := newGateRecoveryCoordinator(replayBus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}, Credentials: unavailableCredentials})
