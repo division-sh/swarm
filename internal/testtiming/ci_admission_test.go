@@ -61,7 +61,7 @@ func evaluateCICondition(t *testing.T, expression string, facts map[string]strin
 	expression = regexp.MustCompile(`'([^']*)'`).ReplaceAllStringFunc(expression, func(value string) string {
 		return strconv.Quote(value[1 : len(value)-1])
 	})
-	expression = regexp.MustCompile(`github\.[a-z_.]+|needs\.[a-z_.-]+|always\(\)|success\(\)|cancelled\(\)`).ReplaceAllStringFunc(expression, func(key string) string {
+	expression = regexp.MustCompile(`github\.[a-z_.]+|needs\.[a-z_.-]+|inputs\.[a-z_]+|always\(\)|success\(\)|cancelled\(\)`).ReplaceAllStringFunc(expression, func(key string) string {
 		switch key {
 		case "always()":
 			return "true"
@@ -69,6 +69,13 @@ func evaluateCICondition(t *testing.T, expression string, facts map[string]strin
 			return strconv.FormatBool(needsSucceeded)
 		default:
 			value, ok := facts[key]
+			// The declared setup input is Boolean. Outside dispatch, or when
+			// omitted, its empty/null value has false truthiness and compares
+			// equal to false under GitHub's loose Boolean equality. Unknown
+			// properties still fail closed instead of acquiring a default.
+			if !ok && key == "inputs.workspace_base_setup" {
+				return "false"
+			}
 			if !ok {
 				t.Fatalf("unbound condition fact %s", key)
 			}
@@ -107,11 +114,15 @@ func TestCIConditionStatusFunctions(t *testing.T) {
 func ciEventFacts(event string, draft bool, soak string) map[string]string {
 	return map[string]string{
 		"github.event_name":                   strconv.Quote(event),
+		"github.repository":                   strconv.Quote("division-sh/swarm"),
+		"cancelled()":                         "false",
 		"github.ref":                          strconv.Quote("refs/heads/master"),
 		"github.event.pull_request.draft":     strconv.FormatBool(draft),
 		"needs.ci-plan.outputs.soak_matrix":   strconv.Quote(soak),
 		"needs.required-tests.result":         strconv.Quote("success"),
 		"needs.ci-preflight.result":           strconv.Quote("success"),
+		"needs.ci-plan.result":                strconv.Quote("success"),
+		"needs.ci-tier.result":                strconv.Quote("success"),
 		"needs.ci-plan.outputs.master_replay": strconv.Quote("false"),
 		"needs.ci-plan.outputs.proof_matrix":  strconv.Quote(`{"include":[{"unit":"ordinary"}]}`),
 		"needs.ci-plan.outputs.profile": strconv.Quote(func() string {
@@ -184,6 +195,34 @@ func TestCIDraftAdmissionAndReadyTransitions(t *testing.T) {
 			want := event != "push" || !strings.HasPrefix(job, "unused-")
 			if got := evaluateCICondition(t, workflow.Jobs[job].If, ciEventFacts(event, true, `{"include":[{"unit":"soak"}]}`), true); got != want {
 				t.Errorf("%s/%s admitted=%t want=%t", event, job, got, want)
+			}
+		}
+	}
+	for _, event := range []string{"pull_request", "push", "workflow_dispatch", "schedule"} {
+		for _, input := range []string{"absent", "false", "true"} {
+			for _, repository := range []string{"division-sh/swarm", "fork/swarm"} {
+				facts := ciEventFacts(event, false, `{"include":[{"unit":"soak"}]}`)
+				facts["github.repository"] = strconv.Quote(repository)
+				// Non-dispatch events have no input properties. Dispatch has
+				// typed Boolean inputs; omission preserves the default-off mode.
+				if event == "workflow_dispatch" && input != "absent" {
+					facts["inputs.workspace_base_setup"] = input
+				}
+				setupOnly := event == "workflow_dispatch" && input == "true"
+				for name, job := range workflow.Jobs {
+					got := evaluateCICondition(t, job.If, facts, true)
+					if name == "workspace-base-setup" {
+						if want := setupOnly && repository == "division-sh/swarm"; got != want {
+							t.Fatalf("%s/%s/%s setup admitted=%v want=%v", repository, event, input, got, want)
+						}
+					} else if setupOnly {
+						if got || evaluateCICondition(t, job.If, facts, false) {
+							t.Fatalf("setup dispatch admitted normal job %s", name)
+						}
+					} else if want := evaluateCICondition(t, job.If, ciEventFacts(event, false, `{"include":[{"unit":"soak"}]}`), true); got != want {
+						t.Fatalf("%s/%s/%s changed ordinary %s admission: got=%v want=%v", repository, event, input, name, got, want)
+					}
+				}
 			}
 		}
 	}
