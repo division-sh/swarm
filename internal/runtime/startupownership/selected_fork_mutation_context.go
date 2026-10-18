@@ -30,26 +30,7 @@ func (g *generationGrant) BindSelectedForkMutationContext(ctx context.Context) (
 	if err != nil {
 		return nil, err
 	}
-	binding := evidence.SelectedFork
-	authority, found := effects.AuthorityFromContext(ctx)
-	admission, admitted := managedexecution.FromContext(ctx)
-	if binding == nil || !found || !authority.Valid() || authority.Kind != effects.AuthoritySelectedContractFork ||
-		!admitted || !admission.AuthorizesSelected(binding.ExecutionID, binding.ForkRunID, binding.ExecutionGeneration) ||
-		admission.BundleHash != evidence.BundleHash || admission.ActorCensusFingerprint != binding.ActorCensusFingerprint {
-		return nil, errors.New("selected child context requires its exact issued execution and admission")
-	}
-	selected := authority.SelectedFork
-	if authority.ID != binding.ExecutionID || selected.ExecutionID != binding.ExecutionID ||
-		selected.ForkRunID != binding.ForkRunID || selected.Generation != binding.ExecutionGeneration ||
-		authority.ExecutionOwner != binding.ExecutionOwner || authority.FenceGeneration != binding.FenceGeneration ||
-		selected.AdmissionFingerprint != binding.AdmissionFingerprint || selected.ContainerPlanFingerprint != binding.ContainerPlanFingerprint ||
-		selected.ActorCensusFingerprint != binding.ActorCensusFingerprint || selected.EffectiveConfigFingerprint != binding.EffectiveConfigFingerprint {
-		return nil, errors.New("selected child context contradicts its issued execution")
-	}
-	if runID := correlation.RunIDFromContext(ctx); runID != "" && runID != binding.ForkRunID {
-		return nil, errors.New("selected child context contradicts its admitted run")
-	}
-	if err := validateMutationContext(ctx, evidence); err != nil {
+	if err := requireSelectedChildIdentity(ctx, evidence); err != nil {
 		return nil, err
 	}
 	if err := g.ProveCurrent(ctx); err != nil {
@@ -60,10 +41,33 @@ func (g *generationGrant) BindSelectedForkMutationContext(ctx context.Context) (
 		return nil, err
 	}
 	ctx = correlation.WithRuntimeInstanceID(ctx, evidence.RuntimeInstanceID)
-	ctx = correlation.WithRunID(ctx, binding.ForkRunID)
+	ctx = correlation.WithRunID(ctx, evidence.SelectedFork.ForkRunID)
 	ctx = correlation.WithSourceArtifactFact(ctx, source)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(evidence.RuntimeInstanceID, evidence.BundleHash))
 	return context.WithValue(ctx, mutationAuthorityContextKey{}, g), nil
+}
+
+func requireSelectedChildIdentity(ctx context.Context, evidence GrantEvidence) error {
+	binding := evidence.SelectedFork
+	authority, found := effects.AuthorityFromContext(ctx)
+	admission, admitted := managedexecution.FromContext(ctx)
+	if binding == nil || !found || !authority.Valid() || authority.Kind != effects.AuthoritySelectedContractFork ||
+		!admitted || !admission.AuthorizesSelected(binding.ExecutionID, binding.ForkRunID, binding.ExecutionGeneration) ||
+		admission.BundleHash != evidence.BundleHash || admission.ActorCensusFingerprint != binding.ActorCensusFingerprint {
+		return errors.New("selected child context requires its exact issued execution and admission")
+	}
+	selected := authority.SelectedFork
+	if authority.ID != binding.ExecutionID || selected.ExecutionID != binding.ExecutionID ||
+		selected.ForkRunID != binding.ForkRunID || selected.Generation != binding.ExecutionGeneration ||
+		authority.ExecutionOwner != binding.ExecutionOwner || authority.FenceGeneration != binding.FenceGeneration ||
+		selected.AdmissionFingerprint != binding.AdmissionFingerprint || selected.ContainerPlanFingerprint != binding.ContainerPlanFingerprint ||
+		selected.ActorCensusFingerprint != binding.ActorCensusFingerprint || selected.EffectiveConfigFingerprint != binding.EffectiveConfigFingerprint {
+		return errors.New("selected child context contradicts its issued execution")
+	}
+	if runID := correlation.RunIDFromContext(ctx); runID != "" && runID != binding.ForkRunID {
+		return errors.New("selected child context contradicts its admitted run")
+	}
+	return validateMutationContext(ctx, evidence)
 }
 
 func (g *generationGrant) requireSelectedChildParent(ctx context.Context) error {
