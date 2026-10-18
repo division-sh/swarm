@@ -28,8 +28,11 @@ ACCEPT = ", ".join([
 
 class BlobRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, response, code, message, headers, new_url):
-        if urllib.parse.urlsplit(new_url).scheme != "https":
+        destination = urllib.parse.urlsplit(new_url)
+        if destination.scheme != "https":
             raise ValueError("non-HTTPS registry redirect refused")
+        if (destination.hostname or "").rstrip(".") == "public.ecr.aws":
+            raise ValueError("ECR source redirect refused")
         redirected = super().redirect_request(request, response, code, message, headers, new_url)
         if urllib.parse.urlsplit(new_url).netloc != urllib.parse.urlsplit(request.full_url).netloc:
             redirected.remove_header("Authorization")
@@ -120,12 +123,20 @@ def linked_package(opener, token, allow_absent=False):
     return package
 
 
-def verify():
+def verify(allow_absent=False):
     token, actor = os.environ["GH_TOKEN"], os.environ["GITHUB_ACTOR"]
     opener = urllib.request.build_opener(BlobRedirect())
-    package = linked_package(opener, token)
+    package = linked_package(opener, token, allow_absent)
+    if package is None:
+        return None
     basic = base64.b64encode((actor + ":" + token).encode()).decode()
     mirror_token = read_json(opener, "https://ghcr.io/token?service=ghcr.io&scope=repository:division-sh/" + PACKAGE + ":pull", "Basic " + basic, "token-exchange")["token"]
+    try:
+        root = read_manifest(opener, mirror_token, DIGEST, None)
+    except urllib.error.HTTPError as error:
+        if allow_absent and error.code == 404:
+            return None
+        raise
     pending, manifests, blobs = [(DIGEST, None)], {}, {}
     while pending:
         digest, size = pending.pop()
@@ -135,7 +146,7 @@ def verify():
             continue
         if len(manifests) >= 128:
             raise ValueError("fixed-image manifest graph limit exceeded")
-        raw = read_manifest(opener, mirror_token, digest, size)
+        raw = root if digest == DIGEST else read_manifest(opener, mirror_token, digest, size)
         manifests[digest] = len(raw)
         manifest = json.loads(raw)
         if manifest.get("schemaVersion") != 2:
@@ -168,17 +179,27 @@ def verify():
             "qualification": False}
 
 
-if __name__ == "__main__":
+def main():
     try:
         if sys.argv[1:] in (["--before-publication"], ["--association-only"]):
             package = linked_package(urllib.request.build_opener(BlobRedirect()), os.environ["GH_TOKEN"], sys.argv[1:] == ["--before-publication"])
             print(json.dumps({"package": package, "qualification": False}, sort_keys=True))
+        elif sys.argv[1:] == ["--verify-if-present"]:
+            result = verify(allow_absent=True)
+            if result is None:
+                return 3
+            print(json.dumps(result, sort_keys=True))
         elif sys.argv[1:]:
             raise ValueError("unknown fixed workspace verification mode")
         else:
             print(json.dumps(verify(), sort_keys=True))
+        return 0
     except urllib.error.HTTPError:
-        sys.exit(1)
+        return 1
     except (KeyError, ValueError, urllib.error.URLError) as error:
         print("workspace mirror verification refused: " + str(error), file=sys.stderr)
-        sys.exit(1)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
