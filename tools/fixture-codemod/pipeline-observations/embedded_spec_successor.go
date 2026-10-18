@@ -53,22 +53,7 @@ func embeddedSpecFieldDeletion1801(source string) (string, error) {
 				node.Name = "CLISourcePaths"
 			}
 		case *ast.CompositeLit:
-			if node.Type == nil {
-				return true
-			}
-			switch formattedNativeReadNode(node.Type) {
-			case "cliapp.ServeOptions", "cliapp.CLISourcePlatformSpecPaths",
-				"admittedFixtureSelectedContractSourceLoader", "SourceArtifactSelectedContractSourceLoader",
-				"runforkexecution.SourceArtifactSelectedContractSourceLoader", "runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader":
-				var kept []ast.Expr
-				for _, field := range node.Elts {
-					if kv, ok := field.(*ast.KeyValueExpr); ok && formattedNativeReadNode(kv.Key) == "PlatformSpecPath" {
-						continue
-					}
-					kept = append(kept, field)
-				}
-				node.Elts = kept
-			}
+			deleteEmbeddedSpecCompositeField1801(node)
 		case *ast.CallExpr:
 			switch formattedNativeReadNode(node.Fun) {
 			case "initializeServePlatformStateStores", "cliapp.NewSwarmWorkflowModule":
@@ -90,6 +75,25 @@ func embeddedSpecFieldDeletion1801(source string) (string, error) {
 		return true
 	}, nil)
 	return canonicalFunction(formattedNativeReadNode(file.Decls[0]))
+}
+
+func deleteEmbeddedSpecCompositeField1801(node *ast.CompositeLit) {
+	if node.Type == nil {
+		return
+	}
+	switch formattedNativeReadNode(node.Type) {
+	case "cliapp.ServeOptions", "cliapp.CLISourcePlatformSpecPaths",
+		"admittedFixtureSelectedContractSourceLoader", "SourceArtifactSelectedContractSourceLoader",
+		"runforkexecution.SourceArtifactSelectedContractSourceLoader", "runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader":
+		var kept []ast.Expr
+		for _, field := range node.Elts {
+			if kv, ok := field.(*ast.KeyValueExpr); ok && formattedNativeReadNode(kv.Key) == "PlatformSpecPath" {
+				continue
+			}
+			kept = append(kept, field)
+		}
+		node.Elts = kept
+	}
 }
 
 func formattedNativeReadNode(node ast.Node) string {
