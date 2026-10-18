@@ -600,6 +600,20 @@ func TestNormalStartupCapabilitySurfacePersistsRunlessActorPlanOnBothStores(t *t
 			if err := persisted.Validate(); err != nil || !persisted.MatchesActorPlan(actorPlan) || !persisted.ActorIdentity.IsZero() || runID.Valid {
 				t.Fatalf("normal startup readback = %#v run=%#v err=%v", persisted, runID, err)
 			}
+			if _, err := fixture.db.Exec(`UPDATE managed_agent_capability_surfaces SET execution_authority_id=$1 WHERE surface_id=$2`, "different-owner", surface.ID); err != nil {
+				t.Fatal(err)
+			}
+			before := historicalContextDatabaseRows(t, fixture.db, fixture.postgres)
+			if err := store.SaveManagedCapabilitySurface(testAuthorActivityContext(), surface); err == nil {
+				t.Fatal("same-integrity surface accepted contradictory stored execution authority")
+			}
+			historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, fixture.postgres))
+			if _, err := fixture.db.Exec(`UPDATE managed_agent_capability_surfaces SET execution_authority_id=$1 WHERE surface_id=$2`, surface.Authority.ExecutionAuthorityID, surface.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SaveManagedCapabilitySurface(testAuthorActivityContext(), surface); err != nil {
+				t.Fatalf("exact repeated startup surface refused: %v", err)
+			}
 		})
 	}
 }
