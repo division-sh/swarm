@@ -356,11 +356,11 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	}
 	ctx, releaseOrdering = authoractivity.BindTransaction(ctx, ctx, tx, authoractivity.DialectSQLite)
 	ctx = transactiontest.WithAttempt(ctx, probe)
-	var retireAdmission func()
-	ctx, retireAdmission, err = admitOptionalMutationTx(ctx, tx, opts)
-	if err != nil {
-		return false, err
+	admittedCtx, retireAdmission, admissionErr := admitOptionalMutationTx(ctx, tx, opts)
+	if admissionErr != nil {
+		return false, admissionErr
 	}
+	ctx = admittedCtx
 	defer retireAdmission()
 	if err = ctx.Err(); err != nil {
 		return false, err
