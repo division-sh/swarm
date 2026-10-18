@@ -18,6 +18,13 @@ type startupRecoveryFanOutSession struct {
 	capacity startupownership.FanOutCapacity
 }
 
+func startupRecoveryFanOutSessionForTest(t testing.TB, capacity startupownership.FanOutCapacity) func(*runtimeTestRetainedSession) startupownership.RetainedSession {
+	t.Helper()
+	return func(session *runtimeTestRetainedSession) startupownership.RetainedSession {
+		return &startupRecoveryFanOutSession{runtimeTestRetainedSession: session, capacity: capacity}
+	}
+}
+
 func (s *startupRecoveryFanOutSession) FanOutServingCapacity() (startupownership.FanOutCapacity, error) {
 	if err := s.ProveCurrent(context.Background()); err != nil {
 		return startupownership.FanOutCapacity{}, err
@@ -63,7 +70,7 @@ func (*startupRecoveryFanOutSession) BindFanOutGrant(startupownership.GrantEvide
 
 func TestStartupRecoveryFanOutFixtureRefusesUnownedWork(t *testing.T) {
 	session := newRuntimeTestRetainedSession(t)
-	fixture := &startupRecoveryFanOutSession{runtimeTestRetainedSession: session, capacity: startupownership.SQLiteFanOutCapacity()}
+	fixture := startupRecoveryFanOutSessionForTest(t, startupownership.SQLiteFanOutCapacity())(session).(*startupRecoveryFanOutSession)
 	if _, present := any(session).(interface {
 		FanOutServingStore() (startupownership.FanOutServingStore, error)
 	}); present {
