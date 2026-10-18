@@ -189,6 +189,7 @@ func TestPersistenceAuthorityRetainedRegistryFixedOwnerBootstrapIsExact(t *testi
 		t.Fatal(err)
 	}
 	registryFixedOwnerBootstrapMutants(t, copy, origin, exact, retired)
+	proveRegistryEffectClassContinuation(t, root, origin, exact)
 }
 
 func registryFixedOwnerBootstrapCopy(t *testing.T, root string) string {

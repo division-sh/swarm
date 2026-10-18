@@ -54,7 +54,13 @@ func registryRetainedH19Bootstrap(root string, origin, active []byte) error {
 			return err
 		}
 		if !bytes.Equal(active, composed) {
-			return fmt.Errorf("first retained registry differs from the exact H19/fixed-owner retirement")
+			continued, err := registryEffectClassContinuation(root, composed)
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(active, continued) {
+				return fmt.Errorf("first retained registry differs from the exact H19/fixed-owner/effect-class continuation")
+			}
 		}
 	}
 	for _, pin := range registryH19SourcePins {
