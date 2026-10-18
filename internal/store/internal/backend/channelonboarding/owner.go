@@ -281,8 +281,12 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			return domain.Operation{}, fmt.Errorf("%w: %v", domain.ErrInvalidRequest, err)
 		}
 	}
-	if req.BindingRevision > 0 && req.Phase != domain.PhaseAwaitingOperatorConfirmation && req.Phase != domain.PhasePublishingActivation {
-		return domain.Operation{}, domain.ErrInvalidRequest
+	switch req.Phase {
+	case domain.PhaseAwaitingOperatorConfirmation, domain.PhasePublishingActivation:
+	default:
+		if req.BindingRevision > 0 {
+			return domain.Operation{}, domain.ErrInvalidRequest
+		}
 	}
 	if req.RebindCoordinate != nil {
 		coordinate := req.RebindCoordinate.Normalized()
@@ -314,11 +318,11 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			if !op.Coordinate.MatchesDurableIdentity(*req.RebindCoordinate) {
 				return domain.ErrConflict
 			}
-			activation, found, err := loadActivationBySlot(txctx, tx, r.dialect(), op.SlotKey, true)
+			activation, _, err := loadActivationBySlot(txctx, tx, r.dialect(), op.SlotKey, true)
 			if err != nil {
 				return err
 			}
-			if found && activation.OperationID == op.OperationID {
+			if activation.OperationID == op.OperationID {
 				if !activation.Coordinate.Matches(op.Coordinate) || activation.Revision != op.ActivationRevision {
 					return domain.ErrRevisionConflict
 				}
@@ -342,10 +346,8 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			op.CredentialAdmissions = append([]domain.CredentialAdmission(nil), req.CredentialAdmissions...)
 		}
 		if req.SessionAccount != nil {
-			if op.Posture != domain.ActivationSessionConnection || req.SessionAccount.ConnectionID != op.SessionConnectionID {
-				return domain.ErrConflict
-			}
-			if op.SessionAccount != (operatorchannel.SessionAccountAdmission{}) && op.SessionAccount != *req.SessionAccount {
+			if op.Posture != domain.ActivationSessionConnection || req.SessionAccount.ConnectionID != op.SessionConnectionID ||
+				(op.SessionAccount != (operatorchannel.SessionAccountAdmission{}) && op.SessionAccount != *req.SessionAccount) {
 				return domain.ErrConflict
 			}
 			op.SessionAccount = *req.SessionAccount
