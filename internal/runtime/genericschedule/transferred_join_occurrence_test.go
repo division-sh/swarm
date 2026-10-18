@@ -307,9 +307,14 @@ func ordinaryTransferredOccurrenceFixture(t *testing.T, facts events.EventFacts,
 	t.Helper()
 	ordinary := eventtest.RuntimeControlWithRoutingSourceAndMode(facts.ID, facts.Type, facts.Producer.ID, facts.TaskID,
 		facts.Payload, facts.ChainDepth, runID, "", facts.Envelope, facts.RoutingSource, facts.CreatedAt, facts.ExecutionMode)
-	if !reflect.DeepEqual(publishedOccurrenceTestFacts(ordinary), facts) || ordinary.RunID() != runID ||
+	// The original constructor projects the typed routing source into the
+	// envelope; the public readback also supplies the normalized scope.
+	expected := facts
+	expected.Envelope.Source = facts.RoutingSource.Route()
+	expected.Envelope = expected.Envelope.Normalized()
+	if !reflect.DeepEqual(publishedOccurrenceTestFacts(ordinary), expected) || ordinary.RunID() != runID ||
 		ordinary.ParentEventID() != "" || ordinary.AdmissionClass() != events.EventAdmissionRuntimeControl {
-		t.Fatalf("ordinary occurrence fixture changed retained facts or runtime-control class: got=%+v want=%+v", publishedOccurrenceTestFacts(ordinary), facts)
+		t.Fatalf("ordinary occurrence fixture changed retained facts or runtime-control class: got=%+v want=%+v", publishedOccurrenceTestFacts(ordinary), expected)
 	}
 	return ordinary
 }
