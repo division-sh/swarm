@@ -38,6 +38,8 @@ import (
 // #2730/6248981600 appends the catalog's same-process pre-seed setup only.
 // #2738/6251218086 appends four exact selected-preparation setup endpoints,
 // preserving the complete 108-receipt prefix and all prior hostile controls.
+// #2738/6253061297 adds the exact original before selected refusal setup,
+// preserving the complete 112-receipt prefix and every business assertion.
 //
 
 // These settled fixture receipts compose with, but do not replace, the earlier
@@ -81,6 +83,7 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			row.Function != "TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres" &&
 			row.Function != "TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite" &&
 			row.Function != "eventBusTestRunContextForSource" &&
+			row.Function != "TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability" &&
 			row.Function != "seedRunControlTestRun" &&
 			row.Function != "TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycleOwner" &&
 			row.Function != "TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends" &&
@@ -179,13 +182,13 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			}
 		})
 	}
-	if matched != 74 {
-		t.Fatalf("fixture comparator endpoints=%d, want74", matched)
+	if matched != 75 {
+		t.Fatalf("fixture comparator endpoints=%d, want75", matched)
 	}
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "7f68f6b26f3a29d4501931e3a5feb4bda3b4ba0474107bc6821628ddce5e68ef" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "a09d56e2ee95ee8b5e8b4b6bbf2a29f02b88275f1904b0fae63713375841c0ff" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -196,7 +199,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 112 {
+	if len(pins) != 113 {
 		t.Fatal("fixture successor row count changed")
 	}
 	prefix, err := json.Marshal(pins[:39])
@@ -230,6 +233,10 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	prefix, err = json.Marshal(pins[:108])
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "e82e362492418195e0461f3422e6e4e59d5b089f41eccc26de84f888d1d3a85f" {
 		t.Fatal("selected preparation changed the immutable 108-receipt predecessor")
+	}
+	prefix, err = json.Marshal(pins[:112])
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "5013255ef4caec501c5fe4aa6a3c77ff45cde67b19820adf0dac07ae93b1ab8e" {
+		t.Fatal("selected refusal setup changed the immutable 112-receipt predecessor")
 	}
 	for index, pin := range pins {
 		t.Run(pin.Original.Function, func(t *testing.T) {
