@@ -143,7 +143,7 @@ func (w *attachmentPhaseFaultWorkflow) AdvanceFlowAttachment(ctx context.Context
 
 func TestFlowAttachmentPhaseFailureRetainsConstructionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, cut := range []string{"before_progress", "inside_progress"} {
+		for _, cut := range []string{"before_progress", "inside_progress", "after_progress"} {
 			t.Run(backend+"/shutdown_"+cut, func(t *testing.T) {
 				proveAttachmentShutdownProgress(t, backend, cut)
 			})

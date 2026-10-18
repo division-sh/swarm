@@ -22,6 +22,8 @@ type attachmentProgressNativeBarrier struct {
 	mu                                     sync.Mutex
 	runID, path, attemptID, previous, hash string
 	armed                                  bool
+	appliedRows                            int64
+	afterUpdate                            bool
 	target                                 *attachmentProgressNativeTx
 	entered                                chan context.Context
 	release                                chan struct{}
@@ -104,6 +106,12 @@ func (b *attachmentProgressNativeBarrier) matchedStatement() bool {
 	return b.target != nil
 }
 
+func (b *attachmentProgressNativeBarrier) updatedRows() int64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.appliedRows
+}
+
 func (b *attachmentProgressNativeBarrier) joinRollback(ctx context.Context) error {
 	b.mu.Lock()
 	tx := b.target
@@ -163,11 +171,22 @@ func (c *attachmentProgressConn) ExecContext(ctx context.Context, query string, 
 	c.mu.Lock()
 	tx := c.active
 	c.mu.Unlock()
-	if c.barrier.claim(query, args, tx) {
+	matched := c.barrier.claim(query, args, tx)
+	if matched && !c.barrier.afterUpdate {
 		c.barrier.entered <- ctx
 		<-c.barrier.release
 	}
-	return c.diagnosticSQLConn.ExecContext(ctx, query, args)
+	result, err := c.diagnosticSQLConn.ExecContext(ctx, query, args)
+	if matched && c.barrier.afterUpdate && err == nil && result != nil {
+		if rows, rowsErr := result.RowsAffected(); rowsErr == nil && rows == 1 {
+			c.barrier.mu.Lock()
+			c.barrier.appliedRows = rows
+			c.barrier.mu.Unlock()
+			c.barrier.entered <- ctx
+			<-c.barrier.release
+		}
+	}
+	return result, err
 }
 
 type attachmentProgressNativeTx struct {
@@ -195,7 +214,7 @@ func (tx *attachmentProgressNativeTx) Rollback() error {
 	return err
 }
 
-func newAttachmentProgressBarrierStore(t *testing.T, backend string) (agentFixtureFlowStore, *attachmentProgressNativeBarrier) {
+func newAttachmentProgressBarrierStore(t *testing.T, backend string, afterUpdate bool) (agentFixtureFlowStore, *attachmentProgressNativeBarrier) {
 	t.Helper()
 	var connector driver.Connector
 	if backend == "postgres" {
@@ -210,7 +229,7 @@ func newAttachmentProgressBarrierStore(t *testing.T, backend string) (agentFixtu
 		newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 		connector = diagnosticSQLiteConnector{path: "file:" + path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"}
 	}
-	barrier := &attachmentProgressNativeBarrier{entered: make(chan context.Context, 1), release: make(chan struct{})}
+	barrier := &attachmentProgressNativeBarrier{afterUpdate: afterUpdate, entered: make(chan context.Context, 1), release: make(chan struct{})}
 	db := sql.OpenDB(attachmentProgressConnector{Connector: connector, barrier: barrier})
 	db.SetMaxOpenConns(12)
 	t.Cleanup(func() {
