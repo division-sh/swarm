@@ -153,9 +153,10 @@ func FixedConstructionOccurrenceID(plan runfork.RunForkPlan, entity runfork.RunF
 }
 
 func (e capturedConstructionEvidence) creatingSelector(plan runfork.RunForkPlan) (events.Event, bool, error) {
+	var absent events.Event
 	id := e.Original.CreatingInput.EventID
 	if id == "" {
-		return events.Event{}, false, nil
+		return absent, false, nil
 	}
 	previousID := id
 	for _, hop := range e.Lineage {
@@ -164,13 +165,13 @@ func (e capturedConstructionEvidence) creatingSelector(plan runfork.RunForkPlan)
 	}
 	selector, found, err := plan.HistoricalRouteSelector(id)
 	if err != nil || !found {
-		return events.Event{}, false, err
+		return absent, false, err
 	}
 	if len(e.Lineage) != 0 {
 		hop := e.Lineage[len(e.Lineage)-1]
 		lineage, recorded := selector.SelectedForkLineage()
 		if !recorded || lineage.DestinationRunID() != hop.RunID || lineage.SourceRunID() != hop.SourceRunID || lineage.SourceEventID() != previousID {
-			return events.Event{}, false, fmt.Errorf("historical constructor selector contradicts its recorded source lineage")
+			return absent, false, fmt.Errorf("historical constructor selector contradicts its recorded source lineage")
 		}
 	}
 	return selector, true, nil

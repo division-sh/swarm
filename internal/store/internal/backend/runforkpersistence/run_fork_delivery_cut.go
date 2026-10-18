@@ -56,13 +56,14 @@ func (c runForkReplayCut) requireFact(runID, id string, fact runForkRevisionedFa
 }
 
 func (c runForkReplayCut) event(eventID string) (events.Event, error) {
+	var absent events.Event
 	row, found := c.events[eventID]
 	if c.runID == "" || !found {
-		return events.Event{}, fmt.Errorf("fork replay publication %s is absent at the cut", eventID)
+		return absent, fmt.Errorf("fork replay publication %s is absent at the cut", eventID)
 	}
 	admitted, err := decodeRunForkRevisionEvent(row)
 	if err != nil {
-		return events.Event{}, fmt.Errorf("decode fork replay publication %s at the cut: %w", eventID, err)
+		return absent, fmt.Errorf("decode fork replay publication %s at the cut: %w", eventID, err)
 	}
 	return admitted.Event().Clone(), nil
 }

@@ -37,6 +37,7 @@ func requireRunForkTransferredJoinHistory(snapshot *runForkRevisionSnapshot, joi
 }
 
 func runForkTransferredJoinEvent(snapshot *runForkRevisionSnapshot, source genericschedule.TransferredJoinOccurrence) (events.Event, bool, error) {
+	var absent events.Event
 	var event events.Event
 	found := false
 	for _, row := range snapshot.Events {
@@ -44,15 +45,15 @@ func runForkTransferredJoinEvent(snapshot *runForkRevisionSnapshot, source gener
 			continue
 		}
 		if found || row.RunID != snapshot.RunID || row.FirstRevision <= 0 || row.Revision < row.FirstRevision || row.Revision > snapshot.Revision {
-			return events.Event{}, false, fmt.Errorf("transferred publication contradicts its exact historical cut")
+			return absent, false, fmt.Errorf("transferred publication contradicts its exact historical cut")
 		}
 		admitted, err := decodeRunForkRevisionEvent(row)
 		if err != nil {
-			return events.Event{}, false, err
+			return absent, false, err
 		}
 		event, found = admitted.Event(), true
 		if err := source.ValidateEvent(event); err != nil {
-			return events.Event{}, false, err
+			return absent, false, err
 		}
 	}
 	return event, found, nil
