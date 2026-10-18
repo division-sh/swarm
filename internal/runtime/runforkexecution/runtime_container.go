@@ -433,10 +433,10 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err != nil {
 		return nil, err
 	}
-	runCtx = managedexecution.WithAdmission(runCtx, admission)
 	if agentRuntime == nil || agentRuntime.manager == nil {
 		return nil, fmt.Errorf("selected-contract fork-local lifecycle manager was not materialized")
 	}
+	runCtx = managedexecution.WithAdmission(agentRuntime.operationContext, admission)
 	lifecycleManager = agentRuntime.manager
 	if err := pipeline.BindTurnCancellationDispatcher(lifecycleManager); err != nil {
 		return nil, err

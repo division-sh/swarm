@@ -65,11 +65,11 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 	// Retain the complete predecessor digest, including its old live Successors.
 	// Only the two appended #2287 join-presentation receipts may reverse it.
 	var pins []fixtureSetupSuccessor2617
-	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 105 {
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 106 {
 		t.Fatalf("finite presentation receipt packet changed: %v", err)
 	}
 	prior := append([]recipe(nil), rows...)
-	// Reverse only the sixty-six authorized setup receipts before checking the
+	// Reverse only the sixty-seven authorized current receipts before checking the
 	// complete predecessor digest, including its prior live Successors.
 	restoredSetup := 0
 	for pinIndex := len(pins) - 1; pinIndex >= 39; pinIndex-- {
@@ -92,8 +92,8 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 			restoredSetup++
 		}
 	}
-	if restoredSetup != 66 {
-		t.Fatalf("#2730 exact setup endpoints restored=%d, want66", restoredSetup)
+	if restoredSetup != 67 {
+		t.Fatalf("#2730 exact setup endpoints restored=%d, want67", restoredSetup)
 	}
 	predecessorDigest, err := mechanicalReceiptDigest(prior)
 	if err != nil || predecessorDigest != "637fcb76a19075ffc1dd93fc6a189652be2a50f2b199647d67cc0ffd58885fed" {

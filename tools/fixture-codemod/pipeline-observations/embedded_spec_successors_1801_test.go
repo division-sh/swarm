@@ -58,6 +58,15 @@ func embeddedSpecPriorEndpoint1801(row recipe, actual string) (recipe, string, e
 }
 
 func embeddedSpecHistoricalPair1801(row recipe, actual string) (recipe, string, error) {
+	if row.Family == "native-run-setup-family144" &&
+		row.File == "internal/runtime/runforkexecution/constructed_agent_input_execution_test.go" &&
+		row.Function == "proveSelectedConstructedAgentInput" {
+		original, err := fixtureSetupCurrentEndpoint2617(row, actual)
+		if err != nil {
+			return recipe{}, "", err
+		}
+		row, actual = original, original.Successor
+	}
 	original, prior, err := embeddedSpecPriorEndpoint1801(row, actual)
 	if errors.Is(err, errUnlistedEmbeddedSpecSuccessor1801) {
 		return row, actual, nil
@@ -152,12 +161,13 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 	}
 	restored := append([]recipe(nil), rows...)
 	var setup []fixtureSetupSuccessor2617
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "d256ba56bfb78c9fa95a25cd1e9a6504e3c5ccf524485f9cc3986787821b1847" ||
-		json.Unmarshal(fixtureSetupSuccessorBytes2617, &setup) != nil || len(setup) != 105 {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "5dbfc419249caf03cefc07be54adef4708908955e6d2ee7f5d8d8594fd7bb2bd" ||
+		json.Unmarshal(fixtureSetupSuccessorBytes2617, &setup) != nil || len(setup) != 106 {
 		t.Fatal("native fixture continuation packet changed")
 	}
 	// Undo only the independently pinned #2730 setup changes before comparing
-	// the complete embedded-spec predecessor population. The row sets are disjoint.
+	// the complete embedded-spec predecessor population. The selected child row
+	// restores its exact embedded-spec successor before the older comparison.
 	restoredSetup := 0
 	for index := len(setup) - 1; index >= 39; index-- {
 		pin := setup[index]
@@ -179,8 +189,8 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 			restoredSetup++
 		}
 	}
-	if restoredSetup != 66 {
-		t.Fatalf("native fixture continuations restored=%d, want66", restoredSetup)
+	if restoredSetup != 67 {
+		t.Fatalf("native fixture continuations restored=%d, want67", restoredSetup)
 	}
 	completionSuccessors := 0
 	for i, row := range rows {
@@ -216,7 +226,7 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 			}
 			matches++
 			actual := selectedCausalObservationBody(t, row.File, row.Function)
-			original, _, err := embeddedSpecPriorEndpoint1801(row, actual)
+			original, _, err := embeddedSpecHistoricalPair1801(row, actual)
 			if err != nil {
 				t.Fatalf("%s: %v", key, err)
 			}
@@ -293,10 +303,23 @@ func TestEmbeddedSpecHistoricalPairPreservesOnlyGenuinelyUnlistedPaths(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	var rows []recipe
+	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
+		t.Fatal(err)
+	}
 	for _, pin := range packet.Rows {
 		t.Run(pin.Original.Function, func(t *testing.T) {
-			row := pin.Original
-			row.Successor = pin.Candidate
+			var row recipe
+			matches := 0
+			for _, candidate := range rows {
+				if sameReviewedRecipeKey(candidate, pin.Original) {
+					row = candidate
+					matches++
+				}
+			}
+			if matches != 1 {
+				t.Fatal("embedded-spec current recipe is not unique")
+			}
 			actual := selectedCausalObservationBody(t, row.File, row.Function)
 			original, prior, err := embeddedSpecHistoricalPair1801(row, actual)
 			want := pin.Original.Successor
@@ -308,6 +331,13 @@ func TestEmbeddedSpecHistoricalPairPreservesOnlyGenuinelyUnlistedPaths(t *testin
 			}
 			if _, _, err := embeddedSpecHistoricalPair1801(pin.Original, want); err == nil {
 				t.Fatal("listed prior endpoint silently gained the unlisted fallback")
+			}
+			if row.Successor != pin.Candidate {
+				former := pin.Original
+				former.Successor = pin.Candidate
+				if _, _, err := embeddedSpecHistoricalPair1801(former, pin.Candidate); err == nil {
+					t.Fatal("former embedded-spec endpoint was accepted as the latest selected child source")
+				}
 			}
 		})
 	}

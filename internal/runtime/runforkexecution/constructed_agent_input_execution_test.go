@@ -66,7 +66,15 @@ func TestSelectedConstructedAgentInputExecutesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) { proveSelectedConstructedAgentInput(t, backend, false, false) })
 		t.Run(backend+"/parent_runtime", func(t *testing.T) {
-			proveSelectedConstructedAgentInput(t, backend, false, false, selectedConstructedInputProof{parentRuntime: true})
+			var afterRelease func()
+			t.Cleanup(func() {
+				if afterRelease == nil {
+					t.Error("selected child never installed its released-owner control")
+					return
+				}
+				afterRelease()
+			})
+			proveSelectedConstructedAgentInput(t, backend, false, false, selectedConstructedInputProof{parentRuntime: true, afterRelease: &afterRelease})
 		})
 	}
 }
@@ -79,6 +87,9 @@ func TestSelectedNestedConstructedAgentInputExecutesBothStores(t *testing.T) {
 				name = "field_bearing"
 			}
 			t.Run(backend+"/"+name, func(t *testing.T) { proveSelectedConstructedAgentInput(t, backend, true, fields) })
+			t.Run(backend+"/"+name+"/parent_runtime", func(t *testing.T) {
+				proveSelectedConstructedAgentInput(t, backend, true, fields, selectedConstructedInputProof{parentRuntime: true})
+			})
 		}
 	}
 }
@@ -96,12 +107,16 @@ func TestSelectedConstructedRecoveryKeepsCapturedVersionBothStores(t *testing.T)
 		t.Run(backend, func(t *testing.T) {
 			proveSelectedConstructedAgentInput(t, backend, false, false, selectedConstructedInputProof{changedVersionRecovery: true})
 		})
+		t.Run(backend+"/parent_runtime", func(t *testing.T) {
+			proveSelectedConstructedAgentInput(t, backend, false, false, selectedConstructedInputProof{changedVersionRecovery: true, parentRuntime: true})
+		})
 	}
 }
 
 type selectedConstructedInputProof struct {
 	scan, changedVersionRecovery bool
 	parentRuntime                bool
+	afterRelease                 *func()
 }
 
 type selectedHistoricalScanProbe struct {
@@ -328,8 +343,13 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 	}
 	agents := map[agentidentity.Identity]*constructedInputAgent{}
 	var parentGrantID string
+	var childContextProof *selectedChildContextProofCapability
 	if proof.parentRuntime {
 		ctx, parentGrantID = selectedForkParentRuntimeContext(t, ctx, selected, loaded.SourceArtifactFact)
+		childContextProof = selectedForkChildContextProof(t, ctx, selected, loaded.SourceArtifactFact)
+		if proof.afterRelease != nil {
+			*proof.afterRelease = func() { childContextProof.requireReleasedChildren(t) }
+		}
 	}
 	request := SelectedContractExecutionRequest{
 		SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
@@ -365,12 +385,18 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 			},
 		},
 	}
+	if childContextProof != nil {
+		request.AgentRuntime.ProcessCapability = childContextProof
+	}
 	var proveRecovery func(string)
 	if proof.changedVersionRecovery {
 		request.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: loaded.SourceArtifactFact.BundleHash()}
 		proveRecovery = prepareSelectedConstructedRecovery(t, ctx, owner, request, loaded)
 	}
 	result, err := ExecuteSelectedContractRunFork(ctx, request)
+	if childContextProof != nil && err == nil {
+		childContextProof.requireRetiredChildren(t)
+	}
 	if proof.scan {
 		if !errors.Is(err, errSelectedHistoricalScanCut) {
 			t.Fatalf("historical scan did not reach its exact admitted component cut: %v", err)

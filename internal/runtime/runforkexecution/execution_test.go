@@ -675,13 +675,17 @@ func assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t testing.TB, 
 
 func selectedForkExecutionTestContext(t testing.TB, ctx context.Context, authority runtimeeffects.Authority) context.Context {
 	t.Helper()
+	source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !ok {
+		t.Fatal("selected-fork test admission requires its exact source fact")
+	}
 	admission, err := managedexecution.New(
 		managedexecution.KindSelectedContractFork,
 		authority.SelectedFork.ExecutionID,
 		authority.SelectedFork.Generation,
 		authority.SelectedFork.ForkRunID,
 		authority.SelectedFork.ActorCensusFingerprint,
-		runForkTestBundleHash,
+		source.BundleHash(),
 		nil,
 	)
 	if err != nil {

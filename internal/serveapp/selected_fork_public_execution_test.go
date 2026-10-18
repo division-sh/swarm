@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -27,7 +28,29 @@ import (
 // Artifact admission below is private setup. This proves the public fork and
 // readback boundary, not the publication-to-fork journey owned by #2376/#2322.
 func TestSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T) {
+	captureSelectedForkExecutionErrors(t)
 	proveSelectedForkPublicChangedTargetExecutionBothStores(t, selectedForkProofOptions{})
+}
+
+func captureSelectedForkExecutionErrors(t *testing.T) {
+	t.Helper()
+	previous := buildSelectedAPICapabilities
+	buildSelectedAPICapabilities = func(owner *selectedStoreOwner, request selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+		caps, err := previous(owner, request)
+		if executor, ok := caps.RunFork.(apiv1.SelectedContractRunForkExecutor); err == nil && ok {
+			execute := executor.ExecuteSelectedContractRunFork
+			executor.ExecuteSelectedContractRunFork = func(ctx context.Context, req runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
+				result, err := execute(ctx, req)
+				if err != nil {
+					t.Logf("selected execution failure before public error presentation: %v", err)
+				}
+				return result, err
+			}
+			caps.RunFork = executor
+		}
+		return caps, err
+	}
+	t.Cleanup(func() { buildSelectedAPICapabilities = previous })
 }
 
 func TestSelectedForkPublicChangedTargetAfterResetBothStores(t *testing.T) {

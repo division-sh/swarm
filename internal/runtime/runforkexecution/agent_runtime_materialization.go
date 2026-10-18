@@ -206,6 +206,7 @@ func agentPlanDescriptions(plans []agentidentity.Plan) []string {
 
 type selectedContractAgentRuntime struct {
 	mu                  sync.Mutex
+	operationContext    context.Context
 	manager             *runtimemanager.AgentManager
 	generationGrant     runtimestartupownership.GenerationGrant
 	cleanup             func()
@@ -512,6 +513,15 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			resultErr = errors.Join(resultErr, runtimeOwner.Shutdown())
 		}
 	}()
+	contextOwner, ok := generationGrant.(runtimestartupownership.SelectedForkMutationContextOwner)
+	if !ok {
+		return nil, managedexecution.Admission{}, errors.New("selected runtime grant cannot construct its child operation context")
+	}
+	ctx, err = contextOwner.BindSelectedForkMutationContext(ctx)
+	if err != nil {
+		return nil, managedexecution.Admission{}, err
+	}
+	runtimeOwner.operationContext = ctx
 	binding, err := generationGrant.ProcessExecutionBinding()
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
