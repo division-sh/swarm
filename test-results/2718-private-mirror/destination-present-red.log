@@ -1,0 +1,11 @@
+Precompile outside test slot: environment=0.003s build=1.748s cleanup=0.000s total=1.751s
+Test slot acquired after 1ms. Starting go test ./internal/testplanning -run ^TestWorkspaceImageCacheHostedContract$/setup/execution/present/clean$ -count=1 -p=1 -timeout=3m
+--- FAIL: TestWorkspaceImageCacheHostedContract (0.03s)
+    --- FAIL: TestWorkspaceImageCacheHostedContract/setup/execution/present/clean (0.02s)
+        workspace_image_cache_test.go:298: setup execution=exit status 98 want=0 case={destination:present fault: cleanup:false} output={"qualification":false}
+            {"qualification":false}
+            ECR copy attempted despite a complete pinned destination
+FAIL
+FAIL	github.com/division-sh/swarm/internal/testplanning	0.032s
+FAIL
+exit status 1
