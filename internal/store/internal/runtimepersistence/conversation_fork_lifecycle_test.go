@@ -639,7 +639,7 @@ type conversationForkSourceFixture struct {
 
 const conversationForkSourceFlowInstance = "review"
 
-func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conversationForkSourceFixture {
+func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, prepared ...*PostgresStore) conversationForkSourceFixture {
 	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:      uuid.NewString(),
@@ -653,8 +653,16 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 		turn1At:    base.Add(-2 * time.Minute),
 		turn2At:    base.Add(-1 * time.Minute),
 	}
-	ctx := testAuthorActivityContext()
-	store := admitTestPostgresStore(t, db)
+	if len(prepared) > 1 {
+		t.Fatal("conversation source requires one original selected owner")
+	}
+	var store *PostgresStore
+	if len(prepared) == 1 {
+		store = prepared[0]
+	} else {
+		store = admitTestPostgresStore(t, db)
+	}
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: source.runID, StartedAt: base.Add(-3 * time.Minute), BundleHash: source.bundleHash})
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()

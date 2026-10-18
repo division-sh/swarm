@@ -84,7 +84,7 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			foreignRun := uuid.NewString()
-			foreignCtx := correlation.WithRunID(testAuthorActivityContext(), foreignRun)
+			foreignCtx := correlation.WithRunID(ctx, foreignRun)
 			requireRunFixtureForTest(t, foreignCtx, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: foreignRun, StartedAt: created, BundleHash: f.source.bundleHash})
 			foreign := record
 			foreign.Identity.RunID = foreignRun

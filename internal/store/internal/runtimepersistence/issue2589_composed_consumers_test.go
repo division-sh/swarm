@@ -20,12 +20,13 @@ func TestIssue2589ComposedConsumersPreserveResultsBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			opened := backend.open(t)
 			selected := opened.store
-			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
+			ctx := testAuthorActivityContext()
 			owner := selected.(snapshotOwnershipStore)
 			cards := selected.(decisioncard.Store)
 			at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 
 			t.Run("scenario_multiple_entities_and_diffs", func(t *testing.T) {
+				ctx := originalStoreFixtureContext(t, ctx, selected)
 				requireDefaultSourceArtifactForTest(t, ctx, selected)
 				runID := uuid.NewString()
 				request := pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at}

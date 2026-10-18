@@ -29,6 +29,8 @@ import (
 // every prior setup, mechanical receipt and execution assertion is retained.
 // #2730/6244508696 appends seven original-process setup endpoints; the first
 // 39 receipts and every historical Before/After/Mechanical field are retained.
+// #2730/6244831965 appends thirteen mapped setup-chain endpoints, retaining
+// those 46 receipts and every prior Successor.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
@@ -57,18 +59,29 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 		"native-bus-run-control-construction/internal/runtime/bus/run_control_dispatch_test.go/seedRunControlTestRun",
 		"native-bus-source-hash/internal/runtime/bus/eventbus_publish_test.go/TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycleOwner",
 		"native-bus-target-construction/internal/runtime/bus/target_owner_store_parity_test.go/TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends",
-		"native-bus-dispatch-seed/internal/runtime/bus/event_identity_dispatch_surface_test.go/newCompleteEventDispatchFixtureWithOrigin":
+		"native-bus-dispatch-seed/internal/runtime/bus/event_identity_dispatch_surface_test.go/newCompleteEventDispatchFixtureWithOrigin",
+		"native-bus-selected-run-construction/internal/runtime/bus/eventbus_publish_test.go/TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects",
+		"native-bus-empty-receiver-context/internal/runtime/bus/eventbus_publish_test.go/TestCommittedPublishDispatchDropsTransactionConnectionCapability",
+		"native-startup-actor-construction/internal/runtime/runtime_constructed_actor_restart_test.go/proveRuntimeConstructedActorCensusBothStores",
+		"native-shared-coordinator-authority/internal/runtime/node_delivery_startup_recovery_test.go/TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSelectedStore",
+		"native-run-setup-family144/internal/store/internal/runtimepersistence/flow_instance_descriptor_authority_test.go/TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores",
+		"native-run-setup-family144/internal/store/internal/runtimepersistence/flow_instance_descriptor_authority_test.go/TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores",
+		"native-run-setup-family144/internal/store/internal/runtimepersistence/flow_instance_descriptor_authority_test.go/TestDynamicFlowRuntimeReadinessPlanBatchIsAtomicBothStores",
+		"native-run-setup-family144/internal/store/internal/runtimepersistence/flow_instance_descriptor_authority_test.go/TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothStores",
+		"native-run-setup-family144/internal/store/internal/runtimepersistence/flow_instance_descriptor_authority_test.go/TestDynamicFlowRuntimeReadinessRejectsABAObservationBothStores",
+		"native-run-setup-family144/internal/store/internal/runtimepersistence/flow_instance_descriptor_authority_test.go/requireReadinessRun",
+		"native-run-setup-family144/internal/store/internal/runtimepersistence/reset_inventory_parity_test.go/TestResetInventoryAndOperationLeaseBothStores":
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "fd41eef4990e7bdd33d748ac046d02c08bac5a9fee37651a171e8b358768b060" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "7f9d06adf8dceadba85d2c79c9edfed8b0a357355a80910e5a9f2d62b40f9288" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 46 {
+	if len(pins) != 59 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -130,7 +143,18 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			row.Function != "seedRunControlTestRun" &&
 			row.Function != "TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycleOwner" &&
 			row.Function != "TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends" &&
-			row.Function != "newCompleteEventDispatchFixtureWithOrigin" {
+			row.Function != "newCompleteEventDispatchFixtureWithOrigin" &&
+			row.Function != "TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnects" &&
+			row.Function != "TestCommittedPublishDispatchDropsTransactionConnectionCapability" &&
+			row.Function != "proveRuntimeConstructedActorCensusBothStores" &&
+			row.Function != "TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSelectedStore" &&
+			row.Function != "TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores" &&
+			row.Function != "TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores" &&
+			row.Function != "TestDynamicFlowRuntimeReadinessPlanBatchIsAtomicBothStores" &&
+			row.Function != "TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothStores" &&
+			row.Function != "TestDynamicFlowRuntimeReadinessRejectsABAObservationBothStores" &&
+			row.Function != "requireReadinessRun" &&
+			row.Function != "TestResetInventoryAndOperationLeaseBothStores" {
 			continue
 		}
 		matched++
@@ -176,13 +200,13 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			}
 		})
 	}
-	if matched != 15 {
-		t.Fatalf("fixture comparator endpoints=%d, want15", matched)
+	if matched != 26 {
+		t.Fatalf("fixture comparator endpoints=%d, want26", matched)
 	}
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "fd41eef4990e7bdd33d748ac046d02c08bac5a9fee37651a171e8b358768b060" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "7f9d06adf8dceadba85d2c79c9edfed8b0a357355a80910e5a9f2d62b40f9288" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -193,12 +217,16 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 46 {
+	if len(pins) != 59 {
 		t.Fatal("fixture successor row count changed")
 	}
 	prefix, err := json.Marshal(pins[:39])
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "daf060dec5ac400e00a35c4a7dea0321a38feeaae8e3bbcb4b20c87cbab0b5b2" {
 		t.Fatal("#2730 changed the immutable 39-receipt predecessor prefix")
+	}
+	prefix, err = json.Marshal(pins[:46])
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "b9f77e265a38ef4729f1b497c637271afc580c01908284dccc91e2983a97bf97" {
+		t.Fatal("#2730 changed the immutable 46-receipt setup predecessor")
 	}
 	for index, pin := range pins {
 		t.Run(pin.Original.Function, func(t *testing.T) {
