@@ -143,6 +143,9 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			t.Run("exact_live_parent_pairs", func(t *testing.T) {
 				verifyForkLiveParentPairs(t, db, eventID)
 			})
+			t.Run("selected_grant_exact_execution", func(t *testing.T) {
+				verifySelectedGrantExactExecution(t, db, bundleHash, deploymentRunID, bindingID, eventBindingID)
+			})
 			insertRoute := func(forkRunID, kind string, revision int64, forkEventID any) error {
 				t.Helper()
 				_, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_route_recoveries

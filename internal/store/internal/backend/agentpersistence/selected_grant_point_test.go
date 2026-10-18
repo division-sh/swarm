@@ -46,6 +46,10 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 					effective_config_fingerprint TEXT NOT NULL, declaration_plan_fingerprint TEXT NOT NULL,
 					declaration_plan TEXT NOT NULL, preparation_fingerprint TEXT NOT NULL,
 					preparation_binding TEXT NOT NULL, state TEXT NOT NULL, lease_expires_at TIMESTAMPTZ NOT NULL)`,
+				`CREATE TABLE run_fork_selected_contract_execution_live_parents (
+					execution_id TEXT PRIMARY KEY, binding_id TEXT NOT NULL, fork_run_id TEXT NOT NULL,
+					source_run_id TEXT NOT NULL, fork_point_kind TEXT NOT NULL, fork_revision BIGINT NOT NULL,
+					fork_event_id TEXT, generation BIGINT NOT NULL)`,
 			} {
 				if _, err := db.Exec(ddl); err != nil {
 					t.Fatal(err)
@@ -77,6 +81,15 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 					executionID, bindingID, forkID, sourceID, arm.kind, arm.revision, arm.eventID, time.Now().Add(time.Hour), "sha256:"+strings.Repeat("1", 64)); err != nil {
 					t.Fatal(err)
 				}
+				pair := func() {
+					t.Helper()
+					if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_execution_live_parents
+						SELECT execution_id,binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,generation
+						FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, executionID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				pair()
 				binding := startupownership.SelectedForkGrantBinding{ExecutionID: executionID}
 				load := func(want bool) {
 					t.Helper()
@@ -116,6 +129,12 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 						}
 					}
 				}
+				load(true)
+				if _, err := db.ExecContext(ctx, `DELETE FROM run_fork_selected_contract_execution_live_parents WHERE execution_id=$1`, executionID); err != nil {
+					t.Fatal(err)
+				}
+				load(false)
+				pair()
 				load(true)
 				if _, err := db.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET fork_revision=fork_revision+1 WHERE execution_id=$1`, executionID); err != nil {
 					t.Fatal(err)
