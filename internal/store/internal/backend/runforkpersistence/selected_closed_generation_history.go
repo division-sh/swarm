@@ -207,6 +207,10 @@ func decodeClosedSelectedGeneration(fact *ClosedSelectedGenerationHistory, creat
 	if _, err := canonicaljson.Decode(fact.EvidenceJSON); err != nil {
 		return err
 	}
+	return decodeClosedSelectedGenerationClocks(fact, created, updated, terminal)
+}
+
+func decodeClosedSelectedGenerationClocks(fact *ClosedSelectedGenerationHistory, created, updated, terminal any) error {
 	for _, clock := range []struct {
 		raw    any
 		target *time.Time
