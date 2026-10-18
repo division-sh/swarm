@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -162,9 +163,10 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	if uuid.Validate(fact.Token) != nil {
 		return render.ResolvedAction{}, false, nil
 	}
-	if mutation && (parent == nil || parent.operationID == "" || parent.activationID == "" || parent.activationRevision < 1 || parent.bindingRevision < 1) {
+	if mutation && (parent == nil || slices.Contains([]string{parent.operationID, parent.activationID}, "") || min(parent.activationRevision, parent.bindingRevision) < 1) {
 		return render.ResolvedAction{}, false, fmt.Errorf("channel action requires its established parent")
 	}
+	parentConstraint := ` AND onboarding.operation_id=? AND activation.activation_id=? AND activation.activation_revision=? AND binding.binding_revision=?`
 	query := `SELECT action.action_token, action.action_kind, action.verdict, action.label, action.action_position,
 		plan.delivery_id, render.render_id, render.render_hash, render.render_input, receipt.effect_operation_id,
 		plan.source_kind, plan.source_id, plan.principal_id, binding.binding_revision,
@@ -200,6 +202,7 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 		AND receipt.state='sent' AND receipt.delivery_id=plan.delivery_id
 		AND receipt.render_id=render.render_id`
 	if postgres {
+		parentConstraint = ` AND onboarding.operation_id=$6::uuid AND activation.activation_id=$7::uuid AND activation.activation_revision=$8 AND binding.binding_revision=$9`
 		query = `SELECT action.action_token::text, action.action_kind, action.verdict, action.label, action.action_position,
 			plan.delivery_id::text, render.render_id::text, render.render_hash, render.render_input, receipt.effect_operation_id::text,
 			plan.source_kind, plan.source_id::text, plan.principal_id::text, binding.binding_revision,
@@ -237,11 +240,7 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	}
 	args := []any{fact.Token, fact.Interface.Key(), fact.ExternalAccountRef, fact.ConversationRef, string(fact.ConversationScope)}
 	if mutation {
-		if postgres {
-			query += ` AND onboarding.operation_id=$6::uuid AND activation.activation_id=$7::uuid AND activation.activation_revision=$8 AND binding.binding_revision=$9`
-		} else {
-			query += ` AND onboarding.operation_id=? AND activation.activation_id=? AND activation.activation_revision=? AND binding.binding_revision=?`
-		}
+		query += parentConstraint
 		args = append(args, parent.operationID, parent.activationID, parent.activationRevision, parent.bindingRevision)
 	}
 	query += ` LIMIT 2`
@@ -281,8 +280,8 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	if err != nil {
 		return render.ResolvedAction{}, false, err
 	}
-	if resolved.Action.Token != fact.Token || resolved.Action.Label == "" ||
-		resolved.ActivationID == "" || resolved.BindingRevision < 1 || resolved.ActivationRevision < 1 {
+	if resolved.Action.Token != fact.Token || slices.Contains([]string{resolved.Action.Label, resolved.ActivationID}, "") ||
+		min(resolved.BindingRevision, resolved.ActivationRevision) < 1 {
 		return render.ResolvedAction{}, false, fmt.Errorf("stored channel action identity is contradictory")
 	}
 	messageRef, err := receiptMessageReference(referenceRaw)

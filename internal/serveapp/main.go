@@ -971,9 +971,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			defer cancel()
 			if err := apiProbe.Close(shutdownCtx); err != nil {
 				presenter.cleanupFailure("api probe shutdown", err)
-				if exitCode == 0 {
-					exitCode = 1
-				}
+				exitCode = max(exitCode, 1)
 			}
 		}
 	}()
@@ -1010,9 +1008,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 		if err := storeLifetime.CloseUnactivated(); err != nil {
 			presenter.cleanupFailure("store shutdown", err)
-			if exitCode == 0 {
-				exitCode = 1
-			}
+			exitCode = max(exitCode, 1)
 		}
 	}()
 	_, err = cliapp.EmbeddedPlatformSpecPath()
@@ -1058,13 +1054,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), opts.ShutdownGrace)
 		defer cancelShutdown()
 		deadline, _ := shutdownCtx.Deadline()
-		if storyFollower != nil {
-			storyFollower.StopAndWait()
-		}
-		var shutdownErr error
-		if publicExposure != nil {
-			shutdownErr = publicExposure.Stop(shutdownCtx)
-		}
+		storyFollower.StopAndWait()
+		shutdownErr := publicExposure.Stop(shutdownCtx)
 		shutdownErr = errors.Join(shutdownErr, apiProbe.Close(shutdownCtx))
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
 		if !httpServersStarted {
@@ -1078,9 +1069,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		if supervisor != nil {
 			shutdownErr = errors.Join(shutdownErr, supervisor.ShutdownProcessWithOptions(context.Background(), runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)}))
 		} else {
-			if len(runtimeContexts) > 1 {
-				shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts, deadline))
-			}
+			shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[min(1, len(runtimeContexts)):], runtimeContextManager, opts, deadline))
 			if len(runtimeContexts) > 0 && runtimeContexts[0].runtime != nil {
 				joinErr := runtimeContexts[0].runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)})
 				shutdownErr = errors.Join(shutdownErr, joinErr)
@@ -1095,8 +1084,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		cancelOwnershipWatch()
 		finalErr := selectedLifecycle.Finalize(shutdownCtx, shutdownErr)
 		presenter.shutdown(finalErr)
-		if finalErr != nil && exitCode == 0 {
-			exitCode = 1
+		if finalErr != nil {
+			exitCode = max(exitCode, 1)
 		}
 	}()
 	apiProbeOwnedByLifecycle = true
@@ -1254,8 +1243,10 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	workspaceLabels := serveLifecycleWorkspaceLabels(loadedBundles)
 	for i, loaded := range loadedBundles {
 		contextToolGatewayBinding := toolgateway.Binding{}
+		var bootProgress func(runtime.BootProgressEvent)
 		if i == 0 {
 			contextToolGatewayBinding = toolGatewayBinding
+			bootProgress = presenter.runtimeSink()
 		}
 		workspaceBackend, err := cliapp.DecideWorkspaceBackend(req.Purpose, workspaceBackendPreference, cfg, loaded.source)
 		if err != nil {
@@ -1266,10 +1257,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return 3
 		}
 		presenter.recordWorkspace(workspaceLabels[i], workspaceBackend)
-		var bootProgress func(runtime.BootProgressEvent)
-		if i == 0 {
-			bootProgress = presenter.runtimeSink()
-		}
 		packLoad := bundlePackLoads[i]
 		request := serveRuntimeBundleContextRequest{
 			RepoRoot:               repo,
