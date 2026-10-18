@@ -521,12 +521,12 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
-	runtimeOwner.operationContext = ctx
 	binding, err := generationGrant.ProcessExecutionBinding()
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, binding.RuntimeInstanceID)
+	runtimeOwner.operationContext = ctx
 	admitActivations := func() error {
 		for _, flow := range req.AgentRuntime.Flows {
 			owner, err := runtimeflowidentity.NewRunScopedFlowInstance(authority.SelectedFork.ForkRunID, flow.Instance.Route())
