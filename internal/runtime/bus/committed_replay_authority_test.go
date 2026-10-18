@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 type preparedPublishEventReaderFunc func(context.Context, string) (PreparedPublishEvent, bool, error)
@@ -105,7 +106,12 @@ func TestCommittedReplayRejectsCorruptPreparedSettlementAcrossConsumers(t *testi
 
 func TestExactDuplicateReuseRejectsCorruptPreparedAggregateBeforeRoutePlanDerivation(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	bus, err := newScopedTestEventBus(store)
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.WritePreparedTargetConflict(t))
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err := bus.AdmitSourceArtifactFact(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +137,7 @@ func TestExactDuplicateReuseRejectsCorruptPreparedAggregateBeforeRoutePlanDeriva
 	}
 
 	_, _, err = bus.prepareClosedPublication(
-		testAuthorActivityContext(context.Background()),
+		ctx,
 		eventBusCommitPublishPlan{bus: bus, event: evt, admitted: admitted},
 	)
 	if err == nil || !strings.Contains(err.Error(), "conflicting target ownership kinds") {
