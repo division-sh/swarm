@@ -140,6 +140,9 @@ func proveNativeEntryCompositionBindings(t *testing.T, root string) {
 		want = strings.Replace(want, anchor, anchor+addition, 1)
 	}
 	actual, err := os.ReadFile(filepath.Join(root, path))
+	if err == nil {
+		actual, err = debtR04CompositionPredecessor(root, actual)
+	}
 	if err != nil || string(actual) != want {
 		t.Fatal("assembly changed beyond the two exact accepted once-bound claim owners:", err)
 	}
@@ -192,7 +195,7 @@ func TestPersistenceAuthorityDebtNativeEntryCatchUpForwardAndForeignProvenance(t
 			t.Fatal(err)
 		}
 		if err := debtValidateCollectorIdentity(prior.Collector, head.Collector, prior, head, "", proof); err != nil {
-			t.Fatalf("exact native-entry forward input refused: %s: %v", input[0], err)
+			t.Fatalf("exact native-entry forward input refused: %s: %v; predecessor comparison: %v", input[0], err, debtCatchUpNativeEntryPredecessors(root, proof.Actual, head.Sites))
 		}
 		proveNativeEntryForeignProvenance(t, prior, head, proof)
 	}

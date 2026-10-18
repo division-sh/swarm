@@ -64,7 +64,7 @@ var eventRecordImportFiles = map[string]struct{}{
 	"internal/store/internal/backend/pipelinepersistence/generic_schedule_occurrence_commit.go": {},
 	// Fixed-session activity recovery reads retained requests/results through the
 	// complete native decoder; it gains no event SQL or construction allowance.
-	"internal/store/internal/backend/activityjournal/displaced_recovery.go": {},
+	"internal/store/internal/startupownership/activity_recovery_native.go": {},
 	// Operator hydration uses canonical admitted records and canonical delivery snapshots.
 	"internal/store/internal/operatorsurface/operator_event_batch.go":                {},
 	"internal/store/internal/operatorsurface/operator_observability_read_surface.go": {},

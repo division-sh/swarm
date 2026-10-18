@@ -20,11 +20,11 @@ func TestDisplacedHTTPActivityCutRequiresOriginalActiveMutation(t *testing.T) {
 	for _, scenario := range []string{"zero_cut", "foreign_attempt", "inactive_attempt", "missing_attempt", "invalid_binding", "invalid_successor"} {
 		t.Run(scenario, func(t *testing.T) {
 			attempt := &mutationprotocol.Attempt{}
-			cut := DisplacedHTTPActivityCut{attempt: attempt, successor: expected, sqlite: true}
+			cut := displacedHTTPActivityCut{attempt: attempt, successor: expected, sqlite: true}
 			input := binding
 			switch scenario {
 			case "zero_cut":
-				cut = DisplacedHTTPActivityCut{}
+				cut = displacedHTTPActivityCut{}
 			case "foreign_attempt":
 				attempt = &mutationprotocol.Attempt{}
 			case "missing_attempt":
@@ -34,7 +34,7 @@ func TestDisplacedHTTPActivityCutRequiresOriginalActiveMutation(t *testing.T) {
 			case "invalid_successor":
 				cut.successor = processbinding.LeaseStamp{}
 			}
-			if _, displaced, err := cut.ProveDisplacedGrantTx(context.Background(), attempt, input); err == nil || displaced {
+			if _, displaced, err := cut.proveDisplacedGrantTx(context.Background(), attempt, input); err == nil || displaced {
 				t.Fatal("unissued or inactive recovery cut admitted historical activity")
 			}
 		})

@@ -17,6 +17,35 @@ import (
 const debtProcessLeaseCollectorTo = "1a353f6c8e5cfe2e2fce2163231e4ac4832df0776daa8dbea177c6edb274bd90"
 const debtProcessLeaseFreshnessCollectorTo = "b06e27c4770377190d13b3218ff93830312175c35e1764cf331f8f61e2309e75"
 
+const debtR04Before = "af47497e27bcc0cca593fb56f5767ff68f201ce1"
+const debtR04After = "b24a0421fa4ffe29f8e89f31fe54720996b0d278"
+const debtR04CustodyTo = "d2212c6e9f90807448b5ee61f2781aee485bf78c28a84a338e9b43fd2e9a142b"
+const debtR04CollectorTo = "34691798f6437c504ebc6ef1c3cb359bccd0d368a515456f4aeb42d42c3084b0"
+const debtR04OwnerPath = "internal/store/internal/startupownership/owner.go"
+const debtR04ActivityPath = "internal/store/internal/startupownership/activity_recovery.go"
+const debtR04CompositionPath = "internal/store/internal/runtimepersistence/composition.go"
+const debtR04NativeRepairAfter = "a88c60be70f6923ef7a3960aa12dcbf2e124e06c"
+const debtR04NativeCustodyTo = "ec1fec1bdff3d92cf2de9f414fff6cc5c9a74feb8138313b8bb4e92e246ab3fa"
+const debtR04NativeCollectorTo = "c79af9700325a028f169ec3c2284828751f97be022233cfd6356f1c726e4ce3d"
+
+var debtR04NativeRepairPins = [...]debtRepair2698SourceFile{
+	{"internal/store/internal/backend/activityjournal/activity_execution_grant.go", "absent", "00e81af8c72afe78c7097610ca7ce5fde612091edb270edb4729185977220925"},
+	{"internal/store/internal/backend/activityjournal/displaced_recovery.go", "13a9f50ced01b7043756f79e81ea40be25e728a7cd6b849c2a43e22ffde6294f", "absent"},
+	{"internal/store/internal/backend/activityjournal/execution_grant.go", "ab720d379d250a2dfb764c5d7d876b6f6778798c99dadd7882851cc99722763d", "d1e8d847374ef53d35d4c7b43fbe1a41f4a2f83625a6ef563bbb9d428c649968"},
+	{"internal/store/internal/backend/activityjournal/recovery_binding.go", "absent", "2d394f12068f129fb4f0676124d866dd999b0d120db409e4b25f8b982a729317"},
+	{"internal/store/internal/startupownership/activity_execution_grant.go", "ead99b547ad30fb9ef5776f1281d3d2c146757d3e2ceeb7652b4d38337f7b12f", "absent"},
+	{"internal/store/internal/startupownership/activity_recovery.go", "3cc9b6af3c7bdf6b5664c88bd6b0f5cfdb0e36891eae5c5944a1fc4b4bf5e91e", "cef83d1ec303eecadd52afd40fad49f9dfcfd99dbb74b4fad3ca32cffbc38bc8"},
+	{"internal/store/internal/startupownership/activity_recovery_native.go", "absent", "f992d066041b3161a11832afe5754cec2f97c5bb8acc12d2f12c8db461ab6e49"},
+	{"internal/store/internal/startupownership/displaced_http_activity.go", "51b6d4c5e1b341a898b0a5b9010ea4abc63234af130ee220d4f6106dc2f4a693", "12abf02bddb116f976d3fe29da263bf35b0a61e6ae1eab4a2d7afdefa6e8dec7"},
+	{"internal/store/internal/startupownership/owner.go", "b189576ad1095fdf2d4d25e73e7baa536333084fad4b289853cc2fdabdf68f68", "6cb13742409e290fce5e5d62177b4dd79b7882cd267b4cafcc5bfde1399ef355"},
+}
+
+var debtR04SourcePins = [...]debtRepair2698SourceFile{
+	{debtR04OwnerPath, "efa6f487608ad86229e863bb8717c98d92745ea25757696346c66da07540e4d7", "b189576ad1095fdf2d4d25e73e7baa536333084fad4b289853cc2fdabdf68f68"},
+	{debtR04ActivityPath, "absent", "3cc9b6af3c7bdf6b5664c88bd6b0f5cfdb0e36891eae5c5944a1fc4b4bf5e91e"},
+	{debtR04CompositionPath, "1ff439f97646d8df6a4e9d333a4f3b581902278d7e8233fe92f33bb72c01ea36", "9a388b421d837cd0ee7432819eff051444727ce70040cb444cfaf1250d74d021"},
+}
+
 func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 	root, base := persistenceAuthorityRepoRoot(t), t.TempDir()
 	debtRequireProcessLeasePredecessor(t, root)
@@ -35,9 +64,11 @@ func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 			}
 		}
 	}
-	if digest, err := debtProcessLeaseCustodyDigest(root); err != nil || digest != debtProcessLeaseCustodyPin {
+	if digest, err := debtProcessLeaseCustodyDigest(root); err != nil || debtR04CustodySource(root, digest) != nil {
 		t.Errorf("custody pin=%q error=%v", digest, err)
 	}
+	proveR04SourceContinuation(t, root)
+	proveR04HistoricalSourceContinuation(t, root)
 	if digest, err := debtCollectorDigest(debtCatchUpHistoricalArchive(t, debtCatchUpMaster)); err != nil || digest != debtProcessLeaseCollectorTo {
 		t.Errorf("collector pin=%q error=%v", digest, err)
 	}
@@ -320,7 +351,7 @@ func TestPersistenceAuthorityDebtProcessLeaseCustodyIsSourceBound(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mutation := range []string{"actual", "raw-field", "raw-getter", "sql-callback", "forwarder", "custody-change", "construction-wiring"} {
+	for _, mutation := range []string{"actual", "raw-field", "raw-getter", "sql-callback", "forwarder", "custody-change", "construction-wiring", "r04-role", "r04-missing-role", "r04-binding", "r04-duplicate", "r04-missing-assembly", "r04-sqlite-field", "r04-source-value-escape", "r04-warm-role"} {
 		t.Run(mutation, func(t *testing.T) {
 			copy := t.TempDir()
 			for _, entry := range entries {
@@ -341,12 +372,52 @@ func TestPersistenceAuthorityDebtProcessLeaseCustodyIsSourceBound(t *testing.T) 
 				if entry.Name() == "postgres_construction.go" && mutation == "construction-wiring" {
 					text = strings.Replace(text, "schemastore.BindPostgresProcessLease(schema, lease)", "schemastore.BindPostgresProcessLease(schema, nil)", 1)
 				}
+				if entry.Name() == "activity_recovery.go" && mutation == "r04-role" {
+					text = strings.Replace(text, "s.activityJournal = role", "s.activityJournal = nil", 1)
+				}
+				if entry.Name() == "owner.go" && mutation == "r04-sqlite-field" {
+					text = strings.Replace(text, "lifecycleCandidates *storerunhandoff.CandidateCoordinator", "lifecycleCandidates any", 1)
+				}
+				if entry.Name() == "activity_recovery.go" && mutation == "r04-missing-role" {
+					continue
+				}
 				debtWriteModuleSource(t, copy, dir+"/"+entry.Name(), text)
 			}
+			copyR04CompositionSource(t, root, copy)
+			if mutation == "r04-warm-role" {
+				if _, _, err := debtR04SourceImages(copy); err != nil {
+					t.Fatal("complete R04 copy failed before warming:", err)
+				}
+				data, err := os.ReadFile(filepath.Join(copy, debtR04ActivityPath))
+				if err != nil {
+					t.Fatal(err)
+				}
+				debtWriteModuleSource(t, copy, debtR04ActivityPath, strings.Replace(string(data), "s.activityJournal = role", "s.activityJournal = nil", 1))
+			}
+			if mutation == "r04-binding" {
+				data, err := os.ReadFile(filepath.Join(copy, debtR04CompositionPath))
+				if err != nil {
+					t.Fatal(err)
+				}
+				debtWriteModuleSource(t, copy, debtR04CompositionPath, strings.Replace(string(data), "startupOwner.BindActivityJournalRole(activityJournal)", "startupOwner.BindActivityJournalRole(nil)", 1))
+			}
+			if mutation == "r04-missing-assembly" {
+				if err := os.Remove(filepath.Join(copy, debtR04CompositionPath)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if mutation == "r04-source-value-escape" {
+				data, err := os.ReadFile(filepath.Join(copy, debtR04OwnerPath))
+				if err != nil {
+					t.Fatal(err)
+				}
+				debtWriteModuleSource(t, copy, debtR04OwnerPath, string(data)+"\nvar leakedR04Role = (*StartupSQLiteOwner).BindActivityJournalRole\n")
+			}
 			additions := map[string]string{
-				"raw-getter":   "func(s *StartupPostgresOwner)Raw()any{return s.constructionLease}",
-				"sql-callback": "func(s *StartupPostgresOwner)Call(f func(any)){f(s.constructionLease)}",
-				"forwarder":    "func(s *StartupPostgresOwner)Forward()any{return s.Raw()}",
+				"raw-getter":    "func(s *StartupPostgresOwner)Raw()any{return s.constructionLease}",
+				"sql-callback":  "func(s *StartupPostgresOwner)Call(f func(any)){f(s.constructionLease)}",
+				"forwarder":     "func(s *StartupPostgresOwner)Forward()any{return s.Raw()}",
+				"r04-duplicate": "func(s *StartupPostgresOwner)BindActivityJournalRole(role displacedHTTPActivityJournal)error{return nil}",
 			}
 			if extra := additions[mutation]; extra != "" {
 				debtWriteModuleSource(t, copy, dir+"/escape.go", "package startupownership\n"+extra)

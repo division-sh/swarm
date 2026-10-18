@@ -18,6 +18,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storeadmin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -44,7 +45,7 @@ type StartupPostgresOwner struct {
 	fanOutPipeline       *storepipeline.PipelinePostgresOwner
 	channelChanges       *runtimechanneldelivery.ReconcileSignal
 	lifecycleCandidates  *storerunhandoff.CandidateCoordinator
-	activityJournal      displacedHTTPActivityJournal
+	activityJournal      *activityjournal.ActivityPostgresOwner
 }
 
 type StartupSQLiteOwner struct {
@@ -59,7 +60,7 @@ type StartupSQLiteOwner struct {
 	fanOutPipeline      *storepipeline.PipelineSQLiteOwner
 	channelChanges      *runtimechanneldelivery.ReconcileSignal
 	lifecycleCandidates *storerunhandoff.CandidateCoordinator
-	activityJournal     displacedHTTPActivityJournal
+	activityJournal     *activityjournal.ActivitySQLiteOwner
 }
 
 func (s *StartupPostgresOwner) BindLifecycleCandidates(candidates *storerunhandoff.CandidateCoordinator) error {

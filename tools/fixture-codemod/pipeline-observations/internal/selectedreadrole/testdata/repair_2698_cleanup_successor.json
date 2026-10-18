@@ -1,0 +1,12 @@
+{
+  "BeforeCommit": "f5c57acafdae2cd0750f493c15ca667ca3d84e33",
+  "AfterCommit": "6d6c3eafaea02d3e0fef5e3183870174436adbc1",
+  "Authorization": "https://github.com/division-sh/swarm/pull/2698#issuecomment-6218416177",
+  "Files": [
+    {
+      "File": "internal/serveapp/main_runtime_test.go",
+      "BeforeSHA256": "ee08bf214fb6f03292d073fcfa08da14d6380efcf45a4309342e799b674d5453",
+      "AfterSHA256": "19f2fb9fc37f34ab52b6a5ba694ce5c34e25eeee4cbc3c7b33eb043768e8d699"
+    }
+  ]
+}

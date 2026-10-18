@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -37,15 +39,19 @@ func TestAgentHTTPKeyFreeMethodsKeepWriteUnknownBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, method := range []string{http.MethodGet, http.MethodPost} {
 			t.Run(backend+"/"+method, func(t *testing.T) {
-				var selected httpSettlementSelectedStore
-				var reopen func() httpSettlementSelectedStore
-				if backend == "sqlite" {
-					native, open := storetest.StartSQLiteRuntimeStoreWithReopen(t, t.Context())
-					selected, reopen = native, func() httpSettlementSelectedStore { return open() }
-				} else {
-					native, open := storetest.StartPostgresRuntimeStoreWithReopen(t)
-					selected, reopen = native, func() httpSettlementSelectedStore { return open() }
+				location := filepath.Join(t.TempDir(), "agent-http.db")
+				if backend == "postgres" {
+					location = testutil.StartPostgresDSN(t)
 				}
+				reopen := func() httpSettlementSelectedStore {
+					if backend == "sqlite" {
+						native, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, t.Context(), location)
+						return native
+					}
+					native, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, location)
+					return native
+				}
+				selected := reopen()
 				ctx, _ := selectedHTTPSettlementContext(t, selected, "agent-http-method-"+method)
 				observer := &agentHTTPClassObservedStore{httpSettlementSelectedStore: selected}
 				ctx = effects.WithController(ctx, effects.NewController(observer).WithExecutionPosture(executionposture.Live))
