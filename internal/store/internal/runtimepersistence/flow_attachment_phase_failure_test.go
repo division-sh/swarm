@@ -143,11 +143,6 @@ func (w *attachmentPhaseFaultWorkflow) AdvanceFlowAttachment(ctx context.Context
 
 func TestFlowAttachmentPhaseFailureRetainsConstructionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, cut := range []string{"before_progress", "inside_progress", "after_progress"} {
-			t.Run(backend+"/shutdown_"+cut, func(t *testing.T) {
-				proveAttachmentShutdownProgress(t, backend, cut)
-			})
-		}
 		for _, previous := range []pipeline.FlowAttachmentPhase{pipeline.FlowAttachmentPlanned, pipeline.FlowAttachmentAgentsRegistered, pipeline.FlowAttachmentRouteInstalled, pipeline.FlowAttachmentTimersArmed} {
 			for _, disposition := range []string{"before_commit", "unacknowledged_response", "acknowledged_error", "panic_after_commit"} {
 				t.Run(backend+"/"+string(previous)+"/"+disposition, func(t *testing.T) {
@@ -338,6 +333,12 @@ func TestFlowAttachmentPhaseFailureRetainsConstructionBothStores(t *testing.T) {
 					assertConstructorRows(t, f, backend, 1)
 				})
 			}
+		}
+		// Keep the reviewed schema literal before the shutdown-only cut labels.
+		for _, cut := range []string{"before_progress", "inside_progress", "after_progress"} {
+			t.Run(backend+"/shutdown_"+cut, func(t *testing.T) {
+				proveAttachmentShutdownProgress(t, backend, cut)
+			})
 		}
 	}
 }
