@@ -19,12 +19,14 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/serveapp/testdata/whatsapp-session"))
 	testRunServeWhatsAppSignedPairing(t, servedNativeJourneyProof{})
 }
 
@@ -33,6 +35,7 @@ func TestRunServeWhatsAppQuotedCardDecisionBothStores(t *testing.T) {
 }
 
 func TestRunServeWhatsAppAuthoredCustomerReplyBothStores(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/serveapp/testdata/whatsapp-session-reply"))
 	testRunServeWhatsAppSignedPairing(t, servedNativeJourneyProof{authoredReply: true})
 }
 
@@ -41,6 +44,7 @@ func TestRunServeWhatsAppAuthoredUncertainReplyRestartBothStores(t *testing.T) {
 }
 
 func TestRunServeWhatsAppNoticeAcknowledgmentBothStores(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/serveapp/testdata/whatsapp-session-notice"))
 	testRunServeWhatsAppSignedPairing(t, servedNativeJourneyProof{noticeAcknowledgment: true})
 }
 
