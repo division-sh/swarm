@@ -177,6 +177,8 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -398,6 +400,8 @@ jobs:
     name: Static checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -580,6 +584,8 @@ jobs:
     name: macOS SQLite possession
     runs-on: macos-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -609,6 +615,8 @@ jobs:
     name: Native Linux unused analysis
     runs-on: ubuntu-latest
     timeout-minutes: 19
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -634,6 +642,8 @@ jobs:
     runs-on: macos-latest
     # Run 38292434273: 6m35s success / 20m47s canceled; 38304031830: 20m27s canceled.
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -658,6 +668,8 @@ jobs:
     needs: [ci-plan, unused-linux, unused-darwin]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -685,6 +697,8 @@ jobs:
     needs: [ci-plan]
     runs-on: ubuntu-latest
     timeout-minutes: ${{ matrix.timeout_minutes }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: ${{ !inputs.keep_going }}
       matrix: ${{ fromJson(needs.ci-plan.outputs.proof_matrix) }}
@@ -768,6 +782,8 @@ jobs:
     name: Semantic smoke proofs
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
