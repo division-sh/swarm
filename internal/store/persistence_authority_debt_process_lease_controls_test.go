@@ -53,6 +53,7 @@ func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 		t.Errorf("custody pin=%q error=%v", digest, err)
 	}
 	proveR04SourceContinuation(t, root)
+	proveR04HistoricalSourceContinuation(t, root)
 	if digest, err := debtCollectorDigest(debtCatchUpHistoricalArchive(t, debtCatchUpMaster)); err != nil || digest != debtProcessLeaseCollectorTo {
 		t.Errorf("collector pin=%q error=%v", digest, err)
 	}

@@ -110,6 +110,169 @@ func debtRepair2698FixtureNameHistoricalSource(root, path string, actual []byte)
 	return debtRepair2698SignedSource(root, packet.BeforeCommit, path, file.BeforeSHA256)
 }
 
+func debtRepair2698ReadCleanupPacket(root string) (debtRepair2698SourcePacket, error) {
+	var packet debtRepair2698SourcePacket
+	raw, err := os.ReadFile(filepath.Join(root, debtRepair2698CleanupPacketPath))
+	if err != nil {
+		return packet, err
+	}
+	if debtBaselineChecksum(raw) != debtRepair2698CleanupSHA {
+		return packet, fmt.Errorf("cleanup source certificate changed")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&packet); err != nil {
+		return packet, err
+	}
+	if decoder.Decode(new(any)) != io.EOF || packet.BeforeCommit != debtRepair2698After ||
+		packet.AfterCommit != debtRepair2698CleanupAfter || len(packet.Files) != 1 ||
+		packet.Files[0].File != debtRepair2698CleanupSource ||
+		packet.Authorization != "https://github.com/division-sh/swarm/pull/2698#issuecomment-6218416177" {
+		return packet, fmt.Errorf("cleanup continuation lost its exact one-file boundary")
+	}
+	file := packet.Files[0]
+	before, err := debtRepair2698SignedSource(root, packet.BeforeCommit, file.File, file.BeforeSHA256)
+	if err != nil {
+		return packet, err
+	}
+	after, err := debtRepair2698SignedSource(root, packet.AfterCommit, file.File, file.AfterSHA256)
+	if err != nil {
+		return packet, err
+	}
+	old := []byte("\tif _, ok := p.waitForExit(serveRuntimeStopTimeout); !ok {\n\t\tp.t.Errorf(\"timed out stopping Run during cleanup\\noutput:\\n%s\", p.outputString())\n\t}\n")
+	next := []byte("\tif code, ok := p.waitForExit(serveRuntimeStopTimeout); !ok {\n\t\tp.t.Errorf(\"timed out stopping Run during cleanup\\noutput:\\n%s\", p.outputString())\n\t} else if code != 0 {\n\t\tp.t.Errorf(\"Run exited during cleanup with code %d\\noutput:\\n%s\", code, p.outputString())\n\t}\n")
+	if bytes.Count(before, old) != 1 || !bytes.Equal(after, bytes.Replace(before, old, next, 1)) {
+		return packet, fmt.Errorf("cleanup continuation changed more than the accepted exit-status check")
+	}
+	return packet, nil
+}
+
+func debtRepair2698CleanupHistoricalSource(root, path string, actual []byte) ([]byte, error) {
+	if path != debtRepair2698CleanupSource {
+		return actual, nil
+	}
+	packet, err := debtRepair2698ReadCleanupPacket(root)
+	if os.IsNotExist(err) {
+		return actual, nil // Immutable archives predate this continuation.
+	}
+	if err != nil {
+		return nil, err
+	}
+	file := packet.Files[0]
+	if debtBaselineChecksum(actual) != file.AfterSHA256 {
+		return actual, nil
+	}
+	current, err := os.ReadFile(filepath.Join(root, path))
+	if err != nil || !bytes.Equal(current, actual) {
+		return nil, fmt.Errorf("cleanup inverse does not describe actual copied source: %v", err)
+	}
+	return debtRepair2698SignedSource(root, packet.BeforeCommit, path, file.BeforeSHA256)
+}
+
+func debtR04ExecutionFunction(raw []byte, name string) ([]byte, error) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, debtR04ExecutionPath, raw, parser.AllErrors)
+	if err != nil {
+		return nil, err
+	}
+	var found []byte
+	for _, node := range file.Decls {
+		fn, ok := node.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Name.Name != name {
+			continue
+		}
+		if found != nil {
+			return nil, fmt.Errorf("duplicate historical execution declaration: %s", name)
+		}
+		found = raw[fset.Position(fn.Pos()).Offset:fset.Position(fn.End()).Offset]
+	}
+	if found == nil {
+		return nil, fmt.Errorf("missing historical execution declaration: %s", name)
+	}
+	return found, nil
+}
+
+func debtR04ExecutionInverse(before, after []byte) ([]byte, error) {
+	const test = "TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostileAdmission"
+	priorTest, err := debtR04ExecutionFunction(before, test)
+	if err != nil {
+		return nil, err
+	}
+	currentTest, err := debtR04ExecutionFunction(after, test)
+	if err != nil {
+		return nil, err
+	}
+	anchor := []byte("runtimecontracts.MustToolHandlerKind(\"http\")), ")
+	effect := []byte("runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(\"write_or_unknown\")), ")
+	if bytes.Count(currentTest, anchor) != 1 || !bytes.Equal(priorTest, bytes.Replace(currentTest, anchor, append(bytes.Clone(anchor), effect...), 1)) {
+		return nil, fmt.Errorf("historical execution inverse is not the single reviewed effect argument")
+	}
+	seed, err := debtR04ExecutionFunction(before, "seedSelectedExecutionTestAgent")
+	if err != nil {
+		return nil, err
+	}
+	next := []byte("func selectedExecutionFixtureAgentConfig(")
+	if bytes.Count(after, currentTest) != 1 || bytes.Count(after, next) != 1 || bytes.Contains(after, seed) {
+		return nil, fmt.Errorf("historical execution inverse lacks its unique deleted-helper position")
+	}
+	reconstructed := bytes.Replace(after, currentTest, priorTest, 1)
+	reconstructed = bytes.Replace(reconstructed, next, append(append(bytes.Clone(seed), '\n', '\n'), next...), 1)
+	if !bytes.Equal(reconstructed, before) {
+		return nil, fmt.Errorf("historical execution inverse changed more than its two exact fragments")
+	}
+	return reconstructed, nil
+}
+
+func debtR04ExecutionImages(root string) ([]byte, []byte, error) {
+	before, err := debtRepair2698SignedSource(root, debtR04Before, debtR04ExecutionPath, debtR04ExecutionBeforeSHA)
+	if err != nil {
+		return nil, nil, err
+	}
+	after, err := debtRepair2698SignedSource(root, debtR04After, debtR04ExecutionPath, debtR04ExecutionAfterSHA)
+	if err != nil {
+		return nil, nil, err
+	}
+	actual, err := os.ReadFile(filepath.Join(root, debtR04ExecutionPath))
+	if err != nil || !bytes.Equal(actual, after) {
+		return nil, nil, fmt.Errorf("historical execution continuation lost its complete actual image: %v", err)
+	}
+	if _, err := debtR04ExecutionInverse(before, actual); err != nil {
+		return nil, nil, err
+	}
+	return before, after, nil
+}
+
+func debtR04HistoricalSource(root, path string, current []byte) ([]byte, error) {
+	if path == debtRepair2698CleanupSource {
+		return debtRepair2698CleanupHistoricalSource(root, path, current)
+	}
+	if path == debtR04ExecutionPath && debtBaselineChecksum(current) == debtR04ExecutionAfterSHA {
+		before, after, err := debtR04ExecutionImages(root)
+		if err != nil || !bytes.Equal(current, after) {
+			return nil, fmt.Errorf("historical execution inverse does not describe actual copied source: %v", err)
+		}
+		return before, nil
+	}
+	return debtRepair2698FixtureNameHistoricalSource(root, path, current)
+}
+
+func debtR04HistoricalSourcePolicy(root string) error {
+	if _, _, err := debtR04ExecutionImages(root); err != nil {
+		return err
+	}
+	cleanup, err := debtRepair2698ReadCleanupPacket(root)
+	if err != nil {
+		return err
+	}
+	for _, file := range cleanup.Files {
+		actual, err := os.ReadFile(filepath.Join(root, file.File))
+		if err != nil || debtBaselineChecksum(actual) != file.AfterSHA256 {
+			return fmt.Errorf("cleanup actual source changed: %s: %v", file.File, err)
+		}
+	}
+	return nil
+}
+
 func debtRepair2698ReadPacket(root string) (debtRepair2698SourcePacket, error) {
 	var packet debtRepair2698SourcePacket
 	raw, err := os.ReadFile(filepath.Join(root, debtRepair2698SourcePath))
@@ -169,8 +332,8 @@ func debtRepair2698SignedSource(root, ref, path, digest string) ([]byte, error) 
 // Preservation only: callers of the live census never consume this view.
 func debtRepair2698HistoricalSource(root, path string, current []byte) ([]byte, error) {
 	actual := current
-	current, err := debtRepair2698FixtureNameHistoricalSource(root, path, current)
-	if err != nil || path == debtRepair2698FixtureNameSource && bytes.Equal(actual, current) {
+	current, err := debtR04HistoricalSource(root, path, current)
+	if err != nil || (path == debtRepair2698FixtureNameSource || path == debtRepair2698CleanupSource) && bytes.Equal(actual, current) {
 		return current, err
 	}
 	packet, err := debtRepair2698ReadPacket(root)
@@ -207,7 +370,7 @@ func debtRepair2698SourcePolicy(root string, historical debtCatchUpSourcePacket)
 	for _, file := range packet.Files {
 		actual, err := os.ReadFile(filepath.Join(root, file.File))
 		if err == nil {
-			actual, err = debtRepair2698FixtureNameHistoricalSource(root, file.File, actual)
+			actual, err = debtR04HistoricalSource(root, file.File, actual)
 		}
 		if err != nil || debtBaselineChecksum(actual) != file.AfterSHA256 {
 			return fmt.Errorf("native repair actual source changed: %s: %v", file.File, err)
@@ -462,9 +625,14 @@ func debtCatchUpSignedBaseline(root, ref, collector string) (authorityDebtBaseli
 
 func debtCatchUpCollectorSource(root string) error {
 	actual, err := debtCollectorDigest(root)
-	if actual == debtR04CollectorTo {
+	if actual == debtR04CollectorTo || actual == debtR04HistoricalCollectorTo {
 		if _, _, sourceErr := debtR04SourceImages(root); sourceErr != nil {
 			return sourceErr
+		}
+		if actual == debtR04HistoricalCollectorTo {
+			if sourceErr := debtR04HistoricalSourcePolicy(root); sourceErr != nil {
+				return sourceErr
+			}
 		}
 		actual = debtRepair2698ProofCostCollectorTo
 	}
@@ -855,6 +1023,29 @@ func debtR04CollectorTransition(base, current string, trusted, head authorityDeb
 		intermediate := head
 		intermediate.Collector = debtRepair2698ProofCostCollectorTo
 		if !debtRepair2698ProofCostCollectorTransition(base, intermediate.Collector, trusted, intermediate, proofs...) {
+			return false
+		}
+	}
+	return len(authorityDebtRatchet(proofs[0].Actual, head.Sites, original.Sites, original.Sites, proofs[0])) == 0
+}
+
+func debtR04HistoricalCollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {
+	if current != debtR04HistoricalCollectorTo || head.Collector != current || trusted.Collector != base || len(proofs) != 1 ||
+		trusted.BootstrapSource != debtBootstrapSource || head.BootstrapSource != debtBootstrapSource || debtCatchUpCollectorSource(proofs[0].Root) != nil {
+		return false
+	}
+	original, _, err := debtCatchUpSignedBaseline(proofs[0].Root, debtR04After, debtRepair2698ProofCostCollectorTo)
+	if err != nil {
+		return false
+	}
+	if base == debtR04CollectorTo {
+		if !debtSitesEqual(trusted.Sites, original.Sites) {
+			return false
+		}
+	} else {
+		intermediate := head
+		intermediate.Collector = debtR04CollectorTo
+		if !debtR04CollectorTransition(base, intermediate.Collector, trusted, intermediate, proofs...) {
 			return false
 		}
 	}
