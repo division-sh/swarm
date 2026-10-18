@@ -177,7 +177,7 @@ func (am *AgentManager) completeDeclaredDynamicFlowReadiness(admission dynamicFl
 	finish := func() {
 		select {
 		case <-attempt.retiring:
-			if !isReadinessShutdownRefusal(result) {
+			if !isReadinessShutdownCompletion(result, admission.key, attempt) {
 				am.lifecycle.recordTerminalCompletion(result)
 			}
 		default:

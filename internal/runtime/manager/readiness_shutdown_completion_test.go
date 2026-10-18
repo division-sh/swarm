@@ -184,6 +184,7 @@ func TestReadinessShutdownCompletionKeepsStrictAdmissionAndIndependentFailures(t
 }
 
 func TestReadinessShutdownRefusalRequiresEveryExactOwnerBranch(t *testing.T) {
+	t.Run("joined native cancellation disposition", proveReadinessShutdownCancellationDisposition)
 	identity := lifecycleTestPersistedAgent(t).Config.Identity
 	shutdown := executableReadinessError(identity, runtimeLifecycleShuttingDown, AgentLifecycleState{}, "manager lifecycle does not admit executable readiness")
 	for _, tc := range []struct {
@@ -209,6 +210,76 @@ func TestReadinessShutdownRefusalRequiresEveryExactOwnerBranch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := isReadinessShutdownRefusal(tc.err); got != tc.want {
 				t.Fatalf("classification=%t, want %t: %v", got, tc.want, tc.err)
+			}
+		})
+	}
+}
+
+func proveReadinessShutdownCancellationDisposition(t *testing.T) {
+	key := dynamicFlowRuntimeReadinessKey{runID: "run", instancePath: "review/child"}
+	attempt := &dynamicFlowRuntimeReadinessAttempt{attemptOrdinal: 3, planHash: "exact-plan"}
+	for _, before := range []bool{false, true} {
+		t.Run(fmt.Sprintf("before_attempt=%t", before), func(t *testing.T) {
+			result, cancellation := (runtimepipeline.FlowAttachmentAdvanceResult{}).WithCleanCancellation(context.Canceled, before)
+			if got, ok := result.CleanCancellation(cancellation); !ok || got != before || !errors.Is(cancellation, context.Canceled) {
+				t.Fatalf("lost native cancellation distinction: before=%t ok=%t err=%v", got, ok, cancellation)
+			}
+			other, otherErr := (runtimepipeline.FlowAttachmentAdvanceResult{}).WithCleanCancellation(context.Canceled, before)
+			acknowledged := result
+			acknowledged.Acknowledged = true
+			for _, hostile := range []struct {
+				name   string
+				result runtimepipeline.FlowAttachmentAdvanceResult
+				err    error
+			}{
+				{"raw caller cancellation", result, context.Canceled},
+				{"independent cancellation", result, errors.Join(cancellation, context.Canceled)},
+				{"storage", result, errors.Join(cancellation, errors.New("storage"))},
+				{"another result", other, cancellation},
+				{"another error", result, otherErr},
+				{"acknowledged", acknowledged, cancellation},
+				{"missing outcome", runtimepipeline.FlowAttachmentAdvanceResult{}, cancellation},
+			} {
+				t.Run(hostile.name, func(t *testing.T) {
+					if _, ok := hostile.result.CleanCancellation(hostile.err); ok {
+						t.Fatal("foreign or independently failed outcome inherited clean cancellation")
+					}
+				})
+			}
+			cancelled := &readinessShutdownCancellation{cause: cancellation, key: key, ordinal: attempt.attemptOrdinal, planHash: attempt.planHash}
+			for _, tc := range []struct {
+				name string
+				err  error
+				want bool
+			}{
+				{"exact", cancelled, true},
+				{"wrapped", fmt.Errorf("attachment: %w", cancelled), true},
+				{"lease failure", errors.Join(cancelled, errors.New("lease join")), false},
+				{"independent cancellation", errors.Join(cancelled, context.Canceled), false},
+				{"grace", errors.Join(cancelled, context.DeadlineExceeded), false},
+				{"classified domain failure", runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "storage", "storage", "cleanup", nil, cancelled), false},
+				{"wrong run", &readinessShutdownCancellation{cause: cancellation, key: dynamicFlowRuntimeReadinessKey{runID: "foreign", instancePath: key.instancePath}, ordinal: attempt.attemptOrdinal, planHash: attempt.planHash}, false},
+				{"wrong instance", &readinessShutdownCancellation{cause: cancellation, key: dynamicFlowRuntimeReadinessKey{runID: key.runID, instancePath: "review/foreign"}, ordinal: attempt.attemptOrdinal, planHash: attempt.planHash}, false},
+				{"wrong ordinal", &readinessShutdownCancellation{cause: cancellation, key: key, ordinal: 4, planHash: attempt.planHash}, false},
+				{"wrong plan", &readinessShutdownCancellation{cause: cancellation, key: key, ordinal: attempt.attemptOrdinal, planHash: "foreign"}, false},
+				{"missing native cause", &readinessShutdownCancellation{key: key, ordinal: attempt.attemptOrdinal, planHash: attempt.planHash}, false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					if got := isReadinessShutdownCompletion(tc.err, key, attempt); got != tc.want {
+						t.Fatalf("completion disposition=%t want=%t err=%v", got, tc.want, tc.err)
+					}
+				})
+			}
+			for _, phase := range []runtimeLifecyclePhase{runtimeLifecycleRunning, runtimeLifecycleResetting, runtimeLifecycleShuttingDown} {
+				for _, cause := range []error{context.Canceled, worklifetime.ErrRetired, context.DeadlineExceeded} {
+					ctx, cancel := context.WithCancelCause(context.Background())
+					cancel(cause)
+					am := &AgentManager{lifecycle: &agentLifecycleCoordinator{phase: phase}}
+					want := phase == runtimeLifecycleShuttingDown && cause == worklifetime.ErrRetired
+					if got := am.cleanReadinessShutdownCancellation(ctx, result, cancellation); got != want {
+						t.Fatalf("phase=%s cause=%v shutdown cancellation=%t want=%t", phase, cause, got, want)
+					}
+				}
 			}
 		})
 	}
