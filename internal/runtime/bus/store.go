@@ -164,7 +164,8 @@ type PublicationCommand struct {
 }
 
 func (c PublicationCommand) Validate() error {
-	if c.Commit.inbound != nil || c.Commit.Event.Event().RoutingSource().Kind() == events.RoutingSourceExternalIngress {
+	event := c.Commit.Event.Event()
+	if c.Commit.inbound != nil || event.RoutingSource().Kind() == events.RoutingSourceExternalIngress && event.AdmissionClass() != events.EventAdmissionReplay {
 		return fmt.Errorf("provider ingress publication requires its exact inbound transaction")
 	}
 	if !c.prospective.Empty() {
@@ -492,7 +493,8 @@ type CommitPublishRequest struct {
 
 // The canonical prepared commit retains its exact provider seal. Exported
 // command projections cannot erase this responsibility: ingress source facts
-// require this capability, and generic publication refuses ingress entirely.
+// require this capability for fresh input. Replay retains recorded provenance
+// under its distinct causal admission rather than repeating input admission.
 type preparedInboundPublication struct {
 	admission     providertriggers.PublicationAdmission
 	eventID       string

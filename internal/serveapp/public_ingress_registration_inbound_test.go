@@ -256,7 +256,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	initialRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(initialRecorder, initialRequest)
 	if initialRecorder.Code != http.StatusAccepted || len(eventsStore.events) != 2 {
-		t.Fatalf("initial registered verifier status/events=%d/%d", initialRecorder.Code, len(eventsStore.events))
+		t.Fatalf("initial registered verifier status/events=%d/%d commit_error=%v", initialRecorder.Code, len(eventsStore.events), persistence.lastError)
 	}
 
 	if err := credentialStore.Set(context.Background(), "webhook_signing.telegram", "telegram-secret-v2"); err != nil {
