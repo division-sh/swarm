@@ -1944,6 +1944,12 @@
     "body_sha256": "a7c9131cbafa1c72e7ed904af4e35ddd17a88b03a4bdd4de4b9001845e946b90"
   },
   {
+    "owner": "internal/runtime/runtime_claude_startup.go::ManagedProviderPreflightAuthority.saveSurface",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "f76630b6b405de7d53215d33628014ac60234fa2a355c4c8f4ffa94d4c5d9916"
+  },
+  {
     "owner": "internal/runtime/runtime_claude_startup.go::ManagedProviderPreflightAuthority.validate",
     "audit_rows": "A11,A12,A18,A25",
     "proof_families": "P09,P10,P15,P21",
@@ -2079,7 +2085,7 @@
     "owner": "internal/runtime/runtime_claude_startup.go::validateManagedProviderPreflightConfigs",
     "audit_rows": "A11,A12,A18,A25",
     "proof_families": "P09,P10,P15,P21",
-    "body_sha256": "0401042b3c609d3c4b455d2eeede70e4367a72deadc079c0a65c8559380e890d"
+    "body_sha256": "01f77dc452085edcf9b8fb21175e473949b1626e9c77dd0d28ed99416386fe2b"
   },
   {
     "owner": "internal/runtime/runtime_claude_startup.go::validateSelectedBackendCredential",
