@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/flowdata"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -146,6 +147,7 @@ type checkerContext struct {
 
 	credentialLoaded      bool
 	credentialFindings    []Finding
+	credentialSources     []runtimecredentials.SourceFact
 	credentialObservation *AdmissionObservation
 
 	mcpLoaded   bool

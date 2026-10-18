@@ -53,6 +53,18 @@ type standingIngressReadback struct {
 	observeSigning bool
 }
 
+// CredentialSources projects construction observations and frozen standing
+// bindings; readback never re-resolves a credential or refreshes admission.
+func (rt *Runtime) CredentialSources() []runtimecredentials.SourceFact {
+	facts := append([]runtimecredentials.SourceFact(nil), rt.bootCredentialSources...)
+	rt.standingCredentialMu.Lock()
+	defer rt.standingCredentialMu.Unlock()
+	if admission := rt.standingCredentialAdmission; admission != nil {
+		facts = append(facts, admission.projection.SourceFacts()...)
+	}
+	return facts
+}
+
 func (rt *Runtime) ineligibleStandingCapabilitySubjects() (map[string]standingIngressReadback, error) {
 	out := map[string]standingIngressReadback{}
 	rt.standingCredentialMu.Lock()

@@ -191,13 +191,34 @@ type Inspector interface {
 // The value is deliberately private to process memory and has no JSON/YAML
 // representation.
 type AtomicSnapshot struct {
-	Key       string
-	Present   bool
-	Source    string
-	Writable  bool
-	Shadowed  bool
-	UpdatedAt *time.Time
-	value     string
+	Key             string
+	Present         bool
+	Source          string
+	Writable        bool
+	Shadowed        bool
+	UpdatedAt       *time.Time
+	value           string
+	sourceReference string
+}
+
+// SourceFact is presentation-only provenance, not credential authority.
+type SourceFact struct {
+	Key       string `json:"key"`
+	Reference string `json:"reference"`
+}
+
+func (s AtomicSnapshot) SourceReference() string {
+	if !s.Present || !credentialValueUsable(s.value) {
+		return ""
+	}
+	return s.sourceReference
+}
+
+func (s AtomicSnapshot) SourceFact() SourceFact {
+	if reference := s.SourceReference(); reference != "" {
+		return SourceFact{Key: s.Key, Reference: reference}
+	}
+	return SourceFact{}
 }
 
 // Snapshotter is the strict credential boundary used when a value and its
@@ -212,11 +233,12 @@ func NewAtomicSnapshot(metadata Metadata, value string) AtomicSnapshot {
 	return AtomicSnapshot{
 		Key: strings.TrimSpace(metadata.Key), Present: metadata.Present, Source: strings.TrimSpace(metadata.Source),
 		Writable: metadata.Writable, Shadowed: metadata.Shadowed, UpdatedAt: timePtrValue(metadata.UpdatedAt), value: value,
+		sourceReference: metadata.sourceFact.Reference,
 	}
 }
 
 func (s AtomicSnapshot) Metadata() Metadata {
-	return Metadata{Key: s.Key, Present: s.Present, Source: s.Source, Writable: s.Writable, Shadowed: s.Shadowed, UpdatedAt: timePtrValue(s.UpdatedAt)}
+	return Metadata{Key: s.Key, Present: s.Present, Source: s.Source, Writable: s.Writable, Shadowed: s.Shadowed, UpdatedAt: timePtrValue(s.UpdatedAt), sourceFact: s.SourceFact()}
 }
 
 func (s AtomicSnapshot) CredentialValue() string { return s.value }
@@ -387,6 +409,24 @@ func (o *SnapshotOwner) BeginSecretBindingProjection() *SecretBindingProjection 
 	return &SecretBindingProjection{owner: o, bindings: map[string]SecretBinding{}}
 }
 
+// SourceFacts reads retained observations only; it never resolves credentials
+// or grants currentness to a previously observed binding.
+func (o *SnapshotOwner) SourceFacts() []SourceFact {
+	if o == nil {
+		return nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	var facts []SourceFact
+	for _, observation := range o.seen {
+		if fact := observation.snapshot.SourceFact(); fact.Reference != "" {
+			facts = append(facts, fact)
+		}
+	}
+	sort.Slice(facts, func(i, j int) bool { return facts[i].Key < facts[j].Key })
+	return facts
+}
+
 func (p *SecretBindingProjection) ObserveSecretBinding(ctx context.Context, key string) (SecretBinding, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -509,6 +549,20 @@ func (p *SecretBindingProjection) ValidateCurrentKeys(ctx context.Context, keys 
 	return nil
 }
 
+func (p *SecretBindingProjection) SourceFacts() []SourceFact {
+	if p == nil {
+		return nil
+	}
+	var facts []SourceFact
+	for _, binding := range p.bindings {
+		if fact := binding.snapshot.SourceFact(); fact.Reference != "" {
+			facts = append(facts, fact)
+		}
+	}
+	sort.Slice(facts, func(i, j int) bool { return facts[i].Key < facts[j].Key })
+	return facts
+}
+
 func cloneAtomicSnapshot(snapshot AtomicSnapshot) AtomicSnapshot {
 	snapshot.UpdatedAt = timePtrValue(snapshot.UpdatedAt)
 	return snapshot
@@ -530,13 +584,16 @@ func timePtrValue(value *time.Time) *time.Time {
 }
 
 type Metadata struct {
-	Key       string
-	Present   bool
-	Source    string
-	Writable  bool
-	Shadowed  bool
-	UpdatedAt *time.Time
+	Key        string
+	Present    bool
+	Source     string
+	Writable   bool
+	Shadowed   bool
+	UpdatedAt  *time.Time
+	sourceFact SourceFact
 }
+
+func (m Metadata) SourceFact() SourceFact { return m.sourceFact }
 
 const (
 	SourceEnv  = "env"
@@ -549,18 +606,9 @@ func NewEnvStore() Store {
 	return EnvStore{}
 }
 
-func (EnvStore) Get(_ context.Context, key string) (string, bool, error) {
-	for _, candidate := range credentialEnvCandidates(key) {
-		value, ok := os.LookupEnv(candidate)
-		if !ok {
-			continue
-		}
-		if strings.HasPrefix(candidate, "SWARM_") {
-			return "", false, fmt.Errorf("credential env %s is not accepted through dynamic credential lookup; declare a typed source or store the secret with swarm secrets", candidate)
-		}
-		return value, true, nil
-	}
-	return "", false, nil
+func (s EnvStore) Get(ctx context.Context, key string) (string, bool, error) {
+	snapshot, err := s.Snapshot(ctx, key)
+	return snapshot.value, snapshot.Present, err
 }
 
 func (EnvStore) Set(_ context.Context, _, _ string) error {
@@ -583,15 +631,19 @@ func (EnvStore) Inspect(ctx context.Context, key string) (Metadata, error) {
 	return snapshot.Metadata(), nil
 }
 
-func (EnvStore) Snapshot(ctx context.Context, key string) (AtomicSnapshot, error) {
-	value, ok, err := EnvStore{}.Get(ctx, key)
-	if err != nil {
-		return AtomicSnapshot{}, err
-	}
-	snapshot := AtomicSnapshot{Key: strings.TrimSpace(key), Present: ok}
-	if ok {
-		snapshot.Source = SourceEnv
-		snapshot.value = value
+func (EnvStore) Snapshot(_ context.Context, key string) (AtomicSnapshot, error) {
+	snapshot := AtomicSnapshot{Key: strings.TrimSpace(key)}
+	for _, candidate := range credentialEnvCandidates(key) {
+		value, ok := os.LookupEnv(candidate)
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(candidate, "SWARM_") {
+			return AtomicSnapshot{}, fmt.Errorf("credential env %s is not accepted through dynamic credential lookup; declare a typed source or store the secret with swarm secrets", candidate)
+		}
+		snapshot.Present, snapshot.Source, snapshot.value = true, SourceEnv, value
+		snapshot.sourceReference = "env:" + candidate
+		break
 	}
 	return snapshot, nil
 }

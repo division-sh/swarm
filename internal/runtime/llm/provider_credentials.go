@@ -24,7 +24,10 @@ type ProviderCredential struct {
 	Source      string
 	EnvPresent  bool
 	EnvShadowed bool
+	sourceFact  runtimecredentials.SourceFact
 }
+
+func (c ProviderCredential) SourceFact() runtimecredentials.SourceFact { return c.sourceFact }
 
 // The cache belongs to one API runtime. Resolution failures leave it empty;
 // request snapshots release synchronization before any provider I/O.
@@ -110,24 +113,13 @@ func (r ProviderCredentialResolver) Resolve(ctx context.Context, profile llmsele
 		return ProviderCredential{}, fmt.Errorf("provider credential key is required for backend %q", strings.TrimSpace(profile.ID))
 	}
 	envPresent := r.envPresent(key)
-	value, ok, err := r.storeValue(ctx, key)
+	credential, ok, err := r.storeValue(ctx, key)
 	if err != nil {
 		return ProviderCredential{}, providerCredentialReadFailure(key, "resolve_credential", err)
 	}
 	if ok {
-		source := runtimecredentials.SourceFile
-		if meta, metaErr := inspectProviderCredentialStore(ctx, r.Store, key); metaErr != nil {
-			return ProviderCredential{}, providerCredentialReadFailure(key, "resolve_credential", metaErr)
-		} else if strings.TrimSpace(meta.Source) != "" {
-			source = strings.TrimSpace(meta.Source)
-		}
-		return ProviderCredential{
-			Key:         key,
-			Value:       value,
-			Source:      source,
-			EnvPresent:  envPresent,
-			EnvShadowed: envPresent,
-		}, nil
+		credential.EnvPresent, credential.EnvShadowed = envPresent, envPresent
+		return credential, nil
 	}
 	missing := MissingProviderCredentialError{
 		Key:        key,
@@ -150,24 +142,11 @@ func (r ProviderCredentialResolver) Inspect(ctx context.Context, profile llmsele
 		return ProviderCredential{}, fmt.Errorf("provider credential key is required for backend %q", strings.TrimSpace(profile.ID))
 	}
 	envPresent := r.envPresent(key)
-	value, ok, err := r.storeValue(ctx, key)
+	credential, ok, err := r.storeValue(ctx, key)
 	if err != nil {
 		return ProviderCredential{}, providerCredentialReadFailure(key, "inspect_credential", err)
 	}
-	credential := ProviderCredential{
-		Key:         key,
-		Value:       value,
-		EnvPresent:  envPresent,
-		EnvShadowed: envPresent && ok,
-	}
-	if ok {
-		credential.Source = runtimecredentials.SourceFile
-		if meta, metaErr := inspectProviderCredentialStore(ctx, r.Store, key); metaErr != nil {
-			return ProviderCredential{}, providerCredentialReadFailure(key, "inspect_credential", metaErr)
-		} else if strings.TrimSpace(meta.Source) != "" {
-			credential.Source = strings.TrimSpace(meta.Source)
-		}
-	}
+	credential.EnvPresent, credential.EnvShadowed = envPresent, envPresent && ok
 	return credential, nil
 }
 
@@ -179,25 +158,47 @@ func (r ProviderCredentialResolver) envPresent(key string) bool {
 	return ok && strings.TrimSpace(value) != ""
 }
 
-func (r ProviderCredentialResolver) storeValue(ctx context.Context, key string) (string, bool, error) {
+func (r ProviderCredentialResolver) storeValue(ctx context.Context, key string) (ProviderCredential, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return "", false, err
+		return ProviderCredential{}, false, err
 	}
 	if r.Store == nil {
-		return "", false, errors.New("provider credential read port is required")
+		return ProviderCredential{}, false, errors.New("provider credential read port is required")
 	}
-	value, ok, err := r.Store.Get(ctx, key)
+	credential := ProviderCredential{Key: key}
+	var present bool
+	var metadata runtimecredentials.Metadata
+	var err error
+	if snapshots, ok := r.Store.(runtimecredentials.Snapshotter); ok {
+		var snapshot runtimecredentials.AtomicSnapshot
+		snapshot, err = snapshots.Snapshot(ctx, key)
+		credential.Value, present = snapshot.CredentialValue(), snapshot.Present
+		metadata = snapshot.Metadata()
+		credential.sourceFact = snapshot.SourceFact()
+	} else {
+		credential.Value, present, err = r.Store.Get(ctx, key)
+	}
 	if err != nil {
-		return "", false, err
+		return ProviderCredential{}, false, err
 	}
 	if err := ctx.Err(); err != nil {
-		return "", false, err
+		return ProviderCredential{}, false, err
 	}
-	value = strings.TrimSpace(value)
-	if !ok || value == "" {
-		return "", false, nil
+	credential.Value = strings.TrimSpace(credential.Value)
+	if !present || credential.Value == "" {
+		return ProviderCredential{Key: key}, false, nil
 	}
-	return value, true, nil
+	if _, atomic := r.Store.(runtimecredentials.Snapshotter); !atomic {
+		metadata, err = inspectProviderCredentialStore(ctx, r.Store, key)
+		if err != nil {
+			return ProviderCredential{}, false, err
+		}
+	}
+	credential.Source = strings.TrimSpace(metadata.Source)
+	if credential.Source == "" {
+		credential.Source = runtimecredentials.SourceFile
+	}
+	return credential, true, nil
 }
 
 type providerCredentialReadError struct{ cause error }

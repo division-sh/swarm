@@ -27,6 +27,8 @@ type admissionPredicateSurface struct {
 }
 
 var admissionPredicateSurfaces = []admissionPredicateSurface{
+	// #2729's presentation-only body changes and preserved owner/proof mapping
+	// are recorded in testdata/issue_2729_credential_source_accounting.md.
 	// #1801 removes spec-path forwarding, not these admission obligations;
 	// owner/caller and execution accounting is in testdata/issue_1801_embedded_spec_accounting.md.
 	{"internal/cliapp/verify_runtime.go", "A01,A28,A29,A30", "P01,P02,P23,P24,P27,P29"},

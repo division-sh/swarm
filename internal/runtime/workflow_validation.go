@@ -49,6 +49,11 @@ type WorkflowContractValidationResult struct {
 	CapabilitySubjects               []packs.Subject
 	mockConnectorResponses           *providerconnectors.MockResponsePlan
 	bootEffectReachability           runtimebootverify.SourceBootEffectReachability
+	credentialSources                []runtimecredentials.SourceFact
+}
+
+func (r WorkflowContractValidationResult) CredentialSources() []runtimecredentials.SourceFact {
+	return append(r.BootReport.CredentialSources(), r.credentialSources...)
 }
 
 func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Store, posture executionposture.Posture) WorkflowContractValidationOptions {
@@ -227,6 +232,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if err != nil {
 		return result, fmt.Errorf("provider trigger capability projection failed: %w", err)
 	}
+	result.credentialSources = append(result.credentialSources, providerCredentialOwner.SourceFacts()...)
 	result.finishAdmissionClause(phase)
 	phase = "channel_capability_projection"
 	result.startAdmissionClause(phase)
