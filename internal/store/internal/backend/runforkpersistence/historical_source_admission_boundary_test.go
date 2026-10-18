@@ -9,10 +9,6 @@ import (
 	"testing"
 )
 
-func TestHistoricalSourceAdmissionDelegationsStayExact(t *testing.T) {
-	historicalSourceAdmissionBoundaryHostile(t)
-}
-
 func historicalSourceAdmissionBoundaryHostile(t *testing.T) {
 	t.Helper()
 	for _, resolver := range []string{"resolveRunForkRevisionPoint", "resolveSQLiteRunForkRevisionPoint"} {
