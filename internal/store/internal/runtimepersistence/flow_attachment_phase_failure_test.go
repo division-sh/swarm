@@ -143,9 +143,11 @@ func (w *attachmentPhaseFaultWorkflow) AdvanceFlowAttachment(ctx context.Context
 
 func TestFlowAttachmentPhaseFailureRetainsConstructionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend+"/shutdown_before_progress", func(t *testing.T) {
-			proveAttachmentShutdownBeforeProgress(t, backend)
-		})
+		for _, cut := range []string{"before_progress", "inside_progress"} {
+			t.Run(backend+"/shutdown_"+cut, func(t *testing.T) {
+				proveAttachmentShutdownProgress(t, backend, cut)
+			})
+		}
 		for _, previous := range []pipeline.FlowAttachmentPhase{pipeline.FlowAttachmentPlanned, pipeline.FlowAttachmentAgentsRegistered, pipeline.FlowAttachmentRouteInstalled, pipeline.FlowAttachmentTimersArmed} {
 			for _, disposition := range []string{"before_commit", "unacknowledged_response", "acknowledged_error", "panic_after_commit"} {
 				t.Run(backend+"/"+string(previous)+"/"+disposition, func(t *testing.T) {
