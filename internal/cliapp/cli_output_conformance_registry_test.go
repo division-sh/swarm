@@ -65,10 +65,10 @@ var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm describe routes":   {Constructor: "newDescribeRoutesCommand", Runner: "runDescribeRoutesCommandWithOutput"},
 	"swarm entity list":       {Constructor: "newEntitiesListCommand", Runner: "runEntitiesListCommand"},
 	"swarm entity view":       {Constructor: "newEntityViewCommand", Runner: "runEntityViewCommand"},
-	"swarm channel connect":   {Constructor: "newChannelLifecycleCommand", Runner: "runChannelConnect"},
-	"swarm channel reconnect": {Constructor: "newChannelLifecycleCommand", Runner: "runChannelConnect"},
-	"swarm channel rebind":    {Constructor: "newChannelLifecycleCommand", Runner: "runChannelConnect"},
-	"swarm channel resume":    {Constructor: "newChannelResumeCommand", Runner: "runChannelResume"},
+	"swarm channel connect":   {Constructor: "newChannelLifecycleCommand", Runner: "renderChannelOnboardingResult"},
+	"swarm channel reconnect": {Constructor: "newChannelLifecycleCommand", Runner: "renderChannelOnboardingResult"},
+	"swarm channel rebind":    {Constructor: "newChannelLifecycleCommand", Runner: "renderChannelOnboardingResult"},
+	"swarm channel resume":    {Constructor: "newChannelResumeCommand", Runner: "renderChannelOnboardingResult"},
 	"swarm channel list":      {Constructor: "newChannelListCommand", Runner: "runChannelList"},
 	"swarm channel status":    {Constructor: "newChannelStatusCommand", Runner: "runChannelStatus"},
 	"swarm channel unbind":    {Constructor: "newChannelUnbindCommand", Runner: "runChannelUnbind"},
@@ -437,6 +437,11 @@ func TestCLIOutputConformanceSharedRowsConsumeSharedOwner(t *testing.T) {
 	calls := cliOutputFunctionCalls(t)
 	if !calls["runVerifyCommandWithOutput"]["renderVerifyCommandResult"] || !calls["renderVerifyAdmissionRefusal"]["renderVerifyCommandResult"] {
 		t.Error("verify success and refusal must consume the shared command-result renderer")
+	}
+	for _, runner := range []string{"runChannelConnect", "runChannelResume"} {
+		if !calls[runner]["renderChannelOnboardingResult"] {
+			t.Errorf("channel runner %s does not call renderChannelOnboardingResult", runner)
+		}
 	}
 	for command, row := range rows {
 		proof, hasProof := cliOutputSharedOwnerProofs[command]
