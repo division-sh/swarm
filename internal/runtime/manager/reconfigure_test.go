@@ -9,12 +9,18 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type reconfigureTestAgent struct{ id string }
@@ -179,12 +185,13 @@ type ReconfigureMemoryNativeTestStore interface {
 	AgentLifecycleStateReader
 	sessions.Registry
 	LoadActiveConversation(context.Context, agentmemory.Identity) (llm.ConversationRecord, bool, error)
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 }
 
 func ReconfigureMemoryNativeFixture(t testing.TB, enabled bool) PersistedAgent {
 	t.Helper()
 	rec := lifecycleTestPersistedAgent(t)
-	rec.Config.FlowID, rec.Config.FlowPath = "review", "review/inst-1"
+	rec.Config.FlowID, rec.Config.FlowPath = ".", "review/inst-1"
 	rec.Config.Identity = managerRuntimeAgentIdentityForFlowPath(rec.Config.ID, rec.Config.FlowPath)
 	rec.Config.Memory.Enabled = enabled
 	rec.Config.LLMBackend = "anthropic"
@@ -197,14 +204,25 @@ func ReconfigureMemoryNativeFixture(t testing.TB, enabled bool) PersistedAgent {
 
 func newReconfigureMemoryNativeManager(t *testing.T, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, rec PersistedAgent) *AgentManager {
 	t.Helper()
+	rooted, err := selected.LoadRunRootedSource(context.Background(), rec.Config.Identity.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := correlation.WithRootAdmission(testAuthorActivityContext(context.Background()), rooted.Admission())
 	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{LLMBackend: "anthropic", LifecycleStore: persistence, Sessions: selected, PersistenceRoles: PersistenceRoles{LifecycleState: selected}})
-	ctx := testAuthorActivityContext(context.Background())
+	}, AgentManagerOptions{
+		BaseContext: ctx, SemanticSource: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
+		LLMBackend: "anthropic", LifecycleStore: persistence, Sessions: selected, PersistenceRoles: PersistenceRoles{LifecycleState: selected},
+	})
 	if err := am.lifecycle.registerExecution(ctx, rec, false, reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
 		t.Fatal(err)
 	}
-	if err := am.Run(managedExecutionTestContext(t, ctx)); err != nil {
+	if err := am.Run(managedExecutionTestContextForCapturedSource(t, ctx)); err != nil {
 		t.Fatal(err)
 	}
 	return am
