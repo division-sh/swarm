@@ -491,6 +491,10 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"state"},
 		Reason: "native inbox qualification is the separate missing/invalid/stale/qualified evidence taxonomy, not runtime operational state",
 	},
+	"channel_onboarding_progress.go\x00renderChannelOnboardingResult": {
+		Names:  []string{"status"},
+		Reason: "retained session pairing progress is its own SDK observation taxonomy, not a registered runtime lifecycle status",
+	},
 	"connections.go\x00newConnectionsCallbackCommand": {
 		Names:  []string{"status"},
 		Reason: "managed-credential connection status is a separate command taxonomy",
