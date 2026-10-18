@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 )
 
 // Request origins walk only committed immediate-parent bindings at their fixed
@@ -191,37 +190,6 @@ func requireSelectedPublicationCutFrame(ctx context.Context, tx *sql.Tx, binding
 		}
 	}
 	return projected, nil
-}
-
-func readSelectedForkInputLineageTx(ctx context.Context, tx *sql.Tx, childRunID, sourceEventID, eventID string) (runfork.RunForkSelectedContractExecutionLineage, bool, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT CAST(fork_run_id AS TEXT), CAST(source_run_id AS TEXT),
-		CAST(source_event_id AS TEXT), CAST(fork_event_id AS TEXT), event_name, selection_authority, created_at
-		FROM run_fork_selected_contract_executions
-		WHERE (fork_run_id=$1 AND source_event_id=$2) OR fork_event_id=$3`, childRunID, sourceEventID, eventID)
-	if err != nil {
-		return runfork.RunForkSelectedContractExecutionLineage{}, false, err
-	}
-	defer rows.Close()
-	var lineage runfork.RunForkSelectedContractExecutionLineage
-	var found bool
-	for rows.Next() {
-		if found {
-			return lineage, false, eventrecord.Corrupt(eventID, fmt.Errorf("selected input publication has multiple lineage owners"))
-		}
-		var rawTime any
-		if err := rows.Scan(&lineage.ForkRunID, &lineage.SourceRunID, &lineage.SourceEventID, &lineage.ForkEventID, &lineage.EventName, &lineage.SelectionAuthority, &rawTime); err != nil {
-			return lineage, false, err
-		}
-		createdAt, present, err := sqliteTimeValue(rawTime)
-		if err != nil || !present {
-			return lineage, false, eventrecord.Corrupt(eventID, fmt.Errorf("selected input lineage has invalid creation time: %v", err))
-		}
-		lineage.CreatedAt, found = createdAt, true
-	}
-	if err := rows.Err(); err != nil {
-		return lineage, false, err
-	}
-	return lineage, found, rows.Close()
 }
 
 func validateSelectedForkPublishedInputIdentity(binding runfork.RunForkSelectedContractBinding, lineage runfork.RunForkSelectedContractExecutionLineage, event events.Event, sourceEvent runfork.RunForkSelectedContractSourceEvent) error {

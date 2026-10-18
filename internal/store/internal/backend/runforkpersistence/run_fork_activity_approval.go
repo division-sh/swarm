@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -42,7 +43,14 @@ func (a runForkSourceStateAdmission) requireOriginalActivityApproval(ctx context
 	if !found {
 		return false, fmt.Errorf("approved original activity is missing its exact proposed effect")
 	}
-	if err := pipeline.ValidateRecordedActivityProposal(origin.Request, card, continuation, decision, origin.Source().BundleHash()); err != nil {
+	// Physical event history has no delivery context. The validated original
+	// continuation owns the released request's durable reply binding.
+	deliveryContext := events.DeliveryContext{}
+	if continuation.ReplyContextID != "" {
+		deliveryContext.Reply = &events.ReplyContextRef{ID: continuation.ReplyContextID}
+	}
+	requestView := events.NewContextDeliveryEvent(origin.Request, deliveryContext).Event()
+	if err := pipeline.ValidateRecordedActivityProposal(requestView, card, continuation, decision, origin.Source().BundleHash()); err != nil {
 		return false, err
 	}
 	return true, nil
