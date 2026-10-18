@@ -21,13 +21,13 @@ import (
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestCommittedReadinessCannotConstructMissingStaticDeclaration(t *testing.T) {
 	store := &flowActivationTestStore{}
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{}, store)
 	source := loadRootAndFlowStaticAgentSource(t)
-	setFlowActivationManagerSemanticSource(am, source)
+	am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{}, source, store)
 	name, err := managerTestFlowAgentNamePlan(t, source, ".", "test-agent").Materialize()
 	if err != nil {
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func TestCommittedReadinessCannotConstructMissingStaticDeclaration(t *testing.T)
 		t.Fatal(err)
 	}
 	event := eventtest.RunCreatingRootIngress("", "task.assigned", "", "", nil, 0, identity.RunID, "", events.EventEnvelope{}, time.Now().UTC())
-	err = am.FinalizeCommittedAgentReadiness(testAuthorActivityContext(context.Background()), event, []events.DeliveryRoute{{
+	err = am.FinalizeCommittedAgentReadiness(ctx, event, []events.DeliveryRoute{{
 		Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
 	}})
 	if !errors.Is(err, ErrAgentNotFound) {
@@ -706,10 +706,9 @@ func TestDynamicReadinessRejectsRegisteredStoppedAsProcessReady(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
 	firstBus := &flowActivationTestBus{}
-	first := newFlowActivationManager(t, firstBus, instances, agents)
 	bundle := testFlowBundle(t, "")
+	first, ctx := newFlowActivationManagerForSource(t, firstBus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(first, ctx, req); err != nil {
 		t.Fatalf("activate first process: %v", err)
 	}
@@ -719,8 +718,7 @@ func TestDynamicReadinessRejectsRegisteredStoppedAsProcessReady(t *testing.T) {
 	}
 
 	restartBus := &flowActivationTestBus{}
-	restarted := newFlowActivationManager(t, restartBus, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
+	restarted, ctx := newFlowActivationManagerForSource(t, restartBus, instances, semanticview.Wrap(bundle), agents)
 	runCtx, cancelRun := context.WithCancel(ctx)
 	if err := restarted.Run(managedExecutionTestContext(t, runCtx)); err != nil {
 		t.Fatalf("start restarted manager: %v", err)
@@ -753,10 +751,9 @@ func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *t
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
 	firstBus := &flowActivationTestBus{}
-	first := newFlowActivationManager(t, firstBus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
+	first, ctx := newFlowActivationManagerForSource(t, firstBus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(first, ctx, req); err != nil {
 		t.Fatalf("activate first process: %v", err)
 	}
@@ -765,8 +762,7 @@ func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *t
 	}
 
 	restartBus := &flowActivationTestBus{}
-	restarted := newFlowActivationManager(t, restartBus, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
+	restarted, ctx := newFlowActivationManagerForSource(t, restartBus, instances, semanticview.Wrap(bundle), agents)
 	runCtx, cancelRun := context.WithCancel(ctx)
 	if err := restarted.Run(managedExecutionTestContext(t, runCtx)); err != nil {
 		t.Fatalf("start restarted manager: %v", err)
@@ -781,7 +777,7 @@ func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *t
 	if err != nil || !found {
 		t.Fatalf("read predecessor readiness: found=%v err=%v", found, err)
 	}
-	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestSourceArtifactFact, false); err != nil {
+	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact), false); err != nil {
 		t.Fatalf("ReconstructDynamicFlowRuntimeStartupTopology: %v", err)
 	}
 	if !flowActivationAttemptReadyForTest(restarted, ctx, req) {
@@ -814,13 +810,12 @@ func TestSourceScopedStartupPreparesEverySiblingBeforeFirstPendingFinalizer(t *t
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
 	firstBus := &flowActivationTestBus{}
-	first := newFlowActivationManager(t, firstBus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "")
+	first, ctx := newFlowActivationManagerForSource(t, firstBus, instances, semanticview.Wrap(bundle), agents)
 	requests := []runtimepipeline.FlowInstanceActivationRequest{
 		testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"),
 		testActivationRequest(bundle, "review", "inst-2", "ent-2", "review/inst-2"),
 	}
-	ctx := testAuthorActivityContext(context.Background())
 	for _, req := range requests {
 		if err := activateFlowInstanceForTest(first, ctx, req); err != nil {
 			t.Fatalf("activate initial process %s: %v", req.Instance.InstancePath, err)
@@ -841,9 +836,8 @@ func TestSourceScopedStartupPreparesEverySiblingBeforeFirstPendingFinalizer(t *t
 	armsBefore := len(instances.armedEntries)
 
 	restartBus := &flowActivationTestBus{}
-	restarted := newFlowActivationManager(t, restartBus, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	startup, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestSourceArtifactFact, true)
+	restarted, ctx := newFlowActivationManagerForSource(t, restartBus, instances, semanticview.Wrap(bundle), agents)
+	startup, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact), true)
 	if err != nil {
 		t.Fatalf("canonicalize sibling startup topology: %v", err)
 	}
