@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -73,6 +75,10 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 	if len(rows) != 893 {
 		t.Fatal("embedded-spec deletion changed the finite recipe population")
 	}
+	inputPopulation, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
 	restored := append([]recipe(nil), rows...)
 	completionSuccessors := 0
 	for i, row := range rows {
@@ -129,9 +135,169 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 		t.Fatal(err)
 	}
 	assertQ10HistoricalComparisonRefusals1801(t, rows)
+	assertN19HistoricalComparisonRefusals1801(t, restored, packet.PopulationSHA256)
+	restored, err = n19HistoricalComparison1801(restored, readQ10ComparisonSource1801)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unchangedPopulation, err := json.Marshal(rows)
+	if err != nil || string(unchangedPopulation) != string(inputPopulation) {
+		t.Fatal("historical comparison modified the current recipe population")
+	}
 	population, err := json.Marshal(restored)
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(population)) != packet.PopulationSHA256 || priorSuccessors != 12 || q10Compositions != 1 {
 		t.Fatalf("embedded-spec successor overwrote historical evidence, prior chains or an unrelated row: population=%x want=%s prior-successors=%d want=12 Q10-compositions=%d want=1 marshal=%v", sha256.Sum256(population), packet.PopulationSHA256, priorSuccessors, q10Compositions, err)
+	}
+}
+
+// Reviewer-e6253576563 permits this one predecessor only in the historical comparison.
+func n19HistoricalComparison1801(rows []recipe, read func(recipe) ([]byte, error)) ([]recipe, error) {
+	index := -1
+	for i, row := range rows {
+		if row.Family+"/"+row.File+"/"+row.Function != n19FanOutBarrierIdentity {
+			continue
+		}
+		if index != -1 {
+			return nil, fmt.Errorf("duplicate N19 historical comparison identity")
+		}
+		index = i
+	}
+	if index == -1 {
+		return nil, fmt.Errorf("missing N19 historical comparison identity")
+	}
+	row := rows[index]
+	source, err := read(row)
+	if err != nil {
+		return nil, err
+	}
+	positions := token.NewFileSet()
+	file, err := parser.ParseFile(positions, row.File, source, 0)
+	if err != nil {
+		return nil, err
+	}
+	function, err := uniqueFunction(file, row.Function)
+	if err != nil {
+		return nil, err
+	}
+	actual := string(source[positions.Position(function.Pos()).Offset:positions.Position(function.End()).Offset])
+	if err := validateN19FanOutBarrierSuccessor(row, actual); err != nil {
+		return nil, err
+	}
+	restored := append([]recipe(nil), rows...)
+	restored[index].Successor = ""
+	return restored, nil
+}
+
+func assertN19HistoricalComparisonRefusals1801(t *testing.T, rows []recipe, expectedPopulation string) {
+	t.Helper()
+	original, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := -1
+	for i, row := range rows {
+		if row.Family+"/"+row.File+"/"+row.Function == n19FanOutBarrierIdentity {
+			if index != -1 {
+				t.Fatal("duplicate N19 comparison fixture")
+			}
+			index = i
+		}
+	}
+	if index == -1 {
+		t.Fatal("missing N19 comparison fixture")
+	}
+	row := rows[index]
+	for _, field := range []string{"family", "file", "function", "before", "after", "missing_successor", "removed", "mechanical", "duplicate", "missing"} {
+		t.Run("N19-historical-comparison/"+field, func(t *testing.T) {
+			mutants := append([]recipe(nil), rows...)
+			mutant := &mutants[index]
+			switch field {
+			case "family":
+				mutant.Family += "-foreign"
+			case "file":
+				mutant.File = "foreign.go"
+			case "function":
+				mutant.Function += "Foreign"
+			case "before":
+				mutant.Before += " "
+			case "after":
+				mutant.After += " "
+			case "missing_successor":
+				mutant.Successor = ""
+			case "removed":
+				mutant.Removed = true
+			case "mechanical":
+				mutant.Mechanical = &mechanicalSnapshot{}
+			case "duplicate":
+				mutants = append(mutants, row)
+			case "missing":
+				mutants = append(mutants[:index], mutants[index+1:]...)
+			}
+			if _, err := n19HistoricalComparison1801(mutants, readQ10ComparisonSource1801); err == nil {
+				t.Fatal("changed N19 identity, history or multiplicity accepted")
+			}
+		})
+	}
+	for name, source := range map[string]string{
+		"missing-armed":       strings.Replace(row.Successor, n19ArmedBarrierObservation, "", 1),
+		"missing-pending":     strings.Replace(row.Successor, n19PendingBarrierObservation, "", 1),
+		"duplicate-armed":     strings.Replace(row.Successor, n19ArmedBarrierObservation, n19ArmedBarrierObservation+n19ArmedBarrierObservation, 1),
+		"duplicate-pending":   strings.Replace(row.Successor, n19PendingBarrierObservation, n19PendingBarrierObservation+n19PendingBarrierObservation, 1),
+		"moved-armed":         strings.Replace(strings.Replace(row.Successor, n19ArmedBarrierObservation, "", 1), n19PendingBarrierAnchor, n19ArmedBarrierObservation+n19PendingBarrierAnchor, 1),
+		"moved-pending":       strings.Replace(strings.Replace(row.Successor, n19PendingBarrierObservation, "", 1), n19ArmedBarrierAnchor, n19ArmedBarrierAnchor+n19PendingBarrierObservation, 1),
+		"changed-armed":       strings.Replace(row.Successor, `projected.State != "running"`, `projected.State == "running"`, 1),
+		"changed-pending":     strings.Replace(row.Successor, n19PendingBarrierObservation, strings.Replace(n19PendingBarrierObservation, `len(projected.Attributions) != 0`, `len(projected.Attributions) == 0`, 1), 1),
+		"lost-original-work":  strings.Replace(row.Successor, `assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 1)`, "", 1),
+		"historical-fallback": row.After,
+	} {
+		t.Run("N19-historical-comparison/"+name, func(t *testing.T) {
+			if source == row.Successor {
+				t.Fatal("negative control did not change N19 source")
+			}
+			mutants := append([]recipe(nil), rows...)
+			mutants[index].Successor = source
+			read := func(recipe) ([]byte, error) { return []byte("package proof\n" + source), nil }
+			if _, err := n19HistoricalComparison1801(mutants, read); err == nil {
+				t.Fatal("matching unreviewed N19 successor and live source accepted")
+			}
+		})
+	}
+	for name, source := range map[string]string{
+		"missing-live":    "package proof\n",
+		"malformed-live":  "package proof\nfunc (",
+		"duplicate-live":  "package proof\n" + row.Successor + "\n" + row.Successor,
+		"historical-live": "package proof\n" + row.After,
+		"changed-live":    "package proof\n" + strings.Replace(row.Successor, `fanOutBarrierRoute("multi-c")`, `fanOutBarrierRoute("foreign")`, 1),
+	} {
+		t.Run("N19-historical-comparison/"+name, func(t *testing.T) {
+			read := func(recipe) ([]byte, error) { return []byte(source), nil }
+			if _, err := n19HistoricalComparison1801(rows, read); err == nil {
+				t.Fatal("missing, ambiguous, historical or changed live N19 source accepted")
+			}
+		})
+	}
+	t.Run("N19-historical-comparison/read-failure", func(t *testing.T) {
+		read := func(recipe) ([]byte, error) { return nil, errors.New("N19 live source unavailable") }
+		if _, err := n19HistoricalComparison1801(rows, read); err == nil {
+			t.Fatal("unavailable N19 live source accepted")
+		}
+	})
+	t.Run("N19-historical-comparison/unrelated-row", func(t *testing.T) {
+		mutants := append([]recipe(nil), rows...)
+		other := (index + 1) % len(mutants)
+		mutants[other].After += "\n// unreviewed unrelated work\n"
+		restored, err := n19HistoricalComparison1801(mutants, readQ10ComparisonSource1801)
+		if err != nil {
+			t.Fatal(err)
+		}
+		population, err := json.Marshal(restored)
+		if err != nil || fmt.Sprintf("%x", sha256.Sum256(population)) == expectedPopulation {
+			t.Fatal("unrelated row edit escaped the final historical population comparison")
+		}
+	})
+	unchanged, err := json.Marshal(rows)
+	if err != nil || string(unchanged) != string(original) {
+		t.Fatal("N19 historical comparison modified its input population")
 	}
 }
 
