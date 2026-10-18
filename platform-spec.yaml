@@ -12610,6 +12610,33 @@ tool_model:
         Basic describe and routing topology remain declaration-only and show
         authored admission kind/pin/auth/event/acknowledgement facts without claiming resolved pack identity, generation,
         request authentication, or readiness.
+      inbound_validation_response: >
+        A canonical schema violation while admitting the submitted inbound event is a permanent HTTP 400 failure.
+        The gateway's one publication-error response owner uses typed admission evidence, never error-text matching.
+        It returns a fixed validation phrase and the bounded, escaped failing path; caller-supplied property names are
+        untrusted display data. Raw values, schema Detail/Actual, internal prefixes and wrapped errors are not disclosed.
+        A bare validation sentinel, unresolved schema, internally generated auto-emission, or independent cleanup,
+        store or dispatch failure is not evidence of invalid submitted input. Independent failures dominate even under
+        nested joins: return a fixed HTTP 503 response and retain every cause in internal diagnostics. Existing provider
+        validation/authentication responses, signature 401, exact duplicate 200, conflicting-body 409 and accepted 202
+        remain unchanged. An acknowledged publication with successful post-commit handoff retains its accepted/duplicate
+        response despite later cleanup failure; it must not become a fresh input refusal or invite redispatch.
+      raw_body_structural_teaching:
+        rule: >
+          Raw envelope `data: json` is valid opaque transport data, not authority to select its members. A node that reads
+          `payload.data.user_id` declares data as a named closed record. Existing structural validation refuses member
+          selection through json; do not loosen it, introduce a syntax alias, or retire valid opaque forwarding.
+        types_yaml: |
+          types:
+            AccountInput:
+              delivery_id: text
+              user_id: text
+        events_yaml: |
+          account.opened:
+            provider: text
+            provider_event_id: text
+            provider_event_type: text
+            data: AccountInput
       provider_delivery_transaction: >
         `RunInboundPublicationMutation` is the sole provider-delivery mutation owner. In one selected-store transaction it
         reserves the provider request identity, persists the `platform.inbound_recorded` evidence event, appends the raw

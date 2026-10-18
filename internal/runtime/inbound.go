@@ -467,17 +467,17 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	}
 	delivery, publicationAdmission, projectionErr := target.AdmissionPlan.ProjectPublication(admitted, target.BundleHash, target.FlowPath)
 	if projectionErr != nil {
-		writeInboundPublicationError(w, projectionErr)
+		writeInboundPublicationError(w, g.logger, requestCtx, provider, target.ServiceID, providerEventID, projectionErr)
 		return
 	}
 	published, evidence, authorProjection, operatorEvent, projectionErr := projectInboundPublication(target, delivery, admitted, publicationRequest, now, g.executionPosture, g.channelPlans, bareSelector)
 	if projectionErr != nil {
-		writeInboundPublicationError(w, projectionErr)
+		writeInboundPublicationError(w, g.logger, requestCtx, provider, target.ServiceID, providerEventID, projectionErr)
 		return
 	}
 	evidence, projectionErr = g.bus.PrepareInboundEvidence(pubCtx, evidence)
 	if projectionErr != nil {
-		writeInboundPublicationError(w, projectionErr)
+		writeInboundPublicationError(w, g.logger, requestCtx, provider, target.ServiceID, providerEventID, projectionErr)
 		return
 	}
 	if operatorEvent != nil && operatorEvent.BareCandidate == nil {
@@ -534,7 +534,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	for {
 		batchPlan, err = g.bus.PrepareInboundDeliveryBatch(pubCtx, batch)
 		if err != nil {
-			http.Error(w, "publish inbound failed: "+err.Error(), http.StatusServiceUnavailable)
+			writeInboundPublicationError(w, g.logger, requestCtx, provider, target.ServiceID, providerEventID, err)
 			return
 		}
 		prepared := batchPlan.PreparedPublications()
@@ -543,8 +543,8 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		for index := range prepared {
 			manifest, _, _, manifestErr := runtimeinbound.CanonicalRecipientManifest(prepared[index].DeliveryRoutes())
 			if manifestErr != nil {
-				_ = g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
-				http.Error(w, "publish inbound failed", http.StatusServiceUnavailable)
+				cleanupErr := g.bus.AbandonInboundDeliveryPlan(context.WithoutCancel(pubCtx), batchPlan)
+				writeInboundPublicationError(w, g.logger, requestCtx, provider, target.ServiceID, providerEventID, errors.Join(manifestErr, cleanupErr))
 				return
 			}
 			finalization.Events[index] = runtimeinbound.EventFinalization{
@@ -639,7 +639,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			if err := g.bus.DispatchPreparedPublishAsync(handoffCtx, item); err != nil {
 				err = errors.Join(commitErr, err)
 				for _, pending := range prepared[index+1:] {
-					_ = g.bus.AbandonPreparedPublish(context.WithoutCancel(pubCtx), pending)
+					err = errors.Join(err, g.bus.AbandonPreparedPublish(context.WithoutCancel(pubCtx), pending))
 				}
 				if g.logger != nil {
 					handleRuntimeLogPersistenceError("inbound-gateway", "dispatch_failed", g.logger.Error(requestCtx, "inbound-gateway", "dispatch_failed", map[string]any{
@@ -655,7 +655,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 			if err := g.bus.DispatchPreparedPublish(handoffCtx, item); err != nil {
 				err = errors.Join(commitErr, err)
 				for _, pending := range prepared[index+1:] {
-					_ = g.bus.AbandonPreparedPublish(context.WithoutCancel(pubCtx), pending)
+					err = errors.Join(err, g.bus.AbandonPreparedPublish(context.WithoutCancel(pubCtx), pending))
 				}
 				if g.logger != nil {
 					handleRuntimeLogPersistenceError("inbound-gateway", "dispatch_failed", g.logger.Error(requestCtx, "inbound-gateway", "dispatch_failed", map[string]any{
@@ -671,17 +671,6 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		reportInboundCommittedCleanup(g.logger, requestCtx, provider, target.ServiceID, providerEventID, commitErr)
 	}
 	writeJSON(w, http.StatusAccepted, inboundPublicationResponse("accepted", record, admitted.ProviderEventType))
-}
-
-func writeInboundPublicationError(w http.ResponseWriter, err error) {
-	status := http.StatusServiceUnavailable
-	message := "publish inbound failed"
-	var providerErr providertriggers.Error
-	if errors.As(err, &providerErr) {
-		status = providerErr.Status
-		message = providerErr.Error()
-	}
-	http.Error(w, message, status)
 }
 
 type operatorInboundProjection struct {
@@ -833,11 +822,7 @@ func projectInboundPublication(target InboundTarget, delivery providertriggers.D
 }
 
 func writeInboundCommitError(w http.ResponseWriter, logger *RuntimeLogger, requestCtx context.Context, provider, serviceID, providerEventID string, err error) {
-	if logger != nil {
-		handleRuntimeLogPersistenceError("inbound-gateway", "publish_failed", logger.Error(requestCtx, "inbound-gateway", "publish_failed", map[string]any{
-			"provider": provider, "service_id": serviceID, "provider_event_id": providerEventID,
-		}, err))
-	}
+	logInboundPublicationFailure(logger, requestCtx, provider, serviceID, providerEventID, err)
 	status := http.StatusServiceUnavailable
 	message := "publish inbound failed"
 	if errors.Is(err, runtimeinbound.ErrRequestIdentityConflict) || errors.Is(err, operatorchannel.ErrConflict) || errors.Is(err, operatorchannel.ErrRevisionConflict) {
@@ -850,6 +835,14 @@ func writeInboundCommitError(w http.ResponseWriter, logger *RuntimeLogger, reque
 		}
 	}
 	http.Error(w, message, status)
+}
+
+func logInboundPublicationFailure(logger *RuntimeLogger, requestCtx context.Context, provider, serviceID, providerEventID string, err error) {
+	if logger != nil {
+		handleRuntimeLogPersistenceError("inbound-gateway", "publish_failed", logger.Error(requestCtx, "inbound-gateway", "publish_failed", map[string]any{
+			"provider": provider, "service_id": serviceID, "provider_event_id": providerEventID,
+		}, err))
+	}
 }
 
 func validateInboundCommittedResultRecord(request runtimeinbound.Request, record runtimeinbound.Record) error {

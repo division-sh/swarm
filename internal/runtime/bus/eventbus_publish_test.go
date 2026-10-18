@@ -1563,6 +1563,9 @@ func TestEventBusPublish_PayloadAdmitterFailureAbortsPublish(t *testing.T) {
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload admission failure, got %v", err)
 	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("payload admission cause was flattened: %v", err)
+	}
 }
 
 func TestEventBusPublish_FailsClosedWhenReplayCapableAtomicStoreOmitsCommittedReplayScope(t *testing.T) {
@@ -1594,6 +1597,9 @@ func TestEventBusPublishDirect_PayloadAdmitterFailureAbortsPublish(t *testing.T)
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload admission failure, got %v", err)
 	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("direct payload admission cause was flattened: %v", err)
+	}
 }
 
 func TestEventBusCheckDirectRoutes_PayloadAdmitterFailureAbortsBeforeRecipientPlanning(t *testing.T) {
@@ -1614,6 +1620,9 @@ func TestEventBusCheckDirectRoutes_PayloadAdmitterFailureAbortsBeforeRecipientPl
 	)
 	if err == nil || !errors.Is(err, runtimebus.ErrPayloadValidation) {
 		t.Fatalf("expected payload admission failure, got %v", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("route-check payload admission cause was flattened: %v", err)
 	}
 	if len(status.Requested) != 1 || status.Requested[0].AgentIdentity != identity {
 		t.Fatalf("requested routes = %#v, want %s", status.Requested, identity)
