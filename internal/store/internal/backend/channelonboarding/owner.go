@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -281,12 +282,8 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			return domain.Operation{}, fmt.Errorf("%w: %v", domain.ErrInvalidRequest, err)
 		}
 	}
-	switch req.Phase {
-	case domain.PhaseAwaitingOperatorConfirmation, domain.PhasePublishingActivation:
-	default:
-		if req.BindingRevision > 0 {
-			return domain.Operation{}, domain.ErrInvalidRequest
-		}
+	if req.BindingRevision > 0 && !slices.Contains([]domain.Phase{domain.PhaseAwaitingOperatorConfirmation, domain.PhasePublishingActivation}, req.Phase) {
+		return domain.Operation{}, domain.ErrInvalidRequest
 	}
 	if req.RebindCoordinate != nil {
 		coordinate := req.RebindCoordinate.Normalized()
