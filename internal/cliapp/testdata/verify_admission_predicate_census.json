@@ -4623,7 +4623,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "97197c0c38f1aa62c94af7d226f969cfd7d1310264e21cd16449f3d2c2011f6c"
+    "body_sha256": "f972134f4159934a0e7a1f2cd9f93677b7077bc4a56d9446617460a0d7a0bc1a"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
