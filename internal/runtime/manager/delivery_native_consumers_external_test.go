@@ -196,7 +196,7 @@ func TestClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescend
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBusDescendant(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerClaimedExecutorDeliverySource(t))
 			})
 		})
 	}
@@ -316,7 +316,7 @@ func TestClaimedAttemptExecutorSerializesLiveAndRecoveryForOneAgent(t *testing.T
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeClaimedAttemptExecutorSerializesLiveAndRecoveryForOneAgent(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerClaimedExecutorDeliverySource(t))
 			})
 		})
 	}

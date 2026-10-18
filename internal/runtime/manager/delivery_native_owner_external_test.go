@@ -183,6 +183,16 @@ func managerFailureDeliverySource(t *testing.T) semanticview.Source {
 	return semanticview.Wrap(bundle)
 }
 
+func managerClaimedExecutorDeliverySource(t *testing.T) semanticview.Source {
+	t.Helper()
+	rooted, _ := sourceartifactfixture.Rooted(t, "delivery", sourceartifactfixture.New("events.yaml", []byte("input.first:\ninput.second:\ntest.lane.child:\ntest.lane.later:\ntest.lane.root:\n")))
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func publishManagerNativeDelivery(t *testing.T, ctx context.Context, selected managerNativeDeliveryOwner, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {
 	t.Helper()
 	publishManagerNativeDeliveryWithRoot(t, ctx, selected, event, routes, authority, nil)

@@ -1129,15 +1129,15 @@ func ProveNativeProcessEventSettlementFailureIsNotReportedAsReplayed(t *testing.
 func ProveNativeClaimedAttemptExecutorSerializesLiveAndRecoveryForOneAgent(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
 	nativeDelivery := newNativeDelivery(t)
 	store := nativeDelivery
-	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{DeliveryStore: store})
+	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{DeliveryStore: store, SemanticSource: nativeDelivery.SemanticSource, SourceArtifactFact: nativeDelivery.Authority.SourceArtifact()})
 	agent := &serializingAgent{id: "agent-a", started: make(chan struct{}), release: make(chan struct{})}
 	runID := uuid.NewString()
 	first := eventtest.RunCreatingRootIngress(uuid.NewString(), "input.first", "gateway", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 	second := eventtest.ExistingRunRootIngress(uuid.NewString(), "input.second", "gateway", "", nil, 0, runID, events.EventEnvelope{}, time.Now().UTC())
 	nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{first})
-	firstCtx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), first, agent.ID())
+	firstCtx := managerClaimedDeliveryContext(t, am, nativeDelivery.Context, first, agent.ID())
 	nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{second})
-	secondCtx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), second, agent.ID())
+	secondCtx := managerClaimedDeliveryContext(t, am, nativeDelivery.Context, second, agent.ID())
 	results := make(chan eventProcessResult, 2)
 	go func() {
 		results <- am.processEventDetailed(firstCtx, agent, first)
@@ -1190,8 +1190,8 @@ func ProveNativeClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBus
 		childStarted:   make(chan struct{}),
 		childCompleted: make(chan struct{}),
 	}
-	am := newTestAgentManagerWithOptions(t, eventBus, func(runtimeactors.AgentConfig) (Agent, error) { return agent, nil }, AgentManagerOptions{DeliveryStore: nativeDelivery})
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Topology: managerTestEphemeralTopologyAdmission(t), Config: managerTestAgentConfig(runtimeactors.AgentConfig{
+	am := newTestAgentManagerWithOptions(t, eventBus, func(runtimeactors.AgentConfig) (Agent, error) { return agent, nil }, AgentManagerOptions{DeliveryStore: nativeDelivery, SemanticSource: nativeDelivery.SemanticSource, SourceArtifactFact: nativeDelivery.Authority.SourceArtifact()})
+	if err := am.spawnAgentInternal(nativeDelivery.Context, PersistedAgent{Topology: managerTestEphemeralTopologyAdmissionForSource(t, nativeDelivery.SemanticSource), Config: managerTestAgentConfig(runtimeactors.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agent.ID(),
 		Identity:      managerAgentIdentity(agent.ID()),
@@ -1199,14 +1199,14 @@ func ProveNativeClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBus
 	})}, true); err != nil {
 		t.Fatalf("spawn lane test agent: %v", err)
 	}
-	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+	if err := am.Run(nativeDelivery.normalRunContext(t)); err != nil {
 		t.Fatalf("run lane test manager: %v", err)
 	}
 
 	root := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.lane.root", "test", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	agent.child = eventtest.ChildWithLineage(uuid.NewString(), "test.lane.child", agent.ID(), "", nil, 0, events.LineageFromEvent(root), events.EventEnvelope{}, time.Now().UTC())
 	nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{root, agent.child})
-	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), root); err != nil {
+	if err := eventBus.Publish(nativeDelivery.Context, root); err != nil {
 		t.Fatalf("publish lane root: %v", err)
 	}
 	select {
@@ -1217,7 +1217,7 @@ func ProveNativeClaimedAttemptExecutorDoesNotInheritLaneAuthorityThroughEventBus
 
 	later := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.lane.later", "test", "", nil, 0, managerIdentityTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{later})
-	laterCtx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), later, agent.ID())
+	laterCtx := managerClaimedDeliveryContext(t, am, nativeDelivery.Context, later, agent.ID())
 	laterResult := make(chan eventProcessResult, 1)
 	go func() {
 		laterResult <- am.processEventDetailed(laterCtx, agent, later)
