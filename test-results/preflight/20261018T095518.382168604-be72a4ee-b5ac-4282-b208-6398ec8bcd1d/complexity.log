@@ -1,0 +1,3563 @@
+{
+  "policy_verdict": "equal-reviewed-policy; independently-measured-base-and-head",
+  "base": "a38d910819775a941d8b2ba63ce044c27547a3af",
+  "head": "46d734519e483addce5b1b56177222b2efee260a",
+  "base_summary": {
+    "cognit": {
+      "callables": 22473,
+      "at_least_30": 539,
+      "at_least_50": 190,
+      "maximum": 302
+    },
+    "cyclo": {
+      "callables": 22473,
+      "at_least_30": 247,
+      "at_least_50": 56,
+      "maximum": 186
+    }
+  },
+  "head_summary": {
+    "cognit": {
+      "callables": 22527,
+      "at_least_30": 540,
+      "at_least_50": 191,
+      "maximum": 302
+    },
+    "cyclo": {
+      "callables": 22527,
+      "at_least_30": 247,
+      "at_least_50": 56,
+      "maximum": 186
+    }
+  },
+  "hotspot_count_increased": true,
+  "removed_file_facts": [],
+  "added_file_facts": [
+    {
+      "path": "internal/apiv1/q10_setup_presence_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/cliapp/q10_entity_nullable_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/runtime/entityquery/nullable_stage_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/runtime/mutationlog/lifecycle_presence_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/runtime/pipeline/workflow_mutation_logging_native_external_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/runtime/pipeline/workflow_mutation_logging_native_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/runtime/testfixtures/canonicalrouting/conversation_history.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/runtime/tools/q10_entity_read_tools_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/runtime/tools/q10_nullable_grouping_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/runtime/tools/q10_role_entity_read_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/serveapp/provider_trigger_q10_fixture_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/store/internal/backend/pipelinepersistence/q10_data_clock_native_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/backend/pipelinepersistence/q10_data_write_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/backend/pipelinepersistence/q10_h2_witness_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/backend/pipelinepersistence/q10_internal_lifecycle_projection_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/backend/runforkpersistence/q10_import_presence_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/conversation_construction_occurrence_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/conversation_fork_construction_fixture_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/conversation_fork_construction_proof_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/conversation_fork_construction_scope_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/fixed_fork_history_fixture_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/q10_conversation_fork_cuts_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/q10_entity_cursor_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/q10_entity_readback_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/q10_import_admission_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/q10_internal_lifecycle_history_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/run_fork_contention_observer_test.go",
+      "class": "test"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/test_conversation_fork_construction.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/test_conversation_fork_projection.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/store/internal/runtimepersistence/test_mutation_log_schema_fault.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/store/internal/workflowheader/data_read.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/store/persistence_authority_debt_q10_active_source_test.go",
+      "class": "test"
+    },
+    {
+      "path": "tools/fixture-codemod/pipeline-observations/embedded_spec_successor.go",
+      "class": "authored"
+    },
+    {
+      "path": "tools/fixture-codemod/pipeline-observations/q10_current_endpoint.go",
+      "class": "authored"
+    },
+    {
+      "path": "tools/fixture-codemod/pipeline-observations/q10_current_endpoint_composition_test.go",
+      "class": "test"
+    },
+    {
+      "path": "tools/fixture-codemod/pipeline-observations/q10_delivery_caller_endpoints_test.go",
+      "class": "test"
+    },
+    {
+      "path": "tools/fixture-codemod/pipeline-observations/q10_fixture_setup_endpoints_test.go",
+      "class": "test"
+    }
+  ],
+  "callable_changes": [
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/apiv1/operator_test_setup.go",
+        "package": "apiv1",
+        "kind": "declaration",
+        "name": "testSetupEntityRequestFromParam",
+        "occurrence": 1
+      },
+      "before": 11,
+      "after": 16
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/apiv1/operator_test_setup.go",
+        "package": "apiv1",
+        "kind": "declaration",
+        "name": "validateTestSetupEntityAgainstBundle",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": 11
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "(*entityAggregateResult).UnmarshalJSON",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "(*entityFull).UnmarshalJSON",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "(*entitySummary).UnmarshalJSON",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "decodeRequiredEntityProperties",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "entityLifecycleStageText",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 3
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "validateEntityAggregateResult",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "validateEntityFullResult",
+        "occurrence": 1
+      },
+      "before": 6,
+      "after": 12
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "validateEntitySummary",
+        "occurrence": 1
+      },
+      "before": 8,
+      "after": 26
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "writeEntityAggregateResult",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "writeEntityFullResult",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": 4
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/cliapp/test_command.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "(scenarioRunner).assertEntityDetailExpectation",
+        "occurrence": 1
+      },
+      "before": 13,
+      "after": 14
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/entityquery/query.go",
+        "package": "entityquery",
+        "kind": "declaration",
+        "name": "(*NullComparisonError).Error",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/entityquery/query.go",
+        "package": "entityquery",
+        "kind": "declaration",
+        "name": "Matches",
+        "occurrence": 1
+      },
+      "before": 15,
+      "after": 16
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/manager/flow_activation.go",
+        "package": "manager",
+        "kind": "declaration",
+        "name": "(*AgentManager).prepareFlowInstanceActivation",
+        "occurrence": 1
+      },
+      "before": 59,
+      "after": 60
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/mutationlog/drift.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "CompareEntityStateProjections",
+        "occurrence": 1
+      },
+      "before": 8,
+      "after": 12
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/mutationlog/mutationlog.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "ApplyEntityStateProjectionMutation",
+        "occurrence": 1
+      },
+      "before": 9,
+      "after": 10
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/mutationlog/mutationlog.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "BuildEntityStateDiffRecords",
+        "occurrence": 1
+      },
+      "before": 9,
+      "after": 13
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/mutationlog/mutationlog.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "PresentLifecycleState",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/mutationlog/mutationlog.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "projectedLifecycleValue",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 3
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/mutationlog/mutationlog.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "stringOrNil",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/pipeline/scenario_setup_contracts.go",
+        "package": "pipeline",
+        "kind": "declaration",
+        "name": "(ScenarioSetupResult).Normalized",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": 3
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/pipeline/workflow_instance_store.go",
+        "package": "pipeline",
+        "kind": "declaration",
+        "name": "(*workflowInstanceStore).LoadEntityState",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/pipeline/workflow_instance_store.go",
+        "package": "pipeline",
+        "kind": "declaration",
+        "name": "(WorkflowPersistence).Valid",
+        "occurrence": 1
+      },
+      "before": 20,
+      "after": 19
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/pipeline/workflow_instance_store.go",
+        "package": "pipeline",
+        "kind": "declaration",
+        "name": "(WorkflowTargetPersistenceRecord).Validate",
+        "occurrence": 1
+      },
+      "before": 37,
+      "after": 38
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/pipeline/workflow_instance_store.go",
+        "package": "pipeline",
+        "kind": "declaration",
+        "name": "DecodeWorkflowEntityStatePersistenceRecord",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/runforkadmission/construction.go",
+        "package": "runforkadmission",
+        "kind": "declaration",
+        "name": "validateFixedConstructionMetadata",
+        "occurrence": 1
+      },
+      "before": 19,
+      "after": 20
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/conversation_history.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "ConversationForkConstructionDocuments",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/conversation_history.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "ConversationForkHistoryRootDocument",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/conversation_history.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "CopyConversationForkHistory",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/conversation_history.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "addConversationForkConstruction",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "CopyWorkflowStateDiagnostic",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 3
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/tools/executor_entity_query.go",
+        "package": "tools",
+        "kind": "declaration",
+        "name": "(entityGroupKey).value",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/tools/executor_entity_query.go",
+        "package": "tools",
+        "kind": "declaration",
+        "name": "aggregateEntityMetricGroups",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": 3
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/tools/executor_entity_query.go",
+        "package": "tools",
+        "kind": "declaration",
+        "name": "groupEntityRows",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 5
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/tools/executor_entity_query.go",
+        "package": "tools",
+        "kind": "declaration",
+        "name": "groupEntityStateRows",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/tools/role_scoped_entity_tools.go",
+        "package": "tools",
+        "kind": "declaration",
+        "name": "roleScopedEntityWholeReadOutputSchema",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": 5
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/entityruntime/persistence.go",
+        "package": "entitystore",
+        "kind": "declaration",
+        "name": "DecodeEntityTime",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/entityruntime/persistence.go",
+        "package": "entitystore",
+        "kind": "declaration",
+        "name": "ScanToolEntityRows",
+        "occurrence": 1
+      },
+      "before": 13,
+      "after": 8
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/entityruntime/persistence.go",
+        "package": "entitystore",
+        "kind": "declaration",
+        "name": "sqliteTimeValue",
+        "occurrence": 1
+      },
+      "before": 6,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/entityruntime/persistence.go",
+        "package": "entitystore",
+        "kind": "declaration",
+        "name": "toolTimeString",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/adapter.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "Insert",
+        "occurrence": 1
+      },
+      "before": 20,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/adapter.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "insertPostgresAt",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 21
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "(*ConstructionOccurrence).ValidateBirthOccurrence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 13
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "(*ConstructionOccurrence).addConstructionBirth",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 14
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "FixedForkConstructionOccurrenceForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 13
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "InsertConstructionEntityStateDiff",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 10
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "constructionFingerprint",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "fixedForkConstructionPlans",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 28
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "fixedForkConstructionWitness",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 28
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "fixedForkWitnessBuckets",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 20
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "fixedForkWitnessIdentity",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 15
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationprotocol/protocol.go",
+        "package": "mutationprotocol",
+        "kind": "declaration",
+        "name": "(*Attempt).Identity",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "(*PipelinePostgresOwner).CommitFixedForkConstructionForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "(*PipelineSQLiteOwner).CommitFixedForkConstructionForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "commitFixedForkConstructionForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "commitFlowConstructionTree",
+        "occurrence": 1
+      },
+      "before": 12,
+      "after": 14
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_header.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "RequireHistoricalImportedWorkflowState",
+        "occurrence": 1
+      },
+      "before": 18,
+      "after": 12
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "(*PipelinePostgresOwner).CommitScenarioSetup",
+        "occurrence": 1
+      },
+      "before": 22,
+      "after": 23
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "(*PipelineSQLiteOwner).CommitScenarioSetup",
+        "occurrence": 1
+      },
+      "before": 23,
+      "after": 24
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "normalizeScenarioSetupRequest",
+        "occurrence": 1
+      },
+      "before": 14,
+      "after": 13
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "requireScenarioImportWithoutHeader",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 3
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "scenarioSetupEntityJSON",
+        "occurrence": 1
+      },
+      "before": 6,
+      "after": 7
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "validateExistingScenarioSetupEntity",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": 5
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "validateScenarioConstruction",
+        "occurrence": 1
+      },
+      "before": 25,
+      "after": 24
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "validateScenarioConstructionSeed",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 10
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/test_issue2564_workload_evidence.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "observeH2HubsForTest",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": 9
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/test_node_recovery_poison.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "InstallNodeRecoveryPoisonMutationTx",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_engine_mutation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "commitWorkflowHeaderAndFields",
+        "occurrence": 1
+      },
+      "before": 9,
+      "after": 14
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_engine_mutation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "insertWorkflowEngineStateDiffWithSource",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 3
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_engine_mutation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "workflowDataUpdateRequired",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 20
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "(*PipelinePostgresOwner).LoadWorkflowEntityState",
+        "occurrence": 1
+      },
+      "before": 7,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "(*PipelineSQLiteOwner).LoadWorkflowEntityState",
+        "occurrence": 1
+      },
+      "before": 7,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "scanPostgresWorkflowTargetPersistence",
+        "occurrence": 1
+      },
+      "before": 9,
+      "after": 8
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_projection_shape_fault.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "AddWorkflowProjectionEmptyFieldsForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_projection_shape_fault.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "AddWorkflowProjectionPrivateBookkeepingForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_projection_shape_fault.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "SetEntityProjectionPrivateBookkeepingForTest",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_projection_shape_fault.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "SetWorkflowProjectionIdentityLookalikesForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 3
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_projection_shape_fault.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "SetWorkflowProjectionObsoleteFieldRowsForTest",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_drift.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "readPhysicalRunState",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": 12
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_fork_entity_snapshot_metadata.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "loadRunForkMaterializedEntitySnapshotMetadata",
+        "occurrence": 1
+      },
+      "before": 21,
+      "after": 17
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_fork_entity_snapshot_metadata.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "validateRunForkMaterializedEntityLifecycle",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 21
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_fork_entry_projection.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "projectRunForkEntityExecutionState",
+        "occurrence": 1
+      },
+      "before": 20,
+      "after": 21
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_fork_materializer.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "loadRunForkEntityMetadata",
+        "occurrence": 1
+      },
+      "before": 12,
+      "after": 26
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_fork_materializer.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "projectRunForkHistoricalFields",
+        "occurrence": 1
+      },
+      "before": 13,
+      "after": 26
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_fork_planner.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "loadRunForkEntityStates",
+        "occurrence": 1
+      },
+      "before": 8,
+      "after": 19
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "selectedContractHistoricalHeader",
+        "occurrence": 1
+      },
+      "before": 16,
+      "after": 17
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/transactiontest/json_copy.go",
+        "package": "transactiontest",
+        "kind": "declaration",
+        "name": "BeginEntityDataJSON",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/backend/transactiontest/json_copy.go",
+        "package": "transactiontest",
+        "kind": "declaration",
+        "name": "BeginLifecycleStateJSON",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/helpers.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "decodeStoreJSONMap",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*EntityPostgres).AggregateOperatorEntities",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": 7
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*EntityPostgres).loadOperatorEntityRow",
+        "occurrence": 1
+      },
+      "before": 8,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*EntitySQLite).AggregateOperatorEntities",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": 7
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*EntitySQLite).loadSQLiteOperatorEntityRow",
+        "occurrence": 1
+      },
+      "before": 8,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "decodeStoreJSONBoolMap",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "scanOperatorEntityAggregateRows",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 5
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "scanOperatorEntityRow",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "scanSQLiteOperatorEntitySummary",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "scanSQLiteOperatorEntitySummaryWithTail",
+        "occurrence": 1
+      },
+      "before": 6,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_construction.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "PrepareConversationForkConstructionForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 21
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_projection.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "conversationForkProjectionStatements",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 22
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_projection.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "conversationForkSessionStatement",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 3
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_source.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "SeedConversationForkSourceForTest",
+        "occurrence": 1
+      },
+      "before": 30,
+      "after": 32
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_source.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "conversationForkConstructionEvidence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 13
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_source.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "seedConversationForkChatEntityForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_source.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "seedConversationForkDataOnlyEntityForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_source.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "validateConversationForkFixture",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 16
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_mutation_log_schema_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "RemoveMutationLogForRollbackProofForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_mutation_log_schema_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "TryInvalidAccumulatorMutationPathForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_notify_all_children_observation.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "readNotifyAllChildrenEntityDiagnosticSection",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_served_delivery_observation.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "readServedEntityDebugStorageTx",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_served_delivery_observation.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "readServedRunDebugSection",
+        "occurrence": 1
+      },
+      "before": 21,
+      "after": 23
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_served_delivery_observation.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "servedRunDebugSQL",
+        "occurrence": 1
+      },
+      "before": 15,
+      "after": 13
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_tracked_entity_mutation_projection.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "ReadTrackedEntityMutationProjectionStorageForTest",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": 11
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_tracked_entity_mutation_projection.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "trackedProjectionStorageFromInventory",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 11
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_workflow_projection_shape_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "AddWorkflowProjectionEmptyFieldsForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_workflow_projection_shape_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "AddWorkflowProjectionPrivateBookkeepingForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_workflow_projection_shape_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "SetEntityProjectionPrivateBookkeepingForTest",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_workflow_projection_shape_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "SetWorkflowProjectionIdentityLookalikesForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 5
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_workflow_projection_shape_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "SetWorkflowProjectionObsoleteFieldRowsForTest",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/workflowentityquery/reader.go",
+        "package": "workflowentityquery",
+        "kind": "declaration",
+        "name": "count",
+        "occurrence": 1
+      },
+      "before": 13,
+      "after": 14
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/workflowentityquery/reader.go",
+        "package": "workflowentityquery",
+        "kind": "declaration",
+        "name": "decodeFields",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/workflowheader/data_read.go",
+        "package": "workflowheader",
+        "kind": "declaration",
+        "name": "ScanData",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 19
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/workflowheader/projection.go",
+        "package": "workflowheader",
+        "kind": "declaration",
+        "name": "inventoryStateOnly",
+        "occurrence": 1
+      },
+      "before": 14,
+      "after": 11
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/internal/workflowheader/projection.go",
+        "package": "workflowheader",
+        "kind": "declaration",
+        "name": "requireJSONObject",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/storetest/conversation_fork.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "PrepareConversationForkConstruction",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/storetest/tracked_entity_mutation_projection.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "RemoveMutationLogForRollbackProof",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/storetest/tracked_entity_mutation_projection.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "TryInvalidAccumulatorMutationPath",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/storetest/workflow_projection_shape_fault.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "AddWorkflowProjectionEmptyFields",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/storetest/workflow_projection_shape_fault.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "AddWorkflowProjectionPrivateBookkeeping",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/storetest/workflow_projection_shape_fault.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "SetEntityProjectionPrivateBookkeeping",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/storetest/workflow_projection_shape_fault.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "SetWorkflowProjectionIdentityLookalikes",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/store/storetest/workflow_projection_shape_fault.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "SetWorkflowProjectionObsoleteFieldRows",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/embedded_spec_successor.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "embeddedSpecFieldDeletion1801",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 21
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/embedded_spec_successor.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "formattedNativeReadNode",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/embedded_spec_successor.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "loadEmbeddedSpecSuccessors1801",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/main.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "checkpointRecipes",
+        "occurrence": 1
+      },
+      "before": 8,
+      "after": 9
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/q10_current_endpoint.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "decodeQ10CurrentEndpoints",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/q10_current_endpoint.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "q10CurrentEndpointRecipe",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 15
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/q10_current_endpoint.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "q10CurrentRecipe",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 9
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/q10_current_endpoint.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "q10EmbeddedSpecCurrentRecipe",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 11
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/q10_current_endpoint.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "reverseReviewedSuccessor2617",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 5
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/apiv1/operator_test_setup.go",
+        "package": "apiv1",
+        "kind": "declaration",
+        "name": "testSetupEntityRequestFromParam",
+        "occurrence": 1
+      },
+      "before": 11,
+      "after": 20
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/apiv1/operator_test_setup.go",
+        "package": "apiv1",
+        "kind": "declaration",
+        "name": "validateTestSetupEntityAgainstBundle",
+        "occurrence": 1
+      },
+      "before": 7,
+      "after": 9
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "(*entityAggregateResult).UnmarshalJSON",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "(*entityFull).UnmarshalJSON",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "(*entitySummary).UnmarshalJSON",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "decodeRequiredEntityProperties",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "entityLifecycleStageText",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "validateEntityAggregateResult",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 6
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "validateEntityFullResult",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": 10
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "validateEntitySummary",
+        "occurrence": 1
+      },
+      "before": 8,
+      "after": 26
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "writeEntityAggregateResult",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": 5
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/cliapp/entities.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "writeEntityFullResult",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": 3
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/cliapp/test_command.go",
+        "package": "cliapp",
+        "kind": "declaration",
+        "name": "(scenarioRunner).assertEntityDetailExpectation",
+        "occurrence": 1
+      },
+      "before": 14,
+      "after": 15
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/entityquery/query.go",
+        "package": "entityquery",
+        "kind": "declaration",
+        "name": "(*NullComparisonError).Error",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/entityquery/query.go",
+        "package": "entityquery",
+        "kind": "declaration",
+        "name": "Matches",
+        "occurrence": 1
+      },
+      "before": 8,
+      "after": 9
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/manager/flow_activation.go",
+        "package": "manager",
+        "kind": "declaration",
+        "name": "(*AgentManager).prepareFlowInstanceActivation",
+        "occurrence": 1
+      },
+      "before": 62,
+      "after": 64
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/mutationlog/drift.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "CompareEntityStateProjections",
+        "occurrence": 1
+      },
+      "before": 15,
+      "after": 23
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/mutationlog/mutationlog.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "ApplyEntityStateProjectionMutation",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": 7
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/mutationlog/mutationlog.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "BuildEntityStateDiffRecords",
+        "occurrence": 1
+      },
+      "before": 8,
+      "after": 12
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/mutationlog/mutationlog.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "PresentLifecycleState",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/mutationlog/mutationlog.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "projectedLifecycleValue",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/mutationlog/mutationlog.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "stringOrNil",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/pipeline/scenario_setup_contracts.go",
+        "package": "pipeline",
+        "kind": "declaration",
+        "name": "(ScenarioSetupResult).Normalized",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": 3
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/pipeline/workflow_instance_store.go",
+        "package": "pipeline",
+        "kind": "declaration",
+        "name": "(*workflowInstanceStore).LoadEntityState",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/pipeline/workflow_instance_store.go",
+        "package": "pipeline",
+        "kind": "declaration",
+        "name": "(WorkflowTargetPersistenceRecord).Validate",
+        "occurrence": 1
+      },
+      "before": 34,
+      "after": 38
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/pipeline/workflow_instance_store.go",
+        "package": "pipeline",
+        "kind": "declaration",
+        "name": "DecodeWorkflowEntityStatePersistenceRecord",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/conversation_history.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "ConversationForkConstructionDocuments",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/conversation_history.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "ConversationForkHistoryRootDocument",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/conversation_history.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "CopyConversationForkHistory",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/conversation_history.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "addConversationForkConstruction",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/testfixtures/canonicalrouting/receiver_composition.go",
+        "package": "canonicalrouting",
+        "kind": "declaration",
+        "name": "CopyWorkflowStateDiagnostic",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/tools/executor_entity_query.go",
+        "package": "tools",
+        "kind": "declaration",
+        "name": "(entityGroupKey).value",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/tools/executor_entity_query.go",
+        "package": "tools",
+        "kind": "declaration",
+        "name": "aggregateEntityMetricGroups",
+        "occurrence": 1
+      },
+      "before": 6,
+      "after": 3
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/tools/executor_entity_query.go",
+        "package": "tools",
+        "kind": "declaration",
+        "name": "groupEntityRows",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 7
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/tools/executor_entity_query.go",
+        "package": "tools",
+        "kind": "declaration",
+        "name": "groupEntityStateRows",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/tools/role_scoped_entity_tools.go",
+        "package": "tools",
+        "kind": "declaration",
+        "name": "roleScopedEntityWholeReadOutputSchema",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": 6
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/entityruntime/persistence.go",
+        "package": "entitystore",
+        "kind": "declaration",
+        "name": "DecodeEntityTime",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 3
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/entityruntime/persistence.go",
+        "package": "entitystore",
+        "kind": "declaration",
+        "name": "ScanToolEntityRows",
+        "occurrence": 1
+      },
+      "before": 22,
+      "after": 13
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/entityruntime/persistence.go",
+        "package": "entitystore",
+        "kind": "declaration",
+        "name": "sqliteTimeValue",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/entityruntime/persistence.go",
+        "package": "entitystore",
+        "kind": "declaration",
+        "name": "toolTimeString",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/adapter.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "Insert",
+        "occurrence": 1
+      },
+      "before": 19,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/adapter.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "insertPostgresAt",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 20
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "(*ConstructionOccurrence).ValidateBirthOccurrence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 8
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "(*ConstructionOccurrence).addConstructionBirth",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 14
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "FixedForkConstructionOccurrenceForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 9
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "InsertConstructionEntityStateDiff",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 12
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "constructionFingerprint",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "fixedForkConstructionPlans",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 10
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "fixedForkConstructionWitness",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 20
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "fixedForkWitnessBuckets",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 8
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationlog/construction_occurrence.go",
+        "package": "mutationlog",
+        "kind": "declaration",
+        "name": "fixedForkWitnessIdentity",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/mutationprotocol/protocol.go",
+        "package": "mutationprotocol",
+        "kind": "declaration",
+        "name": "(*Attempt).Identity",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 5
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "(*PipelinePostgresOwner).CommitFixedForkConstructionForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "(*PipelineSQLiteOwner).CommitFixedForkConstructionForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "commitFixedForkConstructionForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 3
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "commitFlowConstructionTree",
+        "occurrence": 1
+      },
+      "before": 13,
+      "after": 16
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "(*PipelinePostgresOwner).CommitScenarioSetup",
+        "occurrence": 1
+      },
+      "before": 60,
+      "after": 64
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "(*PipelineSQLiteOwner).CommitScenarioSetup",
+        "occurrence": 1
+      },
+      "before": 64,
+      "after": 68
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "normalizeScenarioSetupRequest",
+        "occurrence": 1
+      },
+      "before": 23,
+      "after": 21
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "requireScenarioImportWithoutHeader",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "scenarioSetupEntityJSON",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": 6
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "validateExistingScenarioSetupEntity",
+        "occurrence": 1
+      },
+      "before": 9,
+      "after": 4
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "validateScenarioConstruction",
+        "occurrence": 1
+      },
+      "before": 19,
+      "after": 17
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/scenario_setup.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "validateScenarioConstructionSeed",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 6
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/test_issue2564_workload_evidence.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "observeH2HubsForTest",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": 10
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/test_node_recovery_poison.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "InstallNodeRecoveryPoisonMutationTx",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": 4
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_engine_mutation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "commitWorkflowHeaderAndFields",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": 17
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_engine_mutation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "insertWorkflowEngineStateDiffWithSource",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_engine_mutation_commit.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "workflowDataUpdateRequired",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 17
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "(*PipelinePostgresOwner).LoadWorkflowEntityState",
+        "occurrence": 1
+      },
+      "before": 6,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "(*PipelineSQLiteOwner).LoadWorkflowEntityState",
+        "occurrence": 1
+      },
+      "before": 6,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_instance_read.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "scanPostgresWorkflowTargetPersistence",
+        "occurrence": 1
+      },
+      "before": 13,
+      "after": 11
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_projection_shape_fault.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "AddWorkflowProjectionEmptyFieldsForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_projection_shape_fault.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "AddWorkflowProjectionPrivateBookkeepingForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_projection_shape_fault.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "SetEntityProjectionPrivateBookkeepingForTest",
+        "occurrence": 1
+      },
+      "before": 0,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_projection_shape_fault.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "SetWorkflowProjectionIdentityLookalikesForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/pipelinepersistence/workflow_projection_shape_fault.go",
+        "package": "pipelinepersistence",
+        "kind": "declaration",
+        "name": "SetWorkflowProjectionObsoleteFieldRowsForTest",
+        "occurrence": 1
+      },
+      "before": 0,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_drift.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "readPhysicalRunState",
+        "occurrence": 1
+      },
+      "before": 18,
+      "after": 20
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_fork_entity_snapshot_metadata.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "loadRunForkMaterializedEntitySnapshotMetadata",
+        "occurrence": 1
+      },
+      "before": 16,
+      "after": 17
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_fork_entity_snapshot_metadata.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "validateRunForkMaterializedEntityLifecycle",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 10
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_fork_entry_projection.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "projectRunForkEntityExecutionState",
+        "occurrence": 1
+      },
+      "before": 28,
+      "after": 29
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_fork_materializer.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "loadRunForkEntityMetadata",
+        "occurrence": 1
+      },
+      "before": 17,
+      "after": 29
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_fork_materializer.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "projectRunForkHistoricalFields",
+        "occurrence": 1
+      },
+      "before": 12,
+      "after": 21
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/runforkpersistence/run_fork_planner.go",
+        "package": "runforkpersistence",
+        "kind": "declaration",
+        "name": "loadRunForkEntityStates",
+        "occurrence": 1
+      },
+      "before": 13,
+      "after": 21
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/transactiontest/json_copy.go",
+        "package": "transactiontest",
+        "kind": "declaration",
+        "name": "BeginEntityDataJSON",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/backend/transactiontest/json_copy.go",
+        "package": "transactiontest",
+        "kind": "declaration",
+        "name": "BeginLifecycleStateJSON",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/helpers.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "decodeStoreJSONMap",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*EntityPostgres).AggregateOperatorEntities",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": 6
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*EntityPostgres).loadOperatorEntityRow",
+        "occurrence": 1
+      },
+      "before": 7,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*EntitySQLite).AggregateOperatorEntities",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": 6
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "(*EntitySQLite).loadSQLiteOperatorEntityRow",
+        "occurrence": 1
+      },
+      "before": 7,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "decodeStoreJSONBoolMap",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "scanOperatorEntityAggregateRows",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 7
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "scanOperatorEntityRow",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 6
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "scanSQLiteOperatorEntitySummary",
+        "occurrence": 1
+      },
+      "before": 0,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/operatorsurface/operator_entity_read_surface.go",
+        "package": "operatorsurface",
+        "kind": "declaration",
+        "name": "scanSQLiteOperatorEntitySummaryWithTail",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_construction.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "PrepareConversationForkConstructionForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 15
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_projection.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "conversationForkProjectionStatements",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 26
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_projection.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "conversationForkSessionStatement",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 2
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_source.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "SeedConversationForkSourceForTest",
+        "occurrence": 1
+      },
+      "before": 38,
+      "after": 62
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_source.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "conversationForkConstructionEvidence",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 9
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_source.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "seedConversationForkChatEntityForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_source.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "seedConversationForkDataOnlyEntityForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_conversation_fork_source.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "validateConversationForkFixture",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 14
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_mutation_log_schema_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "RemoveMutationLogForRollbackProofForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 6
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_mutation_log_schema_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "TryInvalidAccumulatorMutationPathForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_notify_all_children_observation.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "readNotifyAllChildrenEntityDiagnosticSection",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 8
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_served_delivery_observation.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "readServedEntityDebugStorageTx",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 8
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_served_delivery_observation.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "readServedRunDebugSection",
+        "occurrence": 1
+      },
+      "before": 38,
+      "after": 39
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_tracked_entity_mutation_projection.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "ReadTrackedEntityMutationProjectionStorageForTest",
+        "occurrence": 1
+      },
+      "before": 16,
+      "after": 18
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_tracked_entity_mutation_projection.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "trackedProjectionStorageFromInventory",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 13
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_workflow_projection_shape_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "AddWorkflowProjectionEmptyFieldsForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_workflow_projection_shape_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "AddWorkflowProjectionPrivateBookkeepingForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_workflow_projection_shape_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "SetEntityProjectionPrivateBookkeepingForTest",
+        "occurrence": 1
+      },
+      "before": 0,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_workflow_projection_shape_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "SetWorkflowProjectionIdentityLookalikesForTest",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/runtimepersistence/test_workflow_projection_shape_fault.go",
+        "package": "runtimepersistence",
+        "kind": "declaration",
+        "name": "SetWorkflowProjectionObsoleteFieldRowsForTest",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/workflowentityquery/reader.go",
+        "package": "workflowentityquery",
+        "kind": "declaration",
+        "name": "count",
+        "occurrence": 1
+      },
+      "before": 16,
+      "after": 18
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/workflowentityquery/reader.go",
+        "package": "workflowentityquery",
+        "kind": "declaration",
+        "name": "decodeFields",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/workflowheader/data_read.go",
+        "package": "workflowheader",
+        "kind": "declaration",
+        "name": "ScanData",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 23
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/workflowheader/projection.go",
+        "package": "workflowheader",
+        "kind": "declaration",
+        "name": "inventoryStateOnly",
+        "occurrence": 1
+      },
+      "before": 12,
+      "after": 9
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/internal/workflowheader/projection.go",
+        "package": "workflowheader",
+        "kind": "declaration",
+        "name": "load",
+        "occurrence": 1
+      },
+      "before": 30,
+      "after": 31
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/storetest/conversation_fork.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "PrepareConversationForkConstruction",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/storetest/tracked_entity_mutation_projection.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "RemoveMutationLogForRollbackProof",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/storetest/tracked_entity_mutation_projection.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "TryInvalidAccumulatorMutationPath",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/storetest/workflow_projection_shape_fault.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "AddWorkflowProjectionEmptyFields",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/storetest/workflow_projection_shape_fault.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "AddWorkflowProjectionPrivateBookkeeping",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/storetest/workflow_projection_shape_fault.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "SetEntityProjectionPrivateBookkeeping",
+        "occurrence": 1
+      },
+      "before": 0,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/storetest/workflow_projection_shape_fault.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "SetWorkflowProjectionIdentityLookalikes",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 0
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/store/storetest/workflow_projection_shape_fault.go",
+        "package": "storetest",
+        "kind": "declaration",
+        "name": "SetWorkflowProjectionObsoleteFieldRows",
+        "occurrence": 1
+      },
+      "before": 0,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/embedded_spec_successor.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "embeddedSpecFieldDeletion1801",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 37
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/embedded_spec_successor.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "formattedNativeReadNode",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 1
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/embedded_spec_successor.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "loadEmbeddedSpecSuccessors1801",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/main.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "checkpointRecipes",
+        "occurrence": 1
+      },
+      "before": 13,
+      "after": 15
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/q10_current_endpoint.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "decodeQ10CurrentEndpoints",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/q10_current_endpoint.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "q10CurrentEndpointRecipe",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 13
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/q10_current_endpoint.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "q10CurrentRecipe",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 12
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/q10_current_endpoint.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "q10EmbeddedSpecCurrentRecipe",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 13
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "tools/fixture-codemod/pipeline-observations/q10_current_endpoint.go",
+        "package": "main",
+        "kind": "declaration",
+        "name": "reverseReviewedSuccessor2617",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 4
+    }
+  ]
+}

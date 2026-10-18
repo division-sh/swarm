@@ -1,0 +1,99 @@
+Usage of /tmp/go-build1450732898/b001/exe/swarm-test-timing:
+  -assert-execution-sha
+    	fail unless the checked-out commit matches the run plan
+  -attempt string
+    	primary
+  -build-cache string
+    	optional compilation-only product cache
+  -cadence-classifications string
+    	optional independently reviewed finding provenance
+  -capture-test-time-reference
+    	capture only the approved immutable hosted full reference
+  -changed-files string
+    	newline-delimited changed paths
+  -check-ci-tier
+    	refuse qualification thinner than the current PR body
+  -ci-selection
+    	report exact tier/extra-unit selection and same-run check name
+  -current-pr-json string
+    	current PR API JSON data for summary revalidation
+  -elapsed-seconds float
+    	recorded command elapsed seconds (default -1)
+  -evaluate-budget
+    	evaluate complete evidence against the emitted plan
+  -event string
+    	GitHub event name
+  -event-json string
+    	GitHub event JSON data for CI-Tier selection
+  -evidence string
+    	typed command evidence path
+  -evidence-root string
+    	directory containing evidence JSON
+  -execution-sha string
+    	actual checked-out commit SHA
+  -exit-code int
+    	recorded go test exit code (default -1)
+  -head-sha string
+    	exact tested commit SHA
+  -input string
+    	path to go test -json output, or - for stdin (default "-")
+  -jobs string
+    	paginated Actions jobs evidence for the exact attempt
+  -markdown string
+    	path to write Markdown output, or - for stdout (default "-")
+  -matrix string
+    	GitHub Actions matrix output path
+  -observe-full-cadence
+    	retain full-run observations without granting qualification
+  -packages string
+    	newline-delimited discovered Go package inventory
+  -plan string
+    	run plan path
+  -plan-ci
+    	emit a digest-bound CI run plan and matrix
+  -policy string
+    	timing budget policy (default ".github/test-timing-budgets.yaml")
+  -prior-core-evidence-root string
+    	optional preceding core command evidence
+  -prior-core-landing-sha string
+    	optional master landing verified by the existing merged-proof owner
+  -prior-core-plan string
+    	optional preceding actual core proof plan
+  -prior-core-run string
+    	optional successful preceding Actions run metadata
+  -profile string
+    	explicit proof profile
+  -proof-policy string
+    	canonical proof policy (default ".github/test-proof-plan.yaml")
+  -record-evidence
+    	record evidence bound to a plan unit
+  -ref string
+    	triggering push ref for merged-tree observation
+  -repository string
+    	triggering repository for merged-tree observation
+  -result-json string
+    	machine-readable budget result path
+  -source-run-id string
+    	successful source run for generated weights
+  -test-time-reference string
+    	pinned independently approved full timing inventory (default ".github/test-time-reference.json")
+  -top int
+    	number of slow packages/tests in Markdown (default 20)
+  -unit string
+    	proof unit ID
+  -update-weight-model
+    	update generated weights from successful plan evidence
+  -validate-publish-diff
+    	fail unless changed-files contains only the generated model
+  -verify-merged-proof
+    	observe exact qualified merged-tree replay, otherwise require full
+  -warm-build-products
+    	compile-only release products for the exact plan tier
+  -weight-model string
+    	generated historical weight model (default ".github/test-timing-weights.json")
+  -workflow-attempt int
+    	exact workflow run attempt
+  -workflow-head-sha string
+    	triggering event head SHA used by Actions job metadata, distinct from a PR merge checkout
+  -workflow-run-id int
+    	exact workflow run ID

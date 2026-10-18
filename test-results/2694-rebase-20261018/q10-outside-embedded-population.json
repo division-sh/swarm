@@ -1,0 +1,26 @@
+[
+  {
+    "family": "native-projection-shapes",
+    "file": "internal/runtime/pipeline/workflow_instance_store_projection_test.go",
+    "function": "TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes",
+    "changed_fields": [
+      "Successor"
+    ]
+  },
+  {
+    "family": "native-missing-run",
+    "file": "internal/runtime/pipeline/workflow_instance_store_run_scope_test.go",
+    "function": "TestWorkflowInstanceStore_RequiresRunContext",
+    "changed_fields": [
+      "Successor"
+    ]
+  },
+  {
+    "family": "native-run-setup-family144",
+    "file": "internal/runtime/tools/executor_entity_test.go",
+    "function": "ensureEntityToolTestRun",
+    "changed_fields": [
+      "Removed"
+    ]
+  }
+]

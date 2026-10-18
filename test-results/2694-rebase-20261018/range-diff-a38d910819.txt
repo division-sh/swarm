@@ -1,0 +1,128 @@
+ 1:  5050999b5c !  1:  7519f9d1b4 refactor: reconcile Q10 lifecycle ownership with delivered owners
+    @@ internal/serveapp/a2_portfolio_supported_surface_test.go: func waitA2PortfolioCo
+     
+      ## internal/serveapp/budget_stage_recovery_test.go ##
+     @@ internal/serveapp/budget_stage_recovery_test.go: import (
+    + 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+      	"github.com/division-sh/swarm/internal/runtime/budgetspend"
+      	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+    - 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+    --	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+    ++	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+    + 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+      	"github.com/division-sh/swarm/internal/runtime/executionposture"
+      	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+    - 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+     @@ internal/serveapp/budget_stage_recovery_test.go: type stageRecoverySelectedStore interface {
+      	budgetspend.Store
+      	sourceArtifactReader
+    @@ internal/serveapp/budget_stage_recovery_test.go: func TestBudgetRecoveryLoadsExa
+     -					t.Fatalf("create retained entity %d: %v", i, err)
+     -				}
+      			}
+    - 			current, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, artifacts[0].BundleHash())
+    + 			current, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, artifacts[0].BundleHash())
+      			if err != nil {
+     @@ internal/serveapp/budget_stage_recovery_test.go: func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
+      					}
+    @@ internal/serveapp/run_fork_constructor_fixture_test.go: import (
+     +		t.Fatal("source construction requires the original selected semantic roles")
+     +	}
+      	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{
+    - 		RepoRoot: repoRootForTest(), PlatformSpecPath: contracts.DefaultPlatformSpecFile(repoRootForTest()), Store: selected,
+    + 		RepoRoot: repoRootForTest(), Store: selected,
+      	}
+     
+      ## internal/serveapp/run_fork_runtime_test.go ##
+ 2:  32989452ac =  2:  f73d9c7e23 docs: align Q10 readback and budget descriptions with header ownership
+ 3:  d22606fb17 =  3:  753c06f2aa docs: retain authored-data budget readers in Q10 ownership accounting
+ 4:  4be5486b28 =  4:  55ebf4f678 refactor(store): reconcile Q10 fixture custody and admission owners
+ 5:  d893828ccb =  5:  b7d7aba607 test(store): retain one exact constructor fault census row
+ 6:  ae9e67d550 =  6:  eb4ea7e015 test(store): bind exact downward Q10 authority debt reduction
+ 7:  8f7c90f57a =  7:  cfb901ddb1 test(store): reconcile exact Q10 authority finding roles
+ 8:  51f4e89d9d =  8:  3def977822 refactor: delete superseded Q10 fixture and projection helpers
+ 9:  0ac609dcb1 =  9:  81f44b1421 test: bind catalog observation guard to Q10 header and field evidence
+10:  0793adb8c4 = 10:  3c6339e985 test: preserve Q10 presence checks in finite historical fixture endpoints
+11:  e4a732f662 = 11:  ffa0b0c8e0 test: preserve exact Q10 import acknowledgement successor evidence
+12:  c3c44aaebd = 12:  8b19aee38d test: require exact Q10 retained-join generation assertions
+13:  c04dd2556c = 13:  765bbbdcf2 fix(test): construct fixed conversation history through native owner
+14:  e5afa80a40 = 14:  9161076ac5 test: retain complete Q10 state in landed rule activity restart proof
+15:  0c51f888ba = 15:  798d25b905 test: retain one prepared conversation creating event at fixture boundary
+16:  d8751b6ad5 = 16:  8cb8e34eb8 Bind historical construction occurrence to one admitted mutation attempt
+17:  65c38c214b = 17:  e720807927 Require the native attempt context for construction occurrence evidence
+18:  cb05579bde = 18:  25479f2deb Consume construction source evidence within its existing SQL loan
+19:  a00d6ed98e = 19:  17dd09cccb test: retain exact Q10 target-reader and handler error endpoints
+20:  dbe9376eef ! 20:  701611983a test: bind Q10 child and sibling reads in exact-origin proof
+    @@ tools/fixture-codemod/pipeline-observations/native_exact_origin_successors_test.
+      			if err != nil || wantErr != nil || got != want {
+      				t.Fatal("current source differs from reviewed successor")
+      			}
+    +-			current := *selected
+    +-			historical, priorSource, err := embeddedSpecHistoricalPair1801(current, actual)
+    ++			currentRecipe := *selected
+    ++			historical, priorSource, err := embeddedSpecHistoricalPair1801(currentRecipe, actual)
+    + 			if err != nil {
+    + 				t.Fatal(err)
+    + 			}
+     @@ tools/fixture-codemod/pipeline-observations/native_exact_origin_successors_test.go: func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
+      			if !target.priorSuccessor && (err != nil || predecessor != canonical) {
+      				t.Fatal("historical After changed")
+      			}
+    --			if files, changes, err := prepareFiles("../../..", []recipe{*selected}); err != nil || len(files) != 0 || len(changes) != 0 {
+    -+			currentGuard := *selected
+    +-			if files, changes, err := prepareFiles("../../..", []recipe{current}); err != nil || len(files) != 0 || len(changes) != 0 {
+    ++			currentGuard := currentRecipe
+     +			currentGuard.Before, currentGuard.After, currentGuard.Successor = current, current, ""
+     +			if files, changes, err := prepareFiles("../../..", []recipe{currentGuard}); err != nil || len(files) != 0 || len(changes) != 0 {
+      				t.Fatalf("current publication successor is not inert: %v", err)
+21:  df34920092 = 21:  3de774b1ea test: preserve exact Q10 header-backed restart construction count
+22:  a9a0f5d5a5 = 22:  e56e772ec4 test: compose finite Q10 delivery callers without rewriting source history
+23:  ab3adee115 ! 23:  50f56344c7 test: preserve exact Q10 setup-fixture source and revision endpoints
+    @@ tools/fixture-codemod/pipeline-observations/fixture_setup_successors_2617_test.g
+     +				t.Fatal(err)
+     +			}
+      			valid := func(candidate recipe, source string) bool {
+    - 				history := candidate
+    - 				history.Successor = pin.Original.Successor
+    + 				candidate, source, err := embeddedSpecHistoricalPair1801(candidate, source)
+    + 				if err != nil {
+    +@@ tools/fixture-codemod/pipeline-observations/fixture_setup_successors_2617_test.go: func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
+      				current, sourceErr := canonicalFunction(source)
+      				endpoint, endpointErr := canonicalFunction(candidate.Successor)
+      				return reflect.DeepEqual(history, pin.Original) && sourceErr == nil && endpointErr == nil &&
+24:  c59b410e0e = 24:  8e6a1221ba test: retain Q10 private-target hostile setup through its original owner
+25:  c91dfd4a87 = 25:  f1f8ee182f test: preserve Q10 import refusal and gate recovery caller endpoints
+26:  8e6d70407c = 26:  3dffd26fb7 test: retain Q10 account readback over immutable coordinator history
+27:  b91d97433e = 27:  d025f8cf16 test: compose the finite Q10 endpoints in whole-corpus snapshot proofs
+28:  936b5f9bd1 = 28:  2585e74701 fix: keep the original codemod owner current on the finite Q10 cuts
+29:  fe43dec6e4 = 29:  83fe4c72ab test: reject impossible endpoint reversals before repeated source parsing
+30:  be957b9bfb = 30:  da3b6b5f04 refactor: separate fixed construction validation from native fixture custody
+31:  6cab4ed103 = 31:  a0aa643ad9 test: inventory exact historical data clock ownership in the Q10 fork fence
+32:  748ae7a0d5 = 32:  4062726884 test: reconcile exact history writers with Q10 delegation owners
+33:  de0c86d006 = 33:  4057cea7b0 test: downward refresh one delivered-history debt occurrence
+34:  2b06934c98 = 34:  663b656bc6 test: prove empty imported membership through native forks and drift inspection
+35:  d06297d915 = 35:  ff84e98c47 test: distinguish inactive header membership from executable collections
+36:  6de2cf991d = 36:  ba3f98c804 test: assert exact native mutation contributions and immutable prior history
+37:  4ac2f5ad75 = 37:  25aa46c2dc test: retain fieldless and fielded membership across inactive header states
+38:  e2ce34d96f = 38:  7a02d42175 test(store): prove native empty-import birth clock refusals
+39:  7f41c173f2 = 39:  b60d1c0091 test(store): detect missing empty-import birth as exact membership drift
+40:  3d92538a15 = 40:  4ec5e8115e test(store): distinguish native imported birth cut and presence faults
+41:  ad9ee88b46 = 41:  f896061620 test(store): bind duplicate birth refusal to its native fact identity owner
+42:  8c3e2234cd = 42:  7bbfed274f test(store): require exact imported lifecycle-domain metadata refusal
+43:  c779822284 = 43:  d4231dd5e8 test(store): prove imported domain history refusal and preserve earlier native cuts
+44:  4d0ebfc09c = 44:  c815196240 test(store): retain source state after the earlier clean import cut materializes
+45:  03c8df828b = 45:  e9e039fd35 test: retain the reviewed import stage golden at its live source selector
+46:  98daae304b = 46:  74dc51aace test: inventory the exact import fixture current selector without changing history
+47:  f305072095 = 47:  84aed6b3a0 test(store): require exact data-only lifecycle-input admission refusal
+48:  abda29f4e5 = 48:  01a27fb77c test(store): pin exact native unchanged-data companion and clock refusals
+49:  a38e5f10b2 = 49:  52985ce741 fix(pipeline): attribute lifecycle decode diagnostics to the header owner
+50:  8d181ae53c = 50:  bdcc0109e8 test(pipeline): require the complete owner decode error cause
+51:  402005fe27 = 51:  44cd2a44be test(codemod): classify Q10 native tool run setup consumers
+52:  781b680744 = 52:  ead93fd36b test(q10): reconcile admitted fixture and observation families
+53:  05dcc7d1b5 = 53:  5647142b61 test(q10): preserve authored receiver posture and immutable recipe history
+54:  1750274987 = 54:  9090789c53 test(q10): bind finite historical witnesses to native construction
+55:  a4a8030e34 = 55:  4db71f5902 test(q10): consume canonical admitted creating-event evidence
+56:  891b1e698a = 56:  3da7c9c7d2 test(q10): align exact event intent and fixture reader inventory
+57:  91397e5345 = 57:  6a6128d26d test(q10): fence contention snapshots at the native story order
+58:  286b22e178 = 58:  76cd3cd500 test(q10): drain cancelled contenders after winner settlement
+59:  2713155625 = 59:  52121fc717 test(q10): stabilize observer ordering across singleton versions

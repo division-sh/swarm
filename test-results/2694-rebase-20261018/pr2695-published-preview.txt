@@ -1,0 +1,42 @@
+d5d1afdaab5abed607dbedf4046a07691000474f
+100644 7a73c715d42a40810c3a9d5ebe21c1b75e84aad4 1	internal/serveapp/budget_stage_recovery_test.go
+100644 d0db1ad78a5008af5a316137ac81c2b0e867a0d7 2	internal/serveapp/budget_stage_recovery_test.go
+100644 f9cecbfe575515573b8dffcaf6a669f5e49a218f 3	internal/serveapp/budget_stage_recovery_test.go
+100644 26ad866518190a259629688d830e55646acec534 1	scripts/rewrite-stages-2566/finite_fixtures_test.go
+100644 a850ffa3cb5bc5a13a412e44532013d224750bfa 2	scripts/rewrite-stages-2566/finite_fixtures_test.go
+100644 336a1f55986692475583f1e003b30434289b5b53 3	scripts/rewrite-stages-2566/finite_fixtures_test.go
+100644 6b0259299645a0f97c71a131cb79f288babc0008 1	tools/fixture-codemod/pipeline-observations/native_exact_origin_successors_test.go
+100644 ea001c9b9b0dc4bca0a35dfa2cc027ba3f147ce5 2	tools/fixture-codemod/pipeline-observations/native_exact_origin_successors_test.go
+100644 f93c443174c85e136389b5c75d55e04bc29ab54f 3	tools/fixture-codemod/pipeline-observations/native_exact_origin_successors_test.go
+
+Auto-merging internal/cliapp/test_command.go
+Auto-merging internal/runtime/conformance/notify_all_children_runtime_conformance_test.go
+Auto-merging internal/runtime/conformance/selected_admitted_event_test.go
+Auto-merging internal/runtime/pipeline/fork_receiver_engine_external_test.go
+Auto-merging internal/runtime/runforkexecution/activity_fork_execution_test.go
+Auto-merging internal/runtime/runforkexecution/execution_test.go
+Auto-merging internal/runtime/runforkexecution/workflow_state_projection_test.go
+Auto-merging internal/serveapp/budget_stage_recovery_test.go
+CONFLICT (content): Merge conflict in internal/serveapp/budget_stage_recovery_test.go
+Auto-merging internal/serveapp/fork_receiver_execution_test.go
+Auto-merging internal/serveapp/fork_receiver_ownership_test.go
+Auto-merging internal/serveapp/issue2564_h2_equivalent_test.go
+Auto-merging internal/serveapp/mailbox_completion_test.go
+Auto-merging internal/serveapp/main_runtime_test.go
+Auto-merging internal/serveapp/receiver_restart_test.go
+Auto-merging internal/serveapp/run_fork_constructor_fixture_test.go
+Auto-merging internal/serveapp/run_fork_runtime_test.go
+Auto-merging internal/serveapp/semantic_numeric_ingress_test.go
+Auto-merging internal/serveapp/served_workspace_proof_test.go
+Auto-merging internal/serveapp/test_command_runtime_test.go
+Auto-merging internal/serveapp/verify_run_registry_integration_test.go
+Auto-merging internal/store/internal/runtimepersistence/mutation_protocol_composed_journey_test.go
+Auto-merging internal/store/internal/runtimepersistence/run_fork_activation_contention_test.go
+Auto-merging internal/store/internal/runtimepersistence/run_fork_selected_contract_execution_mutation_test.go
+Auto-merging scripts/rewrite-stages-2566/finite_fixtures_test.go
+CONFLICT (content): Merge conflict in scripts/rewrite-stages-2566/finite_fixtures_test.go
+Auto-merging tools/fixture-codemod/pipeline-observations/fixture_setup_successors_2617_test.go
+Auto-merging tools/fixture-codemod/pipeline-observations/native_exact_origin_successors_test.go
+CONFLICT (content): Merge conflict in tools/fixture-codemod/pipeline-observations/native_exact_origin_successors_test.go
+Auto-merging tools/fixture-codemod/pipeline-observations/recipes.json
+Auto-merging tools/fixture-codemod/pipeline-observations/reviewed_successors_2617_test.go

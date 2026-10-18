@@ -1,0 +1,101 @@
+### CI proof plan
+
+- profile: `lifecycle`
+- reason: explicit CI-Tier: lifecycle
+- head: `46d734519e483addce5b1b56177222b2efee260a`
+- digest: `ae417a0a47756a09316042064b8bd70d3621e2b78c836bd8ce4d52cd356ac23a`
+- units: `92`
+- package granularity ceiling: `158.838s`
+
+- `broad-01`: 158.838s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `broad-02`: 139.880s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `broad-03`: 133.055s, 27 packages, count-1/ci-postgres-gateway-empty-v1
+- `broad-04`: 133.055s, 29 packages, count-1/ci-postgres-gateway-empty-v1
+- `broad-05`: 133.054s, 30 packages, count-1/ci-postgres-gateway-empty-v1
+- `broad-06`: 133.055s, 31 packages, count-1/ci-postgres-gateway-empty-v1
+- `broad-07`: 133.055s, 32 packages, count-1/ci-postgres-gateway-empty-v1
+- `broad-08`: 133.055s, 32 packages, count-1/ci-postgres-gateway-empty-v1
+- `broad-09`: 133.055s, 33 packages, count-1/ci-postgres-gateway-empty-v1
+- `broad-10`: 133.055s, 33 packages, count-1/ci-postgres-gateway-empty-v1
+- `broad-11`: 133.054s, 33 packages, count-1/ci-postgres-gateway-empty-v1
+- `unused-controls`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `codemod-owner-guards`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `codemod-pipeline-mutation`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `codemod-bus-mutation`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-i-reporter`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `conformance-2394-reporter-window`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `catalog-required-inventory`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `catalog-required-verify`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `catalog-runtime`: 177.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `catalog-replay-1`: 112.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `catalog-runtime-scatter-safety`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `catalog-runtime-fork-readiness`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `hitl-releasee2e-rest`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `hitl-releasee2e-golden`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `hitl-releasee2e-journeys`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `runtime-full`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `delivery-continuation-full`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-channel`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-channel-learned`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-channel-neutral`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-channel-delivery`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-channel-process-temporal`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-channel-lifecycle`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-channel-native`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-runtime`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `contracts-first`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `contracts-rest`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `api-llm-bus-full`: 30.000s, 3 packages, count-1/ci-postgres-gateway-empty-v1
+- `conformance-1`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `conformance-2`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `conformance-2394-core`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `conformance-2394-pressure`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-other`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-other-late`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-2564-h1`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-2564-h2`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-delayed-commit-preservation`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-surfaces`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-publication-text`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-journeys-first`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-journeys-a-c`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-journeys-d-l`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-journeys-m-z`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-mailbox`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-mailbox-p-q`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-selected`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-selected-rest`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-standing`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-admission-full`: 30.000s, 2 packages, count-1/ci-postgres-gateway-empty-v1
+- `persistence-authority-debt-census`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-runtime-full-01`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-runtime-full-02`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-runtime-flow-lifecycle`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-runtime-fanout`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-runtime-fanout-process`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-runtime-fork-generation`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-runtime-full-03`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-runtime-full-03-i-l`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-runtime-full-04`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-runtime-full-05`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-runtime-full-07-fork`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-runtime-selected`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `store-runtime-s-z-rest`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `pipeline-activation`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `pipeline-timer-join`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `pipeline-rest`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `catalog-replay-2-3`: 176.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `codemod-candidate-overlay`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `conformance-2394-reporter`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `conformance-heavy-fanout`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `conformance-soak-postgres`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `conformance-soak-sqlite`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `hitl-releasee2e-burst-1`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `hitl-releasee2e-burst-2`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `hitl-releasee2e-invocation-1`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `hitl-releasee2e-invocation-2`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `hitl-releasee2e-invocation-3`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `hitl-releasee2e-invocation-4`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `hitl-releasee2e-invocation-5`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `hitl-releasee2e-invocation-6`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1
+- `serveapp-i-reporter-all-commit`: 30.000s, 1 packages, count-1/ci-postgres-gateway-empty-v1

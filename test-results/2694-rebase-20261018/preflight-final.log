@@ -1,0 +1,20 @@
+preflight format: passed=true 1.319s
+api spec valid: methods=71 schemas=252 errors=69 mutating=30 subscriptions=5
+preflight openrpc: passed=true 0.397s
+preflight github.com/division-sh/swarm/internal/runtime/core/worklifetime: passed=true 0.791s
+preflight github.com/division-sh/swarm/internal/runtime/effects: passed=true 0.852s
+preflight github.com/division-sh/swarm/internal/runtime/deliverycontinuation: passed=true 1.377s
+preflight github.com/division-sh/swarm/internal/runtime/manager: passed=true 3.497s
+preflight github.com/division-sh/swarm/internal/testutil: passed=true 4.124s
+preflight github.com/division-sh/swarm/scripts/rewrite-stages-2566: passed=true 2.427s
+preflight github.com/division-sh/swarm/internal/store/internal/backend/authoractivity: passed=true 2.398s
+preflight github.com/division-sh/swarm/cmd/swarm-test-timing: passed=true 1.621s
+preflight github.com/division-sh/swarm/internal/testtiming: passed=true 0.375s
+complexity hotspot count increased; generated evidence cannot approve growth
+exit status 1
+preflight complexity: passed=false 10.368s
+preflight: complete=false end-to-end=35.220s queue=0.000s setup/validation=6.951s execution=28.268s cleanup=0.001s; source=46d734519e483addce5b1b56177222b2efee260a go=go1.26.8 selection=c50d4b5400f85fa7c1a11e40ddd3280a074b69436277831cb48f79ff887b6ae7 receipts=test-results/preflight/20261018T095518.382168604-be72a4ee-b5ac-4282-b208-6398ec8bcd1d
+preflight comparison: debt-required=true origin/master=a38d910819775a941d8b2ba63ce044c27547a3af native-source=a38d910819775a941d8b2ba63ce044c27547a3af diff=34b63df8e385703ddff09ab6c311dc9b9575ec639e191d8c9feea0195ae74bef
+preflight status: context=preflight/local repository=division-sh/swarm head=46d734519e483addce5b1b56177222b2efee260a attempt=be72a4ee-b5ac-4282-b208-6398ec8bcd1d receipt=20261018T095518.382168604-be72a4ee-b5ac-4282-b208-6398ec8bcd1d id=56625604194 publication=1.302s
+preflight complexity: command failed; output retained at test-results/preflight/20261018T095518.382168604-be72a4ee-b5ac-4282-b208-6398ec8bcd1d/complexity.log: exit status 1
+exit status 1
