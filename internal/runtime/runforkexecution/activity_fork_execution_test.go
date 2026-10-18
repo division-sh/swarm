@@ -60,30 +60,22 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 	tests := []selectedContractActivityForkCase{
 		{
 			name:            "manual confirmation does not authorize another write",
-			effectClass:     runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:      "require_manual_confirmation",
 			resultEventType: "flow_a/connector.succeeded",
 			wantError:       "fork policy \"require_manual_confirmation\" is not executable",
 		},
 		{
 			name:               "read-only reexecutes exactly once",
-			effectClass:        runtimecontracts.ActivityEffectClassReadOnly,
-			forkPolicy:         "reexecute_read",
 			resultEventType:    "flow_a/connector.succeeded",
 			wantConnectorCalls: 1,
 		},
 		{
 			name:                  "succeeded write publishes recorded result",
-			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:            "reuse_recorded_result",
 			sourceAttemptStatus:   "succeeded",
 			resultEventType:       "flow_a/connector.succeeded",
 			wantForkAttemptStatus: "succeeded",
 		},
 		{
 			name:                  "failed write publishes recorded typed failure",
-			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:            "reuse_recorded_result",
 			sourceAttemptStatus:   "failed",
 			resultEventType:       "flow_a/connector.failed",
 			failureClass:          string(runtimefailures.ClassDependencyUnavailable),
@@ -92,8 +84,6 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 		},
 		{
 			name:                  "uncertain write stays uncertain and publishes outcome-uncertain failure",
-			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:            "reuse_recorded_result",
 			sourceAttemptStatus:   "uncertain",
 			resultEventType:       "flow_a/connector.failed",
 			failureClass:          string(runtimefailures.ClassOutcomeUncertain),
@@ -105,7 +95,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
-			loaded := selectedContractActivityDeclaredSource(t, server.URL, tt.effectClass, selection)
+			loaded := selectedContractActivityDeclaredSource(t, server.URL, selection)
 			activityNode := mustRunForkNode("flow_a", "test-node")
 			beforeCalls := connectorCalls.Load()
 			sourceRunID := uuid.NewString()
@@ -131,8 +121,8 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			}
 			requestPayload := selectedContractActivityRequestPayload{
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
-				EffectClass: string(tt.effectClass), SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
-				RetryMaxAttempts: 1, ForkPolicy: string(tt.forkPolicy), EntityID: entityID, FlowInstance: "flow_a",
+				SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
+				EntityID: entityID, FlowInstance: "flow_a",
 				NodeID: activityidentity.MustNodeOwner(activityNode).Key(), FlowID: "flow_a", HandlerEventKey: "review.requested",
 				SourceEventID: initiatingEventID, SourceRunID: sourceRunID, Attempt: 1,
 				Generation: sourceGeneration, LoopStage: "review",
@@ -331,8 +321,6 @@ func selectedContractActivityDescriptorExists(descriptors []runtimeauthoractivit
 
 type selectedContractActivityForkCase struct {
 	name                  string
-	effectClass           runtimecontracts.ActivityEffectClass
-	forkPolicy            string
 	sourceAttemptStatus   string
 	resultEventType       string
 	failureClass          string
@@ -343,35 +331,31 @@ type selectedContractActivityForkCase struct {
 }
 
 type selectedContractActivityRequestPayload struct {
-	ActivityID       string                       `json:"activity_id"`
-	Tool             string                       `json:"tool"`
-	Input            map[string]any               `json:"input"`
-	EffectClass      string                       `json:"effect_class"`
-	SuccessEvent     string                       `json:"success_event"`
-	FailureEvent     string                       `json:"failure_event"`
-	RetryMaxAttempts int                          `json:"retry_max_attempts"`
-	RetryBackoff     string                       `json:"retry_backoff"`
-	ForkPolicy       string                       `json:"fork_policy"`
-	EntityID         string                       `json:"entity_id"`
-	NodeID           string                       `json:"node_id"`
-	FlowID           string                       `json:"flow_id"`
-	FlowInstance     string                       `json:"flow_instance"`
-	HandlerEventKey  string                       `json:"handler_event_key"`
-	SourceEventID    string                       `json:"source_event_id"`
-	SourceRunID      string                       `json:"source_run_id"`
-	SourceTaskID     string                       `json:"source_task_id"`
-	ParentEventID    string                       `json:"parent_event_id"`
-	ChainDepth       int                          `json:"chain_depth"`
-	Attempt          int                          `json:"attempt"`
-	Generation       attemptgeneration.Generation `json:"loop_generation,omitempty"`
-	LoopStage        string                       `json:"loop_stage,omitempty"`
+	ActivityID      string                       `json:"activity_id"`
+	Tool            string                       `json:"tool"`
+	Input           map[string]any               `json:"input"`
+	SuccessEvent    string                       `json:"success_event"`
+	FailureEvent    string                       `json:"failure_event"`
+	EntityID        string                       `json:"entity_id"`
+	NodeID          string                       `json:"node_id"`
+	FlowID          string                       `json:"flow_id"`
+	FlowInstance    string                       `json:"flow_instance"`
+	HandlerEventKey string                       `json:"handler_event_key"`
+	SourceEventID   string                       `json:"source_event_id"`
+	SourceRunID     string                       `json:"source_run_id"`
+	SourceTaskID    string                       `json:"source_task_id"`
+	ParentEventID   string                       `json:"parent_event_id"`
+	ChainDepth      int                          `json:"chain_depth"`
+	Attempt         int                          `json:"attempt"`
+	Generation      attemptgeneration.Generation `json:"loop_generation,omitempty"`
+	LoopStage       string                       `json:"loop_stage,omitempty"`
 }
 
 func selectedContractActivitySource(serverURL string, effectClass runtimecontracts.ActivityEffectClass) semanticview.Source {
 	return selectedContractActivitySourceWithMode(serverURL, effectClass, runtimecontracts.FlowModeStatic)
 }
 
-func selectedContractActivityDeclaredSource(t *testing.T, serverURL string, effectClass runtimecontracts.ActivityEffectClass, selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
+func selectedContractActivityDeclaredSource(t *testing.T, serverURL string, selection runfork.RunForkContractSelection) LoadedSelectedContractSource {
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
@@ -411,9 +395,8 @@ loops:
 `,
 		"tools.yaml": fmt.Sprintf(`provider.connector:
   handler_type: http
-  effect_class: %s
   http: {method: POST, url: %q}
-`, effectClass, serverURL),
+`, serverURL),
 	} {
 		writeSelectedContractFixtureFile(t, filepath.Join(root, path), contents)
 	}
