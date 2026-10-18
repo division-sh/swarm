@@ -38,7 +38,7 @@ func verifyTurnLiveParents(t *testing.T, db *sql.DB, bundle, run, otherRun strin
 		}
 	}
 	pair := `INSERT INTO agent_turn_live_parents (turn_id,run_id,completion_attempt_id,capability_surface_id) VALUES ($1,$2,$3,$4)`
-	for _, fault := range []string{"run", "attempt", "surface", "null_run", "null_attempt", "null_surface"} {
+	for _, fault := range []string{"run", "attempt", "surface", "null_turn", "null_run", "null_attempt", "null_surface"} {
 		args := []any{turns[0], run, attempts[0], surfaces[0]}
 		switch fault {
 		case "run":
@@ -47,6 +47,8 @@ func verifyTurnLiveParents(t *testing.T, db *sql.DB, bundle, run, otherRun strin
 			args[2] = attempts[1]
 		case "surface":
 			args[3] = surfaces[1]
+		case "null_turn":
+			args[0] = nil
 		case "null_run":
 			args[1] = nil
 		case "null_attempt":

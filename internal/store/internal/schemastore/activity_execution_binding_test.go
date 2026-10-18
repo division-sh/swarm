@@ -102,9 +102,11 @@ func verifyActivityReplyLiveParents(t *testing.T, db *sql.DB, runID, otherRunID,
 			if _, err := db.Exec(`DELETE FROM activity_attempt_live_parents WHERE request_event_id=$1`, id); err != nil {
 				t.Fatal(err)
 			}
-			for _, fault := range []string{"false_presence", "null_presence", "false_null_reply", "different_reply", "different_run"} {
+			for _, fault := range []string{"null_request", "false_presence", "null_presence", "false_null_reply", "different_reply", "different_run"} {
 				args := []any{id, runID, reply, present}
 				switch fault {
+				case "null_request":
+					args[0] = nil
 				case "false_presence":
 					args[2], args[3] = nil, !present
 					if !present {

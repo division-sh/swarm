@@ -76,13 +76,15 @@ func verifyForkLiveParentPairs(t *testing.T, db *sql.DB, sourceEventID string) {
 				if _, err := db.Exec("DELETE FROM "+parents+" WHERE "+idColumn+"=$1", fact.id); err != nil {
 					t.Fatal(err)
 				}
-				for _, fault := range []string{"missing_kind", "crossed_binding", "crossed_child", "crossed_source", "changed_revision", "wrong_event", "false_null_event", "false_null_kind", "changed_generation"} {
+				for _, fault := range []string{"missing_owner", "missing_kind", "crossed_binding", "crossed_child", "crossed_source", "changed_revision", "wrong_event", "false_null_event", "false_null_kind", "changed_generation"} {
 					if fault == "changed_generation" && !execution {
 						continue
 					}
 					t.Run(fault, func(t *testing.T) {
 						changed := append([]any(nil), args...)
 						switch fault {
+						case "missing_owner":
+							changed[0] = nil
 						case "missing_kind":
 							changed[4] = nil
 						case "crossed_binding":
