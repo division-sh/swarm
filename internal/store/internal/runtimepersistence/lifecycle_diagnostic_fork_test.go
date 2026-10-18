@@ -48,8 +48,16 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 						t.Fatal(err)
 					}
 					hash := fixture.request.DeclarationPlan.BundleHash
+					rooted, err := selected.(rootedRunStore).LoadRunRootedSource(ctx, fixture.forkRun)
+					if err != nil {
+						t.Fatal(err)
+					}
+					coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+					if err != nil {
+						t.Fatal(err)
+					}
 					fixture.request.DeclarationPlan, err = agenttopology.NewSelectedDeclarationPlan(hash, []agenttopology.DesiredAgent{{
-						Identity: plan, ConfigRevision: revision, Source: agenttopology.SourceCoordinate{BundleHash: hash},
+						Identity: plan, ConfigRevision: revision, Source: coordinate,
 					}})
 					if err != nil {
 						t.Fatal(err)
