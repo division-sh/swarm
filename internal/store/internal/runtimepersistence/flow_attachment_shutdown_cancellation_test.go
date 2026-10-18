@@ -63,7 +63,7 @@ func (w *attachmentShutdownProgressWorkflow) AbandonDynamicFlowRuntimeActivation
 // invariant: a cancelled progress call is not itself proof of clean settlement.
 func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 	t.Helper()
-	selected, barrier := newAttachmentProgressBarrierStore(t, backend)
+	selected, barrier := newAttachmentProgressBarrierStore(t, backend, cut == "after_progress")
 	workflow := &attachmentShutdownProgressWorkflow{
 		barrier: barrier, cut: cut,
 		entered: make(chan context.Context, 1), release: make(chan struct{}),
@@ -122,10 +122,15 @@ func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 	case <-ctx.Done():
 		t.Fatal("admitted attempt did not reach the real progress owner")
 	}
-	if cut == "inside_progress" {
+	if cut != "before_progress" {
 		select {
 		case <-barrier.entered:
 			barrier.requireExactCoordinates(t)
+			if cut == "after_progress" && barrier.updatedRows() != 1 {
+				t.Fatal("post-UPDATE cut arrived without a successful one-row native UPDATE")
+			}
+		case failed := <-workflow.observed:
+			t.Fatalf("native progress returned without reaching cut %s: result=%+v err=%v", cut, failed.result, failed.err)
 		case <-ctx.Done():
 			t.Fatal("exact attachment UPDATE did not enter its real native transaction")
 		}
@@ -150,7 +155,10 @@ func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 	if before, clean := observed.result.CleanCancellation(observed.err); !clean || before != (cut == "before_progress") {
 		t.Fatalf("native cleanup disposition: before=%t clean=%t cut=%s err=%v", before, clean, cut, observed.err)
 	}
-	if cut == "inside_progress" {
+	if cut != "before_progress" {
+		if !observed.rollbackJoinedAtReturn {
+			t.Fatal("native progress returned before its physical rollback joined")
+		}
 		if err := barrier.joinRollback(ctx); err != nil {
 			t.Fatalf("exact physical rollback did not join: %v", err)
 		}
@@ -169,7 +177,7 @@ func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 	if err != nil || !found || row.Phase != pipeline.FlowAttachmentPlanned || row.AttemptState != "aborted" {
 		t.Fatalf("exact cancelled attachment evidence: %+v found=%t err=%v", row, found, err)
 	}
-	t.Logf("shutdown progress pin: backend=%s cut=%s acknowledgement=%t phase=%s attempt=%s matched_statement=%t physical_rollback_joined_at_return=%t abandonment=acknowledged", backend, cut, observed.result.Acknowledged, row.Phase, row.AttemptState, barrier.matchedStatement(), observed.rollbackJoinedAtReturn)
+	t.Logf("shutdown progress pin: backend=%s cut=%s acknowledgement=%t phase=%s attempt=%s matched_statement=%t applied_rows=%d physical_rollback_joined_at_return=%t abandonment=acknowledged", backend, cut, observed.result.Acknowledged, row.Phase, row.AttemptState, barrier.matchedStatement(), barrier.updatedRows(), observed.rollbackJoinedAtReturn)
 	select {
 	case err := <-finalized:
 		t.Logf("readiness caller returned after retirement handoff: %v", err)
