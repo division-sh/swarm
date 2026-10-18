@@ -715,6 +715,7 @@ func copyR04CompositionSource(t *testing.T, root, destination string) {
 
 func proveR04ExtractionContinuation(t *testing.T, root string, proof debtDeliveryRetirementProof) {
 	t.Helper()
+	proveR04ExtractionSQLMembers(t, root)
 	prior, _, err := debtCatchUpSignedBaseline(root, debtR04ExtractionBefore, debtR04NativeCollectorTo)
 	if err != nil {
 		t.Fatal(err)

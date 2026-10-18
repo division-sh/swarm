@@ -64,6 +64,35 @@ var debtR04ExtractionPins = [...]debtR04CatchUpSource{
 	},
 }
 
+func proveR04ExtractionSQLMembers(t *testing.T, root string) {
+	t.Helper()
+	for _, row := range []struct {
+		file, declaration string
+		query, exec       int
+	}{
+		{debtR04ExtractionPins[0].File, "func:ReadActivityExecutionGrantTx", 1, 0},
+		{debtR04ExtractionPins[0].File, "func:decodeActivityExecutionGrantRow", 0, 0},
+		{debtR04ExtractionPins[1].File, "func:authorizeProviderResumeTx", 0, 1},
+		{debtR04ExtractionPins[1].File, "func:providerResumeEvidenceTx", 1, 0},
+		{debtR04ExtractionPins[2].File, "func:completionRecoveryExecutionAuthority", 0, 0},
+		{debtR04ExtractionPins[2].File, "func:completionRecoveryAgentTurn", 0, 0},
+	} {
+		raw, err := os.ReadFile(filepath.Join(root, row.file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		declarations, err := debtR04CatchUpDeclarations(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := declarations[row.declaration]
+		if len(body) == 0 || bytes.Count(body, []byte(".QueryRowContext(")) != row.query || bytes.Count(body, []byte(".ExecContext(")) != row.exec ||
+			bytes.Contains(body, []byte(".QueryContext(")) || bytes.Contains(body, []byte(".Query(")) || bytes.Contains(body, []byte(".Exec(")) {
+			t.Fatalf("extraction changed its exact SQL member custody: %s/%s", row.file, row.declaration)
+		}
+	}
+}
+
 var debtR04NativeRepairPins = [...]debtRepair2698SourceFile{
 	{"internal/store/internal/backend/activityjournal/activity_execution_grant.go", "absent", "00e81af8c72afe78c7097610ca7ce5fde612091edb270edb4729185977220925"},
 	{"internal/store/internal/backend/activityjournal/displaced_recovery.go", "13a9f50ced01b7043756f79e81ea40be25e728a7cd6b849c2a43e22ffde6294f", "absent"},
