@@ -9,7 +9,7 @@ func WritePreparedTargetConflict(t testing.TB) string {
 	root := t.TempDir()
 	for relative, source := range map[string]string{
 		"schema.yaml": "pins:\n  inputs: [prepared.aggregate.corruption]\n",
-		"events.yaml": "prepared.aggregate.corruption: {}\n",
+		"events.yaml": "prepared.aggregate.corruption:\n",
 		"nodes.yaml": `validator-one:
   execution_type: system_node
   subscribes_to: [prepared.aggregate.corruption]
