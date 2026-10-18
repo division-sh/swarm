@@ -11,6 +11,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -31,24 +32,25 @@ func TestRunAPIReadSurface_LoadAndListRunHeaders(t *testing.T) {
 	middleEntity := uuid.NewString()
 	olderEventOnlyA := uuid.NewString()
 	olderEventOnlyB := uuid.NewString()
-	bundleA := "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	bundleB := "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	rootA, _ := sourceartifactfixture.Rooted(t, "readback-a", storeTestSourceArtifact("run-api-read-a"))
+	rootB, _ := sourceartifactfixture.Rooted(t, "readback-b", storeTestSourceArtifact("run-api-read-b"))
+	bundleA, bundleB := rootA.Admission().BundleHash(), rootB.Admission().BundleHash()
 	failedRunFailure := testFailureEnvelope(runtimefailures.ClassInternalFailure, "run_failed", nil)
 	for _, snapshot := range []runlifecyclefixture.CorruptSnapshot{
 		{
-			RunID: newer, State: "running", BundleHash: bundleA,
+			RunID: newer, State: "running", BundleHash: bundleA, RootDirectory: rootA.Admission().RootDirectory(),
 			OriginKind:     string(runtimerunlifecycle.OriginEvent),
 			TriggerEventID: newerEvent, TriggerEventType: "scan.requested",
 			StartedAt: now,
 		},
 		{
-			RunID: middle, State: "completed", BundleHash: bundleB,
+			RunID: middle, State: "completed", BundleHash: bundleB, RootDirectory: rootB.Admission().RootDirectory(),
 			OriginKind:      string(runtimerunlifecycle.OriginForkMaterialization),
 			ForkedFromRunID: newer, ForkedFromPointKind: "event", ForkedFromRevision: 1, ForkedFromEventID: newerEvent,
 			StartedAt: now.Add(-time.Hour), EndedAt: now.Add(-30 * time.Minute),
 		},
 		{
-			RunID: older, State: "failed", BundleHash: bundleA,
+			RunID: older, State: "failed", BundleHash: bundleA, RootDirectory: rootA.Admission().RootDirectory(),
 			OriginKind:     string(runtimerunlifecycle.OriginEvent),
 			TriggerEventID: olderEvent, TriggerEventType: "scan.failed",
 			Failure:   &failedRunFailure,
