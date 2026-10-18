@@ -160,6 +160,7 @@ type processCapability struct {
 	monitorDone     chan struct{}
 	monitorCadence  time.Duration
 	monitorDeadline time.Duration
+	observationHold atomic.Pointer[PossessionObservationHoldForTest]
 }
 
 type generationGrant struct {
@@ -547,6 +548,11 @@ func (p *processCapability) monitorPossession(ctx context.Context, done chan str
 }
 
 func (p *processCapability) monitorPossessionOnce(ctx context.Context, beforeSerialize func()) error {
+	if hold := p.observationHold.Load(); hold != nil {
+		if err := hold.wait(ctx); err != nil {
+			return err
+		}
+	}
 	if beforeSerialize != nil {
 		beforeSerialize()
 	}

@@ -19,8 +19,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// This native-owner diagnostic isolates post-cutover mutation admission. It
-// does not simulate PostgreSQL session loss or the serve shutdown watcher.
+// Native owner cuts retain the original command across a durable successor.
+// PostgreSQL also interrupts its exact original session while the local
+// possession observer is held outside serialization and proof deadlines.
 func TestSystemNodeMutationRejectsPredecessorAfterProcessCutoverBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, operation := range []struct {
@@ -37,7 +38,11 @@ func TestSystemNodeMutationRejectsPredecessorAfterProcessCutoverBothStores(t *te
 				entrances = append(entrances, "retained")
 			}
 			for _, entrance := range entrances {
-				for _, cut := range []string{"current", "successor", "retired_grant", "missing", "foreign_store"} {
+				cuts := []string{"current", "successor", "retired_grant", "missing", "foreign_store"}
+				if backend == "postgres" && entrance == "pooled" {
+					cuts = append(cuts, "native_loss")
+				}
+				for _, cut := range cuts {
 					t.Run(backend+"/"+operation.name+"/"+entrance+"/"+cut, func(t *testing.T) {
 						proveSystemNodeProcessCutover(t, backend, operation.mode, entrance, cut)
 					})
@@ -97,6 +102,48 @@ func proveSystemNodeProcessCutover(t *testing.T, backend string, mode mutationpr
 	ctx, err := startupownership.FreezeMutationAuthority(f.ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	var observationHold *startupownership.PossessionObservationHoldForTest
+	if cut == "native_loss" {
+		if err := f.manager.Shutdown(); err != nil {
+			t.Fatalf("join unrelated fixture projections before the native cut: %v", err)
+		}
+		original, err := startupownership.CaptureMutationAuthority(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		interruption, err := startupownership.PrepareOriginalSessionInterruptionForTest(ctx, original)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observationHold, err = startupownership.HoldOriginalPossessionObservationForTest(original)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(observationHold.Close)
+		select {
+		case <-observationHold.Entered():
+		case <-time.After(4 * time.Second):
+			t.Fatal("original observer did not reach its pre-admission hold")
+		}
+		if err := interruption.Interrupt(context.Background(), original); err != nil {
+			t.Fatalf("interrupt exact original session without local disposal: %v", err)
+		}
+		if err := interruption.Interrupt(context.Background(), original); err == nil {
+			t.Fatal("one-shot session interruption was reused")
+		}
+		successor, err := f.store.(startupownership.Store).AcquireProcessCapability(context.Background(), testStartupAcquireRequest("native-loss-successor"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = successor.Release(context.Background()) })
+		next, err = successor.Evidence()
+		if err != nil || next.AuthorityGeneration != old.AuthorityGeneration+1 {
+			t.Fatalf("actual successor did not acknowledge the next generation: %+v err=%v", next, err)
+		}
+		if _, err := process.Evidence(); err != nil {
+			t.Fatalf("original was locally fenced before its pooled mutation: %v", err)
+		}
 	}
 	if cut == "successor" || cut == "retired_grant" {
 		if err := f.manager.Shutdown(); err != nil {
@@ -190,6 +237,17 @@ func proveSystemNodeProcessCutover(t *testing.T, backend string, mode mutationpr
 	if err == nil || acknowledged || entered || readErr != nil || !found || !reflect.DeepEqual(before, after) ||
 		!reflect.DeepEqual(beforeFacts, afterFacts) || beforeActivity != afterActivity {
 		t.Fatalf("predecessor system-node mutation must refuse without changing state after successor cutover")
+	}
+	if observationHold != nil {
+		if _, err := process.Evidence(); err != nil {
+			t.Fatalf("pooled refusal used a locally terminal predecessor: %v", err)
+		}
+		observationHold.Close()
+		select {
+		case <-process.Done():
+		case <-time.After(4 * time.Second):
+			t.Fatal("ordinary possession observation did not resume after hold release")
+		}
 	}
 }
 
