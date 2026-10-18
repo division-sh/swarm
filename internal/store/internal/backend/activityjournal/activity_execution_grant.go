@@ -1,4 +1,4 @@
-package startupownership
+package activityjournal
 
 import (
 	"context"
