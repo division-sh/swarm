@@ -40,6 +40,7 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 		"native-bus-terminal-refusal-state/internal/runtime/bus/eventbus_publish_test.go/TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres",
 		"native-bus-terminal-refusal-state/internal/runtime/bus/eventbus_publish_test.go/TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite",
 		"native-bus-selected-run-construction/internal/runtime/bus/eventbus_publish_test.go/eventBusTestRunContextForSource",
+		"native-bus-refusal-duplicate-construction/internal/runtime/bus/eventbus_publish_test.go/TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability",
 		"native-bus-run-control-construction/internal/runtime/bus/run_control_dispatch_test.go/seedRunControlTestRun",
 		"native-bus-source-hash/internal/runtime/bus/eventbus_publish_test.go/TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycleOwner",
 		"native-bus-target-construction/internal/runtime/bus/target_owner_store_parity_test.go/TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends",
@@ -96,14 +97,14 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "7f68f6b26f3a29d4501931e3a5feb4bda3b4ba0474107bc6821628ddce5e68ef" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "a09d56e2ee95ee8b5e8b4b6bbf2a29f02b88275f1904b0fae63713375841c0ff" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 112 {
+	if len(pins) != 113 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
