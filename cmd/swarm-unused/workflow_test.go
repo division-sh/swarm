@@ -12,7 +12,8 @@ import (
 )
 
 func TestWorkflowNativeUnionIsRequired(t *testing.T) {
-	const nativeCadence = "(github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')) && needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'"
+	const setupExclusion = "github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true"
+	const nativeCadence = "(" + setupExclusion + ") && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')) && needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'"
 	b, err := os.ReadFile("../../.github/workflows/ci.yml")
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +95,7 @@ func TestWorkflowNativeUnionIsRequired(t *testing.T) {
 		t.Fatal("union must merge exact-head native artifacts from this run")
 	}
 	aggregate := workflow.Jobs["required-tests"]
-	if aggregate.If != "always()" {
+	if aggregate.If != "always() && ("+setupExclusion+")" {
 		t.Fatal("required aggregate must execute even when a required job fails/skips")
 	}
 	var summary string
