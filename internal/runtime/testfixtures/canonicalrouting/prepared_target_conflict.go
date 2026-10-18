@@ -18,8 +18,6 @@ func WritePreparedTargetConflict(t testing.TB) string {
 validator-two:
   execution_type: system_node
   subscribes_to: [prepared.aggregate.corruption]
-  event_handlers:
-    prepared.aggregate.corruption: {}
 `,
 		"review/schema.yaml":   "instance: instance_key\n",
 		"review/entities.yaml": "review:\n  instance_key: {type: text, immutable: true}\n",
