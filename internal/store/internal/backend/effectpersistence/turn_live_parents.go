@@ -7,7 +7,8 @@ import (
 )
 
 const agentTurnLiveParentMatch = `p.turn_id=t.turn_id AND p.run_id=t.run_id
-	AND p.completion_attempt_id=t.completion_attempt_id AND p.capability_surface_id=t.capability_surface_id`
+	AND p.completion_attempt_id=t.completion_attempt_id AND p.capability_surface_id=t.capability_surface_id
+	AND NOT EXISTS (SELECT 1 FROM run_fork_selected_contract_turn_detachments retained WHERE retained.turn_id=t.turn_id)`
 
 const completionTurnLiveParentExists = `EXISTS (SELECT 1 FROM agent_turns t
 	JOIN agent_turn_live_parents p ON ` + agentTurnLiveParentMatch + `
@@ -22,7 +23,8 @@ func insertTurnLiveParentsTx(ctx context.Context, tx *sql.Tx, turnID string) err
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO agent_turn_live_parents
 		(turn_id,run_id,completion_attempt_id,capability_surface_id)
-		SELECT turn_id,run_id,completion_attempt_id,capability_surface_id FROM agent_turns WHERE turn_id=$1`, turnID)
+		SELECT turn_id,run_id,completion_attempt_id,capability_surface_id FROM agent_turns WHERE turn_id=$1
+		AND NOT EXISTS (SELECT 1 FROM run_fork_selected_contract_turn_detachments retained WHERE retained.turn_id=agent_turns.turn_id)`, turnID)
 	if err != nil {
 		return fmt.Errorf("pair exact completion turn live parents: %w", err)
 	}

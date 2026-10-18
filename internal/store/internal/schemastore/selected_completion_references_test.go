@@ -114,6 +114,17 @@ func verifySelectedCompletionReferencePairs(t *testing.T, db *sql.DB, run, other
 
 func verifySelectedCompletionMembers(t *testing.T, tx *sql.Tx, execution, run, otherRun, fingerprint string) {
 	t.Helper()
+	unreceipted := uuid.NewString()
+	if _, err := tx.Exec(`INSERT INTO run_fork_selected_contract_runtime_executions
+		(execution_id,binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,generation,fork_event_id,
+		executable_coordinate_fingerprint,admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,
+		effective_config_fingerprint,declaration_plan_fingerprint,declaration_plan,preparation_fingerprint,preparation_binding,state,terminal_at)
+		SELECT $2,binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,generation+1,fork_event_id,
+		executable_coordinate_fingerprint,admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,
+		effective_config_fingerprint,declaration_plan_fingerprint,declaration_plan,preparation_fingerprint,preparation_binding,'closed',terminal_at
+		FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, execution, unreceipted); err != nil {
+		t.Fatal(err)
+	}
 	var turn, attempt, surface string
 	if err := tx.QueryRow(`SELECT turn_id,completion_attempt_id,capability_surface_id FROM agent_turns WHERE run_id=$1 ORDER BY turn_id LIMIT 1`, run).Scan(&turn, &attempt, &surface); err != nil {
 		t.Fatal(err)
@@ -144,9 +155,7 @@ func verifySelectedCompletionMembers(t *testing.T, tx *sql.Tx, execution, run, o
 				t.Fatal(err)
 			}
 		case "missing_receipt":
-			if err := tx.QueryRow(`SELECT execution_id FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, otherRun).Scan(&args[0]); err != nil {
-				t.Fatal(err)
-			}
+			args[0] = unreceipted
 		}
 		verifyCompletionReferenceStatement(t, tx, "turn/"+fault, turnInsert, args, fault == "none")
 	}
@@ -185,7 +194,7 @@ func verifySelectedCompletionMembers(t *testing.T, tx *sql.Tx, execution, run, o
 			case "missing_request":
 				args[1] = uuid.NewString()
 			case "missing_receipt":
-				args[0] = uuid.NewString()
+				args[0] = unreceipted
 			case "unknown_origin":
 				args[3] = "inferred_from_run"
 			}

@@ -8,7 +8,9 @@ import (
 
 const activityLiveParentMatch = `p.request_event_id=activity_attempts.request_event_id
 	AND p.run_id=activity_attempts.run_id AND p.reply_context_present=activity_attempts.reply_context_present
-	AND COALESCE(p.reply_context_id,'')=COALESCE(activity_attempts.reply_context_id,'')`
+	AND COALESCE(p.reply_context_id,'')=COALESCE(activity_attempts.reply_context_id,'')
+	AND NOT EXISTS (SELECT 1 FROM run_fork_selected_contract_activity_detachments retained
+	 WHERE retained.request_event_id=activity_attempts.request_event_id)`
 
 func pairActivityLiveParentsTx(ctx context.Context, tx *sql.Tx, requestID string, copied bool) error {
 	if ctx == nil || tx == nil {
@@ -19,7 +21,9 @@ func pairActivityLiveParentsTx(ctx context.Context, tx *sql.Tx, requestID string
 	}
 	query := `INSERT INTO activity_attempt_live_parents (request_event_id,run_id,reply_context_id,reply_context_present)
 		SELECT request_event_id,run_id,reply_context_id,reply_context_present
-		FROM activity_attempts WHERE request_event_id=$1`
+		FROM activity_attempts WHERE request_event_id=$1
+		AND NOT EXISTS (SELECT 1 FROM run_fork_selected_contract_activity_detachments retained
+		 WHERE retained.request_event_id=activity_attempts.request_event_id)`
 	if copied {
 		query += ` AND execution_binding IS NULL AND status IN ('succeeded','failed','uncertain')`
 	}

@@ -677,7 +677,8 @@ func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkS
 			t.created_at, CAST(t.completion_evidence AS TEXT), COALESCE(t.resolved_model,''),
 			EXISTS (SELECT 1 FROM agent_turn_live_parents p
 			 WHERE p.turn_id=t.turn_id AND p.run_id=t.run_id
-			 AND p.completion_attempt_id=t.completion_attempt_id AND p.capability_surface_id=t.capability_surface_id),
+			 AND p.completion_attempt_id=t.completion_attempt_id AND p.capability_surface_id=t.capability_surface_id
+			 AND NOT EXISTS (SELECT 1 FROM run_fork_selected_contract_turn_detachments retained WHERE retained.turn_id=t.turn_id)),
 			c.execution_kind,c.execution_authority_id,c.run_id,c.selected_execution_id,c.selected_fork_run_id
 		FROM agent_turns t
 		JOIN managed_agent_capability_surfaces c ON c.surface_id = t.capability_surface_id

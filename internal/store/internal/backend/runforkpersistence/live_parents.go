@@ -11,7 +11,9 @@ func insertCopiedActivityLiveParentsTx(ctx context.Context, tx *sql.Tx, requestI
 		(request_event_id,run_id,reply_context_id,reply_context_present)
 		SELECT request_event_id,run_id,reply_context_id,reply_context_present
 		FROM activity_attempts WHERE request_event_id=$1 AND execution_binding IS NULL
-		AND status IN ('succeeded','failed','uncertain')`, requestID)
+		AND status IN ('succeeded','failed','uncertain')
+		AND NOT EXISTS (SELECT 1 FROM run_fork_selected_contract_activity_detachments retained
+		 WHERE retained.request_event_id=activity_attempts.request_event_id)`, requestID)
 	return requireExactlyOneMutation(result, err, "pair newly copied terminal activity parents")
 }
 
@@ -19,7 +21,9 @@ func insertSelectedExecutionLiveParentsTx(ctx context.Context, tx *sql.Tx, execu
 	result, err := tx.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_execution_live_parents
 		(execution_id,binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,generation,fork_event_id)
 		SELECT execution_id,binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,generation,fork_event_id
-		FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, executionID)
+		FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1
+		AND NOT EXISTS (SELECT 1 FROM run_fork_selected_contract_execution_detachments retained
+		 WHERE retained.execution_id=run_fork_selected_contract_runtime_executions.execution_id)`, executionID)
 	return requireExactlyOneMutation(result, err, "insert exact selected execution live parents")
 }
 
@@ -27,7 +31,9 @@ func insertForkOperationLiveParentsTx(ctx context.Context, tx *sql.Tx, operation
 	result, err := tx.ExecContext(ctx, `INSERT INTO run_fork_operation_live_parents
 		(operation_id,selected_binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id)
 		SELECT operation_id,selected_binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id
-		FROM run_fork_operations WHERE operation_id=$1`, operationID)
+		FROM run_fork_operations WHERE operation_id=$1
+		AND NOT EXISTS (SELECT 1 FROM run_fork_selected_contract_execution_detachments retained
+		 WHERE retained.binding_id=run_fork_operations.selected_binding_id)`, operationID)
 	return requireExactlyOneMutation(result, err, "insert exact fork operation live parents")
 }
 
@@ -40,14 +46,16 @@ func requireForkLiveParentsTx(ctx context.Context, tx *sql.Tx, id string, execut
 		AND p.source_run_id=c.source_run_id AND p.fork_point_kind=c.fork_point_kind
 		AND p.fork_revision=c.fork_revision
 		AND COALESCE(CAST(p.fork_event_id AS TEXT),'')=COALESCE(CAST(c.fork_event_id AS TEXT),'')
-		WHERE c.operation_id=$1`
+		WHERE c.operation_id=$1
+		AND NOT EXISTS (SELECT 1 FROM run_fork_selected_contract_execution_detachments retained WHERE retained.binding_id=c.selected_binding_id)`
 	if execution {
 		query = `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions c
 			JOIN run_fork_selected_contract_execution_live_parents p ON p.execution_id=c.execution_id
 			AND p.binding_id=c.binding_id AND p.fork_run_id=c.fork_run_id AND p.source_run_id=c.source_run_id
 			AND p.fork_point_kind=c.fork_point_kind AND p.fork_revision=c.fork_revision AND p.generation=c.generation
 			AND COALESCE(CAST(p.fork_event_id AS TEXT),'')=COALESCE(CAST(c.fork_event_id AS TEXT),'')
-			WHERE c.execution_id=$1`
+			WHERE c.execution_id=$1
+			AND NOT EXISTS (SELECT 1 FROM run_fork_selected_contract_execution_detachments retained WHERE retained.execution_id=c.execution_id)`
 	}
 	var count int
 	if err := tx.QueryRowContext(ctx, query, id).Scan(&count); err != nil {
