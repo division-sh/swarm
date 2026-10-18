@@ -20,6 +20,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	storeownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -162,15 +163,17 @@ func proveProviderJournalNativeRefusals(t *testing.T, ctx context.Context, fixtu
 func openProviderJournalFixture(t *testing.T, backend string, memory agentmemory.Plan) (completionSettlementFixture, *completionOutcomeConnector) {
 	t.Helper()
 	var native driver.Connector
+	location := filepath.Join(t.TempDir(), "provider-journal.db")
 	if backend == "postgres" {
 		dsn, _, _ := testutil.StartPostgres(t)
+		location = dsn
 		var err error
 		native, err = pq.NewConnector(dsn)
 		if err != nil {
 			t.Fatal(err)
 		}
 	} else {
-		native = pipelineCrashSQLiteConnector{path: filepath.Join(t.TempDir(), "provider-journal.db")}
+		native = pipelineCrashSQLiteConnector{path: location}
 	}
 	control := &completionOutcomeConnector{Connector: native}
 	db := sql.OpenDB(control)
@@ -181,9 +184,36 @@ func openProviderJournalFixture(t *testing.T, backend string, memory agentmemory
 	})
 	var store completionSettlementTestStore
 	if backend == "postgres" {
-		store = admitTestPostgresStore(t, db)
+		selected, err := NewPostgresStore(location, control)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := selected.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		bootstrapTestPostgresStore(t, selected)
+		store = selected
 	} else {
-		selected := NewSQLiteRuntimeStoreForTest(db)
+		guard, err := storeownership.AcquireSQLiteConstructionGuard(location)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := guard.Release(); err != nil {
+				t.Error(err)
+			}
+		})
+		selected, err := NewSQLiteRuntimeStore(location, nativeSQLiteFixtureConstruction{connector: control, possession: guard})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := selected.Close(); err != nil {
+				t.Error(err)
+			}
+		})
 		if err := selected.BootstrapSchema(testAuthorActivityContext(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
 			t.Fatal(err)
 		}
