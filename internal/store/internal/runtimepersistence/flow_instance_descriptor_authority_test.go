@@ -210,6 +210,7 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 					runID := uuid.NewString()
 					path := "account/guard-" + race + "-" + uuid.NewString()
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
+					ctx = originalStoreFixtureContext(t, ctx, selected)
 					requireReadinessRun(t, ctx, selected, runID, bundleHash)
 					seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, bundleHash)
 					observed, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
@@ -450,6 +451,7 @@ func seedExactFlowInstanceDescriptorOwner(t *testing.T, selected nativeReadiness
 	}
 	ctx := runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(testAuthorActivityContext(), runID), fact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("11111111-1111-1111-1111-111111111111", bundleHash))
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	rootOwner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(".", runID, runID)}
 	root, found, err := selected.LoadWorkflowInstance(ctx, rootOwner)
 	if err != nil {

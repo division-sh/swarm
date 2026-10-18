@@ -141,6 +141,10 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				if err != nil {
 					t.Fatal(err)
 				}
+				ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
+				if err != nil {
+					t.Fatal(err)
+				}
 				var candidates []serveRuntimeBundleContext
 				var manager *runtime.RuntimeContextManager
 				managed := false
