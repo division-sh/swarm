@@ -49,3 +49,15 @@ The parser test copy is generated exactly from the approved pure capture source
 by sync-native-cycle-parser.rb; it is not a second implementation. Original Retry
 and site capture are unchanged. No conclusion about the hosted participants is
 made before comparing the native result to the source map and hosted evidence.
+
+## Control-only preparation correction
+
+The single 09748cb396 PostgreSQL attempt stopped at predecessor standing-current
+false/nil before either scheduled transaction; retain its private log SHA256
+dbf581d05140d83446545abdfd66f4394591535c32970e739dc75faf5eabfc09
+and checkpoint 6253585041. Gate 6253601074 permits one corrected attempt.
+activateLockCyclePredecessor repeats the existing fixture's native owners but
+supplies the genuinely confirmed binding proof ID/revision at the original
+initial PublishConnectedChannelActivation call and asserts exact readback.
+The shared activate helper, production owners, later rows, admission/currentness
+checks, acquisition barriers and 5-second scheduled bound are unchanged.

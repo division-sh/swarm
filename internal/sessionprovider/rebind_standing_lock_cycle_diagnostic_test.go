@@ -12,7 +12,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	flowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -23,7 +26,7 @@ func TestSavedProofRebindStandingLockOrderDiagnosticBothStores(t *testing.T) {
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newActiveInputFixtureWithProof(t, backend, false, true)
-			f.activate(t)
+			activateLockCyclePredecessor(t, f)
 			for _, phase := range []channelonboarding.Phase{channelonboarding.PhasePromotingRegistration,
 				channelonboarding.PhaseRetiringPredecessor, channelonboarding.PhaseDeliveringConfirmation, channelonboarding.PhaseSucceeded} {
 				var err error
@@ -47,6 +50,8 @@ func TestSavedProofRebindStandingLockOrderDiagnosticBothStores(t *testing.T) {
 			if current, err := f.selected.SessionStandingBindingCurrent(f.ctx, f.operation); err != nil || !current {
 				lockCycleStop(t, "predecessor_standing_not_current", err)
 			}
+			logLockCycle(t, map[string]any{"stage": "preparation_ready", "predecessor_standing_current": true,
+				"saved_proof_active": true, "unresolved_proofs_empty": true, "activation_proof_matches_binding": true})
 			replacement, native := prepareLockCycleReplacement(t, f)
 			defer native.CloseExecution()
 			if replacement.OperationID == f.operation.OperationID || replacement.SessionConnectionID == f.operation.SessionConnectionID ||
@@ -192,6 +197,47 @@ func TestSavedProofRebindStandingLockOrderDiagnosticBothStores(t *testing.T) {
 				"existing_identities_exact": true, "new_identity_count": newCount, "workers_joined": true})
 		})
 	}
+}
+
+// Diagnostic-only counterpart of activeInputFixture.activate. The initial
+// native publication carries its genuinely confirmed proof (6253601074).
+func activateLockCyclePredecessor(t *testing.T, f *activeInputFixture) {
+	t.Helper()
+	identity := f.confirm(t)
+	ctx, now := f.ctx, time.Now().UTC().Truncate(time.Microsecond)
+	if !f.operation.SaveProof || f.binding.ProofID == "" || f.binding.ProofRevision < 1 {
+		t.Fatal("native confirmation did not produce the required saved proof")
+	}
+	var err error
+	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
+		f.operation, err = f.selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: f.operation.OperationID,
+			ExpectedRevision: f.operation.Revision, Phase: phase, IdentityOperationID: identity.OperationID, BindingRevision: f.binding.Revision, Now: now})
+		if err != nil {
+			lockCycleStop(t, "predecessor_activation_checkpoint", err)
+		}
+	}
+	f.operation, f.activation, err = f.selected.PublishConnectedChannelActivation(ctx, channelonboarding.PublishActivationRequest{
+		OperationID: f.operation.OperationID, ExpectedRevision: f.operation.Revision, ActivationID: uuid.NewString(),
+		BindingRevision: f.binding.Revision, ConversationRef: f.binding.ConversationRef,
+		ProofID: f.binding.ProofID, ProofRevision: f.binding.ProofRevision, Now: now})
+	if err != nil {
+		lockCycleStop(t, "predecessor_activation_publication", err)
+	}
+	if f.activation.ProofID != f.binding.ProofID || f.activation.ProofRevision != f.binding.ProofRevision {
+		t.Fatal("original native activation publication lost exact confirmed proof")
+	}
+	source := sourceartifactfixture.Require(t, ctx, f.selected)
+	f.standing, err = f.selected.ReconcileStandingService(ctx, pipeline.StandingServiceCandidate{
+		BindingEnabled: f.activation.Status == channelonboarding.ActivationCurrent && f.binding.Status == operatorchannel.BindingCurrent,
+		ServiceID:      flowidentity.StandingServiceID("."), FlowPath: ".", Source: source})
+	if err != nil {
+		lockCycleStop(t, "predecessor_standing_reconciliation", err)
+	}
+	f.standing.PublicationSequence, err = f.selected.PublishStandingService(ctx, f.standing.ServiceID, f.standing.RunID, f.standing.Generation)
+	if err != nil {
+		lockCycleStop(t, "predecessor_standing_publication", err)
+	}
+	f.setScope(channelonboarding.SessionInputBusiness)
 }
 
 func prepareLockCycleReplacement(t *testing.T, f *activeInputFixture) (channelonboarding.Operation, operatorchannel.ProviderAuthority) {
