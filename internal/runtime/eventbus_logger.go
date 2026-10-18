@@ -22,6 +22,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
@@ -42,6 +43,7 @@ func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableD
 		SourceArtifactFact:      sourceArtifactFact,
 		RuntimeInstanceID:       strings.TrimSpace(runtimeInstanceID),
 		MutationContext:         mutationContext,
+		CarryMutationContext:    startupownership.CarryMutationAuthority,
 		WorkOwner:               workOwner,
 		ReceiverExecution:       eventreceiver.NormalExecution(),
 		TestLifecycleProbe:      testLifecycleProbe,

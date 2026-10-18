@@ -82,6 +82,7 @@ type EventBus struct {
 	sourceArtifactFact          runtimecorrelation.SourceArtifactFact
 	runtimeInstanceID           string
 	mutationContext             func(context.Context) (context.Context, error)
+	carryMutationContext        func(context.Context, context.Context) context.Context
 	testLifecycleProbe          runtimelifecycleprobe.Observer
 	providerOutputVerifier      ProviderOutputAuthorizationVerifier
 	outboxSweeperActive         bool
@@ -303,6 +304,7 @@ type EventBusOptions struct {
 	SourceArtifactFact          runtimecorrelation.SourceArtifactFact
 	RuntimeInstanceID           string
 	MutationContext             func(context.Context) (context.Context, error)
+	CarryMutationContext        func(context.Context, context.Context) context.Context
 	TestLifecycleProbe          runtimelifecycleprobe.Observer
 	ProviderOutputVerifier      ProviderOutputAuthorizationVerifier
 	WorkOwner                   worklifetime.Occurrence
@@ -550,6 +552,7 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		sourceArtifactFact:          opts.SourceArtifactFact,
 		runtimeInstanceID:           strings.TrimSpace(opts.RuntimeInstanceID),
 		mutationContext:             opts.MutationContext,
+		carryMutationContext:        opts.CarryMutationContext,
 		testLifecycleProbe:          opts.TestLifecycleProbe,
 		providerOutputVerifier:      opts.ProviderOutputVerifier,
 		workOwner:                   opts.WorkOwner,

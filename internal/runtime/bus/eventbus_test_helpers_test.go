@@ -84,6 +84,9 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 	if len(options) > 0 {
 		opts = options[0]
 	}
+	if opts.CarryMutationContext == nil {
+		opts.CarryMutationContext = startupownership.CarryMutationAuthority
+	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()
 	}
