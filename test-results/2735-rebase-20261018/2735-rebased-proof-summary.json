@@ -1,0 +1,87 @@
+{
+  "results": [
+    {
+      "file": "test-results/2735-memo-transport-20261018/local-proofs/2735-source-memo-projections-and-guards.jsonl",
+      "roots": 95,
+      "distinctPassingCases": 775,
+      "fails": 0,
+      "skips": 0,
+      "packages": [
+        {
+          "package": "github.com/division-sh/swarm/internal/operatorread",
+          "seconds": 0.006
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/operatorsurface",
+          "seconds": 0.221
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runstalled",
+          "seconds": 0.008
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "seconds": 0.028
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "seconds": 4.167
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store",
+          "seconds": 131.168
+        }
+      ]
+    },
+    {
+      "file": "test-results/2735-rebased-projections-and-guards.jsonl",
+      "roots": 96,
+      "distinctPassingCases": 776,
+      "fails": 0,
+      "skips": 0,
+      "packages": [
+        {
+          "package": "github.com/division-sh/swarm/internal/operatorread",
+          "seconds": 0.01
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/operatorsurface",
+          "seconds": 0.375
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/runtime/runstalled",
+          "seconds": 0.007
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/cliapp",
+          "seconds": 0.036
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "seconds": 4.814
+        },
+        {
+          "package": "github.com/division-sh/swarm/internal/store",
+          "seconds": 225.065
+        }
+      ]
+    },
+    {
+      "file": "test-results/2735-rebased-memo-race3.jsonl",
+      "roots": 1,
+      "distinctPassingCases": 9,
+      "fails": 0,
+      "skips": 0,
+      "packages": [
+        {
+          "package": "github.com/division-sh/swarm/internal/store/internal/operatorsurface",
+          "seconds": 4.526
+        }
+      ]
+    }
+  ],
+  "missingPriorRoots": [],
+  "addedRoots": [
+    "github.com/division-sh/swarm/internal/store.TestPersistenceAuthorityDebtQ10AncestrySourceIsActiveAndRequired"
+  ]
+}

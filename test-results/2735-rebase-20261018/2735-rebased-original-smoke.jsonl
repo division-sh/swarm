@@ -1,0 +1,27 @@
+Precompile outside test slot: environment=0.004s build=3.672s cleanup=0.000s total=3.676s
+Test capacity is busy.
+Queue position: 2
+Active slots: 3/3
+Estimated start: unknown
+Estimated completion: unknown
+Waiting for a test slot... updates every 30s
+Test capacity is busy.
+Queue position: 1
+Active slots: 3/3
+Estimated start: unknown
+Estimated completion: unknown
+Waiting for a test slot... updates every 30s
+Test slot acquired after 38s. Starting go test ./internal/releasee2e -run ^TestWorkspaceMCPCompiledDockerConformance$/^disconnect=false$ -count=1 -timeout=4m -json
+{"Time":"2026-10-18T17:04:14.138552355Z","Action":"start","Package":"github.com/division-sh/swarm/internal/releasee2e"}
+{"Time":"2026-10-18T17:04:14.14307299Z","Action":"run","Package":"github.com/division-sh/swarm/internal/releasee2e","Test":"TestWorkspaceMCPCompiledDockerConformance"}
+{"Time":"2026-10-18T17:04:14.143127901Z","Action":"output","Package":"github.com/division-sh/swarm/internal/releasee2e","Test":"TestWorkspaceMCPCompiledDockerConformance","Output":"=== RUN   TestWorkspaceMCPCompiledDockerConformance\n"}
+{"Time":"2026-10-18T17:04:24.844325674Z","Action":"run","Package":"github.com/division-sh/swarm/internal/releasee2e","Test":"TestWorkspaceMCPCompiledDockerConformance/disconnect=false"}
+{"Time":"2026-10-18T17:04:24.844350954Z","Action":"output","Package":"github.com/division-sh/swarm/internal/releasee2e","Test":"TestWorkspaceMCPCompiledDockerConformance/disconnect=false","Output":"=== RUN   TestWorkspaceMCPCompiledDockerConformance/disconnect=false\n"}
+{"Time":"2026-10-18T17:04:42.799237681Z","Action":"output","Package":"github.com/division-sh/swarm/internal/releasee2e","Test":"TestWorkspaceMCPCompiledDockerConformance/disconnect=false","Output":"    workspace_gateway_docker_test.go:395: release command swarm: wall=17.948946644s user=14.014713s system=1.43133s\n"}
+{"Time":"2026-10-18T17:04:42.830431106Z","Action":"output","Package":"github.com/division-sh/swarm/internal/releasee2e","Test":"TestWorkspaceMCPCompiledDockerConformance/disconnect=false","Output":"--- PASS: TestWorkspaceMCPCompiledDockerConformance/disconnect=false (17.99s)\n"}
+{"Time":"2026-10-18T17:04:42.830453336Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/releasee2e","Test":"TestWorkspaceMCPCompiledDockerConformance/disconnect=false","Elapsed":17.99}
+{"Time":"2026-10-18T17:04:42.883317772Z","Action":"output","Package":"github.com/division-sh/swarm/internal/releasee2e","Test":"TestWorkspaceMCPCompiledDockerConformance","Output":"--- PASS: TestWorkspaceMCPCompiledDockerConformance (28.74s)\n"}
+{"Time":"2026-10-18T17:04:42.883353292Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/releasee2e","Test":"TestWorkspaceMCPCompiledDockerConformance","Elapsed":28.74}
+{"Time":"2026-10-18T17:04:42.883363552Z","Action":"output","Package":"github.com/division-sh/swarm/internal/releasee2e","Output":"PASS\n"}
+{"Time":"2026-10-18T17:04:42.884591359Z","Action":"output","Package":"github.com/division-sh/swarm/internal/releasee2e","Output":"ok  \tgithub.com/division-sh/swarm/internal/releasee2e\t28.746s\n"}
+{"Time":"2026-10-18T17:04:42.884608809Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/releasee2e","Elapsed":28.746}

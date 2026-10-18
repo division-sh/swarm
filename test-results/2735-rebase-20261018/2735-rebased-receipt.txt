@@ -1,0 +1,6 @@
+<!-- receipt v1 -->
+receipt: head=0e78f146d8a0afb141628520c3e7c4f32033c339 tree=45b76d13662e5b724fa042425b6a5e2d76709760 parent=56281b14b7fc082a5fa4ef50ceb20513a7a94459 branch=agent-d/2720-stall-attribution signed=G dirty_files=0
+preflight: test-results/preflight/20261018T170559.048990747-c573e565-fb02-4d17-ac79-f313bdef5eab/receipt.json sha256=ef9764c756e64758282c8a64f12cc13f2cb85b4bc18cff268d34710040250bd9 (exact-head complete unstarted=0)
+tests: 2735 rebase 0e78f146d8 onto master 909222b50c: memo files byte-identical to accepted 55adb583b9; memo race x3 PASS; all prior 95 roots plus 1 delivered guard PASS; unmodified smoke N1 PASS; canonical census and API controls PASS; exact-head preflight PASS; one census-digest conflict only; lifecycle/focused unchanged
+regenerated: not-claimed
+generated: 2026-10-18T17:12:50Z

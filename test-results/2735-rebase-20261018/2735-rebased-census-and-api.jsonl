@@ -1,0 +1,22 @@
+Precompile outside test slot: environment=0.003s build=3.145s cleanup=0.000s total=3.148s
+Test slot acquired after 1ms. Starting go test ./internal/cliapp ./internal/apispec -run ^(TestVerifyBootStartupPredicateCensus|TestGeneratedOpenRPCArtifactMatchesPlatformSpec|TestPlatformAPISpecValidationCoverage)$ -count=1 -json
+{"Time":"2026-10-18T17:05:00.836068005Z","Action":"start","Package":"github.com/division-sh/swarm/internal/cliapp"}
+{"Time":"2026-10-18T17:05:00.836234276Z","Action":"start","Package":"github.com/division-sh/swarm/internal/apispec"}
+{"Time":"2026-10-18T17:05:00.83874959Z","Action":"run","Package":"github.com/division-sh/swarm/internal/apispec","Test":"TestPlatformAPISpecValidationCoverage"}
+{"Time":"2026-10-18T17:05:00.83881361Z","Action":"output","Package":"github.com/division-sh/swarm/internal/apispec","Test":"TestPlatformAPISpecValidationCoverage","Output":"=== RUN   TestPlatformAPISpecValidationCoverage\n"}
+{"Time":"2026-10-18T17:05:00.848303793Z","Action":"run","Package":"github.com/division-sh/swarm/internal/cliapp","Test":"TestVerifyBootStartupPredicateCensus"}
+{"Time":"2026-10-18T17:05:00.848322534Z","Action":"output","Package":"github.com/division-sh/swarm/internal/cliapp","Test":"TestVerifyBootStartupPredicateCensus","Output":"=== RUN   TestVerifyBootStartupPredicateCensus\n"}
+{"Time":"2026-10-18T17:05:00.932772016Z","Action":"output","Package":"github.com/division-sh/swarm/internal/cliapp","Test":"TestVerifyBootStartupPredicateCensus","Output":"--- PASS: TestVerifyBootStartupPredicateCensus (0.08s)\n"}
+{"Time":"2026-10-18T17:05:00.932810496Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/cliapp","Test":"TestVerifyBootStartupPredicateCensus","Elapsed":0.08}
+{"Time":"2026-10-18T17:05:00.932820046Z","Action":"output","Package":"github.com/division-sh/swarm/internal/cliapp","Output":"PASS\n"}
+{"Time":"2026-10-18T17:05:00.93522555Z","Action":"output","Package":"github.com/division-sh/swarm/internal/cliapp","Output":"ok  \tgithub.com/division-sh/swarm/internal/cliapp\t0.099s\n"}
+{"Time":"2026-10-18T17:05:00.93526764Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/cliapp","Elapsed":0.099}
+{"Time":"2026-10-18T17:05:00.95671653Z","Action":"output","Package":"github.com/division-sh/swarm/internal/apispec","Test":"TestPlatformAPISpecValidationCoverage","Output":"--- PASS: TestPlatformAPISpecValidationCoverage (0.12s)\n"}
+{"Time":"2026-10-18T17:05:00.95675943Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/apispec","Test":"TestPlatformAPISpecValidationCoverage","Elapsed":0.12}
+{"Time":"2026-10-18T17:05:00.9567786Z","Action":"run","Package":"github.com/division-sh/swarm/internal/apispec","Test":"TestGeneratedOpenRPCArtifactMatchesPlatformSpec"}
+{"Time":"2026-10-18T17:05:00.95678343Z","Action":"output","Package":"github.com/division-sh/swarm/internal/apispec","Test":"TestGeneratedOpenRPCArtifactMatchesPlatformSpec","Output":"=== RUN   TestGeneratedOpenRPCArtifactMatchesPlatformSpec\n"}
+{"Time":"2026-10-18T17:05:01.039913696Z","Action":"output","Package":"github.com/division-sh/swarm/internal/apispec","Test":"TestGeneratedOpenRPCArtifactMatchesPlatformSpec","Output":"--- PASS: TestGeneratedOpenRPCArtifactMatchesPlatformSpec (0.08s)\n"}
+{"Time":"2026-10-18T17:05:01.039956216Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/apispec","Test":"TestGeneratedOpenRPCArtifactMatchesPlatformSpec","Elapsed":0.08}
+{"Time":"2026-10-18T17:05:01.039964576Z","Action":"output","Package":"github.com/division-sh/swarm/internal/apispec","Output":"PASS\n"}
+{"Time":"2026-10-18T17:05:01.041470884Z","Action":"output","Package":"github.com/division-sh/swarm/internal/apispec","Output":"ok  \tgithub.com/division-sh/swarm/internal/apispec\t0.205s\n"}
+{"Time":"2026-10-18T17:05:01.041488315Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/apispec","Elapsed":0.205}

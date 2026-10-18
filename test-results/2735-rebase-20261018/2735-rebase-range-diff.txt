@@ -1,0 +1,65 @@
+ 1:  b1627f013a !  1:  182a96b193 feat(runtime): build read-only operational stall attribution (#2720)
+    @@ platform-spec.yaml: api_specification:
+     +            type: array
+     +            items: {$ref: '#/components/schemas/RunStallAttribution'}
+            EntitySummary:
+    -         type: object
+    -         additionalProperties: false
+    +         description: >-
+    +           Authored-data membership and clocks with nullable header lifecycle. Data-only imports have null for every
+     @@ platform-spec.yaml: api_specification:
+            errors: [RUN_NOT_FOUND]
+          run.diagnose:
+ 2:  9e4916596a !  2:  4c202279cd fix(runtime): retain proven emissions and classify stall read owners
+    @@ Commit message
+      ## internal/runtime/contracts/workflow_transition_ownership_guard_test.go ##
+     @@ internal/runtime/contracts/workflow_transition_ownership_guard_test.go: func allowedTransitionBoundaryUses() map[string]int {
+      		"internal/runtime/pipeline.pipelineActivityDispatcher.logActivityRuntime::call internal/runtime/correlation.InboundEventFromContext":          1,
+    - 		"internal/store/internal/backend/mutationlog.Insert::call internal/runtime/correlation.InboundEventFromContext":                               1,
+    + 		"internal/store/internal/backend/mutationlog.insertPostgresAt::call internal/runtime/correlation.InboundEventFromContext":                     1,
+      		"internal/store/internal/backend/mutationlog.insertSQLiteAt::call internal/runtime/correlation.InboundEventFromContext":                       1,
+     -		"internal/store/storetest.PersistManagedAgentTurnFixture::call internal/runtime/correlation.WithInboundEvent":                                 1,
+     +		// #2720 Gate E 6221291258: pinned final-stage readback, not transition execution.
+ 3:  c052eda592 =  3:  3b3f1a9171 fix(runtime): distinguish publication evidence from turn silence (#2720)
+ 4:  98cb9eb2fd =  4:  e50ffefc25 test(store): inventory exact stall-attribution record consumer (#2720)
+ 5:  8cc910a2f8 =  5:  0bae223114 fix(runtime): preserve accepted output across delivery failure (#2720)
+ 6:  5a6695ad81 =  6:  5bb14198ef test(runstalled): preserve pending and decided human waits on both stores
+ 7:  cf69a8975e =  7:  3cfad3fb8a fix(diagnostics): attribute canonical root emissions and preserve native work
+ 8:  fbf6849db4 =  8:  cffe19813c test(diagnostics): preserve unacknowledged pipeline work before stall projection
+ 9:  ff3272e6cf =  9:  3269e05050 test(diagnostics): isolate the new completion fixture from historical corpus sources
+10:  3d08b17773 = 10:  785ba5e8ce refactor(diagnostics): separate membership, completion and publication evidence checks
+11:  45e467667c = 11:  7814775fec refactor(diagnostics): separate publication receipt validation from row loading
+12:  e3f5774486 = 12:  f0c195de86 test(diagnostics): prove independent same-slug turn origins across scopes
+13:  ec74e417b9 = 13:  76c7d14774 test(diagnostics): join stateless sibling history by exact provider turn IDs
+14:  392236c65f = 14:  1576afe2fd fix(diagnostics): keep delivery custody and claim matching behind its owner
+15:  089a3417df ! 15:  375c46b925 fix: reconcile detached stall evidence owner inventories
+    @@ Commit message
+     
+      ## internal/runtime/contracts/workflow_transition_ownership_guard_test.go ##
+     @@ internal/runtime/contracts/workflow_transition_ownership_guard_test.go: func allowedTransitionBoundaryUses() map[string]int {
+    - 		"internal/store/internal/backend/mutationlog.Insert::call internal/runtime/correlation.InboundEventFromContext":                               1,
+    + 		"internal/store/internal/backend/mutationlog.insertPostgresAt::call internal/runtime/correlation.InboundEventFromContext":                     1,
+      		"internal/store/internal/backend/mutationlog.insertSQLiteAt::call internal/runtime/correlation.InboundEventFromContext":                       1,
+      		// #2720 Gate E 6221291258: pinned final-stage readback, not transition execution.
+     -		"internal/store/internal/operatorsurface.loadRunOperationalEvidence::call internal/runtime/semanticview.WorkflowStageTopology": 1,
+16:  14c5475cda = 16:  37fdad1d85 test: retain completion startup diagnostic timestamps
+17:  e742d8458f = 17:  a10a5ee661 test(cli): expose missing frozen emit grants in text status
+18:  cca85b49af = 18:  c710a392be fix(cli): retain frozen emit grants in text run status
+19:  2a9f585d5f = 19:  0c1037d012 runtime: use fixed run-level stalled attribution alerts
+20:  86d8358d18 = 20:  7e7d911cb3 test(store): retire the two deleted stalled-policy callbacks
+21:  4aeba56148 = 21:  0e24b5f401 style: format stalled-status ownership fixtures
+22:  cc17bef5e7 ! 22:  333440046f test(cliapp): refresh fixed stall-monitor composition accounting
+    @@ internal/cliapp/testdata/verify_admission_predicate_census.json
+          "owner": "internal/serveapp/main.go::buildRuntimeComposition",
+          "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+          "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    --    "body_sha256": "8c462f5b3386160df2a9fb561e362c4ea1fc2ae17d0b15ffde643ba333aaed17"
+    -+    "body_sha256": "19f11ba3df37f5fb35df947739cc457037ce20309c4df3fa7f47cc4cd319e768"
+    +-    "body_sha256": "7877f29de6095029847a5b0be52ce8eb6acc1c4c979ed6be10d1b2ee9c3142a8"
+    ++    "body_sha256": "54637bd3422f5b199870e509cdac5468148d6b1f6944d05a49afa31b5bc08c75"
+        },
+        {
+          "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
+23:  1057402d41 = 23:  d4d76eb2dd test(codemod): record the exact N19 barrier observation successor
+24:  80b43c1a23 = 24:  56281b14b7 test(apispec): account for the two accepted N19 schemas
+25:  55adb583b9 = 25:  0e78f146d8 fix(store): reuse exact operational source semantics per reader
