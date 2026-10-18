@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
 type TargetFailureDeadLetterRecorder = runtimedeadletters.AcknowledgedRecorder
@@ -2630,6 +2631,7 @@ func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner workl
 		return ctx
 	}
 	workCtx := lease.Context()
+	workCtx = startupownership.CarryMutationAuthority(workCtx, ctx)
 	if _, ok := worklifetime.OccurrenceFromContext(workCtx); !ok {
 		workCtx = worklifetime.WithOccurrence(workCtx, owner)
 	}

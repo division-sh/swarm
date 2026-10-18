@@ -192,6 +192,29 @@ func FreezeMutationAuthority(ctx context.Context) (context.Context, error) {
 	return context.WithValue(ctx, mutationAuthorityContextKey{}, original), nil
 }
 
+// CarryMutationAuthority preserves a command's original custody when accepted
+// work moves to an independently cancellable lease. Failure is carried forward
+// as a refusal; a later runtime grant cannot repair or replace that command.
+func CarryMutationAuthority(work, command context.Context) context.Context {
+	if !HasMutationAuthority(command) {
+		return work
+	}
+	original, err := CaptureMutationAuthority(context.WithoutCancel(command))
+	if err != nil {
+		return context.WithValue(work, mutationAuthorityContextKey{}, refusedMutationAuthority{err})
+	}
+	if HasMutationAuthority(work) {
+		previous, err := CaptureMutationAuthority(context.WithoutCancel(work))
+		if err != nil {
+			return context.WithValue(work, mutationAuthorityContextKey{}, refusedMutationAuthority{err})
+		}
+		if previous.owner != original.owner || previous.grant != original.grant {
+			return context.WithValue(work, mutationAuthorityContextKey{}, refusedMutationAuthority{errors.New("accepted work cannot replace its original mutation owner")})
+		}
+	}
+	return context.WithValue(work, mutationAuthorityContextKey{}, original)
+}
+
 func (g *generationGrant) BindRuntimeMutationContext(ctx context.Context) (context.Context, error) {
 	return WithRuntimeMutationAuthority(ctx, g)
 }
