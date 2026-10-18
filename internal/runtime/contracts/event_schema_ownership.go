@@ -9,11 +9,6 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
-const (
-	eventConsumerProjectionRule = "compiled_connect_event_consumer_projection/v1"
-	eventReceiverProjectionRule = "compiled_receiver_delivery_projection/v1"
-)
-
 type eventSchemaOwnershipRow struct {
 	connect               FlowConnect
 	ownerFlowPath         string
@@ -126,8 +121,8 @@ func validateCompiledConnectEventSchemaOwnership(bundle *WorkflowContractBundle)
 		if !row.receiverRestatement {
 			continue
 		}
-		producerLocation := eventDeclarationLocation(row.producer)
-		receiverLocation := eventDeclarationLocation(row.receiver)
+		producerLocation := eventDeclarationLocation(bundle, row.producerFlowID, row.producerEvent)
+		receiverLocation := eventDeclarationLocation(bundle, row.receiverFlowID, row.receiverEvent)
 		errs = append(errs, fmt.Errorf(
 			"%w: event %s consumer %s under schema owner %s restates producer-owned schema %s at %s with %s at %s; remove the consumer declaration so its compiled projection derives from the producer",
 			ErrInvalidField,
@@ -154,7 +149,7 @@ func validateCompiledConnectEventSchemaOwnership(bundle *WorkflowContractBundle)
 		var receiver eventSchemaOwnershipRow
 		for _, owner := range owners {
 			receiver = owner
-			labels = append(labels, fmt.Sprintf("%s event %s at %s", packageEndpointLabel(owner.producerEndpoint), owner.producerName, eventDeclarationLocation(owner.producer)))
+			labels = append(labels, fmt.Sprintf("%s event %s at %s", packageEndpointLabel(owner.producerEndpoint), owner.producerName, eventDeclarationLocation(bundle, owner.producerFlowID, owner.producerEvent)))
 		}
 		sort.Strings(labels)
 		errs = append(errs, fmt.Errorf(
@@ -239,15 +234,17 @@ func packageEndpointLocalEvent(bundle *WorkflowContractBundle, endpoint, eventNa
 	return scope.LocalizeOutput(eventName)
 }
 
-func eventDeclarationLocation(entry EventCatalogEntry) string {
-	provenance, ok := entry.admissionProvenance["declaration"]
-	if !ok || strings.TrimSpace(provenance.SourceFile) == "" {
+func eventDeclarationLocation(bundle *WorkflowContractBundle, flowID, event string) string {
+	compiled, ok, err := bundle.ResolveCompiledFlowEventSchema(flowID, event)
+	if err != nil || !ok || compiled.Source().File == "" {
 		return "unknown source"
 	}
-	if provenance.SourceLine <= 0 {
-		return provenance.SourceFile
+	file := compiled.Source().File
+	slot := NodeProvenanceMapPath("", eventidentity.LeafName(compiled.EventName()))
+	if location, found := bundle.IntroductionLocation(file, slot, true); found {
+		return fmt.Sprintf("%s:%d", file, location.Line)
 	}
-	return fmt.Sprintf("%s:%d", provenance.SourceFile, provenance.SourceLine)
+	return "unknown source"
 }
 
 func packageEndpointLabel(endpoint string) string {

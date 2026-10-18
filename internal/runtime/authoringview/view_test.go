@@ -24,7 +24,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
-	"gopkg.in/yaml.v3"
 )
 
 func TestA9DeclaredBindingProjectionParity(t *testing.T) {
@@ -55,6 +54,9 @@ func TestA9DeclaredBindingProjectionParity(t *testing.T) {
 		wire, err := json.Marshal(view)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if strings.Contains(string(wire), "\"effective_provenance\"") {
+			t.Fatal("declaration projection retained the retired provenance ledger")
 		}
 		var projected struct {
 			Flows []map[string]any `json:"flows"`
@@ -141,87 +143,6 @@ func TestBuildShowsParentLocalConnectionsWithoutPublicPins(t *testing.T) {
 				}
 			}
 		}
-	}
-}
-
-func TestBuildExposesComposedNodeAndEventProvenance(t *testing.T) {
-	repoRoot := canonicalrouting.RepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-		repoRoot,
-		filepath.Join(repoRoot, "examples", "routing", "template-create-minted-key"),
-		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var nodeFound, eventFound bool
-	for _, entry := range view.EffectiveProvenance {
-		if strings.HasPrefix(entry.Path, "nodes[") {
-			nodeFound = true
-		}
-		if strings.HasPrefix(entry.Path, "events[") {
-			eventFound = true
-		}
-	}
-	if !nodeFound || !eventFound {
-		t.Fatalf("describe projection lacks composed provenance: node=%t event=%t", nodeFound, eventFound)
-	}
-}
-
-func TestEffectiveProvenanceWireFormat(t *testing.T) {
-	entries := []runtimecontracts.EffectiveProvenanceEntry{{
-		Path: "nodes[worker].execution_type",
-		Provenance: runtimecontracts.EffectiveValueProvenance{
-			Origin: runtimecontracts.EffectiveValueOriginAuthored, SourceFile: "nodes.yaml",
-			SourceLine: 2, SourceColumn: 19, SourcePresence: "scalar",
-		},
-	}, {
-		Path: "nodes[worker].produces",
-		Provenance: runtimecontracts.EffectiveValueProvenance{
-			Origin: runtimecontracts.EffectiveValueOriginDerived,
-		},
-	}}
-	want := `[{
-		"path":"nodes[worker].execution_type",
-		"provenance":{"origin":"authored","source_file":"nodes.yaml","source_line":2,"source_column":19,"source_presence":"scalar"}
-	},{"path":"nodes[worker].produces","provenance":{"origin":"derived"}}]`
-	var expected any
-	if err := json.Unmarshal([]byte(want), &expected); err != nil {
-		t.Fatal(err)
-	}
-	for _, format := range []string{"json", "yaml"} {
-		t.Run(format, func(t *testing.T) {
-			var raw []byte
-			var actual any
-			var err error
-			if format == "json" {
-				raw, err = json.Marshal(entries)
-				if err == nil {
-					err = json.Unmarshal(raw, &actual)
-				}
-			} else {
-				raw, err = yaml.Marshal(entries)
-				if err == nil {
-					err = yaml.Unmarshal(raw, &actual)
-				}
-				if err == nil {
-					raw, err = json.Marshal(actual)
-				}
-				if err == nil {
-					err = json.Unmarshal(raw, &actual)
-				}
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(actual, expected) {
-				t.Fatalf("provenance wire keys or omission differ: %s", raw)
-			}
-		})
 	}
 }
 

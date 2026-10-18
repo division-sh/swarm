@@ -105,11 +105,7 @@ func TestReviewer2492WholeDocumentExpansion(t *testing.T) {
 			for name, load := range loaders {
 				t.Run(name, func(t *testing.T) {
 					nodes, err := load()
-					entries := 0
-					for _, node := range nodes {
-						entries += len(node.admissionProvenance)
-					}
-					t.Logf("source bytes=%d declarations=%d provenance=%d admission=%v", source.Len(), tc.declarations, entries, err)
+					t.Logf("source bytes=%d declarations=%d admission=%v", source.Len(), tc.declarations, err)
 					if tc.wantReject {
 						if err == nil || !strings.Contains(err.Error(), "YAML-EXPANSION-LIMIT") || !strings.Contains(err.Error(), "$ at ") || !strings.Contains(err.Error(), "nodes.yaml:1:1") || len(nodes) != 0 {
 							t.Fatalf("aggregate source must reject before projection with document coordinates: %v", err)
@@ -118,20 +114,6 @@ func TestReviewer2492WholeDocumentExpansion(t *testing.T) {
 					}
 					if err != nil || len(nodes) != tc.declarations {
 						t.Fatalf("valid declarations must survive: %d, %v", len(nodes), err)
-					}
-					wantEntries := 8199 * tc.declarations
-					if !tc.active {
-						wantEntries = 5 * tc.declarations
-					}
-					if entries != wantEntries || entries > yamlsource.MaxExpandedNodes {
-						t.Fatalf("provenance entries = %d, want %d under document limit", entries, wantEntries)
-					}
-					if !tc.active {
-						for _, node := range nodes {
-							if note := node.admissionProvenance["event_handlers[\"task.ready\"]._note"]; note.Origin != EffectiveValueOriginAuthored || note.SourceLine == 0 {
-								t.Fatal("annotation outer occurrence lost")
-							}
-						}
 					}
 				})
 			}

@@ -1,33 +1,30 @@
 package contracts
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-func TestNodeAdmissionProvenanceComposesWithEvents(t *testing.T) {
-	repo := repoRootForContractsTest(t)
-	root := filepath.Join(repo, "examples", "routing", "template-create-minted-key")
-	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+func retainedLocationFixture(t testing.TB, name, body string) *WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	file := filepath.Join(root, name)
+	if err := os.WriteFile(file, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var nodeFound, eventFound bool
-	for _, entry := range bundle.EffectiveProvenance().Entries() {
-		if strings.HasPrefix(entry.Path, `nodes["producer:producer-node"].event_handlers["validation.triggered"].emit.fields.candidate`) {
-			nodeFound = entry.Provenance.Origin == EffectiveValueOriginAuthored &&
-				strings.HasSuffix(entry.Provenance.SourceFile, "producer/nodes.yaml") && entry.Provenance.SourceLine == 10
-		}
-		if strings.HasPrefix(entry.Path, "events[") {
-			eventFound = true
-		}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
 	}
-	if !nodeFound || !eventFound {
-		t.Fatalf("composed provenance missing node or event entry: node=%t event=%t", nodeFound, eventFound)
-	}
+	return &WorkflowContractBundle{SourceArtifact: artifact}
 }
 
 func TestNodeAdmissionAliasMergeAndNestedCoordinates(t *testing.T) {
@@ -50,8 +47,9 @@ func TestNodeAdmissionAliasMergeAndNestedCoordinates(t *testing.T) {
 			if nodes["second"].EventHandlers["task.ready"].Emit.Event != "task.done" {
 				t.Fatal("alias/merge lost the executed nested effect")
 			}
-			proof := nodes["second"].admissionProvenance[`event_handlers["task.ready"].emit`]
-			if proof.SourceFile != "nodes.yaml" || proof.SourceLine != tc.line || proof.SourceColumn != tc.column {
+			bundle := retainedLocationFixture(t, "nodes.yaml", tc.source)
+			proof, found := bundle.IntroductionLocation("nodes.yaml", `second.event_handlers["task.ready"].emit`, false)
+			if !found || proof.File != "nodes.yaml" || proof.Line != tc.line || proof.Column != tc.column {
 				t.Fatalf("authored introduction coordinate: %#v", proof)
 			}
 		})
@@ -67,6 +65,17 @@ func TestNodeAdmissionAliasMergeAndNestedCoordinates(t *testing.T) {
 		}
 		if _, err := projectNodeDeclarationsValue(snapshot.Document("nodes.yaml").Root()); err == nil || !strings.Contains(err.Error(), "nodes.yaml:") {
 			t.Fatalf("nested duplicate/cycle lost source-located rejection: %v", err)
+		}
+	}
+	bundle := retainedLocationFixture(t, "nodes.yaml", "worker: {event_handlers: {}}\n")
+	for _, slot := range []string{"missing", "worker.absent", "worker[0]", "worker.", `worker["unterminated]`} {
+		if location, found := bundle.IntroductionLocation("nodes.yaml", slot, false); found || location != (yamlsource.Location{}) {
+			t.Fatalf("unresolved diagnostic slot %q invented a position: %+v", slot, location)
+		}
+	}
+	for _, source := range []*WorkflowContractBundle{nil, {}, bundle} {
+		if location, found := source.IntroductionLocation("absent.yaml", "worker", false); found || location != (yamlsource.Location{}) {
+			t.Fatalf("missing retained source invented a position: %+v", location)
 		}
 	}
 }

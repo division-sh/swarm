@@ -233,7 +233,10 @@ func TestA9NoProducerCannotRetain(t *testing.T) {
 func TestCompileStandingIngressAliasRejectsUnreachableAlias(t *testing.T) {
 	source, _ := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bundle, _ := semanticview.Bundle(source)
-	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) { schema.Ingress.Alias = "chat/support" })
+	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) {
+		alias := "chat/support"
+		schema.Ingress.Alias = &alias
+	})
 	err := runtimecontracts.CompileWorkflowSemantics(bundle)
 	if err == nil || !strings.Contains(err.Error(), "one URL-safe path segment") || !strings.Contains(err.Error(), "[A-Za-z0-9][A-Za-z0-9._-]*") {
 		t.Fatalf("multi-segment alias error = %v", err)

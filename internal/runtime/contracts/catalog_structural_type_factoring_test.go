@@ -105,7 +105,7 @@ func TestCatalogStructuralTypeFactoringPostDPrecedence(t *testing.T) {
 					field, err := projectEntityFieldDecl(value)
 					return field.Type, err
 				case "events":
-					field, _, _, err := admitEventPayloadField(value)
+					field, _, err := admitEventPayloadField(value)
 					return field.Type, err
 				case "nodes":
 					field, err := projectNodeStateFieldValue("items", value)

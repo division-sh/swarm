@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -63,25 +64,6 @@ func TestReviewer2492NestedDiagnosticPath(t *testing.T) {
 	_, err = projectNodeDeclarationsValue(snapshot.Document("nodes.yaml").Root())
 	if err == nil || !strings.Contains(err.Error(), `$["worker"]["event_handlers"]["start"]["rules"][0]["when"]`) {
 		t.Fatalf("original motivating diagnostic must retain its exact path: %v", err)
-	}
-}
-
-func TestReviewer2492AnnotationProvenanceBound(t *testing.T) {
-	for _, depth := range []int{8, 12, 14, 24} {
-		t.Run(fmt.Sprint(depth), func(t *testing.T) {
-			var body strings.Builder
-			body.WriteString("_note:\n  a0: &a0 [x, x]\n")
-			for i := 1; i <= depth; i++ {
-				fmt.Fprintf(&body, "  a%d: &a%d [*a%d, *a%d]\n", i, i, i-1, i-1)
-			}
-			node, err := admitReviewNode(t, body.String())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(node.admissionProvenance) != 4 {
-				t.Fatalf("annotation expanded into %d entries, want its outer occurrence only", len(node.admissionProvenance))
-			}
-		})
 	}
 }
 
@@ -263,7 +245,7 @@ func TestNodeAnnotationAliasDoesNotExemptActiveData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, found := node.admissionProvenance[`event_handlers["task.ready"].emit.fields._note.business`]; !found {
+	if value, found := node.EventHandlers["task.ready"].Emit.Fields["_note"]; !found || !reflect.DeepEqual(value.Literal, map[string]any{"business": "value"}) {
 		t.Fatal("business data named _note is not a handler annotation")
 	}
 }

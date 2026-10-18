@@ -3,7 +3,6 @@ package contracts
 import (
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -41,14 +40,7 @@ func TestA9RootedAliasCompilation(t *testing.T) {
 			if !present || got != want {
 				t.Fatalf("flow %q alias=%q present=%t, want %q", flow, got, present, want)
 			}
-			fact, present := bundle.EffectiveProvenance().Lookup(`schemas["` + flow + `"].ingress.alias`)
-			if !present || fact.Origin != EffectiveValueOriginDerived || fact.RuleID != "flow.rooted_ingress_alias" || len(fact.InputPaths) != 2 {
-				t.Fatalf("derived alias provenance = %+v present=%t", fact, present)
-			}
 		}
-	}
-	if !reflect.DeepEqual(disk.EffectiveProvenance().Entries(), rebuilt.EffectiveProvenance().Entries()) {
-		t.Fatal("retained source changed alias provenance")
 	}
 	disk.RootSchema.Name = "changed"
 	if got, _ := disk.FlowIngressAlias("shop"); got != "shop.shop" {
@@ -94,9 +86,7 @@ func TestA9AliasPresenceAdmission(t *testing.T) {
 	if alias, _ := bundle.FlowIngressAlias("."); alias != "independent" {
 		t.Fatalf("override changed: %q", alias)
 	}
-	for _, row := range bundle.EffectiveProvenance().Entries() {
-		if strings.HasSuffix(row.Path, ".ingress.alias") && row.Provenance.Origin != EffectiveValueOriginAuthored {
-			t.Fatalf("override lost authored provenance: %+v", row)
-		}
+	if bundle.RootSchema.Ingress.Alias == nil || *bundle.RootSchema.Ingress.Alias != "independent" {
+		t.Fatal("explicit alias presence was not retained by its decoded field")
 	}
 }

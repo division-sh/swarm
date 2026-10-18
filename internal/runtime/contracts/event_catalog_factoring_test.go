@@ -19,10 +19,9 @@ import (
 var updateEventAdmission = flag.Bool("update-event-admission", false, "record the unchanged event-admission characterization")
 
 type eventAdmissionObservation struct {
-	Entries    map[string]EventCatalogEntry
-	Provenance map[string]map[string]EffectiveValueProvenance
-	Error      string
-	ErrorType  string
+	Entries   map[string]EventCatalogEntry
+	Error     string
+	ErrorType string
 }
 
 func TestEventCatalogFactoringCharacterization(t *testing.T) {
@@ -123,12 +122,6 @@ func TestEventCatalogFactoringCharacterization(t *testing.T) {
 				observation.Error = err.Error()
 				observation.ErrorType = reflect.TypeOf(err).String()
 			}
-			if entries != nil {
-				observation.Provenance = map[string]map[string]EffectiveValueProvenance{}
-				for name, entry := range entries {
-					observation.Provenance[name] = entry.admissionProvenance
-				}
-			}
 			got[tc.name] = observation
 			actual, err := json.Marshal(observation)
 			if err != nil {
@@ -223,8 +216,6 @@ func TestEventCatalogFactoringConsumers(t *testing.T) {
 		{"type_refusal", TestTypeCatalogDocumentDecode_RejectsInvalidOptionalMarkers},
 		{"type_lowering", TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning},
 		{"business_key_lowering", TestEventCatalogBusinessKeyRejectsDynamicSemanticsAtBundleAdmission},
-		{"provenance_ledger", TestNodeAdmissionProvenanceComposesWithEvents},
-		{"pack_provenance", TestPackPlatformProvenanceComposesWithoutOverwrite},
 		{"connected_rename", TestEffectiveEventResolutionPreservesConnectedRenameOwnership},
 		{"shared_refinements", TestSharedRefinementBoundPresenceMatrix},
 		{"shared_vocabulary", TestRemovedClosedFieldsUseCurrentVocabularyAcrossPresenceAndMerges},
