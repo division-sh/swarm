@@ -563,14 +563,12 @@ func TestTerminalPlanRetainsFencedAcceptedSelfAuthor(t *testing.T) {
 func TestTerminalLoopSettlementRejectsForeignRetirementMember(t *testing.T) {
 	for _, cut := range []string{"member_token", "retirement_token"} {
 		t.Run(cut, func(t *testing.T) {
-			probe := newLifecyclePersistenceProbe()
+			ctx, rec, probe := newLifecycleCacheFixture(t)
 			c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
-			ctx := testAuthorActivityContext(context.Background())
-			rec := lifecycleTestPersistedAgent(t)
 			if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
 				t.Fatal(err)
 			}
-			beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+			beginCoordinatorRun(t, c, managedExecutionTestContextForCapturedSource(t, ctx), AgentRunModeStandard)
 			_, token, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 			if err != nil {
 				t.Fatal(err)
@@ -608,14 +606,12 @@ func TestPanicRetirementReturnsBeforeOwnLoopFinalizer(t *testing.T) {
 func TestTerminalPanicRejectsMissingAndPredecessorAuthority(t *testing.T) {
 	for _, origin := range []string{"missing", "replaced"} {
 		t.Run(origin, func(t *testing.T) {
-			probe := newLifecyclePersistenceProbe()
+			ctx, rec, probe := newLifecycleCacheFixture(t)
 			c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
-			rec := lifecycleTestPersistedAgent(t)
-			ctx := testAuthorActivityContext(context.Background())
 			if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
 				t.Fatal(err)
 			}
-			beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+			beginCoordinatorRun(t, c, managedExecutionTestContextForCapturedSource(t, ctx), AgentRunModeStandard)
 			_, token, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 			if err != nil {
 				t.Fatal(err)
@@ -658,14 +654,12 @@ func TestTerminalPanicRejectsMissingAndPredecessorAuthority(t *testing.T) {
 }
 
 func TestTerminalPanicPersistenceFailureRetainsRetirement(t *testing.T) {
-	probe := newLifecyclePersistenceProbe()
+	ctx, rec, probe := newLifecycleCacheFixture(t)
 	c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
-	rec := lifecycleTestPersistedAgent(t)
-	ctx := testAuthorActivityContext(context.Background())
 	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
 		t.Fatal(err)
 	}
-	beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+	beginCoordinatorRun(t, c, managedExecutionTestContextForCapturedSource(t, ctx), AgentRunModeStandard)
 	_, token, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatal(err)
@@ -942,14 +936,12 @@ func TestTerminalReadinessReplacementReleasesDependentCaller(t *testing.T) {
 }
 
 func TestTerminalFlowFencesWholeSetBeforeRetirementJoin(t *testing.T) {
-	probe := newLifecyclePersistenceProbe()
+	ctx, rec, probe := newLifecycleCacheFixture(t)
 	c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
-	ctx := testAuthorActivityContext(context.Background())
-	rec := lifecycleTestPersistedAgent(t)
 	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
 		t.Fatal(err)
 	}
-	beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+	beginCoordinatorRun(t, c, managedExecutionTestContextForCapturedSource(t, ctx), AgentRunModeStandard)
 	_, token, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatal(err)
@@ -977,13 +969,12 @@ func TestTerminalFlowFencesWholeSetBeforeRetirementJoin(t *testing.T) {
 }
 
 func TestTerminalLoopRouteJoinReleasesSourceSetPublication(t *testing.T) {
-	c := newAgentLifecycleCoordinator(newLifecyclePersistenceProbe(), nil, nil, nil)
-	ctx := testAuthorActivityContext(context.Background())
-	rec := lifecycleTestPersistedAgent(t)
+	ctx, rec, probe := newLifecycleCacheFixture(t)
+	c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
 	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
 		t.Fatal(err)
 	}
-	beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+	beginCoordinatorRun(t, c, managedExecutionTestContextForCapturedSource(t, ctx), AgentRunModeStandard)
 	_, token, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatal(err)
@@ -1011,14 +1002,12 @@ func TestTerminalLoopRouteJoinReleasesSourceSetPublication(t *testing.T) {
 }
 
 func TestTerminalRetirementReleasesOperationLockBeforeJoin(t *testing.T) {
-	probe := newLifecyclePersistenceProbe()
+	ctx, rec, probe := newLifecycleCacheFixture(t)
 	c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
-	ctx := testAuthorActivityContext(context.Background())
-	rec := lifecycleTestPersistedAgent(t)
 	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, true); err != nil {
 		t.Fatal(err)
 	}
-	beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+	beginCoordinatorRun(t, c, managedExecutionTestContextForCapturedSource(t, ctx), AgentRunModeStandard)
 	_, token, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatal(err)
@@ -1046,13 +1035,12 @@ func TestTerminalRetirementReleasesOperationLockBeforeJoin(t *testing.T) {
 func TestReplacementRetainsTransitionWithoutFinalizerDependencies(t *testing.T) {
 	for _, terminal := range []bool{false, true} {
 		t.Run(fmt.Sprintf("terminal_%t", terminal), func(t *testing.T) {
-			c := newAgentLifecycleCoordinator(newLifecyclePersistenceProbe(), nil, nil, nil)
-			rec := lifecycleTestPersistedAgent(t)
-			ctx := testAuthorActivityContext(context.Background())
+			ctx, rec, probe := newLifecycleCacheFixture(t)
+			c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
 			if err := c.registerExecution(ctx, rec, true, &reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
 				t.Fatal(err)
 			}
-			beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+			beginCoordinatorRun(t, c, managedExecutionTestContextForCapturedSource(t, ctx), AgentRunModeStandard)
 			oldCtx, old, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 			if err != nil {
 				t.Fatal(err)
