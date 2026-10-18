@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -55,6 +56,12 @@ func newLifecycleCacheFixtureForSource(t *testing.T, source semanticview.Source)
 }
 
 func TestManagerFixtureRowOwnerSelectionIsExplicit(t *testing.T) {
+	t.Run("native_panic_candidate_requires_selected_admission", func(t *testing.T) {
+		record := TerminalPanicFixture(t)
+		if !reflect.DeepEqual(record.Topology, runtimeagenttopology.Admission{}) || record.ProcessBinding != (ProcessExecutionBinding{}) || record.LifecycleGeneration != 0 || record.LifecycleEpoch != 0 || record.LifecyclePhase != "" {
+			t.Fatalf("native panic candidate already carries execution authority: %+v", record)
+		}
+	})
 	unit := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{})
 	model, ok := unit.lifecycle.persistence().(*ephemeralLifecyclePersistenceProbe)
 	if !ok || unit.lifecycle.stateReader != model || unit.lifecycle.outcomeReader != model {

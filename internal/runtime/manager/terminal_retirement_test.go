@@ -609,7 +609,8 @@ func TestTerminalLoopSettlementRejectsForeignRetirementMember(t *testing.T) {
 }
 
 func TestPanicRetirementReturnsBeforeOwnLoopFinalizer(t *testing.T) {
-	ProveTerminalPanicFinalization(t, newLifecyclePersistenceProbe(), nil, lifecycleTestPersistedAgent(t), true)
+	ctx, record, probe := newLifecycleCacheFixture(t)
+	ProveTerminalPanicFinalization(t, ctx, probe, nil, record, true)
 }
 
 func TestTerminalPanicRejectsMissingAndPredecessorAuthority(t *testing.T) {
@@ -705,14 +706,13 @@ func TerminalPanicFixtureContext() context.Context {
 	return testAuthorActivityContext(context.Background())
 }
 
-func ProveTerminalPanicFinalization(t *testing.T, persistence AgentLifecyclePersistence, reader AgentLifecycleStateReader, rec PersistedAgent, persist bool) {
+func ProveTerminalPanicFinalization(t *testing.T, ctx context.Context, persistence AgentLifecyclePersistence, reader AgentLifecycleStateReader, rec PersistedAgent, persist bool) {
 	t.Helper()
 	c := newAgentLifecycleCoordinator(persistence, nil, reader, nil)
-	ctx := testAuthorActivityContext(context.Background())
 	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, persist); err != nil {
 		t.Fatal(err)
 	}
-	beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+	beginCoordinatorRun(t, c, managedExecutionTestContextForCapturedSource(t, ctx), AgentRunModeStandard)
 	_, token, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatal(err)
@@ -748,14 +748,13 @@ func ProveTerminalPanicFinalization(t *testing.T, persistence AgentLifecyclePers
 	}
 }
 
-func ProveTerminalPanicMutationFailure(t *testing.T, persistence AgentLifecyclePersistence, reader AgentLifecycleStateReader, rec PersistedAgent, failure string, finalizerFails bool) {
+func ProveTerminalPanicMutationFailure(t *testing.T, ctx context.Context, persistence AgentLifecyclePersistence, reader AgentLifecycleStateReader, rec PersistedAgent, failure string, finalizerFails bool) {
 	t.Helper()
 	c := newAgentLifecycleCoordinator(persistence, nil, reader, nil)
-	ctx := testAuthorActivityContext(context.Background())
 	if err := registerCoordinatorLifecycleCell(t, c, ctx, rec, false); err != nil {
 		t.Fatal(err)
 	}
-	beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+	beginCoordinatorRun(t, c, managedExecutionTestContextForCapturedSource(t, ctx), AgentRunModeStandard)
 	_, token, done, err := replaceCoordinatorLoop(c, ctx, rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
 	if err != nil {
 		t.Fatal(err)

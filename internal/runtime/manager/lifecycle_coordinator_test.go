@@ -1363,6 +1363,7 @@ func TestLifecycleCoordinatorStartupAbortCompletesIssuedTransitions(t *testing.T
 	}
 }
 
+// Native candidates carry metadata; their selected store supplies execution admission.
 func lifecycleTestPersistedAgent(t testing.TB) PersistedAgent {
 	t.Helper()
 	return PersistedAgent{
@@ -1370,6 +1371,6 @@ func lifecycleTestPersistedAgent(t testing.TB) PersistedAgent {
 			ExecutionMode: "live", ID: "agent-lifecycle-test", Role: "worker", Type: "sonnet", Model: "regular", FlowID: "global",
 			Identity: runtimeagentidentitytest.RootRuntime(t, "agent-lifecycle-test", "lifecycle-test"),
 		}),
-		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(), Topology: managerTestTopologyAdmission(t),
+		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
 	}
 }
