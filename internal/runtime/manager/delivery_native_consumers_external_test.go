@@ -60,7 +60,7 @@ func TestShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeShutdown_DrainsInFlightWorkBeforeCancellingLoopContext(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -70,7 +70,7 @@ func TestShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeShutdownWithOptions_TimesOutAfterConfiguredGraceAndCancelsLoopContext(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -80,7 +80,7 @@ func TestShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeShutdown_DoesNotStartQueuedWorkAfterDrainBegins(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -90,7 +90,7 @@ func TestShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t *testing
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeShutdown_DoesNotAllowRunToReplaceActiveRunContextDuringDrain(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
