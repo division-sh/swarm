@@ -37,6 +37,8 @@ import (
 // The final native-runtime fixture sweep appends 21 original-context/grant
 // continuations, retaining the complete 83-receipt predecessor prefix.
 // #2730/6248981600 appends the catalog's same-process pre-seed setup only.
+// #2738/6251218086 appends four exact selected-preparation setup endpoints,
+// preserving the complete 108-receipt prefix and all prior hostile controls.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
@@ -52,6 +54,10 @@ type fixtureSetupSuccessor2617 struct {
 func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) {
 	switch row.Family + "/" + row.File + "/" + row.Function {
 	case "native-catalog-preconstruction/internal/runtime/cataloge2e/runtime_harness_test.go/newRuntimeHarnessWithTerminalProvider",
+		"native-run-setup-family144/internal/runtime/runforkexecution/activity_fork_execution_test.go/seedSource",
+		"native-run-setup-family144/internal/runtime/runforkexecution/execution_test.go/buildSelectedForkProofContainer",
+		"native-run-setup-family144/internal/runtime/runforkexecution/execution_test.go/seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource",
+		"native-run-setup-family144/internal/runtime/runforkexecution/execution_test.go/seedSelectedExecutionStateOnlySourceRun",
 		"native-run-setup-family144/internal/runtime/runforkexecution/constructed_agent_input_execution_test.go/proveSelectedConstructedAgentInput",
 		"native-run-setup-family144/internal/runtime/runforkexecution/execution_test.go/TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation",
 		"native-run-setup-family144/internal/runtime/runforkexecution/execution_test.go/TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority",
@@ -124,14 +130,14 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "f04e8836e1d93e697e60b75018cf88a6de2ee023d97bf611e216f72a0502ea19" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "94590602f5f3dfeb2f8527c875aa2d22bed2d8ef18922a4f9fb961fe6d451bb5" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 108 {
+	if len(pins) != 112 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -196,6 +202,10 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			name = nativePipelineRecipeReplacementName(t, row)
 		}
 		if row.Function != "newRuntimeHarnessWithTerminalProvider" &&
+			row.Function != "seedSource" &&
+			row.Function != "buildSelectedForkProofContainer" &&
+			row.Function != "seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource" &&
+			row.Function != "seedSelectedExecutionStateOnlySourceRun" &&
 			row.Function != "proveSelectedConstructedAgentInput" &&
 			row.Function != "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation" &&
 			row.Function != "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority" &&
@@ -310,13 +320,13 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			}
 		})
 	}
-	if matched != 70 {
-		t.Fatalf("fixture comparator endpoints=%d, want70", matched)
+	if matched != 74 {
+		t.Fatalf("fixture comparator endpoints=%d, want74", matched)
 	}
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "f04e8836e1d93e697e60b75018cf88a6de2ee023d97bf611e216f72a0502ea19" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "94590602f5f3dfeb2f8527c875aa2d22bed2d8ef18922a4f9fb961fe6d451bb5" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -327,7 +337,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 108 {
+	if len(pins) != 112 {
 		t.Fatal("fixture successor row count changed")
 	}
 	prefix, err := json.Marshal(pins[:39])
@@ -357,6 +367,10 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	prefix, err = json.Marshal(pins[:106])
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "1d35c91dd5a592a1fce5e60c7dea95d8b4069cfdaa9076915ccafaa9765edb90" {
 		t.Fatal("selected setup changed the immutable 106-receipt predecessor")
+	}
+	prefix, err = json.Marshal(pins[:108])
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "e82e362492418195e0461f3422e6e4e59d5b089f41eccc26de84f888d1d3a85f" {
+		t.Fatal("selected preparation changed the immutable 108-receipt predecessor")
 	}
 	for index, pin := range pins {
 		t.Run(pin.Original.Function, func(t *testing.T) {

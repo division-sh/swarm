@@ -72,6 +72,7 @@ type SelectedContractForkLocalRuntimeContainer struct {
 }
 
 type selectedContractForkLocalRuntimeContainer struct {
+	preparation       runfork.SelectedForkPreparationBinding
 	proof             SelectedContractForkLocalRuntimeContainer
 	req               publishSelectedContractForkEventsRequest
 	ports             *selectedContractExecutionPorts
@@ -227,7 +228,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	proof.ContainerPlanFingerprint = issued.ContainerPlanFingerprint
 	proof.ActorCensusFingerprint = issued.ActorCensusFingerprint
 	proof.EffectiveConfigFingerprint = issued.EffectiveConfigFingerprint
-	container := selectedContractForkLocalRuntimeContainer{proof: proof, req: req, ports: ports, diagnostics: &selectedForkCommitDiagnostics{}}
+	container := selectedContractForkLocalRuntimeContainer{preparation: preparation, proof: proof, req: req, ports: ports, diagnostics: &selectedForkCommitDiagnostics{}}
 	if err != nil {
 		return container, err
 	}
@@ -305,7 +306,13 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			return nil, err
 		}
 	}
-	sourceEvents, err := c.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, req.SourceRunID, req.ForkRunID, req.SourceEvents, req.OriginalLoopCarriage)
+	process := req.Prepared.processOwner
+	var sourceEvents []runfork.RunForkSelectedContractSourceEvent
+	sourceOperation, err := startupownership.PreparedForkSourceEventsOperation(ctx, process, c.ports.replay, c.preparation, c.authority, req.SourceEvents, req.OriginalLoopCarriage, &sourceEvents)
+	if err != nil {
+		return nil, err
+	}
+	err = process.RunPreparedOperation(ctx, sourceOperation)
 	if err != nil {
 		sourceRunID, forkRunID, committed, ok := isolatedSelectedForkSourceEventsCommit(err)
 		if !ok {
@@ -345,7 +352,11 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		return nil, fmt.Errorf("create selected-contract delivery authority: %w", err)
 	}
 	if req.Prepared.recoveryFromExecutionID != "" {
-		if err := c.ports.fork.ReconcileSelectedSuccessorDeliveryAuthority(ctx, req.Prepared.recoveryFromExecutionID, deliveryAuthority); err != nil {
+		operation, err := startupownership.PreparedForkDeliveryReconcileOperation(ctx, process, c.ports.fork, c.preparation, c.authority, req.Prepared.recoveryFromExecutionID, deliveryAuthority)
+		if err != nil {
+			return nil, err
+		}
+		if err := process.RunPreparedOperation(ctx, operation); err != nil {
 			return nil, fmt.Errorf("reconcile selected successor deliveries: %w", err)
 		}
 	}
@@ -421,7 +432,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			case <-heartbeatLease.Context().Done():
 				return
 			case <-ticker.C:
-				if err := c.ports.runtimeExecution.HeartbeatRunForkSelectedContractRuntimeExecution(context.WithoutCancel(heartbeatLease.Context()), c.authority, 2*time.Minute); err != nil {
+				if err := c.settle(context.WithoutCancel(heartbeatLease.Context()), startupownership.PreparedForkHeartbeat, nil, 2*time.Minute); err != nil {
 					heartbeatErr <- err
 					cancelRuntime()
 					return
@@ -796,11 +807,24 @@ func projectSelectedContractSourceEvents(
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Quiesce(ctx context.Context) error {
-	return c.ports.runtimeExecution.QuiesceRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority)
+	return c.settle(context.WithoutCancel(ctx), startupownership.PreparedForkQuiesce, nil, 0)
+}
+
+func (c selectedContractForkLocalRuntimeContainer) activate(ctx context.Context, request runfork.RunForkSelectedContractExecutionActivateRequest) (result runfork.RunForkActivation, err error) {
+	if c.req.Prepared == nil || c.req.Prepared.processOwner == nil {
+		return result, errors.New("selected activation requires its retained preparation process")
+	}
+	process := c.req.Prepared.processOwner
+	operation, err := startupownership.PreparedForkActivateOperation(ctx, process, c.ports.fork, c.preparation, c.authority, request, &result)
+	if err != nil {
+		return result, err
+	}
+	err = process.RunPreparedOperation(ctx, operation)
+	return result, err
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Close(ctx context.Context) error {
-	return c.ports.runtimeExecution.CloseRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority.ID)
+	return c.settle(context.WithoutCancel(ctx), startupownership.PreparedForkClose, nil, 0)
 }
 
 func (c selectedContractForkLocalRuntimeContainer) Fail(ctx context.Context, cause error) error {
@@ -815,10 +839,22 @@ func (c selectedContractForkLocalRuntimeContainer) Fail(ctx context.Context, cau
 	if err != nil {
 		return err
 	}
-	if err := c.ports.runtimeExecution.FailRunForkSelectedContractRuntimeExecution(context.WithoutCancel(ctx), c.authority, raw); err != nil {
+	if err := c.settle(context.WithoutCancel(ctx), startupownership.PreparedForkFail, raw, 0); err != nil {
 		return err
 	}
 	return c.Close(ctx)
+}
+
+func (c selectedContractForkLocalRuntimeContainer) settle(ctx context.Context, kind startupownership.PreparedForkSettlementKind, failure json.RawMessage, lease time.Duration) error {
+	if c.req.Prepared == nil || c.req.Prepared.processOwner == nil {
+		return errors.New("selected settlement requires its retained preparation process")
+	}
+	process := c.req.Prepared.processOwner
+	operation, err := startupownership.PreparedForkSettlementOperation(ctx, process, c.ports.runtimeExecution, c.preparation, c.authority, kind, failure, lease)
+	if err != nil {
+		return err
+	}
+	return process.RunPreparedOperation(ctx, operation)
 }
 
 type selectedContractRuntimeContainerLoggerHook struct {

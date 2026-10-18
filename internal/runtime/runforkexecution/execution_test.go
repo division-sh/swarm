@@ -2844,9 +2844,9 @@ func (selectedForkStartupVisibleSurfaceProbe) ProbeStartupVisibleToolSurface(ctx
 	return response, runtimellm.ValidateCLIProviderCapabilitySurface(observed, response)
 }
 
-func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.DB) selectedContractForkLocalRuntimeContainer {
+func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, selected *store.PostgresStore, process runtimestartupownership.ProcessCapability) selectedContractForkLocalRuntimeContainer {
 	t.Helper()
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	db := storetest.Database(selected)
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -2901,9 +2901,9 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 		EffectiveSourceIdentity: testEffectiveSourceIdentity(testEphemeralSourceArtifactFact(runForkTestBundleHash)),
 	}
 	agents := selectedContractAgentRuntimePlan{Declarations: declarations, Options: SelectedContractAgentRuntimeOptions{
-		ExecutionPosture: executionposture.Live, ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected),
+		ExecutionPosture: executionposture.Live, ProcessCapability: process,
 	}}
-	owner := selectedContractExecutionOwnerForTest(t, selected)
+	owner := selectedContractExecutionOwnerWithProcessForTest(t, selected, process)
 	plan, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkEventID})
 	if err != nil {
 		t.Fatal(err)
@@ -2935,7 +2935,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	if bindErr != nil {
 		t.Fatal(bindErr)
 	}
-	container := buildSelectedForkProofContainer(t, ctx, db)
+	container := buildSelectedForkProofContainer(t, ctx, selected, process)
 	proof := container.Proof()
 	var requests atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -3674,7 +3674,7 @@ func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntimeGateway: %v", err)
 	}
@@ -3729,7 +3729,7 @@ func TestStartSelectedContractAgentRuntimeGatewayDoesNotConsumeAmbientToken(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1789,7 +1789,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 					AgentID: agent.ID(), Failure: &failure.Failure,
 				})
 			}
-			_ = am.projectLifecycleDiagnostics(context.Background())
+			_ = am.projectLifecycleDiagnostics(context.WithoutCancel(parent))
 			if settleErr := workLease.Done(); settleErr != nil {
 				diaglog.ProcessLog(diaglog.LevelError, "agent-manager", "agent execution loop work settlement failed",
 					"agent_id", agent.ID(),

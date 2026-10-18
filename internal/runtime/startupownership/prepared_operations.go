@@ -2,14 +2,19 @@ package startupownership
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
 
 var ErrProcessNotCurrent = errors.New("prepared store operation requires current native process authority")
@@ -26,6 +31,11 @@ const (
 	PreparedForkRecover
 	PreparedForkStop
 	PreparedManagedCapabilitySurface
+	PreparedForkSourceEvents
+	PreparedForkSettlement
+	PreparedForkConstructionFailure
+	PreparedForkDeliveryReconcile
+	PreparedForkActivate
 )
 
 // PreparedProcessOperation is a closed synchronous store command. Only the
@@ -134,7 +144,7 @@ func PreparedManagedCapabilitySurfaceOperation(ctx context.Context, process Proc
 	op.run = func(owned context.Context) error {
 		// RunPreparedOperation has proved this process under opMu. Check the
 		// caller's retained original before its derived process context is used.
-		if err := p.requirePreparedSurfaceOriginal(ctx); err != nil {
+		if err := p.requirePreparedOriginal(ctx); err != nil {
 			return err
 		}
 		return store.SaveManagedCapabilitySurface(owned, surface)
@@ -142,7 +152,7 @@ func PreparedManagedCapabilitySurfaceOperation(ctx context.Context, process Proc
 	return op, nil
 }
 
-func (p *processCapability) requirePreparedSurfaceOriginal(ctx context.Context) error {
+func (p *processCapability) requirePreparedOriginal(ctx context.Context) error {
 	var grant *generationGrant
 	var version uint64
 	switch original := ctx.Value(mutationAuthorityContextKey{}).(type) {
@@ -182,6 +192,180 @@ func (p *processCapability) requirePreparedSurfaceOriginal(ctx context.Context) 
 		return errors.New("prepared surface has stale original custody")
 	}
 	return grant.requireExecutionAuthorityLocked(ctx, evidence)
+}
+
+func preparedSelectedForkOperation(ctx context.Context, process ProcessCapability, target any, binding runfork.SelectedForkPreparationBinding) (PreparedProcessOperation, *processCapability, error) {
+	p, ok := process.(*processCapability)
+	if ctx == nil || !ok || p == nil || target == nil {
+		return PreparedProcessOperation{}, nil, ErrProcessNotCurrent
+	}
+	if err := binding.Validate(); err != nil {
+		return PreparedProcessOperation{}, nil, err
+	}
+	op := preparedForkOperation(0, target, binding.SelectedForkPreparation)
+	return op, p, nil
+}
+
+func validatePreparedSelectedExecution(binding runfork.SelectedForkPreparationBinding, authority effects.Authority) error {
+	if !authority.Valid() || authority.Kind != effects.AuthoritySelectedContractFork ||
+		authority.ID != authority.SelectedFork.ExecutionID || authority.SelectedFork.ForkRunID != binding.ForkRunID {
+		return errors.New("prepared operation requires its exact selected execution")
+	}
+	return nil
+}
+
+func PreparedForkSourceEventsOperation(ctx context.Context, process ProcessCapability, store interface {
+	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error)
+}, binding runfork.SelectedForkPreparationBinding, authority effects.Authority, eventIDs []string, carriage semanticview.OriginalLoopCarriage, result *[]runfork.RunForkSelectedContractSourceEvent) (PreparedProcessOperation, error) {
+	op, p, err := preparedSelectedForkOperation(ctx, process, store, binding)
+	if err != nil {
+		return PreparedProcessOperation{}, err
+	}
+	if err := validatePreparedSelectedExecution(binding, authority); err != nil {
+		return PreparedProcessOperation{}, err
+	}
+	if result == nil {
+		return PreparedProcessOperation{}, errors.New("prepared source events require their result")
+	}
+	ids := slices.Clone(eventIDs)
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		parsed, err := uuid.Parse(id)
+		if err != nil || parsed == uuid.Nil || parsed.String() != id || seen[id] {
+			return PreparedProcessOperation{}, errors.New("prepared source event membership is not exact")
+		}
+		seen[id] = true
+	}
+	op.kind = PreparedForkSourceEvents
+	op.run = func(owned context.Context) error {
+		if err := p.requirePreparedOriginal(ctx); err != nil {
+			return err
+		}
+		var err error
+		*result, err = store.LoadRunForkSelectedContractSourceEvents(owned, binding.SourceRunID, binding.ForkRunID, ids, carriage)
+		return err
+	}
+	return op, nil
+}
+
+type PreparedForkSettlementKind uint8
+
+const (
+	PreparedForkHeartbeat PreparedForkSettlementKind = iota + 1
+	PreparedForkQuiesce
+	PreparedForkFail
+	PreparedForkClose
+)
+
+func PreparedForkSettlementOperation(ctx context.Context, process ProcessCapability, store interface {
+	HeartbeatRunForkSelectedContractRuntimeExecution(context.Context, effects.Authority, time.Duration) error
+	QuiesceRunForkSelectedContractRuntimeExecution(context.Context, effects.Authority) error
+	FailRunForkSelectedContractRuntimeExecution(context.Context, effects.Authority, json.RawMessage) error
+	CloseRunForkSelectedContractRuntimeExecution(context.Context, string) error
+}, binding runfork.SelectedForkPreparationBinding, authority effects.Authority, kind PreparedForkSettlementKind, failure json.RawMessage, lease time.Duration) (PreparedProcessOperation, error) {
+	op, p, err := preparedSelectedForkOperation(ctx, process, store, binding)
+	if err != nil {
+		return PreparedProcessOperation{}, err
+	}
+	if err := validatePreparedSelectedExecution(binding, authority); err != nil {
+		return PreparedProcessOperation{}, err
+	}
+	if kind < PreparedForkHeartbeat || kind > PreparedForkClose {
+		return PreparedProcessOperation{}, errors.New("prepared selected settlement kind is invalid")
+	}
+	failure = slices.Clone(failure)
+	op.kind = PreparedForkSettlement
+	op.run = func(owned context.Context) error {
+		if err := p.requirePreparedOriginal(ctx); err != nil {
+			return err
+		}
+		switch kind {
+		case PreparedForkHeartbeat:
+			return store.HeartbeatRunForkSelectedContractRuntimeExecution(owned, authority, lease)
+		case PreparedForkQuiesce:
+			return store.QuiesceRunForkSelectedContractRuntimeExecution(owned, authority)
+		case PreparedForkFail:
+			return store.FailRunForkSelectedContractRuntimeExecution(owned, authority, failure)
+		default:
+			return store.CloseRunForkSelectedContractRuntimeExecution(owned, authority.ID)
+		}
+	}
+	return op, nil
+}
+
+func PreparedForkConstructionFailureOperation(ctx context.Context, process ProcessCapability, store interface {
+	FailMaterializedSelectedContractExecutionFork(context.Context, string, runfork.ForkOperationFailure) error
+	DiscardMaterializedSelectedContractExecutionFork(context.Context, string) error
+}, binding runfork.SelectedForkPreparationBinding, failure runfork.ForkOperationFailure, discard bool) (PreparedProcessOperation, error) {
+	op, p, err := preparedSelectedForkOperation(ctx, process, store, binding)
+	if err != nil {
+		return PreparedProcessOperation{}, err
+	}
+	op.kind = PreparedForkConstructionFailure
+	op.run = func(owned context.Context) error {
+		if err := p.requirePreparedOriginal(ctx); err != nil {
+			return err
+		}
+		if discard {
+			return store.DiscardMaterializedSelectedContractExecutionFork(owned, binding.ForkRunID)
+		}
+		return store.FailMaterializedSelectedContractExecutionFork(owned, binding.ForkRunID, failure)
+	}
+	return op, nil
+}
+
+func PreparedForkDeliveryReconcileOperation(ctx context.Context, process ProcessCapability, store interface {
+	ReconcileSelectedSuccessorDeliveryAuthority(context.Context, string, deliverylifecycle.ExecutionAuthority) error
+}, binding runfork.SelectedForkPreparationBinding, authority effects.Authority, predecessor string, successor deliverylifecycle.ExecutionAuthority) (PreparedProcessOperation, error) {
+	op, p, err := preparedSelectedForkOperation(ctx, process, store, binding)
+	if err != nil {
+		return PreparedProcessOperation{}, err
+	}
+	if err := validatePreparedSelectedExecution(binding, authority); err != nil {
+		return PreparedProcessOperation{}, err
+	}
+	if err := successor.Validate(); err != nil {
+		return PreparedProcessOperation{}, err
+	}
+	if successor.Kind() != deliverylifecycle.ExecutionAuthoritySelectedContractFork || successor.ExecutionID() != authority.ID ||
+		successor.ForkRunID() != binding.ForkRunID || successor.Generation() != authority.SelectedFork.Generation ||
+		successor.SourceArtifact().BundleHash() != binding.Coordinates.BundleHash || predecessor == "" || predecessor == authority.ID {
+		return PreparedProcessOperation{}, errors.New("prepared delivery reconciliation differs from its selected successor")
+	}
+	op.kind = PreparedForkDeliveryReconcile
+	op.run = func(owned context.Context) error {
+		if err := p.requirePreparedOriginal(ctx); err != nil {
+			return err
+		}
+		return store.ReconcileSelectedSuccessorDeliveryAuthority(owned, predecessor, successor)
+	}
+	return op, nil
+}
+
+func PreparedForkActivateOperation(ctx context.Context, process ProcessCapability, store interface {
+	ActivateRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)
+}, binding runfork.SelectedForkPreparationBinding, authority effects.Authority, request runfork.RunForkSelectedContractExecutionActivateRequest, result *runfork.RunForkActivation) (PreparedProcessOperation, error) {
+	op, p, err := preparedSelectedForkOperation(ctx, process, store, binding)
+	if err != nil {
+		return PreparedProcessOperation{}, err
+	}
+	if err := validatePreparedSelectedExecution(binding, authority); err != nil {
+		return PreparedProcessOperation{}, err
+	}
+	if result == nil || request.ForkRunID != binding.ForkRunID {
+		return PreparedProcessOperation{}, errors.New("prepared activation requires its exact child and result")
+	}
+	request.AllowedSourceEventIDs = slices.Clone(request.AllowedSourceEventIDs)
+	op.kind = PreparedForkActivate
+	op.run = func(owned context.Context) error {
+		if err := p.requirePreparedOriginal(ctx); err != nil {
+			return err
+		}
+		var err error
+		*result, err = store.ActivateRunForkForSelectedContractExecution(owned, request)
+		return err
+	}
+	return op, nil
 }
 
 type PreparedEffectStore interface {
