@@ -33,7 +33,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -889,23 +891,26 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					storedResultEventID, resultEventType, resultPayload, failure, completedAt = nil, nil, nil, nil, nil
 				}
 				if tc.status != "missing" {
-					if _, err := db.ExecContext(ctx, `
-				INSERT INTO activity_attempts (
-					request_event_id, run_id, execution_mode, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
-					activity_id, tool, attempt, status, success_event, failure_event,
-					result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
-					started_at, completed_at, updated_at
-				) VALUES (
-							$1, $2, 'live', $3, $4, $5, $6, $7,
-							$8, $9, 1, $10, $11, $12,
-							$13, $14, $15, $16, 'input-hash', $17, '', $18, $19, $18
-				)
-					`, continuation.RequestEventID, sourceRunID, continuation.SourceEventID, continuation.EntityID, continuation.FlowInstance,
-						continuation.NodeID, continuation.HandlerEventKey, continuation.ActivityID, continuation.Tool, tc.status,
-						continuation.SuccessEvent, continuation.FailureEvent, storedResultEventID, resultEventType,
-						resultPayload, failure, forkTestJSON(t, continuation.Generation), startedAt, completedAt); err != nil {
-						t.Fatal(err)
+					record := runtimepipeline.ActivityAttemptRecord{
+						RequestEventID: continuation.RequestEventID, RunID: sourceRunID, ExecutionMode: executionmode.Live,
+						SourceEventID: continuation.SourceEventID, EntityID: continuation.EntityID, FlowInstance: continuation.FlowInstance,
+						NodeID: continuation.NodeID, HandlerEventKey: continuation.HandlerEventKey, ActivityID: continuation.ActivityID,
+						Tool: continuation.Tool, Attempt: 1, Status: tc.status, SuccessEvent: continuation.SuccessEvent,
+						FailureEvent: continuation.FailureEvent, InputHash: "input-hash", Generation: continuation.Generation,
 					}
+					if tc.status != "started" {
+						record.ResultEventID = storedResultEventID.(string)
+						record.ResultEventType = resultEventType.(string)
+						if err := json.Unmarshal([]byte(resultPayload.(string)), &record.ResultPayload); err != nil {
+							t.Fatal(err)
+						}
+						if failure != nil {
+							if err := json.Unmarshal([]byte(failure.(string)), &record.Failure); err != nil {
+								t.Fatal(err)
+							}
+						}
+					}
+					seedApprovedActivityRecordedEvidence(t, ctx, fixture, backend.name == "postgres", record, startedAt, completedAt)
 				}
 
 				requestPayload := map[string]any{
@@ -1110,6 +1115,38 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				}
 			})
 		}
+	}
+}
+
+// The native journal owns the coupled live-parent write. Only the recorded
+// clock representation is substituted, as in the timestamp reuse controls.
+func seedApprovedActivityRecordedEvidence(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, postgres bool, record runtimepipeline.ActivityAttemptRecord, startedAt string, completedAt any) {
+	t.Helper()
+	err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
+		dialect := activityjournal.DialectSQLite
+		active := func(ctx context.Context, runID string) error { return runstate.RequireSQLiteActiveTx(ctx, tx, runID) }
+		if postgres {
+			dialect = activityjournal.DialectPostgres
+			active = func(ctx context.Context, runID string) error { return runstate.RequirePostgresActiveTx(ctx, tx, runID) }
+		}
+		story := &activityStorySpy{}
+		if _, inserted, err := activityjournal.Start(ctx, tx, dialect, active, story, record); err != nil {
+			return err
+		} else if !inserted {
+			return fmt.Errorf("approved recorded activity already exists")
+		}
+		if record.Status != runtimepipeline.ActivityAttemptStatusStarted {
+			if _, committed, err := activityjournal.Complete(ctx, tx, dialect, active, story, record); err != nil {
+				return err
+			} else if !committed {
+				return fmt.Errorf("approved recorded activity did not settle")
+			}
+		}
+		_, err := tx.ExecContext(ctx, `UPDATE activity_attempts SET started_at=$1,completed_at=$2,updated_at=$1 WHERE request_event_id=$3`, startedAt, completedAt, record.RequestEventID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
