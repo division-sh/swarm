@@ -3810,15 +3810,20 @@ func (b *readinessRecoveryTestBus) Store() runtimebus.EventStore { return b.stor
 func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) {
 	runID := uuid.NewString()
 	path := "review/inst-1"
-	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
+	bundle := testFlowBundle(t, "")
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundleHash := fact.BundleHash()
 	instances := &flowActivationTestInstanceStore{
 		readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{
 			flowActivationReadinessKey(runID, path): {
 				InstancePath:    path,
-				OwningRunSource: authorActivityTestSourceArtifactFact,
+				OwningRunSource: fact,
 				RunStatus:       "running", InstanceStatus: "active",
 				Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
-					RunID: runID, BundleHash: bundleHash, WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
+					RunID: runID, BundleHash: bundleHash, WorkflowVersion: bundle.WorkflowVersion(), ExecutionMode: executionmode.Live,
 					Identity: runtimeflowidentity.Instance{
 						TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
 						InstancePath: path, EntityID: uuid.NewString(), HasStoredPath: true,
@@ -3827,10 +3832,9 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 			},
 		},
 	}
-	am := newFlowActivationManager(t, &readinessRecoveryTestBus{flowActivationTestBus: &flowActivationTestBus{}, store: &recoveryTestBus{}}, instances)
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(testFlowBundle(t, "")))
+	am, ctx := newFlowActivationManagerForSource(t, &readinessRecoveryTestBus{flowActivationTestBus: &flowActivationTestBus{}, store: &recoveryTestBus{}}, instances, semanticview.Wrap(bundle))
 	seedForeignMalformedDynamicFlowRuntimeReadiness(t, instances)
-	snapshot, err := am.RecoverableStateSnapshot(testAuthorActivityContext(context.Background()))
+	snapshot, err := am.RecoverableStateSnapshot(ctx)
 	if err != nil {
 		t.Fatalf("RecoverableStateSnapshot: %v", err)
 	}
@@ -3843,7 +3847,12 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 }
 
 func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing.T) {
-	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
+	bundle := testFlowBundle(t, "")
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundleHash := fact.BundleHash()
 	runKinds := flowActivationStandingRestarts{
 		uuid.NewString(): runtimestanding.StandingRestartOrdinary,
 		uuid.NewString(): runtimestanding.StandingRestartActiveIntrinsic,
@@ -3858,11 +3867,11 @@ func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing
 		index++
 		path := fmt.Sprintf("review/standing-%d", index)
 		instances.readiness[flowActivationReadinessKey(runID, path)] = runtimepipeline.DynamicFlowRuntimeReadiness{
-			InstancePath: path, OwningRunSource: authorActivityTestSourceArtifactFact,
+			InstancePath: path, OwningRunSource: fact,
 			RunStatus: "running", InstanceStatus: "active",
 			Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 				RunID: runID, BundleHash: bundleHash,
-				WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
+				WorkflowVersion: bundle.WorkflowVersion(), ExecutionMode: executionmode.Live,
 				Identity: runtimeflowidentity.Instance{
 					TemplateID: "review", ScopeKey: "review", InstanceID: fmt.Sprintf("standing-%d", index),
 					InstancePath: path, EntityID: uuid.NewString(), HasStoredPath: true,
@@ -3870,9 +3879,9 @@ func TestDynamicFlowRuntimeReadinessExcludesNonExecutableStandingRuns(t *testing
 			},
 		}
 	}
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
+	am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle))
 	am.roles.StandingRestarts = runKinds
-	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(context.Background(), authorActivityTestSourceArtifactFact)
+	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, fact)
 	if err != nil {
 		t.Fatalf("inspect standing readiness: %v", err)
 	}
