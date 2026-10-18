@@ -19,63 +19,8 @@ func authorizeProviderResumeTx(ctx context.Context, tx *sql.Tx, postgres bool, d
 		existing.operationState != string(runtimeeffects.StateOutcomeUncertain) || existing.attemptState != string(runtimeeffects.StateOutcomeUncertain) {
 		return runtimeeffects.Attempt{}, false, nil
 	}
-	refuse := func(reason string) (runtimeeffects.Attempt, bool, error) {
-		return runtimeeffects.Attempt{}, true, runtimefailures.New(runtimefailures.ClassLifecycleConflict,
-			"provider_resume_evidence_refused", "external-effects", "resume_provider_attempt", map[string]any{
-				"operation_id": req.OperationID, "attempt_id": existing.attemptID, "reason": reason,
-			})
-	}
-	if !existing.matchesAuthorityIdentity(authority) || !existing.matchesOperationRequest(req) ||
-		req.CapabilitySurface == nil || req.CapabilitySurface.ID != existing.capabilitySurfaceID || delivery == nil {
-		return refuse("original operation identity or request differs")
-	}
-	readOnly, err := completionResumeSurfaceAllowsHTTP(req.Adapter, req.CompletionRequest, *req.CapabilitySurface)
-	if err != nil || !readOnly {
-		return refuse("frozen provider surface is not eligible")
-	}
-	var raw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT provider_request_journal FROM runtime_external_effect_attempts WHERE attempt_id=$1 AND operation_id=$2`, existing.attemptID, req.OperationID).Scan(&raw); err != nil {
-		return runtimeeffects.Attempt{}, true, err
-	}
-	journal, err := runtimeeffects.DecodeProviderRequestJournal(raw)
+	retained, previous, err := providerResumeEvidenceTx(ctx, tx, postgres, delivery, authority, req, existing)
 	if err != nil {
-		return refuse("original request journal is unavailable")
-	}
-	retained, err := runtimeeffects.EncodeProviderRequestJournal(journal)
-	if err != nil {
-		return runtimeeffects.Attempt{}, true, err
-	}
-	requested, err := runtimeeffects.EncodeProviderRequestJournal(*req.ProviderRequestJournal)
-	if err != nil || !bytes.Equal(retained, requested) {
-		return refuse("original physical request journal differs")
-	}
-	previous, state, err := loadBusinessTurnFirstAttempt(ctx, tx, postgres, existing.attemptID, req.Now)
-	if err != nil {
-		return runtimeeffects.Attempt{}, true, err
-	}
-	if state != runtimeeffects.StateOutcomeUncertain || previous.OperationID != req.OperationID ||
-		previous.Origin.Kind != runtimeeffects.CompletionOriginDelivery {
-		return refuse("predecessor physical attempt differs")
-	}
-	permit, found, err := loadProviderRecoveryDrain(ctx, tx, previous, postgres, true)
-	if err != nil {
-		return runtimeeffects.Attempt{}, true, err
-	}
-	if !found || permit.Target != runtimeeffects.ProviderDrainTargetRunning {
-		return refuse("predecessor has no settled running takeover drain")
-	}
-	proved, err := storeagent.ReadProviderResumeTakeoverChainTx(ctx, tx, authority.Normal, previous.Authority.Normal,
-		permit.LifecycleOperationID, permit.LifecycleTransitionID, permit.SuccessorEpoch, permit.SuccessorGeneration, !postgres)
-	if err != nil {
-		return runtimeeffects.Attempt{}, true, err
-	}
-	if !proved {
-		return refuse("successor lacks the exact immutable takeover chain")
-	}
-	if err := delivery.ValidateProviderResumeClaimTx(ctx, tx, previous.Origin.Delivery, req.Origin.Delivery); err != nil {
-		return runtimeeffects.Attempt{}, true, err
-	}
-	if err := requireProviderResumeTurnClockTx(ctx, tx, postgres, previous, req.Now); err != nil {
 		return runtimeeffects.Attempt{}, true, err
 	}
 	var attempt runtimeeffects.Attempt
@@ -98,6 +43,69 @@ func authorizeProviderResumeTx(ctx context.Context, tx *sql.Tx, postgres bool, d
 		return runtimeeffects.Attempt{}, true, err
 	}
 	return attempt, true, nil
+}
+
+func providerResumeEvidenceTx(ctx context.Context, tx *sql.Tx, postgres bool, delivery providerDrainDeliveryOwner, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) ([]byte, runtimeeffects.Attempt, error) {
+	refuse := func(reason string) error {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict,
+			"provider_resume_evidence_refused", "external-effects", "resume_provider_attempt", map[string]any{
+				"operation_id": req.OperationID, "attempt_id": existing.attemptID, "reason": reason,
+			})
+	}
+	if !existing.matchesAuthorityIdentity(authority) || !existing.matchesOperationRequest(req) ||
+		req.CapabilitySurface == nil || req.CapabilitySurface.ID != existing.capabilitySurfaceID || delivery == nil {
+		return nil, runtimeeffects.Attempt{}, refuse("original operation identity or request differs")
+	}
+	readOnly, err := completionResumeSurfaceAllowsHTTP(req.Adapter, req.CompletionRequest, *req.CapabilitySurface)
+	if err != nil || !readOnly {
+		return nil, runtimeeffects.Attempt{}, refuse("frozen provider surface is not eligible")
+	}
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, `SELECT provider_request_journal FROM runtime_external_effect_attempts WHERE attempt_id=$1 AND operation_id=$2`, existing.attemptID, req.OperationID).Scan(&raw); err != nil {
+		return nil, runtimeeffects.Attempt{}, err
+	}
+	journal, err := runtimeeffects.DecodeProviderRequestJournal(raw)
+	if err != nil {
+		return nil, runtimeeffects.Attempt{}, refuse("original request journal is unavailable")
+	}
+	retained, err := runtimeeffects.EncodeProviderRequestJournal(journal)
+	if err != nil {
+		return nil, runtimeeffects.Attempt{}, err
+	}
+	requested, err := runtimeeffects.EncodeProviderRequestJournal(*req.ProviderRequestJournal)
+	if err != nil || !bytes.Equal(retained, requested) {
+		return nil, runtimeeffects.Attempt{}, refuse("original physical request journal differs")
+	}
+	previous, state, err := loadBusinessTurnFirstAttempt(ctx, tx, postgres, existing.attemptID, req.Now)
+	if err != nil {
+		return nil, runtimeeffects.Attempt{}, err
+	}
+	if state != runtimeeffects.StateOutcomeUncertain || previous.OperationID != req.OperationID ||
+		previous.Origin.Kind != runtimeeffects.CompletionOriginDelivery {
+		return nil, runtimeeffects.Attempt{}, refuse("predecessor physical attempt differs")
+	}
+	permit, found, err := loadProviderRecoveryDrain(ctx, tx, previous, postgres, true)
+	if err != nil {
+		return nil, runtimeeffects.Attempt{}, err
+	}
+	if !found || permit.Target != runtimeeffects.ProviderDrainTargetRunning {
+		return nil, runtimeeffects.Attempt{}, refuse("predecessor has no settled running takeover drain")
+	}
+	proved, err := storeagent.ReadProviderResumeTakeoverChainTx(ctx, tx, authority.Normal, previous.Authority.Normal,
+		permit.LifecycleOperationID, permit.LifecycleTransitionID, permit.SuccessorEpoch, permit.SuccessorGeneration, !postgres)
+	if err != nil {
+		return nil, runtimeeffects.Attempt{}, err
+	}
+	if !proved {
+		return nil, runtimeeffects.Attempt{}, refuse("successor lacks the exact immutable takeover chain")
+	}
+	if err := delivery.ValidateProviderResumeClaimTx(ctx, tx, previous.Origin.Delivery, req.Origin.Delivery); err != nil {
+		return nil, runtimeeffects.Attempt{}, err
+	}
+	if err := requireProviderResumeTurnClockTx(ctx, tx, postgres, previous, req.Now); err != nil {
+		return nil, runtimeeffects.Attempt{}, err
+	}
+	return retained, previous, nil
 }
 
 func requireProviderResumeTurnClockTx(ctx context.Context, tx *sql.Tx, postgres bool, previous runtimeeffects.Attempt, now time.Time) error {

@@ -413,56 +413,12 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 	if !target.Valid() {
 		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery target for attempt %s is invalid", recovered.AttemptID)
 	}
-	authority := runtimeeffects.Authority{Kind: runtimeeffects.AuthorityKind(recovered.AuthorityKind), ID: recovered.AuthorityID, Target: target, ExecutionMode: mode, CompletionRequest: evidence.ProviderRequest}
-	if authority.Kind == runtimeeffects.AuthorityNormalAgent {
-		if evidence.RuntimeEpoch != recovered.RuntimeEpoch || evidence.Generation != uint64(recovered.Generation) {
-			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery physical authority conflicts for attempt %s", recovered.AttemptID)
-		}
-		runID := strings.TrimSpace(target.RunID)
-		for _, axis := range []struct {
-			name  string
-			value string
-		}{
-			{name: "persisted agent", value: recovered.AgentRunID},
-			{name: "lineage", value: recovered.LineageRunID},
-			{name: "concrete agent", value: target.AgentIdentity.Normalize().RunID},
-		} {
-			if strings.TrimSpace(axis.value) == "" || strings.TrimSpace(axis.value) != runID {
-				return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery %s run identity conflicts for attempt %s", axis.name, recovered.AttemptID)
-			}
-		}
-		identity, err := agentidentity.FromStorageFields(agentidentity.StorageFields{
-			RunID:   target.RunID,
-			AgentID: recovered.AgentID, NameOwner: recovered.AgentNameOwner, NameSource: recovered.AgentNameSource,
-			RoutePresence: recovered.AgentRoutePresence, FlowScopeKey: recovered.FlowScopeKey,
-			FlowInstanceID: recovered.FlowInstanceID, FlowInstancePath: recovered.FlowInstance,
-		})
-		if err != nil {
-			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery normal-agent identity for attempt %s: %w", recovered.AttemptID, err)
-		}
-		if same, err := agentidentity.Equal(identity, target.AgentIdentity); err != nil || !same {
-			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery normal-agent identity conflicts for attempt %s", recovered.AttemptID)
-		}
-		authority.Normal = runtimeeffects.LifecycleToken{
-			RuntimeEpoch: recovered.RuntimeEpoch, Identity: identity, AgentID: recovered.AgentID, Generation: uint64(recovered.Generation),
-		}
-		authority.ExecutionOwner = recovered.ExecutionOwner
-		authority.LeaseExpiresAt = recovered.LeaseExpiresAt.UTC()
-		authority.FenceGeneration = uint64(recovered.FenceGeneration)
-	}
-	if authority.Kind == runtimeeffects.AuthoritySelectedContractFork {
-		authority.SelectedFork = runtimeeffects.SelectedContractForkAuthority{
-			ExecutionID: evidence.ExecutionID, ForkRunID: evidence.ForkRunID, Generation: evidence.Generation,
-			AdmissionFingerprint: evidence.AdmissionFingerprint, ContainerPlanFingerprint: evidence.ContainerPlanFingerprint,
-			ActorCensusFingerprint: evidence.ActorCensusFingerprint, EffectiveConfigFingerprint: evidence.EffectiveConfigFingerprint,
-		}
-		authority.ExecutionOwner, authority.FenceGeneration, authority.LeaseExpiresAt = recovered.ExecutionOwner, uint64(recovered.FenceGeneration), recovered.LeaseExpiresAt.UTC()
-		if !authority.Valid() || authority.ID != evidence.ExecutionID || evidence.ForkRunID != target.RunID || recovered.LineageRunID != target.RunID || recovered.AgentRunID != "" {
-			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery selected authority contradicts its immutable execution for attempt %s", recovered.AttemptID)
-		}
-	}
-	if target.Kind == runtimeeffects.UsageTargetConversationForkCompletion {
-		authority.ForkChat.ForkTurnID = target.ID
+	authority, err := completionRecoveryExecutionAuthority(recovered, evidence, runtimeeffects.Authority{
+		Kind: runtimeeffects.AuthorityKind(recovered.AuthorityKind), ID: recovered.AuthorityID,
+		Target: target, ExecutionMode: mode, CompletionRequest: evidence.ProviderRequest,
+	})
+	if err != nil {
+		return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, err
 	}
 	attempt := runtimeeffects.Attempt{
 		OperationID: recovered.OperationID, AttemptID: recovered.AttemptID, Authority: authority,
@@ -510,34 +466,100 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		Now: now,
 	}
 	if target.Kind == runtimeeffects.UsageTargetAgentTurn {
-		if _, err := uuid.Parse(strings.TrimSpace(target.SessionID)); err != nil || agentID == "" {
-			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery agent-turn identity for attempt %s is incomplete", recovered.AttemptID)
-		}
-		surface, err := storemanagedcapability.Decode([]byte(recovered.CapabilitySurface))
-		if err != nil || surface.ID != recovered.CapabilitySurfaceID ||
-			!runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(target, surface) {
-			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery capability surface for attempt %s is invalid or mismatched: %w", recovered.AttemptID, err)
-		}
-		frame, err := agentframe.DecodeDurable(recovered.AgentFrame)
+		turn, err := completionRecoveryAgentTurn(recovered, authority, target, agentID, failure)
 		if err != nil {
-			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery frame for attempt %s: %w", recovered.AttemptID, err)
+			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, err
 		}
-		if err := runtimeeffects.ValidateManagedAgentFrame(frame, authority, surface); err != nil {
-			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery frame for attempt %s is mismatched: %w", recovered.AttemptID, err)
-		}
-		if recovered.State == string(runtimeeffects.StateAuthorized) {
+		if turn == nil {
 			return attempt, settlement, nil
 		}
-		settlement.AgentTurn = &runtimeeffects.CompletionAgentTurn{
-			TurnID: target.ID, RunID: target.RunID, AgentID: agentID, SessionID: target.SessionID,
-			Identity: target.AgentIdentity,
-			Memory:   target.Memory, FlowInstance: target.FlowInstance, EntityID: target.EntityID,
-			TriggerEventID: frame.Turn.Event.ID, TriggerEventType: frame.Turn.Event.Type,
-			CapabilitySurfaceID: surface.ID, CapabilitySurface: json.RawMessage(recovered.CapabilitySurface), Failure: failure,
-		}
+		settlement.AgentTurn = turn
 		settlement.Spend.AgentIdentity = target.AgentIdentity
 	}
 	return attempt, settlement, nil
+}
+
+func completionRecoveryExecutionAuthority(recovered completionRecoveryAttempt, evidence completionRecoveryAuthorityEvidence, authority runtimeeffects.Authority) (runtimeeffects.Authority, error) {
+	target := authority.Target
+	if authority.Kind == runtimeeffects.AuthorityNormalAgent {
+		if evidence.RuntimeEpoch != recovered.RuntimeEpoch || evidence.Generation != uint64(recovered.Generation) {
+			return runtimeeffects.Authority{}, fmt.Errorf("completion recovery physical authority conflicts for attempt %s", recovered.AttemptID)
+		}
+		runID := strings.TrimSpace(target.RunID)
+		for _, axis := range []struct {
+			name  string
+			value string
+		}{
+			{name: "persisted agent", value: recovered.AgentRunID},
+			{name: "lineage", value: recovered.LineageRunID},
+			{name: "concrete agent", value: target.AgentIdentity.Normalize().RunID},
+		} {
+			if strings.TrimSpace(axis.value) == "" || strings.TrimSpace(axis.value) != runID {
+				return runtimeeffects.Authority{}, fmt.Errorf("completion recovery %s run identity conflicts for attempt %s", axis.name, recovered.AttemptID)
+			}
+		}
+		identity, err := agentidentity.FromStorageFields(agentidentity.StorageFields{
+			RunID:   target.RunID,
+			AgentID: recovered.AgentID, NameOwner: recovered.AgentNameOwner, NameSource: recovered.AgentNameSource,
+			RoutePresence: recovered.AgentRoutePresence, FlowScopeKey: recovered.FlowScopeKey,
+			FlowInstanceID: recovered.FlowInstanceID, FlowInstancePath: recovered.FlowInstance,
+		})
+		if err != nil {
+			return runtimeeffects.Authority{}, fmt.Errorf("completion recovery normal-agent identity for attempt %s: %w", recovered.AttemptID, err)
+		}
+		if same, err := agentidentity.Equal(identity, target.AgentIdentity); err != nil || !same {
+			return runtimeeffects.Authority{}, fmt.Errorf("completion recovery normal-agent identity conflicts for attempt %s", recovered.AttemptID)
+		}
+		authority.Normal = runtimeeffects.LifecycleToken{
+			RuntimeEpoch: recovered.RuntimeEpoch, Identity: identity, AgentID: recovered.AgentID, Generation: uint64(recovered.Generation),
+		}
+		authority.ExecutionOwner = recovered.ExecutionOwner
+		authority.LeaseExpiresAt = recovered.LeaseExpiresAt.UTC()
+		authority.FenceGeneration = uint64(recovered.FenceGeneration)
+	}
+	if authority.Kind == runtimeeffects.AuthoritySelectedContractFork {
+		authority.SelectedFork = runtimeeffects.SelectedContractForkAuthority{
+			ExecutionID: evidence.ExecutionID, ForkRunID: evidence.ForkRunID, Generation: evidence.Generation,
+			AdmissionFingerprint: evidence.AdmissionFingerprint, ContainerPlanFingerprint: evidence.ContainerPlanFingerprint,
+			ActorCensusFingerprint: evidence.ActorCensusFingerprint, EffectiveConfigFingerprint: evidence.EffectiveConfigFingerprint,
+		}
+		authority.ExecutionOwner, authority.FenceGeneration, authority.LeaseExpiresAt = recovered.ExecutionOwner, uint64(recovered.FenceGeneration), recovered.LeaseExpiresAt.UTC()
+		if !authority.Valid() || authority.ID != evidence.ExecutionID || evidence.ForkRunID != target.RunID || recovered.LineageRunID != target.RunID || recovered.AgentRunID != "" {
+			return runtimeeffects.Authority{}, fmt.Errorf("completion recovery selected authority contradicts its immutable execution for attempt %s", recovered.AttemptID)
+		}
+	}
+	if target.Kind == runtimeeffects.UsageTargetConversationForkCompletion {
+		authority.ForkChat.ForkTurnID = target.ID
+	}
+	return authority, nil
+}
+
+func completionRecoveryAgentTurn(recovered completionRecoveryAttempt, authority runtimeeffects.Authority, target runtimeeffects.UsageTarget, agentID string, failure *runtimefailures.Envelope) (*runtimeeffects.CompletionAgentTurn, error) {
+	if _, err := uuid.Parse(strings.TrimSpace(target.SessionID)); err != nil || agentID == "" {
+		return nil, fmt.Errorf("completion recovery agent-turn identity for attempt %s is incomplete", recovered.AttemptID)
+	}
+	surface, err := storemanagedcapability.Decode([]byte(recovered.CapabilitySurface))
+	if err != nil || surface.ID != recovered.CapabilitySurfaceID ||
+		!runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(target, surface) {
+		return nil, fmt.Errorf("completion recovery capability surface for attempt %s is invalid or mismatched: %w", recovered.AttemptID, err)
+	}
+	frame, err := agentframe.DecodeDurable(recovered.AgentFrame)
+	if err != nil {
+		return nil, fmt.Errorf("completion recovery frame for attempt %s: %w", recovered.AttemptID, err)
+	}
+	if err := runtimeeffects.ValidateManagedAgentFrame(frame, authority, surface); err != nil {
+		return nil, fmt.Errorf("completion recovery frame for attempt %s is mismatched: %w", recovered.AttemptID, err)
+	}
+	if recovered.State == string(runtimeeffects.StateAuthorized) {
+		return nil, nil
+	}
+	return &runtimeeffects.CompletionAgentTurn{
+		TurnID: target.ID, RunID: target.RunID, AgentID: agentID, SessionID: target.SessionID,
+		Identity: target.AgentIdentity,
+		Memory:   target.Memory, FlowInstance: target.FlowInstance, EntityID: target.EntityID,
+		TriggerEventID: frame.Turn.Event.ID, TriggerEventType: frame.Turn.Event.Type,
+		CapabilitySurfaceID: surface.ID, CapabilitySurface: json.RawMessage(recovered.CapabilitySurface), Failure: failure,
+	}, nil
 }
 
 func CompletionRecoverySettlement(recovered CompletionRecoveryAttempt, state runtimeeffects.State, failure *runtimefailures.Envelope, now time.Time) (runtimeeffects.Attempt, runtimeeffects.CompletionSettlement, error) {
