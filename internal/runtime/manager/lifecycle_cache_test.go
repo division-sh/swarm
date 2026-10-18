@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -63,9 +64,37 @@ func TestManagerFixtureRowOwnerSelectionIsExplicit(t *testing.T) {
 	if binding, err := owner.ProcessExecutionBinding(); err != nil || !binding.Equal(lifecycleProbeProcessBinding()) {
 		t.Fatalf("default lifecycle probe changed its binding: %+v err=%v", binding, err)
 	}
-	_, record, bound := newLifecycleCacheFixture(t)
+	ctx, record, bound := newLifecycleCacheFixture(t)
 	if binding, err := bound.ProcessExecutionBinding(); err != nil || !binding.Equal(record.ProcessBinding) || binding.Equal(lifecycleProbeProcessBinding()) {
 		t.Fatalf("source-bound lifecycle probe lost its explicit binding: %+v err=%v", binding, err)
+	}
+	t.Run("aggregate_members_retain_captured_binding", func(t *testing.T) {
+		aggregate := &terminalSetPersistenceProbe{AgentLifecyclePersistence: bound, agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)}
+		if binding, err := aggregate.ProcessExecutionBinding(); err != nil || !binding.Equal(record.ProcessBinding) {
+			t.Fatalf("aggregate lost its owner binding: %+v err=%v", binding, err)
+		}
+		coordinator := newAgentLifecycleCoordinator(aggregate, nil, nil, nil)
+		if err := registerCoordinatorLifecycleCell(t, coordinator, ctx, record, true); err != nil {
+			t.Fatal(err)
+		}
+		state, found, err := aggregate.LoadAgentLifecycleState(ctx, record.Config.Identity)
+		if err != nil || !found || !state.ProcessBinding.Equal(record.ProcessBinding) {
+			t.Fatalf("aggregate member changed its captured binding: %+v found=%t err=%v", state.ProcessBinding, found, err)
+		}
+	})
+	for name, owner := range map[string]AgentLifecyclePersistence{
+		"missing_binding_provider": struct{ AgentLifecyclePersistence }{bound},
+		"invalid_binding":          lifecycleReintroductionBindingProbe{lifecyclePersistenceProbe: bound},
+	} {
+		t.Run(name, func(t *testing.T) {
+			aggregate := &terminalSetPersistenceProbe{AgentLifecyclePersistence: owner, agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)}
+			if binding, err := aggregate.ProcessExecutionBinding(); err == nil {
+				t.Fatalf("unbound aggregate acquired a binding: %+v", binding)
+			}
+			if _, err := aggregate.CommitAgentLifecycleTransition(ctx, AgentLifecycleTransition{Identity: record.Config.Identity}); err == nil || len(aggregate.agents) != 0 {
+				t.Fatalf("unbound aggregate constructed member state: members=%d err=%v", len(aggregate.agents), err)
+			}
+		})
 	}
 	supplied := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{LifecycleStore: owner, PersistenceRoles: PersistenceRoles{LifecycleState: owner, LifecycleOutcome: owner}})
 	if supplied.lifecycle.persistence() != owner || supplied.lifecycle.stateReader != owner || supplied.lifecycle.outcomeReader != owner {

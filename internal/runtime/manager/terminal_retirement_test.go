@@ -243,7 +243,11 @@ func TestTerminalCompletionRouteFailureStillJoinsEveryFinalizer(t *testing.T) {
 }
 
 func (p *terminalSetPersistenceProbe) ProcessExecutionBinding() (ProcessExecutionBinding, error) {
-	return lifecycleProbeProcessBinding(), nil
+	provider, ok := p.AgentLifecyclePersistence.(processExecutionBindingProvider)
+	if !ok {
+		return ProcessExecutionBinding{}, errors.New("terminal-set persistence probe has no process binding")
+	}
+	return provider.ProcessExecutionBinding()
 }
 
 func (p *terminalSetPersistenceProbe) InspectRunExecutionOwnership(ctx context.Context, runID string) (RunExecutionOwnership, error) {
@@ -274,7 +278,12 @@ func (p *terminalSetPersistenceProbe) CommitAgentLifecycleTransition(ctx context
 	p.mu.Lock()
 	member := p.agents[req.Identity]
 	if member == nil {
-		member = newLifecyclePersistenceProbe()
+		binding, err := p.ProcessExecutionBinding()
+		if err != nil {
+			p.mu.Unlock()
+			return AgentLifecycleTransitionResult{}, err
+		}
+		member = newLifecyclePersistenceProbeWithBinding(binding)
 		p.agents[req.Identity] = member
 	}
 	before := p.before
@@ -290,13 +299,13 @@ func (p *terminalSetPersistenceProbe) CommitAgentLifecycleTransition(ctx context
 func TestTerminalFlowWholeSetDispositionSurvivesMiddleFailure(t *testing.T) {
 	for _, mode := range []string{"success", "existing_retirement", "middle_error", "middle_panic", "middle_fence_panic"} {
 		t.Run(mode, func(t *testing.T) {
-			probe := &terminalSetPersistenceProbe{AgentLifecyclePersistence: newLifecyclePersistenceProbe(), agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)}
+			ctx, base, owner := newLifecycleCacheFixture(t)
+			probe := &terminalSetPersistenceProbe{AgentLifecyclePersistence: owner, agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)}
 			c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
-			ctx := testAuthorActivityContext(context.Background())
 			records := make([]PersistedAgent, 3)
 			plan := terminalFlowInstanceSideEffectPlan{}
 			for i := range records {
-				rec := lifecycleTestPersistedAgent(t)
+				rec := base
 				rec.Config.ID = fmt.Sprintf("terminal-agent-%d", i)
 				rec.Config.Identity = runtimeagentidentitytest.RootRuntime(t, rec.Config.ID, "terminal-set-test")
 				plan.RunID = rec.Config.Identity.RunID
@@ -306,7 +315,7 @@ func TestTerminalFlowWholeSetDispositionSurvivesMiddleFailure(t *testing.T) {
 				records[i] = rec
 				plan.AgentIdentities = append(plan.AgentIdentities, rec.Config.Identity)
 			}
-			beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+			beginCoordinatorRun(t, c, managedExecutionTestContextForCapturedSource(t, ctx), AgentRunModeStandard)
 			tokens := make([]runtimeeffects.LifecycleToken, len(records))
 			dones := make([]chan struct{}, len(records))
 			for i, rec := range records {
@@ -430,12 +439,12 @@ func TestTerminalFlowWholeSetDispositionSurvivesMiddleFailure(t *testing.T) {
 func TestTerminalPlanRetainsFencedAcceptedSelfAuthor(t *testing.T) {
 	for _, sourceKind := range []string{"same_flow", "foreign_flow", "foreign_run"} {
 		t.Run(sourceKind, func(t *testing.T) {
-			probe := &terminalSetPersistenceProbe{AgentLifecyclePersistence: newLifecyclePersistenceProbe(), agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)}
+			ctx, base, owner := newLifecycleCacheFixture(t)
+			probe := &terminalSetPersistenceProbe{AgentLifecyclePersistence: owner, agents: make(map[runtimeagentidentity.Identity]*lifecyclePersistenceProbe)}
 			c := newAgentLifecycleCoordinator(probe, nil, nil, nil)
-			ctx := testAuthorActivityContext(context.Background())
 			records := make([]PersistedAgent, 3)
 			for i := range records {
-				rec := lifecycleTestPersistedAgent(t)
+				rec := base
 				rec.Config.ID = fmt.Sprintf("held-terminal-%d", i)
 				if i == 2 {
 					rec.Config.ID = "held-terminal-0"
@@ -456,7 +465,7 @@ func TestTerminalPlanRetainsFencedAcceptedSelfAuthor(t *testing.T) {
 				}
 				records[i] = rec
 			}
-			beginCoordinatorRun(t, c, managedExecutionTestContext(t, ctx), AgentRunModeStandard)
+			beginCoordinatorRun(t, c, managedExecutionTestContextForCapturedSource(t, ctx), AgentRunModeStandard)
 			tokens := make([]runtimeeffects.LifecycleToken, len(records))
 			dones := make([]chan struct{}, len(records))
 			loopContexts := make([]context.Context, len(records))
