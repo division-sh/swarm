@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -69,6 +68,7 @@ type runForkSourceStateAdmission struct {
 	forkRunID string
 	snapshot  *runForkRevisionSnapshot
 	postgres  bool
+	sourceAt  func(context.Context, *sql.Tx, string) (correlation.SourceArtifactFact, error)
 }
 
 type runForkProjectedSourceState struct {
@@ -220,13 +220,6 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if err != nil {
 		return event, err
 	}
-	sourceFact, err := runForkActivityFact(sourceRequest)
-	if err != nil {
-		return event, err
-	}
-	if activityidentity.RequestEventID(sourceFact) != event.SourceEventID {
-		return event, fmt.Errorf("activity request identity contradicts its exact source coordinates")
-	}
 	flowID, err := admission.carriage.ExecutionFlow(sourceEvent.RoutingSource)
 	if err != nil {
 		return event, err
@@ -234,10 +227,14 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if sourceRequest.SourceRunID != admission.snapshot.RunID || sourceRequest.EntityID != state.Source.EntityID || sourceRequest.FlowID != flowID {
 		return event, fmt.Errorf("activity source request disagrees with fixed-revision ownership")
 	}
+	origin, err := admission.activityRequestOriginAtCut(ctx, tx, sourceEvent.SourceEventID, make(map[string]bool))
+	if err != nil {
+		return event, err
+	}
 	var role semanticview.LoopRevisionRole
 	var declared bool
 	if node, isNode := owner.Node(); isNode {
-		role, declared, err = admission.carriage.ResolveActivity(node, sourceRequest.HandlerEventKey, sourceRequest.ActivityID, sourceRequest.Tool)
+		role, declared, err = admission.carriage.ResolveOriginalActivity(origin, node, sourceRequest.HandlerEventKey, sourceRequest.ActivityID, sourceRequest.Tool)
 	} else {
 		role, declared, err = admission.carriage.ResolveEvent(sourceEvent.RoutingSource, sourceRequest.HandlerEventKey, identity.ExecutableNode{}, "")
 	}
@@ -273,18 +270,15 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if err := json.Unmarshal(event.Payload, &request); err != nil {
 		return event, fmt.Errorf("decode selected-contract activity request %s: %w", event.SourceEventID, err)
 	}
-	proposed, err := loadRunForkProposedEffectAuthority(ctx, tx, event.SourceEventID)
+	proposed, err := admission.requireOriginalActivityApproval(ctx, tx, origin)
 	if err != nil {
 		return event, err
-	}
-	if !proposed {
-		return event, fmt.Errorf("activity request %s has no settled proposed-effect authority; unapproved activity fork continuation is unavailable", event.SourceEventID)
 	}
 	evidence, err := loadRunForkActivityAttemptEvidence(ctx, tx, event.SourceEventID)
 	if err != nil {
 		return event, fmt.Errorf("approved proposed effect %s cannot authorize a fork-local call: %w", event.SourceEventID, err)
 	}
-	if evidence.Status == "uncertain" {
+	if proposed && evidence.Status == "uncertain" {
 		return event, fmt.Errorf("approved proposed effect %s has ambiguous dispatch evidence and cannot authorize a fork-local call", event.SourceEventID)
 	}
 	if evidence.ExecutionMode != event.ExecutionMode {
@@ -297,26 +291,6 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		return event, err
 	}
 	return event, nil
-}
-
-func loadRunForkProposedEffectAuthority(ctx context.Context, tx *sql.Tx, requestEventID string) (bool, error) {
-	var status, verdict, state string
-	err := tx.QueryRowContext(ctx, `
-		SELECT c.status, COALESCE(c.verdict, ''), p.state
-		FROM proposed_effect_continuations p
-		JOIN decision_cards c ON c.card_id = p.card_id
-		WHERE p.request_event_id = $1
-	`, strings.TrimSpace(requestEventID)).Scan(&status, &verdict, &state)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("load proposed-effect fork authority for request %s: %w", requestEventID, err)
-	}
-	if status != decisioncard.StatusDecided || verdict != "approve" || state != decisioncard.ProposedEffectRequestReleased {
-		return false, fmt.Errorf("approved proposed effect %s is not terminal fork evidence: card=%s verdict=%s continuation=%s", requestEventID, status, verdict, state)
-	}
-	return true, nil
 }
 
 func bindRunForkActivitySourceEvent(raw json.RawMessage, forkRunID, sourceRequestEventID, entityID string, reference *loopruntime.ForkChildReference) (json.RawMessage, error) {
