@@ -2610,6 +2610,7 @@ func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *tes
 	}
 	source := semanticview.Wrap(bundle)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	forkRunID := uuid.NewString()
 	providerReached := make(chan struct{}, 1)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
