@@ -129,6 +129,20 @@ func proveCompletionOperationOwnsExactAgentFrame(t *testing.T, fixture completio
 	}
 	settlement = completionSettlementForTest(t, retry.Attempt().Authority.Target, fixture, adapter, "", "")
 	settlement.ProviderHead = nil
+	// Fail the coupled insert after the canonical turn writer has run. The
+	// provider response remains observed, with no partial turn, spend or pair.
+	if _, err := fixture.db.Exec(`ALTER TABLE agent_turn_live_parents RENAME TO completion_pair_unavailable`); err != nil {
+		t.Fatal(err)
+	}
+	beforePairFailure := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
+	_, pairErr := retry.SettleCompletion(ctx, settlement)
+	historicalContextRequireUnchanged(t, beforePairFailure, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
+	if _, err := fixture.db.Exec(`ALTER TABLE completion_pair_unavailable RENAME TO agent_turn_live_parents`); err != nil {
+		t.Fatal(err)
+	}
+	if pairErr == nil || !strings.Contains(pairErr.Error(), "pair exact completion turn live parents") {
+		t.Fatalf("late pair-insert failure did not reach its exact native write: %v", pairErr)
+	}
 	if _, err := retry.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("settle byte-identical retry completion: %v", err)
 	}
