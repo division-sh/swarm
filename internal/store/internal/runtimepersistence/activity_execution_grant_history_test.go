@@ -14,7 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	storestartup "github.com/division-sh/swarm/internal/store/internal/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
@@ -142,7 +142,7 @@ func TestActivityExecutionGrantReadUsesExactHistoricalVersionBothStores(t *testi
 					if err != nil {
 						t.Fatal(err)
 					}
-					actual, readErr := storestartup.ReadActivityExecutionGrantTx(ctx, tx, grantID, version)
+					actual, readErr := activityjournal.ReadActivityExecutionGrantTx(ctx, tx, grantID, version)
 					rollbackErr := tx.Rollback()
 					control.fault = ""
 					if rollbackErr != nil {
