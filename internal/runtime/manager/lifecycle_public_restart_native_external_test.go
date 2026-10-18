@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -38,7 +39,7 @@ func (owner *restartAfterNativeCommitLoss) Restart(ctx context.Context, request 
 	return result, nil
 }
 
-func proveNativeAgentRestartAPICompletionLoss(t *testing.T, selected storetest.AgentFixtureStore, actor actors.AgentConfig, controller agentcontrol.Controller) {
+func proveNativeAgentRestartAPICompletionLoss(t *testing.T, original context.Context, selected storetest.AgentFixtureStore, actor actors.AgentConfig, controller agentcontrol.Controller) {
 	t.Helper()
 	idempotency, ok := selected.(apiv1.APIIdempotencyStore)
 	if !ok {
@@ -64,7 +65,9 @@ func proveNativeAgentRestartAPICompletionLoss(t *testing.T, selected storetest.A
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
+	server := httptest.NewUnstartedServer(handler)
+	server.Config.BaseContext = func(net.Listener) context.Context { return original }
+	server.Start()
 	defer server.Close()
 	client := server.Client()
 	client.Timeout = 5 * time.Second

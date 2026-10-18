@@ -134,7 +134,7 @@ func TestAcceptedReceiverDispatchDoesNotReadmitAfterOwnerFence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("accept receiver dispatch work: %v", err)
 	}
-	executionCtx, closeExecution, err := acceptedWorkExecutionContext(acceptedCtx)
+	executionCtx, closeExecution, err := acceptedWorkExecutionContext(acceptedCtx, nil)
 	if err != nil {
 		t.Fatalf("project accepted dispatch execution context: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestAcceptedReceiverDispatchRetainsChannelExecutionAuthority(t *testing.T) 
 	if err != nil {
 		t.Fatalf("project accepted receiver dispatch: %v", err)
 	}
-	executionCtx, closeExecution, err := acceptedWorkExecutionContext(acceptedCtx)
+	executionCtx, closeExecution, err := acceptedWorkExecutionContext(acceptedCtx, nil)
 	if err != nil {
 		t.Fatalf("project accepted dispatch execution context: %v", err)
 	}

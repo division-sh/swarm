@@ -187,6 +187,10 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 				defer cancel()
 				process, _ := worklifetime.ProcessFromContext(ctx)
 				capability := selectedContractTestProcessCapability(t, ctx, selected)
+				ctx, bindErr := startupownership.WithProcessMutationAuthority(ctx, capability)
+				if bindErr != nil {
+					t.Fatal(bindErr)
+				}
 				repo := runForkExecutionRepoRoot(t)
 				fixture := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")}
 				loaded, err := fixture.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})

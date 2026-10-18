@@ -2016,6 +2016,8 @@ func seedFanOutOwnerFixture(t *testing.T, ctx context.Context, db *sql.DB, selec
 
 func seedFanOutOwnerFixtureWithArtifact(t *testing.T, ctx context.Context, db *sql.DB, selected any, postgres bool, cardinality int, createdAt time.Time, artifact *sourceartifact.AdmittedSourceArtifact) fanOutOwnerFixture {
 	t.Helper()
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	artifactOwner, ok := selected.(interface {
 		EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
 	})

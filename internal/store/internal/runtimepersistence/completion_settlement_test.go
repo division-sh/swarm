@@ -1503,6 +1503,7 @@ func newCompletionSettlementFixtureForFlow(t *testing.T, store completionSettlem
 func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string, actor runtimeactors.AgentConfig) completionSettlementFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	now := time.Now().UTC()
 	agentID := "completion-settlement-agent"
 	sessionID := uuid.NewString()

@@ -433,7 +433,7 @@ func VerifyRuntimeLogger_Log_StampsSourceArtifactFactOnRunRowForTest(t *testing.
 	logger := newTestRuntimeLogger(fixture.Persistence)
 	runID := uuid.NewString()
 	sourceFact := testPersistedSourceArtifactFact(t, artifact.BundleHash())
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(testAuthorActivityContext(context.Background()), sourceFact.BundleHash()), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(testAuthorActivityContext(fixture.Context), sourceFact.BundleHash()), runID)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 	before := requireNativeRuntimeLogRunForTest(t, fixture, ctx, runID)
 
@@ -464,7 +464,7 @@ func VerifyRuntimeLogSetupRejectsDeletedPersistedSourceArtifactFactForTest(t *te
 	if removed, err := fixture.RemoveArtifact(fixture.Context, sourceFact.BundleHash()); err != nil || removed != 1 {
 		t.Fatalf("delete source artifact row: %v", err)
 	}
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(testAuthorActivityContext(context.Background()), sourceFact.BundleHash()), runID)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(testAuthorActivityContext(fixture.Context), sourceFact.BundleHash()), runID)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 
 	before := fixture.Physical(ctx)
@@ -663,7 +663,7 @@ func TestRuntimeLogger_Log_DoesNotAppendFlightRecorderOnPostAppendOwnerFailure(t
 func VerifyRuntimeLogger_Log_PersistsCanonicalRunOwnershipFromContextForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	artifact := admittedRuntimeLogSourceArtifactForTest(t)
 	fixture := open(t, artifact)
-	ctx := testAuthorActivityContextForBundle(context.Background(), artifact.BundleHash())
+	ctx := testAuthorActivityContextForBundle(fixture.Context, artifact.BundleHash())
 	logger := newTestRuntimeLogger(fixture.Persistence)
 	runID := uuid.NewString()
 	spoofedRunID := uuid.NewString()
@@ -734,7 +734,7 @@ func VerifyRuntimeLogger_Log_DoesNotInferRunOwnershipFromDetailPayloadForTest(t 
 func VerifyRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEventForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	artifact := admittedRuntimeLogSourceArtifactForTest(t)
 	fixture := open(t, artifact)
-	ctx := testAuthorActivityContextForBundle(context.Background(), artifact.BundleHash())
+	ctx := testAuthorActivityContextForBundle(fixture.Context, artifact.BundleHash())
 	logger := newTestRuntimeLogger(fixture.Persistence)
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
@@ -776,7 +776,7 @@ func VerifyRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEventForTest(t *t
 func VerifyRuntimeLogger_Log_DoesNotDeriveLineageFromUnpersistedSubjectEventForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	artifact := admittedRuntimeLogSourceArtifactForTest(t)
 	fixture := open(t, artifact)
-	ctx := testAuthorActivityContextForBundle(context.Background(), artifact.BundleHash())
+	ctx := testAuthorActivityContextForBundle(fixture.Context, artifact.BundleHash())
 	logger := newTestRuntimeLogger(fixture.Persistence)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
@@ -810,7 +810,7 @@ func VerifyRuntimeLogger_Log_DoesNotDeriveLineageFromUnpersistedSubjectEventForT
 func VerifyRuntimeLogger_Log_PersistsTypedRuntimeLineageForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	artifact := admittedRuntimeLogSourceArtifactForTest(t)
 	fixture := open(t, artifact)
-	ctx := testAuthorActivityContextForBundle(context.Background(), artifact.BundleHash())
+	ctx := testAuthorActivityContextForBundle(fixture.Context, artifact.BundleHash())
 	logger := newTestRuntimeLogger(fixture.Persistence)
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()

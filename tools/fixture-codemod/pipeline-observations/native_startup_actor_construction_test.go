@@ -21,7 +21,15 @@ func TestNativeStartupActorConstructionPreservesAttachmentMemoryAndRestartProofs
 		before = strings.Replace(before, "\t\t\t\t\t_, db, _ := testutil.StartPostgres(t)\n\t\t\t\t\tselected = storetest.AdmitPostgresRuntimeStore(t, db)", "\t\t\t\t\tselected = storetest.StartPostgresRuntimeStore(t)", 1)
 		want, err := canonicalFunction(before)
 		got, actualErr := canonicalFunction(row.After)
-		actual, sourceErr := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
+		source := selectedCausalObservationBody(t, row.File, row.Function)
+		actual, sourceErr := canonicalFunction(source)
+		if row.Successor != "" {
+			original, err := fixtureSetupCurrentEndpoint2617(row, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actual, sourceErr = canonicalFunction(original.After)
+		}
 		if err != nil || actualErr != nil || sourceErr != nil || want != got || got != actual {
 			t.Fatalf("startup source/admission/runtime/attachment/cleanup/assertions changed: %s", row.Function)
 		}
