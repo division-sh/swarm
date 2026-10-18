@@ -841,12 +841,29 @@ func logInboundPublicationFailure(logger *RuntimeLogger, requestCtx context.Cont
 	// Durable failure envelopes normalize unknown errors; retain joined causes in
 	// the existing process diagnostic channel without exposing them over HTTP.
 	diaglog.ProcessLog(diaglog.LevelError, "inbound-gateway", "inbound publication failed",
-		"provider", provider, "service_id", serviceID, "provider_event_id", providerEventID, "error", err.Error())
+		"provider", provider, "service_id", serviceID, "provider_event_id", providerEventID,
+		"error", err.Error(), "causes", inboundPublicationDiagnosticCauses(err))
 	if logger != nil {
 		handleRuntimeLogPersistenceError("inbound-gateway", "publish_failed", logger.Error(requestCtx, "inbound-gateway", "publish_failed", map[string]any{
 			"provider": provider, "service_id": serviceID, "provider_event_id": providerEventID,
 		}, err))
 	}
+}
+
+func inboundPublicationDiagnosticCauses(err error) []string {
+	if err == nil {
+		return nil
+	}
+	causes := []string{err.Error()}
+	switch err := err.(type) {
+	case interface{ Unwrap() []error }:
+		for _, cause := range err.Unwrap() {
+			causes = append(causes, inboundPublicationDiagnosticCauses(cause)...)
+		}
+	case interface{ Unwrap() error }:
+		causes = append(causes, inboundPublicationDiagnosticCauses(err.Unwrap())...)
+	}
+	return causes
 }
 
 func validateInboundCommittedResultRecord(request runtimeinbound.Request, record runtimeinbound.Record) error {
