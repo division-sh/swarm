@@ -151,6 +151,37 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 		t.Fatal("embedded-spec deletion changed the finite recipe population")
 	}
 	restored := append([]recipe(nil), rows...)
+	var setup []fixtureSetupSuccessor2617
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "695c4885b5047f74969c970a3cc873dd6e89350c9ca5365e29dc67995ff66b22" ||
+		json.Unmarshal(fixtureSetupSuccessorBytes2617, &setup) != nil || len(setup) != 104 {
+		t.Fatal("native fixture continuation packet changed")
+	}
+	// Undo only the independently pinned #2730 setup changes before comparing
+	// the complete embedded-spec predecessor population. The row sets are disjoint.
+	restoredSetup := 0
+	for index := len(setup) - 1; index >= 39; index-- {
+		pin := setup[index]
+		for i, row := range restored {
+			if !sameReviewedRecipeKey(row, pin.Original) {
+				continue
+			}
+			history := row
+			history.Successor = pin.Original.Successor
+			prior := pin.Original.Successor
+			if prior == "" {
+				prior = pin.Original.After
+			}
+			body, err := reverseReviewedSuccessor2617(row.Successor, pin.Edits)
+			if err != nil || body != prior || row.Successor != pin.Candidate || !reflect.DeepEqual(history, pin.Original) {
+				t.Fatal("native fixture continuation changed another transformation or historical field")
+			}
+			restored[i] = pin.Original
+			restoredSetup++
+		}
+	}
+	if restoredSetup != 65 {
+		t.Fatalf("native fixture continuations restored=%d, want65", restoredSetup)
+	}
 	completionSuccessors := 0
 	for i, row := range rows {
 		if row.Function != "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores" {
