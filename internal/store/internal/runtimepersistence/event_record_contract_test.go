@@ -235,6 +235,9 @@ func TestW2CompiledRouteClaimPersistenceRestartAndGraphMutationParity(t *testing
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			event := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "routing.claim.roundtrip", "gateway", "", []byte(`{}`), 0,
 				uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 18, 16, 45, 0, 0, time.UTC),
