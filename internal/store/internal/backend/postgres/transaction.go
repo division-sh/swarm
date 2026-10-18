@@ -117,11 +117,9 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	if drain && (opts == nil || !opts.ReadOnly) && runtimeownership.HasMutationAuthority(ctx) {
-		ctx, err = generationauthority.PrepareMutationAdmission(ctx)
-		if err != nil {
-			return false, err
-		}
+	ctx, err = prepareOptionalMutationAdmission(ctx, opts, drain)
+	if err != nil {
+		return false, err
 	}
 	poolStarted := time.Now()
 	conn, err := b.db.Conn(ctx)
@@ -213,15 +211,13 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		})
 	}
 	sqlCtx = transactiontest.WithAttempt(sqlCtx, probe)
-	if drain && (opts == nil || !opts.ReadOnly) && runtimeownership.HasMutationAuthority(sqlCtx) {
-		var retireAdmission func()
-		sqlCtx, retireAdmission, err = generationauthority.AdmitMutationTx(sqlCtx, tx, false)
-		if err != nil {
-			serializationConflict = exactSerializationConflict(err)
-			return false, err
-		}
-		defer retireAdmission()
+	var retireAdmission func()
+	sqlCtx, retireAdmission, err = admitOptionalMutationTx(sqlCtx, tx, opts, drain)
+	if err != nil {
+		serializationConflict = exactSerializationConflict(err)
+		return false, err
 	}
+	defer retireAdmission()
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -251,6 +247,20 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	probe.Committed()
 	tx = nil
 	return true, nil
+}
+
+func prepareOptionalMutationAdmission(ctx context.Context, opts *sql.TxOptions, drain bool) (context.Context, error) {
+	if drain && (opts == nil || !opts.ReadOnly) && runtimeownership.HasMutationAuthority(ctx) {
+		return generationauthority.PrepareMutationAdmission(ctx)
+	}
+	return ctx, nil
+}
+
+func admitOptionalMutationTx(ctx context.Context, tx *sql.Tx, opts *sql.TxOptions, drain bool) (context.Context, func(), error) {
+	if drain && (opts == nil || !opts.ReadOnly) && runtimeownership.HasMutationAuthority(ctx) {
+		return generationauthority.AdmitMutationTx(ctx, tx, false)
+	}
+	return ctx, func() {}, nil
 }
 
 func joinTransactionRollback(tx *sql.Tx, stopReadRollback func() bool, readRollbackDone <-chan error, probe *transactiontest.Attempt) error {

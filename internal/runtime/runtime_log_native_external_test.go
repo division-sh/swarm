@@ -27,8 +27,15 @@ type runtimeLogSelectedForTest interface {
 	storetest.DeliveryPublicationFixtureStore
 }
 
-func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartifact.AdmittedSourceArtifact) runtimepkg.RuntimeLogNativeFixtureForTest {
+func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartifact.AdmittedSourceArtifact, runtimeIDs ...string) runtimepkg.RuntimeLogNativeFixtureForTest {
 	t.Helper()
+	runtimeID := "00000000-0000-4000-8000-000000001331"
+	if len(runtimeIDs) > 1 || (len(runtimeIDs) == 1 && runtimeIDs[0] == "") {
+		t.Fatal("native runtime-log fixture requires one exact runtime coordinate")
+	}
+	if len(runtimeIDs) == 1 {
+		runtimeID = runtimeIDs[0]
+	}
 	var selected runtimeLogSelectedForTest
 	capacity := startupownership.SQLiteFanOutCapacity()
 	if backend == "postgres" {
@@ -43,7 +50,7 @@ func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartif
 	}
 	fact := sourceartifactfixture.FactFor(artifact)
 	ctx := correlation.WithSourceArtifactFact(context.Background(), fact)
-	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("00000000-0000-4000-8000-000000001331", fact.BundleHash()))
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, fact.BundleHash()))
 	ctx = originalRuntimeFixtureContext(t, ctx, selected)
 	original, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
 	if err != nil {

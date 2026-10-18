@@ -64,35 +64,7 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 	runtimeID := uuid.NewString()
 	process := worklifetime.NewProcess()
 	ctx = worklifetime.WithProcess(ctx, process)
-	var capability startupownership.ProcessCapability
-	switch len(original) {
-	case 0:
-		capability, err = owner.AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "manager-selected-delivery-proof", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if err := capability.Release(context.Background()); err != nil {
-				t.Error(err)
-			}
-		})
-	case 1:
-		capability = original[0]
-		if capability == nil {
-			t.Fatal("selected delivery fixture requires its supplied original process")
-		}
-	default:
-		t.Fatal("selected delivery fixture requires exactly one original process")
-	}
-	evidence, err := capability.Evidence()
-	if err != nil || evidence.Validate() != nil {
-		t.Fatalf("selected delivery fixture requires genuine original evidence: %v", err)
-	}
-	ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtimeID = evidence.RuntimeInstanceID
+	ctx, capability, runtimeID := selectedDeliveryOriginal(t, ctx, owner, runtimeID, original)
 	source := sourceartifactfixture.RequireArtifact(t, ctx, owner, bundle.SourceArtifact)
 	ctx = correlation.WithSourceArtifactFact(ctx, source)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, source.BundleHash()))
@@ -201,6 +173,40 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 		t.Fatal(err)
 	}
 	return fixture
+}
+
+func selectedDeliveryOriginal(t *testing.T, ctx context.Context, owner SelectedDeliveryFixtureStore, runtimeID string, original []startupownership.ProcessCapability) (context.Context, startupownership.ProcessCapability, string) {
+	t.Helper()
+	var capability startupownership.ProcessCapability
+	switch len(original) {
+	case 0:
+		var err error
+		capability, err = owner.AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "manager-selected-delivery-proof", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := capability.Release(context.Background()); err != nil {
+				t.Error(err)
+			}
+		})
+	case 1:
+		capability = original[0]
+		if capability == nil {
+			t.Fatal("selected delivery fixture requires its supplied original process")
+		}
+	default:
+		t.Fatal("selected delivery fixture requires exactly one original process")
+	}
+	evidence, err := capability.Evidence()
+	if err != nil || evidence.Validate() != nil {
+		t.Fatalf("selected delivery fixture requires genuine original evidence: %v", err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx, capability, evidence.RuntimeInstanceID
 }
 
 func selectedDeliveryRootFacts(t *testing.T, runID string) events.EventFacts {

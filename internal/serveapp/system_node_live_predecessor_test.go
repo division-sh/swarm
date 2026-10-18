@@ -275,13 +275,13 @@ func proveSystemNodeStartupFailureCleanup(t *testing.T, backend string) {
 	if _, err := rt.CurrentStartupGrantEvidence(); err == nil {
 		t.Fatal("startup cleanup retained an admitted runtime grant")
 	}
-	// Repeated retirement after the original grant was already retired must
-	// refuse native work, not borrow a later grant. Local work is already joined.
-	if err := rt.Bus.ResetInMemoryState(); !errors.Is(err, startupownership.ErrMutationAuthorityMissing) {
-		t.Fatalf("post-retirement cleanup did not retain its missing-original refusal: %v", err)
+	// #2730/6246457824: an already-joined local reset needs no native authority.
+	// Nonempty native-release refusals remain covered by the Bus cleanup root.
+	if err := rt.Bus.ResetInMemoryState(); err != nil {
+		t.Fatalf("post-retirement local cleanup did not remain joined: %v", err)
 	}
 	if rt.WorkOccurrence().ActiveCount() != 0 {
-		t.Fatal("post-retirement refusal reopened local delivery ownership")
+		t.Fatal("post-retirement local reset reopened delivery ownership")
 	}
 	opts.TestBeforeReadinessCommit = nil
 	opts.TestRuntimeReadyHook = nil
