@@ -1719,7 +1719,7 @@
     "owner": "internal/runtime/runtime.go::*Runtime.prepareStartLocked",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "f362a17356975c5d074ee1499bdbe2e01b51900edefd9b71ab594a961516dc15"
+    "body_sha256": "3e7bdff0d9d94216fe5ce139a819ce6da458bc0d3f1f6733950d95f677d0ace4"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.prepareStartupLifecycleLocked",
@@ -1887,7 +1887,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "9ce1b87184fd387256889e8006cad4c2c08aebc524062973c4cf4e8ad97612e8"
+    "body_sha256": "21ccf78d438eb2eaf61826399344d005f2abde9361b0b4806727b97f3da266f9"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
@@ -2901,7 +2901,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "8c08d353f298f0725cc7bb0bb4f5118e29395b41e71f391ffdbb996cebf1d3c7"
+    "body_sha256": "ee18f498222d8709069a2be25f8116404e85bd5453f9bde6381151f4c4c6bd87"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
