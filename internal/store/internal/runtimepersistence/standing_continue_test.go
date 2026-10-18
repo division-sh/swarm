@@ -15,7 +15,7 @@ import (
 func TestStandingOwnedPauseRejectsGenericContinueBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			for _, posture := range []string{"suspended", "reset_preserved", "orphaned"} {
+			for _, posture := range []string{"suspended", "reset_preserved", "orphaned", "session_required"} {
 				t.Run(posture, func(t *testing.T) {
 					fixture := openStandingDispositionParityFixture(t, backend)
 					ctx := testAuthorActivityRuntimeContext()
@@ -40,6 +40,14 @@ func TestStandingOwnedPauseRejectsGenericContinueBothStores(t *testing.T) {
 							t.Fatalf("remove complete declaration set: %v", err)
 						}
 						wantBefore = runtimestanding.StandingRestartOrphaned
+					case "session_required":
+						candidate := fixture.candidate("audit-" + posture)
+						candidate.BindingEnabled = false
+						candidate.BindingBlockReason = runtimestanding.StandingBindingSessionRequired
+						if _, err := fixture.workflow.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate}); err != nil {
+							t.Fatal(err)
+						}
+						wantBefore = runtimestanding.StandingRestartSessionDormant
 					}
 					before := assertStandingDisposition(t, ctx, fixture, current.RunID, wantBefore)
 					if before.OperatorOverride != "suspended" || before.RunState != "paused" {
@@ -60,6 +68,18 @@ func TestStandingOwnedPauseRejectsGenericContinueBothStores(t *testing.T) {
 					after := assertStandingDisposition(t, ctx, fixture, current.RunID, wantBefore)
 					if !reflect.DeepEqual(before, after) {
 						t.Fatalf("standing changed on refused continue: before=%+v after=%+v", before, after)
+					}
+					if posture == "session_required" {
+						for _, mutate := range []func(context.Context, runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error){
+							fixture.workflow.ResumeStandingService, fixture.workflow.ResetStandingService,
+						} {
+							if _, err := mutate(ctx, operation); err == nil {
+								t.Fatal("standing controls bypassed native admission")
+							}
+							if after := assertStandingDisposition(t, ctx, fixture, current.RunID, wantBefore); !reflect.DeepEqual(before, after) {
+								t.Fatal("refused standing control changed native dormancy", before, after)
+							}
+						}
 					}
 				})
 			}

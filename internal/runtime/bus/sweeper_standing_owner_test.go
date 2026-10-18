@@ -94,6 +94,7 @@ func TestStandingPipelineRecoveryParksNonExecutableDispositionBeforeLease(t *tes
 		runtimerunlifecycle.StandingRestartSuspended,
 		runtimerunlifecycle.StandingRestartOrphaned,
 		runtimerunlifecycle.StandingRestartCredentialDormant,
+		runtimerunlifecycle.StandingRestartSessionDormant,
 		runtimerunlifecycle.StandingRestartRecoveryRequired,
 	} {
 		t.Run(string(kind), func(t *testing.T) {
