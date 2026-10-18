@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -59,28 +60,16 @@ func (b *WorkflowContractBundle) IntroductionLocation(file, slot string, declara
 			if err != nil {
 				return yamlsource.Location{}, false
 			}
-			found := false
-			for _, field := range fields {
-				if field.Name == key {
-					value, found = field.Value, true
-					location = value.IntroductionLocation()
-					if declarationKey && slot == "" {
-						location = field.IntroductionLocation()
-					}
-					break
-				}
-			}
-			if !found {
+			fieldIndex := slices.IndexFunc(fields, func(field yamlsource.MappingField) bool { return field.Name == key })
+			if fieldIndex < 0 {
 				return yamlsource.Location{}, false
 			}
-		}
-		if strings.HasPrefix(slot, ".") {
-			slot = slot[1:]
-			if slot == "" {
-				return yamlsource.Location{}, false
+			field := fields[fieldIndex]
+			value = field.Value
+			location = value.IntroductionLocation()
+			if declarationKey && slot == "" {
+				location = field.IntroductionLocation()
 			}
-		} else if slot != "" && slot[0] != '[' {
-			return yamlsource.Location{}, false
 		}
 	}
 	return location, location.Line > 0 && location.Column > 0
@@ -88,26 +77,47 @@ func (b *WorkflowContractBundle) IntroductionLocation(file, slot string, declara
 
 // Decode the existing diagnostic slot spelling without normalizing map keys.
 func introductionPathSegment(slot string) (key string, index int, rest string, ok bool) {
-	if !strings.HasPrefix(slot, "[") {
+	index = -1
+	switch {
+	case !strings.HasPrefix(slot, "["):
 		end := strings.IndexAny(slot, ".[")
 		if end < 0 {
 			end = len(slot)
 		}
-		return slot[:end], -1, slot[end:], end > 0
-	}
-	if strings.HasPrefix(slot, `["`) {
+		if end == 0 {
+			return "", -1, "", false
+		}
+		key, rest = slot[:end], slot[end:]
+	case strings.HasPrefix(slot, `["`):
 		quoted, err := strconv.QuotedPrefix(slot[1:])
 		end := len(quoted) + 1
 		if err != nil || len(slot) <= end || slot[end] != ']' {
 			return "", -1, "", false
 		}
 		key, err = strconv.Unquote(quoted)
-		return key, -1, slot[end+1:], err == nil
+		if err != nil {
+			return "", -1, "", false
+		}
+		rest = slot[end+1:]
+	default:
+		end := strings.IndexByte(slot, ']')
+		if end < 0 {
+			return "", -1, "", false
+		}
+		var err error
+		index, err = strconv.Atoi(slot[1:end])
+		if err != nil || index < 0 {
+			return "", -1, "", false
+		}
+		rest = slot[end+1:]
 	}
-	end := strings.IndexByte(slot, ']')
-	if end < 0 {
+	if strings.HasPrefix(rest, ".") {
+		rest = rest[1:]
+		if rest == "" {
+			return "", -1, "", false
+		}
+	} else if rest != "" && rest[0] != '[' {
 		return "", -1, "", false
 	}
-	index, err := strconv.Atoi(slot[1:end])
-	return "", index, slot[end+1:], err == nil && index >= 0
+	return key, index, rest, true
 }
