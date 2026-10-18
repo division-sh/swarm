@@ -359,6 +359,19 @@ type Result[T any] struct {
 func (r Result[T]) Acknowledged() bool { return r.acknowledged }
 func (r Result[T]) Err() error         { return r.err }
 func (r Result[T]) Phase() Phase       { return r.phase }
+
+// CleanCancellation accepts only the native owner's sealed, joined outcome.
+// The diagnostic phase and absence of COMMIT acknowledgement are not evidence.
+func (r Result[T]) CleanCancellation() (beforeAttempt, ok bool) {
+	if r.acknowledged {
+		return false, false
+	}
+	if before, clean := sqlitebackend.CleanCancellationBeforeCommit(r.err); clean {
+		return before, true
+	}
+	return postgresbackend.CleanCancellationBeforeCommit(r.err)
+}
+
 func (r Result[T]) Value() (T, bool) {
 	if !r.acknowledged {
 		var zero T

@@ -275,9 +275,8 @@ func proveReadinessShutdownCancellationDisposition(t *testing.T) {
 					ctx, cancel := context.WithCancelCause(context.Background())
 					cancel(cause)
 					am := &AgentManager{lifecycle: &agentLifecycleCoordinator{phase: phase}}
-					want := phase == runtimeLifecycleShuttingDown && cause == worklifetime.ErrRetired
-					if got := am.cleanReadinessShutdownCancellation(ctx, result, cancellation); got != want {
-						t.Fatalf("phase=%s cause=%v shutdown cancellation=%t want=%t", phase, cause, got, want)
+					if am.cleanReadinessShutdownCancellation(ctx, result, cancellation) {
+						t.Fatalf("current phase=%s promoted foreign retirement cause=%v", phase, cause)
 					}
 				}
 			}

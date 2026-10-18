@@ -41069,6 +41069,17 @@ process_local_work_lifetime_authority:
       visible. This grants no admission success, durable readiness or creation completion, general cancellation
       exemption, or inference from the current Manager phase. No new replay permission or retry registry follows
       from this process-local separation.
+      An admitted readiness progress call cancelled by the exact Manager occurrence's shutdown retirement also
+      remains cancellation to its caller, but is not a terminal completion when its native owner positively proves
+      either no transaction attempt began or a pre-COMMIT rollback and connection cleanup have both joined,
+      and the exact activation attempt's durable abandonment and required resource/lease settlement acknowledge.
+      This is a closed native outcome, bound to the returned attachment result and the admitted run, instance,
+      ordinal and plan; false COMMIT acknowledgement, context cancellation, a later readiness phase, diagnostic
+      transaction phase, ErrTxDone or ErrConnDone alone never establish it. Ordinary caller cancellation, reset
+      and owner-loss refusal, any attempted/uncertain COMMIT, acknowledged COMMIT with later error, independent
+      domain/storage/rollback/close/lease failures and shutdown grace expiry remain failures. SQLite's write
+      transaction owner retains only the SQL handle's finalizer, joining its cancellation rollback before connection
+      release; callback, admission and execution permission retain the original cancellation and authority context.
     accepted_claim_settlement: >
       Execution cancellation does not release an accepted claim's process-local settlement lease. The exact existing
       claim heartbeat retains its occurrence until its handler settles or explicitly returns the claim and joins the
