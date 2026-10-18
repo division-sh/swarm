@@ -34,6 +34,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/startuphandoff"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
@@ -647,7 +648,12 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			runID := uuid.NewString()
 			bundle, sourceFact := workflowTimerStartupRecoverySource(t, "25ms")
 			ctx := runtimecorrelation.WithRunID(workflowTimerStartupContext(sourceFact), runID)
-			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
+			constructionCtx := originalRuntimeFixtureContext(t, runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID), selected)
+			original, err := agentfixture.ProcessCapability(t, constructionCtx, selected.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			storetest.RequireRun(t, constructionCtx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 
 			source := semanticview.Wrap(bundle)
 			module := newRuntimeTestWorkflowModule(t, source)
@@ -693,7 +699,11 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			}
 
 			seedRuntime, seedProcess := newRuntime(selected)
-			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
+			_, seedGrant := installExternalRuntimeTestGeneration(t, ctx, selected, seedRuntime, original)
+			seedCtx, err := runtimestartupownership.WithRuntimeMutationAuthority(testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence())), seedGrant)
+			if err != nil {
+				t.Fatal(err)
+			}
 			construction620Ctx := seedCtx
 			construction620At := time.Now().UTC()
 			rootSchema, declared := source.FlowSchemaByID(".")
@@ -733,6 +743,9 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 				t.Fatalf("initial materialization result = %v, want created", result)
 			}
 			shutdown("seed", seedRuntime, seedProcess)
+			if err := original.Release(context.Background()); err != nil {
+				t.Fatal(err)
+			}
 
 			flakyManagerStore := &workflowTimerStartupFlakyManagerStore{
 				workflowTimerStartupStore: selected,
