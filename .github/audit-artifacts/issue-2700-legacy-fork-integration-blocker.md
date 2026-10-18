@@ -54,3 +54,10 @@ is posted. Recovery ACK-loss/full-resume remains E-owned. While this integration
 question is routed, A can consume C's already-authorized exact-parent comparison
 delta f023c07529 under reviewer-a6226823121; no competing implementation.
 The ONE consolidated widened-deletion RED-to-GREEN is not claimed yet.
+
+Parent-control composition cost: adds 1 root in lifecycle, C's existing
+TestActivityResultEmitterAndLineageAgreeOnExactParent. Its added reach is the
+canonical emitter into ordinary/selected-root validation, including exact-parent
+and wrong-frame boundary controls. It is the SAME C-owned name/path, not an
+additional mirror when C integrates. The control uses A's existing dispatcher
+without C's later publication-parent field; no new production port is added.
