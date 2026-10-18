@@ -1956,14 +1956,14 @@ func TestFlowActivationCommitErrorFinalizesOnlyAcknowledgedReadiness(t *testing.
 func TestActivateFlowInstanceRejectsMissingCanonicalEntityContract(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	bundle = loadFlowActivationEntityContracts(t, bundle, map[string]string{"unrelated": "other_entity"})
 	if _, err := bundle.ResolveFlowTemplateInstance("review"); err == nil {
 		t.Fatal("missing canonical entity contract passed instance admission")
 	}
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
+	err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err == nil || !strings.Contains(err.Error(), "flow review has no entity assignment contract") {
 		t.Fatalf("missing canonical entity error = %v", err)
 	}
@@ -4464,7 +4464,6 @@ func TestActivateFlowInstanceRouteMaterializationExcludesBusinessState(t *testin
 
 func TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "")
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{
 		"flow_instance_path": {Type: "string"}, "flow_scope_key": {Type: "string"},
@@ -4484,7 +4483,8 @@ func TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation(t *test
 		"instance_id":    "wrong-config-instance",
 		"template_id":    "wrong-config-template",
 	})
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, req.ContractBundle)
+	err := activateFlowInstanceForTest(am, ctx, req)
 	if err == nil || !strings.Contains(err.Error(), "contains interpolation") || !strings.Contains(err.Error(), "instance.by") {
 		t.Fatalf("ActivateFlowInstance error = %v, want agent-name interpolation teaching error", err)
 	}
