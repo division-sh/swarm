@@ -1,0 +1,15 @@
+{
+  "purpose": "DIAGNOSTIC ONLY",
+  "base": "f2e0d031a06d3f8e5a6ec487c8f90c3e212860d8",
+  "base_tree": "aef77b3b207d58e681d06802b9e8ed9d4a808e5d",
+  "capture_gate": "https://github.com/division-sh/swarm/pull/2614#issuecomment-6251306217",
+  "route_gate": "https://github.com/division-sh/swarm/pull/2614#issuecomment-6251490013",
+  "capture_receipt": "https://github.com/division-sh/swarm/pull/2614#issuecomment-6251471800",
+  "capture_overlay_archive_sha256": "6a3cdd600b4e400df3f9a920e6f23dcceb283f196e9d7317429159c00471b9c4",
+  "capture_tracked_patch_sha256": "bbc29aac74fea2e2b3dd9360115bcd66c06e5102f95f5ee199986fb036e9af80",
+  "capture_validation_log_sha256": "e93c2b9edf7705749771036bf54eb3ff35d4f4c6515d5ed797b63ebae108fb47",
+  "validation_command": "go run ./cmd/swarm-test -- -race -count=1 -run ^TestChannelOnboardingAPIContractEvidence$ ./internal/apiv1",
+  "validation_result": "PASS 5.444s; wrapped, joined, SQLSTATE, unknown, secret-bearing, bounded traversal and unchanged-response controls",
+  "local_runtime_negative": "3 serial PostgreSQL invocations; all four siblings each; 12/12 pass, no capture; no more local reproduction authorized",
+  "qualification_credit": false
+}

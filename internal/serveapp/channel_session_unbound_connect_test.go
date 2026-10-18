@@ -22,6 +22,7 @@ func TestRunServeWhatsAppConnectAfterUnbindResetBothStores(t *testing.T) {
 					isolateCLIAPIConfigEnv(t)
 					t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 					peer := newServeNativeProtocolPeer(t)
+					causeTrace := beginOriginalCauseLeafLog(t)
 					opts, _ := servedNativeProcessOptions(t, backend)
 					opts.SourceRoot = filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session")
 					opts.SelfCheck = true
@@ -33,6 +34,7 @@ func TestRunServeWhatsAppConnectAfterUnbindResetBothStores(t *testing.T) {
 					endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 					original := requireServedNativeProcessPairingRequest(t, endpoint, peer, channelonboarding.VerbConnect,
 						"retained-fence-first-connect", "FENCE_FIRST_CLAIM", saveProof)
+					causeTrace.phase("rebind", "start")
 					rebound := requireServedNativeProcessPairingClaim(t, endpoint, peer, channelonboarding.VerbRebind,
 						"retained-fence-rebind", saveProof, func(challenge string) types.JID {
 							return peer.claimMessageFrom(challenge, "FENCE_REBIND_CLAIM",
@@ -63,6 +65,7 @@ func TestRunServeWhatsAppConnectAfterUnbindResetBothStores(t *testing.T) {
 							t.Fatal("unbound history became a current reconnect/rebind identity", verb, refused.Error)
 						}
 					}
+					causeTrace.phase("fresh_connect", "start")
 					fresh := requireServedUnboundConnectAcrossRestart(t, endpoint, peer, saveProof, func(paired bool) string {
 						if code := process.stop(); code != 0 {
 							t.Fatal("fresh unconfirmed connect did not join for restart", code, process.outputString())

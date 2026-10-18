@@ -1,0 +1,3 @@
+Precompile outside test slot: environment=0.003s build=12.509s cleanup=0.000s total=12.512s
+Test slot acquired after 27ms. Starting go test -race -count=1 -run ^TestChannelOnboardingAPIContractEvidence$ ./internal/apiv1
+ok  	github.com/division-sh/swarm/internal/apiv1	5.444s

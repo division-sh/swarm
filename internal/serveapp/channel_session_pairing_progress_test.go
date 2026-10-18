@@ -85,6 +85,9 @@ func requestTimedServedSessionPreparation(t *testing.T, endpoint, method, operat
 
 func requireTimedServedNativeOnboardingRetry(t *testing.T, endpoint, operationID, stage string, result *channelonboarding.Result) {
 	t.Helper()
+	if trace, ok := originalCauseLeafLogs.Load(t); ok {
+		trace.(*originalCauseLeafLog).phase("", stage)
+	}
 	began := time.Now()
 	t.Logf("onboarding_retry stage=%s begin=%s limit=5s", stage, began.UTC().Format(time.RFC3339Nano))
 	defer func() { t.Logf("onboarding_retry stage=%s elapsed=%s", stage, time.Since(began)) }()

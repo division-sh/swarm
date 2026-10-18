@@ -165,4 +165,5 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 	if details["operation_id"] != operationID || details["role"] != "telegram_bot_token" || details["store_key"] != "telegram_bot_token" || details["remediation"] != "swarm channel resume "+operationID+" --credential-stdin" {
 		t.Fatalf("credential-required details = %#v", details)
 	}
+	exerciseOnboardingOriginalCauseDiagnostic(t, handler, lifecycle, operationID)
 }

@@ -1,0 +1,8 @@
+{
+  "source_head": "f2e0d031a06d3f8e5a6ec487c8f90c3e212860d8",
+  "source_plan_digest": "2d6f538a460eedf6e720a65817a0967ccfd1907887fb7b05fa94f42466760114",
+  "encoding": "jq -cS {unit:(.units[]|select(.id==\"serveapp-runtime\")),batch:(.batches[]|select(.id==\"serveapp-runtime\"))} including newline",
+  "unit_and_batch_sha256": "7d8d0b3f137d55449fccf768be67e7f1d0eb36ff14302b4a5809b7a19aabb78c",
+  "selected_roots": 106,
+  "timeout_minutes": 18
+}

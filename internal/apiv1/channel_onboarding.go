@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -29,6 +30,7 @@ func ChannelOnboardingHandlers(opts ChannelOnboardingHandlerOptions) map[string]
 	if opts.Onboarding == nil || opts.Channels == nil {
 		return nil
 	}
+	var retryOrdinal atomic.Uint64
 	return map[string]MethodHandler{
 		"channel.onboarding_select": func(ctx context.Context, req Request) (any, error) {
 			if err := requireOperatorPrincipal(req, opts.Channels); err != nil {
@@ -101,9 +103,11 @@ func ChannelOnboardingHandlers(opts ChannelOnboardingHandlerOptions) map[string]
 					return nil, err
 				}
 			}
+			ordinal := retryOrdinal.Add(1)
 			result, err := opts.Onboarding.Retry(ctx, channelonboarding.RetryInput{OperationID: operationID, ProviderCredential: credential,
 				ClientLanguage: language, ExpectedLocaleRevision: localeRevision})
 			if err != nil {
+				captureOnboardingRetryOriginalCause(err, ordinal)
 				return nil, channelOnboardingError(err)
 			}
 			return result, nil
