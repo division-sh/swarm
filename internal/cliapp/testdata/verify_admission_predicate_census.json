@@ -2889,7 +2889,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "99e72376a378ec61d5ddba641d23feecefabcc005663f18824005e268cc6a2ec"
+    "body_sha256": "c91a1ead43d629d51ab9046c8cf2fcfb25228675986e43361a377d50f1d7a5f9"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
@@ -3561,7 +3561,7 @@
     "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.runTransactionOutcome",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
-    "body_sha256": "e452024e0019e4cb9eba29756b5ca758d6413ef5fac623c90a08efa13b6fd532"
+    "body_sha256": "1d0c74efd9c628ac39fd6ef4b92b9877ee2dc23ccc93ecbfa1dcfbda654208e9"
   },
   {
     "owner": "internal/store/internal/backend/postgres/transaction.go::*rolledBackSerializationConflict.Error",
@@ -3600,6 +3600,12 @@
     "body_sha256": "353dcd9e2d2e69e8d3070f8cd28acd3dd4de74364c5e1ce1bb0093c1a15381e1"
   },
   {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::prepareOptionalMutationAdmission",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "530e2ea3f30204188ea3463c0c01403c40a7e3f5710023e6c62df566e455c3fa"
+  },
+  {
     "owner": "internal/store/internal/backend/postgres/transaction_cancellation.go::*cleanTransactionCancellation.Error",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
@@ -3622,12 +3628,6 @@
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
     "body_sha256": "6a88214e4e5e04c2e8f5537714f8c1ac0a552bb1d368b67af2cd260437202b38"
-  },
-  {
-    "owner": "internal/store/internal/backend/postgres/transaction.go::prepareOptionalMutationAdmission",
-    "audit_rows": "A19,A28",
-    "proof_families": "P18,P24",
-    "body_sha256": "530e2ea3f30204188ea3463c0c01403c40a7e3f5710023e6c62df566e455c3fa"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkPostgresOwner.ListSelectedForkRecoveryEntries",
