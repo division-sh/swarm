@@ -881,7 +881,7 @@ func assertWorkspaceMirrorVerifier(t *testing.T) {
 }
 
 const workspaceMirrorVerifierControls = `
-import hashlib, io, json, os, pathlib, urllib.error, urllib.request
+import collections, contextlib, hashlib, io, json, os, pathlib, urllib.error, urllib.request
 from unittest import mock
 
 path = pathlib.Path("../../.github/scripts/verify-workspace-base.py")
@@ -892,13 +892,15 @@ encode = lambda value: json.dumps(value, sort_keys=True).encode()
 description = lambda value: {"digest": digest(value), "size": len(value)}
 config, layer, auxiliary = b"{}", b"fixed base filesystem", b"fixed auxiliary attestation"
 leaf = encode({"schemaVersion": 2, "config": description(config), "layers": [description(layer)]})
-aux = encode({"schemaVersion": 2, "config": description(config), "layers": [description(auxiliary)]})
+subject_blob = b"fixed subject evidence"
+subject = encode({"schemaVersion": 2, "blobs": [description(subject_blob)]})
+aux = encode({"schemaVersion": 2, "config": description(config), "layers": [description(auxiliary)], "subject": description(subject)})
 index = encode({"schemaVersion": 2, "manifests": [
     {**description(leaf), "platform": {"os": "linux", "architecture": "amd64"}},
     {**description(aux), "platform": {"os": "unknown", "architecture": "unknown"}},
 ]})
-manifests = {digest(index): index, digest(leaf): leaf, digest(aux): aux}
-blobs = {digest(config): config, digest(layer): layer, digest(auxiliary): auxiliary}
+manifests = {digest(index): index, digest(leaf): leaf, digest(aux): aux, digest(subject): subject}
+blobs = {digest(config): config, digest(layer): layer, digest(auxiliary): auxiliary, digest(subject_blob): subject_blob}
 assert scope["DIGEST"] == "sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437"
 # Test data changes the isolated function globals, never a production override.
 scope["DIGEST"] = digest(index)
@@ -906,10 +908,12 @@ os.environ.update(GH_TOKEN="owned-fake-token", GITHUB_ACTOR="owned-actor", GITHU
 
 class FixedResponses:
     def __init__(self, fault):
-        self.fault, self.read_blobs = fault, set()
+        self.fault, self.read_blobs, self.requests = fault, set(), []
     def open(self, request, timeout):
         assert timeout == 60
         url, auth = request.full_url, request.get_header("Authorization")
+        self.requests.append(url)
+        assert "public.ecr.aws" not in url, "verifier re-read the anonymous ECR source: " + url
         if url == "https://api.github.com/orgs/division-sh/packages/container/swarm-workspace-golang":
             assert auth == "Bearer owned-fake-token"
             if self.fault in ("absent", "forbidden"):
@@ -918,22 +922,26 @@ class FixedResponses:
             if self.fault == "public": package["visibility"] = "public"
             if self.fault == "foreign-repository": package["repository"]["full_name"] = "foreign/swarm"
             if self.fault == "crossed-repository-id": package["repository"]["id"] = 99
+            if self.fault == "malformed-metadata": return io.BytesIO(b"{")
             return io.BytesIO(encode(package))
-        if url.startswith("https://public.ecr.aws/token/"):
-            assert auth == ""
-            return io.BytesIO(encode({"token": "ecr-read"}))
         if url.startswith("https://ghcr.io/token?"):
             assert auth.startswith("Basic ")
             return io.BytesIO(encode({"token": "mirror-read"}))
-        source, mirror = scope["SOURCE"], scope["MIRROR"]
-        if url.startswith(source + "/manifests/") or url.startswith(mirror + "/manifests/"):
-            is_mirror = url.startswith(mirror)
-            assert auth == ("Bearer mirror-read" if is_mirror else "Bearer ecr-read")
+        mirror = scope["MIRROR"]
+        if url.startswith(mirror + "/manifests/"):
+            assert auth == "Bearer mirror-read"
             key = url.rsplit("/", 1)[1]
-            if is_mirror and self.fault == "missing-auxiliary" and key == digest(aux):
+            if ((self.fault == "missing-root" and key == digest(index))
+                    or (self.fault == "missing-auxiliary" and key == digest(aux))
+                    or (self.fault == "missing-subject" and key == digest(subject))):
                 raise urllib.error.HTTPError(url, 404, "absent", {}, None)
             raw = manifests[key]
-            if is_mirror and self.fault == "manifest-mismatch": raw += b" "
+            if self.fault == "manifest-mismatch": raw += b" "
+            if self.fault == "changed-platform" and key == digest(index):
+                raw = encode({"schemaVersion": 2, "manifests": [description(leaf)]})
+            if self.fault == "child-mismatch" and key == digest(leaf): raw = raw[:-1] + b"!"
+            if self.fault == "subject-mismatch" and key == digest(subject): raw = raw[:-1] + b"!"
+            if self.fault == "child-size" and key == digest(leaf): raw += b" "
             return io.BytesIO(raw)
         if url.startswith(mirror + "/blobs/"):
             assert auth == "Bearer mirror-read"
@@ -941,26 +949,36 @@ class FixedResponses:
             self.read_blobs.add(key)
             if self.fault == "missing-layer" and key == digest(layer):
                 raise urllib.error.HTTPError(url, 404, "absent", {}, None)
+            if self.fault == "missing-subject-blob" and key == digest(subject_blob):
+                raise urllib.error.HTTPError(url, 404, "absent", {}, None)
             raw = blobs[key]
             if self.fault == "config-mismatch" and key == digest(config): raw = b"[]"
             if self.fault == "layer-mismatch" and key == digest(layer): raw = b"changed"
             if self.fault == "auxiliary-mismatch" and key == digest(auxiliary): raw = b"changed"
+            if self.fault == "subject-blob-mismatch" and key == digest(subject_blob): raw = b"changed"
+            if self.fault == "oversized-layer" and key == digest(layer): raw += b"!"
             return io.BytesIO(raw)
         raise AssertionError("unexpected network target: " + url)
 
-for fault in [None, "absent", "forbidden", "public", "foreign-repository", "crossed-repository-id", "manifest-mismatch", "missing-auxiliary", "missing-layer", "config-mismatch", "layer-mismatch", "auxiliary-mismatch"]:
+for fault in [None, "absent", "forbidden", "public", "foreign-repository", "crossed-repository-id", "malformed-metadata", "manifest-mismatch", "changed-platform", "child-mismatch", "subject-mismatch", "child-size", "missing-root", "missing-auxiliary", "missing-subject", "missing-layer", "missing-subject-blob", "config-mismatch", "layer-mismatch", "auxiliary-mismatch", "subject-blob-mismatch", "oversized-layer"]:
     responses = FixedResponses(fault)
-    with mock.patch.object(scope["urllib"].request, "build_opener", return_value=responses):
+    with mock.patch.object(scope["urllib"].request, "build_opener", return_value=responses), mock.patch.object(scope["time"], "sleep") as pause, contextlib.redirect_stderr(io.StringIO()):
         try:
             result = scope["verify"]()
         except (ValueError, urllib.error.HTTPError) as error:
             assert fault is not None, fault
-            if fault in ("absent", "missing-auxiliary", "missing-layer", "forbidden"):
+            if fault in ("absent", "missing-root", "missing-auxiliary", "missing-subject", "missing-layer", "missing-subject-blob", "forbidden"):
                 assert isinstance(error, urllib.error.HTTPError) and error.code == (403 if fault == "forbidden" else 404)
             elif fault in ("public", "foreign-repository", "crossed-repository-id"):
                 assert str(error) == "private package/repository association refused; user policy action required"
-            elif fault == "manifest-mismatch":
+            elif fault in ("manifest-mismatch", "changed-platform", "child-mismatch", "subject-mismatch"):
                 assert str(error) == "manifest bytes differ from immutable digest"
+            elif fault == "child-size":
+                assert str(error) == "manifest size differs from immutable descriptor"
+            elif fault == "oversized-layer":
+                assert str(error) == "blob exceeds immutable descriptor size"
+            elif fault == "malformed-metadata":
+                assert isinstance(error, json.JSONDecodeError)
             else:
                 assert str(error) == "blob bytes differ from immutable descriptor"
         else:
@@ -969,6 +987,8 @@ for fault in [None, "absent", "forbidden", "public", "foreign-repository", "cros
             assert result["manifests"] == {key: len(value) for key, value in manifests.items()}
             assert result["verified_blobs"] == {key: len(value) for key, value in blobs.items()}
             assert responses.read_blobs == set(blobs)
+    pause.assert_not_called()
+    assert max(collections.Counter(responses.requests).values()) == 1, (fault, responses.requests)
 
 for fault in [None, "absent", "forbidden", "public", "foreign-repository", "crossed-repository-id"]:
     for allow_absent in [False, True]:
@@ -979,6 +999,106 @@ for fault in [None, "absent", "forbidden", "public", "foreign-repository", "cros
         else:
             assert fault is None or (fault == "absent" and allow_absent)
             assert (package is None) == (fault == "absent")
+
+class Refusals(FixedResponses):
+    def __init__(self, target, status, failures, redirected=False, partial=False):
+        super().__init__(None)
+        self.target, self.status, self.failures = target, status, failures
+        self.redirected, self.partial = redirected, partial
+        self.attempts, self.errors, self.partial_responses = 0, [], []
+    def refusal(self, url):
+        final = "https://user:userinfo-secret@blob-storage.invalid/owned-object?signature=signed-secret" if self.redirected else url
+        body = io.BytesIO(b"private-response-body-secret")
+        error = urllib.error.HTTPError(final, self.status, "private-response-reason-secret", {"Retry-After": "99999", "Authorization": "Bearer header-secret"}, body)
+        self.errors.append((error, body))
+        return error
+    def open(self, request, timeout):
+        if request.full_url == self.target:
+            self.attempts += 1
+            if self.attempts <= self.failures:
+                if not self.partial:
+                    raise self.refusal(request.full_url)
+                owner = self
+                class InterruptedBlob(io.BytesIO):
+                    def read(self, size):
+                        if self.tell() != 0:
+                            raise owner.refusal(request.full_url)
+                        return super().read(1)
+                response = InterruptedBlob(layer)
+                self.partial_responses.append(response)
+                return response
+        return super().open(request, timeout)
+
+def records_for(responses, diagnostics):
+    text = diagnostics.getvalue()
+    for secret in ["owned-fake-token", "mirror-read", "Authorization", "Bearer", "Basic", "userinfo-secret", "signed-secret", "private-response-body-secret", "private-response-reason-secret", "header-secret"]:
+        assert secret not in text, (secret, text)
+    requested = urllib.parse.urlsplit(responses.target)
+    records = [json.loads(line) for line in text.splitlines()]
+    for attempt, record in enumerate(records, 1):
+        expected = {"requested_host": requested.hostname, "requested_path": requested.path,
+                    "status": responses.status, "attempt": attempt,
+                    "classification": "rate-limit" if responses.status == 429 else
+                                      "access-refusal" if responses.status in (401, 403) else "http-failure"}
+        if responses.redirected: expected["final_host"] = "blob-storage.invalid"
+        assert {key: value for key, value in record.items() if key != "operation"} == expected, record
+    assert all(body.closed for _, body in responses.errors)
+    return records
+
+targets = {
+    "package-metadata": "https://api.github.com/orgs/division-sh/packages/container/swarm-workspace-golang",
+    "token-exchange": "https://ghcr.io/token?service=ghcr.io&scope=repository:division-sh/swarm-workspace-golang:pull",
+    "destination-manifest": scope["MIRROR"] + "/manifests/" + digest(index),
+    "destination-blob": scope["MIRROR"] + "/blobs/" + digest(layer),
+}
+for operation, target in targets.items():
+    for failures in [1, 2, 4, 5]:
+        responses, diagnostics, sleeps = Refusals(target, 429, failures), io.StringIO(), []
+        with mock.patch.object(scope["urllib"].request, "build_opener", return_value=responses), mock.patch.object(scope["time"], "sleep", side_effect=sleeps.append), contextlib.redirect_stderr(diagnostics):
+            try:
+                result = scope["verify"]()
+            except urllib.error.HTTPError as error:
+                assert failures == 5 and error.code == 429 and error is responses.errors[-1][0]
+            else:
+                assert failures < 5 and result["verified_blobs"] == {key: len(value) for key, value in blobs.items()}
+        assert responses.attempts == min(failures + 1, 5), (operation, failures, responses.attempts)
+        assert sleeps == [5, 10, 20, 40][:min(failures, 4)], (operation, failures, sleeps)
+        records = records_for(responses, diagnostics)
+        assert len(records) == failures and all(record["operation"] == operation for record in records)
+    for status in [401, 403, 404, 500]:
+        responses, diagnostics = Refusals(target, status, 5, redirected=True), io.StringIO()
+        with mock.patch.object(scope["urllib"].request, "build_opener", return_value=responses), mock.patch.object(scope["time"], "sleep") as pause, contextlib.redirect_stderr(diagnostics):
+            try:
+                scope["verify"]()
+            except urllib.error.HTTPError as error:
+                assert error.code == status and error is responses.errors[0][0]
+            else:
+                raise AssertionError((operation, status, "refusal admitted"))
+        pause.assert_not_called()
+        records = records_for(responses, diagnostics)
+        assert responses.attempts == len(records) == 1 and records[0]["operation"] == operation
+
+responses, diagnostics, sleeps = Refusals(targets["destination-blob"], 429, 1, redirected=True, partial=True), io.StringIO(), []
+def partial_pause(seconds):
+    assert responses.partial_responses and all(response.closed for response in responses.partial_responses)
+    sleeps.append(seconds)
+with mock.patch.object(scope["urllib"].request, "build_opener", return_value=responses), mock.patch.object(scope["time"], "sleep", side_effect=partial_pause), contextlib.redirect_stderr(diagnostics):
+    result = scope["verify"]()
+assert result["verified_blobs"] == {key: len(value) for key, value in blobs.items()}
+assert responses.attempts == 2 and sleeps == [5]
+assert records_for(responses, diagnostics)[0]["operation"] == "destination-blob"
+
+# Exercise the actual CLI refusal path, not just its reader functions.
+responses, diagnostics, output = Refusals(targets["package-metadata"], 403, 1, redirected=True), io.StringIO(), io.StringIO()
+with mock.patch.object(scope["urllib"].request, "build_opener", return_value=responses), mock.patch.object(scope["sys"], "argv", [str(path), "--association-only"]), mock.patch.object(scope["time"], "sleep") as pause, contextlib.redirect_stderr(diagnostics), contextlib.redirect_stdout(output):
+    try:
+        exec(compile(path.read_bytes(), str(path), "exec"), {"__name__": "__main__"})
+    except SystemExit as error:
+        assert error.code == 1
+    else:
+        raise AssertionError("CLI admitted a refused metadata read")
+pause.assert_not_called()
+assert output.getvalue() == "" and len(records_for(responses, diagnostics)) == 1
 
 request = urllib.request.Request(scope["MIRROR"] + "/blobs/" + digest(layer), headers={"Authorization": "Bearer mirror-read"})
 redirect = scope["BlobRedirect"]().redirect_request(request, None, 302, "found", {}, "https://blob-storage.invalid/owned-object")
