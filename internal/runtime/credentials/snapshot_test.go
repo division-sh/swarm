@@ -403,6 +403,10 @@ func TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically(t *testing
 			if reference(observed.AtomicSnapshot) != "env:"+candidate {
 				t.Fatalf("winning source = %q, want env:%s", reference(observed.AtomicSnapshot), candidate)
 			}
+			facts := owner.SourceFacts()
+			if len(facts) != 1 || facts[0].Key != key || facts[0].Reference != "env:"+candidate {
+				t.Fatalf("retained source facts=%v, want env:%s", facts, candidate)
+			}
 			metadata, err := json.Marshal(observed.Metadata())
 			if err != nil {
 				t.Fatal(err)
@@ -415,6 +419,10 @@ func TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically(t *testing
 			}
 			if reference(frozen.AtomicSnapshot) != "env:"+key {
 				t.Fatal("frozen binding adopted a later source observation")
+			}
+			frozenFacts := projection.SourceFacts()
+			if len(frozenFacts) != 1 || frozenFacts[0].Key != key || frozenFacts[0].Reference != "env:"+key {
+				t.Fatalf("frozen projection adopted later source facts: %v", frozenFacts)
 			}
 			if err := os.Unsetenv(candidate); err != nil {
 				t.Fatal(err)

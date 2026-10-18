@@ -25,6 +25,16 @@ covers same-value raw/normalized/uppercase source changes without token changes,
 real value/tier changes, frozen provenance, and absent/empty/refused/corrupt
 sources. Existing currentness and ingress owner guards stay mandatory.
 
+Reviewer-d's owner-readback P2 is repaired in that same snapshot owner and root:
+https://github.com/division-sh/swarm/issues/2729#issuecomment-6253270672
+`Observe` refreshes its retained snapshot after every successful observation,
+including an unchanged-authority observation, under its existing mutex. Token
+rotation still depends only on `sameAtomicSnapshot`. The source remains outside
+authority JSON, receipts and seals; no second lookup is introduced. The proof
+checks `owner.SourceFacts()` at each winning environment spelling while the
+already-frozen projection keeps its original locator, with the existing exact
+metadata/token stability and real-tier/value invalidation assertions intact.
+
 Channel role mapping remains in `compileChannelBindings` and the existing
 mapped store; source facts are captured during its original inspection, not by
 another read. The existing configured-channel root adds the exact mapped-key
