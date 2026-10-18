@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -48,9 +50,20 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 	fact := sourceartifactfixture.FactFor(artifact)
 	ctx := testAuthorActivityContextForSource(t, context.Background(), fact)
 	ctx = originalPipelineFixtureContext(t, ctx, selected)
+	original, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
 	persistence := pipeline.NewWorkflowPersistence(selected)
 	var buses []*runtimebus.EventBus
+	var joinMu sync.Mutex
+	joined := false
 	join := func() error {
+		joinMu.Lock()
+		defer joinMu.Unlock()
+		if joined {
+			return nil
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		for _, bus := range buses {
@@ -58,6 +71,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 				return err
 			}
 		}
+		joined = true
 		return nil
 	}
 	coordinator := func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions, workflow pipeline.WorkflowPersistence) *pipeline.PipelineCoordinator {
@@ -93,9 +107,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		// Register after the bus catalog lease so cleanup joins this bus
 		// before releasing its catalog, runtime occurrence or selected store.
 		t.Cleanup(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := deliveryBus.WaitForQuiescence(ctx); err != nil {
+			if err := join(); err != nil {
 				t.Error(err)
 			}
 		})
@@ -149,6 +161,9 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		},
 		Reopen: func() pipeline.WorkflowActivityNativeFixtureForTest {
 			if err := join(); err != nil {
+				t.Fatal(err)
+			}
+			if err := original.Release(context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			if err := selected.Close(); err != nil {
