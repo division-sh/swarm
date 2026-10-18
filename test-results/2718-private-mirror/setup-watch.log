@@ -1,0 +1,59 @@
+Refreshing run status every 60 seconds. Press Ctrl+C to quit.
+
+* agent-d/2718-private-workspace-base CI division-sh/swarm#2739 · 39122994179
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* Private workspace base setup (not qualification) (ID 117662247524)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Bind reviewed setup source
+  * Publish and verify immutable workspace base
+  * Retain workspace base setup result
+  * Post Run actions/checkout@v4
+- Exact-head local preflight admission in 0s (ID 117662248329)
+- CI plan in 0s (ID 117662248385)
+- Static checks in 0s (ID 117662248386)
+- github.event_name == 'workflow_dispatch' && 'Full dispatch SQLite smoke' || 'SQLite local smoke' in 0s (ID 117662248430)
+- Native Darwin unused analysis in 0s (ID 117662248463)
+- Independently measured complexity ratchet in 0s (ID 117662248499)
+- macOS SQLite possession in 0s (ID 117662248612)
+- Native Linux unused analysis in 0s (ID 117662248637)
+- Go proof ${{ matrix.unit }} in 0s (ID 117662248967)
+- Native union unused checks in 0s (ID 117662249100)
+- Semantic smoke proofs in 0s (ID 117662249195)
+- CI timing budget in 0s (ID 117662249450)
+- needs.ci-plan.outputs.selection_check (ID 117662249760)
+- github.event_name == 'workflow_dispatch' && 'Full dispatch summary' || 'Required test summary' (ID 117662249796)
+- Publish generated timing model (ID 117662249847)
+- Publish protected-master immutable debt analysis (ID 117662249876)
+- Master nightly proof (ID 117662249951)
+X agent-d/2718-private-workspace-base CI division-sh/swarm#2739 · 39122994179
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+X Private workspace base setup (not qualification) in 30s (ID 117662247524)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Bind reviewed setup source
+  X Publish and verify immutable workspace base
+  - Retain workspace base setup result
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+- Exact-head local preflight admission in 0s (ID 117662248329)
+- CI plan in 0s (ID 117662248385)
+- Static checks in 0s (ID 117662248386)
+- github.event_name == 'workflow_dispatch' && 'Full dispatch SQLite smoke' || 'SQLite local smoke' in 0s (ID 117662248430)
+- Native Darwin unused analysis in 0s (ID 117662248463)
+- Independently measured complexity ratchet in 0s (ID 117662248499)
+- macOS SQLite possession in 0s (ID 117662248612)
+- Native Linux unused analysis in 0s (ID 117662248637)
+- Go proof ${{ matrix.unit }} in 0s (ID 117662248967)
+- Native union unused checks in 0s (ID 117662249100)
+- Semantic smoke proofs in 0s (ID 117662249195)
+- CI timing budget in 0s (ID 117662249450)
+- needs.ci-plan.outputs.selection_check (ID 117662249760)
+- github.event_name == 'workflow_dispatch' && 'Full dispatch summary' || 'Required test summary' (ID 117662249796)
+- Publish generated timing model (ID 117662249847)
+- Publish protected-master immutable debt analysis (ID 117662249876)
+- Master nightly proof (ID 117662249951)

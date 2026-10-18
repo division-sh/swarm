@@ -1,0 +1,21 @@
+Precompile outside test slot: environment=0.003s build=1.248s cleanup=0.000s total=1.251s
+Test slot acquired after 29ms. Starting go test ./internal/testplanning -run ^TestWorkspaceImageCacheDockerfileInputsAreComplete$ -count=1 -p=1 -timeout=3m
+--- FAIL: TestWorkspaceImageCacheDockerfileInputsAreComplete (0.10s)
+    workspace_image_cache_test.go:870: fixed mirror verifier refused its controls: exit status 1
+        Traceback (most recent call last):
+          File "<string>", line 85, in <module>
+            result = scope["verify"]()
+          File "../../.github/scripts/verify-workspace-base.py", line 102, in verify
+            source_token = read_json(opener, "https://public.ecr.aws/token/?service=public.ecr.aws&scope=repository:docker/library/golang:pull", "")["token"]
+                           ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          File "../../.github/scripts/verify-workspace-base.py", line 41, in read_json
+            with opener.open(request, timeout=60) as response:
+                 ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+          File "<string>", line 34, in open
+            assert "public.ecr.aws" not in url, "verifier re-read the anonymous ECR source: " + url
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        AssertionError: verifier re-read the anonymous ECR source: https://public.ecr.aws/token/?service=public.ecr.aws&scope=repository:docker/library/golang:pull
+FAIL
+FAIL	github.com/division-sh/swarm/internal/testplanning	0.102s
+FAIL
+exit status 1

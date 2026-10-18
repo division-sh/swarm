@@ -1,0 +1,3 @@
+Precompile outside test slot: environment=0.003s build=1.237s cleanup=0.000s total=1.240s
+Test slot acquired after 26ms. Starting go test ./internal/testplanning -run ^TestWorkspaceImageCacheDockerfileInputsAreComplete$ -count=1 -p=1 -timeout=3m
+ok  	github.com/division-sh/swarm/internal/testplanning	0.100s
