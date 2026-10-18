@@ -25,7 +25,11 @@ import (
 
 func newLifecycleCacheFixture(t *testing.T) (context.Context, PersistedAgent, *lifecyclePersistenceProbe) {
 	t.Helper()
-	source := loadRootAndFlowStaticAgentSource(t)
+	return newLifecycleCacheFixtureForSource(t, loadRootAndFlowStaticAgentSource(t))
+}
+
+func newLifecycleCacheFixtureForSource(t *testing.T, source semanticview.Source) (context.Context, PersistedAgent, *lifecyclePersistenceProbe) {
+	t.Helper()
 	options, coordinate, binding := sourceSetFixtureAdmission(t, source)
 	bundle, present := semanticview.Bundle(source)
 	if !present || bundle == nil {

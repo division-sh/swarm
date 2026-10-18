@@ -216,9 +216,12 @@ func TestResetRuntimeStateFailureAlwaysLeavesResetPhase(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			am := newTestAgentManagerWithOptions(t, tt.bus, nil, AgentManagerOptions{})
-			rec := lifecycleTestPersistedAgent(t)
-			if err := registerCoordinatorLifecycleCell(t, am.lifecycle, testAuthorActivityContext(context.Background()), rec, true); err != nil {
+			source := loadRootAndFlowStaticAgentSource(t)
+			ctx, rec, probe := newLifecycleCacheFixtureForSource(t, source)
+			options, _, _ := sourceSetFixtureAdmission(t, source)
+			options.BaseContext, options.LifecycleStore = ctx, probe
+			am := newTestAgentManagerWithOptions(t, tt.bus, nil, options)
+			if err := registerCoordinatorLifecycleCell(t, am.lifecycle, ctx, rec, true); err != nil {
 				t.Fatalf("register lifecycle cell: %v", err)
 			}
 
@@ -232,7 +235,7 @@ func TestResetRuntimeStateFailureAlwaysLeavesResetPhase(t *testing.T) {
 			if cellExists != tt.wantCellAfter {
 				t.Fatalf("lifecycle cell exists = %v, want %v", cellExists, tt.wantCellAfter)
 			}
-			if _, started, err := am.lifecycle.beginRun(testAuthorActivityContext(context.Background()), AgentRunModeStandard, am.workOwner); err != nil || !started {
+			if _, started, err := am.lifecycle.beginRun(ctx, AgentRunModeStandard, am.workOwner); err != nil || !started {
 				t.Fatal("runtime remained blocked after reset failure")
 			}
 			transition := am.lifecycle.requestShutdownTransition()
