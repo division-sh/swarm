@@ -258,9 +258,8 @@ func TestFlowActivationPostMarkFailureReturnsToPendingRetry(t *testing.T) {
 func TestFlowActivationShutdownPreservesFailedAttemptDisposition(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	instances.topologyMarkErr = errors.New("ready phase CAS failed before acknowledgement")
 	calls := 0
@@ -271,7 +270,6 @@ func TestFlowActivationShutdownPreservesFailedAttemptDisposition(t *testing.T) {
 		}
 		return nil
 	}
-	ctx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
 		t.Fatal("missing injected error")
 	}
@@ -305,14 +303,12 @@ func TestFlowActivationShutdownRetriesAcknowledgedFailedAbandonment(t *testing.T
 		t.Run(name, func(t *testing.T) {
 			instances := &flowActivationTestInstanceStore{settleAttemptPostCommitErr: errors.New("acknowledged abandonment response lost")}
 			bus := &flowActivationTestBus{}
-			am := newFlowActivationManager(t, bus, instances)
 			bundle := testFlowBundle(t, autoEmit)
-			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+			am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 			req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 			instances.afterTopologyMark = func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
 				instances.readyAcknowledgementErr = errors.New("phase acknowledgment lost after durable progress")
 			}
-			ctx := testAuthorActivityContext(context.Background())
 			if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
 				t.Fatal("missing injected failure")
 			}
@@ -339,9 +335,8 @@ func TestFlowActivationShutdownRetriesAcknowledgedFailedAbandonment(t *testing.T
 func TestFlowActivationFailedAttemptShutdownRetainsPersistentSettlement(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	instances.afterTopologyMark = func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
 		instances.readyAcknowledgementErr = errors.New("phase acknowledgment lost after durable progress")
@@ -354,7 +349,6 @@ func TestFlowActivationFailedAttemptShutdownRetainsPersistentSettlement(t *testi
 		}
 		return nil
 	}
-	ctx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
 		t.Fatal("missing injected activation failure")
 	}
@@ -381,9 +375,8 @@ func TestFlowActivationFailedAttemptShutdownRetainsPersistentSettlement(t *testi
 func TestFlowActivationFailedAttemptShutdownRetriesSettlementPanic(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	instances.afterTopologyMark = func(runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
 		instances.readyAcknowledgementErr = errors.New("phase acknowledgment lost after durable progress")
@@ -400,7 +393,6 @@ func TestFlowActivationFailedAttemptShutdownRetriesSettlementPanic(t *testing.T)
 			return nil
 		}
 	}
-	ctx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
 		t.Fatal("missing injected activation failure")
 	}
