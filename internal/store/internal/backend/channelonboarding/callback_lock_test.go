@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +37,9 @@ func TestChannelCallbackPublicationLockOrderBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, verb := range []domain.Verb{domain.VerbReconnect, domain.VerbRebind} {
 			t.Run(backend+"/"+string(verb), func(t *testing.T) {
+				if backend == "postgres" && verb == domain.VerbReconnect {
+					t.Run("changed_discovery", proveChangedActionDiscovery)
+				}
 				f := newCallbackLockFixture(t, backend)
 				now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
 				predecessor := f.prepare(t, domain.VerbConnect, now)
@@ -136,6 +140,108 @@ func assertCallbackRefusal(t *testing.T, err error) {
 	}
 }
 
+func proveChangedActionDiscovery(t *testing.T) {
+	for _, changed := range []string{"parent_activation", "binding", "activation"} {
+		t.Run(changed, func(t *testing.T) {
+			f := newCallbackLockFixture(t, "postgres")
+			now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+			op := f.prepare(t, domain.VerbConnect, now)
+			_, activation, err := f.selected.PublishConnectedChannelActivation(context.Background(), publishCallbackRequest(op, now))
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.bind(t, op, now)
+			f.finish(t, op.OperationID, now)
+			action, _ := f.chooser(t, op, activation, now)
+			if err := f.run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+				resolved, found, err := channeldelivery.ResolveActionFactTx(ctx, tx, action.ActionFact, true)
+				if err == nil && (!found || !resolved.CurrentRender || resolved.ActivationID != activation.ActivationID) {
+					return fmt.Errorf("discovery control is not exact-current")
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			cut := &callbackDiscoveryCut{parent: op.OperationID, ready: make(chan struct{}), release: make(chan struct{})}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			var release sync.Once
+			unblock := func() { release.Do(func() { close(cut.release) }) }
+			var workers sync.WaitGroup
+			defer func() { unblock(); cancel(); workers.Wait() }()
+			done := make(chan error, 1)
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				done <- f.run(context.WithValue(ctx, callbackDiscoveryKey{}, cut), func(ctx context.Context, tx *sql.Tx) error {
+					_, _, _, err := channeldelivery.RequireChosenInputDraftTx(ctx, tx, action, now, true, true)
+					return err
+				})
+			}()
+			select {
+			case <-cut.ready:
+			case err := <-done:
+				t.Fatalf("discovery missed its original parent lock: %v", err)
+			case <-ctx.Done():
+				t.Fatal("discovery missed its original parent lock")
+			}
+			switch changed {
+			case "parent_activation":
+				successor := f.prepare(t, domain.VerbReconnect, now.Add(time.Minute))
+				_, _, err = f.selected.PublishConnectedChannelActivation(ctx, publishCallbackRequest(successor, now.Add(time.Minute)))
+			case "binding":
+				id := uuid.NewString()
+				_, _, err = f.selected.UnbindOperatorChannel(ctx, operatorchannel.UnbindRequest{OperationID: id, PrincipalID: f.principal,
+					Interface: op.Interface, ExpectedRevision: 1, RequestKeyHash: id, RequestHash: id, RequestedAt: now.Add(time.Minute)})
+			case "activation":
+				_, err = f.selected.RetireConnectedChannelActivation(ctx, domain.RetireActivationRequest{SlotKey: op.SlotKey,
+					ExpectedActivationRevision: activation.Revision, Reason: "changed discovery control", Now: now.Add(time.Minute)})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeBindings, err := f.selected.ListOperatorChannelBindings(ctx, f.principal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeActivations, err := f.selected.ListCurrentConnectedChannelActivations(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			unblock()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatal("changed discovery admitted its stale action")
+				}
+			case <-ctx.Done():
+				t.Fatal("changed-discovery refusal did not join")
+			}
+			workers.Wait()
+			if !cut.constrained || cut.foreignLock {
+				t.Fatal("mutation join was not constrained to its already-discovered parent before locking")
+			}
+			afterBindings, err := f.selected.ListOperatorChannelBindings(ctx, f.principal)
+			if err != nil {
+				t.Fatal(err)
+			}
+			afterActivations, err := f.selected.ListCurrentConnectedChannelActivations(ctx)
+			if err != nil || !reflect.DeepEqual(beforeBindings, afterBindings) || !reflect.DeepEqual(beforeActivations, afterActivations) {
+				t.Fatal("refused action changed current binding/activation rows")
+			}
+			if err := f.run(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				state, err := channeldelivery.RequireActionIntentTx(ctx, tx, action, true, false)
+				if err == nil && state != "pending" {
+					return fmt.Errorf("refused discovery changed its exact intent")
+				}
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestChannelActionMutationFencesAndReadOnlyPreviewsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, kind := range []string{"card", "skip", "choice"} {
@@ -152,7 +258,9 @@ func TestChannelActionMutationFencesAndReadOnlyPreviewsBothStores(t *testing.T) 
 				action, _ := f.chooser(t, op, activation, now)
 				for _, lock := range []bool{false, true} {
 					observed := make(chan bool, 1)
-					ctx := context.WithValue(context.Background(), callbackOrderObservation{}, observed)
+					ctx := context.WithValue(context.Background(), callbackOrderObservation{}, callbackOrderProbe{observed: observed, mutation: lock})
+					queries := &neutralQueryObservation{}
+					ctx = context.WithValue(ctx, neutralLockOrderObservation{}, queries)
 					err := f.run(ctx, func(ctx context.Context, tx *sql.Tx) error {
 						switch kind {
 						case "card":
@@ -178,6 +286,27 @@ func TestChannelActionMutationFencesAndReadOnlyPreviewsBothStores(t *testing.T) 
 						}
 					default:
 						t.Fatal("guard did not reach its real native query")
+					}
+					parent, principal := false, false
+					for _, query := range queries.queries {
+						if actionParentLockQuery(query) {
+							if !lock || principal {
+								t.Fatal("parent lock was acquired in preview or after principal")
+							}
+							parent = true
+						}
+						if principalFenceQuery(query) {
+							if !lock || !parent {
+								t.Fatal("principal fence preceded the parent or appeared in preview")
+							}
+							principal = true
+						}
+						if !lock && strings.Contains(query, "FOR UPDATE") {
+							t.Fatal("read-only action preview acquired mutation locks")
+						}
+					}
+					if lock && (!parent || !principal) {
+						t.Fatal("mutation did not establish both parent and principal fences")
 					}
 				}
 			})
@@ -245,11 +374,21 @@ func TestNeutralChannelMutationPrincipalFirstBothStores(t *testing.T) {
 				}); err != nil {
 					t.Fatal(err)
 				}
-				principal, mutation := false, false
+				parent, principal, mutation := false, false, false
 				queries.Lock()
 				defer queries.Unlock()
 				for _, query := range queries.queries {
+					if actionParentLockQuery(query) {
+						if principal || path != "quoted_control" {
+							t.Fatal("unexpected or late parent acquisition")
+						}
+						parent = true
+						continue
+					}
 					if strings.Contains(query, "operator_principal_singleton") || strings.Contains(query, "SELECT principal_id FROM operator_principals") {
+						if path == "quoted_control" && !parent {
+							t.Fatal("quoted reply acquired principal before its parent")
+						}
 						principal = true
 						continue
 					}
@@ -362,6 +501,17 @@ func TestNativeInboxAttachmentPublicationLockOrderBothStores(t *testing.T) {
 
 type callbackLockRole struct{}
 type callbackOrderObservation struct{}
+type callbackDiscoveryKey struct{}
+type callbackDiscoveryCut struct {
+	parent                   string
+	ready, release           chan struct{}
+	once                     sync.Once
+	constrained, foreignLock bool
+}
+type callbackOrderProbe struct {
+	observed chan bool
+	mutation bool
+}
 type neutralLockOrderObservation struct{}
 type neutralQueryObservation struct {
 	sync.Mutex
@@ -390,17 +540,28 @@ type callbackLockConn struct {
 	probe *callbackLockProbe
 }
 
-func (c *callbackLockConn) before(ctx context.Context, query string) {
+func (c *callbackLockConn) before(ctx context.Context, query string, args []driver.NamedValue) {
+	if cut, ok := ctx.Value(callbackDiscoveryKey{}).(*callbackDiscoveryCut); ok {
+		if actionParentLockQuery(query) {
+			if len(args) != 1 || args[0].Value != cut.parent {
+				cut.foreignLock = true
+			}
+			cut.once.Do(func() { close(cut.ready); <-cut.release })
+		}
+		if strings.Contains(query, "FOR UPDATE OF action, render, plan, receipt, selected, binding, onboarding, activation") {
+			cut.constrained = strings.Contains(query, "AND onboarding.operation_id=$6::uuid") && len(args) == 9 && args[5].Value == cut.parent
+		}
+	}
 	if observed, ok := ctx.Value(neutralLockOrderObservation{}).(*neutralQueryObservation); ok {
 		observed.Lock()
 		observed.queries = append(observed.queries, query)
 		observed.Unlock()
 	}
-	if observed, ok := ctx.Value(callbackOrderObservation{}).(chan bool); ok {
+	if probe, ok := ctx.Value(callbackOrderObservation{}).(callbackOrderProbe); ok {
 		principal := strings.Contains(query, "operator_principal_singleton") || strings.Contains(query, "SELECT principal_id FROM operator_principals")
-		if principal || strings.Contains(query, "FROM channel_delivery_actions action") {
+		if principal || strings.Contains(query, "FROM channel_delivery_actions action") && (!probe.mutation || strings.Contains(query, "AND onboarding.operation_id=")) {
 			select {
-			case observed <- principal:
+			case probe.observed <- principal:
 			default:
 			}
 		}
@@ -413,22 +574,31 @@ func (c *callbackLockConn) before(ctx context.Context, query string) {
 	}
 }
 func (c *callbackLockConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	c.before(ctx, query)
+	c.before(ctx, query, args)
 	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
 }
 func (c *callbackLockConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
-	c.before(ctx, query)
+	c.before(ctx, query, args)
 	rows, err := c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
 	if err != nil {
 		return rows, err
 	}
-	if ctx.Value(callbackLockRole{}) == "callback" && (strings.Contains(query, "FROM channel_delivery_actions action") || strings.Contains(query, "FROM connected_channel_activations a")) {
+	if ctx.Value(callbackLockRole{}) == "callback" && strings.Contains(query, "FOR UPDATE OF") {
 		c.probe.callbackOnce.Do(func() { c.probe.callbackReady <- false; <-c.probe.release })
 	}
 	if ctx.Value(callbackLockRole{}) == "publisher" && strings.Contains(query, "SELECT principal_id FROM operator_principals") {
 		c.probe.publisherOnce.Do(func() { close(c.probe.publisherReady); <-c.probe.release })
 	}
 	return rows, nil
+}
+
+func actionParentLockQuery(query string) bool {
+	return query == "SELECT operation_id::text FROM channel_onboarding_operations WHERE operation_id=$1::uuid FOR UPDATE" ||
+		query == "SELECT operation_id FROM channel_onboarding_operations WHERE operation_id=?"
+}
+
+func principalFenceQuery(query string) bool {
+	return strings.Contains(query, "operator_principal_singleton") || strings.Contains(query, "SELECT principal_id FROM operator_principals")
 }
 func (c *callbackLockConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	if native, ok := c.Conn.(driver.ConnBeginTx); ok {
