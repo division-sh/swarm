@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
@@ -87,8 +86,8 @@ func TestQ10EntityDataCursorOrderingBothStores(t *testing.T) {
 				return readList(ctx, request)
 			}
 			handler, err := apiv1.NewHandler(apiv1.Options{
-				PlatformSpecPath: contracts.DefaultPlatformSpecFile(repoRootForRuntimeWriterGuard(t)), AuthTokens: []string{"q10-cursor-token"},
-				Handlers: methods,
+				AuthTokens: []string{"q10-cursor-token"},
+				Handlers:   methods,
 			})
 			if err != nil {
 				t.Fatal(err)

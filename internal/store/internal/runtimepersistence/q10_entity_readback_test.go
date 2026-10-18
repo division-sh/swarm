@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityquery"
@@ -159,8 +158,8 @@ func TestQ10OperatorAndAgentLifecycleReadbackBothStores(t *testing.T) {
 				t.Fatalf("absence/unknown counts drift: %+v %v", groups, err)
 			}
 			handler, err := apiv1.NewHandler(apiv1.Options{
-				PlatformSpecPath: contracts.DefaultPlatformSpecFile(repoRootForRuntimeWriterGuard(t)), AuthTokens: []string{"q10-read-token"},
-				Handlers: apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: f.store.(apiv1.EntityReadStore)}),
+				AuthTokens: []string{"q10-read-token"},
+				Handlers:   apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: f.store.(apiv1.EntityReadStore)}),
 			})
 			if err != nil {
 				t.Fatal(err)
