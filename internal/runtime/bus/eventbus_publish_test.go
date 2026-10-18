@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -203,6 +204,7 @@ func eventBusTestRunContext(t *testing.T, selected eventBusRunFixtureStore) cont
 func eventBusTestRunContextForSource(t *testing.T, selected eventBusRunFixtureStore, source semanticview.Source) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), eventBusTestRunID)
+	ctx = originalEventBusFixtureContext(t, ctx, selected)
 	if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source)); err != nil {
 		t.Fatalf("persist exact event bus test source artifact: %v", err)
 	}
@@ -217,6 +219,7 @@ func eventBusTestRunContextForSource(t *testing.T, selected eventBusRunFixtureSt
 func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	runID := uuid.NewString()
 	if err := storetest.EnsureEphemeralRun(ctx, pg, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("create run through lifecycle owner: %v", err)
@@ -234,6 +237,7 @@ func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres(t *tes
 func TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
+	ctx = originalEventBusFixtureContext(t, ctx, sqliteStore)
 	runID := uuid.NewString()
 	if err := storetest.EnsureEphemeralRun(ctx, sqliteStore, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 		t.Fatalf("create run through lifecycle owner: %v", err)
@@ -3014,13 +3018,16 @@ func TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycle
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), sourceFact)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, sourceFact.BundleHash()))
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		SourceArtifactFact: sourceFact,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	if err := eb.Publish(context.Background(), eventtest.RunCreatingRootIngress(uuid.NewString(),
+	if err := eb.Publish(ctx, eventtest.RunCreatingRootIngress(uuid.NewString(),
 
 		events.EventType("scan.requested"),
 		"test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {

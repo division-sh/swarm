@@ -49,6 +49,7 @@ func TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends(t *testing.T
 			source := semanticview.Wrap(bundle)
 			ctx := testAuthorActivityContextForSource(context.Background(), source)
 			selected := newTargetOwnerParityStore(t, backend, ctx)
+			ctx = originalEventBusFixtureContext(t, ctx, selected)
 			runID := uuid.NewString()
 			sourceEntityID := runtimeflowidentity.EntityID(runID)
 			rootOwner := events.RouteIdentity{
