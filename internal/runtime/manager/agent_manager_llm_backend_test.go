@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
@@ -22,8 +23,10 @@ import (
 
 func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {
 	am := newTestAgentManagerWithOptions(t, nil, nil, AgentManagerOptions{LLMBackend: "openai_compatible"})
+	topology := managerTestTopologyAdmissionForSource(t, am.semanticSource)
+	topology.Lifetime = runtimeagenttopology.LifetimeEphemeral
 	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Topology: managerTestEphemeralTopologyAdmission(t),
+		Topology: topology,
 		Config: managerTestAgentConfig(models.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "agent-1",
