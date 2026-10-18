@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	"github.com/google/uuid"
 )
@@ -83,9 +84,35 @@ func TestRunForkReplayCutRetainsExactPublicationAndReceiver(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(again, sourceDelivery) || reflect.DeepEqual(again, current) {
 		t.Fatal("fixed delivery borrowed a current source story")
 	}
-	child, err := projectRunForkReplayInitializedReceiver(snapshot, got, again, uuid.NewString())
-	if err != nil || !child.Target.ExistingEntity() || !child.Initialization.Empty() || child.ConnectClaim != sourceDelivery.Route.ConnectClaim {
+	childRun := uuid.NewString()
+	child, err := projectRunForkReplayInitializedReceiver(snapshot, got, again, childRun)
+	if err != nil || !child.Target.ExistingEntity() || child.ConnectClaim != sourceDelivery.Route.ConnectClaim {
 		t.Fatalf("fixed receiver preparation lost exact ownership: %+v %v", child, err)
+	}
+	// This captured non-root receiver keeps its construction coordinates in the child.
+	wantTarget := events.MustExistingEntityTarget(sourceDelivery.Route.Initialization.ConstructionTarget().Route())
+	wantReceiver := sourceDelivery.Route.AgentIdentity.Route
+	wantHistorical := events.HistoricalReceiverConstruction{
+		SourceRunID: snapshot.RunID, SourceRevision: snapshot.Revision, SourceReceiver: wantReceiver,
+	}
+	historical, present := child.Initialization.HistoricalConstruction()
+	if !present || historical != wantHistorical || child.Initialization.ConstructionTarget() != wantTarget ||
+		child.Initialization.ReceiverRoute() != wantReceiver || child.Initialization.CreatingEventID() != "" ||
+		child.Target != wantTarget || child.AgentIdentity.RunID != childRun || child.AgentIdentity.Route != wantReceiver {
+		t.Fatalf("fixed receiver lost exact historical construction: child=%+v historical=%+v want=%+v", child, historical, wantHistorical)
+	}
+	childEventID := runfork.ProjectReplayEventID(childRun, event.ID())
+	if err := child.Initialization.ValidatePublication(childRun, childEventID); err != nil {
+		t.Fatalf("historical initialization rejected its child publication: %v", err)
+	}
+	if err := child.Initialization.ValidateRoute(child); err != nil {
+		t.Fatalf("historical initialization rejected its child route: %v", err)
+	}
+	if _, err := child.Identity(); err != nil {
+		t.Fatalf("fixed child route has no valid identity: %v", err)
+	}
+	if err := child.Initialization.ValidatePublication(snapshot.RunID, childEventID); err == nil {
+		t.Fatal("historical child initialization accepted source-run publication ownership")
 	}
 	if projectionJSON(t, snapshot) != before {
 		t.Fatal("cut preparation changed historical evidence")
