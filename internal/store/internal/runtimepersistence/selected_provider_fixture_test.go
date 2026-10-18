@@ -34,6 +34,14 @@ func newSelectedProviderCompletionFixture(t *testing.T, store selectedCompletion
 
 func newSelectedProviderCompletionFixtureWithProcess(t *testing.T, store selectedCompletionAuthorityStore, db *sql.DB, sqlite bool, process startupownership.ProcessCapability) selectedCompletionFixture {
 	t.Helper()
+	source := selectedProviderCompletionSourceForTest(t)
+	bundle, _ := semanticview.Bundle(source)
+	f := newSelectedCompletionFixtureWithProcess(t, store, db, sqlite, process, bundle.SourceArtifact)
+	return selectedProviderCompletionFixtureForSource(t, f, source)
+}
+
+func selectedProviderCompletionSourceForTest(t *testing.T) semanticview.Source {
+	t.Helper()
 	root := t.TempDir()
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: grant-receiver-root\nstages:\n  active: {}\n  done: {final: true}\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "global/schema.yaml"), "name: global\nstages:\n  active: {}\n  done: {final: true}\n")
@@ -43,9 +51,12 @@ func newSelectedProviderCompletionFixtureWithProcess(t *testing.T, store selecte
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := semanticview.Wrap(compiled)
+	return semanticview.Wrap(compiled)
+}
+
+func selectedProviderCompletionFixtureForSource(t *testing.T, f selectedCompletionFixture, source semanticview.Source) selectedCompletionFixture {
+	t.Helper()
 	bundle, _ := semanticview.Bundle(source)
-	f := newSelectedCompletionFixtureWithProcess(t, store, db, sqlite, process, bundle.SourceArtifact)
 	f.providerSource = source
 	f.request.ContainerPlanFingerprint = "sha256:" + strings.Repeat("1", 64)
 	f.request.ActorCensusFingerprint = "sha256:" + strings.Repeat("2", 64)
