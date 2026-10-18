@@ -109,6 +109,7 @@ func registerCoordinatorLifecycleCell(t *testing.T, coordinator *agentLifecycleC
 
 type lifecyclePersistenceProbe struct {
 	mu           sync.Mutex
+	binding      ProcessExecutionBinding
 	cell         lifecycleProbeCell
 	views        map[runtimeagentidentity.Identity]AgentLifecycleState
 	exists       bool
@@ -148,7 +149,11 @@ func (p *lifecyclePersistenceProbe) seedAgentRow(rec PersistedAgent) error {
 }
 
 func newLifecyclePersistenceProbe() *lifecyclePersistenceProbe {
-	return &lifecyclePersistenceProbe{operations: map[string]AgentLifecycleTransitionResult{}, views: map[runtimeagentidentity.Identity]AgentLifecycleState{}}
+	return newLifecyclePersistenceProbeWithBinding(lifecycleProbeProcessBinding())
+}
+
+func newLifecyclePersistenceProbeWithBinding(binding ProcessExecutionBinding) *lifecyclePersistenceProbe {
+	return &lifecyclePersistenceProbe{binding: binding, operations: map[string]AgentLifecycleTransitionResult{}, views: map[runtimeagentidentity.Identity]AgentLifecycleState{}}
 }
 
 func lifecycleProbeProcessBinding() ProcessExecutionBinding {
@@ -164,7 +169,7 @@ func lifecycleProbeProcessBinding() ProcessExecutionBinding {
 }
 
 func (p *lifecyclePersistenceProbe) ProcessExecutionBinding() (ProcessExecutionBinding, error) {
-	binding := lifecycleProbeProcessBinding()
+	binding := p.binding
 	return binding, binding.Validate()
 }
 
@@ -287,7 +292,7 @@ func (p *lifecyclePersistenceProbe) CommitAgentLifecycleTransition(_ context.Con
 		PreviousGeneration: p.cell.Generation, Generation: req.TargetGeneration,
 		PreviousPhase: p.cell.Phase, Phase: req.TargetPhase,
 		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
-		ProcessBinding: lifecycleProbeProcessBinding(),
+		ProcessBinding: p.binding,
 	}
 	p.cell = lifecycleProbeCell{Epoch: req.TargetEpoch, Generation: req.TargetGeneration, Phase: req.TargetPhase}
 	p.views[req.Identity] = AgentLifecycleState{Identity: req.Identity, AgentID: req.AgentID, RuntimeEpoch: req.TargetEpoch, Generation: req.TargetGeneration,
