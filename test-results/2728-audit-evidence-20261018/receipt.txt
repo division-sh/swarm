@@ -1,0 +1,6 @@
+<!-- receipt v1 -->
+receipt: head=fe9fb54200cff883ce337b377c02e791d6d195bd tree=e3b8b30ffd18bc6d2c4011e17b897ae8dd5b66d9 parent=8666783a940b91ccb93ced2600600aa85f44678b branch=agent-d/2728-provenance-ledger-audit signed=N dirty_files=0
+preflight: test-results/preflight/20261018T192735.201020022-10ff70e6-765c-439b-b4d8-f204c993447c/receipt.json sha256=d9afabbe75b1b04d8ecf9a7299c15dea069f4b687f840f09a07fd1ce10b9b720 (STALE(head=50e3a8f275) complete unstarted=0)
+tests: read-only #2728 PLAN; no tests run; canonical lifecycle+catalog-replay-2-3+codemod-candidate-overlay emission only, not qualification
+regenerated: not-claimed
+generated: 2026-10-18T19:51:27Z
