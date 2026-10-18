@@ -101,12 +101,15 @@ func TestReviewCycle2InboundFinalizationKeepsCommittedSiblings(t *testing.T) {
 	for _, failAt := range []int{1, 2} {
 		t.Run(fmt.Sprintf("position_%d", failAt), func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
-			store := &InMemoryEventStore{}
+			store := newTargetRouteMemoryStore()
 			probe := &review2460PublicationProbe{failAt: failAt}
 			source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
 			bus, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle: source, ProviderOutputVerifier: catalog, TestLifecycleProbe: probe,
-				Durable: DurableDependencies{Instances: FlowInstanceIndexFixture()},
+				Durable: DurableDependencies{
+					Instances:    FlowInstanceIndexFixture(),
+					RunLifecycle: &publicationRunPreflightTestStore{runID: batch.Events[1].Event.RunID()},
+				},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -117,7 +120,10 @@ func TestReviewCycle2InboundFinalizationKeepsCommittedSiblings(t *testing.T) {
 			}
 			var committed []CommittedPublication
 			for _, command := range plan.CommitCommands() {
-				result, err := store.CommitPublication(ctx, command)
+				if err := command.ValidateInbound(plan.Admission()); err != nil {
+					t.Fatal(err)
+				}
+				result, err := store.commitValidatedPublication(command)
 				if err != nil {
 					t.Fatal(err)
 				}
