@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -43,11 +44,24 @@ func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartif
 	fact := sourceartifactfixture.FactFor(artifact)
 	ctx := correlation.WithSourceArtifactFact(context.Background(), fact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("00000000-0000-4000-8000-000000001331", fact.BundleHash()))
+	ctx = originalRuntimeFixtureContext(t, ctx, selected)
+	original, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := sourceartifactfixture.EnsureArtifact(ctx, selected, artifact); err != nil {
 		t.Fatal(err)
 	}
 	return runtimepkg.RuntimeLogNativeFixtureForTest{
 		Persistence: selected, Deliveries: selected, Runs: selected, Context: ctx, FanOutCapacity: capacity,
+		ProcessCapability: original,
+		MutationContext: func(operation context.Context) (context.Context, error) {
+			if startupownership.HasMutationAuthority(operation) {
+				_, err := startupownership.CaptureMutationAuthority(operation)
+				return operation, err
+			}
+			return startupownership.WithProcessMutationAuthority(operation, original)
+		},
 		RequireRun: func(ctx context.Context, run string) error {
 			return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{RunID: run, Origin: storetest.ScenarioSetupOrigin(), Artifact: artifact, BundleHash: artifact.BundleHash(), StartedAt: time.Now().UTC()})
 		},

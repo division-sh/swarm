@@ -1448,14 +1448,16 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 	factory := runtimeagents.NewLLMAgentFactory(rt.LLMRuntimes, rt.ToolExecutor, runtimeagents.LLMAgentOptions{})
 	managerOptions := runtimemanager.AgentManagerOptions{
-		ExecutionPosture:   boot.ExecutionPosture,
-		BaseContext:        rt.authorActivityContext(context.Background()),
-		SourceArtifactFact: rt.Options.SourceArtifactFact,
-		DeliveryStore:      runtimeDeps.DeliveryStore,
-		TestLifecycleProbe: opts.TestLifecycleProbe,
-		Workspaces:         rt.Workspace,
-		Sessions:           runtimeDeps.SessionRegistry,
-		SessionResetter:    runtimeDeps.SessionResetter,
+		ExecutionPosture:     boot.ExecutionPosture,
+		BaseContext:          rt.authorActivityContext(context.Background()),
+		MutationContext:      rt.mutationContext,
+		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
+		SourceArtifactFact:   rt.Options.SourceArtifactFact,
+		DeliveryStore:        runtimeDeps.DeliveryStore,
+		TestLifecycleProbe:   opts.TestLifecycleProbe,
+		Workspaces:           rt.Workspace,
+		Sessions:             runtimeDeps.SessionRegistry,
+		SessionResetter:      runtimeDeps.SessionResetter,
 		PersistenceRoles: func() runtimemanager.PersistenceRoles {
 			roles := runtimeDeps.ManagerPersistenceRoles
 			roles.AgentRoutes = rt.Bus

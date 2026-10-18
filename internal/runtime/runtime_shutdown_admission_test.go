@@ -249,7 +249,7 @@ func VerifyRuntimeShutdownDeliveryFixtureClaimsThroughCanonicalAdapterForTest(t 
 		t.Fatalf("claim seeded unpublished durable work: %+v", before)
 	}
 	event = fixture.PublishDelivery(fixture.Context, event, []events.DeliveryRoute{route}, store.authority)
-	result, err := store.ClaimDelivery(testAuthorActivityContext(context.Background()), store.authority, event, route)
+	result, err := store.ClaimDelivery(fixture.Context, store.authority, event, route)
 	if err != nil {
 		t.Fatalf("shutdown fixture must admit its real delivery claim: %v", err)
 	}
@@ -299,6 +299,9 @@ func VerifyRuntimeShutdown_ClosesAdmissionBeforeManagerDrainAndInboundIngressFor
 		}
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
+		BaseContext:                    testAuthorActivityContext(fixture.Context),
+		MutationContext:                fixture.MutationContext,
+		CarryMutationContext:           runtimestartupownership.CarryMutationAuthority,
 		ExecutionPosture:               executionposture.Live,
 		SemanticSource:                 runtimeTestSubscriptionSource("test.in"),
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,
@@ -476,6 +479,9 @@ func VerifyRuntimeShutdownWithOptions_PropagatesConfiguredGraceToManagerDrainFor
 	am := runtimemanager.NewAgentManagerWithOptions(bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
+		BaseContext:                    testAuthorActivityContext(fixture.Context),
+		MutationContext:                fixture.MutationContext,
+		CarryMutationContext:           runtimestartupownership.CarryMutationAuthority,
 		ExecutionPosture:               executionposture.Live,
 		SemanticSource:                 runtimeTestSubscriptionSource("test.in"),
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed,

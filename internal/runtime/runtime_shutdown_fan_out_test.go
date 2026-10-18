@@ -129,7 +129,9 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 	rt.Manager = manager.NewAgentManagerWithOptions(bus, func(actors.AgentConfig) (manager.Agent, error) {
 		return agent, nil
 	}, manager.AgentManagerOptions{
-		ExecutionPosture: executionposture.Live, SemanticSource: runtimeTestSubscriptionSource("test.in"),
+		BaseContext: testAuthorActivityContext(fixture.Context), MutationContext: fixture.MutationContext,
+		CarryMutationContext: startupownership.CarryMutationAuthority,
+		ExecutionPosture:     executionposture.Live, SemanticSource: runtimeTestSubscriptionSource("test.in"),
 		RuntimeShutdownAdmissionClosed: rt.shutdownAdmissionClosed, WorkOwner: rt.workOccurrence,
 		LifecycleStore: lifecycle, DeliveryStore: store, PersistenceRoles: busRoles, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, &runtimeShutdownManagerStore{})

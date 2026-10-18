@@ -16,20 +16,22 @@ import (
 // is the original selected owner; setup and fixed fault cuts are explicit.
 type ManagerDeliveryNativeFixture struct {
 	runtimedelivery.Store
-	Authority         runtimedelivery.ExecutionAuthority
-	Context           context.Context
-	SelectedEvent     events.Event
-	SelectedAdmission managedexecution.Admission
-	SelectedRoute     events.DeliveryRoute
-	SemanticSource    semanticview.Source
-	RequireRun        func(*testing.T, string)
-	NormalAuthority   runtimedelivery.ExecutionAuthority
-	Publish           func(*testing.T, context.Context, events.Event, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority)
-	ClaimHeartbeat    func(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error)
-	RenewHeartbeat    func(context.Context, runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error)
-	RetryReady        func(*testing.T, events.Event, events.DeliveryRoute)
-	AgeClaim          func(*testing.T, runtimedelivery.Claim, time.Time)
-	Transitions       func(*testing.T) []string
+	Authority            runtimedelivery.ExecutionAuthority
+	Context              context.Context
+	MutationContext      func(context.Context) (context.Context, error)
+	CarryMutationContext func(context.Context, context.Context) context.Context
+	SelectedEvent        events.Event
+	SelectedAdmission    managedexecution.Admission
+	SelectedRoute        events.DeliveryRoute
+	SemanticSource       semanticview.Source
+	RequireRun           func(*testing.T, string)
+	NormalAuthority      runtimedelivery.ExecutionAuthority
+	Publish              func(*testing.T, context.Context, events.Event, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority)
+	ClaimHeartbeat       func(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error)
+	RenewHeartbeat       func(context.Context, runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error)
+	RetryReady           func(*testing.T, events.Event, events.DeliveryRoute)
+	AgeClaim             func(*testing.T, runtimedelivery.Claim, time.Time)
+	Transitions          func(*testing.T) []string
 }
 
 type managerDeliveryNativeFactory func(*testing.T) *ManagerDeliveryNativeFixture

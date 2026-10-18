@@ -29,18 +29,20 @@ type RuntimeLogNativeFixtureForTest struct {
 		runlifecycle.OperationOwner
 		runlifecycle.CandidateStore
 	}
-	Context         context.Context
-	RequireRun      func(context.Context, string) error
-	RunSnapshot     func(context.Context, string) (runlifecycle.Snapshot, error)
-	LatestLog       func(context.Context) (events.Event, error)
-	StartupDecision func(context.Context) (events.Event, error)
-	RunPresence     func(context.Context, string) (bool, error)
-	RemoveArtifact  func(context.Context, string) (int64, error)
-	AppendFault     func(context.Context, string, bool) error
-	PublishSubject  func(context.Context, events.Event)
-	PublishDelivery func(context.Context, events.Event, []events.DeliveryRoute, deliverylifecycle.ExecutionAuthority) events.Event
-	Physical        func(context.Context) RuntimeLogPhysicalForTest
-	FanOutCapacity  startupownership.FanOutCapacity
+	Context           context.Context
+	ProcessCapability startupownership.ProcessCapability
+	MutationContext   func(context.Context) (context.Context, error)
+	RequireRun        func(context.Context, string) error
+	RunSnapshot       func(context.Context, string) (runlifecycle.Snapshot, error)
+	LatestLog         func(context.Context) (events.Event, error)
+	StartupDecision   func(context.Context) (events.Event, error)
+	RunPresence       func(context.Context, string) (bool, error)
+	RemoveArtifact    func(context.Context, string) (int64, error)
+	AppendFault       func(context.Context, string, bool) error
+	PublishSubject    func(context.Context, events.Event)
+	PublishDelivery   func(context.Context, events.Event, []events.DeliveryRoute, deliverylifecycle.ExecutionAuthority) events.Event
+	Physical          func(context.Context) RuntimeLogPhysicalForTest
+	FanOutCapacity    startupownership.FanOutCapacity
 }
 
 type RuntimeLogPhysicalForTest struct {

@@ -61,6 +61,8 @@ type AgentManager struct {
 	lifecycle                       *agentLifecycleCoordinator
 	roles                           PersistenceRoles
 	baseContext                     context.Context
+	mutationContext                 func(context.Context) (context.Context, error)
+	carryMutationContext            func(context.Context, context.Context) context.Context
 	staticTopology                  runtimeagenttopology.Admission
 	staticSourceSet                 runtimeagenttopology.SourceSetPlan
 	startupAgentsHydrated           bool
@@ -261,6 +263,8 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		lifecycle:                         lifecycle,
 		roles:                             opts.PersistenceRoles,
 		baseContext:                       opts.BaseContext,
+		mutationContext:                   opts.MutationContext,
+		carryMutationContext:              opts.CarryMutationContext,
 		executionPosture:                  opts.ExecutionPosture,
 		poisonPanicCounts:                 make(map[poisonPanicKey]int),
 		poisonEventEntities:               make(map[string]map[string]struct{}),
@@ -318,6 +322,13 @@ func (am *AgentManager) bindRuntimeOperationContext(ctx context.Context) (contex
 	if owner, ok := am.lifecycle.persistence().(runtimeMutationContextOwner); ok {
 		var err error
 		ctx, err = owner.BindRuntimeMutationContext(ctx)
+		if err != nil {
+			return ctx, err
+		}
+	}
+	if am.mutationContext != nil {
+		var err error
+		ctx, err = am.mutationContext(ctx)
 		if err != nil {
 			return ctx, err
 		}

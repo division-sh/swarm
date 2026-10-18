@@ -75,6 +75,14 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 	}
 	return &manager.ManagerDeliveryNativeFixture{
 		Store: selected, Authority: authority, Context: ctx, NormalAuthority: authority,
+		MutationContext: func(operation context.Context) (context.Context, error) {
+			if startupownership.HasMutationAuthority(operation) {
+				_, err := startupownership.CaptureMutationAuthority(operation)
+				return operation, err
+			}
+			return startupownership.WithProcessMutationAuthority(operation, process)
+		},
+		CarryMutationContext: startupownership.CarryMutationAuthority,
 		RequireRun: func(t *testing.T, runID string) {
 			t.Helper()
 			storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
