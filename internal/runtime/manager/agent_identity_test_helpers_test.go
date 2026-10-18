@@ -181,7 +181,18 @@ func installManagerTestStaticTopology(
 	configs ...runtimeactors.AgentConfig,
 ) ([]PersistedAgent, runtimeagenttopology.Admission, runtimeagenttopology.SourceSetPlan) {
 	t.Helper()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
+	bundle, present := semanticview.Bundle(am.semanticSource)
+	if !present || bundle == nil {
+		t.Fatal("manager topology fixture requires its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	records := make([]PersistedAgent, 0, len(configs))
 	desired := make([]runtimeagenttopology.DesiredAgent, 0, len(configs))
 	for _, authored := range configs {
