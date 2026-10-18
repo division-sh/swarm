@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -135,7 +136,16 @@ func TestFanOutEvaluationHydrationIntervalFencesBothStores(t *testing.T) {
 						if err != nil || !found {
 							t.Fatalf("current source set: %v %v", found, err)
 						}
-						next, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: f.seed.bundleHash}, {BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64)}}, nil)
+						extra, _ := sourceartifactfixture.Rooted(t, "extra", storeTestSourceArtifact("hydration-source-head-extra-source"))
+						sourceartifactfixture.RequireArtifact(t, f.ctx, f.raw.(sourceartifactfixture.Writer), extra.Artifact())
+						if extra.Admission().BundleHash() == f.seed.bundleHash {
+							t.Fatal("hydration source-head replacement requires a distinct second source")
+						}
+						extraCoordinate, err := agenttopology.NewSourceCoordinate(extra.Admission())
+						if err != nil {
+							t.Fatal(err)
+						}
+						next, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{current.Sources[0], extraCoordinate}, nil)
 						if err != nil {
 							t.Fatal(err)
 						}
