@@ -1,0 +1,6 @@
+<!-- receipt v1 -->
+receipt: head=0e78f146d8a0afb141628520c3e7c4f32033c339 tree=45b76d13662e5b724fa042425b6a5e2d76709760 parent=56281b14b7fc082a5fa4ef50ceb20513a7a94459 branch=agent-d/2720-stall-attribution signed=G dirty_files=0
+preflight: test-results/preflight/20261018T170559.048990747-c573e565-fb02-4d17-ac79-f313bdef5eab/receipt.json sha256=ef9764c756e64758282c8a64f12cc13f2cb85b4bc18cff268d34710040250bd9 (exact-head complete unstarted=0)
+tests: 2735 hosted RED classified: candidate 0e78f146d8 catalog protocol root FAIL 3.330s; master 909222b50c same root PASS 3.198s; eight hosted roots share unchanged mock missing required arrays; no source edits, push or rerun
+regenerated: not-claimed
+generated: 2026-10-18T17:37:27Z

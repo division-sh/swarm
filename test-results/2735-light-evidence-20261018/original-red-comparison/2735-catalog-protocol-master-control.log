@@ -1,0 +1,3 @@
+Precompile outside test slot: environment=0.003s build=21.239s cleanup=0.000s total=21.242s
+Test slot acquired after 5ms. Starting go test ./internal/cliapp -run ^TestSwarmTestCatalogCompanionsAreProtocolOnly$ -count=1
+ok  	github.com/division-sh/swarm/internal/cliapp	3.198s

@@ -1,0 +1,177 @@
+Precompile outside test slot: environment=0.003s build=2.954s cleanup=0.000s total=2.957s
+Test slot acquired after 16ms. Starting go test ./internal/cliapp -run ^TestSwarmTestCatalogCompanionsAreProtocolOnly$ -count=1
+--- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly (3.31s)
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-advances-to (0.12s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-advances-to-terminal (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-clear-gates (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-compute-standalone (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-data-accumulation-direct (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-data-accumulation-literal (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-data-accumulation-mapped (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-emits-multiple (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-emits-payload-transform (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-from-filter (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-guard-compound-condition (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-guard-discard (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-guard-entity-ref (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-guard-escalate (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-guard-kill (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-guard-multi (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-guard-multi-fail (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-guard-pass (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-guard-policy-ref (0.04s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-guard-reject (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-on-complete-first-match (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-on-complete-second-match (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-on-complete-with-state (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-payload-transform-multi-source (0.04s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-record-evidence (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-rules-advances-to (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-rules-data-accumulation (0.04s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-rules-else (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-rules-match (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-rules-no-match (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier1-primitives/test-sets-gate (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier10-policy-patterns/test-policy-capacity-query (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier10-policy-patterns/test-policy-counter-escalate (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier10-policy-patterns/test-policy-hard-gate-override (0.05s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier10-policy-patterns/test-policy-multi-guard-partial (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier10-policy-patterns/test-policy-threshold-three-way (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier10-policy-patterns/test-policy-timeout-elapsed (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier11-flow-composition/test-child-flow-absolute-path (0.04s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier11-flow-composition/test-child-flow-pin-wiring (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier11-flow-composition/test-child-flow-policy-inherit (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier11-flow-composition/test-multi-level-policy-inherit (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier11-flow-composition/test-wildcard-deep-subscription (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier12-runtime-fork/test-non-agent-replay-fail-closed (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier3-list-processing/test-fan-out-basic (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier3-list-processing/test-fan-out-count (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier3-list-processing/test-fan-out-emit-mapping (0.05s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier3-list-processing/test-fan-out-empty (0.04s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier3-list-processing/test-filter-basic (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier3-list-processing/test-filter-empty (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier3-list-processing/test-group-by-standalone (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier3-list-processing/test-reduce-count (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier3-list-processing/test-reduce-max (0.04s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier3-list-processing/test-reduce-min (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier3-list-processing/test-reduce-operation-count (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier4-cross-entity/test-clear-multiple-targets (0.04s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier4-cross-entity/test-clear-state (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier4-cross-entity/test-query-filter (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier4-cross-entity/test-query-group-by (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier5-flow-lifecycle/test-auto-emit-on-create (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier5-flow-lifecycle/test-terminal-state-preserves (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier5-flow-lifecycle/test-terminal-state-rejects (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier5-flow-lifecycle/test-timer-cancel (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier5-flow-lifecycle/test-timer-start-on (0.06s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier5-flow-lifecycle/test-wildcard-subscription (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier6-event-loop/test-atomicity-guard-rollback (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier6-event-loop/test-atomicity-rollback (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier6-event-loop/test-dead-letter (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier6-event-loop/test-guards-pre-handler-state (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier6-event-loop/test-on-complete-atomicity-chain (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier7-composition/test-agent-emits-to-node (0.05s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier7-composition/test-dual-delivery (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier7-composition/test-full-lifecycle (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier7-composition/test-multi-gate-pipeline (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier7-composition/test-two-node-chain (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier7-composition/test-wildcard-cross-flow (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier9-composition-patterns/test-compose-accumulate-compute-branch (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier9-composition-patterns/test-compose-clear-gates-reenter (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier9-composition-patterns/test-compose-gate-chain-three (0.05s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier9-composition-patterns/test-compose-gate-data-advance-emit (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier9-composition-patterns/test-compose-guard-counter-escalate (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier9-composition-patterns/test-compose-guard-multi-source (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier9-composition-patterns/test-compose-guard-query-capacity (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier9-composition-patterns/test-compose-lifecycle-seven-states (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier9-composition-patterns/test-compose-rules-fanout-data (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+    --- FAIL: TestSwarmTestCatalogCompanionsAreProtocolOnly/tests/tier9-composition-patterns/test-compose-rules-per-rule-data (0.03s)
+        test_command_test.go:532: tests/visible-smoke.yaml: step 1: malformed run.diagnose result: instances and attributions are required
+FAIL
+FAIL	github.com/division-sh/swarm/internal/cliapp	3.330s
+FAIL
+exit status 1
