@@ -386,9 +386,11 @@ func (o *SnapshotOwner) Observe(ctx context.Context, key string) (AdmittedSnapsh
 	defer o.mu.Unlock()
 	observation, exists := o.seen[key]
 	if !exists || !sameAtomicSnapshot(observation.snapshot, snapshot) {
-		observation = snapshotObservation{snapshot: cloneAtomicSnapshot(snapshot), token: uuid.NewString()}
-		o.seen[key] = observation
+		observation.token = uuid.NewString()
 	}
+	// Presentation provenance follows the latest observation without granting new authority.
+	observation.snapshot = cloneAtomicSnapshot(snapshot)
+	o.seen[key] = observation
 	return AdmittedSnapshot{AtomicSnapshot: cloneAtomicSnapshot(snapshot), observationToken: observation.token}, nil
 }
 
