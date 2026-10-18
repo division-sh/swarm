@@ -85,13 +85,14 @@ func TestConversationForkChatAdmitsExactSourceActorModeBeforeMutation(t *testing
 }
 
 type forkChatCompletionAuthorityFixture struct {
-	store  forkChatCompletionAuthorityStore
-	db     *sql.DB
-	sqlite bool
-	now    time.Time
-	source conversationForkSourceFixture
-	fork   runfork.OperatorConversationForkSession
-	reopen func() forkChatHistoryReader
+	context context.Context
+	store   forkChatCompletionAuthorityStore
+	db      *sql.DB
+	sqlite  bool
+	now     time.Time
+	source  conversationForkSourceFixture
+	fork    runfork.OperatorConversationForkSession
+	reopen  func() forkChatHistoryReader
 }
 
 type forkChatHistoryReader interface {
@@ -192,7 +193,7 @@ func proveForkChatCompletionGroupCapRejection(t *testing.T, fixture forkChatComp
 func proveForkChatCompletionGroupPreparedOrphanRecovery(t *testing.T, fixture forkChatCompletionAuthorityFixture) {
 	prepared := prepareForkChatCompletionGroup(t, fixture, "orphan-key", "prepared orphan")
 	expireForkChatGroupLease(t, fixture, prepared.ForkTurnID)
-	if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(fixture.now.Add(10*time.Minute))); err != nil {
+	if _, err := fixture.store.ReconcileExternalEffectAttempts(fixture.context, liveExternalEffectRecoveryRequest(fixture.now.Add(10*time.Minute))); err != nil {
 		t.Fatalf("recover prepared forkchat group: %v", err)
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "abandoned", true)
@@ -245,7 +246,7 @@ func proveForkChatCompletionGroupFinalizationFailure(t *testing.T, fixture forkC
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "executing", false)
 	expireForkChatGroupLease(t, fixture, prepared.ForkTurnID)
-	if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(fixture.now.Add(10*time.Minute))); err != nil {
+	if _, err := fixture.store.ReconcileExternalEffectAttempts(fixture.context, liveExternalEffectRecoveryRequest(fixture.now.Add(10*time.Minute))); err != nil {
 		t.Fatalf("recover finalization-failed forkchat group: %v", err)
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "outcome_uncertain", true)
@@ -362,7 +363,8 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 	if err != nil {
 		t.Fatalf("create forkchat authority fixture: %v", err)
 	}
-	return forkChatCompletionAuthorityFixture{store: store, db: db, sqlite: sqlite, now: now, source: source, fork: fork, reopen: reopen}
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+	return forkChatCompletionAuthorityFixture{context: ctx, store: store, db: db, sqlite: sqlite, now: now, source: source, fork: fork, reopen: reopen}
 }
 
 func prepareForkChatCompletionGroup(t *testing.T, fixture forkChatCompletionAuthorityFixture, key, message string) runfork.ConversationForkChatPrepared {
@@ -393,7 +395,7 @@ func forkChatCompletionAuthority(prepared runfork.ConversationForkChatPrepared, 
 }
 
 func forkChatCompletionContext(fixture forkChatCompletionAuthorityFixture, authority runtimeeffects.Authority, suffix string) context.Context {
-	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), newCompletionControllerForTest(fixture.store))
+	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(fixture.context, authority), newCompletionControllerForTest(fixture.store))
 	ctx = runtimeeffects.WithCompletionRequest(ctx, runtimeeffects.CompletionRequest{ModelAlias: "regular", RequestedModel: "forkchat-request", BackendProfile: "anthropic", Provider: "anthropic", Transport: "api"})
 	return runtimeeffects.WithLogicalOperationIdentity(ctx, "forkchat:"+authority.ForkChat.RequestOccurrenceID+":"+suffix)
 }
