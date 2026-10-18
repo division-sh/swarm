@@ -65,7 +65,14 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 	})
 	sources := make([]agenttopology.SourceCoordinate, len(fixtures))
 	for i, fixture := range fixtures {
-		sources[i] = agenttopology.SourceCoordinate{BundleHash: fixture.bundleHash}
+		rooted, err := fixture.artifact.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources[i], err = agenttopology.NewSourceCoordinate(rooted.Admission())
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	plan, err := agenttopology.NewSourceSetPlan(sources, nil)
 	if err != nil {
