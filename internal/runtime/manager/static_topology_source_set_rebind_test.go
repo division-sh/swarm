@@ -15,10 +15,35 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-const removedManagerTestTopologyBundleHash = "bundle-v2:sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+func newSourceSetTestManager(t *testing.T, source semanticview.Source) (*AgentManager, runtimeagenttopology.SourceCoordinate, ProcessExecutionBinding) {
+	t.Helper()
+	bundle, present := semanticview.Bundle(source)
+	if !present || bundle == nil {
+		t.Fatal("source-set fixture requires its compiled source")
+	}
+	coordinate, err := staticSourceCoordinate(source, bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := newTestAgentManagerWithOptions(t, &recoveryTestBus{}, nil, AgentManagerOptions{SemanticSource: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact)})
+	binding := lifecycleProbeProcessBinding()
+	binding.BundleHash = coordinate.BundleHash
+	return manager, coordinate, binding
+}
+
+func removedSourceSetCoordinate(t *testing.T) runtimeagenttopology.SourceCoordinate {
+	t.Helper()
+	rooted, _ := sourceartifactfixture.Rooted(t, "removed", sourceartifactfixture.New("schema.yaml", []byte("{}\n")))
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return coordinate
+}
 
 type sourceSetLifecycleCensusProbe struct {
 	states []AgentLifecycleState
@@ -79,8 +104,7 @@ func (p *sourceSetTransitionAdmissionProbe) PredecessorProcessBinding(current Pr
 func (p *sourceSetTransitionAdmissionProbe) release()         { p.once.Do(func() { close(p.done) }) }
 func (p *sourceSetTransitionAdmissionProbe) readCount() int64 { return p.reads.Load() }
 
-func sourceSetSuccessorProcessBinding() ProcessExecutionBinding {
-	binding := lifecycleProbeProcessBinding()
+func sourceSetSuccessorProcessBinding(binding ProcessExecutionBinding) ProcessExecutionBinding {
 	binding.GenerationGrantID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 	binding.RuntimeGeneration++
 	return binding
@@ -103,13 +127,11 @@ type durableSourceSetPreparationFixture struct {
 func newDurableSourceSetPreparationFixture(t *testing.T) *durableSourceSetPreparationFixture {
 	t.Helper()
 	source := loadRootAndFlowStaticAgentSource(t)
-	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
-	manager.semanticSource = source
+	manager, coordinate, binding := newSourceSetTestManager(t, source)
 	records, err := manager.resolvedStaticTopologyRecords(managerIdentityTestRunID, source)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("resolve static topology fixture: count=%d err=%v", len(records), err)
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
 	desired, err := desiredAgentsFromRecords(records, coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -124,13 +146,12 @@ func newDurableSourceSetPreparationFixture(t *testing.T) *durableSourceSetPrepar
 	if err != nil {
 		t.Fatal(err)
 	}
-	rowOwner := newLifecyclePersistenceProbe()
+	rowOwner := &sourceSetLifecycleCommitProbe{lifecyclePersistenceProbe: newLifecyclePersistenceProbe(), binding: binding}
 	if err := manager.InstallStartupTopology(rowOwner, admission, plan); err != nil {
 		t.Fatal(err)
 	}
 	identity, _ := records[0].Config.ConcreteIdentity()
 	revision, _ := lifecycleConfigRevision(records[0])
-	binding := lifecycleProbeProcessBinding()
 	manager.lifecycle.mu.Lock()
 	manager.lifecycle.cells[identity] = &agentLifecycleCell{
 		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 41, Generation: 17, Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeStandard, Topology: admission, ProcessBinding: binding},
@@ -196,9 +217,8 @@ func (p *sourceSetLifecycleCommitProbe) RebindFlowReadinessSourceSet(ctx context
 
 func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *testing.T) {
 	source := loadRootAndFlowStaticAgentSource(t)
-	oldStore := newLifecyclePersistenceProbe()
-	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
-	manager.semanticSource = source
+	manager, coordinate, binding := newSourceSetTestManager(t, source)
+	oldStore := &sourceSetLifecycleCommitProbe{lifecyclePersistenceProbe: newLifecyclePersistenceProbe(), binding: binding}
 
 	records, err := manager.resolvedStaticTopologyRecords(managerIdentityTestRunID, source)
 	if err != nil {
@@ -207,8 +227,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *te
 	if len(records) != 1 {
 		t.Fatalf("static topology records = %d, want 1", len(records))
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
-	removed := runtimeagenttopology.SourceCoordinate{BundleHash: removedManagerTestTopologyBundleHash}
+	removed := removedSourceSetCoordinate(t)
 	desired, err := desiredAgentsFromRecords(records, coordinate)
 	if err != nil {
 		t.Fatalf("compile desired static agents: %v", err)
@@ -249,7 +268,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *te
 	const generation uint64 = 7
 	manager.lifecycle.mu.Lock()
 	manager.lifecycle.cells[identity] = &agentLifecycleCell{
-		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: epoch, Generation: generation, Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeStandard, Topology: predecessorAdmission, ProcessBinding: lifecycleProbeProcessBinding()},
+		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: epoch, Generation: generation, Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeStandard, Topology: predecessorAdmission, ProcessBinding: binding},
 	}
 	manager.lifecycle.mu.Unlock()
 	oldStore.views[identity] = manager.lifecycle.cells[identity].view
@@ -257,7 +276,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *te
 	manager.roles.LifecycleCensus = sourceSetLifecycleCensusProbe{states: []AgentLifecycleState{{
 		Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: epoch, Generation: generation,
 		Phase: AgentLifecycleRunning, ConfigRevision: revision, RunMode: AgentRunModeStandard,
-		Topology: predecessorAdmission, ProcessBinding: lifecycleProbeProcessBinding(),
+		Topology: predecessorAdmission, ProcessBinding: binding,
 	}}}
 	t.Cleanup(func() {
 		manager.lifecycle.mu.Lock()
@@ -266,7 +285,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *te
 	})
 
 	successorStore := &sourceSetLifecycleCommitProbe{
-		lifecyclePersistenceProbe: oldStore, binding: sourceSetSuccessorProcessBinding(),
+		lifecyclePersistenceProbe: oldStore.lifecyclePersistenceProbe, binding: sourceSetSuccessorProcessBinding(binding),
 	}
 	successorStore.exists = true
 	successorStore.cell = lifecycleProbeCell{Epoch: epoch, Generation: generation, Phase: AgentLifecycleRunning}
@@ -274,7 +293,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesExecutionLifecycle(t *te
 	defer transitionAdmission.release()
 	prepared, err := manager.PrepareDurableTopologySourceSetRebind(
 		context.Background(), successorAdmission, successorPlan, source,
-		lifecycleProbeProcessBinding(), lifecycleProbeProcessBinding(), false, transitionAdmission, false,
+		binding, binding, false, transitionAdmission, false,
 	)
 	if err != nil {
 		t.Fatalf("prepare source-set rebind: %v", err)
@@ -320,7 +339,7 @@ func TestPrepareDurableTopologySourceSetRebindRejectsForeignGrantAtValidPredeces
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newDurableSourceSetPreparationFixture(t)
 			predecessor := fixture.binding
-			successor := sourceSetSuccessorProcessBinding()
+			successor := sourceSetSuccessorProcessBinding(predecessor)
 			foreign := predecessor
 			foreign.GenerationGrantID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 			if test.mutateProcess {
@@ -352,14 +371,12 @@ func TestPrepareDurableTopologySourceSetRebindRejectsForeignGrantAtValidPredeces
 
 func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *testing.T) {
 	source := loadRootAndFlowStaticAgentSource(t)
-	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
-	manager.semanticSource = source
+	manager, coordinate, binding := newSourceSetTestManager(t, source)
 	records, err := manager.resolvedStaticTopologyRecords(managerIdentityTestRunID, source)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("resolve static topology records: count=%d err=%v", len(records), err)
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
-	removed := runtimeagenttopology.SourceCoordinate{BundleHash: removedManagerTestTopologyBundleHash}
+	removed := removedSourceSetCoordinate(t)
 	desired, err := desiredAgentsFromRecords(records, coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -380,7 +397,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldStore := newLifecyclePersistenceProbe()
+	oldStore := &sourceSetLifecycleCommitProbe{lifecyclePersistenceProbe: newLifecyclePersistenceProbe(), binding: binding}
 	if err := manager.InstallStartupTopology(oldStore, predecessorAdmission, predecessorPlan); err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +407,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *tes
 	const generation uint64 = 11
 	manager.lifecycle.mu.Lock()
 	manager.lifecycle.cells[identity] = &agentLifecycleCell{
-		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: epoch, Generation: generation, Phase: AgentLifecycleFailed, ConfigRevision: revision, RunMode: AgentRunModeStopped, Topology: predecessorAdmission, ProcessBinding: lifecycleProbeProcessBinding()},
+		identity: identity, view: AgentLifecycleState{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: epoch, Generation: generation, Phase: AgentLifecycleFailed, ConfigRevision: revision, RunMode: AgentRunModeStopped, Topology: predecessorAdmission, ProcessBinding: binding},
 	}
 	manager.lifecycle.mu.Unlock()
 	oldStore.views[identity] = manager.lifecycle.cells[identity].view
@@ -398,11 +415,11 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *tes
 	manager.roles.LifecycleCensus = sourceSetLifecycleCensusProbe{states: []AgentLifecycleState{{
 		Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: epoch, Generation: generation,
 		Phase: AgentLifecycleFailed, ConfigRevision: revision, RunMode: AgentRunModeStopped,
-		Topology: predecessorAdmission, ProcessBinding: lifecycleProbeProcessBinding(),
+		Topology: predecessorAdmission, ProcessBinding: binding,
 	}}}
 
 	successorStore := &sourceSetLifecycleCommitProbe{
-		lifecyclePersistenceProbe: oldStore, binding: sourceSetSuccessorProcessBinding(),
+		lifecyclePersistenceProbe: oldStore.lifecyclePersistenceProbe, binding: sourceSetSuccessorProcessBinding(binding),
 	}
 	successorStore.exists = true
 	successorStore.cell = lifecycleProbeCell{Epoch: epoch, Generation: generation, Phase: AgentLifecycleFailed}
@@ -410,7 +427,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *tes
 	defer transitionAdmission.release()
 	prepared, err := manager.PrepareDurableTopologySourceSetRebind(
 		context.Background(), successorAdmission, successorPlan, source,
-		lifecycleProbeProcessBinding(), lifecycleProbeProcessBinding(), false, transitionAdmission, false,
+		binding, binding, false, transitionAdmission, false,
 	)
 	if err != nil {
 		t.Fatalf("prepare failed-cell source-set rebind: %v", err)
@@ -430,14 +447,12 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFailedDeclaration(t *tes
 
 func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t *testing.T) {
 	source := loadRootAndFlowStaticAgentSource(t)
-	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
-	manager.semanticSource = source
+	manager, coordinate, predecessorBinding := newSourceSetTestManager(t, source)
 	records, err := manager.resolvedStaticTopologyRecords(managerIdentityTestRunID, source)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("resolve static topology records: count=%d err=%v", len(records), err)
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
-	removed := runtimeagenttopology.SourceCoordinate{BundleHash: removedManagerTestTopologyBundleHash}
+	removed := removedSourceSetCoordinate(t)
 	desired, err := desiredAgentsFromRecords(records, coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -462,7 +477,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	rowOwner := newLifecyclePersistenceProbe()
+	rowOwner := &sourceSetLifecycleCommitProbe{lifecyclePersistenceProbe: newLifecyclePersistenceProbe(), binding: predecessorBinding}
 	if err := manager.InstallStartupTopology(rowOwner, predecessorAdmission, predecessorPlan); err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +508,6 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 		generation   uint64 = 13
 		flowRevision        = "flow-config-v1"
 	)
-	predecessorBinding := lifecycleProbeProcessBinding()
 	manager.lifecycle.mu.Lock()
 	manager.lifecycle.cells[staticIdentity] = &agentLifecycleCell{
 		identity: staticIdentity, view: AgentLifecycleState{Identity: staticIdentity, AgentID: staticIdentity.AgentID(), RuntimeEpoch: epoch, Generation: generation, Phase: AgentLifecycleRunning, ConfigRevision: staticRevision, RunMode: AgentRunModeStandard, Topology: predecessorAdmission, ProcessBinding: predecessorBinding},
@@ -518,7 +532,7 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 		},
 	}}
 	successorStore := &sourceSetLifecycleCommitProbe{
-		lifecyclePersistenceProbe: rowOwner, binding: sourceSetSuccessorProcessBinding(),
+		lifecyclePersistenceProbe: rowOwner.lifecyclePersistenceProbe, binding: sourceSetSuccessorProcessBinding(predecessorBinding),
 	}
 	successorStore.exists = true
 	successorStore.cell = lifecycleProbeCell{Epoch: epoch, Generation: generation, Phase: AgentLifecycleRunning}
@@ -556,8 +570,8 @@ func TestPreparedDurableTopologySourceSetRebindPreservesFlowReadinessAdmission(t
 	defer manager.lifecycle.mu.Unlock()
 	if !manager.lifecycle.cells[staticIdentity].view.Topology.Equal(successorAdmission) ||
 		!manager.lifecycle.cells[flowIdentity].view.Topology.Equal(flowTopology) ||
-		!manager.lifecycle.cells[staticIdentity].view.ProcessBinding.Equal(sourceSetSuccessorProcessBinding()) ||
-		!manager.lifecycle.cells[flowIdentity].view.ProcessBinding.Equal(sourceSetSuccessorProcessBinding()) {
+		!manager.lifecycle.cells[staticIdentity].view.ProcessBinding.Equal(sourceSetSuccessorProcessBinding(predecessorBinding)) ||
+		!manager.lifecycle.cells[flowIdentity].view.ProcessBinding.Equal(sourceSetSuccessorProcessBinding(predecessorBinding)) {
 		t.Fatal("mixed durable process projection did not publish atomically")
 	}
 }
