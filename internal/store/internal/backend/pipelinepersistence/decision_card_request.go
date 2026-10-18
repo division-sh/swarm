@@ -90,7 +90,7 @@ func requireChannelCardActionTx(ctx context.Context, tx *sql.Tx, req apiidempote
 	if !present {
 		return nil
 	}
-	if _, err := storechanneldelivery.RequireActionIntentTx(ctx, tx, fact, postgres, lock); err != nil {
+	if _, err := storechanneldelivery.RequireActionIntentTx(ctx, tx, fact, postgres, false); err != nil {
 		return err
 	}
 	demand := channeldelivery.CardActionDemand{CardID: req.ResourceID, PrincipalID: req.Actor.ID, Method: req.Method}
@@ -107,7 +107,14 @@ func requireChannelCardActionTx(ctx context.Context, tx *sql.Tx, req apiidempote
 	default:
 		return fmt.Errorf("channel action does not authorize this card method")
 	}
-	return storechanneldelivery.RequireCardActionTx(ctx, tx, fact.ActionFact, demand, postgres, lock)
+	if err := storechanneldelivery.RequireCardActionTx(ctx, tx, fact.ActionFact, demand, postgres, lock); err != nil {
+		return err
+	}
+	if lock {
+		_, err := storechanneldelivery.RequireActionIntentTx(ctx, tx, fact, postgres, true)
+		return err
+	}
+	return nil
 }
 
 func settleChannelCardActionTx(ctx context.Context, tx *sql.Tx, mutation pipeline.DecisionCardMutation, postgres bool) error {

@@ -60,6 +60,10 @@ func PlanManualResendTx(ctx context.Context, tx *sql.Tx, action operatorchannel.
 	if tx == nil || expected.Action.Kind != "resend" || uuid.Validate(expected.Action.RecoveryDeliveryID) != nil {
 		return "", false, fmt.Errorf("manual resend requires exact uncertain delivery action")
 	}
+	parent, err := lockActionParentTx(ctx, tx, action.ActionFact, postgres)
+	if err != nil {
+		return "", false, err
+	}
 	if err := LockPrincipalTx(ctx, tx, expected.PrincipalID, postgres); err != nil {
 		return "", false, err
 	}
@@ -70,7 +74,7 @@ func PlanManualResendTx(ctx context.Context, tx *sql.Tx, action operatorchannel.
 	if state != "pending" {
 		return "", false, fmt.Errorf("manual resend action was already consumed")
 	}
-	resolved, found, err := ResolveActionFactForMutationTx(ctx, tx, action.ActionFact, postgres)
+	resolved, found, err := parent.resolve(ctx, tx, action.ActionFact, postgres)
 	if err != nil {
 		return "", false, err
 	}
