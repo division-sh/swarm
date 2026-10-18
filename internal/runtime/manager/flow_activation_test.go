@@ -5383,11 +5383,9 @@ func TestStandingFlowAgentsBindAttemptBeforeManagerRun(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 	created, finish, err := am.PrepareStandingFlowInstance(ctx, req)
 	if err != nil || !created || finish == nil {
 		t.Fatalf("prepare standing flow: created=%t finish=%t err=%v", created, finish != nil, err)
@@ -5424,7 +5422,14 @@ func TestStandingFlowAgentsBindAttemptBeforeManagerRun(t *testing.T) {
 		t.Fatal("admitted pre-run preparation completed attachment or armed timer work")
 	}
 	runCtx, cancelRun := context.WithCancel(ctx)
-	if err := am.Run(managedExecutionTestContext(t, runCtx)); err != nil {
+	runCtx = managedExecutionTestContextForCapturedSource(t, runCtx)
+	execution, executionOK := managedexecution.FromContext(runCtx)
+	captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !executionOK || !capturedOK || execution.BundleHash != captured.BundleHash() {
+		cancelRun()
+		t.Fatalf("standing managed execution source differs from captured source: execution=%t/%s captured=%t/%s", executionOK, execution.BundleHash, capturedOK, captured.BundleHash())
+	}
+	if err := am.Run(runCtx); err != nil {
 		cancelRun()
 		t.Fatalf("run attempt-bound standing agents: %v", err)
 	}
@@ -5654,7 +5659,7 @@ func TestFlowInstanceAgentRecordsMaterializeProjectDeclarationOwnedByFlow(t *tes
 				Instance: runtimeflowidentity.Stored(source, "support", tc.instancePath, tc.instanceID,
 					runtimepipeline.FlowInstanceEntityID(tc.instancePath), "ent-1"),
 			}
-			am := newFlowActivationManager(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{})
+			am, _ := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{}, source)
 			records, err := am.flowInstanceAgentRecords(managerIdentityTestRunID, req, schema, scope)
 			if err != nil {
 				t.Fatalf("flowInstanceAgentRecords: %v", err)
