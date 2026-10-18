@@ -21,10 +21,11 @@ import (
 
 type activityGrantHistoryConnector struct {
 	driver.Connector
-	fault       string
-	reads       int
-	cohortFault string
-	cohortReads int
+	fault          string
+	reads          int
+	cohortFault    string
+	cohortReads    int
+	installedFault string
 }
 
 func (c *activityGrantHistoryConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -45,6 +46,11 @@ func (c *activityGrantHistoryConn) BeginTx(ctx context.Context, options driver.T
 }
 
 func (c *activityGrantHistoryConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	closed := strings.Contains(query, "AS history_max_generation")
+	installed := strings.Contains(query, "FROM activity_attempts") && strings.HasSuffix(query, " ORDER BY request_event_id")
+	if (closed || installed) && c.control.installedFault == "query_error" {
+		return nil, errSelectedGrantHistoryRead
+	}
 	cohort := strings.Contains(query, "FROM runtime_generation_grants WHERE selected_execution_id=$1 OR ")
 	if cohort {
 		c.control.cohortReads++
@@ -58,6 +64,9 @@ func (c *activityGrantHistoryConn) QueryContext(ctx context.Context, query strin
 	rows, err := c.pipelineCrashConn.QueryContext(ctx, query, args)
 	if err != nil {
 		return nil, err
+	}
+	if closed || installed {
+		return &selectedInstalledHistoryRows{Rows: rows, fault: c.control.installedFault, closed: closed}, nil
 	}
 	if cohort {
 		return &selectedGrantCohortRows{Rows: rows, fault: c.control.cohortFault}, nil

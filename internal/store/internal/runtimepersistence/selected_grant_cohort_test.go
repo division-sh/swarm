@@ -170,6 +170,7 @@ func proveRetiredSelectedGrantHistory(t *testing.T, fixture completionSettlement
 		t.Fatal(err)
 	}
 	expected = append(expected, admitted)
+	firstJournal := completeSelectedHistoryJournal(t, ctx, grant, admitted, selected.forkRun, selected.eventID)
 	if err := store.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
 		t.Fatal(err)
 	}
@@ -281,4 +282,5 @@ func proveRetiredSelectedGrantHistory(t *testing.T, fixture completionSettlement
 	if err := grant.ProveCurrent(ctx); err == nil {
 		t.Fatal("historical grant evidence restored retired execution permission")
 	}
+	proveClosedSelectedInstalledJournalCohort(t, fixture, selected, admitted, firstJournal, control)
 }

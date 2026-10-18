@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -117,9 +118,11 @@ func TestGenericSchedulePublishedOccurrenceUsesActualLifecycleNumericProjection(
 	} {
 		facts := publishedOccurrenceTestFacts(published)
 		facts.Payload = []byte(payload)
-		changed, err := events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: facts})
-		if err != nil {
-			t.Fatal(err)
+		changed := eventtest.RuntimeControlWithRoutingSource(facts.ID, facts.Type, facts.Producer.ID, facts.TaskID,
+			facts.Payload, facts.ChainDepth, "", "", facts.Envelope, facts.RoutingSource, facts.CreatedAt)
+		changed = eventtest.InExecutionMode(changed, facts.ExecutionMode)
+		if !reflect.DeepEqual(publishedOccurrenceTestFacts(changed), facts) || changed.RunID() != "" || changed.ParentEventID() != "" || changed.AdmissionClass() != published.AdmissionClass() {
+			t.Fatal("fixture owner changed numeric-projection event metadata")
 		}
 		if _, err := accepted.ValidatePublishedOccurrence(changed); err == nil {
 			t.Fatalf("changed projected numeric payload accepted: %s", payload)
@@ -127,9 +130,11 @@ func TestGenericSchedulePublishedOccurrenceUsesActualLifecycleNumericProjection(
 	}
 	facts := publishedOccurrenceTestFacts(published)
 	facts.Payload = []byte(` { "safe":9007199254740991, "integer":7, "fraction":7.5 } `)
-	reordered, err := events.NewStandaloneRuntimeControlEvent(events.StandaloneRuntimeEventInput{Facts: facts})
-	if err != nil {
-		t.Fatal(err)
+	reordered := eventtest.RuntimeControlWithRoutingSource(facts.ID, facts.Type, facts.Producer.ID, facts.TaskID,
+		facts.Payload, facts.ChainDepth, "", "", facts.Envelope, facts.RoutingSource, facts.CreatedAt)
+	reordered = eventtest.InExecutionMode(reordered, facts.ExecutionMode)
+	if !reflect.DeepEqual(publishedOccurrenceTestFacts(reordered), facts) || reordered.RunID() != "" || reordered.ParentEventID() != "" || reordered.AdmissionClass() != published.AdmissionClass() {
+		t.Fatal("fixture owner changed formatting-equivalence event metadata")
 	}
 	if _, err := accepted.ValidatePublishedOccurrence(reordered); err != nil {
 		t.Fatalf("insignificant payload formatting changed publication evidence: %v", err)
@@ -216,19 +221,25 @@ func TestGenericSchedulePublishedOccurrenceRejectsEventSubstitution(t *testing.T
 				facts.ChainDepth++
 			}
 			var changed events.Event
-			var err error
+			parentID, class := "", event.AdmissionClass()
 			switch name {
 			case "parent":
-				changed, err = events.NewCausalRuntimeControlEvent(events.CausalRuntimeEventInput{Facts: facts, Lineage: events.EventLineage{RunID: runID, ParentEventID: uuid.NewString(), TaskID: facts.TaskID, ExecutionMode: facts.ExecutionMode}})
+				parentID = uuid.NewString()
+				changed = eventtest.RuntimeControlWithRoutingSource(facts.ID, facts.Type, facts.Producer.ID, facts.TaskID,
+					facts.Payload, facts.ChainDepth, runID, parentID, facts.Envelope, facts.RoutingSource, facts.CreatedAt)
 			case "admission_class":
+				class = events.EventAdmissionRuntimeDiagnostic
 				facts.RoutingSource = events.NoRoutingSource()
 				facts.Envelope.Source = events.RouteIdentity{}
-				changed, err = events.NewRunScopedRuntimeDiagnosticEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: runID})
+				changed = eventtest.RuntimeDiagnostic(facts.ID, facts.Type, facts.Producer.ID, facts.TaskID,
+					facts.Payload, facts.ChainDepth, runID, "", facts.Envelope, facts.CreatedAt)
 			default:
-				changed, err = events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: runID})
+				changed = eventtest.RuntimeControlWithRoutingSource(facts.ID, facts.Type, facts.Producer.ID, facts.TaskID,
+					facts.Payload, facts.ChainDepth, runID, "", facts.Envelope, facts.RoutingSource, facts.CreatedAt)
 			}
-			if err != nil {
-				t.Fatalf("construct hostile event %s: %v", name, err)
+			changed = eventtest.InExecutionMode(changed, facts.ExecutionMode)
+			if !reflect.DeepEqual(publishedOccurrenceTestFacts(changed), facts) || changed.RunID() != runID || changed.ParentEventID() != parentID || changed.AdmissionClass() != class {
+				t.Fatalf("fixture owner changed substituted %s event metadata", name)
 			}
 			if got, err := activation.ValidatePublishedOccurrence(changed); err == nil || got != (Occurrence{}) {
 				t.Fatalf("substituted event %s accepted: occurrence=%+v err=%v", name, got, err)
