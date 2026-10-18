@@ -29,4 +29,17 @@ func verifySelectedGrantExactExecution(t *testing.T, db *sql.DB, bundle, run, bi
 			t.Fatalf("selected grant accepted a different or absent canonical binding: %v", wrongBinding)
 		}
 	}
+	var versions int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM runtime_generation_grants WHERE grant_id=$1`, grant).Scan(&versions); err != nil || versions != 4 {
+		t.Fatalf("exact selected grant history changed: versions=%d error=%v", versions, err)
+	}
+	// The selected tuple is absent for ordinary source-set grants; the new
+	// constraint must not turn their genuine NULL projections into a refusal.
+	if _, err := db.Exec(`INSERT INTO runtime_generation_grants
+		(fact_id,grant_id,process_authority_id,process_owner_id,state_version,state,bundle_hash,
+		 runtime_instance_id,runtime_generation,source_set_revision,snapshot)
+		VALUES ($1,$2,$3,'schema-owner',1,'prepared',$4,$5,1,'exact-source-revision','{}')`,
+		uuid.NewString(), uuid.NewString(), process, bundle, instance); err != nil {
+		t.Fatalf("ordinary source-set grant refused: %v", err)
+	}
 }
