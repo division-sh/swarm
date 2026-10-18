@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -88,6 +89,18 @@ func nativeRuntimeLogSourceFactForTest(t *testing.T, fixture RuntimeLogNativeFix
 		t.Fatal("native runtime log fixture requires its admitted source fact")
 	}
 	return fact
+}
+
+func nativeRuntimeRecoveryStartupContext(t *testing.T, fixture RuntimeLogNativeFixtureForTest) context.Context {
+	t.Helper()
+	authority, err := fixture.ProcessCapability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact := nativeRuntimeLogSourceFactForTest(t, fixture)
+	ctx := correlation.WithSourceArtifactFact(context.Background(), fact)
+	ctx = correlation.WithRuntimeInstanceID(ctx, authority.RuntimeInstanceID)
+	return authoractivity.WithScope(ctx, authoractivity.BundleScope(authority.RuntimeInstanceID, fact.BundleHash()))
 }
 
 func exactNativeRuntimeLogRecordForTest(t *testing.T, runID string, mode executionmode.Mode, message string) RuntimeLogPersistenceRecord {

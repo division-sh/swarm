@@ -823,6 +823,26 @@ func testAuthorActivityContextForBundle(ctx context.Context, bundleHash string) 
 }
 
 func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps, decorators ...func(*runtimeTestRetainedSession) runtimestartupownership.RetainedSession) (*Runtime, error) {
+	return newScopedTestRuntimeWithCapability(t, ctx, deps, nil, decorators...)
+}
+
+func newScopedNativeTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps, capability runtimestartupownership.ProcessCapability) (*Runtime, error) {
+	t.Helper()
+	if capability == nil {
+		return nil, fmt.Errorf("native runtime fixture requires its original process capability")
+	}
+	authority, err := capability.Evidence()
+	if err != nil {
+		return nil, err
+	}
+	if deps.Options.RuntimeInstanceID != "" && deps.Options.RuntimeInstanceID != authority.RuntimeInstanceID {
+		return nil, fmt.Errorf("native runtime fixture differs from its original process coordinate")
+	}
+	deps.Options.RuntimeInstanceID = authority.RuntimeInstanceID
+	return newScopedTestRuntimeWithCapability(t, ctx, deps, capability)
+}
+
+func newScopedTestRuntimeWithCapability(t testing.TB, ctx context.Context, deps RuntimeDeps, capability runtimestartupownership.ProcessCapability, decorators ...func(*runtimeTestRetainedSession) runtimestartupownership.RetainedSession) (*Runtime, error) {
 	t.Helper()
 	if deps.Options.WorkflowModule != nil {
 		if bundle, ok := semanticview.Bundle(deps.Options.WorkflowModule.SemanticSource()); ok {
@@ -881,7 +901,13 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps, d
 			if deps.Options.WorkflowModule != nil {
 				source = deps.Options.WorkflowModule.SemanticSource()
 			}
-			_, grant, grantErr := newRuntimeTestProcessCapabilityWithSession(t, runtime.Manager, source, deps.Options.SourceArtifactFact, deps.Options.RuntimeInstanceID, retainedSession, decorators...)
+			var grant runtimestartupownership.LiveGenerationGrant
+			var grantErr error
+			if capability == nil {
+				_, grant, grantErr = newRuntimeTestProcessCapabilityWithSession(t, runtime.Manager, source, deps.Options.SourceArtifactFact, deps.Options.RuntimeInstanceID, retainedSession, decorators...)
+			} else {
+				grant, grantErr = nativeRuntimeTestGrant(ctx, runtime, capability)
+			}
 			if grantErr != nil {
 				return nil, grantErr
 			}
@@ -910,6 +936,25 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps, d
 		})
 	}
 	return runtime, err
+}
+
+func nativeRuntimeTestGrant(ctx context.Context, runtime *Runtime, capability runtimestartupownership.ProcessCapability) (runtimestartupownership.LiveGenerationGrant, error) {
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
+	desired, err := runtime.Manager.CompileStaticTopologyDesiredAgents(runtime.Options.WorkflowModule.SemanticSource(), coordinate)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+		return nil, err
+	}
+	return capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: coordinate.BundleHash, RuntimeInstanceID: runtime.Options.RuntimeInstanceID,
+		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+	})
 }
 
 func completeRuntimeRecoveryTestDeps(t testing.TB, deps RuntimeDeps) RuntimeDeps {
