@@ -17,6 +17,14 @@ on:
         description: Diagnostic run; collect failures instead of cancelling sibling proofs
         default: false
         type: boolean
+      workspace_base_setup:
+        description: Populate the fixed private workspace base (not qualification)
+        default: false
+        type: boolean
+      workspace_base_setup_head:
+        description: Exact reviewed source SHA for workspace base setup
+        default: ''
+        type: string
   schedule:
     - cron: "17 3 * * *"
 
@@ -25,8 +33,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  workspace-base-setup:
+    name: Private workspace base setup (not qualification)
+    if: github.event_name == 'workflow_dispatch' && inputs.workspace_base_setup == true && github.repository == 'division-sh/swarm'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bind reviewed setup source
+        shell: bash
+        env:
+          REVIEWED_HEAD: ${{ inputs.workspace_base_setup_head }}
+        run: |
+          set -euo pipefail
+          [[ "$REVIEWED_HEAD" =~ ^[0-9a-f]{40}$ ]]
+          test "$GITHUB_REPOSITORY" = division-sh/swarm
+          [[ "$GITHUB_REF" == refs/heads/* ]]
+          test "$GITHUB_SHA" = "$REVIEWED_HEAD"
+          test "$(git rev-parse HEAD)" = "$REVIEWED_HEAD"
+          sha256sum Dockerfile.workspace-base-link .github/scripts/verify-workspace-base.py
+      - name: Publish and verify immutable workspace base
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          credential_root=$(mktemp -d "$RUNNER_TEMP/workspace-base-auth.XXXXXX")
+          trap 'rm -r -- "$credential_root"' EXIT
+          export DOCKER_CONFIG="$credential_root"
+          case "$DOCKER_CONFIG/" in "$GITHUB_WORKSPACE/"*) exit 1 ;; esac
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          source='public.ecr.aws/docker/library/golang:1.25-bookworm@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437'
+          mirror='ghcr.io/division-sh/swarm-workspace-golang'
+          digest='sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437'
+          python3 .github/scripts/verify-workspace-base.py --before-publication
+          docker build -t "$mirror:repository-link" -f Dockerfile.workspace-base-link .
+          docker image inspect "$mirror:repository-link" | jq -e 'length == 1 and .[0].Config.Labels["org.opencontainers.image.source"] == "https://github.com/division-sh/swarm" and (.[0].RootFS.Layers // [] | length) == 0 and .[0].Config.Cmd == null and .[0].Config.Entrypoint == null' >/dev/null
+          docker push "$mirror:repository-link"
+          python3 .github/scripts/verify-workspace-base.py --association-only
+          docker buildx imagetools create --prefer-index=false --tag "$mirror:1.25-bookworm" "$source"
+          python3 .github/scripts/verify-workspace-base.py > "$RUNNER_TEMP/workspace-base-setup.json"
+          docker pull "$mirror@$digest"
+          echo 'Private workspace base setup complete; no qualification or tier attestation'
+      - name: Retain workspace base setup result
+        uses: actions/upload-artifact@v4
+        with:
+          name: workspace-base-setup-${{ github.sha }}
+          path: ${{ runner.temp }}/workspace-base-setup.json
+          if-no-files-found: error
+
   ci-preflight:
     name: Exact-head local preflight admission
+    if: github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
@@ -113,6 +174,7 @@ jobs:
   complexity:
     name: Independently measured complexity ratchet
     needs: [ci-preflight]
+    if: github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -139,7 +201,7 @@ jobs:
   ci-plan:
     name: CI plan
     needs: [ci-preflight]
-    if: needs.ci-preflight.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    if: (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && needs.ci-preflight.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -332,6 +394,7 @@ jobs:
 
   static-checks:
     needs: [ci-preflight]
+    if: github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true
     name: Static checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -363,10 +426,13 @@ jobs:
 
   sqlite-local-dev:
     needs: [ci-preflight]
-    if: needs.ci-preflight.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    if: (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && needs.ci-preflight.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch SQLite smoke' || 'SQLite local smoke' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -375,23 +441,53 @@ jobs:
           cache: true
       - name: Build swarm binary
         run: go build ./cmd/swarm
+      - name: Select workspace base
+        id: workspace-base
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          base_ref='public.ecr.aws/docker/library/golang:1.25-bookworm@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437'
+          use_mirror=false
+          if [ "$GITHUB_REPOSITORY" = division-sh/swarm ]; then
+            case "$EVENT_NAME" in
+              push|schedule|workflow_dispatch) use_mirror=true ;;
+              pull_request) if [ "$HEAD_REPOSITORY" = division-sh/swarm ]; then use_mirror=true; fi ;;
+            esac
+          fi
+          if [ "$use_mirror" = true ]; then
+            base_ref='ghcr.io/division-sh/swarm-workspace-golang@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437'
+          fi
+          reference_hash=$(printf '%s' "$base_ref" | sha256sum | cut -d ' ' -f 1)
+          printf 'ref=%s\nhash=%s\n' "$base_ref" "$reference_hash" >> "$GITHUB_OUTPUT"
       - name: Restore workspace image
         id: workspace-image-cache
         if: hashFiles('Dockerfile.workspace') != ''
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/swarm-workspace-image
-          key: workspace-image-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Dockerfile.workspace') }}
+          key: workspace-image-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Dockerfile.workspace') }}-${{ steps.workspace-base.outputs.hash }}
       - name: Prepare workspace image
         shell: bash
         env:
           CACHE_HIT: ${{ steps.workspace-image-cache.outputs.cache-hit }}
           DOCKERFILE_HASH: ${{ hashFiles('Dockerfile.workspace') }}
           WORKSPACE_IMAGE_CACHE: ${{ runner.temp }}/swarm-workspace-image
+          BASE_REF: ${{ steps.workspace-base.outputs.ref }}
+          BASE_REF_HASH: ${{ steps.workspace-base.outputs.hash }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           set -euo pipefail
           [[ "$DOCKERFILE_HASH" =~ ^[0-9a-f]{64}$ ]]
           test -n "$WORKSPACE_IMAGE_CACHE"
+          test "$(printf '%s' "$BASE_REF" | sha256sum | cut -d ' ' -f 1)" = "$BASE_REF_HASH"
+          case "$BASE_REF" in
+            public.ecr.aws/docker/library/golang:1.25-bookworm@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437|ghcr.io/division-sh/swarm-workspace-golang@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437) ;;
+            *) exit 1 ;;
+          esac
           if [ "$CACHE_HIT" = true ]; then
             echo 'Workspace image cache: exact hit (load only)'
             test -s "$WORKSPACE_IMAGE_CACHE/image.tar.zst"
@@ -399,19 +495,34 @@ jobs:
             [[ "$expected_id" =~ ^sha256:[0-9a-f]{64}$ ]]
             zstd -dc "$WORKSPACE_IMAGE_CACHE/image.tar.zst" | docker load
           else
-            echo 'Workspace image cache: miss (pinned public mirror build)'
+            echo 'Workspace image cache: miss (pinned selected base build)'
             rm -rf "$WORKSPACE_IMAGE_CACHE"
             mkdir -p "$WORKSPACE_IMAGE_CACHE"
             build_log="$WORKSPACE_IMAGE_CACHE/build.log"
-            base_ref='public.ecr.aws/docker/library/golang:1.25-bookworm@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437'
-            manifest_error='https://public.ecr.aws/v2/docker/library/golang/manifests/sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437: 429 Too Many Requests'
+            base_ref=$BASE_REF
+            if [[ "$base_ref" == ghcr.io/* ]]; then
+              test "$GITHUB_REPOSITORY" = division-sh/swarm
+              case "$GITHUB_EVENT_NAME" in
+                push|schedule|workflow_dispatch) ;;
+                pull_request) test "$HEAD_REPOSITORY" = division-sh/swarm ;;
+                *) exit 1 ;;
+              esac
+              credential_root=$(mktemp -d "$RUNNER_TEMP/workspace-build-auth.XXXXXX")
+              trap 'rm -r -- "$credential_root"' EXIT
+              export DOCKER_CONFIG="$credential_root"
+              case "$DOCKER_CONFIG/" in "$GITHUB_WORKSPACE/"*|"$WORKSPACE_IMAGE_CACHE/"*) exit 1 ;; esac
+              printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+              manifest_error='https://ghcr.io/v2/division-sh/swarm-workspace-golang/manifests/sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437: 429 Too Many Requests'
+            else
+              manifest_error='https://public.ecr.aws/v2/docker/library/golang/manifests/sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437: 429 Too Many Requests'
+            fi
             error_prefix="ERROR: failed to build: failed to solve: $base_ref: failed to resolve source metadata for $base_ref: failed to copy: httpReadSeeker: failed open: unexpected status code "
             built=false
             attempt=0
             build_started=$SECONDS
             for backoff in 5 10 20 40 0; do
               attempt=$((attempt + 1))
-              if docker build -t swarm-workspace:latest -f Dockerfile.workspace . > "$build_log" 2>&1; then
+              if docker build -t swarm-workspace:latest --build-arg WORKSPACE_GOLANG_BASE="$base_ref" -f Dockerfile.workspace . > "$build_log" 2>&1; then
                 cat "$build_log"
                 built=true
                 break
@@ -465,7 +576,7 @@ jobs:
 
   macos-sqlite-possession:
     needs: [ci-plan]
-    if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.master_replay != 'true'
+    if: (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.master_replay != 'true'
     name: macOS SQLite possession
     runs-on: macos-latest
     timeout-minutes: 15
@@ -494,7 +605,7 @@ jobs:
   # Explicit branch dispatch also qualifies this path before a placement change lands.
   unused-linux:
     needs: [ci-plan]
-    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')) && needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
+    if: (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')) && needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
     name: Native Linux unused analysis
     runs-on: ubuntu-latest
     timeout-minutes: 19
@@ -518,7 +629,7 @@ jobs:
 
   unused-darwin:
     needs: [ci-plan]
-    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')) && needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
+    if: (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')) && needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
     name: Native Darwin unused analysis
     runs-on: macos-latest
     # Run 38292434273: 6m35s success / 20m47s canceled; 38304031830: 20m27s canceled.
@@ -542,7 +653,7 @@ jobs:
           if-no-files-found: error
 
   unused-checks:
-    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')) && needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
+    if: (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && (github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.ref == 'refs/heads/master')) && needs.ci-plan.outputs.profile == 'full' && needs.ci-plan.outputs.master_replay != 'true'
     name: Native union unused checks
     needs: [ci-plan, unused-linux, unused-darwin]
     runs-on: ubuntu-latest
@@ -569,7 +680,7 @@ jobs:
         run: go run ./cmd/swarm-unused -merge -in test-results/unused
 
   proof-unit:
-    if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.proof_matrix != '{"include":[]}'
+    if: (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.proof_matrix != '{"include":[]}'
     name: Go proof ${{ matrix.unit }}
     needs: [ci-plan]
     runs-on: ubuntu-latest
@@ -653,7 +764,7 @@ jobs:
 
   semantic-smoke:
     needs: [ci-plan]
-    if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.master_replay != 'true'
+    if: (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.master_replay != 'true'
     name: Semantic smoke proofs
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -709,7 +820,7 @@ jobs:
 
   timing-budget:
     name: CI timing budget
-    if: ${{ always() && needs.ci-preflight.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.master_replay != 'true' }}
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && needs.ci-preflight.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.master_replay != 'true' }}
     needs: [ci-preflight, ci-plan, proof-unit]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -800,7 +911,7 @@ jobs:
 
   required-tests:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch summary' || 'Required test summary' }}
-    if: always()
+    if: always() && (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true)
     needs: [ci-preflight, complexity, ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, unused-linux, unused-darwin, unused-checks, proof-unit, semantic-smoke, timing-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -905,7 +1016,7 @@ jobs:
   ci-tier:
     name: ${{ needs.ci-plan.outputs.selection_check }}
     needs: [ci-preflight, ci-plan, required-tests]
-    if: ${{ always() && needs.ci-preflight.result == 'success' && needs.ci-plan.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && needs.ci-preflight.result == 'success' && needs.ci-plan.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
@@ -940,7 +1051,7 @@ jobs:
   nightly-proof:
     name: Master nightly proof
     needs: [ci-plan, required-tests, ci-tier]
-    if: ${{ always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master' && needs.ci-plan.outputs.profile == 'full' && needs.required-tests.result == 'success' && needs.ci-tier.result == 'success' }}
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master' && needs.ci-plan.outputs.profile == 'full' && needs.required-tests.result == 'success' && needs.ci-tier.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions: {}
@@ -959,7 +1070,7 @@ jobs:
   publish-debt-analysis:
     name: Publish protected-master immutable debt analysis
     needs: [ci-plan, required-tests]
-    if: ${{ !cancelled() && github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'schedule') && needs.ci-plan.result == 'success' && needs.required-tests.result == 'success' }}
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'schedule') && needs.ci-plan.result == 'success' && needs.required-tests.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -1001,7 +1112,7 @@ jobs:
 
   publish-timing-model:
     name: Publish generated timing model
-    if: github.event_name == 'schedule' && needs.required-tests.result == 'success'
+    if: (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && github.event_name == 'schedule' && needs.required-tests.result == 'success'
     needs: [required-tests, ci-plan, proof-unit]
     runs-on: ubuntu-latest
     timeout-minutes: 10
