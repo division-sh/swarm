@@ -334,6 +334,7 @@ func TestRecoverRejectsPersistedForeignExactAndPatternBeforeRouteOrPendingQuery(
 				Identity: managerScopedRuntimeAgentIdentity(
 					"reviewer", "test://recovery/reviewer", "review", "inst-1", "review/inst-1",
 				),
+				FlowID:        "review",
 				FlowPath:      "review/inst-1",
 				Subscriptions: []string{subscription},
 			})}}}
