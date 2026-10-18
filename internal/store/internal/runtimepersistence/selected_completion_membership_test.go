@@ -5,16 +5,24 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/google/uuid"
 )
 
 // Deliberately incomplete reset references are a corruption probe, not a
 // replacement reset writer or evidence of semantic cohort admission.
-func proveCompletionMembershipCannotBecomeLiveEvidence(t *testing.T, ctx context.Context, fixture selectedCompletionFixture, execution, attempt string) {
+func proveCompletionMembershipCannotBecomeLiveEvidence(t *testing.T, ctx context.Context, fixture selectedCompletionFixture, execution, attempt string, surface managedcapabilities.Surface) {
 	t.Helper()
 	physical, err := ReadCompletionAttemptStorageForTest(ctx, fixture.store, "openai_responses", attempt)
 	if err != nil || len(physical) != 1 || len(physical[0].Targets) != 1 {
 		t.Fatalf("original retained completion observation: %+v err=%v", physical, err)
+	}
+	persistence, ok := fixture.store.(managedcapabilities.Persistence)
+	if !ok {
+		t.Fatal("original native store has no managed capability persistence owner")
+	}
+	if err := persistence.SaveManagedCapabilitySurface(ctx, surface); err != nil {
+		t.Fatalf("attached closed completion surface lost idempotent persistence: %v", err)
 	}
 	before := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
 	reset := uuid.NewString()
@@ -70,10 +78,50 @@ func proveCompletionMembershipCannotBecomeLiveEvidence(t *testing.T, ctx context
 	if got, err := ReadCompletionAttemptStorageForTest(ctx, fixture.store, "openai_responses", attempt); err == nil || got != nil || !strings.Contains(err.Error(), "live-parent association") {
 		t.Fatalf("simultaneous live and retained completion membership became readable live evidence: %+v err=%v", got, err)
 	}
+	proveRetainedSurfaceCannotBecomeWritable(t, ctx, persistence, surface)
 	historicalContextRequireUnchanged(t, corrupt, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
 	clean()
 	historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
 	if got, err := ReadCompletionAttemptStorageForTest(ctx, fixture.store, "openai_responses", attempt); err != nil || len(got) != 1 || len(got[0].Targets) != 1 {
 		t.Fatalf("original completion evidence was not preserved after removing the invalid probe: %+v err=%v", got, err)
+	}
+	if err := persistence.SaveManagedCapabilitySurface(ctx, surface); err != nil {
+		t.Fatalf("original attached surface was not preserved after removing the invalid probe: %v", err)
+	}
+}
+
+func proveRetainedSurfaceCannotBecomeWritable(t *testing.T, ctx context.Context, persistence managedcapabilities.Persistence, surface managedcapabilities.Surface) {
+	t.Helper()
+	advanced, err := surface.ObserveMismatch(managedcapabilities.DeliveryMismatch{
+		BindingKind: managedcapabilities.BindingAPIDefinition, ExactName: "completion", Kind: "unavailable",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := advanced.CanAdvanceFrom(surface); err != nil || advanced.IntegrityHash == surface.IntegrityHash {
+		t.Fatalf("surface advancement control is invalid: %v", err)
+	}
+	nextAuthority := surface.Authority
+	nextAuthority.ID = uuid.NewString()
+	nextAuthority.TurnOrdinal++
+	fresh, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorIdentity: surface.ActorIdentity, ActorPlan: surface.ActorPlan,
+		RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
+		ProviderContract: surface.ProviderContract, Authority: nextAuthority, CreatedAt: surface.CreatedAt,
+	})
+	if err != nil || fresh.ID == surface.ID {
+		t.Fatalf("fresh selected surface control is invalid: %v", err)
+	}
+	for _, candidate := range []struct {
+		name    string
+		surface managedcapabilities.Surface
+	}{
+		{name: "idempotent", surface: surface},
+		{name: "advance", surface: advanced},
+		{name: "fresh", surface: fresh},
+	} {
+		if err := persistence.SaveManagedCapabilitySurface(ctx, candidate.surface); err == nil || !strings.Contains(err.Error(), "selected execution live-parent association") {
+			t.Errorf("%s retained selected surface accepted live persistence or lost exact refusal: %v", candidate.name, err)
+		}
 	}
 }

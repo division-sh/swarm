@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -424,6 +425,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 		}, want: runtimeeffects.StateOutcomeUncertain},
 	}
 	handles := make(map[string]*runtimeeffects.Handle, len(cases))
+	var retainedSurface managedcapabilities.Surface
 	for _, tc := range cases {
 		attemptAuthority := authority
 		attemptAuthority.Target = selectedProviderTarget(fixture)
@@ -431,6 +433,13 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 		attemptCtx = selectedProviderClaimContext(t, attemptCtx, fixture, attemptAuthority)
 		attemptCtx = managedSelectedExecutionStoreTestContext(t, attemptCtx, attemptAuthority)
 		attemptCtx = withManagedCompletionTestSurface(t, attemptCtx, attemptAuthority, "openai_responses")
+		if tc.name == "launched" {
+			var ok bool
+			retainedSurface, ok = managedcapabilities.FromContext(attemptCtx)
+			if !ok {
+				t.Fatal("selected completion has no captured capability surface")
+			}
+		}
 		handle, err := beginManagedCompletionForTest(t, attemptCtx, "openai_responses", []byte(tc.name))
 		if err != nil {
 			t.Fatalf("authorize %s: %v", tc.name, err)
@@ -618,7 +627,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	if err := fixture.db.QueryRowContext(ctx, `SELECT fence_generation FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, issued.ExecutionID).Scan(&repeatedFence); err != nil || repeatedFence != fence {
 		t.Fatalf("repeat recovery mutated fence: %d -> %d %v", fence, repeatedFence, err)
 	}
-	proveCompletionMembershipCannotBecomeLiveEvidence(t, ctx, fixture, issued.ExecutionID, handles["launched"].Attempt().AttemptID)
+	proveCompletionMembershipCannotBecomeLiveEvidence(t, ctx, fixture, issued.ExecutionID, handles["launched"].Attempt().AttemptID, retainedSurface)
 }
 
 func TestSelectedForkRecoveryInspectionWithoutProcessAcquisitionBothStores(t *testing.T) {
