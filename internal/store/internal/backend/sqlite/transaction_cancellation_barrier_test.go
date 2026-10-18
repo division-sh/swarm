@@ -72,6 +72,7 @@ func (t *cancellationBarrierTx) Rollback() error {
 }
 
 func TestTransactionCancellationRollbackOrders(t *testing.T) {
+	t.Run("native_rollback_witness", proveNativeRollbackWitness)
 	for _, read := range []bool{false, true} {
 		for _, deadline := range []bool{false, true} {
 			for _, rollbackFirst := range []bool{false, true} {
