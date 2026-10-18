@@ -36,6 +36,7 @@ import (
 // retaining all 52 prior receipts and the complete mechanical history.
 // The final native-runtime fixture sweep appends 21 original-context/grant
 // continuations, retaining the complete 83-receipt predecessor prefix.
+// #2730/6248981600 appends the catalog's same-process pre-seed setup only.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
@@ -50,7 +51,8 @@ type fixtureSetupSuccessor2617 struct {
 // historical transformation and current-endpoint packets.
 func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) {
 	switch row.Family + "/" + row.File + "/" + row.Function {
-	case "native-fanout-barrier-authority/internal/store/internal/runtimepersistence/fan_out_delivery_barrier_selected_store_test.go/TestFanOutDeliveryBarrierCompletionAndSupersessionWinnerMatrixOnBothStores",
+	case "native-catalog-preconstruction/internal/runtime/cataloge2e/runtime_harness_test.go/newRuntimeHarnessWithTerminalProvider",
+		"native-fanout-barrier-authority/internal/store/internal/runtimepersistence/fan_out_delivery_barrier_selected_store_test.go/TestFanOutDeliveryBarrierCompletionAndSupersessionWinnerMatrixOnBothStores",
 		"native-pipeline-delivery-exact-join-semantic/internal/runtime/pipeline/workflow_join_lifecycle_test.go/TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores",
 		"native-pipeline-delivery-exact-join-semantic/internal/runtime/pipeline/workflow_join_lifecycle_test.go/TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores",
 		"native-pipeline-delivery-exact-join-semantic/internal/runtime/pipeline/workflow_join_lifecycle_test.go/TestWorkflowJoinDurableIdentityIncludesStageOnBothStores",
@@ -119,14 +121,14 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "695c4885b5047f74969c970a3cc873dd6e89350c9ca5365e29dc67995ff66b22" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "d256ba56bfb78c9fa95a25cd1e9a6504e3c5ccf524485f9cc3986787821b1847" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 104 {
+	if len(pins) != 105 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -301,13 +303,13 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			}
 		})
 	}
-	if matched != 66 {
-		t.Fatalf("fixture comparator endpoints=%d, want66", matched)
+	if matched != 67 {
+		t.Fatalf("fixture comparator endpoints=%d, want67", matched)
 	}
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "695c4885b5047f74969c970a3cc873dd6e89350c9ca5365e29dc67995ff66b22" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "d256ba56bfb78c9fa95a25cd1e9a6504e3c5ccf524485f9cc3986787821b1847" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -318,7 +320,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 104 {
+	if len(pins) != 105 {
 		t.Fatal("fixture successor row count changed")
 	}
 	prefix, err := json.Marshal(pins[:39])
@@ -336,6 +338,10 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	prefix, err = json.Marshal(pins[:83])
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "84f07ee185996ade04d083e3c4e17f5b182b41528d57ac8e4e2711f3aa090c5f" {
 		t.Fatal("#2730 changed the immutable 83-receipt setup predecessor")
+	}
+	prefix, err = json.Marshal(pins[:104])
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "2ffc9c59c0a64b8179ea8537b7b6286ce3ee3bf806a6f8f3911b7a57fe165063" {
+		t.Fatal("#2730 changed the immutable 104-receipt setup predecessor")
 	}
 	for index, pin := range pins {
 		t.Run(pin.Original.Function, func(t *testing.T) {

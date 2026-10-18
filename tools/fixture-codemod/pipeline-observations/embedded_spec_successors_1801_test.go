@@ -152,8 +152,8 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 	}
 	restored := append([]recipe(nil), rows...)
 	var setup []fixtureSetupSuccessor2617
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "695c4885b5047f74969c970a3cc873dd6e89350c9ca5365e29dc67995ff66b22" ||
-		json.Unmarshal(fixtureSetupSuccessorBytes2617, &setup) != nil || len(setup) != 104 {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "d256ba56bfb78c9fa95a25cd1e9a6504e3c5ccf524485f9cc3986787821b1847" ||
+		json.Unmarshal(fixtureSetupSuccessorBytes2617, &setup) != nil || len(setup) != 105 {
 		t.Fatal("native fixture continuation packet changed")
 	}
 	// Undo only the independently pinned #2730 setup changes before comparing
@@ -179,8 +179,8 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 			restoredSetup++
 		}
 	}
-	if restoredSetup != 65 {
-		t.Fatalf("native fixture continuations restored=%d, want65", restoredSetup)
+	if restoredSetup != 66 {
+		t.Fatalf("native fixture continuations restored=%d, want66", restoredSetup)
 	}
 	completionSuccessors := 0
 	for i, row := range rows {
