@@ -36,15 +36,22 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 	if err != nil {
 		t.Fatalf("LoadConfiguredChannelPacks without credential: %v", err)
 	}
-	if len(withoutCredential.Plans) != 1 || len(withoutCredential.Bindings) != 1 {
-		t.Fatalf("channel load = %#v, want one plan and one binding", withoutCredential)
+	if len(withoutCredential.Plans) != 2 || len(withoutCredential.Bindings) != 1 {
+		t.Fatalf("channel load = %#v, want both installed plans and one configured binding", withoutCredential)
 	}
-	structural, err := withoutCredential.Plans[0].CapabilitySubject()
-	if err != nil || structural.Kind != packs.SubjectChannelPack || structural.Status != packs.StatusAvailable {
-		t.Fatalf("structural subject = %#v, err=%v", structural, err)
+	wantPlans := map[string]bool{"provider.telegram.hitl_channel": true, "provider.whatsapp.hitl_channel": true}
+	for _, plan := range withoutCredential.Plans {
+		structural, err := plan.CapabilitySubject()
+		if err != nil || !wantPlans[structural.ID] || structural.Kind != packs.SubjectChannelPack || structural.Status != packs.StatusAvailable {
+			t.Fatalf("structural subject = %#v, err=%v", structural, err)
+		}
+		delete(wantPlans, structural.ID)
+	}
+	if len(wantPlans) != 0 {
+		t.Fatalf("missing installed channel plans: %v", wantPlans)
 	}
 	outbound, err := withoutCredential.Bindings[0].CapabilitySubject()
-	if err != nil || outbound.Kind != packs.SubjectChannelOutbound || outbound.Status != packs.StatusNotReady {
+	if err != nil || outbound.ID != "ops" || outbound.Provider != "telegram" || outbound.Kind != packs.SubjectChannelOutbound || outbound.Status != packs.StatusNotReady {
 		t.Fatalf("outbound subject without credential = %#v, err=%v", outbound, err)
 	}
 
@@ -60,8 +67,8 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 
 	report := LocalPreflightReport{}
 	appendChannelCapabilitySubjects(&report, ready)
-	if len(report.CapabilitySubjects) != 2 {
-		t.Fatalf("preflight channel subjects = %#v, want structural and outbound", report.CapabilitySubjects)
+	if len(report.CapabilitySubjects) != 3 {
+		t.Fatalf("preflight channel subjects = %#v, want both structural plans and one configured outbound", report.CapabilitySubjects)
 	}
 
 	connectorDescriptors := projection.ProviderConnectors.PackDescriptors()
