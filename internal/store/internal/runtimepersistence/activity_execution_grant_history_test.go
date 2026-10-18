@@ -108,6 +108,12 @@ func TestActivityExecutionGrantReadUsesExactHistoricalVersionBothStores(t *testi
 				t.Fatal(err)
 			}
 			original, err := grant.Evidence()
+			if err == nil && original.State == runtimeownership.GrantPrepared {
+				original, err = grant.MarkProbesSettled(ctx, nil)
+			}
+			if err == nil && original.State == runtimeownership.GrantProbeSettled {
+				original, err = grant.AdmitExecution(ctx)
+			}
 			if err != nil || original.State != runtimeownership.GrantAdmitted {
 				t.Fatalf("original admitted grant unavailable: state=%s error=%v", original.State, err)
 			}
