@@ -17,7 +17,7 @@ import (
 
 func TestWhatsAppAuthoredReplyFixtureUsesInstalledPrivateConnector(t *testing.T) {
 	repo := repoRootForTest()
-	module, _, err := cliapp.NewSwarmWorkflowModule(repo, filepath.Join(repo, "internal/serveapp/testdata/whatsapp-session-reply"), filepath.Join(repo, "platform-spec.yaml"))
+	module, _, err := cliapp.NewSwarmWorkflowModule(repo, filepath.Join(repo, "internal/serveapp/testdata/whatsapp-session-reply"))
 	if err != nil {
 		t.Fatal(err)
 	}

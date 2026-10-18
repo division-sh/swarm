@@ -90,7 +90,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 			peer := newServeNativeProtocolPeer(t)
 			opts := cliapp.ServeOptions{SourceRoot: filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session"),
-				PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 				SwarmDir: t.TempDir(), SwarmDirSet: true, SelfCheck: true,
 				WorkspaceBackend: "host", WorkspaceBackendSet: true, StoreMode: backend, StoreModeSet: true}
 			if authoredReply {

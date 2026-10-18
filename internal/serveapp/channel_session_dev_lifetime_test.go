@@ -28,9 +28,8 @@ func TestRunServeWhatsAppDevDoesNotRetainPrivateState(t *testing.T) {
 	}
 	peer := newServeNativeProtocolPeer(t)
 	opts := cliapp.ServeOptions{SourceRoot: root,
-		PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-		ConfigPath:       writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", "", channelOnboardingHostWorkspaceFields()),
-		SwarmDir:         t.TempDir(), SwarmDirSet: true, StoreMode: "sqlite", StoreModeSet: true,
+		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", "", channelOnboardingHostWorkspaceFields()),
+		SwarmDir:   t.TempDir(), SwarmDirSet: true, StoreMode: "sqlite", StoreModeSet: true,
 		WorkspaceBackend: "host", WorkspaceBackendSet: true, SelfCheck: true, Dev: true, NoFeed: true,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0"}
 	if err := os.Chmod(opts.SwarmDir, 0o700); err != nil {

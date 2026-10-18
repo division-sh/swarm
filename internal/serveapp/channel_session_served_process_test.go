@@ -33,9 +33,9 @@ type servedNativeClientTrust struct {
 }
 
 type servedNativeProcessConfig struct {
-	ConfigPath, SourceRoot, PlatformSpecPath, SwarmDir, StoreMode string
-	Trust                                                         servedNativeClientTrust
-	LogoutReservationCut                                          bool
+	ConfigPath, SourceRoot, SwarmDir, StoreMode string
+	Trust                                       servedNativeClientTrust
+	LogoutReservationCut                        bool
 }
 
 const servedNativeProcessEnv = "TEST_SERVED_WHATSAPP_PROCESS"
@@ -48,7 +48,7 @@ func startServedNativeSDKProcess(t *testing.T, opts cliapp.ServeOptions, peer *s
 func startServedNativeSDKProcessWithLogoutCut(t *testing.T, opts cliapp.ServeOptions, peer *serveNativeProtocolPeer, reservationCut bool) *channelOnboardingCrashServeProcess {
 	t.Helper()
 	config, err := json.Marshal(servedNativeProcessConfig{ConfigPath: opts.ConfigPath, SourceRoot: opts.SourceRoot,
-		PlatformSpecPath: opts.PlatformSpecPath, SwarmDir: opts.SwarmDir, StoreMode: opts.StoreMode, Trust: peer.clientTrust,
+		SwarmDir: opts.SwarmDir, StoreMode: opts.StoreMode, Trust: peer.clientTrust,
 		LogoutReservationCut: reservationCut})
 	if err != nil {
 		t.Fatal(err)
@@ -128,7 +128,7 @@ func TestServedWhatsAppSDKProcessHelper(t *testing.T) {
 		whatsmeow.WACertPubKey = root
 	})
 	opts := cliapp.DefaultServeOptions()
-	opts.ConfigPath, opts.SourceRoot, opts.PlatformSpecPath = config.ConfigPath, config.SourceRoot, config.PlatformSpecPath
+	opts.ConfigPath, opts.SourceRoot = config.ConfigPath, config.SourceRoot
 	opts.StoreMode, opts.StoreModeSet = config.StoreMode, true
 	opts.SwarmDir, opts.SwarmDirSet = config.SwarmDir, true
 	opts.WorkspaceBackend, opts.WorkspaceBackendSet = "host", true
@@ -167,7 +167,7 @@ func TestServedWhatsAppUnpairedSDKProcessRestartBothStores(t *testing.T) {
 			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 			peer := newServeNativeProtocolPeer(t)
 			opts := cliapp.ServeOptions{SourceRoot: filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session-reply"),
-				PlatformSpecPath: defaultPlatformSpecPath, SwarmDir: t.TempDir(), StoreMode: backend}
+				SwarmDir: t.TempDir(), StoreMode: backend}
 			if err := os.Chmod(opts.SwarmDir, 0o700); err != nil {
 				t.Fatal(err)
 			}

@@ -31,7 +31,7 @@ func TestWhatsAppHeldFirstQRPublicCLIProgressBothStores(t *testing.T) {
 			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 			f := newRuntimeBootstrapFixture(t, backend)
 			const token = "held-first-qr-test-token"
-			handler, err := apiv1.NewHandler(apiv1.Options{PlatformSpecPath: filepath.Join("..", "..", "platform-spec.yaml"),
+			handler, err := apiv1.NewHandler(apiv1.Options{
 				AuthTokens: []string{token}, OperatorPrincipalID: f.principal.ID,
 				Handlers: apiv1.ChannelOnboardingHandlers(apiv1.ChannelOnboardingHandlerOptions{Onboarding: f.service, Channels: f.channels})})
 			if err != nil {

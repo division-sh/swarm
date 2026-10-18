@@ -20,8 +20,8 @@ func TestRunServeWhatsAppUnpairedDeclarationBothStores(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 			opts := cliapp.ServeOptions{
-				SourceRoot:       filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session"),
-				PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+				SourceRoot:    filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session"),
+				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 				SelfCheck: true, Verbose: true,
 				WorkspaceBackend: "host", WorkspaceBackendSet: true, StoreMode: backend, StoreModeSet: true,
 			}

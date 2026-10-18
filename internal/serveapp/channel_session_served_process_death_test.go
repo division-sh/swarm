@@ -206,7 +206,7 @@ func requireServedNativeNoResend(t *testing.T, peer *serveNativeProtocolPeer, or
 func servedNativeProcessOptions(t *testing.T, backend string) (cliapp.ServeOptions, string) {
 	t.Helper()
 	opts := cliapp.ServeOptions{SourceRoot: filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session-reply"),
-		PlatformSpecPath: defaultPlatformSpecPath, SwarmDir: t.TempDir(), StoreMode: backend}
+		SwarmDir: t.TempDir(), StoreMode: backend}
 	if err := os.Chmod(opts.SwarmDir, 0o700); err != nil {
 		t.Fatal(err)
 	}

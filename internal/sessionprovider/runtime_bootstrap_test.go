@@ -315,7 +315,7 @@ func TestWhatsAppPublicBootstrapReservesBeforeQRBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			f := newRuntimeBootstrapFixture(t, backend)
 			const token = "authenticated-bootstrap-token"
-			handler, err := apiv1.NewHandler(apiv1.Options{PlatformSpecPath: filepath.Join("..", "..", "platform-spec.yaml"),
+			handler, err := apiv1.NewHandler(apiv1.Options{
 				AuthTokens: []string{token}, OperatorPrincipalID: f.principal.ID,
 				Handlers: apiv1.ChannelOnboardingHandlers(apiv1.ChannelOnboardingHandlerOptions{Onboarding: f.service, Channels: f.channels})})
 			if err != nil {
