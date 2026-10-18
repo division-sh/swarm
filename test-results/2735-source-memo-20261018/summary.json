@@ -1,0 +1,67 @@
+{
+  "head": "55adb583b9de0572f69e6e4adb23776ac0851ed1",
+  "tree": "282c1fd92235a389689f920eefc4023be1c635bf",
+  "memoBound": 1,
+  "compilerInputs": "exact retained row; fixed compiler and embedded platform/packs/admission; no ambient fallback",
+  "newRoots": 1,
+  "invariant": "only exact successfully validated immutable semantics are memoized, never live report evidence",
+  "reproduction": {
+    "state": "prepared-not-executed",
+    "venue": "server2 awaiting G release and orchestrator handoff",
+    "limit": 1,
+    "schedule": "unchanged first successful model response at 7.09s",
+    "originalBounds": "10s/25ms and one-minute public-command fuse"
+  },
+  "preflight": "pending after the authorized bounded reproduction",
+  "files": [
+    {
+      "file": "2735-source-memo-exact-head-race.jsonl",
+      "passCells": 27,
+      "failures": [],
+      "skips": []
+    },
+    {
+      "file": "2735-source-memo-original-smoke.jsonl",
+      "passCells": 2,
+      "failures": [],
+      "skips": []
+    },
+    {
+      "file": "2735-source-memo-preservation-race.jsonl",
+      "passCells": 440,
+      "failures": [
+        {
+          "Time": "2026-10-18T15:18:32.763780823Z",
+          "Action": "fail",
+          "Package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+          "Elapsed": 600.059
+        }
+      ],
+      "skips": []
+    },
+    {
+      "file": "2735-source-memo-projections-and-guards.jsonl",
+      "passCells": 775,
+      "failures": [],
+      "skips": []
+    },
+    {
+      "file": "2735-source-memo-race.jsonl",
+      "passCells": 54,
+      "failures": [],
+      "skips": []
+    },
+    {
+      "file": "2735-source-memo-remaining-publication-race.jsonl",
+      "passCells": 18,
+      "failures": [],
+      "skips": []
+    },
+    {
+      "file": "2735-source-memo-remaining-waits-race.jsonl",
+      "passCells": 13,
+      "failures": [],
+      "skips": []
+    }
+  ]
+}
