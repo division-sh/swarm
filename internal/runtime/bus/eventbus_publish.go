@@ -32,7 +32,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
 type TargetFailureDeadLetterRecorder = runtimedeadletters.AcknowledgedRecorder
@@ -1602,7 +1601,7 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 	if err != nil {
 		return releaseOnFailure(fmt.Errorf("admit asynchronous event dispatch: %w", err))
 	}
-	acceptedCtx := bindWorkContext(dispatchCtx, lease, owner)
+	acceptedCtx := bindWorkContext(dispatchCtx, lease, owner, eb.carryMutationContext)
 	dispatchCtx, closeDispatchContext, err := acceptedWorkExecutionContext(acceptedCtx)
 	if err != nil {
 		_ = lease.Done()
@@ -2616,7 +2615,7 @@ func (eb *EventBus) beginRuntimeWork(ctx context.Context) (context.Context, *wor
 	if err != nil {
 		return admittedCtx, nil, fmt.Errorf("admit event bus work: %w", err)
 	}
-	return bindWorkContext(admittedCtx, lease, owner), lease, nil
+	return bindWorkContext(admittedCtx, lease, owner, eb.carryMutationContext), lease, nil
 }
 
 func (eb *EventBus) workOwnerForContext(ctx context.Context) worklifetime.Occurrence {
@@ -2626,12 +2625,14 @@ func (eb *EventBus) workOwnerForContext(ctx context.Context) worklifetime.Occurr
 	return eb.workOwner
 }
 
-func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner worklifetime.Occurrence) context.Context {
+func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner worklifetime.Occurrence, carryOriginal func(context.Context, context.Context) context.Context) context.Context {
 	if lease == nil {
 		return ctx
 	}
 	workCtx := lease.Context()
-	workCtx = startupownership.CarryMutationAuthority(workCtx, ctx)
+	if carryOriginal != nil {
+		workCtx = carryOriginal(workCtx, ctx)
+	}
 	if _, ok := worklifetime.OccurrenceFromContext(workCtx); !ok {
 		workCtx = worklifetime.WithOccurrence(workCtx, owner)
 	}
