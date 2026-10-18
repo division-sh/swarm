@@ -618,6 +618,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	if err := fixture.db.QueryRowContext(ctx, `SELECT fence_generation FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, issued.ExecutionID).Scan(&repeatedFence); err != nil || repeatedFence != fence {
 		t.Fatalf("repeat recovery mutated fence: %d -> %d %v", fence, repeatedFence, err)
 	}
+	proveCompletionMembershipCannotBecomeLiveEvidence(t, ctx, fixture, issued.ExecutionID, handles["launched"].Attempt().AttemptID)
 }
 
 func TestSelectedForkRecoveryInspectionWithoutProcessAcquisitionBothStores(t *testing.T) {

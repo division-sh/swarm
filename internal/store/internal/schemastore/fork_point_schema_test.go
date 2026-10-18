@@ -147,10 +147,13 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 				verifySelectedGrantExactExecution(t, db, bundleHash, deploymentRunID, bindingID, eventBindingID)
 			})
 			t.Run("turn_exact_live_parents", func(t *testing.T) {
-				verifyTurnLiveParents(t, db, bundleHash, sourceRunID, deploymentRunID)
+				verifyTurnLiveParents(t, db, bundleHash, deploymentRunID, sourceRunID)
 			})
 			t.Run("selected_surface_projection", func(t *testing.T) {
 				verifySelectedSurfaceProjection(t, db, deploymentRunID, eventRunID)
+			})
+			t.Run("selected_completion_reference_pairs", func(t *testing.T) {
+				verifySelectedCompletionReferencePairs(t, db, deploymentRunID, eventRunID)
 			})
 			insertRoute := func(forkRunID, kind string, revision int64, forkEventID any) error {
 				t.Helper()

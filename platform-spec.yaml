@@ -18189,6 +18189,7 @@ platform_tables:
             updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND failure IS NULL AND completed_at IS NULL) OR (status = 'succeeded' AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NULL AND completed_at IS NOT NULL) OR (status IN ('failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NOT NULL AND completed_at IS NOT NULL)),
             CHECK ((reply_context_present AND reply_context_id IS NOT NULL AND NULLIF(TRIM(reply_context_id), '') IS NOT NULL) OR (NOT reply_context_present AND reply_context_id IS NULL)),
+            UNIQUE (request_event_id, run_id),
             UNIQUE (request_event_id, run_id, reply_context_present),
             UNIQUE (request_event_id, reply_context_id),
             INDEX idx_activity_attempts_run (run_id, started_at),
@@ -18317,6 +18318,7 @@ platform_tables:
             CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             UNIQUE (execution_id, fork_run_id),
             UNIQUE (execution_id, fork_run_id, generation),
+            UNIQUE (execution_id, fork_run_id, generation, state),
             UNIQUE (execution_id, binding_id, fork_run_id, generation),
             UNIQUE (execution_id, binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision, generation),
             UNIQUE (execution_id, fork_event_id),
@@ -18327,6 +18329,71 @@ platform_tables:
         CREATE UNIQUE INDEX idx_run_fork_selected_contract_runtime_executions_current
             ON run_fork_selected_contract_runtime_executions (fork_run_id)
             WHERE state <> 'closed';
+    run_fork_selected_contract_execution_detachments:
+      description: >-
+        Positive retained-completion reference for exactly one CLOSED selected execution.
+        The original reset operation, revision, exact typed cut and full closed-cohort manifest
+        must be admitted together by the reset owner before its live associations are removed.
+        This row alone is neither cohort validation nor permission to execute or settle work.
+        Its manifest fingerprints refer to retained canonical outcomes, never substitute archives.
+      ddl: |
+        CREATE TABLE run_fork_selected_contract_execution_detachments (
+            execution_id UUID NOT NULL PRIMARY KEY REFERENCES run_fork_selected_contract_runtime_executions(execution_id),
+            binding_id UUID NOT NULL,
+            fork_run_id UUID NOT NULL,
+            source_run_id UUID NOT NULL,
+            fork_point_kind TEXT NOT NULL CHECK (fork_point_kind IN ('event', 'deployment_revision', 'run_start')),
+            fork_revision BIGINT NOT NULL CHECK (fork_revision > 0),
+            generation BIGINT NOT NULL CHECK (generation > 0),
+            fork_event_id UUID,
+            execution_state TEXT NOT NULL CHECK (execution_state = 'closed'),
+            reset_operation_id UUID NOT NULL REFERENCES runtime_reset_operations(operation_id),
+            reset_revision BIGINT NOT NULL CHECK (reset_revision > 0),
+            planned_runs_fingerprint TEXT NOT NULL CHECK (planned_runs_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+            execution_fingerprint TEXT NOT NULL CHECK (execution_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+            manifest_fingerprint TEXT NOT NULL CHECK (manifest_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+            manifest JSONB NOT NULL,
+            CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
+            UNIQUE (execution_id, fork_run_id),
+            FOREIGN KEY (execution_id, binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision, generation) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision, generation),
+            FOREIGN KEY (execution_id, fork_event_id) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_event_id),
+            FOREIGN KEY (execution_id, fork_run_id, generation, execution_state) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_run_id, generation, state)
+        );
+    run_fork_selected_contract_activity_detachments:
+      description: >-
+        Typed membership of one unchanged canonical terminal journal in a positively retained
+        selected execution cohort. The reset owner proves installed-grant or copied-terminal
+        lineage and complete row fingerprint before insertion; SQL NULL binding is not evidence.
+        The canonical journal retains its original result, failure, clocks and binding presence.
+      ddl: |
+        CREATE TABLE run_fork_selected_contract_activity_detachments (
+            execution_id UUID NOT NULL,
+            request_event_id UUID NOT NULL,
+            fork_run_id UUID NOT NULL,
+            origin_kind TEXT NOT NULL CHECK (origin_kind IN ('installed_grant', 'copied_terminal')),
+            lineage JSONB NOT NULL,
+            row_fingerprint TEXT NOT NULL CHECK (row_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+            PRIMARY KEY (execution_id, request_event_id),
+            FOREIGN KEY (execution_id, fork_run_id) REFERENCES run_fork_selected_contract_execution_detachments(execution_id, fork_run_id),
+            FOREIGN KEY (request_event_id, fork_run_id) REFERENCES activity_attempts(request_event_id, run_id)
+        );
+    run_fork_selected_contract_turn_detachments:
+      description: >-
+        Typed membership of an unchanged canonical completion audit in a positively retained
+        selected execution cohort. The actual completion attempt and capability surface remain
+        the canonical audit parents. Membership grants no reply, completion or provider authority.
+      ddl: |
+        CREATE TABLE run_fork_selected_contract_turn_detachments (
+            execution_id UUID NOT NULL,
+            turn_id UUID NOT NULL,
+            fork_run_id UUID NOT NULL,
+            completion_attempt_id UUID NOT NULL,
+            capability_surface_id UUID NOT NULL,
+            row_fingerprint TEXT NOT NULL CHECK (row_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+            PRIMARY KEY (execution_id, turn_id),
+            FOREIGN KEY (execution_id, fork_run_id) REFERENCES run_fork_selected_contract_execution_detachments(execution_id, fork_run_id),
+            FOREIGN KEY (turn_id, fork_run_id, completion_attempt_id, capability_surface_id) REFERENCES agent_turns(turn_id, run_id, completion_attempt_id, capability_surface_id)
+        );
     run_fork_selected_contract_execution_live_parents:
       description: >-
         Exact live-parent association for one canonical selected runtime execution.
