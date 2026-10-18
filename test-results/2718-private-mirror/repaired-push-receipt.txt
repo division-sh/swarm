@@ -1,0 +1,6 @@
+<!-- receipt v1 -->
+receipt: head=c28690895eca0927b1e2ab95094a79b8ec13bf19 tree=1b54ec598c04f4247207169aee2bd29928e93e4a parent=4077a0e675ba33b7c1a8c1ab4496f40fc79d1276 branch=agent-d/2718-private-workspace-base signed=G dirty_files=0
+preflight: test-results/preflight/20261018T132810.747145190-817f0b36-ea32-41a8-b6a3-c149613825b4/receipt.json sha256=d3fdd5b419c803978927636cd451b4d3e4ca859a854016df0be8cdd4ea3881ae (exact-head complete unstarted=0)
+tests: cmd/swarm-complexity workflow guard RED-to-GREEN:reviewer-e6250653448; affected owners:59 roots/626 passes; preflight:25/25 pass644.7s; normal PR full39133302082:RUNNING at c28690895e; no extra units/setup dispatch
+regenerated: not-claimed
+generated: 2026-10-18T13:52:29Z

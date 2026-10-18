@@ -1,0 +1,5 @@
+--- FAIL: TestWorkflowUnconditionalGateAndExecutableAggregate (0.00s)
+    workflow_test.go:35: complexity must depend only on cheap admission, never proof profile/expensive plan
+FAIL
+FAIL	github.com/division-sh/swarm/cmd/swarm-complexity	0.004s
+FAIL
