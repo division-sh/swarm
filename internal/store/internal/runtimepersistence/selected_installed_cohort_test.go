@@ -242,6 +242,20 @@ func proveClosedSelectedInstalledJournalCohort(t *testing.T, fixture completionS
 				if expected, found := want[fact.Record.RequestEventID]; !found || !reflect.DeepEqual(fact.Record, expected) || fact.GrantFactID == "" {
 					t.Fatalf("installed journal changed or lost its exact admitted version: %+v want=%+v", fact, expected)
 				}
+				matches := 0
+				for _, generation := range got.Generations {
+					for _, grant := range generation.Grants {
+						if grant.Evidence.GrantID == fact.Record.ExecutionBinding.GrantID && grant.Evidence.StateVersion == fact.Record.ExecutionBinding.StateVersion {
+							if grant.FactID != fact.GrantFactID || grant.Evidence.State != runtimeownership.GrantAdmitted {
+								t.Fatal("journal membership substituted the physical admitted grant fact")
+							}
+							matches++
+						}
+					}
+				}
+				if matches != 1 {
+					t.Fatalf("journal membership matched %d historical versions, want exactly one", matches)
+				}
 			}
 		})
 	}
