@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -29,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -797,16 +799,19 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		for _, tc := range []struct {
-			name       string
-			status     string
-			wantErr    string
-			wantCopied bool
+			name         string
+			status       string
+			wantErr      string
+			wantCopied   bool
+			requestFault string
 		}{
 			{name: "succeeded", status: "succeeded", wantCopied: true},
 			{name: "failed", status: "failed", wantCopied: true},
 			{name: "uncertain", status: "uncertain", wantErr: "ambiguous dispatch evidence"},
 			{name: "started", status: "started", wantErr: "recorded evidence is not terminal"},
 			{name: "missing", status: "missing", wantErr: "cannot authorize a fork-local call"},
+			{name: "foreign_request_run", status: "succeeded", requestFault: "source_run_id", wantErr: "foreign request coordinates"},
+			{name: "changed_request_input", status: "succeeded", requestFault: "input", wantErr: "changed its exact released request"},
 		} {
 			t.Run(backend.name+"/"+tc.name, func(t *testing.T) {
 				fixture := backend.open(t)
@@ -822,13 +827,11 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				source := selectedActivityProducerSourceWithLoops(t, false, false)
 				ctx := seedSelectedActivitySourceRun(t, fixture, sourceRunID, source)
 				card, continuation := newDeclaredRootActivityCard(t, sourceRunID, now, source)
-				if err := commitSemanticParentFixture(ctx, cards, sourceRunID, continuation.SourceEventID, now); err != nil {
+				parent := eventtest.ExistingRunRootIngress(continuation.SourceEventID, "support.drafted", "test", "", []byte(`{}`), 0, sourceRunID, events.EventEnvelope{}, now)
+				if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, parent); err != nil {
 					t.Fatal(err)
 				}
-				commitPreparedWorkflowAggregateFixture(t, ctx, fixture.store.(agentFixtureFlowStore), sourceRunID, runtimepipeline.WorkflowInstance{
-					InstanceID: sourceRunID, StorageRef: sourceRunID, EntityID: sourceRunID, EntityType: "default", WorkflowName: ".", WorkflowVersion: source.WorkflowVersion(),
-					Mode: "static", CurrentState: "pending", Fields: map[string]any{}, CreatedAt: now, EnteredStageAt: now,
-				}, now)
+				constructSelectedActivityProducerFixture(t, ctx, fixture.store.(agentFixtureFlowStore), source, parent, ".", now)
 				captureFanOutBarrierForkRevision(t, ctx, db, sourceRunID, backend.name == "postgres")
 				if err := cards.CreateProposedEffectCard(ctx, card, continuation); err != nil {
 					t.Fatal(err)
@@ -838,6 +841,10 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					CardID: card.CardID, Verdict: "approve", PrincipalID: "operator",
 					ObservedContentHash: card.CardContentHash, DecisionEventID: decisionEventID, Now: now.Add(time.Minute),
 				}); err != nil {
+					t.Fatal(err)
+				}
+				decisionEvent := eventtest.RuntimeControl(decisionEventID, "mailbox.card_decided", "platform", "", []byte(`{"card_id":"`+card.CardID+`"}`), 0, sourceRunID, "", events.EventEnvelope{}, now.Add(time.Minute))
+				if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, decisionEvent); err != nil {
 					t.Fatal(err)
 				}
 				owner, err := activityidentity.ParseOwnerKey(continuation.NodeID)
@@ -854,7 +861,8 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				var resultEventType any = continuation.SuccessEvent
 				var resultPayload any = `{"activity_id":"send_support_reply","result":{"ok":true}}`
 				var failure any
-				var completedAt any = now.Add(3 * time.Minute)
+				startedAt := now.Add(3 * time.Minute).Format(time.RFC3339Nano)
+				var completedAt any = startedAt
 				switch tc.status {
 				case "failed":
 					resultEventType = continuation.FailureEvent
@@ -871,8 +879,12 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					resultPayload = forkTestJSON(t, map[string]any{"activity_id": continuation.ActivityID, "failure": envelope})
 				case "uncertain":
 					resultEventType = continuation.FailureEvent
-					resultPayload = `{"activity_id":"send_support_reply","failure":{"code":"provider_outcome_uncertain"}}`
-					failure = `{"schema_version":"platform.failure/v1","class":"platform.outcome_uncertain","detail":{"code":"provider_outcome_uncertain"},"retryable":false,"deterministic":false,"message":"Provider outcome is uncertain.","remediation":"Inspect provider state.","component":"activity-runtime","operation":"execute"}`
+					envelope, ok := failures.EnvelopeFromError(failures.New(failures.ClassOutcomeUncertain, "provider_outcome_uncertain", "activity-runtime", "execute", nil))
+					if !ok {
+						t.Fatal("missing uncertain activity evidence")
+					}
+					failure = forkTestJSON(t, envelope)
+					resultPayload = forkTestJSON(t, map[string]any{"activity_id": continuation.ActivityID, "failure": envelope})
 				case "started":
 					storedResultEventID, resultEventType, resultPayload, failure, completedAt = nil, nil, nil, nil, nil
 				}
@@ -891,20 +903,30 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					`, continuation.RequestEventID, sourceRunID, continuation.SourceEventID, continuation.EntityID, continuation.FlowInstance,
 						continuation.NodeID, continuation.HandlerEventKey, continuation.ActivityID, continuation.Tool, tc.status,
 						continuation.SuccessEvent, continuation.FailureEvent, storedResultEventID, resultEventType,
-						resultPayload, failure, forkTestJSON(t, continuation.Generation), now.Add(3*time.Minute), completedAt); err != nil {
+						resultPayload, failure, forkTestJSON(t, continuation.Generation), startedAt, completedAt); err != nil {
 						t.Fatal(err)
 					}
 				}
 
-				payload, err := json.Marshal(map[string]any{
+				requestPayload := map[string]any{
 					"activity_id": continuation.ActivityID, "tool": continuation.Tool, "input": continuation.Input.Interface(),
-					"success_event": continuation.SuccessEvent,
-					"failure_event": continuation.FailureEvent,
-					"entity_id":     continuation.EntityID, "node_id": continuation.NodeID, "flow_id": continuation.FlowID,
+					"bundle_hash": continuation.BundleHash, "workflow_version": continuation.WorkflowVersion,
+					"success_event":  continuation.SuccessEvent,
+					"failure_event":  continuation.FailureEvent,
+					"revision_event": continuation.RevisionEvent, "rejected_event": continuation.RejectedEvent,
+					"entity_id": continuation.EntityID, "node_id": continuation.NodeID, "flow_id": continuation.FlowID,
 					"flow_instance":     continuation.FlowInstance,
 					"handler_event_key": continuation.HandlerEventKey, "source_event_id": continuation.SourceEventID,
-					"source_run_id": sourceRunID,
-				})
+					"source_run_id": sourceRunID, "source_task_id": continuation.SourceTaskID,
+					"parent_event_id": continuation.ParentEventID, "chain_depth": continuation.ChainDepth,
+				}
+				switch tc.requestFault {
+				case "source_run_id":
+					requestPayload["source_run_id"] = uuid.NewString()
+				case "input":
+					requestPayload["input"] = map[string]any{"foreign_request": true}
+				}
+				payload, err := json.Marshal(requestPayload)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -913,14 +935,41 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					t.Fatal(err)
 				}
 				request := eventtest.ChildForProducerWithRoutingSource(continuation.RequestEventID, runForkActivityRequestEvent, eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
-					events.EventLineage{RunID: sourceRunID, ParentEventID: continuation.SourceEventID, ExecutionMode: continuation.ExecutionMode}, events.EventEnvelope{}, anchor.Source, now.Add(2*time.Minute))
-				if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, request); err != nil {
+					events.EventLineage{RunID: sourceRunID, ParentEventID: decisionEventID, ExecutionMode: continuation.ExecutionMode}, events.EventEnvelope{}, anchor.Source, now.Add(2*time.Minute))
+				fact, err := runtimecorrelation.NewSourceArtifactFact(continuation.BundleHash)
+				if err != nil {
+					t.Fatal(err)
+				}
+				admission, err := runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact)(ctx, request, continuation.FlowID)
+				if err != nil {
+					t.Fatalf("admit exact approved activity request: %v", err)
+				}
+				request, err = events.ApplyPayloadAdmission(request, admission)
+				if err != nil {
+					t.Fatal(err)
+				}
+				admitted, err := events.AdmitForPublish(request, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				disposition := pipelineobligation.Acknowledged("pipeline_persisted")
+				if _, err := commitAdmittedSemanticEventFixtureOutcomeWithDisposition(ctx, cards, admitted, nil, pipelineobligation.ScopeDirect, &disposition); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := cards.CompleteProposedEffectRoute(ctx, card.CardID, decisionEventID, now.Add(2*time.Minute)); err != nil {
 					t.Fatal(err)
 				}
-				// A README-only target changes executable identity, not the frozen effect contract.
+				if tc.requestFault == "source_run_id" {
+					before := historicalContextDatabaseRows(t, db, backend.name == "postgres")
+					_, err := cards.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: request.ID()})
+					if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+						t.Fatalf("foreign request planning refusal = %v, want %q", err, tc.wantErr)
+					}
+					historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, db, backend.name == "postgres"))
+					return
+				}
+				// Removing selected approval cannot replace the original declaration
+				// or turn its ambiguous/missing evidence into a fresh child call.
 				parentBundle, ok := semanticview.Bundle(source)
 				if !ok {
 					t.Fatal("source fixture has no admitted bundle")
@@ -931,7 +980,11 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 						t.Fatal(err)
 					}
-					if err := os.WriteFile(path, entry.Bytes(), 0600); err != nil {
+					contents := entry.Bytes()
+					if entry.Label() == "nodes.yaml" {
+						contents = []byte(strings.ReplaceAll(string(contents), ", approval: {decision: support_reply}", ""))
+					}
+					if err := os.WriteFile(path, contents, 0600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -943,21 +996,63 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				if err != nil {
 					t.Fatal(err)
 				}
+				if targetBundle.Nodes["support"].EventHandlers["support.drafted"].Activity.Approval != nil ||
+					parentBundle.Nodes["support"].EventHandlers["support.drafted"].Activity.Approval.Decision != "support_reply" {
+					t.Fatal("selected declaration replaced the exact retained original approval")
+				}
 				materializationRequest := selectedSourceMaterializationRequest(t, ctx, cards, sourceRunID, request.ID(), semanticview.Wrap(targetBundle))
 				child, err := cards.MaterializeRunForkForSelectedContractExecution(ctx, materializationRequest)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if child.MaterializedEntityCount != 1 || child.SelectedContractBinding == nil {
+				if child.MaterializedEntityCount != 2 || child.SelectedContractBinding == nil {
 					t.Fatalf("approved-effect fixture requires its bound source state: %#v", child)
 				}
 				if child.SelectedContractBinding.ContractSelection.BundleHash != targetBundle.SourceArtifact.BundleHash() || child.SelectedContractBinding.ContractSelection.BundleHash == parentBundle.SourceArtifact.BundleHash() {
 					t.Fatal("recorded-result fork did not consume independent target C")
 				}
 				forkRunID := child.ForkRunID
+				if tc.requestFault == "" {
+					requireOriginalActivityProposalComparisonControls(t, ctx, cards, request, card.CardID, continuation.BundleHash, targetBundle.SourceArtifact.BundleHash())
+				}
+				if tc.wantCopied {
+					lateFact := activityidentity.Fact{RunID: sourceRunID, SourceEventID: request.ID(),
+						EntityID: continuation.EntityID, Owner: owner, ExecutionFlowID: continuation.FlowID,
+						HandlerEventKey: continuation.HandlerEventKey, ActivityID: continuation.ActivityID, Tool: continuation.Tool, Attempt: 1}
+					latePayload := make(map[string]any, len(requestPayload))
+					for key, value := range requestPayload {
+						latePayload[key] = value
+					}
+					latePayload["source_event_id"] = request.ID()
+					lateRaw, err := json.Marshal(latePayload)
+					if err != nil {
+						t.Fatal(err)
+					}
+					late := eventtest.ChildForProducerWithRoutingSource(activityidentity.RequestEventID(lateFact), runForkActivityRequestEvent,
+						request.Producer(), "", lateRaw, 1, events.EventLineage{RunID: sourceRunID, ParentEventID: request.ID(), ExecutionMode: continuation.ExecutionMode},
+						events.EventEnvelope{}, anchor.Source, now.Add(4*time.Minute))
+					if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, late); err != nil {
+						t.Fatal(err)
+					}
+					before := historicalContextDatabaseRows(t, db, backend.name == "postgres")
+					// The loader processes these by committed time: the reusable
+					// first attempt is inserted before the later input refuses.
+					loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{request.ID(), late.ID()}, materializationRequest.OriginalLoopCarriage)
+					if err == nil || !strings.Contains(err.Error(), "outside the bound fork revision") || len(loaded) != 0 {
+						t.Fatalf("late input did not roll back the earlier approved copy: loaded=%d error=%v", len(loaded), err)
+					}
+					historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, db, backend.name == "postgres"))
+				}
 				var prepared runfork.RunForkSelectedContractSourceEvent
+				sourceEventBefore := selectedActivityPersistedSourceEvidence(t, db, request.ID())
+				sourceAttemptBefore, sourceAttemptFound, err := fixture.store.(activityTimestampJournal).LoadActivityAttempt(ctx, request.ID())
+				if err != nil || sourceAttemptFound == (tc.status == "missing") {
+					t.Fatalf("original journal inventory: found=%t error=%v", sourceAttemptFound, err)
+				}
 				beforePrepare := historicalContextDatabaseRows(t, db, backend.name == "postgres")
-				loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, originalCarriageForRun(t, cards, sourceRunID))
+				// An unrelated caller reply must not fill an empty original binding.
+				loadCtx := events.WithDeliveryContext(ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "foreign-caller-reply"}})
+				loaded, err := cards.LoadRunForkSelectedContractSourceEvents(loadCtx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, materializationRequest.OriginalLoopCarriage)
 				if err == nil {
 					if len(loaded) != 1 {
 						t.Fatalf("prepared count=%d", len(loaded))
@@ -1002,13 +1097,60 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					t.Fatalf("copied status=%q entity=%q flow=%q", copiedStatus, copiedEntity, copiedFlow)
 				}
 				copied, found, err := fixture.store.(activityTimestampJournal).LoadActivityAttempt(ctx, forkRequestID)
-				if err != nil || !found || copied.ResultEventType != resultEventType || copied.ResultEventID == storedResultEventID || copied.InputHash != "input-hash" {
+				if err != nil || !found || copied.ResultEventType != resultEventType || copied.ResultEventID == storedResultEventID || copied.InputHash != "input-hash" || copied.ReplyContextID != "" {
 					t.Fatalf("terminal approved result lost fork-local identity: %#v found=%v err=%v", copied, found, err)
 				}
 				if tc.status == "failed" && (copied.Failure == nil || copied.Failure.Detail.Code != "provider_rejected") {
 					t.Fatalf("approved failed result lost its terminal failure: %#v", copied.Failure)
 				}
+				sourceAttemptAfter, found, err := fixture.store.(activityTimestampJournal).LoadActivityAttempt(ctx, request.ID())
+				if err != nil || !found || !reflect.DeepEqual(sourceAttemptBefore, sourceAttemptAfter) ||
+					!reflect.DeepEqual(sourceEventBefore, selectedActivityPersistedSourceEvidence(t, db, request.ID())) {
+					t.Fatalf("child preparation changed the physical original request or journal: found=%t error=%v", found, err)
+				}
 			})
 		}
+	}
+}
+
+func requireOriginalActivityProposalComparisonControls(t *testing.T, ctx context.Context, cards interface {
+	decisioncard.Store
+	decisioncard.ProposedEffectStore
+}, request events.Event, cardID, originalBundle, selectedBundle string) {
+	t.Helper()
+	card, err := cards.GetDecisionCard(ctx, cardID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation, err := cards.LoadProposedEffectContinuation(ctx, cardID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if continuation.ReplyContextID != "" || request.DeliveryContext().ReplyContextID() != "" {
+		t.Fatal("empty-original control acquired a fabricated reply")
+	}
+	if err := runtimepipeline.ValidateRecordedActivityProposal(request, card, continuation, "support_reply", originalBundle); err != nil {
+		t.Fatalf("exact original native proposal: %v", err)
+	}
+	for _, fault := range []string{"foreign_proposal_run", "foreign_proposal_request", "selected_bundle", "foreign_reply"} {
+		t.Run(fault, func(t *testing.T) {
+			candidateCard, candidateContinuation, candidateRequest, bundle := card, continuation, request, originalBundle
+			switch fault {
+			case "foreign_proposal_run":
+				candidateCard.RunID = uuid.NewString()
+			case "foreign_proposal_request":
+				candidateContinuation.RequestEventID = uuid.NewString()
+			case "selected_bundle":
+				bundle = selectedBundle
+			case "foreign_reply":
+				candidateRequest = events.NewContextDeliveryEvent(request, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "foreign-reply"}}).Event()
+			}
+			if err := runtimepipeline.ValidateRecordedActivityProposal(candidateRequest, candidateCard, candidateContinuation, "support_reply", bundle); err == nil {
+				t.Fatal("foreign proposal/request evidence was admitted")
+			}
+		})
+	}
+	if request.DeliveryContext().ReplyContextID() != "" {
+		t.Fatal("proposal comparison changed immutable physical history")
 	}
 }

@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,7 +36,11 @@ import (
 func TestIssue642CopiedActivityPublishesAndReturnsToOwnRequesterBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			runCopiedActivityReplyReturn(t, backend, false, copiedReplyNoFollowup)
+			for _, failed := range []bool{false, true} {
+				t.Run(map[bool]string{false: "succeeded", true: "failed"}[failed], func(t *testing.T) {
+					runCopiedActivityReplyReturnOutcome(t, backend, false, copiedReplyNoFollowup, failed)
+				})
+			}
 		})
 	}
 }
@@ -130,6 +137,15 @@ const (
 
 func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, nested bool, followup copiedReplyFollowup) {
 	t.Helper()
+	runCopiedActivityReplyReturnOutcome(t, backend, nested, followup, false)
+}
+
+func runCopiedActivityReplyReturnOutcome(t *testing.T, backend catalogRuntimeBackend, nested bool, followup copiedReplyFollowup, failed bool) {
+	t.Helper()
+	wantStatus, wantResult, accountID, requestID := pipeline.ActivityAttemptStatusSucceeded, "recorded-only", "original-account", "original-request"
+	if failed {
+		wantStatus, wantResult, accountID, requestID = pipeline.ActivityAttemptStatusFailed, "provider_http_status", "compute", "compute"
+	}
 	levels := 1
 	if nested {
 		levels = 2
@@ -144,6 +160,9 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if failed {
+			w.WriteHeader(http.StatusBadGateway)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]string{"account_id": input["account_id"], "request_id": input["request_id"], "result": "recorded-only"})
 	}))
 	t.Cleanup(provider.Close)
@@ -153,8 +172,27 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 	} else {
 		root = canonicalrouting.CopyRecordedActivityReply(t, provider.URL)
 	}
+	if failed {
+		path := filepath.Join(root, "provider", "nodes.yaml")
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body = []byte(strings.Replace(string(body), "    compute.failed:\n      guard: {id: exact_activity, check: payload.activity_id == 'compute'}", `    compute.failed:
+      guard: {id: exact_activity, check: payload.activity_id == 'compute'}
+      advances_to: done
+      emit:
+        event: provider.replied
+        fields:
+          account_id: payload.activity_id
+          request_id: payload.activity_id
+          result: payload.failure.detail.code`, 1))
+		if err := os.WriteFile(path, body, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	h := newRuntimeHarnessForBackend(t, root, backend, true)
-	step := catalogTriggerStep{Event: "request.started", Payload: map[string]any{"account_id": "original-account", "request_id": "original-request"},
+	step := catalogTriggerStep{Event: "request.started", Payload: map[string]any{"account_id": accountID, "request_id": requestID},
 		eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", inputKind: catalogReplayInputRootIngress}
 	h.publishAndWait(step, 20*time.Second)
 	reader, err := h.catalogOperatorEventLister()
@@ -218,13 +256,20 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 		}
 	}
 	original, found, err := selected.LoadActivityAttempt(h.ctx, cut)
-	if err != nil || !found || cut == "" || original.ReplyContextID != incoming.ID || original.Status != pipeline.ActivityAttemptStatusSucceeded || original.CompletedAt == nil || calls.Load() != 1 || sourceFinished != 1 {
+	if err != nil || !found || cut == "" || original.ReplyContextID != incoming.ID || original.Status != wantStatus || original.CompletedAt == nil || calls.Load() != 1 || sourceFinished != 1 {
 		for _, event := range activityLineageEvents(t, h.ctx, h, catalogRuntimeRunID) {
 			t.Logf("original publication phase: event=%s name=%s payload=%+v", event.EventID, event.EventName, event.Payload)
 		}
 		rows, _ := storetest.ReadReplyContextRecords(h.ctx, reader, catalogRuntimeRunID)
 		t.Logf("original reply settlement phase: %+v", rows)
 		t.Fatalf("real source did not record one complete reply-bearing result: journal=%+v found=%t calls=%d finished=%d error=%v", original, found, calls.Load(), sourceFinished, err)
+	}
+	physicalRequest, found, err := selected.LoadPreparedPublishEvent(h.ctx, cut)
+	if err != nil || !found || physicalRequest.Event.Event().DeliveryContext().ReplyContextID() != "" {
+		t.Fatalf("original request history unexpectedly contains a delivery reply binding: found=%t error=%v", found, err)
+	}
+	if failed && (original.Failure == nil || original.Failure.Class != failures.ClassConnectorFailure || original.Failure.Detail.Code != "provider_http_status") {
+		t.Fatalf("failed original lost the exact real HTTP failure: %+v", original.Failure)
 	}
 	sourceRows, err := storetest.ReadReplyContextRecords(h.ctx, reader, catalogRuntimeRunID)
 	if err != nil || len(sourceRows) != levels {
@@ -313,11 +358,11 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 		t.Fatalf("child copied-journal inventory: %+v error=%v", attempts, err)
 	}
 	copied, found, err := selected.LoadActivityAttempt(ctx, attempts[0].RequestEventID)
-	if err != nil || !found || copied.ReplyContextID != childInner.ID || copied.RequestEventID == original.RequestEventID || copied.InputHash != original.InputHash || !reflect.DeepEqual(copied.ResultPayload, original.ResultPayload) || !copied.StartedAt.Equal(original.StartedAt) || copied.CompletedAt == nil || !copied.CompletedAt.Equal(*original.CompletedAt) {
+	if err != nil || !found || copied.ReplyContextID != childInner.ID || copied.RequestEventID == original.RequestEventID || copied.InputHash != original.InputHash || copied.Status != original.Status || !reflect.DeepEqual(copied.Failure, original.Failure) || !reflect.DeepEqual(copied.ResultPayload, original.ResultPayload) || !copied.StartedAt.Equal(original.StartedAt) || copied.CompletedAt == nil || !copied.CompletedAt.Equal(*original.CompletedAt) {
 		t.Fatalf("copy/publish hid an empty or changed recorded carrier: copied=%+v error=%v", copied, err)
 	}
 	result, found, err := selected.LoadPreparedPublishEvent(ctx, copied.ResultEventID)
-	if err != nil || !found || len(result.DeliveryRoutes) != 1 || result.DeliveryRoutes[0].Context.ReplyContextID() != childInner.ID {
+	if err != nil || !found || string(result.Event.Event().Type()) != original.ResultEventType || len(result.DeliveryRoutes) != 1 || result.DeliveryRoutes[0].Context.ReplyContextID() != childInner.ID {
 		t.Fatalf("actual recorded result lost its child continuation: %+v found=%t error=%v", result, found, err)
 	}
 	settled, err := selected.LoadReplyContext(ctx, childInner.ID)
@@ -342,7 +387,7 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 	for _, event := range activityLineageEvents(t, ctx, h, staged.ForkRunID) {
 		if event.EventName == "request.finished" {
 			finished++
-			if event.Payload["request_id"] != "original-request" || event.Payload["result"] != "recorded-only" {
+			if event.Payload["request_id"] != requestID || event.Payload["result"] != wantResult {
 				t.Fatalf("final requester received different business data: %+v", event)
 			}
 		}

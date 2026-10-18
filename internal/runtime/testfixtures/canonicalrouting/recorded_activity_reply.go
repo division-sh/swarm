@@ -51,7 +51,6 @@ pins:
 	writeClosedVariantFile(t, root, "provider/tools.yaml", fmt.Sprintf(`compute:
   description: Return the exact original request's recorded result
   handler_type: http
-  effect_class: non_idempotent_write
   input_schema:
     type: object
     properties: {account_id: {type: string}, request_id: {type: string}}

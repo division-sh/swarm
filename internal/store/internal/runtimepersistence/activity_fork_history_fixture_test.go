@@ -86,7 +86,7 @@ func TestHistoricalActivityForkSetupKeepsClocksCutsAndCapturedFrontierBothStores
 			record := pipeline.ActivityAttemptRecord{
 				RequestEventID: event.ID(), RunID: event.RunID(), ExecutionMode: executionmode.Live,
 				SourceEventID: event.ID(), EntityID: entity, FlowInstance: "flow-a/1", NodeID: "history-node", HandlerEventKey: "review.requested",
-				ActivityID: "connector", Tool: "provider.connector", EffectClass: "non_idempotent_write", Attempt: 1,
+				ActivityID: "connector", Tool: "provider.connector", Attempt: 1,
 				Status: pipeline.ActivityAttemptStatusSucceeded, SuccessEvent: "connector.succeeded", FailureEvent: "connector.failed",
 				ResultEventID: uuid.NewString(), ResultEventType: "connector.succeeded", ResultPayload: map[string]any{"value": "recorded-result"},
 				InputHash: fmt.Sprintf("sha256:%x", input), Generation: activation.Generation(), LoopStage: "pending",
@@ -119,11 +119,16 @@ func TestHistoricalActivityForkSetupKeepsClocksCutsAndCapturedFrontierBothStores
 
 func assertActivityHistoryJournalRow(t testing.TB, table SelectedForkStorageTableSnapshot, record pipeline.ActivityAttemptRecord) {
 	t.Helper()
+	for _, column := range table.Columns {
+		if column == "effect_class" {
+			t.Fatal("historical journal still exposes the retired authored-policy column")
+		}
+	}
 	assertSelectedSourceEntityFixtureRow(t, table, map[string]string{
 		"request_event_id": record.RequestEventID, "run_id": record.RunID, "execution_mode": string(record.ExecutionMode),
 		"source_event_id": record.SourceEventID, "parent_event_id": "", "entity_id": record.EntityID, "flow_instance": record.FlowInstance,
 		"node_id": record.NodeID, "handler_event_key": record.HandlerEventKey, "activity_id": record.ActivityID, "tool": record.Tool,
-		"effect_class": record.EffectClass, "status": record.Status, "success_event": record.SuccessEvent, "failure_event": record.FailureEvent,
+		"status": record.Status, "success_event": record.SuccessEvent, "failure_event": record.FailureEvent,
 		"result_event_id": record.ResultEventID, "result_event_type": record.ResultEventType, "input_hash": record.InputHash,
 		"loop_stage": record.LoopStage, "reply_context_id": "",
 	}, record.StartedAt, "started_at", "completed_at", "updated_at")
