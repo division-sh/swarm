@@ -2060,6 +2060,13 @@ func (eb *EventBus) admitSourceArtifactFact(ctx context.Context) (context.Contex
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if eb.mutationContext != nil {
+		var err error
+		ctx, err = eb.mutationContext(ctx)
+		if err != nil {
+			return ctx, err
+		}
+	}
 	eb.mu.RLock()
 	runtimeInstanceID := eb.runtimeInstanceID
 	sourceFact := eb.sourceArtifactFact

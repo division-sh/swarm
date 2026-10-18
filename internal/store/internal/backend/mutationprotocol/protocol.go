@@ -11,6 +11,7 @@ import (
 
 	runtimeactivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimelifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privatefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -357,7 +358,7 @@ func RunPostgres[T any](ctx context.Context, db *postgresbackend.Backend, eviden
 	if kind != Ordinary {
 		return failed[T](errors.New("destructive PostgreSQL mutation requires serializable transaction options"))
 	}
-	return run(ctx, privateactivity.DialectPostgres, evidence, kind, baseline, candidates, db.RunTransactionOutcome, write)
+	return runRuntime(ctx, privateactivity.DialectPostgres, evidence, kind, baseline, candidates, db.RunAdmittedTransactionOutcome, write)
 }
 
 func RunPostgresWithOptions[T any](ctx context.Context, db *postgresbackend.Backend, opts *sql.TxOptions, evidence Evidence, kind Kind, baseline *Baseline, candidates *runhandoff.CandidateCoordinator, write func(context.Context, *Attempt) (T, error)) Result[T] {
@@ -367,8 +368,8 @@ func RunPostgresWithOptions[T any](ctx context.Context, db *postgresbackend.Back
 	if kind != Ordinary && (opts == nil || opts.Isolation != sql.LevelSerializable || opts.ReadOnly) {
 		return failed[T](errors.New("destructive PostgreSQL mutation requires serializable write transaction"))
 	}
-	return run(ctx, privateactivity.DialectPostgres, evidence, kind, baseline, candidates, func(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
-		return db.RunTransactionWithOptionsOutcome(ctx, opts, fn)
+	return runRuntime(ctx, privateactivity.DialectPostgres, evidence, kind, baseline, candidates, func(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
+		return db.RunAdmittedTransactionWithOptionsOutcome(ctx, opts, fn)
 	}, write)
 }
 
@@ -376,8 +377,8 @@ func RunSQLite[T any](ctx context.Context, db *sqlitebackend.Backend, label stri
 	if db == nil {
 		return failed[T](errors.New("SQLite mutation backend is required"))
 	}
-	return run(ctx, privateactivity.DialectSQLite, evidence, kind, baseline, candidates, func(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
-		return db.RunTransactionOutcome(ctx, label, fn)
+	return runRuntime(ctx, privateactivity.DialectSQLite, evidence, kind, baseline, candidates, func(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
+		return db.RunAdmittedTransactionOutcome(ctx, label, fn)
 	}, write)
 }
 
@@ -388,8 +389,8 @@ func RunRetainedPostgres[T any](ctx context.Context, session *postgresbackend.Se
 	if kind != Ordinary {
 		return failed[T](errors.New("destructive retained PostgreSQL mutation requires serializable transaction options"))
 	}
-	return run(ctx, privateactivity.DialectPostgres, evidence, kind, baseline, candidates, func(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
-		return postgresbackend.RunAuthorityTransactionOutcome(ctx, session, fn)
+	return runRuntime(ctx, privateactivity.DialectPostgres, evidence, kind, baseline, candidates, func(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
+		return postgresbackend.RunAdmittedAuthorityTransactionOutcome(ctx, session, fn)
 	}, write)
 }
 
@@ -400,8 +401,8 @@ func RunRetainedPostgresWithOptions[T any](ctx context.Context, session *postgre
 	if kind != Ordinary && (opts == nil || opts.Isolation != sql.LevelSerializable || opts.ReadOnly) {
 		return failed[T](errors.New("destructive retained PostgreSQL mutation requires serializable write transaction"))
 	}
-	return run(ctx, privateactivity.DialectPostgres, evidence, kind, baseline, candidates, func(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
-		return postgresbackend.RunAuthorityTransactionOutcomeWithOptions(ctx, session, opts, fn)
+	return runRuntime(ctx, privateactivity.DialectPostgres, evidence, kind, baseline, candidates, func(ctx context.Context, fn func(context.Context, *sql.Tx) error) (bool, error) {
+		return postgresbackend.RunAdmittedAuthorityTransactionOutcomeWithOptions(ctx, session, opts, fn)
 	}, write)
 }
 
@@ -409,6 +410,14 @@ func failed[T any](err error) Result[T] { return Result[T]{err: err, phase: Befo
 
 // Reject reports an admission failure before a transaction attempt exists.
 func Reject[T any](err error) Result[T] { return failed[T](err) }
+
+func runRuntime[T any](ctx context.Context, dialect privateactivity.Dialect, evidence Evidence, kind Kind, baseline *Baseline, candidates *runhandoff.CandidateCoordinator, native nativeRunner, write func(context.Context, *Attempt) (T, error)) Result[T] {
+	original, err := runtimeownership.FreezeMutationAuthority(ctx)
+	if err != nil {
+		return failed[T](err)
+	}
+	return run(original, dialect, evidence, kind, baseline, candidates, native, write)
+}
 
 func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence Evidence, kind Kind, baseline *Baseline, candidates *runhandoff.CandidateCoordinator, native nativeRunner, write func(context.Context, *Attempt) (T, error)) Result[T] {
 	if ctx == nil {
@@ -460,7 +469,7 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 	var nativeErr error
 	retryDelay := time.Millisecond
 	for {
-		phase = BeforeAttempt
+		phase = AcquireFence
 		acknowledged, nativeErr = native(ctx, func(txctx context.Context, tx *sql.Tx) error {
 			if previous != nil {
 				previous.active = false

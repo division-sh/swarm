@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"time"
 
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/lib/pq"
 )
@@ -62,6 +64,20 @@ func (b *Backend) RunTransactionWithOptionsOutcome(ctx context.Context, opts *sq
 	return b.runTransactionOutcome(ctx, opts, true, operation)
 }
 
+// RunAdmittedTransactionOutcome is the runtime-write entrance. Construction and
+// closed native control owners retain their distinct RunTransaction owner.
+func (b *Backend) RunAdmittedTransactionOutcome(ctx context.Context, operation func(context.Context, *sql.Tx) error) (bool, error) {
+	return b.RunAdmittedTransactionWithOptionsOutcome(ctx, nil, operation)
+}
+
+func (b *Backend) RunAdmittedTransactionWithOptionsOutcome(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (bool, error) {
+	ctx, err := generationauthority.PrepareMutationAdmission(ctx)
+	if err != nil {
+		return false, err
+	}
+	return b.runTransactionOutcome(ctx, opts, true, operation)
+}
+
 // RunReadTransaction owns one caller-scoped, transactionally consistent read.
 func (b *Backend) RunReadTransaction(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
 	if tx, err := b.inspectionTransaction(ctx); err != nil {
@@ -94,6 +110,12 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	}
 	if err := ctx.Err(); err != nil {
 		return false, err
+	}
+	if drain && (opts == nil || !opts.ReadOnly) && runtimeownership.HasMutationAuthority(ctx) {
+		ctx, err = generationauthority.PrepareMutationAdmission(ctx)
+		if err != nil {
+			return false, err
+		}
 	}
 	poolStarted := time.Now()
 	conn, err := b.db.Conn(ctx)
@@ -185,6 +207,15 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 		})
 	}
 	sqlCtx = transactiontest.WithAttempt(sqlCtx, probe)
+	if drain && (opts == nil || !opts.ReadOnly) && runtimeownership.HasMutationAuthority(sqlCtx) {
+		var retireAdmission func()
+		sqlCtx, retireAdmission, err = generationauthority.AdmitMutationTx(sqlCtx, tx, false)
+		if err != nil {
+			serializationConflict = exactSerializationConflict(err)
+			return false, err
+		}
+		defer retireAdmission()
+	}
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
