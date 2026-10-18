@@ -2,9 +2,13 @@ package store_test
 
 import (
 	"maps"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+const debtSelectedFixtureSignatureCollectorTo2738 = "2d4e5b625af6b82c453191ebe2d9091684583c1fd15227bf002d3bc05e7985e3"
 
 func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]authorityDebtSite) {
 	old, current := debtControlSet(), debtControlSet()
@@ -16,6 +20,7 @@ func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]
 }
 
 func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing.T) {
+	t.Run("selected-context-threading-2738", proveSelectedFixtureSignatureContinuation2738)
 	old, current := debtRunFixtureTransitionStates()
 	if authorityDebtCount(old) != 9 || authorityDebtCount(current) != 9 {
 		t.Fatal("signature accounting must preserve all nine distinct debt occurrences")
@@ -68,6 +73,57 @@ func TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact(t *testing
 	}
 }
 
+func proveSelectedFixtureSignatureContinuation2738(t *testing.T) {
+	old, current := debtControlSet(), debtControlSet()
+	for _, pair := range debtSelectedFixtureSignatureTransitions2738() {
+		old[pair[0].identity()] = pair[0]
+		current[pair[1].identity()] = pair[1]
+	}
+	if len(old) != 6 || len(current) != 6 || authorityDebtCount(old) != 6 || authorityDebtCount(current) != 6 {
+		t.Fatal("selected fixture signature map changed its six distinct occurrences")
+	}
+	for _, states := range [][4]map[string]authorityDebtSite{{old, old, old, old}, {current, old, old, old}, {current, current, old, old}, {current, current, current, current}} {
+		if failures := authorityDebtRatchet(states[0], states[1], states[2], states[3]); len(failures) != 0 {
+			t.Fatal(failures)
+		}
+	}
+	for _, states := range [][4]map[string]authorityDebtSite{{old, old, current, current}, {current, current, old, debtControlSet()}} {
+		if len(authorityDebtRatchet(states[0], states[1], states[2], states[3])) == 0 {
+			t.Fatal("selected signature reverse/foreign source admitted")
+		}
+	}
+	for _, pair := range debtSelectedFixtureSignatureTransitions2738() {
+		t.Run(pair[0].Declaration, func(t *testing.T) {
+			debtRunFixtureSignatureHostileControls(t, pair, old, current)
+			missing := maps.Clone(current)
+			delete(missing, pair[1].identity())
+			if len(authorityDebtRatchet(missing, current, old, old)) == 0 {
+				t.Fatal("missing original signature donor was treated as deletion credit")
+			}
+		})
+	}
+	root := persistenceAuthorityRepoRoot(t)
+	before, err := debtGit(root, "show", "a38d910819775a941d8b2ba63ce044c27547a3af:internal/runtime/runforkexecution/execution_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(filepath.Join(root, "internal/runtime/runforkexecution/execution_test.go"))
+	if err != nil || debtSelectedFixtureSignatureImages2738(before, after) != nil {
+		t.Fatalf("selected signature complete source is not current: %v", err)
+	}
+	for _, image := range []string{"warm-current", "foreign-prior", "copied-current"} {
+		prior, current := before, after
+		if image == "foreign-prior" {
+			prior = append(append([]byte(nil), before...), ' ')
+		} else {
+			current = append(append([]byte(nil), after...), ' ')
+		}
+		if debtSelectedFixtureSignatureImages2738(prior, current) == nil {
+			t.Fatal("signature image changed after successful warm validation: " + image)
+		}
+	}
+}
+
 func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtSite, old, current map[string]authorityDebtSite) {
 	t.Helper()
 	for slot := range 4 {
@@ -95,6 +151,9 @@ func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtS
 				changed.Operation += "Other"
 			case "argument":
 				changed.Resolved = strings.Replace(changed.Resolved, "|arg=string|", "|arg=int|", 1)
+				if changed.Resolved == pair[1].Resolved {
+					changed.Resolved = strings.Replace(changed.Resolved, "|arg=context.Context|", "|arg=int|", 1)
+				}
 			case "receiver":
 				changed.Resolved = strings.Replace(changed.Resolved, "|recv=<nil>|", "|recv=*database/sql.DB|", 1)
 			case "result":
@@ -137,6 +196,36 @@ func debtRunFixtureSignatureHostileControls(t *testing.T, pair [2]authorityDebtS
 }
 
 func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testing.T) {
+	t.Run("selected-original-signature-successor-2738", func(t *testing.T) {
+		inherited := debtControlSet(debtControlSite("call:QueryRow", 1))
+		for _, mutation := range []string{"exact", "old-chain", "foreign", "reverse", "missing", "duplicate", "rebootstrap", "stale"} {
+			t.Run(mutation, func(t *testing.T) {
+				base := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: debtProcessFenceCollectorTo, Sites: maps.Clone(inherited)}
+				head := base
+				head.Collector, head.Sites = debtSelectedFixtureSignatureCollectorTo2738, maps.Clone(inherited)
+				switch mutation {
+				case "old-chain":
+					base.Collector = debtProcessLeaseCollectorTo
+				case "foreign":
+					base.Collector = strings.Repeat("f", 64)
+				case "reverse":
+					base, head = head, base
+				case "missing":
+					head.Sites = debtControlSet()
+				case "duplicate":
+					head.Sites = debtControlSet(debtControlSite("call:QueryRow", 2))
+				case "rebootstrap":
+					head.BootstrapSource = strings.Repeat("a", 40)
+				case "stale":
+					head.Collector = strings.Repeat("b", 64)
+				}
+				err := debtValidateCollectorIdentity(base.Collector, head.Collector, base, head, "")
+				if (err == nil) != (mutation == "exact" || mutation == "old-chain") {
+					t.Fatalf("collector successor %s: %v", mutation, err)
+				}
+			})
+		}
+	})
 	old, current := debtRunFixtureTransitionStates()
 	legacy := debtControlSite("call:QueryRow", 3)
 	old[legacy.identity()] = legacy
@@ -203,7 +292,7 @@ func TestPersistenceAuthorityDebtRunFixtureCollectorTransitionIsPinned(t *testin
 func TestPersistenceAuthorityDebtRunFixturePolicyDestinationMatchesSource(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	digest, err := debtCollectorDigest(root)
-	if err != nil || (digest != debtForkProofCollectorTo && digest != debtProcessLeaseCollectorTo && digest != debtProcessFenceCollectorTo) {
+	if err != nil || (digest != debtForkProofCollectorTo && digest != debtProcessLeaseCollectorTo && digest != debtProcessFenceCollectorTo && digest != debtSelectedFixtureSignatureCollectorTo2738) {
 		t.Fatalf("reviewed fork/process successor=%s/%s actual=%s error=%v", debtForkProofCollectorTo, debtProcessLeaseCollectorTo, digest, err)
 	}
 	prior := materializeDebtBase(t, root, "40c0b18bf315a949959417688adb32e358413b78")

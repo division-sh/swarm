@@ -134,7 +134,11 @@ func authorityDebtSubset(actual, allowed map[string]authorityDebtSite, label str
 }
 
 func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDebtSite) []string {
-	head, base, baseActual, failures := debtRunFixtureSignatureComparisons(actual, head, base, baseActual)
+	head, base, baseActual, failures := debtSelectedFixtureSignatureComparisons2738(actual, head, base, baseActual)
+	if len(failures) != 0 {
+		return failures
+	}
+	head, base, baseActual, failures = debtRunFixtureSignatureComparisons(actual, head, base, baseActual)
 	if len(failures) != 0 {
 		return failures
 	}
@@ -798,6 +802,9 @@ func TestPersistenceAuthorityDebtRatchet(t *testing.T) {
 	if err := debtValidateProcessLeaseRelocationSource(root, baseRoot, actual, baseActual); err != nil {
 		t.Fatal(err)
 	}
+	if err := debtSelectedFixtureSignatureSources2738(root, baseRoot, actual, baseActual); err != nil {
+		t.Fatal(err)
+	}
 	failures := authorityDebtRatchet(actual, head.Sites, trusted.Sites, baseActual)
 	if len(failures) > 0 {
 		t.Fatalf("authority debt ratchet failed: base=%s old=%d head=%d actual=%d\n%s", base, authorityDebtCount(trusted.Sites), authorityDebtCount(head.Sites), authorityDebtCount(actual), strings.Join(failures, "\n"))
@@ -862,6 +869,14 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if current == debtSelectedFixtureSignatureCollectorTo2738 && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
+		intermediate := head
+		intermediate.Collector = debtProcessFenceCollectorTo
+		if base == debtProcessFenceCollectorTo && trusted.Collector == base ||
+			debtValidateCollectorIdentity(base, debtProcessFenceCollectorTo, trusted, intermediate, "") == nil {
+			return nil
+		}
 	}
 	if base == debtProcessLeaseCollectorTo && trusted.Collector == base && current == debtProcessFenceCollectorTo && head.Collector == current &&
 		len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0 {
@@ -1051,6 +1066,67 @@ func debtSelectedBoundarySource(path string, file *ast.File) []authorityFinding 
 		})
 	}
 	return findings
+}
+
+func debtSelectedFixtureSignatureComparisons2738(actual, head, base, source map[string]authorityDebtSite) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
+	pairs := debtSelectedFixtureSignatureTransitions2738()
+	forward := false
+	for _, pair := range pairs {
+		old, current := pair[0], pair[1]
+		for _, state := range []map[string]authorityDebtSite{actual, head, base, source} {
+			if state[old.identity()].Multiplicity > 0 && state[current.identity()].Multiplicity > 0 {
+				return head, base, source, []string{"selected fixture signature identities coexist: " + old.Declaration}
+			}
+		}
+		forward = forward || actual[current.identity()].Multiplicity > 0 &&
+			(base[old.identity()].Multiplicity > 0 || source[old.identity()].Multiplicity > 0)
+	}
+	if !forward {
+		return head, base, source, nil
+	}
+	for _, pair := range pairs {
+		old, current := pair[0], pair[1]
+		if actual[current.identity()] != current || actual[old.identity()].Multiplicity != 0 ||
+			base[old.identity()] != old || source[old.identity()] != old ||
+			base[current.identity()].Multiplicity != 0 || source[current.identity()].Multiplicity != 0 ||
+			(head[old.identity()] != old && head[current.identity()] != current) {
+			return head, base, source, []string{"selected fixture signature lost its exact six-occurrence donor: " + old.Declaration}
+		}
+	}
+	for _, pair := range pairs {
+		head = debtForwardQuiescenceUncertainty(head, pair[0], pair[1])
+		base = debtForwardQuiescenceUncertainty(base, pair[0], pair[1])
+		source = debtForwardQuiescenceUncertainty(source, pair[0], pair[1])
+	}
+	return head, base, source, nil
+}
+
+func debtSelectedFixtureSignatureSources2738(root, baseRoot string, actual, source map[string]authorityDebtSite) error {
+	needed := false
+	for _, pair := range debtSelectedFixtureSignatureTransitions2738() {
+		needed = needed || actual[pair[1].identity()].Multiplicity > 0 && source[pair[0].identity()].Multiplicity > 0
+	}
+	if !needed {
+		return nil
+	}
+	const path = "internal/runtime/runforkexecution/execution_test.go"
+	before, err := os.ReadFile(filepath.Join(baseRoot, path))
+	if err != nil {
+		return err
+	}
+	after, err := os.ReadFile(filepath.Join(root, path))
+	if err != nil {
+		return err
+	}
+	return debtSelectedFixtureSignatureImages2738(before, after)
+}
+
+func debtSelectedFixtureSignatureImages2738(before, after []byte) error {
+	if fmt.Sprintf("%x", sha256.Sum256(before)) != "a9f5159b4cc0ec9c99c34f8b999959ee9cac04f87faf0ae489931c284f894fee" ||
+		fmt.Sprintf("%x", sha256.Sum256(after)) != "4dd0a91bcdc3e14af05e4630fd65b4db79a90d7f1943bc9eb271734bbe369799" {
+		return fmt.Errorf("selected fixture signature source differs from its complete reviewed images")
+	}
+	return nil
 }
 
 // Reviewer-b6252008831: preserve exactly these six existing raw occurrences.
