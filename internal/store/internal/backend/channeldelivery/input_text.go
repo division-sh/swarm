@@ -79,16 +79,16 @@ func RequireChosenInputDraftTx(ctx context.Context, tx *sql.Tx, action operatorc
 		return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, fmt.Errorf("draft choice is already settled")
 	}
 	var resolved render.ResolvedAction
-	var found bool
 	if lock {
-		resolved, found, err = parent.resolve(ctx, tx, action.ActionFact, postgres)
+		resolved, _, err = parent.resolve(ctx, tx, action.ActionFact, postgres)
 	} else {
-		resolved, found, err = ResolveActionFactTx(ctx, tx, action.ActionFact, postgres)
+		resolved, _, err = ResolveActionFactTx(ctx, tx, action.ActionFact, postgres)
 	}
 	if err != nil {
 		return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, err
 	}
-	if !found || !resolved.CurrentRender || resolved.SourceKind != PlanResponse ||
+	// Both resolvers return a zero projection on a miss, never a current render.
+	if !resolved.CurrentRender || resolved.SourceKind != PlanResponse ||
 		resolved.Action.Kind != "select_draft" || uuid.Validate(resolved.Action.DraftID) != nil ||
 		uuid.Validate(resolved.Action.CardID) != nil || uuid.Validate(resolved.Action.TextPublicationID) != nil {
 		return render.InputDraftCandidate{}, render.PendingText{}, render.ResolvedText{}, fmt.Errorf("draft choice is no longer current")
