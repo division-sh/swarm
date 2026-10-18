@@ -416,7 +416,11 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
-			cards, runID := decisionCardTestStore(t, backend)
+			var probe *cardIntentRecheckProbe
+			if backend == "postgres" {
+				probe = &cardIntentRecheckProbe{}
+			}
+			cards, runID := decisionCardTestStore(t, backend, probe)
 			selected := cards.(selectedChannelDeliveryTestStore)
 			postgres := backend == "postgres"
 			var runTx func(func(context.Context, *sql.Tx) error) error
@@ -593,6 +597,9 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 			foreign.Verdict = "reject"
 			if err := require(fact, foreign); err == nil || !strings.Contains(err.Error(), "not current card authority") {
 				t.Fatalf("foreign verdict admission = %v", err)
+			}
+			if probe != nil {
+				proveCardIntentLockingRecheck(t, ctx, cards, selected, card, prepared, fact, probe, runTx)
 			}
 			draft, err := DecisionCardDomainForTest(cards).BeginInputForTest(ctx, decisioncard.BeginInputRequest{
 				CardID: card.CardID, Verdict: "revise", PrincipalID: principal.ID,

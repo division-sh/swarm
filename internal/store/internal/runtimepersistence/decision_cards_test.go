@@ -1623,7 +1623,7 @@ func storeDecisionSnapshotNestedObject(t *testing.T, root map[string]any, path .
 	return current
 }
 
-func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, string) {
+func decisionCardTestStore(t *testing.T, backend string, probes ...*cardIntentRecheckProbe) (decisioncard.Store, string) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	spec := loadPlatformSpecForSQLiteSchemaTest(t)
@@ -1655,7 +1655,13 @@ func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, st
 		}
 		return store, runID
 	case "postgres":
-		_, db, _ := testutil.StartPostgres(t)
+		location, db, _ := testutil.StartPostgres(t)
+		if len(probes) == 1 && probes[0] != nil {
+			probe := probes[0]
+			probe.native, probe.driver, probe.location = db, db.Driver(), location
+			db = sql.OpenDB(probe)
+			t.Cleanup(func() { _ = db.Close() })
+		}
 		store := newTestPostgresStore(t, db)
 		registerTestAuthorActivityCatalog(t, store)
 		if err := ensureEphemeralRunForTest(ctx, store, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
