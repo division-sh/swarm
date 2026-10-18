@@ -1,25 +1,35 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 // Owns the HTTP display/error-composition boundary; the served both-store root
 // separately owns authentication, real persistence conservation and settlement.
 func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
+	processLogs := &inboundProcessLogCapture{}
+	previousWriter := log.Writer()
+	log.SetOutput(processLogs)
+	t.Cleanup(func() { log.SetOutput(previousWriter) })
 	target := testInboundTarget("entity-1", "")
 	source := inboundTransportSource(t, []InboundTarget{target}, false)
 	bundle, _ := semanticview.Bundle(source)
@@ -95,8 +105,24 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 			if len(logs.records) != beforeLogs+1 {
 				t.Fatalf("internal diagnostics missing: before=%d after=%d", beforeLogs, len(logs.records))
 			}
-			if strings.Contains(cell.name, "cleanup") && !strings.Contains(string(logs.records[beforeLogs].Payload), cleanup.Error()) {
-				t.Fatalf("independent failure lost from diagnostics: %s", logs.records[beforeLogs].Payload)
+			found := 0
+			for _, line := range strings.Split(processLogs.String(), "\n") {
+				var diagnostic struct {
+					Message         string `json:"message"`
+					ProviderEventID string `json:"provider_event_id"`
+					Error           string `json:"error"`
+				}
+				_, payload, ok := strings.Cut(line, "detail=")
+				if !ok || json.Unmarshal([]byte(payload), &diagnostic) != nil || diagnostic.Message != "inbound publication failed" || diagnostic.ProviderEventID != cell.name {
+					continue
+				}
+				found++
+				if !strings.Contains(diagnostic.Error, failure.Error()) || strings.Contains(cell.name, "cleanup") && !strings.Contains(diagnostic.Error, cleanup.Error()) {
+					t.Fatalf("original causes lost from process diagnostics: %q", diagnostic.Error)
+				}
+			}
+			if found != 1 {
+				t.Fatalf("process diagnostics=%d, want one complete original error", found)
 			}
 		})
 	}
@@ -119,4 +145,44 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 			}
 		})
 	}
+	for _, cell := range []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{"commit_identity_conflict", runtimeinbound.ErrRequestIdentityConflict, 409},
+		{"commit_wrapped_conflict", fmt.Errorf("wrapped: %w", operatorchannel.ErrConflict), 409},
+		{"commit_revision_conflict", operatorchannel.ErrRevisionConflict, 409},
+		{"commit_conflict_cleanup", errors.Join(runtimeinbound.ErrRequestIdentityConflict, cleanup), 503},
+		{"commit_cleanup_conflict", errors.Join(cleanup, runtimeinbound.ErrRequestIdentityConflict), 503},
+		{"commit_nested_conflict_cleanup", fmt.Errorf("wrapped: %w", errors.Join(operatorchannel.ErrRevisionConflict, cleanup)), 503},
+		{"commit_provider", providertriggers.Error{Status: 400, Message: "invalid provider request"}, 400},
+		{"commit_provider_cleanup", errors.Join(providertriggers.Error{Status: 400, Message: "invalid provider request"}, cleanup), 503},
+		{"commit_cleanup_provider", errors.Join(cleanup, providertriggers.Error{Status: 400, Message: "invalid provider request"}), 503},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			writeInboundCommitError(response, nil, context.Background(), "custom", "entity-1", cell.name, cell.err)
+			if response.Code != cell.status || cell.status == 503 && response.Body.String() != "publish inbound failed\n" {
+				t.Fatalf("commit error response=%d %q, want %d", response.Code, response.Body.String(), cell.status)
+			}
+		})
+	}
+}
+
+type inboundProcessLogCapture struct {
+	mu sync.Mutex
+	bytes.Buffer
+}
+
+func (c *inboundProcessLogCapture) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Buffer.Write(p)
+}
+
+func (c *inboundProcessLogCapture) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.Buffer.String()
 }
