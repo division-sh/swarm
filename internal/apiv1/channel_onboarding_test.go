@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,12 +18,18 @@ import (
 )
 
 type recordingChannelOnboardingLifecycle struct {
-	start    channelonboarding.StartInput
-	retry    channelonboarding.RetryInput
-	get      string
-	result   channelonboarding.Result
-	startErr error
-	retryErr error
+	selection channelonboarding.StartInput
+	start     channelonboarding.StartInput
+	retry     channelonboarding.RetryInput
+	get       string
+	result    channelonboarding.Result
+	startErr  error
+	retryErr  error
+}
+
+func (l *recordingChannelOnboardingLifecycle) Select(_ context.Context, input channelonboarding.StartInput) (channelonboarding.StartSelection, error) {
+	l.selection = input
+	return channelonboarding.StartSelection{Candidate: *l.result.Candidate, SelectionFence: "selected-declaration"}, l.startErr
 }
 
 func TestChannelClientLanguageParameterDoesNotGuessOrNormalize(t *testing.T) {
@@ -94,7 +101,7 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 		},
 	}}
 	handlers := ChannelOnboardingHandlers(ChannelOnboardingHandlerOptions{Onboarding: lifecycle, Channels: channels})
-	for _, method := range []string{"channel.onboarding_start", "channel.onboarding_get", "channel.onboarding_retry"} {
+	for _, method := range []string{"channel.onboarding_select", "channel.onboarding_start", "channel.onboarding_get", "channel.onboarding_retry"} {
 		if handlers[method] == nil {
 			t.Fatalf("channel onboarding handler %s is missing", method)
 		}
@@ -106,6 +113,23 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthorized onboarding status = %d, want 401", unauthorized.Code)
 	}
+	selection := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"selection","method":"channel.onboarding_select","params":{"verb":"reconnect","provider":"telegram"}}`)
+	if selection.Error != nil || lifecycle.selection.Verb != channelonboarding.VerbReconnect || lifecycle.start.Verb != "" {
+		t.Fatal("selection invoked Start or lost its request", selection.Error, lifecycle.selection)
+	}
+	for _, cell := range []struct {
+		err  error
+		code string
+	}{
+		{fmt.Errorf("%w: no matching candidate", channelonboarding.ErrNotFound), ChannelInterfaceNotFoundCode},
+		{fmt.Errorf("%w: ambiguous candidate", channelonboarding.ErrConflict), ChannelInterfaceAmbiguousCode},
+		{fmt.Errorf("%w: changed selection", channelonboarding.ErrConflict), ChannelBindingConflictCode},
+	} {
+		lifecycle.startErr = cell.err
+		refused := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"selection-refusal","method":"channel.onboarding_select","params":{"verb":"reconnect","provider":"telegram"}}`)
+		requireOperatorChannelAPIErrorCode(t, refused, cell.code)
+	}
+	lifecycle.startErr = nil
 
 	start := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"start","method":"channel.onboarding_start","params":{"verb":"connect","provider":"telegram","bundle":"bundle-v2:sha256:`+strings.Repeat("b", 64)+`","interface":"`+identity.Selector+`","target":"ingress:support:telegram","provider_credential":"private-token","save_proof":false,"idempotency_key":"journey"}}`)
 	if start.Error != nil {

@@ -1,0 +1,5 @@
+observer:
+  role: observer
+  intent: {inline: 'Notify the operator about the observed work.'}
+  model: regular
+  subscriptions: [notice.requested]

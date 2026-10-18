@@ -136,6 +136,7 @@ func nonCompletionRegistrationsForParity(t *testing.T) []runtimeeffects.Registra
 			registration.Kind == runtimeeffects.KindChannelConfirmation ||
 			registration.Kind == runtimeeffects.KindChannelDelivery ||
 			registration.Kind == runtimeeffects.KindChannelActionAck ||
+			registration.Kind == runtimeeffects.KindChannelLogout ||
 			registration.Kind == runtimeeffects.KindChannelNativeSetting {
 			continue
 		}

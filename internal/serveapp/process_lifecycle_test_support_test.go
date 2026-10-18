@@ -165,15 +165,15 @@ func (s *processIngressProofStore) CommitInboundPublication(ctx context.Context,
 		return runtimeinbound.CommitResult{}, err
 	}
 	s.recorded = true
-	owner, ok := s.store.(runtimebus.CommitPublicationOwner)
-	if !ok {
-		return runtimeinbound.CommitResult{}, errors.New("process ingress store does not implement closed publication commit")
+	owner, ok := s.store.(*processIngressEventStore)
+	if !ok || owner == nil {
+		return runtimeinbound.CommitResult{}, errors.New("process ingress proof requires its validated publication store")
 	}
 	committed := make([]runtimebus.CommittedPublication, len(command.Publications))
 	children := make([]runtimeinbound.EventRecord, len(command.Finalization.Events))
 	for i, finalized := range command.Finalization.Events {
 		var err error
-		committed[i], err = owner.CommitPublication(ctx, command.Publications[i])
+		committed[i], err = owner.commitValidatedPublication(command.Publications[i])
 		if err != nil {
 			s.lastError = err
 			return runtimeinbound.CommitResult{}, err
@@ -319,6 +319,10 @@ func (s *processIngressEventStore) CommitPublication(_ context.Context, command 
 	if err := command.Validate(); err != nil {
 		return runtimebus.CommittedPublication{}, err
 	}
+	return s.commitValidatedPublication(command)
+}
+
+func (s *processIngressEventStore) commitValidatedPublication(command runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error) {
 	event := command.Commit.Event.Event()
 	for _, existing := range s.events {
 		if existing.ID() != event.ID() {
