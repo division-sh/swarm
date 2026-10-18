@@ -5,8 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -19,63 +17,6 @@ func requireResolvedSelection(t *testing.T, observation handlerselection.Observa
 		t.Fatalf("expected resolved selection observation: %v", err)
 	}
 	return fact
-}
-
-type selectionReplayLoader struct{ calls int }
-
-func (l *selectionReplayLoader) LoadComputeModuleReplayEvidenceForExecution(context.Context, string, string, string) ([]computemodule.ReplayEnvelope, error) {
-	l.calls++
-	return nil, errors.New("controlled replay evidence read failure")
-}
-
-func TestExecutionAdaptersPreserveUnreachedSelection(t *testing.T) {
-	for _, boundary := range []string{"nil_node", "wrong_node", "missing_handler", "nil_executor", "nil_loader", "missing_run", "missing_event", "missing_node", "dual_evidence", "evidence_read"} {
-		t.Run(boundary, func(t *testing.T) {
-			node := testFlowExecutableNode(t, "orders", "worker")
-			exec, recorder := transitionTestExecutor(t, sourceWithFixtureStages(stubSource(), "orders", "ready", "ready"))
-			req := transitionTestRequest(t, node, "work.requested", contracts.SystemNodeEventHandler{}, "ready")
-			loader := &selectionReplayLoader{}
-			var input ComputeModuleReplayEvidenceLoader = loader
-			runID := "run"
-			var result ExecutionResult
-			var err error
-			switch boundary {
-			case "nil_node":
-				result, err = (*DeclarativeNode)(nil).Handle(context.Background(), req)
-			case "wrong_node":
-				req.Node = testFlowExecutableNode(t, "orders", "other")
-				result, err = NewDeclarativeNode(node, exec).Handle(context.Background(), req)
-			case "missing_handler":
-				result, err = NewDeclarativeNode(node, exec).Handle(context.Background(), req)
-			default:
-				switch boundary {
-				case "nil_executor":
-					exec = nil
-				case "nil_loader":
-					input = nil
-				case "missing_run":
-					runID = ""
-				case "missing_event":
-					req.Event = events.Event{}
-				case "missing_node":
-					req.Node = identity.ExecutableNode{}
-				case "dual_evidence":
-					req.ExpectedComputeModuleTraces = []ComputeModuleTrace{}
-				}
-				result, err = exec.ExecuteWithPersistedComputeModuleReplayEvidence(context.Background(), input, runID, req)
-			}
-			if err == nil || !result.HandlerRuleSelection.Equal(handlerselection.NotReached()) || len(recorder.mutations) != 0 || result.Committed || len(result.EmitIntents) != 0 {
-				t.Fatalf("adapter fabricated selection/effects: result=%+v err=%v", result, err)
-			}
-			wantReads := 0
-			if boundary == "evidence_read" {
-				wantReads = 1
-			}
-			if loader.calls != wantReads {
-				t.Fatalf("unexpected evidence reads: got=%d want=%d", loader.calls, wantReads)
-			}
-		})
-	}
 }
 
 type selectionFailureLocker struct{ err error }

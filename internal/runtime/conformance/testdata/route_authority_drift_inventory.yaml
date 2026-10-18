@@ -719,8 +719,6 @@ seam_families:
       - internal/runtime/bus/test_routes_test.go
       - internal/runtime/conformance/reply_resolution_conformance_test.go
       - internal/runtime/conformance/template_flow_pilot_conformance_test.go
-      - internal/runtime/engine/declarative_node.go
-      - internal/runtime/engine/declarative_node_test.go
       - internal/runtime/pipeline/node_declarative.go
       - internal/runtime/pipeline/workflow_nodes.go
       - internal/runtime/pipeline/workflow_nodes_test.go
