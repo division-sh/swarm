@@ -49,6 +49,13 @@ func (s *ManagerDeliveryNativeFixture) seedAgentDeliveries(t *testing.T, agentID
 
 func (s *ManagerDeliveryNativeFixture) seedClaim(t *testing.T, ctx context.Context, event events.Event, agentID string) {
 	t.Helper()
+	if s.MutationContext != nil {
+		var err error
+		ctx, err = s.MutationContext(ctx)
+		if err != nil {
+			t.Fatalf("bind native delivery seed owner: %v", err)
+		}
+	}
 	authority := s.Authority
 	if admission, present := managedexecution.FromContext(ctx); present {
 		var err error
@@ -61,6 +68,13 @@ func (s *ManagerDeliveryNativeFixture) seedClaim(t *testing.T, ctx context.Conte
 }
 
 func (s *ManagerDeliveryNativeFixture) claimExact(ctx context.Context, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
+	if s.MutationContext != nil {
+		var err error
+		ctx, err = s.MutationContext(ctx)
+		if err != nil {
+			return runtimedelivery.ClaimedObligation{}, err
+		}
+	}
 	result, err := s.Store.ClaimDelivery(ctx, s.Authority, event, route)
 	if err != nil {
 		return runtimedelivery.ClaimedObligation{}, err
