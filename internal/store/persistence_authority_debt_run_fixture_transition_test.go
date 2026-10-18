@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const debtSelectedFixtureSignatureCollectorTo2738 = "2d4e5b625af6b82c453191ebe2d9091684583c1fd15227bf002d3bc05e7985e3"
+const debtSelectedFixtureSignatureCollectorTo2738 = "d28210ea744ffdb3eaffd17163f357c6c08da48340692826b373cd988bfbea13"
 
 func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]authorityDebtSite) {
 	old, current := debtControlSet(), debtControlSet()
@@ -103,7 +103,7 @@ func proveSelectedFixtureSignatureContinuation2738(t *testing.T) {
 		})
 	}
 	root := persistenceAuthorityRepoRoot(t)
-	before, err := debtGit(root, "show", "a38d910819775a941d8b2ba63ce044c27547a3af:internal/runtime/runforkexecution/execution_test.go")
+	before, err := debtGit(root, "show", "b74c4c58b3ef772f11faed17d78324b8210b2a7a:internal/runtime/runforkexecution/execution_test.go")
 	if err != nil {
 		t.Fatal(err)
 	}

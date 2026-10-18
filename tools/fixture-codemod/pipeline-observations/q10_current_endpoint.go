@@ -52,7 +52,10 @@ var q10CurrentEndpoints = sync.OnceValues(func() (q10CurrentEndpointPacket, erro
 })
 
 func q10CurrentEndpointRecipe(row recipe, pin fixtureSetupSuccessor2617) (recipe, error) {
-	if !reflect.DeepEqual(row, pin.Original) || row.Removed || len(pin.Edits) == 0 {
+	if !reflect.DeepEqual(row, pin.Original) {
+		return q10FixtureCustodyCurrentRecipe(row, pin)
+	}
+	if row.Removed || len(pin.Edits) == 0 {
 		return recipe{}, fmt.Errorf("Q10 endpoint changed original history or identity")
 	}
 	reversed, err := reverseReviewedSuccessor2617(pin.Candidate, pin.Edits)
@@ -92,6 +95,44 @@ func q10CurrentEndpointRecipe(row recipe, pin fixtureSetupSuccessor2617) (recipe
 	return row, nil
 }
 
+// Compose the independently pinned original-custody setup with Q10's exact
+// header-backed read/write changes; neither historical endpoint is rewritten.
+func q10FixtureCustodyCurrentRecipe(row recipe, pin fixtureSetupSuccessor2617) (recipe, error) {
+	switch row.File + "/" + row.Function {
+	case "internal/runtime/final_flow_instance_authoring_runtime_test.go/TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTemplateInstance",
+		"internal/runtime/runforkexecution/activity_fork_execution_test.go/seedSource",
+		"internal/runtime/runforkexecution/execution_test.go/seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource":
+	default:
+		return recipe{}, fmt.Errorf("Q10 endpoint changed original history or identity")
+	}
+	if _, err := q10CurrentEndpointRecipe(pin.Original, pin); err != nil {
+		return recipe{}, err
+	}
+	var setup []fixtureSetupSuccessor2617
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &setup); err != nil {
+		return recipe{}, err
+	}
+	var prior recipe
+	for _, endpoint := range setup {
+		if sameReviewedRecipeKey(row, endpoint.Original) {
+			prior = endpoint.Original
+			prior.Successor = endpoint.Candidate
+		}
+	}
+	current := prior
+	var err error
+	current.Successor, err = q10FixtureSetupCurrentSource(prior)
+	if err != nil {
+		return recipe{}, err
+	}
+	original, err := fixtureSetupCurrentEndpoint2617(prior, current.Successor)
+	if err != nil || !reflect.DeepEqual(original, pin.Original) ||
+		(!reflect.DeepEqual(row, prior) && !reflect.DeepEqual(row, current)) {
+		return recipe{}, fmt.Errorf("Q10 custody composition crossed its complete source/history pair: %v", err)
+	}
+	return current, nil
+}
+
 func q10CurrentRecipe(row recipe) (recipe, error) {
 	packet, err := q10CurrentEndpoints()
 	if err != nil {
@@ -100,6 +141,16 @@ func q10CurrentRecipe(row recipe) (recipe, error) {
 	for _, pin := range packet.Rows {
 		if reflect.DeepEqual(row, pin.Original) {
 			return q10CurrentEndpointRecipe(row, pin)
+		}
+		if sameReviewedRecipeKey(row, pin.Original) {
+			switch row.File + "/" + row.Function {
+			case "internal/runtime/final_flow_instance_authoring_runtime_test.go/TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTemplateInstance",
+				"internal/runtime/runforkexecution/activity_fork_execution_test.go/seedSource",
+				"internal/runtime/runforkexecution/execution_test.go/seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource":
+				if current, err := q10FixtureCustodyCurrentRecipe(row, pin); err == nil {
+					return current, nil
+				}
+			}
 		}
 	}
 	if row.File == "internal/serveapp/receiver_restart_test.go" && row.Function == "TestReceiverCompositionRestartBothStores" {
@@ -111,6 +162,10 @@ func q10CurrentRecipe(row recipe) (recipe, error) {
 		return recipe{}, fmt.Errorf("missing exact Q10 restart composition")
 	}
 	return row, nil
+}
+
+func sameReviewedRecipeKey(left, right recipe) bool {
+	return left.Family == right.Family && left.File == right.File && left.Function == right.Function
 }
 
 // reviewer-e6248012287 composes only this complete delivered predecessor.
