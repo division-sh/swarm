@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
@@ -17,6 +16,8 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestAgentManagerDefaultsLLMBackendFromCanonicalProfile(t *testing.T) {
@@ -135,66 +136,19 @@ func TestResolveAgentModelMockRetainsAndRequiresCapturedArtifact(t *testing.T) {
 }
 
 func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testing.T) {
-	artifact := capturedMockAlternative()
-	staticOwner := "test://static-support/static-worker"
-	templateOwner := "test://template-support/worker"
-	staticFlow := runtimecontracts.FlowContractView{
-		Path:  "static-support",
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "static-support"},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"static-worker": managerTestAgentEntry("static-worker", runtimecontracts.AgentRegistryEntry{ID: "static-worker"}),
-		},
-		AgentURIs: map[string]string{"static-worker": staticOwner},
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.WriteManagerMockAlternatives(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
 	}
-	templateFlow := runtimecontracts.FlowContractView{
-		Path:  "template-support",
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "template-support"},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"worker": managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{ID: "template-worker"}),
-		},
-		AgentURIs: map[string]string{"worker": templateOwner},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{staticFlow, templateFlow}}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		FlowTree: runtimecontracts.FlowTree{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"static-support":   &root.Children[0],
-				"template-support": &root.Children[1],
-			},
-		},
-		URIRegistry: runtimecontracts.ContractURIRegistry{
-			Agents: map[string]runtimecontracts.ContractURIRef{
-				"static-support/static-worker": {
-					Kind: "agent", FlowID: "static-support", LocalID: "static-worker",
-					Full: staticOwner,
-				},
-				"template-support/worker": {
-					Kind: "agent", FlowID: "template-support", LocalID: "worker",
-					Full: templateOwner,
-				},
-			},
-			ByURI: map[string]runtimecontracts.ContractURIRef{
-				staticOwner: {
-					Kind: "agent", FlowID: "static-support", LocalID: "static-worker",
-					Full: staticOwner,
-				},
-				templateOwner: {
-					Kind: "agent", FlowID: "template-support", LocalID: "worker",
-					Full: templateOwner,
-				},
-			},
-		},
-	})
-	staticCfg, err := buildStaticFlowAgentConfig(managerIdentityTestRunID, source, managerTestFlowAgentNamePlan(t, source, "static-support", "static-worker"), "static-support", "static-support", "static-worker", managerTestAgentEntry("static-worker", runtimecontracts.AgentRegistryEntry{
-		ID: "static-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.Plan{}, Mock: artifact,
-	}), nil)
+	source := semanticview.Wrap(bundle)
+	staticEntry := bundle.FlowTree.ByID["static-support"].Agents["static-worker"]
+	templateEntry := bundle.FlowTree.ByID["template-support"].Agents["worker"]
+	staticCfg, err := buildStaticFlowAgentConfig(managerIdentityTestRunID, source, managerTestFlowAgentNamePlan(t, source, "static-support", "static-worker"), "static-support", "static-support", "static-worker", staticEntry, nil)
 	if err != nil {
 		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
 	}
-	instantiatedCfg, err := buildFlowAgentConfig(managerIdentityTestRunID, source, managerTestFlowAgentNamePlan(t, source, "template-support", "worker"), "template-support", "inst-1", "entity-1", "template-support/inst-1", "worker", managerTestAgentEntry("worker", runtimecontracts.AgentRegistryEntry{
-		ID: "template-worker", Role: "worker", Model: "regular", MemoryPlan: agentmemory.Plan{}, Mock: artifact,
-	}), map[string]string{"instance_id": "inst-1"}, nil)
+	instantiatedCfg, err := buildFlowAgentConfig(managerIdentityTestRunID, source, managerTestFlowAgentNamePlan(t, source, "template-support", "worker"), "template-support", "inst-1", "entity-1", "template-support/inst-1", "worker", templateEntry, map[string]string{"instance_id": "inst-1"}, nil)
 	if err != nil {
 		t.Fatalf("buildFlowAgentConfig: %v", err)
 	}
@@ -209,14 +163,15 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 	am := newTestAgentManagerWithOptions(t, &recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
 		spawned[cfg.ID] = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{LLMBackend: llmselection.BackendAnthropic, ExecutionPosture: executionposture.MockOnly}, store)
+	}, AgentManagerOptions{LLMBackend: llmselection.BackendAnthropic, ExecutionPosture: executionposture.MockOnly, SemanticSource: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact)}, store)
 	records, admission, plan := installManagerTestStaticTopology(t, am, store, staticCfg, instantiatedCfg)
 	for _, rec := range records {
 		if err := am.spawnAgentInternal(context.Background(), rec, true); err != nil {
 			t.Fatalf("spawnAgentInternal(%s): %v", rec.Config.ID, err)
 		}
 	}
-	assertMockProjection(t, "spawned", artifact, spawned, staticCfg.ID, instantiatedCfg.ID)
+	assertMockProjection(t, "spawned static", staticEntry.Mock, spawned, staticCfg.ID)
+	assertMockProjection(t, "spawned instantiated", templateEntry.Mock, spawned, instantiatedCfg.ID)
 	if len(store.records) != 2 {
 		t.Fatalf("persisted records = %d, want 2", len(store.records))
 	}
@@ -224,13 +179,14 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 	for _, rec := range store.records {
 		persisted[rec.Config.ID] = rec.Config
 	}
-	assertMockProjection(t, "persisted", artifact, persisted, staticCfg.ID, instantiatedCfg.ID)
+	assertMockProjection(t, "persisted static", staticEntry.Mock, persisted, staticCfg.ID)
+	assertMockProjection(t, "persisted instantiated", templateEntry.Mock, persisted, instantiatedCfg.ID)
 
 	recovered := map[string]models.AgentConfig{}
 	recoveryManager := newTestAgentManagerWithOptions(t, &recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
 		recovered[cfg.ID] = cfg
 		return recoveryTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{LLMBackend: llmselection.BackendAnthropic, ExecutionPosture: executionposture.MockOnly}, store)
+	}, AgentManagerOptions{LLMBackend: llmselection.BackendAnthropic, ExecutionPosture: executionposture.MockOnly, SemanticSource: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact)}, store)
 	if err := recoveryManager.InstallStartupTopology(store, admission, plan); err != nil {
 		t.Fatalf("install recovery topology: %v", err)
 	}
@@ -243,7 +199,8 @@ func TestAuthoredMockStaticAndInstantiatedAgentsSpawnPersistRecoverMock(t *testi
 	if _, err := recoveryManager.RecoverAfterStartupAdmission(managedExecutionTestContext(t, context.Background())); err != nil {
 		t.Fatalf("RecoverAfterStartupAdmission: %v", err)
 	}
-	assertMockProjection(t, "recovered", artifact, recovered, staticCfg.ID, instantiatedCfg.ID)
+	assertMockProjection(t, "recovered static", staticEntry.Mock, recovered, staticCfg.ID)
+	assertMockProjection(t, "recovered instantiated", templateEntry.Mock, recovered, instantiatedCfg.ID)
 }
 
 func TestAuthoredMockSelectionSurvivesReconfigureAndRestart(t *testing.T) {
