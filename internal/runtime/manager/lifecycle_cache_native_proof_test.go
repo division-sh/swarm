@@ -54,7 +54,7 @@ func (s *agentRowResponseLoss) CommitAgentLifecycleTransition(ctx context.Contex
 	return result, nil
 }
 
-func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, store AgentLifecyclePersistence, reader AgentLifecycleStateReader, outcomes AgentLifecycleOutcomeReader, record PersistedAgent, snapshot func() any, admit ReconfigureMemoryNativeAdmission, publicRestart func(agentcontrol.Controller)) {
+func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, ctx context.Context, store AgentLifecyclePersistence, reader AgentLifecycleStateReader, outcomes AgentLifecycleOutcomeReader, record PersistedAgent, snapshot func() any, admit ReconfigureMemoryNativeAdmission, publicRestart func(agentcontrol.Controller)) {
 	t.Helper()
 	binding, ok := store.(processExecutionBindingProvider)
 	if !ok {
@@ -73,7 +73,7 @@ func ProveAgentRowNativeLostAckCacheAdoption(t *testing.T, store AgentLifecycleP
 	if _, unit := am.lifecycle.persistence().(*ephemeralLifecyclePersistenceProbe); unit {
 		t.Fatal("supplied native authority selected the unit-only row model")
 	}
-	ctx := testAuthorActivityContext(context.Background())
+	ctx = testAuthorActivityContext(ctx)
 	if err := am.lifecycle.registerExecution(ctx, record, false, reconfigureTestAgent{id: record.Config.ID}, testManagerSubscriptionAdmission(t, record.Config)); err != nil {
 		t.Fatal(err)
 	}

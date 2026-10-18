@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -54,6 +55,7 @@ type SessionAuthority struct {
 	pendingLeaseRetirements []*AdvisoryLockLease
 	testBeginTx             func(context.Context, *sql.Conn) (*sql.Tx, error)
 	testEndTxError          func() error
+	testInterruptionIssued  atomic.Bool
 }
 
 type sessionDiscard struct {
@@ -825,6 +827,18 @@ func RunAuthorityTransactionOutcome(
 	return runAuthorityTransaction(ctx, session, nil, fn)
 }
 
+func RunAdmittedAuthorityTransactionOutcome(ctx context.Context, session *SessionAuthority, fn func(context.Context, *sql.Tx) error) (bool, error) {
+	return RunAdmittedAuthorityTransactionOutcomeWithOptions(ctx, session, nil, fn)
+}
+
+func RunAdmittedAuthorityTransactionOutcomeWithOptions(ctx context.Context, session *SessionAuthority, opts *sql.TxOptions, fn func(context.Context, *sql.Tx) error) (bool, error) {
+	ctx, err := generationauthority.PrepareMutationAdmission(ctx)
+	if err != nil {
+		return false, err
+	}
+	return runAuthorityTransaction(ctx, session, opts, fn)
+}
+
 // RunAuthorityTransactionOutcomeWithOptions uses the same settlement owner with
 // caller-selected isolation. Committed evidence survives later cleanup errors.
 func RunAuthorityTransactionOutcomeWithOptions(
@@ -869,6 +883,10 @@ func runAuthorityTransactionWithProof(
 	if fn == nil {
 		return false, nil
 	}
+	ctx, err = prepareOptionalMutationAdmission(ctx, opts, true)
+	if err != nil {
+		return false, err
+	}
 	probe := session.testTransactions.Begin(opts != nil && opts.ReadOnly, true)
 	defer func() { probe.Finish(err) }()
 	beginStarted := time.Now()
@@ -900,7 +918,13 @@ func runAuthorityTransactionWithProof(
 		}
 	}()
 	if runErr := session.runWithCallerCancellation(orderingCtx, func(operationCtx context.Context) error {
-		return fn(transactiontest.WithAttempt(operationCtx, probe), tx)
+		operationCtx = transactiontest.WithAttempt(operationCtx, probe)
+		operationCtx, retireAdmission, err := admitOptionalMutationTx(operationCtx, tx, opts, true)
+		if err != nil {
+			return err
+		}
+		defer retireAdmission()
+		return fn(operationCtx, tx)
 	}); runErr != nil {
 		serializationConflict = (opts == nil || !opts.ReadOnly) && exactSerializationConflict(runErr)
 		return false, runErr

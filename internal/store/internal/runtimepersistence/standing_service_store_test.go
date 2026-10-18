@@ -707,6 +707,7 @@ func TestStandingServicePostureCensusRejectsEachLiveWorkFamilyBeforeMutation(t *
 			t.Run(backend+"/"+family, func(t *testing.T) {
 				fixture := openStandingCensusFixture(t, backend)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				runID := uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				seedStandingCensusFamily(t, fixture, ctx, runID, family, executionmode.Live)
@@ -735,6 +736,7 @@ func TestStandingServicePostureCensusAdmitsExactMockWork(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingCensusFixture(t, backend)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			seedStandingCensusFamily(t, fixture, ctx, runID, "raw_pipeline_event", executionmode.Mock)

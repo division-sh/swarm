@@ -28,7 +28,7 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now)
+	source := seedConversationForkSource(t, db, now, nil)
 
 	created, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
@@ -154,7 +154,7 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now)
+	source := seedConversationForkSource(t, db, now, nil)
 
 	_, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
@@ -200,7 +200,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	bundle := conversationForkConstructionBundle(t)
 	ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now, bundle)
+	source := seedConversationForkSource(t, db, now, nil, bundle)
 	entityID := uuid.NewString()
 
 	construction := prepareNativeConversationForkConstruction(t, ctx, s, bundle, ConversationForkSourceFixture{RunID: source.runID, EntityID: entityID, Turn1At: source.turn1At, kind: conversationForkNativeChat})
@@ -426,7 +426,7 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now)
+	source := seedConversationForkSource(t, db, now, nil)
 	fork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
 		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
@@ -602,7 +602,7 @@ type conversationForkSourceFixture struct {
 
 const conversationForkSourceFlowInstance = "review"
 
-func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
+func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, prepared *PostgresStore, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
 	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:      uuid.NewString(),
@@ -622,8 +622,11 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, histor
 		source.bundleHash = run.Artifact.BundleHash()
 		run.BundleHash = source.bundleHash
 	}
-	ctx := testAuthorActivityContextForBundle(source.bundleHash)
-	store := admitTestPostgresStore(t, db)
+	store := prepared
+	if store == nil {
+		store = admitTestPostgresStore(t, db)
+	}
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(source.bundleHash), store)
 	requireRunFixtureForTest(t, ctx, store, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()

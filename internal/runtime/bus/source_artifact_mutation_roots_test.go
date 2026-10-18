@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -457,9 +458,20 @@ func TestSubscriptionAndQuiescenceRejectForeignSourceBeforeLifecycleMutation(t *
 	if !active || retained != 1 {
 		t.Fatalf("foreign quiescence changed retained lifecycle state: active=%v retained=%d", active, retained)
 	}
+	bindings := 0
+	bus.mutationContext = func(ctx context.Context) (context.Context, error) {
+		bindings++
+		return ctx, errors.New("startup deliberately refused its generation")
+	}
 	close(handle.receiverDone)
 	if err := bus.WaitForQuiescence(context.Background()); err != nil {
 		t.Fatalf("owner-bound quiescence: %v", err)
+	}
+	if err := bus.ResetInMemoryState(); err != nil {
+		t.Fatalf("local reset after refused startup: %v", err)
+	}
+	if bindings != 0 {
+		t.Fatalf("local-only cleanup requested mutation admission %d times", bindings)
 	}
 }
 
@@ -882,6 +894,46 @@ func TestPublicationClaimCleanupRejectsForeignSourceBeforeCapabilityMutation(t *
 			}
 			if got := owner.sourceFact(action); !owned.Matches(got) {
 				t.Fatalf("%s did not carry the immutable bus source fact", action)
+			}
+		})
+	}
+	for _, reason := range []string{"missing_original", "stale_original", "foreign_original"} {
+		t.Run("reset_"+reason, func(t *testing.T) {
+			owner := newSourceMutationProbeOwner()
+			bus := newSourceMutationProbeBus(t, owned, owner)
+			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.work", "", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Time{})
+			claim, err := bus.claimPipelinePublication(context.Background(), event.ID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			bus.stageCommittedOutboxOperationWithFinalization(runtimeengine.EmitIntent{Event: event}, event, EventAppendInserted, claim, nil, false, nil, nil)
+			refusal := errors.New(reason)
+			rejected := true
+			bus.mutationContext = func(ctx context.Context) (context.Context, error) {
+				if rejected {
+					return ctx, refusal
+				}
+				return ctx, nil
+			}
+			before := owner.counts()
+			if err := bus.ResetInMemoryState(); !errors.Is(err, refusal) {
+				t.Fatalf("reset lost exact original-owner refusal: %v", err)
+			}
+			bus.mu.RLock()
+			pending := append([]pendingOutboxOperation(nil), bus.pendingOutboxByID[event.ID()]...)
+			bus.mu.RUnlock()
+			if len(pending) != 1 || pending[0].publicationClaim != claim || !owner.owns(event.ID()) || owner.counts() != before {
+				t.Fatal("rejected reset erased or consumed the retained publication claim")
+			}
+			rejected = false
+			if err := bus.ResetInMemoryState(); err != nil {
+				t.Fatalf("retry exact retained cleanup: %v", err)
+			}
+			bus.mu.RLock()
+			remaining := len(bus.pendingOutboxByID[event.ID()])
+			bus.mu.RUnlock()
+			if remaining != 0 || owner.owns(event.ID()) || owner.counts().release != before.release+1 {
+				t.Fatal("successful retry did not release the original claim exactly once")
 			}
 		})
 	}

@@ -24,10 +24,35 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
+
+func originalStoreFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if startupownership.HasMutationAuthority(ctx) {
+		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return ctx
+	}
+	store, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("original fixture context requires its selected lifecycle owner: %T", selected)
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
 
 type externalStoreTestWorkFixture struct {
 	process *worklifetime.Process
@@ -109,6 +134,19 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 	var opts runtimebus.EventBusOptions
 	if len(options) > 0 {
 		opts = options[0]
+	}
+	if opts.CarryMutationContext == nil {
+		opts.CarryMutationContext = startupownership.CarryMutationAuthority
+	}
+	if opts.MutationContext == nil {
+		original := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
+		opts.MutationContext = func(ctx context.Context) (context.Context, error) {
+			if !startupownership.HasMutationAuthority(ctx) {
+				ctx = startupownership.CarryMutationAuthority(ctx, original)
+			}
+			_, err := startupownership.CaptureMutationAuthority(ctx)
+			return ctx, err
+		}
 	}
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live

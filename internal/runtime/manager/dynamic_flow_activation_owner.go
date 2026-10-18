@@ -365,6 +365,13 @@ func (am *AgentManager) retireDynamicFlowAttemptsAfterJoin(ctx context.Context) 
 		attempts[key] = active
 	}
 	am.dynamicFlowReadinessMu.Unlock()
+	if len(attempts) == 0 {
+		return nil
+	}
+	ctx, err := am.bindRuntimeOperationContext(ctx)
+	if err != nil {
+		return err
+	}
 	var result error
 	batch := make([]joinedFlowRetirement, 0, runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit)
 	finish := func(entries []joinedFlowRetirement, committed bool) {

@@ -170,6 +170,7 @@ func (c *Collector) Snapshot() Snapshot {
 type Slot struct {
 	mu        sync.Mutex
 	collector *Collector
+	workflow  *WorkflowDomainObservation
 }
 
 func (s *Slot) Install(options Options) (*Collector, func(), error) {
