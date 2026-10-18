@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -613,12 +614,13 @@ func TestRunLifecycleEligibilityOriginParity(t *testing.T) {
 				runID := uuid.NewString()
 				ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, at)
 				stale := requestRunLifecycleCandidateParity(t, fixture, ctx, runID).Candidate
-				sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, runLifecycleCandidateParityReplacementArtifact)
+				rooted, _ := sourceartifactfixture.Rooted(t, "candidate-replacement", runLifecycleCandidateParityReplacementArtifact)
+				sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, rooted.Artifact())
 				replacement, err := runtimecorrelation.NewSourceArtifactFact(runLifecycleCandidateParityReplacementHash)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if got, err := reviseRunLifecycleSourceParity(fixture, ctx, runID, replacement); err != nil || got != runtimerunlifecycle.MutationApplied {
+				if got, err := reviseRunLifecycleSourceParity(fixture, ctx, runID, replacement, rooted); err != nil || got != runtimerunlifecycle.MutationApplied {
 					t.Fatalf("revise source = %s/%v", got, err)
 				}
 				if _, duePresent, revision := loadRunLifecycleCandidateFacts(t, fixture, ctx, runID); !duePresent || revision != 1 {
@@ -642,7 +644,7 @@ func TestRunLifecycleEligibilityOriginParity(t *testing.T) {
 				if err != nil || result.Outcome != runtimerunlifecycle.OutcomeExactNoop {
 					t.Fatalf("previous-source callback = %#v/%v", result, err)
 				}
-				if got, err := reviseRunLifecycleSourceParity(fixture, ctx, runID, replacement); err != nil || got != runtimerunlifecycle.MutationExactNoop {
+				if got, err := reviseRunLifecycleSourceParity(fixture, ctx, runID, replacement, rooted); err != nil || got != runtimerunlifecycle.MutationExactNoop {
 					t.Fatalf("duplicate source revision = %s/%v", got, err)
 				}
 				if _, duePresent, revision := loadRunLifecycleCandidateFacts(t, fixture, ctx, runID); !duePresent || revision != 1 {
@@ -675,7 +677,8 @@ func ensureRunLifecycleCandidateParityRun(
 	startedAt time.Time,
 ) {
 	t.Helper()
-	sourceartifactfixture.Require(t, ctx, fixture.store)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, rooted.Artifact())
 	source, err := runtimecorrelation.NewSourceArtifactFact(runLifecycleCandidateParityBundleHash)
 	if err != nil {
 		t.Fatal(err)
@@ -689,7 +692,7 @@ func ensureRunLifecycleCandidateParityRun(
 	}
 	if _, err := fixture.store.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
 		RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
-		Source: source, StartedAt: startedAt,
+		Source: source, RootAdmission: rooted.Admission(), StartedAt: startedAt,
 	}); err != nil {
 		t.Fatalf("ensure run %s: %v", runID, err)
 	}
@@ -719,14 +722,13 @@ func reviseRunLifecycleSourceParity(
 	ctx context.Context,
 	runID string,
 	source runtimecorrelation.SourceArtifactFact,
+	rooted sourceartifact.RootedSource,
 ) (runtimerunlifecycle.MutationDisposition, error) {
-	if source.BundleHash() == runLifecycleCandidateParityReplacementHash {
-		if err := sourceartifactfixture.EnsureArtifact(ctx, fixture.store, runLifecycleCandidateParityReplacementArtifact); err != nil {
-			return "", err
-		}
+	if err := sourceartifactfixture.EnsureArtifact(ctx, fixture.store, rooted.Artifact()); err != nil {
+		return "", err
 	}
 	return fixture.store.ReviseRunSource(ctx, runtimerunlifecycle.SourceRevisionRequest{
-		RunID: runID, Source: source,
+		RunID: runID, Source: source, RootAdmission: rooted.Admission(),
 	})
 }
 

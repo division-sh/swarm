@@ -49,7 +49,8 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			writer := selectedAdmissionLifecycleWriter(fixture.store)
 			ctx := testAuthorActivitySourceArtifactContext()
-			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, runLifecycleCandidateParityReplacementArtifact)
+			replacementRoot, _ := sourceartifactfixture.Rooted(t, "candidate-replacement", runLifecycleCandidateParityReplacementArtifact)
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, replacementRoot.Artifact())
 			for _, change := range []string{"pause", "source-revision", "terminal", "complete", "fork-source", "terminal-uuid-alias", "terminal-unbound-caller"} {
 				t.Run(change, func(t *testing.T) {
 					if !fixture.postgres && strings.HasSuffix(change, "uuid-alias") {
@@ -84,7 +85,7 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 						case "pause":
 							_, err = writer.TransitionActiveTx(txctx, attempt, runtimerunlifecycle.ActiveTransitionRequest{RunID: writeID, State: runtimerunlifecycle.StatePaused})
 						case "source-revision":
-							_, err = writer.ReviseSourceTx(txctx, attempt, runtimerunlifecycle.SourceRevisionRequest{RunID: writeID, Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityReplacementHash)})
+							_, err = writer.ReviseSourceTx(txctx, attempt, runtimerunlifecycle.SourceRevisionRequest{RunID: writeID, Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityReplacementHash), RootAdmission: replacementRoot.Admission()})
 						case "terminal", "terminal-uuid-alias", "terminal-unbound-caller":
 							_, _, err = writer.MarkTerminalTx(writeCtx, attempt, runtimerunlifecycle.TerminalRequest{RunID: writeID, State: runtimerunlifecycle.StateCancelled, EndedAt: started.Add(time.Minute)}, &cardChanges)
 						case "complete":

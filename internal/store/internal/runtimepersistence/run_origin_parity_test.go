@@ -14,11 +14,13 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
@@ -58,6 +60,9 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			reader := fixture.store.(runOriginReadStore)
 			ctx := testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store, rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			at := time.Date(2026, 7, 29, 16, 0, 0, 0, time.UTC)
 
 			t.Run("event_origin_survives_later_event", func(t *testing.T) {
@@ -90,7 +95,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 				source := mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash)
 				request := runtimerunlifecycle.CreateRequest{
 					RunID: runID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
-					Source: source, StartedAt: at.Add(time.Minute),
+					Source: source, RootAdmission: rooted.Admission(), StartedAt: at.Add(time.Minute),
 				}
 				if disposition, err := createRunLifecycleParity(fixture, ctx, request); err != nil ||
 					disposition != runtimerunlifecycle.MutationApplied {
@@ -114,11 +119,12 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 				requireRunOriginHeader(t, ctx, reader, runID, want, 1)
 
 				replacement := mustStoreTestSourceArtifactFact(runLifecycleCandidateParityReplacementHash)
-				if disposition, err := reviseRunLifecycleSourceParity(fixture, ctx, runID, replacement); err != nil ||
+				replacementRoot, _ := sourceartifactfixture.Rooted(t, "candidate-replacement", runLifecycleCandidateParityReplacementArtifact)
+				if disposition, err := reviseRunLifecycleSourceParity(fixture, ctx, runID, replacement, replacementRoot); err != nil ||
 					disposition != runtimerunlifecycle.MutationApplied {
 					t.Fatalf("revise scenario source = %s/%v", disposition, err)
 				}
-				ctx = testAuthorActivityContextForBundle(runLifecycleCandidateParityReplacementHash)
+				ctx = runtimecorrelation.WithRootAdmission(testAuthorActivityContextForBundle(runLifecycleCandidateParityReplacementHash), replacementRoot.Admission())
 				requireRunOriginHeader(t, ctx, reader, runID, want, 1)
 				for _, state := range []runtimerunlifecycle.State{
 					runtimerunlifecycle.StatePaused,
