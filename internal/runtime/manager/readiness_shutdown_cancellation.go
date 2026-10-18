@@ -3,7 +3,6 @@ package manager
 import (
 	"context"
 
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
@@ -22,9 +21,14 @@ func (e *readinessShutdownCancellation) Unwrap() error { return e.cause }
 
 func (am *AgentManager) cleanReadinessShutdownCancellation(ctx context.Context, result runtimepipeline.FlowAttachmentAdvanceResult, err error) bool {
 	_, clean := result.CleanCancellation(err)
-	return clean && ctx.Err() == context.Canceled &&
-		context.Cause(ctx) == worklifetime.ErrRetired &&
-		am.lifecycle.phaseSnapshot() == runtimeLifecycleShuttingDown
+	if !clean || ctx.Err() != context.Canceled {
+		return false
+	}
+	am.lifecycle.mu.Lock()
+	defer am.lifecycle.mu.Unlock()
+	am.lifecycle.workMu.Lock()
+	defer am.lifecycle.workMu.Unlock()
+	return am.lifecycle.phase == runtimeLifecycleShuttingDown && am.lifecycle.runOwner.CancelledByShutdown(ctx)
 }
 
 func isReadinessShutdownCompletion(err error, key dynamicFlowRuntimeReadinessKey, attempt *dynamicFlowRuntimeReadinessAttempt) bool {
