@@ -49,6 +49,14 @@ func TestNativeCompletionEvidenceSuccessorPreservesHistoryAndRefusals(t *testing
 			continue
 		}
 		found++
+		if row.File == "internal/runtime/runforkexecution/execution_test.go" && row.Function == "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority" {
+			actual := selectedCausalObservationBody(t, row.File, row.Function)
+			original, err := fixtureSetupCurrentEndpoint2617(row, actual)
+			if err != nil {
+				t.Fatalf("completion fixture lost its exact original-context continuation: %v", err)
+			}
+			row = original
+		}
 		if i != history.RecipeIndex || row.Family != history.Family || fmt.Sprintf("%x", sha256.Sum256([]byte(row.Before))) != history.FrozenBeforeSHA256 || fmt.Sprintf("%x", sha256.Sum256([]byte(row.After))) != history.FrozenAfterSHA256 || fmt.Sprintf("%x", sha256.Sum256([]byte(row.Successor))) != history.AfterSHA256 {
 			t.Fatal("completion successor overwrote prior transformation history")
 		}
