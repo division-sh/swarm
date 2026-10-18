@@ -1,4 +1,14 @@
 {
+  "AuditErrata": [
+    {
+      "After": "c6ede909fc9e9d29de4aca7b2c8af7bd35bdf760",
+      "Before": "0d64f764057322d379cbb5491113a1a20416df4d",
+      "Field": "PriorRecipeRef",
+      "Reason": "The already-accepted mailbox edge has its immutable pre-Successor recipe at c6; its Original and endpoint bytes are unchanged.",
+      "RecordedAt": "0e94e1fdb3",
+      "Row": 440
+    }
+  ],
   "Authorization": [
     "https://github.com/division-sh/swarm/issues/2700#issuecomment-6252046415",
     "https://github.com/division-sh/swarm/issues/2700#issuecomment-6252046258"
@@ -1573,7 +1583,7 @@
         "Function": "newProposedEffectMailboxHandler"
       },
       "PriorEndpointSHA256": "b6160a4b5946a508cbc73c00794b735f728f74165c8fb7f5a06097b13d2f6551",
-      "PriorRecipeRef": "0d64f764057322d379cbb5491113a1a20416df4d",
+      "PriorRecipeRef": "c6ede909fc9e9d29de4aca7b2c8af7bd35bdf760",
       "PriorSource": {
         "CanonicalSHA256": "b93c8c56a1c03fd54b886eeaf8054dbeec758e3b46b078d1d81a8d572f3fdd57",
         "DeclarationSHA256": "b6160a4b5946a508cbc73c00794b735f728f74165c8fb7f5a06097b13d2f6551",

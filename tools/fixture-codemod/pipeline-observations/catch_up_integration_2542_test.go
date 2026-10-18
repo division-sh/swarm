@@ -4,9 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"testing"
 
@@ -41,26 +39,7 @@ func catchUp2542ReadRecipes(ref string) ([]recipe, error) {
 
 func catchUp2542HistoricalRows(t *testing.T, rows []recipe, master bool) []recipe {
 	t.Helper()
-	historical := append([]recipe(nil), rows...)
-	// #2700/6251805014 and 6251798482 append one live successor, not a
-	// rewrite of the complete historical ledger authenticated below.
-	for index, row := range historical {
-		if row.Family != "native-proposed-effect-public-fixture" ||
-			row.File != "internal/apiv1/operator_mailbox_proposed_effect_supported_surface_test.go" ||
-			row.Function != "newProposedEffectMailboxHandler" || row.Successor == "" {
-			continue
-		}
-		source, err := os.ReadFile(filepath.Join("..", "..", "..", row.File))
-		if err != nil {
-			t.Fatal(err)
-		}
-		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		if err := validateProposedEffectJournalSuccessor(row, actual, string(source)); err != nil {
-			t.Fatal(err)
-		}
-		historical[index].Successor = ""
-	}
-	raw, err := json.Marshal(historical)
+	raw, err := json.Marshal(rows)
 	if err != nil {
 		t.Fatal(err)
 	}

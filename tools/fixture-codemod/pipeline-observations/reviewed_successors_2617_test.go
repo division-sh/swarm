@@ -67,6 +67,11 @@ func sameReviewedRecipeKey(left, right recipe) bool {
 }
 
 func matchesReviewedSuccessor2617(row recipe, source string, pin reviewedSuccessor2617) bool {
+	var continuationErr error
+	row, source, continuationErr = http2700PriorRecipe(row, source)
+	if continuationErr != nil {
+		return false
+	}
 	var integrationErr error
 	row, source, integrationErr = catchUp2542PriorMasterPair(row, source)
 	if integrationErr != nil {
@@ -158,7 +163,11 @@ func TestReviewedSuccessors2617PreserveExactHistoryAndRejectHostileCompositions(
 			if err != nil {
 				t.Fatal(err)
 			}
-			historicalRow, historicalSource, err := catchUp2542PriorMasterPair(row, actual)
+			continuationRow, continuationSource, err := http2700PriorRecipe(row, actual)
+			if err != nil {
+				t.Fatal(err)
+			}
+			historicalRow, historicalSource, err := catchUp2542PriorMasterPair(continuationRow, continuationSource)
 			if err != nil {
 				t.Fatal(err)
 			}

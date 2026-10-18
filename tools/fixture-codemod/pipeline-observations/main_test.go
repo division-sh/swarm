@@ -152,6 +152,7 @@ func TestOwnerRetirementSnapshotsRejectSurvivingAndAmbiguousCapabilities(t *test
 }
 
 func TestOwnerSuccessorSnapshotsArePinnedAndKeepHistoricalTransformation(t *testing.T) {
+	proveHTTP2700Continuations(t)
 	row := recipe{Function: "original", Before: "func original() { raw() }", After: "func native() { local() }", Successor: "func native() { selected() }"}
 	current, err := checkpointRecipes([]byte("package probe\n"+row.Successor), []recipe{row})
 	if err != nil || len(current) != 1 || current[0].Before != row.After || current[0].After != row.Successor {

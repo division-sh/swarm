@@ -205,6 +205,10 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 			}
 			valid := func(candidate recipe, source string) bool {
 				var integrationErr error
+				candidate, source, integrationErr = http2700PriorRecipe(candidate, source)
+				if integrationErr != nil {
+					return false
+				}
 				candidate, source, integrationErr = catchUp2542PriorMasterPair(candidate, source)
 				if integrationErr != nil {
 					return false

@@ -19,6 +19,10 @@ func historicalMechanicalRecipe(t *testing.T, row recipe) recipe {
 	if err != nil || len(files) != 0 || len(changes) != 0 {
 		t.Fatalf("current semantic successor diverged: %s/%v", row.Function, err)
 	}
+	row, _, err = http2700PriorRecipe(row, row.Successor)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if row.Mechanical != nil {
 		row.After = row.Mechanical.After
 	}

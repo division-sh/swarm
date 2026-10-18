@@ -83,6 +83,10 @@ func CatchUp2542JSONDigest(raw []byte) (string, error) {
 }
 
 func CatchUp2542HistoricalRecipes(root string, current []byte, master bool) ([]byte, error) {
+	current, continuationErr := HTTP2700HistoricalRecipes(root, current)
+	if continuationErr != nil {
+		return nil, continuationErr
+	}
 	packet, err := readCatchUp2542Packet()
 	if err != nil {
 		return nil, err
@@ -101,6 +105,10 @@ func CatchUp2542HistoricalRecipes(root string, current []byte, master bool) ([]b
 // Older archives and intermediate inverses keep their own exact validators.
 // Only this one fully authenticated composed ledger has a catch-up inverse.
 func catchUp2542LaneLedger(root string, current []byte) ([]byte, error) {
+	current, continuationErr := HTTP2700HistoricalRecipes(root, current)
+	if continuationErr != nil {
+		return nil, continuationErr
+	}
 	packet, err := readCatchUp2542Packet()
 	if err != nil {
 		return nil, err
@@ -117,6 +125,10 @@ func catchUp2542LaneLedger(root string, current []byte) ([]byte, error) {
 
 func CatchUp2542HistoricalSource(root, path string, current []byte) ([]byte, error) {
 	var err error
+	current, err = HTTP2700HistoricalSource(root, path, current)
+	if err != nil {
+		return nil, err
+	}
 	current, err = Repair2698HistoricalSource(root, path, current)
 	if err != nil {
 		return nil, err

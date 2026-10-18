@@ -64,6 +64,9 @@ func repair2698CurrentRecipes(root, path string, source []byte, rows []recipe) (
 			endpoint = row.After
 		}
 		expected, parseErr := canonicalFunction(endpoint)
+		if parseErr == nil {
+			expected, parseErr = selectedreadrole.HTTP2700HistoricalFunction(root, path, fn.Name.Name, expected)
+		}
 		if err != nil || parseErr != nil || before != expected {
 			return nil, fmt.Errorf("native repair is not its exact prior recipe endpoint: %s/%s", path, row.Function)
 		}
