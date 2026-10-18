@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 )
 
@@ -577,6 +578,9 @@ func loadRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, request
 	if err != nil {
 		return evidence, fmt.Errorf("load activity request %s fork evidence: %w", requestEventID, err)
 	}
+	if err := activityjournal.RequireLiveAttemptParentsTx(ctx, tx, requestEventID); err != nil {
+		return evidence, err
+	}
 	if evidence.Status != "succeeded" && evidence.Status != "failed" && evidence.Status != "uncertain" {
 		return evidence, fmt.Errorf("activity request %s recorded evidence is not terminal: %s", requestEventID, evidence.Status)
 	}
@@ -694,24 +698,32 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 			node_id, handler_event_key, activity_id, tool, attempt, status,
 			success_event, failure_event, result_event_id, result_event_type, result_payload,
 			failure, input_hash, loop_generation, loop_stage, reply_context_id,
-			started_at, completed_at, updated_at, execution_binding
+			started_at, completed_at, updated_at, execution_binding, reply_context_present
 		) VALUES (
 			$1, $2, $24, $3, $4, $5, $23,
 			$6, $7, $8, $9, 1, $10,
 			$11, $12, $13, $14, $15,
 			$16, $17, $18, $19, $25,
-			$20, $21, $22, NULL
+			$20, $21, $22, NULL, $26
 		) ON CONFLICT (request_event_id) DO NOTHING
 	`, requestEventID, forkRunID, nullableRunForkString(request.SourceEventID), nullableRunForkString(request.ParentEventID), nullableRunForkString(request.EntityID),
 		request.NodeID, request.HandlerEventKey, request.ActivityID, request.Tool, evidence.Status,
 		request.SuccessEvent, request.FailureEvent, resultEventID, evidence.ResultEventType, string(resultPayload),
 		failure, evidence.InputHash, string(generationJSON), nullableRunForkString(request.LoopStage),
-		evidence.StartedAt.UTC().Format(time.RFC3339Nano), evidence.CompletedAt.UTC().Format(time.RFC3339Nano), evidence.UpdatedAt.UTC().Format(time.RFC3339Nano), nullableRunForkString(flowInstance), evidence.ExecutionMode, nullableRunForkString(replyID))
+		evidence.StartedAt.UTC().Format(time.RFC3339Nano), evidence.CompletedAt.UTC().Format(time.RFC3339Nano), evidence.UpdatedAt.UTC().Format(time.RFC3339Nano), nullableRunForkString(flowInstance), evidence.ExecutionMode, nullableRunForkString(replyID), replyID != "")
 	if err != nil {
 		return fmt.Errorf("copy fork-local activity evidence %s: %w", request.ActivityID, err)
 	}
 	inserted, err := rowsAffected(result)
 	if err != nil {
+		return err
+	}
+	if inserted > 0 {
+		if err := activityjournal.PairCopiedTerminalAttemptTx(ctx, tx, requestEventID); err != nil {
+			return err
+		}
+	}
+	if err := activityjournal.RequireLiveAttemptParentsTx(ctx, tx, requestEventID); err != nil {
 		return err
 	}
 	var gotRunID, gotStatus, gotResultID string

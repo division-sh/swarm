@@ -18183,13 +18183,34 @@ platform_tables:
             loop_generation   JSONB NOT NULL DEFAULT '{}'::jsonb,
             loop_stage        TEXT,
             reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),
+            reply_context_present BOOLEAN NOT NULL DEFAULT FALSE,
             started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             completed_at      TIMESTAMPTZ,
             updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND failure IS NULL AND completed_at IS NULL) OR (status = 'succeeded' AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NULL AND completed_at IS NOT NULL) OR (status IN ('failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NOT NULL AND completed_at IS NOT NULL)),
+            CHECK ((reply_context_present AND reply_context_id IS NOT NULL AND NULLIF(TRIM(reply_context_id), '') IS NOT NULL) OR (NOT reply_context_present AND reply_context_id IS NULL)),
+            UNIQUE (request_event_id, run_id, reply_context_present),
+            UNIQUE (request_event_id, reply_context_id),
             INDEX idx_activity_attempts_run (run_id, started_at),
             INDEX idx_activity_attempts_activity (run_id, activity_id, tool),
             INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL
+        );
+    activity_attempt_live_parents:
+      description: >-
+        Exact live run and reply-context association for a canonical activity journal row.
+        Non-null reply presence is bound separately to the canonical request and run,
+        so a present reply cannot be erased through an optional composite foreign key.
+        The original execution binding and terminal outcome remain in activity_attempts.
+        This association is not a provider-dispatch, recovery or selected execution permit.
+      ddl: |
+        CREATE TABLE activity_attempt_live_parents (
+            request_event_id UUID PRIMARY KEY REFERENCES activity_attempts(request_event_id),
+            run_id UUID NOT NULL REFERENCES runs(run_id),
+            reply_context_id TEXT REFERENCES reply_contexts(reply_context_id),
+            reply_context_present BOOLEAN NOT NULL,
+            CHECK ((reply_context_present AND reply_context_id IS NOT NULL AND NULLIF(TRIM(reply_context_id), '') IS NOT NULL) OR (NOT reply_context_present AND reply_context_id IS NULL)),
+            FOREIGN KEY (request_event_id, run_id, reply_context_present) REFERENCES activity_attempts(request_event_id, run_id, reply_context_present),
+            FOREIGN KEY (request_event_id, reply_context_id) REFERENCES activity_attempts(request_event_id, reply_context_id)
         );
     run_fork_selected_contract_bindings:
       description: Durable selected-contract source binding for event, original-start or deployment-revision forks. One row binds a fork run to the selected

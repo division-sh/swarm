@@ -32,7 +32,7 @@ func executionIdentityRecord(t *testing.T) runtimepipeline.ActivityAttemptRecord
 	}
 }
 
-func executionIdentityRows(t *testing.T, record runtimepipeline.ActivityAttemptRecord) *sqlmock.Rows {
+func executionIdentityRows(t *testing.T, record runtimepipeline.ActivityAttemptRecord, paired ...bool) *sqlmock.Rows {
 	t.Helper()
 	binding, err := activityExecutionBindingValue(record.ExecutionBinding)
 	if err != nil {
@@ -42,12 +42,13 @@ func executionIdentityRows(t *testing.T, record runtimepipeline.ActivityAttemptR
 	columns := strings.Fields(`request_event_id run_id source_event_id parent_event_id entity_id flow_instance
 		node_id handler_event_key activity_id tool attempt status success_event failure_event
 		result_event_id result_event_type result_payload failure input_hash loop_generation loop_stage reply_context_id execution_mode
-		started_at completed_at updated_at execution_binding`)
+		started_at completed_at updated_at execution_binding live_parents_match`)
+	liveParents := len(paired) == 0 || paired[0]
 	return sqlmock.NewRows(columns).AddRow(
 		record.RequestEventID, record.RunID, record.SourceEventID, record.ParentEventID, record.EntityID, record.FlowInstance,
 		record.NodeID, record.HandlerEventKey, record.ActivityID, record.Tool, record.Attempt, "started",
 		record.SuccessEvent, record.FailureEvent, nil, nil, nil, nil, record.InputHash, "{}", record.LoopStage, record.ReplyContextID, string(record.ExecutionMode),
-		now, nil, now, binding,
+		now, nil, now, binding, liveParents,
 	)
 }
 

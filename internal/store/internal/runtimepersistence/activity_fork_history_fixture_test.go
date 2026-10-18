@@ -103,8 +103,11 @@ func TestHistoricalActivityForkSetupKeepsClocksCutsAndCapturedFrontierBothStores
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertActivityHistoryOnlyTablesChanged(t, before, after, "activity_attempts")
+			assertActivityHistoryOnlyTablesChanged(t, before, after, "activity_attempts", "activity_attempt_live_parents")
 			assertActivityHistoryJournalRow(t, after["activity_attempts"], record)
+			assertSelectedSourceEntityFixtureRow(t, after["activity_attempt_live_parents"], map[string]string{
+				"request_event_id": record.RequestEventID, "run_id": record.RunID, "reply_context_id": "",
+			}, time.Time{})
 			if err := SeedHistoricalActivityForkAttemptForTest(ctx, selected, record); err == nil {
 				t.Fatal("historical insert silently overwrote or replayed an existing journal row")
 			}

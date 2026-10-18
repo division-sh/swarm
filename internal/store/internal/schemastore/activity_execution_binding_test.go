@@ -92,6 +92,10 @@ func verifyActivityReplyLiveParents(t *testing.T, db *sql.DB, runID, sourceEvent
 			if _, err := db.Exec(insert, id, runID, attribution, reply, present); err != nil {
 				t.Fatalf("exact journal presence refused: %v", err)
 			}
+			var before []byte
+			if err := db.QueryRow(`SELECT execution_binding FROM activity_attempts WHERE request_event_id=$1`, id).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := db.Exec(pair, id, runID, reply, present); err != nil {
 				t.Fatalf("exact journal live parents refused: %v", err)
 			}
@@ -129,7 +133,7 @@ func verifyActivityReplyLiveParents(t *testing.T, db *sql.DB, runID, sourceEvent
 				t.Fatal(err)
 			}
 			var got []byte
-			if err := db.QueryRow(`SELECT execution_binding FROM activity_attempts WHERE request_event_id=$1`, id).Scan(&got); err != nil || (got == nil) != (attribution == nil) || (attributed && string(got) != string(raw)) {
+			if err := db.QueryRow(`SELECT execution_binding FROM activity_attempts WHERE request_event_id=$1`, id).Scan(&got); err != nil || (got == nil) != (attribution == nil) || string(got) != string(before) {
 				t.Fatalf("reply-parent validation changed original execution attribution: %s %v", got, err)
 			}
 		}
