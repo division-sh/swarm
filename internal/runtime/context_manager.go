@@ -1460,6 +1460,10 @@ func (m *RuntimeContextManager) acquireEntryLocked(ctx context.Context, entry *r
 	if !runtimeContextEntryLoaded(entry) || entry.runtime == nil || entry.workOwner == nil {
 		return nil, fmt.Errorf("runtime context is unavailable")
 	}
+	ctx, err := entry.runtime.mutationContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	owner := entry.workOwner
 	ctx, releaseAdmission, admitted := entry.runtime.shutdownGate.BeginContext(ctx)
 	if !admitted {

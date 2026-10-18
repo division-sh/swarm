@@ -19,8 +19,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -33,6 +35,32 @@ type managerNativeDeliveryOwner interface {
 	CommitPublication(context.Context, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error)
 	RegisterAuthorActivityEventCatalog(authoractivity.Scope, []authoractivity.EventDescriptor) (*authoractivity.EventCatalogLease, error)
 	ListAuthorActivity(context.Context, authoractivity.ListOptions) (authoractivity.ListResult, error)
+}
+
+func originalManagerFixtureContext(t testing.TB, ctx context.Context, selected agentfixture.Store) context.Context {
+	t.Helper()
+	if startupownership.HasMutationAuthority(ctx) {
+		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return ctx
+	}
+	if _, present := correlation.RuntimeInstanceIDFromContext(ctx); !present {
+		scope, ok := authoractivity.ScopeFromContext(ctx)
+		if !ok || scope.RuntimeInstanceID == "" {
+			t.Fatal("native manager fixture requires its declared runtime scope before acquisition")
+		}
+		ctx = correlation.WithRuntimeInstanceID(ctx, scope.RuntimeInstanceID)
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
 }
 
 func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDeliveryNativeFixture {
@@ -52,6 +80,18 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 		t.Fatal(err)
 	}
 	ctx := manager.TerminalPanicFixtureContext()
+	original, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("native manager fixture lacks its original process owner: %T", selected)
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := sourceartifactfixture.Ensure(ctx, selected); err != nil {
 		t.Fatal(err)
 	}
@@ -60,6 +100,14 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 	}
 	return &manager.ManagerDeliveryNativeFixture{
 		Store: selected, Authority: authority, Context: ctx, NormalAuthority: authority,
+		MutationContext: func(operation context.Context) (context.Context, error) {
+			if startupownership.HasMutationAuthority(operation) {
+				_, err := startupownership.CaptureMutationAuthority(operation)
+				return operation, err
+			}
+			return startupownership.WithProcessMutationAuthority(operation, process)
+		},
+		CarryMutationContext: startupownership.CarryMutationAuthority,
 		RequireRun: func(t *testing.T, runID string) {
 			t.Helper()
 			storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
@@ -131,7 +179,7 @@ func TestManagerDeliveryNativeOwnerRequiresExplicitPublicationBothStores(t *test
 		t.Run(backend, func(t *testing.T) {
 			fixture := openManagerNativeDelivery(t, backend)
 			source := sourceartifactfixture.Fact()
-			ctx := correlation.WithSourceArtifactFact(context.Background(), source)
+			ctx := correlation.WithSourceArtifactFact(fixture.Context, source)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("11111111-1111-1111-1111-111111111111", source.BundleHash()))
 			runID := uuid.NewString()
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().UTC())

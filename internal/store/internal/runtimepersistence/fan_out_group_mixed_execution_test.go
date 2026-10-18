@@ -37,6 +37,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -508,6 +509,7 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 	fact := mustStoreTestSourceArtifactFact(f.seed.bundleHash)
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, f.seed.runID), fact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, f.seed.bundleHash))
+	ctx = originalStoreFixtureContext(t, ctx, f.raw)
 	construction := sqliteFlowActivationRequest(bundle, ".", f.seed.runID, "", f.seed.runID)
 	construction.Instance = flowidentity.Stored(source, ".", f.seed.runID, f.seed.runID, f.seed.runID, "")
 	construction.OccurredAt = f.seed.createdAt
@@ -597,9 +599,7 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.process, err = f.raw.(interface {
-		AcquireProcessCapability(context.Context, startupownership.AcquireRequest) (startupownership.ProcessCapability, error)
-	}).AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "mixed-group", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
+	f.process, err = agentfixture.ProcessCapability(t, ctx, f.raw.(agentfixture.Store))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -49,6 +49,7 @@ func TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends(t *testing.T
 			source := semanticview.Wrap(bundle)
 			ctx := testAuthorActivityContextForSource(context.Background(), source)
 			selected := newTargetOwnerParityStore(t, backend, ctx)
+			ctx = originalEventBusFixtureContext(t, ctx, selected)
 			runID := uuid.NewString()
 			sourceEntityID := runtimeflowidentity.EntityID(runID)
 			rootOwner := events.RouteIdentity{
@@ -126,7 +127,7 @@ func TestCrossFlowConstructedTargetOwnershipRoundTripOnBothBackends(t *testing.T
 				t.Fatalf("durable duplicate preflight = %#v, want original route %#v", duplicatePlan, persisted[0])
 			}
 			duplicateCtx := runtimedelivery.WithRoute(
-				runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID),
+				ctx,
 				events.DeliveryRoute{Target: events.MustExistingEntityTarget(events.RouteIdentity{
 					FlowID: "foreign", FlowInstance: "foreign/changed-topology", EntityID: uuid.NewString(),
 				})},

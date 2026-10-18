@@ -614,6 +614,9 @@ func commitWorkflowEngineMutation(
 			}
 			return nil
 		})
+		if err == nil && command.DeliverySuccess != nil {
+			err = transactiontest.NotifyWorkflowDomainExit(txctx, command.DeliverySuccess.Claim)
+		}
 		return result, err
 	})
 	result, committed := outcome.Value()

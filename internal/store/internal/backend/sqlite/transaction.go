@@ -10,7 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -39,6 +42,21 @@ func (b *Backend) RunTransaction(ctx context.Context, label string, operation fu
 	return err
 }
 
+// RunAdmittedTransactionOutcome requires original runtime/process evidence;
+// native construction and control retain their separate existing entrance.
+func (b *Backend) RunAdmittedTransaction(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) error {
+	_, err := b.RunAdmittedTransactionOutcome(ctx, label, operation)
+	return err
+}
+
+func (b *Backend) RunAdmittedTransactionOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) (bool, error) {
+	ctx, err := generationauthority.PrepareMutationAdmission(ctx)
+	if err != nil {
+		return false, err
+	}
+	return b.RunTransactionOutcome(ctx, label, operation)
+}
+
 // RunTransactionOutcome keeps acknowledged COMMIT separate from later cleanup
 // errors. False is not evidence that an uncertain COMMIT rolled back.
 func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) (bool, error) {
@@ -53,6 +71,13 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, opera
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if runtimeownership.HasMutationAuthority(ctx) {
+		var err error
+		ctx, err = generationauthority.PrepareMutationAdmission(ctx)
+		if err != nil {
+			return false, err
+		}
 	}
 	label = mutationLabel(label)
 	var recoveryDeadline time.Time
@@ -314,9 +339,18 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	probe.Begun()
 	ctx, releaseOrdering = authoractivity.BindTransaction(ctx, ctx, tx, authoractivity.DialectSQLite)
 	ctx = transactiontest.WithAttempt(ctx, probe)
+	var retireAdmission func()
+	ctx, retireAdmission, err = admitOptionalMutationTx(ctx, tx, opts)
+	if err != nil {
+		return false, err
+	}
+	defer retireAdmission()
 	if err = ctx.Err(); err != nil {
 		return false, err
 	}
+	ctx = transactiontest.WithWorkflowDomainNotification(ctx, func(notify context.Context, claim deliverylifecycle.Claim) error {
+		return b.testTransactions.WorkflowDomainExit(notify, claim, nil)
+	})
 	if err = operation(ctx, tx); err != nil {
 		return false, err
 	}
@@ -376,6 +410,13 @@ func mutationBudgetError(label string, lastErr error) error {
 		return fmt.Errorf("%s busy recovery invariant violated: missing busy/locked cause", label)
 	}
 	return fmt.Errorf("%s retry budget %s exceeded: %w", label, mutationRetryBudget, lastErr)
+}
+
+func admitOptionalMutationTx(ctx context.Context, tx *sql.Tx, opts *sql.TxOptions) (context.Context, func(), error) {
+	if (opts == nil || !opts.ReadOnly) && runtimeownership.HasMutationAuthority(ctx) {
+		return generationauthority.AdmitMutationTx(ctx, tx, true)
+	}
+	return ctx, func() {}, nil
 }
 
 func mutationLabel(label string) string {

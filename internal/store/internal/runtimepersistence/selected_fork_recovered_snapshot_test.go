@@ -21,6 +21,7 @@ func TestSelectedForkRecoveredSnapshotPreservesExactRunInventoryBothStores(t *te
 			selected, _, _ := selectedForkDiscardTestStore(t, backend)
 			owner := selected.(diagnosticProjectionTestStore)
 			ctx := context.Background()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			item := enqueueDiagnosticTestAgent(t, owner, "recovery-snapshot")
 			if err := runtimepkg.NewRuntimeLogger(owner, executionposture.Live, nil).ProjectLifecycleDiagnostic(ctx, item); err != nil {
 				t.Fatal(err)

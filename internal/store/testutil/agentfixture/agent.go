@@ -130,6 +130,18 @@ func ProcessCapability(t testing.TB, ctx context.Context, selected Store) (runti
 	return session.capability, nil
 }
 
+func withFixtureProcessContext(t testing.TB, ctx context.Context, selected Store) (context.Context, error) {
+	if runtimestartupownership.HasMutationAuthority(ctx) {
+		_, err := runtimestartupownership.CaptureMutationAuthority(ctx)
+		return ctx, err
+	}
+	process, err := ProcessCapability(t, ctx, selected)
+	if err != nil {
+		return nil, err
+	}
+	return runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+}
+
 // AdmitGeneration installs the caller's complete source plan before a fixture
 // Manager can inspect run ownership. Inspection itself never creates authority.
 func AdmitGeneration(t testing.TB, ctx context.Context, selected Store, plan runtimeagenttopology.SourceSetPlan, coordinate runtimeagenttopology.SourceCoordinate) (runtimestartupownership.LiveGenerationGrant, error) {
@@ -408,6 +420,10 @@ func UpsertStaticForSource(t testing.TB, ctx context.Context, selected Store, re
 	if err != nil {
 		return err
 	}
+	ctx, err = withFixtureProcessContext(t, ctx, selected)
+	if err != nil {
+		return err
+	}
 	if err := ensureFixtureRun(ctx, selected, identity.RunID, rec.StartedAt, source); err != nil {
 		return err
 	}
@@ -596,6 +612,10 @@ func CommitStatic(t testing.TB, ctx context.Context, selected Store, req runtime
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
+	ctx, err = withFixtureProcessContext(t, ctx, selected)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	if err := ensureFixtureRun(ctx, selected, identity.RunID, req.Now); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -721,6 +741,10 @@ func CommitExact(t testing.TB, ctx context.Context, selected Store, req runtimem
 		ctx = context.Background()
 	}
 	identity, key, kind, err := validateExactDurableTransition(req)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	ctx, err = withFixtureProcessContext(t, ctx, selected)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}

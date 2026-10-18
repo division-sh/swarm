@@ -85,7 +85,12 @@ func proveRuntimeConstructedActorCensusBothStores(t *testing.T, journey string) 
 				}
 				runID := uuid.NewString()
 				ctx := startupRecoverySourceContext(fact, runID)
-				seedStartupRecoverySourceRun(t, ctx, selected, fact, artifact, runID)
+				preparedProcess := prepareExternalRuntimeFixtureProcess(t, ctx, selected)
+				seedContext, err := startupownership.WithProcessMutationAuthority(ctx, preparedProcess)
+				if err != nil {
+					t.Fatal(err)
+				}
+				seedStartupRecoverySourceRun(t, seedContext, selected, fact, artifact, runID)
 				var currentCapability startupownership.ProcessCapability
 				var currentContexts *runtimepkg.RuntimeContextManager
 				start := func() (*runtimepkg.Runtime, func() error) {
@@ -104,7 +109,13 @@ func proveRuntimeConstructedActorCensusBothStores(t *testing.T, journey string) 
 					if err != nil {
 						t.Fatal(err)
 					}
-					capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, rt)
+					var capability startupownership.ProcessCapability
+					if preparedProcess != nil {
+						capability, _ = installExternalRuntimeTestGeneration(t, ctx, selected, rt, preparedProcess)
+						preparedProcess = nil
+					} else {
+						capability, _ = installExternalRuntimeTestGeneration(t, ctx, selected, rt)
+					}
 					currentCapability = capability
 					contexts := nativeConstructedActorRuntimeContexts(t, rt, source, fact)
 					currentContexts = contexts
@@ -339,7 +350,11 @@ func proveNativeConstructedActorSourceSetRebind(t *testing.T, ctx context.Contex
 		t.Fatal(err)
 	}
 	spareRunID := uuid.NewString()
-	seedStartupRecoverySourceRun(t, startupRecoverySourceContext(spareFact, spareRunID), selected, spareFact, spareArtifact, spareRunID)
+	spareContext, err := startupownership.WithProcessMutationAuthority(startupRecoverySourceContext(spareFact, spareRunID), capability)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedStartupRecoverySourceRun(t, spareContext, selected, spareFact, spareArtifact, spareRunID)
 	plan, err := agenttopology.NewSourceSetPlan(append(current.Sources, agenttopology.SourceCoordinate{BundleHash: spareArtifact.BundleHash()}), current.Agents)
 	if err != nil || plan.Revision == current.Revision {
 		t.Fatalf("changed source-set plan: err=%v", err)

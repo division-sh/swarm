@@ -508,6 +508,17 @@ func (a ManagedProviderPreflightAuthority) probeAuthority(ctx context.Context, p
 	return capability, effect, nil
 }
 
+func (a ManagedProviderPreflightAuthority) saveSurface(ctx context.Context, authority managedcapabilities.Authority, surface managedcapabilities.Surface) error {
+	if a.prepared == nil {
+		return a.CapabilityStore.SaveManagedCapabilitySurface(ctx, surface)
+	}
+	operation, err := startupownership.PreparedManagedCapabilitySurfaceOperation(ctx, a.prepared.process, a.CapabilityStore, authority, surface)
+	if err != nil {
+		return err
+	}
+	return a.prepared.process.RunPreparedOperation(ctx, operation)
+}
+
 func ValidateManagedProviderPreflight(ctx context.Context, cfg *config.Config, source semanticview.Source, gatewayBinding toolgateway.Binding, runtimes *llm.AgentRuntimeSet, turnStore llm.MCPTurnContextStore, tools claudeStartupToolSource, manager *runtimemanager.AgentManager, authority ManagedProviderPreflightAuthority) ([]string, error) {
 	if authority.ExecutionKind == managedcapabilities.ExecutionSelectedContractFork {
 		return nil, fmt.Errorf("selected-fork startup requires non-executable preparation")
@@ -633,7 +644,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 			if err != nil {
 				return fmt.Errorf("build managed capability startup surface for agent %s: %w", agentID, err)
 			}
-			if err := authority.CapabilityStore.SaveManagedCapabilitySurface(agentCtx, surface); err != nil {
+			if err := authority.saveSurface(agentCtx, capabilityAuthority, surface); err != nil {
 				return fmt.Errorf("persist managed capability startup plan for agent %s: %w", agentID, err)
 			}
 			agentCtx = managedcapabilities.WithContext(agentCtx, surface)
@@ -650,7 +661,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 				return fmt.Errorf("managed capability provider evidence changed startup plan for agent %s: %w", agentID, err)
 			}
 			surface = probeResp.CapabilitySurface.Clone()
-			if err := authority.CapabilityStore.SaveManagedCapabilitySurface(agentCtx, surface); err != nil {
+			if err := authority.saveSurface(agentCtx, capabilityAuthority, surface); err != nil {
 				return fmt.Errorf("persist managed capability provider evidence for agent %s: %w", agentID, err)
 			}
 			expectedNames := startupSurfaceCanonicalNames(surface, managedcapabilities.BindingMCPTool)
@@ -694,7 +705,7 @@ func validateManagedProviderPreflightConfigs(ctx context.Context, cfg *config.Co
 				turnStore.UnregisterTurnContext(binding.ContextToken)
 				return fmt.Errorf("managed capability MCP evidence changed startup plan for agent %s: %w", agentID, err)
 			}
-			if err := authority.CapabilityStore.SaveManagedCapabilitySurface(agentCtx, listedSurface); err != nil {
+			if err := authority.saveSurface(agentCtx, capabilityAuthority, listedSurface); err != nil {
 				turnStore.UnregisterTurnContext(binding.ContextToken)
 				return fmt.Errorf("persist managed capability MCP evidence for agent %s: %w", agentID, err)
 			}
