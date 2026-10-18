@@ -307,9 +307,20 @@ func (am *AgentManager) runtimeContext() context.Context {
 	return context.Background()
 }
 
+type runtimeMutationContextOwner interface {
+	BindRuntimeMutationContext(context.Context) (context.Context, error)
+}
+
 func (am *AgentManager) bindRuntimeOperationContext(ctx context.Context) (context.Context, error) {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if owner, ok := am.lifecycle.persistence().(runtimeMutationContextOwner); ok {
+		var err error
+		ctx, err = owner.BindRuntimeMutationContext(ctx)
+		if err != nil {
+			return ctx, err
+		}
 	}
 	base := am.runtimeContext()
 	ownerScope, ownerOK := runtimeauthoractivity.ScopeFromContext(base)

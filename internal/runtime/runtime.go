@@ -431,6 +431,10 @@ func (rt *Runtime) prepareStartupLifecycleLocked(ctx context.Context) error {
 	if grant == nil {
 		return errors.New("runtime generation grant is required before startup preparation")
 	}
+	ctx, err := runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
+	if err != nil {
+		return err
+	}
 	evidence, err := grant.Evidence()
 	if err != nil {
 		return err
@@ -1099,6 +1103,19 @@ func (rt *Runtime) authorActivityContext(ctx context.Context) context.Context {
 	return runtimeauthoractivity.WithScope(ctx, rt.authorActivityScope)
 }
 
+func (rt *Runtime) mutationContext(ctx context.Context) (context.Context, error) {
+	if runtimestartupownership.HasMutationAuthority(ctx) {
+		original, err := runtimestartupownership.CaptureMutationAuthority(ctx)
+		if err != nil || original.HasRuntimeGrant() {
+			return ctx, err
+		}
+	}
+	rt.lifecycleMu.Lock()
+	grant := rt.startupGrant
+	rt.lifecycleMu.Unlock()
+	return runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
+}
+
 func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	return newRuntime(ctx, deps)
 }
@@ -1180,7 +1197,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			return nil
 		}
 		return []runtimebus.EventInterceptor{rt.Pipeline}
-	}, payloadAdmitter, constructionOwner, constructionOwner, opts.ProviderTriggerCatalog, opts.TestLifecycleProbe)
+	}, payloadAdmitter, constructionOwner, constructionOwner, opts.ProviderTriggerCatalog, opts.TestLifecycleProbe, rt.mutationContext)
 	if err != nil {
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}
@@ -1603,6 +1620,11 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 		return nil, err
 	}
 	ctx = rt.authorActivityContext(ctx)
+	var err error
+	ctx, err = rt.mutationContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
 	bootStartedAt := rt.Options.BootStartedAt
 	if bootStartedAt.IsZero() {
@@ -1676,7 +1698,6 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 		RecoveryOnStartup:  rt != nil && rt.Config != nil && rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery,
 		InspectionComplete: true,
 	}
-	var err error
 	if skipPersistentStartupRecovery {
 		startupRecoverySnapshot.Delivery, startupRecoverySnapshot.StandingDeliveryObligations, err = rt.inspectDeliveryRecoveryInventory(ctx)
 		if err != nil {

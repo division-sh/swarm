@@ -161,7 +161,7 @@ func (am *AgentManager) ShutdownWithOptions(opts ShutdownOptions) error {
 	if transition == nil {
 		// A prior run may already be joined while exact activation cleanup is
 		// retained after a failed durable settlement.
-		return am.retireDynamicFlowAttemptsAfterJoin(context.Background())
+		return am.retireDynamicFlowAttemptsAfterJoin(context.WithoutCancel(am.runtimeContext()))
 	}
 	executor, claimed, err := am.lifecycle.claimUnwatchedTransition(transition, runtimeLifecycleTransitionShutdown)
 	if err != nil {
@@ -1029,9 +1029,10 @@ func (am *AgentManager) completeClaimedShutdownTransition(transition *runtimeLif
 	for _, wait := range done {
 		<-wait
 	}
-	runSettleErr := am.lifecycle.retireRunOwner(context.Background())
+	cleanupCtx := context.WithoutCancel(am.runtimeContext())
+	runSettleErr := am.lifecycle.retireRunOwner(cleanupCtx)
 	if runSettleErr == nil {
-		runSettleErr = am.retireDynamicFlowAttemptsAfterJoin(context.Background())
+		runSettleErr = am.retireDynamicFlowAttemptsAfterJoin(cleanupCtx)
 	}
 	settleErr := executor.Done()
 	am.lifecycle.completeShutdownTransition(transition, errors.Join(runSettleErr, settleErr))

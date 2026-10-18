@@ -26,7 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
-func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableDependencies, pipelineObligations runtimepipelineobligation.Store, logger *RuntimeLogger, source semanticview.Source, posture executionposture.Posture, sourceArtifactFact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, workOwner *worklifetime.RuntimeOccurrence, interceptorProvider func() []runtimebus.EventInterceptor, payloadAdmitter runtimebus.PayloadAdmitter, templateInstancePlanner runtimepipeline.FlowInstanceActivationPlanner, flowActivationFinalizer runtimepipeline.CommittedFlowInstanceActivationFinalizer, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer) (*runtimebus.EventBus, error) {
+func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableDependencies, pipelineObligations runtimepipelineobligation.Store, logger *RuntimeLogger, source semanticview.Source, posture executionposture.Posture, sourceArtifactFact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string, workOwner *worklifetime.RuntimeOccurrence, interceptorProvider func() []runtimebus.EventInterceptor, payloadAdmitter runtimebus.PayloadAdmitter, templateInstancePlanner runtimepipeline.FlowInstanceActivationPlanner, flowActivationFinalizer runtimepipeline.CommittedFlowInstanceActivationFinalizer, providerOutputVerifier runtimebus.ProviderOutputAuthorizationVerifier, testLifecycleProbe runtimelifecycleprobe.Observer, mutationContext func(context.Context) (context.Context, error)) (*runtimebus.EventBus, error) {
 	var hook runtimebus.LoggerHook
 	if logger != nil {
 		hook = runtimeLoggerHook{logger: logger}
@@ -41,6 +41,7 @@ func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableD
 		PayloadAdmitter:         payloadAdmitter,
 		SourceArtifactFact:      sourceArtifactFact,
 		RuntimeInstanceID:       strings.TrimSpace(runtimeInstanceID),
+		MutationContext:         mutationContext,
 		WorkOwner:               workOwner,
 		ReceiverExecution:       eventreceiver.NormalExecution(),
 		TestLifecycleProbe:      testLifecycleProbe,

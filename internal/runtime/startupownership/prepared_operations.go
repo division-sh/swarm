@@ -93,6 +93,7 @@ func (p *processCapability) RunPreparedOperation(ctx context.Context, operation 
 	life, end := context.WithCancel(context.WithoutCancel(ctx))
 	defer end()
 	operationCtx := context.WithValue(ctx, preparedOperationContextKey{}, preparedOperationScope{operation.kind, operation.target, life})
+	operationCtx = p.processMutationContext(operationCtx)
 	err = operation.run(operationCtx)
 	if err != nil {
 		err = p.retireOnPossessionFailure(err)

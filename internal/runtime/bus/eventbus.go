@@ -81,6 +81,7 @@ type EventBus struct {
 	standingRunWorkOwner        StandingRunWorkOwner
 	sourceArtifactFact          runtimecorrelation.SourceArtifactFact
 	runtimeInstanceID           string
+	mutationContext             func(context.Context) (context.Context, error)
 	testLifecycleProbe          runtimelifecycleprobe.Observer
 	providerOutputVerifier      ProviderOutputAuthorizationVerifier
 	outboxSweeperActive         bool
@@ -301,6 +302,7 @@ type EventBusOptions struct {
 	RunDispatchGate             RunDispatchGate
 	SourceArtifactFact          runtimecorrelation.SourceArtifactFact
 	RuntimeInstanceID           string
+	MutationContext             func(context.Context) (context.Context, error)
 	TestLifecycleProbe          runtimelifecycleprobe.Observer
 	ProviderOutputVerifier      ProviderOutputAuthorizationVerifier
 	WorkOwner                   worklifetime.Occurrence
@@ -547,6 +549,7 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		runDispatchGate:             opts.RunDispatchGate,
 		sourceArtifactFact:          opts.SourceArtifactFact,
 		runtimeInstanceID:           strings.TrimSpace(opts.RuntimeInstanceID),
+		mutationContext:             opts.MutationContext,
 		testLifecycleProbe:          opts.TestLifecycleProbe,
 		providerOutputVerifier:      opts.ProviderOutputVerifier,
 		workOwner:                   opts.WorkOwner,
