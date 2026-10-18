@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -145,6 +146,9 @@ func TestServeProcessTakeoverRejectsLivePredecessorMutationBothStores(t *testing
 				if _, ok := first.waitForExit(serveRuntimeStopTimeout); !ok {
 					t.Fatal("ordinary stop-on-loss did not resume")
 				}
+				if active := use.Runtime().WorkOccurrence().ActiveCount(); active != 0 {
+					t.Fatalf("ordinary stop-on-loss retained local delivery leases: %d", active)
+				}
 			}
 			rows, err := storetest.ReadWorkflowStateObservationRows(ctx, selected)
 			if err != nil || len(rows) != 1 || rows[0].EntityID != seed.RunID || rows[0].CurrentState != "waiting" {
@@ -157,5 +161,49 @@ func TestServeProcessTakeoverRejectsLivePredecessorMutationBothStores(t *testing
 				t.Fatalf("successor stop=%d", code)
 			}
 		})
+		t.Run(backend+"/startup_failure_cleanup", func(t *testing.T) {
+			proveSystemNodeStartupFailureCleanup(t, backend)
+		})
+	}
+}
+
+func proveSystemNodeStartupFailureCleanup(t *testing.T, backend string) {
+	t.Helper()
+	opts, _ := issue2564ServeHarness(t, backend, canonicalrouting.CopyRootIngressServedFollowUp(t), false)
+	setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
+	prepared := make(chan *runtimepkg.Runtime, 1)
+	opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) { prepared <- rt }
+	opts.TestBeforeReadinessCommit = func() error { return errors.New("controlled system-node readiness refusal") }
+	failed := startServeRuntimeTestProcess(t, *opts)
+	code, exited := failed.waitForExit(serveRuntimeStopTimeout)
+	if !exited || code == 0 || !strings.Contains(failed.outputString(), "controlled system-node readiness refusal") {
+		t.Fatalf("controlled startup failure did not finish its real cleanup: exit=%t code=%d", exited, code)
+	}
+	var rt *runtimepkg.Runtime
+	select {
+	case rt = <-prepared:
+	default:
+		t.Fatal("startup failure preceded actual runtime construction")
+	}
+	if rt.WorkOccurrence().ActiveCount() != 0 {
+		t.Fatalf("startup cleanup retained local work: %d", rt.WorkOccurrence().ActiveCount())
+	}
+	if _, err := rt.CurrentStartupGrantEvidence(); err == nil {
+		t.Fatal("startup cleanup retained an admitted runtime grant")
+	}
+	// Repeated retirement after the original grant was already retired must
+	// refuse native work, not borrow a later grant. Local work is already joined.
+	if err := rt.Bus.ResetInMemoryState(); !errors.Is(err, startupownership.ErrMutationAuthorityMissing) {
+		t.Fatalf("post-retirement cleanup did not retain its missing-original refusal: %v", err)
+	}
+	if rt.WorkOccurrence().ActiveCount() != 0 {
+		t.Fatal("post-retirement refusal reopened local delivery ownership")
+	}
+	opts.TestBeforeReadinessCommit = nil
+	opts.TestRuntimeReadyHook = nil
+	successor := startServeRuntimeTestProcess(t, *opts)
+	successor.waitForReadyLine()
+	if code := successor.stop(); code != 0 {
+		t.Fatalf("successor after controlled startup failure stop=%d", code)
 	}
 }
