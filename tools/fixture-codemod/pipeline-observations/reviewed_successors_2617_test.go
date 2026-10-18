@@ -93,6 +93,9 @@ func reverseReviewedSuccessor2617(source string, edits []reviewedSuccessorEdit) 
 }
 
 func reviewedSharedCoordinatorBody2617(row recipe, packet reviewedSuccessorPacket2617) (string, error) {
+	if original, err := fixtureSetupCurrentEndpoint2617(row, row.Successor); err == nil {
+		row = original
+	}
 	for _, pin := range packet.Shared {
 		if row.Family != pin.Family || row.File != pin.File || row.Function != pin.Function {
 			continue

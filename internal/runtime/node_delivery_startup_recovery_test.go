@@ -171,7 +171,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
+				ctx := startupRecoverySourceContext(persistedSource, templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
 				return ctx, db, db, selected
@@ -181,7 +181,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			name: "sqlite",
 			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
+				ctx := startupRecoverySourceContext(persistedSource, templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
 				return ctx, nil, storetest.Database(selected), selected
