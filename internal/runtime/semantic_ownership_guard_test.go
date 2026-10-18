@@ -378,7 +378,6 @@ func TestSemanticOwnershipProducerConsumerLedgerIsClosed(t *testing.T) {
 		"toolSchemaEntryValue": {
 			"category":          "ToolCategory",
 			"handler":           "ToolHandlerKind",
-			"effect":            "ActivityEffectClass",
 			"permission":        "ToolPermission",
 			"ratePolicy":        "ToolRatePolicy",
 			"inputSchema":       "ToolInputSchema",
@@ -521,6 +520,11 @@ func TestSemanticOwnershipProducerConsumerLedgerIsClosed(t *testing.T) {
 					}
 					for _, field := range structType.Fields.List {
 						for _, name := range field.Names {
+							// #2700/6220888538 deletes authored tool effects, not
+							// the platform-owned compiled channel classification.
+							if typeSpec.Name.Name == "toolSchemaEntryValue" && name.Name == "effect" {
+								t.Errorf("%s restores retired authored tool effect_class authority", path)
+							}
 							wantType, tracked := required[name.Name]
 							if !tracked {
 								continue
