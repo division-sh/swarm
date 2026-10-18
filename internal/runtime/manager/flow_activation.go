@@ -80,6 +80,13 @@ func (am *AgentManager) ActivateFlowInstance(ctx context.Context, req runtimepip
 	if am == nil {
 		return fmt.Errorf("agent manager is required")
 	}
+	if owner, ok := am.lifecycle.persistence().(runtimeMutationContextOwner); ok {
+		var err error
+		ctx, err = owner.BindRuntimeMutationContext(ctx)
+		if err != nil {
+			return err
+		}
+	}
 	lease, err := am.beginWork(ctx, "flow instance activation")
 	if err != nil {
 		return err

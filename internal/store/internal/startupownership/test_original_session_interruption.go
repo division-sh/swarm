@@ -13,9 +13,20 @@ import (
 // the first original constructor result, never a mutable current-session lookup.
 type OriginalProcessCaptureForTest struct {
 	mu         sync.Mutex
-	session    *postgresSession
+	session    originalSessionPreparationForTest
 	capability runtimeowner.ProcessCapability
 	issued     bool
+}
+
+type originalSessionPreparationForTest interface {
+	prepareOriginalSessionForTest(context.Context) (func(context.Context) error, error)
+}
+
+func (s *postgresSession) prepareOriginalSessionForTest(ctx context.Context) (func(context.Context) error, error) {
+	if _, err := s.Authority(); err != nil {
+		return nil, err
+	}
+	return s.owner.backend.PrepareOriginalSessionInterruptionForTest(ctx, s.lease.Session())
 }
 
 func (s *StartupPostgresOwner) CaptureOriginalProcessForTest() (*OriginalProcessCaptureForTest, error) {
@@ -70,7 +81,7 @@ func (p *OriginalProcessCaptureForTest) PrepareForTest(ctx context.Context, orig
 	if actual != original.ProcessAuthority() {
 		return nil, errors.New("interruption authority differs from the original constructed process")
 	}
-	interrupt, err := p.session.owner.backend.PrepareOriginalSessionInterruptionForTest(ctx, p.session.lease.Session())
+	interrupt, err := p.session.prepareOriginalSessionForTest(ctx)
 	if err != nil {
 		return nil, err
 	}

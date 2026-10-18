@@ -47,6 +47,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 	// Keep the first artifact write inside RequireRun's accounting boundary.
 	fact := sourceartifactfixture.FactFor(artifact)
 	ctx := testAuthorActivityContextForSource(t, context.Background(), fact)
+	ctx = originalPipelineFixtureContext(t, ctx, selected)
 	persistence := pipeline.NewWorkflowPersistence(selected)
 	var buses []*runtimebus.EventBus
 	join := func() error {
