@@ -68,6 +68,35 @@ type FlowAttachmentAdvanceResult struct {
 	Phase        FlowAttachmentPhase
 	Acknowledged bool
 	Terminal     bool
+	cancellation *flowAttachmentCancellation
+}
+
+type flowAttachmentCancellation struct {
+	cause         error
+	beforeAttempt bool
+}
+
+func (e *flowAttachmentCancellation) Error() string { return e.cause.Error() }
+func (e *flowAttachmentCancellation) Unwrap() error { return e.cause }
+
+// WithCleanCancellation carries the native owner's completed non-COMMIT
+// disposition. Only the attachment persistence owner supplies this result.
+func (r FlowAttachmentAdvanceResult) WithCleanCancellation(cause error, beforeAttempt bool) (FlowAttachmentAdvanceResult, error) {
+	if cause == nil || r.Acknowledged {
+		return r, cause
+	}
+	r.cancellation = &flowAttachmentCancellation{cause: cause, beforeAttempt: beforeAttempt}
+	return r, r.cancellation
+}
+
+// CleanCancellation accepts only the exact returned error; a joined independent
+// failure cannot inherit the native cancellation disposition.
+func (r FlowAttachmentAdvanceResult) CleanCancellation(err error) (beforeAttempt, ok bool) {
+	matched, ok := err.(*flowAttachmentCancellation)
+	if !ok || r.Acknowledged || matched == nil || matched != r.cancellation {
+		return false, false
+	}
+	return matched.beforeAttempt, true
 }
 
 func (r FlowAttachmentAdvanceResult) Admitted() bool {
