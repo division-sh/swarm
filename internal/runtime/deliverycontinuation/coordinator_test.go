@@ -673,6 +673,7 @@ func TestCoordinatorParksNonExecutableStandingDelivery(t *testing.T) {
 		runtimestanding.StandingRestartSuspended,
 		runtimestanding.StandingRestartOrphaned,
 		runtimestanding.StandingRestartCredentialDormant,
+		runtimestanding.StandingRestartSessionDormant,
 		runtimestanding.StandingRestartRecoveryRequired,
 	} {
 		t.Run(string(kind), func(t *testing.T) {

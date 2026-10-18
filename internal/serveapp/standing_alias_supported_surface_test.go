@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
@@ -289,7 +290,7 @@ func proveA9EnabledAliasAdmission(t *testing.T, backend string) {
 	if dormant.Target.Alias != "shared" || dormant.Target.Generation != 0 {
 		t.Fatalf("dormant discovery fabricated a receiver/generation: %+v", dormant)
 	}
-	err = manager.AdmitChannelStandingTarget(t.Context(), channelonboarding.Operation{}, dormant, nil)
+	err = manager.AdmitChannelStandingTarget(t.Context(), channelonboarding.Operation{}, dormant, operatorchannel.ProviderAuthority{}, nil)
 	if err == nil || !strings.Contains(err.Error(), `flow "."`) || !strings.Contains(err.Error(), `flow "beta"`) || !strings.Contains(err.Error(), "duplicate enabled ingress alias") {
 		t.Fatalf("promotion did not refuse both exact owners before mutation: %v", err)
 	}

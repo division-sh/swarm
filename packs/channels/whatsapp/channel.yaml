@@ -1,0 +1,40 @@
+provider: whatsapp
+transport: session
+capabilities:
+  card_render: true
+  reply_to_reference: true
+  actions_as_buttons: false
+  actions_as_text: true
+  edit: false
+  acknowledgment: false
+  inbox_listing: true
+onboarding:
+  ceremony: authenticated_text_challenge
+  confirmation: deliver
+  connection_health: provider_connection
+  learned_destination:
+    destination: conversation_reference
+opaque_types:
+  destination: {type: string, minLength: 1}
+  delivery_reference: {type: string, minLength: 1}
+  external_account_reference: {type: string, minLength: 1}
+  conversation_reference: {type: string, minLength: 1}
+operations:
+  deliver:
+    tool: whatsapp.send_text
+    input:
+      destination: context.destination
+      text: input.presentation.text
+    output:
+      delivery_reference: result.id
+events:
+  text:
+    event: inbound.whatsapp.message
+    fields:
+      text: event.text
+      external_account_reference: event.external_account_reference
+      conversation_reference: event.conversation_reference
+      conversation_scope: event.conversation_scope
+      provider_message_reference: event.provider_message_reference
+      reply_to_message_reference: event.reply_to_message_reference
+      entry_invocation: event.entry_invocation

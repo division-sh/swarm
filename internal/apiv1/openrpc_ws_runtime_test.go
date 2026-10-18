@@ -368,6 +368,7 @@ func approvedHTTPRuntimeTransportMethods() []string {
 	out = append(out, approvedMutatingHTTPRuntimeMethods()...)
 	out = append(out,
 		"channel.confirm",
+		"channel.logout",
 		"channel.list",
 		"channel.onboarding_retry",
 		"channel.onboarding_start",
