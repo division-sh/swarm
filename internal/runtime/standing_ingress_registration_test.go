@@ -30,6 +30,11 @@ func TestPublicIngressClassificationUsesCompleteDeclaredAndLearnedOwners(t *test
 			if err := admitted.registrationAdmission(t.Context()); err != nil {
 				t.Fatalf("exact admitted binding refused: %v", err)
 			}
+			for _, owned := range use.Context.StandingTargets {
+				if owned.Provider == target.Provider && declaredAuthorIngress(use.runtime, &use.Context, owned) == wantManaged {
+					t.Fatalf("mode=%s pre-availability classification lost the frozen declaration/learned split", mode)
+				}
+			}
 			wantSource := providertriggers.PolicySourceVerifiedPack
 			if mode == "raw_author" {
 				wantSource = providertriggers.PolicySourceRawDeclaration

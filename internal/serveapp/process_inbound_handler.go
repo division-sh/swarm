@@ -3,6 +3,7 @@ package serveapp
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -23,6 +24,33 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 		return
 	}
 	use, lookup, acquireErr := h.contexts.AcquireIngress(r.Context(), alias, providertriggers.NormalizeProviderName(provider))
+	if use != nil {
+		defer func() { _ = use.Done() }()
+	}
+	forward := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.serveAcquiredIngress(w, r, use, lookup, acquireErr, alias, provider)
+	})
+	if h.publicRegistration != nil {
+		query, queryErr := url.ParseQuery(r.URL.RawQuery)
+		// A callback URL never becomes author traffic after withdrawal/reset.
+		// Missing native author evidence is not an authorization shortcut.
+		if queryErr != nil || query.Has("swarm_callback_generation") || h.publicRegistration.OwnsRoute(alias, provider) || !lookup.DeclaresAuthorIngress() {
+			h.publicRegistration.Handler(forward).ServeHTTP(w, r)
+			return
+		}
+		ctx := r.Context()
+		if use != nil {
+			ctx = use.WorkContext()
+		}
+		if !h.publicRegistration.ExposureCurrent(ctx) {
+			http.NotFound(w, r)
+			return
+		}
+	}
+	forward.ServeHTTP(w, r)
+}
+
+func (h runtimeProcessInboundHandler) serveAcquiredIngress(w http.ResponseWriter, r *http.Request, use *runtime.RuntimeContextUse, lookup runtime.RuntimeIngressContextLookup, acquireErr error, alias, provider string) {
 	if !lookup.Found {
 		if lookup.AliasFound {
 			http.Error(w, fmt.Sprintf("ingress target %q does not declare provider %q; add that provider binding to the standing singleton flow", alias, provider), http.StatusNotFound)
@@ -43,7 +71,6 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 		http.Error(w, "ingress target is unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	defer func() { _ = use.Done() }()
 	target := lookup.Target
 	inbound := runtime.InboundTarget{
 		BundleHash: target.BundleHash, ServiceID: target.ServiceID, FlowPath: target.FlowPath,
@@ -63,11 +90,7 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 		serveAcquiredProcessWebhook(w, r, use, target, inbound, alias, provider)
 	})
 	if h.publicRegistration != nil {
-		if !h.publicRegistration.ExposureCurrent(use.WorkContext()) {
-			http.NotFound(w, r)
-			return
-		}
-		if required || h.publicRegistration.OwnsRoute(target.Alias, target.Provider) {
+		if _, authenticated := runtimepublicingress.CurrentRegistrationTarget(r.Context()); !authenticated && (required || h.publicRegistration.OwnsRoute(target.Alias, target.Provider)) {
 			h.publicRegistration.Handler(forward).ServeHTTP(w, r)
 			return
 		}
