@@ -52,6 +52,89 @@ func TestSystemNodeMutationRejectsPredecessorAfterProcessCutoverBothStores(t *te
 		t.Run(backend+"/nested_and_ended_native_context", func(t *testing.T) {
 			proveSystemNodeNativeContextConfinement(t, backend)
 		})
+		t.Run(backend+"/original_session_proof_confinement", func(t *testing.T) {
+			proveOriginalSessionProofConfinement(t, backend)
+		})
+	}
+}
+
+func proveOriginalSessionProofConfinement(t *testing.T, backend string) {
+	t.Helper()
+	f, _ := constructWorkflowMutationFixture(t, backend, "original-session-proof", time.Now().UTC().Add(-time.Minute))
+	if err := f.manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+	original, err := startupownership.CaptureMutationAuthority(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var missing *startupownership.OriginalSessionInterruptionForTest
+	if err := missing.Interrupt(t.Context(), original); err == nil {
+		t.Fatal("nil native interruption admitted")
+	}
+	if _, err := startupownership.PrepareOriginalSessionInterruptionForTest(t.Context(), startupownership.MutationAuthority{}); err == nil {
+		t.Fatal("missing original authority issued a native interruption")
+	}
+	if _, err := startupownership.HoldOriginalPossessionObservationForTest(startupownership.MutationAuthority{}); err == nil {
+		t.Fatal("missing original authority held a possession observer")
+	}
+	interruption, err := startupownership.PrepareOriginalSessionInterruptionForTest(t.Context(), original)
+	if backend == "sqlite" {
+		if err == nil || interruption != nil {
+			t.Fatal("SQLite issued a PostgreSQL session interruption")
+		}
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := startupownership.PrepareOriginalSessionInterruptionForTest(t.Context(), original); err == nil {
+		t.Fatal("one original session issued a second interruption handle")
+	}
+	foreign, _ := constructWorkflowMutationFixture(t, backend, "foreign-original-session-proof", time.Now().UTC().Add(-time.Minute))
+	foreignOriginal, err := startupownership.CaptureMutationAuthority(foreign.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := interruption.Interrupt(t.Context(), foreignOriginal); err == nil {
+		t.Fatal("foreign original owner consumed a native interruption")
+	}
+	if err := foreignOriginal.Validate(); err != nil {
+		t.Fatalf("foreign refusal changed the foreign owner: %v", err)
+	}
+	hold, err := startupownership.HoldOriginalPossessionObservationForTest(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold.Close()
+	if _, err := startupownership.HoldOriginalPossessionObservationForTest(original); err == nil {
+		t.Fatal("duplicate original possession hold admitted")
+	}
+	select {
+	case <-hold.Entered():
+	case <-time.After(4 * time.Second):
+		t.Fatal("original observer did not enter its cancellable hold")
+	}
+	process, err := agentfixture.ProcessCapability(t, f.ctx, f.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Ordinary cleanup must cancel and join an armed hold without its release
+	// being necessary for opMu or the session's proof deadline to proceed.
+	if err := process.Release(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	hold.Close()
+	successor, err := f.store.(startupownership.Store).AcquireProcessCapability(t.Context(), testStartupAcquireRequest("ended-handle-successor"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = successor.Release(context.Background()) })
+	if err := interruption.Interrupt(t.Context(), original); err == nil {
+		t.Fatal("ended original handle interrupted a replacement session")
+	}
+	if err := successor.ProveCurrent(t.Context()); err != nil {
+		t.Fatalf("ended-handle refusal changed its replacement owner: %v", err)
 	}
 }
 
