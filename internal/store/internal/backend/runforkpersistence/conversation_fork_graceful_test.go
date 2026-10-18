@@ -22,6 +22,10 @@ type forkMutationConnector struct {
 	begins, commits, rollbacks int
 	orderWrong, contextWrong   bool
 	afterLock                  func()
+	failFence                  bool
+	fenceFailures              int
+	rollbackFailure            error
+	commitFailure              error
 }
 
 func (p *forkMutationConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -50,6 +54,11 @@ func (c *forkMutationConn) ExecContext(ctx context.Context, query string, args [
 }
 
 func (c *forkMutationConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	if c.probe.failFence && c.probe.fenceFailures == 0 && query == `SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1 FOR UPDATE` {
+		c.probe.fenceFailures++
+		_, err := c.ExecContext(ctx, `DO $$ BEGIN RAISE EXCEPTION 'fence conflict' USING ERRCODE='40001'; END $$`, nil)
+		return nil, err
+	}
 	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
 }
 
@@ -77,23 +86,23 @@ type forkMutationTx struct {
 
 func (tx *forkMutationTx) Commit() error {
 	tx.probe.commits++
-	return tx.Tx.Commit()
+	return errors.Join(tx.Tx.Commit(), tx.probe.commitFailure)
 }
 
 func (tx *forkMutationTx) Rollback() error {
 	tx.probe.rollbacks++
-	return tx.Tx.Rollback()
+	return errors.Join(tx.Tx.Rollback(), tx.probe.rollbackFailure)
 }
 
-func TestConversationForkGracefulMutation(t *testing.T) {
-	for _, keyed := range []bool{false, true} {
-		name := "unkeyed"
-		if keyed {
-			name = "keyed"
-		}
+func VerifyConversationForkGracefulMutationForTest(t *testing.T, prepare func(*testing.T, string) context.Context) {
+	for _, name := range []string{"unkeyed", "keyed", "serializable_unkeyed"} {
+		keyed, serializable := name == "keyed", name != "unkeyed"
 		t.Run(name, func(t *testing.T) {
-			for _, scenario := range []string{"success", "before_admission", "during_sql", "before_commit", "panic", "sql_failure", "commit_failure", "after_lock", "lost_lock"} {
+			for _, scenario := range []string{"success", "before_admission", "during_sql", "before_commit", "panic", "sql_failure", "commit_failure", "after_lock", "lost_lock", "fence_conflict", "fence_rollback_failure", "domain_conflict", "commit_ack_lost"} {
 				if !keyed && (scenario == "after_lock" || scenario == "lost_lock") {
+					continue
+				}
+				if !serializable && (scenario == "fence_conflict" || scenario == "fence_rollback_failure") {
 					continue
 				}
 				t.Run(scenario, func(t *testing.T) {
@@ -105,13 +114,25 @@ func TestConversationForkGracefulMutation(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					ctx, cancel := context.WithCancel(context.Background())
+					original := context.Background()
+					if serializable {
+						original = prepare(t, dsn)
+					}
+					ctx, cancel := context.WithCancel(original)
 					defer cancel()
 					noticed := false
 					probe := &forkMutationConnector{Connector: pq.ConnectorWithNoticeHandler(connector, func(*pq.Error) {
 						noticed = true
 						cancel()
 					}), keyed: keyed}
+					cleanupFailure := errors.New("independent fork rollback cleanup")
+					probe.failFence = scenario == "fence_conflict" || scenario == "fence_rollback_failure"
+					if scenario == "fence_rollback_failure" {
+						probe.rollbackFailure = cleanupFailure
+					}
+					if scenario == "commit_ack_lost" {
+						probe.commitFailure = &pq.Error{Code: "40001", Message: "response lost after commit"}
+					}
 					db := sql.OpenDB(probe)
 					db.SetMaxOpenConns(1)
 					defer db.Close()
@@ -135,7 +156,7 @@ func TestConversationForkGracefulMutation(t *testing.T) {
 						if keyed {
 							return store.runForkMutation(ctx, key, true, fn)
 						}
-						return store.runMutation(ctx, false, fn)
+						return store.runMutation(ctx, serializable, fn)
 					}
 					calls := 0
 					primary := errors.New("fork callback panic")
@@ -149,7 +170,7 @@ func TestConversationForkGracefulMutation(t *testing.T) {
 								return err
 							}
 							want := "read committed"
-							if keyed {
+							if serializable {
 								want = "serializable"
 							}
 							if isolation != want || sqlCtx.Done() != nil {
@@ -179,8 +200,12 @@ func TestConversationForkGracefulMutation(t *testing.T) {
 								cancel()
 							case "panic":
 								panic(primary)
-							case "sql_failure":
-								_, err := tx.ExecContext(sqlCtx, "SELECT 1/0")
+							case "sql_failure", "domain_conflict":
+								query := "SELECT 1/0"
+								if scenario == "domain_conflict" {
+									query = `DO $$ BEGIN RAISE EXCEPTION 'domain conflict' USING ERRCODE='40001'; END $$`
+								}
+								_, err := tx.ExecContext(sqlCtx, query)
 								return err
 							case "commit_failure":
 								_, err := tx.ExecContext(sqlCtx, "INSERT INTO fork_graceful VALUES (1)")
@@ -202,18 +227,24 @@ func TestConversationForkGracefulMutation(t *testing.T) {
 					if canceled && !errors.Is(err, context.Canceled) {
 						t.Errorf("logical stop lost: %v", err)
 					}
-					if scenario == "success" && err != nil {
+					if (scenario == "success" || scenario == "fence_conflict") && err != nil {
 						t.Errorf("healthy work: %v", err)
 					}
-					if scenario == "sql_failure" || scenario == "commit_failure" {
+					if scenario == "sql_failure" || scenario == "commit_failure" || scenario == "domain_conflict" || scenario == "commit_ack_lost" || scenario == "fence_rollback_failure" {
 						var pgErr *pq.Error
 						want := pq.ErrorCode("22012")
 						if scenario == "commit_failure" {
 							want = "23505"
 						}
+						if scenario == "domain_conflict" || scenario == "commit_ack_lost" || scenario == "fence_rollback_failure" {
+							want = "40001"
+						}
 						if !errors.As(err, &pgErr) || pgErr.Code != want {
 							t.Errorf("SQL failure lost: %v", err)
 						}
+					}
+					if scenario == "fence_rollback_failure" && !errors.Is(err, cleanupFailure) {
+						t.Errorf("independent rollback cleanup lost: %v", err)
 					}
 					if scenario == "lost_lock" && (err == nil || !strings.Contains(err.Error(), "advisory lock was not held")) {
 						t.Errorf("cleanup failure lost: %v", err)
@@ -222,10 +253,20 @@ func TestConversationForkGracefulMutation(t *testing.T) {
 					if scenario == "before_admission" || scenario == "after_lock" {
 						wantCalls, wantRollbacks = 0, 0
 					}
-					if scenario == "success" || scenario == "commit_failure" || scenario == "lost_lock" {
+					if scenario == "success" || scenario == "commit_failure" || scenario == "lost_lock" || scenario == "fence_conflict" || scenario == "commit_ack_lost" {
 						wantCommits, wantRollbacks = 1, 0
 					}
-					if calls != wantCalls || probe.begins != wantCalls || probe.commits != wantCommits || probe.rollbacks != wantRollbacks || probe.orderWrong || probe.contextWrong {
+					wantBegins := wantCalls
+					if scenario == "fence_conflict" {
+						wantBegins, wantRollbacks = 2, 1
+					}
+					if scenario == "fence_rollback_failure" {
+						wantCalls, wantBegins = 0, 1
+					}
+					if probe.failFence && probe.fenceFailures != 1 {
+						t.Errorf("pre-domain fence failure was not reached exactly once: %d", probe.fenceFailures)
+					}
+					if calls != wantCalls || probe.begins != wantBegins || probe.commits != wantCommits || probe.rollbacks != wantRollbacks || probe.orderWrong || probe.contextWrong {
 						t.Errorf("calls=%d BEGIN=%d COMMIT=%d ROLLBACK=%d orderWrong=%t contextWrong=%t", calls, probe.begins, probe.commits, probe.rollbacks, probe.orderWrong, probe.contextWrong)
 					}
 					var durable int
@@ -233,7 +274,7 @@ func TestConversationForkGracefulMutation(t *testing.T) {
 						t.Fatal(err)
 					}
 					wantDurable := 0
-					if scenario == "success" || scenario == "lost_lock" {
+					if scenario == "success" || scenario == "lost_lock" || scenario == "fence_conflict" || scenario == "commit_ack_lost" {
 						wantDurable = 1
 					}
 					if durable != wantDurable {
@@ -252,12 +293,13 @@ func TestConversationForkGracefulMutation(t *testing.T) {
 					probe.afterLock = nil
 					probe.lockHeld = false
 					var afterPID int
-					if err := run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
+					probe.commitFailure, probe.rollbackFailure = nil, nil
+					if err := run(original, func(ctx context.Context, tx *sql.Tx) error {
 						return tx.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&afterPID)
 					}); err != nil {
 						t.Fatalf("successor failed: %v", err)
 					}
-					unsafe := scenario == "commit_failure" || scenario == "lost_lock"
+					unsafe := scenario == "commit_failure" || scenario == "lost_lock" || scenario == "commit_ack_lost" || scenario == "fence_rollback_failure"
 					if (beforePID != afterPID) != unsafe {
 						t.Errorf("socket disposition pid %d -> %d unsafe=%t", beforePID, afterPID, unsafe)
 					}
