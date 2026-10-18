@@ -126,19 +126,18 @@ func ValidateDeclaredAgentModelAdmission(posture executionposture.Posture, cfg *
 	return nil
 }
 
-func validateSelectedBackendCredentialForActiveAgents(ctx context.Context, cfg *config.Config, opts RuntimeOptions, source semanticview.Source, manager *runtimemanager.AgentManager) error {
+func validateSelectedBackendCredentialForActiveAgents(ctx context.Context, cfg *config.Config, opts RuntimeOptions, source semanticview.Source, manager *runtimemanager.AgentManager) (runtimecredentials.SourceFact, error) {
 	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
 	if err != nil {
-		return err
+		return runtimecredentials.SourceFact{}, err
 	}
 	if !hasAgents {
-		return nil
+		return runtimecredentials.SourceFact{}, nil
 	}
 	if opts.ExecutionPosture == executionposture.MockOnly {
-		return validateActiveMockDescriptors(cfg, manager)
+		return runtimecredentials.SourceFact{}, validateActiveMockDescriptors(cfg, manager)
 	}
-	_, err = validateSelectedBackendCredential(ctx, cfg, providerCredentialResolverForRuntimeOptions(opts))
-	return err
+	return validateSelectedBackendCredential(ctx, cfg, providerCredentialResolverForRuntimeOptions(opts))
 }
 
 func validateSelectedBackendCredential(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver) (runtimecredentials.SourceFact, error) {

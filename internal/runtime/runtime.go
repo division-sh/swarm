@@ -1751,9 +1751,15 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 	}
 	source := rt.Options.WorkflowModule.SemanticSource()
 	if rt.Options.LLMRuntime == nil {
-		if err := validateSelectedBackendCredentialForActiveAgents(ctx, rt.Config, rt.Options, source, rt.Manager); err != nil {
+		fact, err := validateSelectedBackendCredentialForActiveAgents(ctx, rt.Config, rt.Options, source, rt.Manager)
+		if err != nil {
 			rt.emitBootProgress(14, "workspace_validation_and_system_containers", "FAILED", err.Error())
 			return nil, fmt.Errorf("llm backend credential validation failed: %w", err)
+		}
+		if fact.Reference != "" {
+			rt.standingCredentialMu.Lock()
+			rt.bootCredentialSources = append(rt.bootCredentialSources, fact)
+			rt.standingCredentialMu.Unlock()
 		}
 	}
 	if err := validateClaudeStartupConfigForActiveAgents(ctx, rt.Config, rt.Options, source, rt.Manager); err != nil {
