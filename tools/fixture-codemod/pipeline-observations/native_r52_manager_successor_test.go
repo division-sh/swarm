@@ -23,7 +23,7 @@ type r52ManagerSuccessorPin struct {
 //go:embed testdata/manager-settlement-readback-2614.json
 var managerSettlementReadback2614 []byte
 
-func reverseManagerSettlementReadback2614(row recipe, current string) (string, error) {
+func reverseManagerSettlementReadback2614(row recipe, actual string) (string, error) {
 	if row.Family != "native-manager-delivery-caller" || row.File != "internal/runtime/manager/failure_test.go" || row.Function != "TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim" {
 		return "", fmt.Errorf("unlisted Manager readback continuation")
 	}
@@ -40,6 +40,10 @@ func reverseManagerSettlementReadback2614(row recipe, current string) (string, e
 	if proof.Family != row.Family || proof.File != row.File || proof.Function != row.Function {
 		return "", fmt.Errorf("Manager readback continuation identity changed")
 	}
+	current, err := canonicalFunction(actual)
+	if err != nil {
+		return "", err
+	}
 	previous, err := canonicalFunction(proof.PreviousSuccessor)
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256([]byte(previous))) != proof.PreviousSHA256 {
 		return "", fmt.Errorf("Manager readback predecessor changed")
@@ -53,7 +57,7 @@ func reverseManagerSettlementReadback2614(row recipe, current string) (string, e
 		return "", fmt.Errorf("Manager readback source differs from its exact endpoint")
 	}
 	cut := proof.Diagnostic + proof.FollowingStatement
-	if proof.Diagnostic == "" || proof.FollowingStatement == "" || strings.Count(current, cut) != 1 || strings.Replace(current, cut, proof.FollowingStatement, 1) != previous {
+	if proof.Diagnostic == "" || proof.FollowingStatement == "" || strings.Count(actual, cut) != 1 || strings.Replace(actual, cut, proof.FollowingStatement, 1) != proof.PreviousSuccessor {
 		return "", fmt.Errorf("Manager readback inverse changed work beyond its exact failure-only defer")
 	}
 	return previous, nil
@@ -92,7 +96,7 @@ func reverseR52ManagerSuccessor(row recipe, actual string) (string, error) {
 		return "", err
 	}
 	if row.Function == "TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim" {
-		current, err = reverseManagerSettlementReadback2614(row, current)
+		current, err = reverseManagerSettlementReadback2614(row, actual)
 		if err != nil {
 			return "", err
 		}
