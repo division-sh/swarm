@@ -675,6 +675,7 @@ func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.
 	}
 	evidence := completionRecoveryAuthorityEvidence{
 		ActorTokenID: identityA.AgentID(), ExecutionMode: string(runtimeeffects.ExecutionModeLive),
+		RuntimeEpoch: bound.Normal.RuntimeEpoch, Generation: bound.Normal.Generation,
 		ProviderRequest: bound.CompletionRequest,
 	}
 	evidence.UsageTarget.Kind = string(targetA.Kind)
