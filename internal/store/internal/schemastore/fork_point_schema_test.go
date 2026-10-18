@@ -41,6 +41,9 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 				'{"flow_path":"."}','{}','[]','{}',`+runOwnerKey+`)`, eventID, sourceRunID, []byte("{}"), bundleHash, "sha256:"+strings.Repeat("b", 64)); err != nil {
 				t.Fatalf("create source event: %v", err)
 			}
+			t.Run("activity_reply_live_parents", func(t *testing.T) {
+				verifyActivityReplyLiveParents(t, db, sourceRunID, eventID)
+			})
 			insertForkRun := func(kind string, revision int64, eventID any) (string, error) {
 				t.Helper()
 				runID := uuid.NewString()
