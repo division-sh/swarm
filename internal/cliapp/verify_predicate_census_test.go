@@ -53,6 +53,8 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/runtime/workflow_validation_admission.go", "A05,A06,A07,A08,A09,A10,A13,A14,A29", "P00,P04,P05,P06,P07,P08,P11,P12"},
 	{"internal/runtime/bootverify/admission_report.go", "A28,A29,A30", "P23,P24"},
 	{"internal/runtime/bootverify/admission_store_absence.go", "A19,A28", "2567-P02,P08,P09"},
+	// #2738's closed prepared save keeps the three original receipt phases;
+	// owner/caller and execution mapping: testdata/issue_2738_admission_predicate_accounting.md.
 	{"internal/runtime/runtime_claude_startup.go", "A11,A12,A18,A25", "P09,P10,P15,P21"},
 	{"internal/runtime/runtime_activation_gateway.go", "A11,A18,A25", "P09,P15,P21"},
 	// #2497's native-row/cache migration preserves these observations; exact
