@@ -60,17 +60,36 @@ func validateNativeQualificationRequest(tx *sql.Tx, req channelnative.Qualificat
 }
 
 func loadNativeQualification(ctx context.Context, tx *sql.Tx, activationID string, postgres, lock bool) (nativeQualificationFacts, bool, error) {
+	var parentID string
+	if lock {
+		query := `SELECT operation_id FROM channel_onboarding_operations
+			WHERE operation_id=(SELECT operation_id FROM connected_channel_activations WHERE activation_id=?)`
+		if postgres {
+			query = `SELECT operation_id::text FROM channel_onboarding_operations
+				WHERE operation_id=(SELECT operation_id FROM connected_channel_activations WHERE activation_id=$1::uuid) FOR UPDATE`
+		}
+		if err := tx.QueryRowContext(ctx, query, activationID).Scan(&parentID); errors.Is(err, sql.ErrNoRows) {
+			return nativeQualificationFacts{}, false, nil
+		} else if err != nil {
+			return nativeQualificationFacts{}, false, err
+		}
+	}
 	query := nativeQualificationSelect + "?"
+	args := []any{activationID}
+	if lock {
+		query += " AND o.operation_id=?"
+		args = append(args, parentID)
+	}
 	if postgres {
 		query = nativeQualificationSelect + "$1::uuid"
 		if lock {
-			query += " FOR UPDATE OF a, o, b, c, s"
+			query += " AND o.operation_id=$2::uuid FOR UPDATE OF a, o, b, c, s"
 		}
 	}
 	var facts nativeQualificationFacts
 	var observed any
 	p := &facts.projection
-	err := tx.QueryRowContext(ctx, query, activationID).Scan(&p.ClientLanguage, &p.LocaleRevision,
+	err := tx.QueryRowContext(ctx, query, args...).Scan(&p.ClientLanguage, &p.LocaleRevision,
 		&p.SettingID, &p.SettingGeneration, &facts.settingState, &facts.contractHash,
 		&facts.activationRevision, &facts.contextGeneration, &facts.bindingRevision,
 		&p.State, &facts.localeRevision, &facts.settingGeneration, &facts.qualifiedActivation,
