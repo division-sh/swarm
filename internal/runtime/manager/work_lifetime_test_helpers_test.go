@@ -22,6 +22,8 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type managerTestWorkFixture struct {
@@ -240,7 +242,16 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 		opts.WorkOwner = newTestManagerWorkOwner(t)
 	}
 	if opts.SemanticSource == nil {
-		opts.SemanticSource = managerTestSemanticSource()
+		if opts.SourceArtifactFact.BundleHash() != "" {
+			t.Fatal("manager fixture with an explicit artifact requires its matching compiled source")
+		}
+		repo := canonicalrouting.RepoRoot(t)
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.WriteManagerExecutionProjection(t), runtimecontracts.DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		opts.SemanticSource = semanticview.Wrap(bundle)
+		opts.SourceArtifactFact = sourceartifactfixture.FactFor(bundle.SourceArtifact)
 	}
 	if opts.DeliveryStore == nil && len(stores) > 0 {
 		if deliveryStore, ok := any(stores[0]).(runtimedelivery.Store); ok {
