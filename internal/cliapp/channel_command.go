@@ -424,14 +424,14 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 		advancePending = false
 		switch result.Operation.Phase {
 		case "succeeded":
-			if result.Readiness == nil || !result.Readiness.Ready {
-				reason := "connected readiness evidence is unavailable"
-				if result.Readiness != nil && strings.TrimSpace(string(result.Readiness.Reason)) != "" {
-					reason = string(result.Readiness.Reason)
-				}
-				return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding succeeded historically but the channel is not READY: %s", reason))
+			if result.Readiness != nil && result.Readiness.Ready {
+				return result, nil
 			}
-			return result, nil
+			reason := "connected readiness evidence is unavailable"
+			if result.Readiness != nil && strings.TrimSpace(string(result.Readiness.Reason)) != "" {
+				reason = string(result.Readiness.Reason)
+			}
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding succeeded historically but the channel is not READY: %s", reason))
 		case "failed", "retired":
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding ended in %s: %s", result.Operation.Phase, result.Operation.FailureMessage))
 		}
@@ -440,9 +440,8 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 			if opts.apiOptions.now != nil {
 				now = opts.apiOptions.now()
 			}
-			overdue := !identity.ExpiresAt.IsZero() && !identity.ExpiresAt.After(now) &&
-				(identity.State == "awaiting_claim" || identity.State == "awaiting_confirmation")
-			if !overdue && identity.State == "awaiting_claim" {
+			claimCurrent := identity.ExpiresAt.IsZero() || identity.ExpiresAt.After(now)
+			if identity.State == "awaiting_claim" && claimCurrent {
 				if !identityAnnounced {
 					fmt.Fprintf(progressOut, "Send this exact code through the live %s channel before %s:\n\n  %s\n\nWaiting for an authenticated claimant...\n", result.Operation.Provider, identity.ExpiresAt.Local().Format(time.RFC3339), identity.Challenge)
 					identityAnnounced = true
