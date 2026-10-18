@@ -297,16 +297,22 @@ func TestTransferredJoinOccurrenceEvidenceBindsPublicationAndOrdinaryFrame(t *te
 		t.Fatal(err)
 	}
 	facts := occurrenceEventFacts(source.Command, source.Publication.EventID, source.Command.Due.Absolute, payload)
-	ordinary := eventtest.RuntimeControlWithRoutingSource(facts.ID, facts.Type, facts.Producer.ID, facts.TaskID,
-		facts.Payload, facts.ChainDepth, source.Command.RunID, "", facts.Envelope, facts.RoutingSource, facts.CreatedAt)
-	ordinary = eventtest.InExecutionMode(ordinary, facts.ExecutionMode)
-	if !reflect.DeepEqual(publishedOccurrenceTestFacts(ordinary), facts) || ordinary.RunID() != source.Command.RunID ||
-		ordinary.ParentEventID() != "" || ordinary.AdmissionClass() != original.AdmissionClass() {
-		t.Fatal("ordinary occurrence fixture changed retained facts or admission class")
-	}
+	ordinary := ordinaryTransferredOccurrenceFixture(t, facts, source.Command.RunID)
 	if !reflect.DeepEqual(ordinary.Envelope(), original.Envelope()) || !reflect.DeepEqual(ordinary.Payload(), original.Payload()) {
 		t.Fatal("transferred event changed ordinary occurrence envelope or numeric payload projection")
 	}
+}
+
+func ordinaryTransferredOccurrenceFixture(t *testing.T, facts events.EventFacts, runID string) events.Event {
+	t.Helper()
+	ordinary := eventtest.RuntimeControlWithRoutingSource(facts.ID, facts.Type, facts.Producer.ID, facts.TaskID,
+		facts.Payload, facts.ChainDepth, runID, "", facts.Envelope, facts.RoutingSource, facts.CreatedAt)
+	ordinary = eventtest.InExecutionMode(ordinary, facts.ExecutionMode)
+	if !reflect.DeepEqual(publishedOccurrenceTestFacts(ordinary), facts) || ordinary.RunID() != runID ||
+		ordinary.ParentEventID() != "" || ordinary.AdmissionClass() != events.EventAdmissionRuntimeControl {
+		t.Fatalf("ordinary occurrence fixture changed retained facts or runtime-control class: got=%+v want=%+v", publishedOccurrenceTestFacts(ordinary), facts)
+	}
+	return ordinary
 }
 
 func TestTransferredJoinPublicationRejectsHostileCoordinates(t *testing.T) {
@@ -408,7 +414,7 @@ func TestTransferredJoinOccurrenceValidateEventRejectsSubstitutions(t *testing.T
 			}
 			candidate, err := events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{Facts: facts, Lineage: lineage})
 			if fault == "class" {
-				candidate, err = events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: occurrence.Command.RunID})
+				candidate = ordinaryTransferredOccurrenceFixture(t, facts, occurrence.Command.RunID)
 			}
 			if err != nil {
 				t.Fatal(err)
