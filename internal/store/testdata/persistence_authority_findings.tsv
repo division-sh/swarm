@@ -716,7 +716,9 @@ typed-process-local	interface-method	typed	internal/runtime/managedcredentials/s
 typed-process-local	interface-method	typed	internal/runtime/managedcredentials/store.go	Store	method:Get	func(ctx context.Context, key string) (github.com/division-sh/swarm/internal/runtime/managedcredentials.Record, bool, error)
 typed-process-local	interface-method	typed	internal/runtime/managedcredentials/store.go	Store	method:List	func(ctx context.Context) ([]github.com/division-sh/swarm/internal/runtime/managedcredentials.Descriptor, error)
 typed-process-local	interface-method	typed	internal/runtime/managedcredentials/store.go	Store	method:Put	func(ctx context.Context, record github.com/division-sh/swarm/internal/runtime/managedcredentials.Record) error
+typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.go	AgentManager	field:carryMutationContext	func(context.Context, context.Context) context.Context
 typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.go	AgentManager	field:factory	github.com/division-sh/swarm/internal/runtime/manager.AgentFactory
+typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.go	AgentManager	field:mutationContext	func(context.Context) (context.Context, error)
 typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.go	AgentManager	field:nativeToolAdmissionValidator	func(context.Context, github.com/division-sh/swarm/internal/runtime/core/actors.AgentConfig) error
 typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.go	AgentManager	field:resetRuntimeOwnedState	func()
 typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.go	AgentManager	field:runtimeIngressSafetyPause	func(context.Context, string, *github.com/division-sh/swarm/internal/runtime/failures.Envelope) error
@@ -776,6 +778,8 @@ typed-process-local	interface-method	typed	internal/runtime/manager/retained_act
 typed-process-local	interface-method	typed	internal/runtime/manager/retained_actor_inspection.go	RetainedActorInspectionReader	method:ObserveOrdinaryRunSource	func(context.Context, github.com/division-sh/swarm/internal/runtime/correlation.SourceArtifactFact, string) (bool, error)
 typed-process-local	interface-method	typed	internal/runtime/manager/run_execution_ownership.go	RunExecutionOwner	method:InspectRunExecutionOwnership	func(context.Context, string) (github.com/division-sh/swarm/internal/runtime/manager.RunExecutionOwnership, error)
 typed-process-local	callback-type	typed	internal/runtime/manager/runtime.go	agentDeliveryExecutionContext	param:admitSourceArtifactFact	func(context.Context) (context.Context, error)
+typed-process-local	callback-type	typed	internal/runtime/manager/runtime.go	agentDeliveryExecutionContext	param:bindMutationContext	func(context.Context) (context.Context, error)
+typed-process-local	callback-type	typed	internal/runtime/manager/runtime.go	agentDeliveryExecutionContext	param:carryMutationContext	func(context.Context, context.Context) context.Context
 typed-process-local	callback-type	typed	internal/runtime/manager/runtime.go	agentDeliveryExecutionContext	result:#2	func()
 typed-process-local	interface-method	typed	internal/runtime/manager/runtime.go	AgentDirectiveRunTargetResolver	method:ResolveAgentDirectiveRunTarget	func(ctx context.Context, identity github.com/division-sh/swarm/internal/runtime/core/agentidentity.Identity) (github.com/division-sh/swarm/internal/runtime/agentcontrol.RunTargetResolution, error)
 typed-process-local	interface-method	typed	internal/runtime/manager/runtime.go	EventExistenceReader	method:EventExists	func(ctx context.Context, eventID string) (bool, error)
@@ -783,6 +787,8 @@ typed-process-local	interface-method	typed	internal/runtime/manager/selected_con
 typed-process-local	interface-method	typed	internal/runtime/manager/startup_process_takeover.go	processExecutionBindingProvider	method:ProcessExecutionBinding	func() (github.com/division-sh/swarm/internal/runtime/manager.ProcessExecutionBinding, error)
 typed-process-local	context-value	typed	internal/runtime/manager/turn_termination.go	(*github.com/division-sh/swarm/internal/runtime/manager.AgentManager).attachLogicalTurn	context:Value#1	func(key any) any|arg=github.com/division-sh/swarm/internal/runtime/manager.agentExecutionLeaseContextKey
 typed-process-local	callback-type	typed	internal/runtime/manager/types.go	AgentFactory	named-function-type	func(cfg github.com/division-sh/swarm/internal/runtime/core/actors.AgentConfig) (github.com/division-sh/swarm/internal/runtime/manager.Agent, error)
+typed-process-local	callback-type	typed	internal/runtime/manager/types.go	AgentManagerOptions	field:CarryMutationContext	func(context.Context, context.Context) context.Context
+typed-process-local	callback-type	typed	internal/runtime/manager/types.go	AgentManagerOptions	field:MutationContext	func(context.Context) (context.Context, error)
 typed-process-local	callback-type	typed	internal/runtime/manager/types.go	AgentManagerOptions	field:NativeToolAdmissionValidator	func(context.Context, github.com/division-sh/swarm/internal/runtime/core/actors.AgentConfig) error
 typed-process-local	callback-type	typed	internal/runtime/manager/types.go	AgentManagerOptions	field:ResetRuntimeOwnedState	func()
 typed-process-local	callback-type	typed	internal/runtime/manager/types.go	AgentManagerOptions	field:RuntimeIngressSafetyPause	func(context.Context, string, *github.com/division-sh/swarm/internal/runtime/failures.Envelope) error
