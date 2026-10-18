@@ -133,18 +133,12 @@ func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthori
 		}
 
 		original := command.Commit.Event.Event()
-		replay, err := events.NewReplayEvent(events.ReplayEventInput{
-			Facts: events.EventFacts{
-				ID: eventtest.UUID("provider-replay-" + original.ID()), Type: original.Type(),
-				Producer: events.ProducerClaim{Type: original.ProducerType(), ID: original.SourceAgent()},
-				Payload:  original.Payload(), Envelope: original.Envelope(), RoutingSource: original.RoutingSource(),
-				CreatedAt: original.CreatedAt().Add(time.Second), ExecutionMode: original.ExecutionMode(),
-			},
-			Lineage: events.EventLineage{RunID: original.RunID(), ParentEventID: original.ID(), ExecutionMode: original.ExecutionMode()},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
+		replay := eventtest.ReplayForProducerWithRoutingSource(
+			eventtest.UUID("provider-replay-"+original.ID()), original.Type(), original.Producer(),
+			original.TaskID(), original.Payload(), original.ChainDepth(),
+			events.EventLineage{RunID: original.RunID(), ParentEventID: original.ID(), ExecutionMode: original.ExecutionMode()},
+			original.Envelope(), original.RoutingSource(), original.CreatedAt().Add(time.Second),
+		)
 		admitted, err := events.AdmitForPersistence(replay, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 		if err != nil {
 			t.Fatal(err)

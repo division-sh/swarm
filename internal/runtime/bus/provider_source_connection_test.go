@@ -106,7 +106,10 @@ func TestExternalIngressConnectionOnlyChangesAuthorizedBranch(t *testing.T) {
 				assertRoutes(prepared[1].plan.DeliveryRoutes())
 				var committed []CommittedPublication
 				for _, command := range plan.CommitCommands() {
-					result, err := store.CommitPublication(ctx, command)
+					if err := command.ValidateInbound(plan.Admission()); err != nil {
+						t.Fatal(err)
+					}
+					result, err := store.commitValidatedPublication(command)
 					if err != nil {
 						t.Fatal(err)
 					}
