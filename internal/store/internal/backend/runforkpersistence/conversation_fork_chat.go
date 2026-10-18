@@ -677,7 +677,8 @@ func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkS
 			t.created_at, CAST(t.completion_evidence AS TEXT), COALESCE(t.resolved_model,''),
 			EXISTS (SELECT 1 FROM agent_turn_live_parents p
 			 WHERE p.turn_id=t.turn_id AND p.run_id=t.run_id
-			 AND p.completion_attempt_id=t.completion_attempt_id AND p.capability_surface_id=t.capability_surface_id)
+			 AND p.completion_attempt_id=t.completion_attempt_id AND p.capability_surface_id=t.capability_surface_id),
+			c.execution_kind,c.execution_authority_id,c.run_id,c.selected_execution_id,c.selected_fork_run_id
 		FROM agent_turns t
 		JOIN managed_agent_capability_surfaces c ON c.surface_id = t.capability_surface_id
 		WHERE t.session_id = ?
@@ -695,7 +696,9 @@ func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkS
 	var requestRaw, responseRaw, toolCallsRaw, capabilitySurfaceRaw, completionRaw []byte
 	var createdAt conversationForkTimeValue
 	var liveParents bool
-	if err := row.Scan(&out.TurnID, &requestRaw, &responseRaw, &toolCallsRaw, &capabilitySurfaceRaw, &createdAt, &completionRaw, &out.ResolvedModel, &liveParents); err != nil {
+	var stored storemanagedcapability.StoredProjection
+	if err := row.Scan(&out.TurnID, &requestRaw, &responseRaw, &toolCallsRaw, &capabilitySurfaceRaw, &createdAt, &completionRaw, &out.ResolvedModel, &liveParents,
+		&stored.ExecutionKind, &stored.ExecutionAuthorityID, &stored.RunID, &stored.SelectedExecutionID, &stored.SelectedForkRunID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return runtimerunfork.ConversationForkSourceTurn{}, &operatorread.EntityReadParamError{Field: "fork_id", Reason: "source turn is unavailable"}
 		}
@@ -716,7 +719,7 @@ func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkS
 	if out.ResolvedModel != out.CompletionEvidence.ResolvedModel() {
 		return runtimerunfork.ConversationForkSourceTurn{}, fmt.Errorf("fork source model contradicts historical completion evidence")
 	}
-	surface, err := storemanagedcapability.Decode(capabilitySurfaceRaw)
+	surface, err := storemanagedcapability.DecodeStored(capabilitySurfaceRaw, stored)
 	if err != nil {
 		return runtimerunfork.ConversationForkSourceTurn{}, fmt.Errorf("decode conversation fork source capability surface: %w", err)
 	}

@@ -429,7 +429,7 @@ func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, tx *sq
 			query: `
 				UPDATE managed_agent_capability_surfaces
 				SET run_id = NULL
-				WHERE run_id IN %[1]s
+				WHERE run_id IN %[1]s AND execution_kind <> 'selected_contract_fork'
 			`,
 		},
 		{

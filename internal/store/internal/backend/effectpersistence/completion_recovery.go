@@ -38,6 +38,7 @@ type completionRecoveryAttempt struct {
 	TargetOrdinal        int
 	CapabilitySurfaceID  string
 	CapabilitySurface    string
+	CapabilityProjection storemanagedcapability.StoredProjection
 	ExecutionOwner       string
 	FenceGeneration      int64
 	LeaseExpiresAt       time.Time
@@ -107,7 +108,8 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		       COALESCE(o.runtime_epoch,0),COALESCE(o.generation,0),
 		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id::text,''),COALESCE(a.origin_run_id::text,''),COALESCE(a.origin_route_identity,''),
 		       COALESCE(a.origin_claim_token::text,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_id,''),
-		       COALESCE(a.origin_directive_operation_id::text,''),COALESCE(a.origin_directive_owner_id,'')
+		       COALESCE(a.origin_directive_operation_id::text,''),COALESCE(a.origin_directive_owner_id,''),
+		       s.execution_kind,s.execution_authority_id,s.run_id,s.selected_execution_id,s.selected_fork_run_id
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
@@ -155,7 +157,8 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		       COALESCE(o.runtime_epoch,0),COALESCE(o.generation,0),
 		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id,''),COALESCE(a.origin_run_id,''),COALESCE(a.origin_route_identity,''),
 		       COALESCE(a.origin_claim_token,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_id,''),
-		       COALESCE(a.origin_directive_operation_id,''),COALESCE(a.origin_directive_owner_id,'')
+		       COALESCE(a.origin_directive_operation_id,''),COALESCE(a.origin_directive_owner_id,''),
+		       s.execution_kind,s.execution_authority_id,s.run_id,s.selected_execution_id,s.selected_fork_run_id
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
 		LEFT JOIN managed_agent_capability_surfaces s ON s.surface_id=a.capability_surface_id
@@ -216,7 +219,9 @@ func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt
 			&attempt.RuntimeEpoch, &attempt.Generation,
 			&attempt.OriginKind, &attempt.OriginDeliveryID, &attempt.OriginRunID, &attempt.OriginRouteIdentity,
 			&attempt.OriginClaimToken, &attempt.OriginClaimVersion, &attempt.OriginSubscriber,
-			&attempt.OriginDirectiveID, &attempt.OriginDirectiveOwner); err != nil {
+			&attempt.OriginDirectiveID, &attempt.OriginDirectiveOwner,
+			&attempt.CapabilityProjection.ExecutionKind, &attempt.CapabilityProjection.ExecutionAuthorityID,
+			&attempt.CapabilityProjection.RunID, &attempt.CapabilityProjection.SelectedExecutionID, &attempt.CapabilityProjection.SelectedForkRunID); err != nil {
 			return nil, fmt.Errorf("scan completion attempt for recovery: %w", err)
 		}
 		if !lease.Valid {
@@ -469,7 +474,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		if _, err := uuid.Parse(strings.TrimSpace(target.SessionID)); err != nil || agentID == "" {
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery agent-turn identity for attempt %s is incomplete", recovered.AttemptID)
 		}
-		surface, err := storemanagedcapability.Decode([]byte(recovered.CapabilitySurface))
+		surface, err := storemanagedcapability.DecodeStored([]byte(recovered.CapabilitySurface), recovered.CapabilityProjection)
 		if err != nil || surface.ID != recovered.CapabilitySurfaceID ||
 			!runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(target, surface) {
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery capability surface for attempt %s is invalid or mismatched: %w", recovered.AttemptID, err)
