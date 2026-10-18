@@ -14,7 +14,9 @@ import (
 
 	runtimeactivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privatefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -182,6 +184,57 @@ func TestFaultMatrixRollbackAndFinalizationPhases(t *testing.T) {
 func TestFaultMatrixCancellationAndCommitAcknowledgement(t *testing.T) {
 	faultMatrixStores(t, func(t *testing.T, db *sql.DB, dialect privateactivity.Dialect) {
 		base := faultMatrixNative(db, nil, dialect)
+		t.Run("joined native cancellation", func(t *testing.T) {
+			var native nativeRunner
+			if dialect == privateactivity.DialectPostgres {
+				backend, err := postgresbackend.New(db)
+				if err != nil {
+					t.Fatal(err)
+				}
+				native = backend.RunTransactionOutcome
+			} else {
+				backend, err := sqlitebackend.New(db)
+				if err != nil {
+					t.Fatal(err)
+				}
+				native = func(ctx context.Context, write func(context.Context, *sql.Tx) error) (bool, error) {
+					return backend.RunTransactionOutcome(ctx, "cancellation disposition", write)
+				}
+			}
+			for _, before := range []bool{false, true} {
+				ctx, cancel := context.WithCancel(context.Background())
+				if before {
+					cancel()
+				}
+				value := fmt.Sprintf("%s-native-cancel-%t", dialect, before)
+				entered := false
+				result := run(ctx, dialect, RevisionOnly, Ordinary, nil, nil, native, func(ctx context.Context, attempt *Attempt) (string, error) {
+					entered = true
+					if err := faultMatrixInsert(ctx, attempt, value); err != nil {
+						return "", err
+					}
+					cancel()
+					return value, nil
+				})
+				cancel()
+				gotBefore, clean := result.CleanCancellation()
+				if !clean || gotBefore != before || entered == before || result.Acknowledged() || !errors.Is(result.Err(), context.Canceled) || faultMatrixCount(t, db, value) != 0 {
+					t.Fatalf("native cancellation before=%t: clean=%t before=%t entered=%t outcome=%+v", before, clean, gotBefore, entered, result)
+				}
+				for _, independent := range []error{context.Canceled, context.DeadlineExceeded, sql.ErrTxDone, sql.ErrConnDone, errors.New("storage/rollback/lease failed")} {
+					joined := result
+					joined.err = errors.Join(result.Err(), independent)
+					if _, clean := joined.CleanCancellation(); clean {
+						t.Fatalf("independent failure inherited clean cancellation: %v", independent)
+					}
+				}
+				acknowledged := result
+				acknowledged.acknowledged = true
+				if _, clean := acknowledged.CleanCancellation(); clean {
+					t.Fatal("acknowledged COMMIT inherited clean cancellation")
+				}
+			}
+		})
 		t.Run("cancel_after_domain_write", func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -207,6 +260,9 @@ func TestFaultMatrixCancellationAndCommitAcknowledgement(t *testing.T) {
 				return value, nil
 			})
 			faultMatrixNoValue(t, result, CommitAdmission)
+			if _, clean := result.CleanCancellation(); clean {
+				t.Fatal("unsealed callback cancellation inferred native cleanup")
+			}
 			if !errors.Is(result.Err(), context.Canceled) || faultMatrixCount(t, db, value) != 0 {
 				t.Fatalf("canceled attempt was not rolled back: %v", result.Err())
 			}
@@ -225,6 +281,9 @@ func TestFaultMatrixCancellationAndCommitAcknowledgement(t *testing.T) {
 					return value, faultMatrixInsert(ctx, attempt, value)
 				})
 			faultMatrixNoValue(t, result, CommitAdmission)
+			if _, clean := result.CleanCancellation(); clean {
+				t.Fatal("uncertain COMMIT inferred native cancellation")
+			}
 			if !errors.Is(result.Err(), lost) || faultMatrixCount(t, db, value) != 1 {
 				t.Fatalf("ambiguous committed transaction was misrepresented: %v", result.Err())
 			}
@@ -244,6 +303,9 @@ func TestFaultMatrixCancellationAndCommitAcknowledgement(t *testing.T) {
 				})
 			if !result.Acknowledged() || result.Phase() != PostCommit || !errors.Is(result.Err(), cleanup) {
 				t.Fatalf("acknowledged cleanup result = %+v", result)
+			}
+			if _, clean := result.CleanCancellation(); clean {
+				t.Fatal("acknowledged COMMIT cleanup failure inferred native cancellation")
 			}
 			if got, ok := result.Value(); !ok || got != value || faultMatrixCount(t, db, value) != 1 {
 				t.Fatalf("acknowledged result lost committed value: %q, %v", got, ok)

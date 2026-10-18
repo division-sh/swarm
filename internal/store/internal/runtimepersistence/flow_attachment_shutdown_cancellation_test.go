@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -103,6 +104,14 @@ func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 	if err != nil || !committed.Acknowledged || !committed.Created {
 		t.Fatalf("exact construction commit: %+v %v", committed, err)
 	}
+	owner, err := flowidentity.NewRunScopedFlowInstance(correlation.RunIDFromContext(f.ctx), plan.Identity.Route())
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, found, err := f.workflows.Load(f.ctx, owner)
+	if err != nil || !found {
+		t.Fatalf("original construction: found=%t err=%v", found, err)
+	}
 	finalized := make(chan error, 1)
 	go func() { finalized <- f.manager.FinalizeCommittedFlowInstanceActivation(f.ctx, committed) }()
 	ctx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
@@ -137,6 +146,9 @@ func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 	}
 	if observed.result.Acknowledged || !errors.Is(observed.err, context.Canceled) {
 		t.Fatalf("cancelled progress result: %+v error=%v", observed.result, observed.err)
+	}
+	if before, clean := observed.result.CleanCancellation(observed.err); !clean || before != (cut == "before_progress") {
+		t.Fatalf("native cleanup disposition: before=%t clean=%t cut=%s err=%v", before, clean, cut, observed.err)
 	}
 	if cut == "inside_progress" {
 		if err := barrier.joinRollback(ctx); err != nil {
@@ -175,5 +187,43 @@ func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 		}
 	case <-ctx.Done():
 		t.Fatal("shutdown did not join its cancelled readiness attempt")
+	}
+	// A fresh Manager/reader and generation must reattach, not reconstruct or
+	// republish the immutable construction abandoned by the stopped occurrence.
+	restarted := f.restartedReceiverConfigManager(t, nil)
+	restartBinding, err := restarted.grant.ProcessExecutionBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartAdmission, err := managedexecution.New(managedexecution.KindNormalRuntime, restartBinding.RuntimeInstanceID, restartBinding.RuntimeGeneration, "", "shutdown-progress-restart", restartBinding.BundleHash, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.manager.Run(managedexecution.WithAdmission(restarted.ctx, restartAdmission)); err != nil {
+		t.Fatal(err)
+	}
+	if created, err := restarted.manager.EnsureFlowInstance(restarted.ctx, req); err != nil || created {
+		t.Fatalf("fresh Manager did not reuse construction: created=%t err=%v", created, err)
+	}
+	current, found, err := restarted.workflows.Load(restarted.ctx, owner)
+	if err != nil || !found || !reflect.DeepEqual(current, initial) {
+		t.Fatalf("reattachment changed immutable construction: before=%+v after=%+v found=%t err=%v", initial, current, found, err)
+	}
+	restarted.bus.mu.Lock()
+	published := len(restarted.bus.published)
+	restarted.bus.mu.Unlock()
+	if published != 0 {
+		t.Fatalf("restart republished constructor events: %d", published)
+	}
+	if err := restarted.manager.WaitForQuiescence(ctx); err != nil {
+		t.Fatalf("fresh readiness work did not join: %v", err)
+	}
+	recovered, found, err := restarted.store.LoadDynamicFlowRuntimeReadiness(restarted.ctx, owner.RunID, owner.Route)
+	if err != nil || !found || recovered.AttemptOrdinal <= row.AttemptOrdinal || recovered.Phase != pipeline.FlowAttachmentReady || recovered.AttemptState != "accepted" {
+		t.Fatalf("fresh Manager did not acknowledge successor readiness: before=%+v after=%+v found=%t err=%v", row, recovered, found, err)
+	}
+	assertConstructorRows(t, restarted, backend, 1)
+	if err := restarted.manager.Shutdown(); err != nil {
+		t.Fatalf("fresh Manager cleanup: %v", err)
 	}
 }
