@@ -718,8 +718,8 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 	if err != nil {
 		return err
 	}
-	if inserted > 0 {
-		if err := activityjournal.PairCopiedTerminalAttemptTx(ctx, tx, requestEventID); err != nil {
+	if inserted {
+		if err := insertCopiedActivityLiveParentsTx(ctx, tx, requestEventID); err != nil {
 			return err
 		}
 	}

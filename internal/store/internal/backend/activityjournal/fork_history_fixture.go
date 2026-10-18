@@ -46,5 +46,5 @@ func InsertHistoricalActivityForkAttemptTx(ctx context.Context, tx *sql.Tx, post
 	if err != nil {
 		return err
 	}
-	return PairCopiedTerminalAttemptTx(ctx, tx, record.RequestEventID)
+	return pairActivityLiveParentsTx(ctx, tx, record.RequestEventID, true)
 }

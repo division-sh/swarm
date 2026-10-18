@@ -6,6 +6,15 @@ import (
 	"fmt"
 )
 
+func insertCopiedActivityLiveParentsTx(ctx context.Context, tx *sql.Tx, requestID string) error {
+	result, err := tx.ExecContext(ctx, `INSERT INTO activity_attempt_live_parents
+		(request_event_id,run_id,reply_context_id,reply_context_present)
+		SELECT request_event_id,run_id,reply_context_id,reply_context_present
+		FROM activity_attempts WHERE request_event_id=$1 AND execution_binding IS NULL
+		AND status IN ('succeeded','failed','uncertain')`, requestID)
+	return requireExactlyOneMutation(result, err, "pair newly copied terminal activity parents")
+}
+
 func insertSelectedExecutionLiveParentsTx(ctx context.Context, tx *sql.Tx, executionID string) error {
 	result, err := tx.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_execution_live_parents
 		(execution_id,binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,generation,fork_event_id)

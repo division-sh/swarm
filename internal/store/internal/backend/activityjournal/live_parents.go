@@ -37,12 +37,6 @@ func pairActivityLiveParentsTx(ctx context.Context, tx *sql.Tx, requestID string
 	return nil
 }
 
-// PairCopiedTerminalAttemptTx projects only the stored terminal row's parents.
-// It cannot assign an execution binding or authorize a provider call.
-func PairCopiedTerminalAttemptTx(ctx context.Context, tx *sql.Tx, requestID string) error {
-	return pairActivityLiveParentsTx(ctx, tx, requestID, true)
-}
-
 // RequireLiveAttemptParentsTx validates live evidence, never detached completion
 // or execution permission. A missing pair is corruption, not ordinary absence.
 func RequireLiveAttemptParentsTx(ctx context.Context, tx *sql.Tx, requestID string) error {
