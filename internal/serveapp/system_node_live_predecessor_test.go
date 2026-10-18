@@ -235,7 +235,7 @@ func TestServeProcessTakeoverRejectsLivePredecessorMutationBothStores(t *testing
 				}
 			}
 			rows, err := storetest.ReadWorkflowStateObservationRows(ctx, selected)
-			if err != nil || len(rows) != 1 || rows[0].EntityID != seed.RunID || rows[0].CurrentState != "waiting" {
+			if err != nil || len(rows) != 1 || rows[0].EntityID != seed.RunID || rows[0].CurrentState == nil || *rows[0].CurrentState != "waiting" {
 				t.Fatalf("successor lost the final predecessor state: rows=%+v err=%v", rows, err)
 			}
 			if err := current.Done(); err != nil {
