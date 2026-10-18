@@ -61,23 +61,60 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          credential_root=$(mktemp -d "$RUNNER_TEMP/workspace-base-auth.XXXXXX")
-          trap 'rm -r -- "$credential_root"' EXIT
+          attempt_root=$(mktemp -d "$RUNNER_TEMP/workspace-base-attempt.XXXXXX")
+          credential_root="$attempt_root/auth"
+          result_file="$attempt_root/verified.json"
+          final_result="$RUNNER_TEMP/workspace-base-setup.json"
+          cleanup() {
+            status=$?
+            trap - EXIT
+            if rm -r -- "$attempt_root"; then
+              :
+            else
+              cleanup_status=$?
+              if [ "$status" -eq 0 ]; then status=$cleanup_status; fi
+            fi
+            if [ "$status" -ne 0 ] && { [ -e "$final_result" ] || [ -L "$final_result" ]; }; then
+              rm -- "$final_result" || true
+            fi
+            exit "$status"
+          }
+          trap cleanup EXIT
+          mkdir -- "$credential_root"
+          if [ -e "$final_result" ] || [ -L "$final_result" ]; then rm -- "$final_result"; fi
           export DOCKER_CONFIG="$credential_root"
           case "$DOCKER_CONFIG/" in "$GITHUB_WORKSPACE/"*) exit 1 ;; esac
           printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           source='public.ecr.aws/docker/library/golang:1.25-bookworm@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437'
           mirror='ghcr.io/division-sh/swarm-workspace-golang'
           digest='sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437'
-          python3 .github/scripts/verify-workspace-base.py --before-publication
-          docker build -t "$mirror:repository-link" -f Dockerfile.workspace-base-link .
-          docker image inspect "$mirror:repository-link" | jq -e 'length == 1 and .[0].Config.Labels["org.opencontainers.image.source"] == "https://github.com/division-sh/swarm" and (.[0].RootFS.Layers // [] | length) == 0 and .[0].Config.Cmd == null and .[0].Config.Entrypoint == null' >/dev/null
-          docker push "$mirror:repository-link"
-          python3 .github/scripts/verify-workspace-base.py --association-only
-          docker buildx imagetools create --prefer-index=false --tag "$mirror:1.25-bookworm" "$source"
-          python3 .github/scripts/verify-workspace-base.py > "$RUNNER_TEMP/workspace-base-setup.json"
+          if python3 .github/scripts/verify-workspace-base.py --verify-if-present > "$result_file"; then
+            acquisition=already-present
+          else
+            status=$?
+            if [ "$status" -ne 3 ]; then exit "$status"; fi
+            python3 .github/scripts/verify-workspace-base.py --before-publication
+            docker build -t "$mirror:repository-link" -f Dockerfile.workspace-base-link .
+            docker image inspect "$mirror:repository-link" | jq -e 'length == 1 and .[0].Config.Labels["org.opencontainers.image.source"] == "https://github.com/division-sh/swarm" and (.[0].RootFS.Layers // [] | length) == 0 and .[0].Config.Cmd == null and .[0].Config.Entrypoint == null' >/dev/null
+            docker push "$mirror:repository-link"
+            python3 .github/scripts/verify-workspace-base.py --association-only
+            docker buildx imagetools create --prefer-index=false --tag "$mirror:1.25-bookworm" "$source"
+            python3 .github/scripts/verify-workspace-base.py > "$result_file"
+            acquisition=copied
+          fi
+          test -s "$result_file"
+          jq -e --arg digest "$digest" --arg head "$GITHUB_SHA" --argjson repository "$GITHUB_REPOSITORY_ID" '
+            .qualification == false and .repository == "division-sh/swarm" and
+            .package == "swarm-workspace-golang" and .visibility == "private" and
+            .digest == $digest and .source_head == $head and .repository_id == $repository and
+            (.package_id | type == "number" and . > 0 and . == floor) and
+            (.manifests | type == "object" and has($digest)) and
+            (.manifests[$digest] | type == "number" and . > 0) and
+            (.verified_blobs | type == "object" and length > 0)
+          ' "$result_file" >/dev/null
           docker pull "$mirror@$digest"
-          echo 'Private workspace base setup complete; no qualification or tier attestation'
+          mv -- "$result_file" "$final_result"
+          printf 'Private workspace base setup path: %s; no qualification or tier attestation\n' "$acquisition"
       - name: Retain workspace base setup result
         uses: actions/upload-artifact@v4
         with:

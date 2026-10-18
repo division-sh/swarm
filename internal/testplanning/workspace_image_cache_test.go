@@ -125,13 +125,18 @@ func workspaceBaseSetupContract(raw []byte) error {
 	}
 	for _, command := range []string{
 		`printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin`,
-		`trap 'rm -r -- "$credential_root"' EXIT`,
+		`trap cleanup EXIT`,
+		`rm -r -- "$attempt_root"`,
+		`python3 .github/scripts/verify-workspace-base.py --verify-if-present > "$result_file"`,
+		`if [ "$status" -ne 3 ]; then exit "$status"; fi`,
 		`python3 .github/scripts/verify-workspace-base.py --before-publication`,
 		`docker build -t "$mirror:repository-link" -f Dockerfile.workspace-base-link .`,
 		`docker push "$mirror:repository-link"`,
 		`python3 .github/scripts/verify-workspace-base.py --association-only`,
 		`docker buildx imagetools create --prefer-index=false --tag "$mirror:1.25-bookworm" "$source"`,
-		`python3 .github/scripts/verify-workspace-base.py > "$RUNNER_TEMP/workspace-base-setup.json"`,
+		`python3 .github/scripts/verify-workspace-base.py > "$result_file"`,
+		`test -s "$result_file"`,
+		`mv -- "$result_file" "$final_result"`,
 		`docker pull "$mirror@$digest"`,
 	} {
 		if !strings.Contains(setup.Steps[2].Run, command) {
@@ -231,13 +236,45 @@ func assertWorkspaceSetupShell(t *testing.T, raw []byte) {
 			}
 		})
 	}
-	for _, fault := range []string{"", "login", "before-publication", "association-only", "link-build", "link-inspect", "link-push", "copy", "verify", "pull", "link-layers", "link-label", "link-executable"} {
-		t.Run("setup/execution/"+fault, func(t *testing.T) {
+	type execution struct {
+		destination, fault string
+		cleanup            bool
+	}
+	var executions []execution
+	for _, fault := range []string{"", "login", "before-publication", "association-only", "link-build", "link-inspect", "link-push", "copy", "verify", "pull", "link-layers", "link-label", "link-executable", "verify-empty", "verify-invalid", "verify-malformed", "verify-stale", "verify-proof"} {
+		executions = append(executions, execution{"absent", fault, false})
+	}
+	for _, fault := range []string{"", "login", "probe", "probe-exit4", "probe-cancel", "probe-token404", "probe-child404", "probe-subject404", "probe-blob404", "probe-auth403", "probe-throttled", "probe-empty", "probe-invalid", "probe-malformed", "probe-stale", "probe-proof", "pull"} {
+		executions = append(executions, execution{"present", fault, false})
+	}
+	for _, destination := range []string{"absent", "present"} {
+		executions = append(executions, execution{destination, "", true}, execution{destination, "pull", true})
+	}
+	emptyJSONStatus := workspaceSetupJQStatus(t, "")
+	malformedJSONStatus := workspaceSetupJQStatus(t, "{")
+	if malformedJSONStatus == 0 {
+		t.Fatal("native JSON negative control accepted malformed content")
+	}
+	for _, test := range executions {
+		name := test.fault
+		if name == "" {
+			name = "clean"
+		}
+		if test.cleanup {
+			name += "+cleanup"
+		}
+		t.Run("setup/execution/"+test.destination+"/"+name, func(t *testing.T) {
 			root := t.TempDir()
-			for name, script := range map[string]string{"docker": workspaceSetupDockerStub, "python3": workspaceSetupPythonStub} {
+			for name, script := range map[string]string{"docker": workspaceSetupDockerStub, "python3": workspaceSetupPythonStub, "rm": workspaceSetupRemoveStub} {
 				if err := os.WriteFile(filepath.Join(root, name), []byte(script), 0o700); err != nil {
 					t.Fatal(err)
 				}
+			}
+			artifact := filepath.Join(root, "workspace-base-setup.json")
+			pin := strings.SplitN(workspaceGHCRBase, "@", 2)[1]
+			stale := fmt.Sprintf(`{"qualification":false,"repository":"division-sh/swarm","package":"swarm-workspace-golang","visibility":"private","package_id":17,"repository_id":23,"source_head":%q,"digest":%q,"manifests":{%q:1},"verified_blobs":{%q:1},"stale":true}`, strings.Repeat("a", 40), pin, pin, pin)
+			if err := os.WriteFile(artifact, []byte(stale), 0o600); err != nil {
+				t.Fatal(err)
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -245,19 +282,56 @@ func assertWorkspaceSetupShell(t *testing.T, raw []byte) {
 			cmd.Dir = repo
 			cmd.Env = append(os.Environ(), "PATH="+root+":"+os.Getenv("PATH"), "RUNNER_TEMP="+root,
 				"GITHUB_WORKSPACE="+repo, "GH_TOKEN=fixture-only-token", "GITHUB_ACTOR=workspace-fixture",
-				"FAIL_STAGE="+fault, "CALLS="+filepath.Join(root, "calls"))
+				"FAIL_STAGE="+test.fault, "CALLS="+filepath.Join(root, "calls"), "DESTINATION="+test.destination,
+				fmt.Sprintf("FAIL_CLEANUP=%t", test.cleanup), "GITHUB_SHA="+strings.Repeat("a", 40), "GITHUB_REPOSITORY_ID=23")
 			out, err := cmd.CombinedOutput()
-			if (err != nil) != (fault != "") || strings.Contains(string(out), "fixture-only-token") {
-				t.Fatalf("setup execution=%v fault=%q output=%s", err, fault, out)
+			wantCode := 0
+			if test.fault != "" {
+				wantCode = 1
+			}
+			switch test.fault {
+			case "probe-exit4":
+				wantCode = 4
+			case "probe-malformed", "verify-malformed":
+				wantCode = malformedJSONStatus
+			case "link-inspect":
+				if emptyJSONStatus != 0 {
+					wantCode = emptyJSONStatus
+				}
+			case "probe-cancel":
+				wantCode = 130
+			}
+			if test.cleanup && wantCode == 0 {
+				wantCode = 73
+			}
+			code := 0
+			if err != nil {
+				exit, ok := err.(*exec.ExitError)
+				if !ok {
+					t.Fatal(err)
+				}
+				code = exit.ExitCode()
+			}
+			if code != wantCode || strings.Contains(string(out), "fixture-only-token") {
+				t.Fatalf("setup execution=%v want=%d case=%+v output=%s", err, wantCode, test, out)
 			}
 			calls, readErr := os.ReadFile(filepath.Join(root, "calls"))
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
-			want := "login\nbefore-publication\nlink-build\nlink-inspect\nlink-push\nassociation-only\ncopy\nverify\npull\n"
-			cut := fault
-			if strings.HasPrefix(fault, "link-") && fault != "link-build" && fault != "link-push" {
+			want := "login\nprobe\nbefore-publication\nlink-build\nlink-inspect\nlink-push\nassociation-only\ncopy\nverify\npull\n"
+			if test.destination == "present" {
+				want = "login\nprobe\npull\n"
+			}
+			cut := test.fault
+			if strings.HasPrefix(cut, "link-") && cut != "link-build" && cut != "link-push" {
 				cut = "link-inspect"
+			}
+			if strings.HasPrefix(cut, "probe-") {
+				cut = "probe"
+			}
+			if strings.HasPrefix(cut, "verify-") {
+				cut = "verify"
 			}
 			if cut != "" {
 				before, _, found := strings.Cut(want, cut+"\n")
@@ -266,6 +340,9 @@ func assertWorkspaceSetupShell(t *testing.T, raw []byte) {
 				}
 				want = before + cut + "\n"
 			}
+			if test.cleanup {
+				want += "cleanup\n"
+			}
 			if string(calls) != want {
 				t.Fatalf("setup advanced past failure or changed ordered work: got=%q want=%q", calls, want)
 			}
@@ -273,11 +350,36 @@ func assertWorkspaceSetupShell(t *testing.T, raw []byte) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := os.Stat(strings.TrimSpace(string(credentials))); !os.IsNotExist(err) {
+			if _, err := os.Stat(strings.TrimSpace(string(credentials))); !test.cleanup && !os.IsNotExist(err) {
 				t.Fatalf("setup credentials survived failure/success: %v", err)
+			}
+			result, err := os.ReadFile(artifact)
+			if wantCode == 0 {
+				if err != nil || strings.Contains(string(result), `"stale"`) || !strings.Contains(string(result), `"source_head":"`+strings.Repeat("a", 40)+`"`) {
+					t.Fatalf("successful setup did not publish the fresh verified result: %s %v", result, err)
+				}
+			} else if !os.IsNotExist(err) {
+				t.Fatalf("failed setup exposed an old/partial result: %s %v", result, err)
 			}
 		})
 	}
+}
+
+func workspaceSetupJQStatus(t *testing.T, input string) int {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "jq", "-e", ".")
+	command.Stdin = strings.NewReader(input)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		return 0
+	}
+	exit, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("native JSON control could not execute: %v %s", err, output)
+	}
+	return exit.ExitCode()
 }
 
 const workspaceSetupDockerStub = `#!/bin/bash
@@ -294,10 +396,16 @@ case "$*" in
   'image inspect ghcr.io/division-sh/swarm-workspace-golang:repository-link') operation=link-inspect ;;
   'push ghcr.io/division-sh/swarm-workspace-golang:repository-link') operation=link-push ;;
   'buildx imagetools create --prefer-index=false --tag ghcr.io/division-sh/swarm-workspace-golang:1.25-bookworm public.ecr.aws/docker/library/golang:1.25-bookworm@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437') operation=copy ;;
-  'pull ghcr.io/division-sh/swarm-workspace-golang@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437') operation=pull ;;
+  'pull ghcr.io/division-sh/swarm-workspace-golang@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437')
+    test ! -e "$RUNNER_TEMP/workspace-base-setup.json"
+    operation=pull ;;
   *) echo unexpected-setup-Docker-operation >&2; exit 99 ;;
 esac
 printf '%s\n' "$operation" >> "$CALLS"
+if [ "$operation" = copy ] && [ "$DESTINATION" = present ]; then
+  echo 'ECR copy attempted despite a complete pinned destination' >&2
+  exit 98
+fi
 test "$FAIL_STAGE" != "$operation"
 if [ "$operation" = link-inspect ]; then
   label=https://github.com/division-sh/swarm
@@ -313,6 +421,7 @@ fi
 const workspaceSetupPythonStub = `#!/bin/bash
 set -euo pipefail
 case "$*" in
+  '.github/scripts/verify-workspace-base.py --verify-if-present') operation=probe ;;
   '.github/scripts/verify-workspace-base.py') operation=verify ;;
   '.github/scripts/verify-workspace-base.py --before-publication') operation=before-publication ;;
   '.github/scripts/verify-workspace-base.py --association-only') operation=association-only ;;
@@ -320,7 +429,34 @@ case "$*" in
 esac
 printf '%s\n' "$operation" >> "$CALLS"
 test "$FAIL_STAGE" != "$operation"
-printf '{"qualification":false}\n'
+case "$FAIL_STAGE" in
+  "$operation-exit4") exit 4 ;;
+  "$operation-cancel") exit 130 ;;
+  "$operation-token404"|"$operation-child404"|"$operation-subject404"|"$operation-blob404"|"$operation-auth403"|"$operation-throttled") exit 1 ;;
+  "$operation-empty") exit 0 ;;
+  "$operation-invalid") printf '{}\n'; exit 0 ;;
+  "$operation-malformed") printf '{'; exit 0 ;;
+esac
+if [ "$operation" = probe ] && [ "$DESTINATION" = absent ]; then exit 3; fi
+if [ "$operation" != probe ] && [ "$operation" != verify ]; then
+  printf '{"qualification":false}\n'
+  exit 0
+fi
+head="$GITHUB_SHA"
+if [ "$FAIL_STAGE" = "$operation-stale" ]; then head=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; fi
+qualification=false
+if [ "$FAIL_STAGE" = "$operation-proof" ]; then qualification=true; fi
+digest=sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437
+printf '{"qualification":%s,"repository":"division-sh/swarm","package":"swarm-workspace-golang","visibility":"private","package_id":17,"repository_id":23,"source_head":"%s","digest":"%s","manifests":{"%s":1},"verified_blobs":{"%s":1}}\n' "$qualification" "$head" "$digest" "$digest" "$digest"
+`
+
+const workspaceSetupRemoveStub = `#!/bin/bash
+set -euo pipefail
+if [ "$1" = -r ] && [ "$FAIL_CLEANUP" = true ]; then
+  printf 'cleanup\n' >> "$CALLS"
+  exit 73
+fi
+exec /bin/rm "$@"
 `
 
 func workspaceCacheDocument(raw []byte) (workspaceCacheWorkflow, error) {
@@ -926,12 +1062,17 @@ class FixedResponses:
             return io.BytesIO(encode(package))
         if url.startswith("https://ghcr.io/token?"):
             assert auth.startswith("Basic ")
+            if self.fault == "missing-token":
+                raise urllib.error.HTTPError(url, 404, "absent", {}, None)
             return io.BytesIO(encode({"token": "mirror-read"}))
         mirror = scope["MIRROR"]
         if url.startswith(mirror + "/manifests/"):
             assert auth == "Bearer mirror-read"
             key = url.rsplit("/", 1)[1]
+            if self.fault == "transport" and key == digest(index):
+                raise urllib.error.URLError("fixture transport failure")
             if ((self.fault == "missing-root" and key == digest(index))
+                    or (self.fault == "missing-child" and key == digest(leaf))
                     or (self.fault == "missing-auxiliary" and key == digest(aux))
                     or (self.fault == "missing-subject" and key == digest(subject))):
                 raise urllib.error.HTTPError(url, 404, "absent", {}, None)
@@ -960,14 +1101,15 @@ class FixedResponses:
             return io.BytesIO(raw)
         raise AssertionError("unexpected network target: " + url)
 
-for fault in [None, "absent", "forbidden", "public", "foreign-repository", "crossed-repository-id", "malformed-metadata", "manifest-mismatch", "changed-platform", "child-mismatch", "subject-mismatch", "child-size", "missing-root", "missing-auxiliary", "missing-subject", "missing-layer", "missing-subject-blob", "config-mismatch", "layer-mismatch", "auxiliary-mismatch", "subject-blob-mismatch", "oversized-layer"]:
+faults = [None, "absent", "forbidden", "public", "foreign-repository", "crossed-repository-id", "malformed-metadata", "transport", "manifest-mismatch", "changed-platform", "child-mismatch", "subject-mismatch", "child-size", "missing-root", "missing-token", "missing-child", "missing-auxiliary", "missing-subject", "missing-layer", "missing-subject-blob", "config-mismatch", "layer-mismatch", "auxiliary-mismatch", "subject-blob-mismatch", "oversized-layer"]
+for fault in faults:
     responses = FixedResponses(fault)
     with mock.patch.object(scope["urllib"].request, "build_opener", return_value=responses), mock.patch.object(scope["time"], "sleep") as pause, contextlib.redirect_stderr(io.StringIO()):
         try:
             result = scope["verify"]()
-        except (ValueError, urllib.error.HTTPError) as error:
+        except (ValueError, urllib.error.URLError) as error:
             assert fault is not None, fault
-            if fault in ("absent", "missing-root", "missing-auxiliary", "missing-subject", "missing-layer", "missing-subject-blob", "forbidden"):
+            if fault in ("absent", "missing-root", "missing-token", "missing-child", "missing-auxiliary", "missing-subject", "missing-layer", "missing-subject-blob", "forbidden"):
                 assert isinstance(error, urllib.error.HTTPError) and error.code == (403 if fault == "forbidden" else 404)
             elif fault in ("public", "foreign-repository", "crossed-repository-id"):
                 assert str(error) == "private package/repository association refused; user policy action required"
@@ -979,6 +1121,8 @@ for fault in [None, "absent", "forbidden", "public", "foreign-repository", "cros
                 assert str(error) == "blob exceeds immutable descriptor size"
             elif fault == "malformed-metadata":
                 assert isinstance(error, json.JSONDecodeError)
+            elif fault == "transport":
+                assert isinstance(error, urllib.error.URLError) and not isinstance(error, urllib.error.HTTPError)
             else:
                 assert str(error) == "blob bytes differ from immutable descriptor"
         else:
@@ -989,6 +1133,22 @@ for fault in [None, "absent", "forbidden", "public", "foreign-repository", "cros
             assert responses.read_blobs == set(blobs)
     pause.assert_not_called()
     assert max(collections.Counter(responses.requests).values()) == 1, (fault, responses.requests)
+
+for fault in faults:
+    responses, output = FixedResponses(fault), io.StringIO()
+    with mock.patch.object(scope["urllib"].request, "build_opener", return_value=responses), mock.patch.object(scope["sys"], "argv", [str(path), "--verify-if-present"]), mock.patch.object(scope["time"], "sleep") as pause, contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(output):
+        status = scope["main"]()
+    expected = 0 if fault is None else 3 if fault in ("absent", "missing-root") else 1
+    assert status == expected, (fault, status, expected)
+    pause.assert_not_called()
+    assert max(collections.Counter(responses.requests).values()) == 1, (fault, responses.requests)
+    if fault is None:
+        result = json.loads(output.getvalue())
+        assert result["manifests"] == {key: len(value) for key, value in manifests.items()}
+        assert result["verified_blobs"] == {key: len(value) for key, value in blobs.items()}
+        assert responses.read_blobs == set(blobs)
+    else:
+        assert output.getvalue() == "", (fault, output.getvalue())
 
 for fault in [None, "absent", "forbidden", "public", "foreign-repository", "crossed-repository-id"]:
     for allow_absent in [False, True]:
@@ -1078,6 +1238,25 @@ for operation, target in targets.items():
         records = records_for(responses, diagnostics)
         assert responses.attempts == len(records) == 1 and records[0]["operation"] == operation
 
+presence_targets = {**targets,
+    "child-manifest": scope["MIRROR"] + "/manifests/" + digest(leaf),
+    "subject-manifest": scope["MIRROR"] + "/manifests/" + digest(subject),
+}
+for operation, target in presence_targets.items():
+    for status in [401, 403, 404, 429]:
+        failures = 5 if status == 429 else 1
+        responses, diagnostics, output, sleeps = Refusals(target, status, failures), io.StringIO(), io.StringIO(), []
+        with mock.patch.object(scope["urllib"].request, "build_opener", return_value=responses), mock.patch.object(scope["sys"], "argv", [str(path), "--verify-if-present"]), mock.patch.object(scope["time"], "sleep", side_effect=sleeps.append), contextlib.redirect_stderr(diagnostics), contextlib.redirect_stdout(output):
+            result = scope["main"]()
+        absent = status == 404 and operation in ("package-metadata", "destination-manifest")
+        assert result == (3 if absent else 1), (operation, status, result)
+        assert sleeps == ([5, 10, 20, 40] if status == 429 else [])
+        assert output.getvalue() == ""
+        records = records_for(responses, diagnostics)
+        expected_operation = "destination-manifest" if operation in ("child-manifest", "subject-manifest") else operation
+        assert responses.attempts == len(records) == failures
+        assert all(record["operation"] == expected_operation for record in records)
+
 responses, diagnostics, sleeps = Refusals(targets["destination-blob"], 429, 1, redirected=True, partial=True), io.StringIO(), []
 def partial_pause(seconds):
     assert responses.partial_responses and all(response.closed for response in responses.partial_responses)
@@ -1103,10 +1282,11 @@ assert output.getvalue() == "" and len(records_for(responses, diagnostics)) == 1
 request = urllib.request.Request(scope["MIRROR"] + "/blobs/" + digest(layer), headers={"Authorization": "Bearer mirror-read"})
 redirect = scope["BlobRedirect"]().redirect_request(request, None, 302, "found", {}, "https://blob-storage.invalid/owned-object")
 assert redirect.get_header("Authorization") is None
-try:
-    scope["BlobRedirect"]().redirect_request(request, None, 302, "found", {}, "http://blob-storage.invalid/owned-object")
-except ValueError:
-    pass
-else:
-    raise AssertionError("insecure blob redirect admitted")
+for url in ["http://blob-storage.invalid/owned-object", "https://public.ecr.aws/v2/owned-object", "https://PUBLIC.ECR.AWS./v2/owned-object?signature=signed-secret"]:
+    try:
+        scope["BlobRedirect"]().redirect_request(request, None, 302, "found", {}, url)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("insecure or ECR-source blob redirect admitted")
 `
