@@ -206,7 +206,7 @@ func TestManagerClaimPostcommitErrorConsumesOnlyAcknowledgedClaim(t *testing.T) 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeManagerClaimPostcommitErrorConsumesOnlyAcknowledgedClaim(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -396,7 +396,7 @@ func TestRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRecovery(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -406,7 +406,7 @@ func TestRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeRunningManagerInterventionSettlementFailureShutsDownAndRecoversClaim(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}

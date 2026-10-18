@@ -173,11 +173,11 @@ func ProveNativeRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRe
 			newFactory := func(runtimeactors.AgentConfig) (Agent, error) {
 				return agent, nil
 			}
-			manager := newTestAgentManagerWithOptions(t, eventBus, newFactory, AgentManagerOptions{DeliveryStore: deliveryStore, TestLifecycleProbe: probe.Raw()}, persistence)
-			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.intervention"}})}, true); err != nil {
+			manager := newTestAgentManagerWithOptions(t, eventBus, newFactory, AgentManagerOptions{DeliveryStore: deliveryStore, SemanticSource: nativeDelivery.SemanticSource, SourceArtifactFact: nativeDelivery.Authority.SourceArtifact(), TestLifecycleProbe: probe.Raw()}, persistence)
+			if err := manager.spawnAgentInternal(nativeDelivery.Context, PersistedAgent{Topology: managerTestTopologyAdmissionForSource(t, nativeDelivery.SemanticSource), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.intervention"}})}, true); err != nil {
 				t.Fatalf("spawn intervention agent: %v", err)
 			}
-			if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+			if err := manager.Run(nativeDelivery.normalRunContext(t)); err != nil {
 				t.Fatalf("run intervention manager: %v", err)
 			}
 			managerRunCtx, _, running := manager.lifecycle.runSnapshot()
@@ -186,7 +186,7 @@ func ProveNativeRunningManagerInterventionFailureSettlesClaimBeforeShutdownAndRe
 			}
 			inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("intervention-"+tt.name), events.EventType("test.intervention"), "test", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 			nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{inbound})
-			if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
+			if err := eventBus.Publish(nativeDelivery.Context, inbound); err != nil {
 				t.Fatalf("publish intervention event: %v", err)
 			}
 			probe.RequireAgentInProgress(inbound.ID(), agent.ID())
@@ -268,11 +268,11 @@ func ProveNativeRunningManagerInterventionSettlementFailureShutsDownAndRecoversC
 			newFactory := func(runtimeactors.AgentConfig) (Agent, error) {
 				return agent, nil
 			}
-			manager := newTestAgentManagerWithOptions(t, eventBus, newFactory, AgentManagerOptions{DeliveryStore: deliveryStore, TestLifecycleProbe: probe.Raw()}, persistence)
-			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.intervention.settlement"}})}, true); err != nil {
+			manager := newTestAgentManagerWithOptions(t, eventBus, newFactory, AgentManagerOptions{DeliveryStore: deliveryStore, SemanticSource: nativeDelivery.SemanticSource, SourceArtifactFact: nativeDelivery.Authority.SourceArtifact(), TestLifecycleProbe: probe.Raw()}, persistence)
+			if err := manager.spawnAgentInternal(nativeDelivery.Context, PersistedAgent{Topology: managerTestTopologyAdmissionForSource(t, nativeDelivery.SemanticSource), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.intervention.settlement"}})}, true); err != nil {
 				t.Fatalf("spawn intervention settlement agent: %v", err)
 			}
-			if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+			if err := manager.Run(nativeDelivery.normalRunContext(t)); err != nil {
 				t.Fatalf("run intervention settlement manager: %v", err)
 			}
 			managerRunCtx, _, running := manager.lifecycle.runSnapshot()
@@ -281,7 +281,7 @@ func ProveNativeRunningManagerInterventionSettlementFailureShutsDownAndRecoversC
 			}
 			inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("intervention-settlement-"+tt.name), events.EventType("test.intervention.settlement"), "test", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 			nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{inbound})
-			if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
+			if err := eventBus.Publish(nativeDelivery.Context, inbound); err != nil {
 				t.Fatalf("publish intervention settlement event: %v", err)
 			}
 			probe.RequireAgentInProgress(inbound.ID(), agent.ID())
