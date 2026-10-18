@@ -1126,6 +1126,15 @@
           "Start": 54
         }
       ],
+      "FileEdits": [
+        {
+          "Current": [],
+          "Prior": [
+            "  effect_class: non_idempotent_write\n"
+          ],
+          "Start": 102
+        }
+      ],
       "Index": 1378,
       "Multiplicity": 1,
       "Original": {
@@ -1533,6 +1542,48 @@
             "\t\t\t\treplayFrame := storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{Store: frameStore, Selected: f.store, Identity: agentIdentity, RunID: runID, SessionID: uuid.NewString(), TurnID: replayTurnID, Memory: agentmemory.Plan{Enabled: false}, Event: persistedSnapshot, DeliveryRoute: \u0026replayRoute, DeliveryCommitted: true, ParseOK: true, CreatedAt: replayAt.Add(time.Minute), ExecutionMode: executionmode.Mock, Adapter: \"mock_python\"})\n"
           ],
           "Start": 8
+        }
+      ],
+      "FileEdits": [
+        {
+          "Current": [
+            "\t\t\t\tctx = admitAPITestAgentExecution(t, ctx, f.store.(storetest.AgentFixtureStore), runStartTestSourceArtifactFact())\n"
+          ],
+          "Prior": [],
+          "Start": 304
+        },
+        {
+          "Current": [
+            "\tauthority, err := agentfixture.AdmitExecutionAuthority(t, ctx, fixture, runStartTestSourceArtifactFact())\n"
+          ],
+          "Prior": [
+            "\tif _, err := grant.MarkProbesSettled(ctx, nil); err != nil {\n",
+            "\t\tt.Fatal(err)\n",
+            "\t}\n",
+            "\tif _, err := grant.AdmitExecution(ctx); err != nil {\n",
+            "\t\tt.Fatal(err)\n",
+            "\t}\n",
+            "\tauthority, err := runtimedelivery.NewNormalExecutionAuthority(runStartTestSourceArtifactFact(), binding.GenerationGrantID, binding.RuntimeGeneration)\n"
+          ],
+          "Start": 771
+        },
+        {
+          "Current": [
+            "\tif authority.ExecutionID() != binding.GenerationGrantID || authority.Generation() != binding.RuntimeGeneration {\n",
+            "\t\tt.Fatal(\"replay execution admission differs from its retained receiver binding\")\n",
+            "\t}\n"
+          ],
+          "Prior": [],
+          "Start": 775
+        },
+        {
+          "Current": [
+            "\tif len(routes) \u003e 0 \u0026\u0026 status != runtimedelivery.StatusPending {\n",
+            "\t\tctx = admitAPITestAgentExecution(t, ctx, pg, authorActivityTestSourceArtifactFact)\n",
+            "\t}\n"
+          ],
+          "Prior": [],
+          "Start": 1591
         }
       ],
       "Index": 213,

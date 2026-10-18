@@ -10,7 +10,6 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -24,7 +23,7 @@ import (
 //go:embed testdata/http_policy_correspondences_2700.json
 var http2700CorrespondenceBytes []byte
 
-const HTTP2700CorrespondenceDigest = "986c4047f9e821aa79f1c9e95dbb2306001869ad76d1066e20e28c72c0fbb9ba"
+const HTTP2700CorrespondenceDigest = "5341096c7c1d612b1b427de6433a5ae35f08ea14a74862b4f4f3921cfb512784"
 const http2700CurrentLedger = "afe1f636e21c4016bb38f088145aa94a9597344e05692d5bfa4e8ed9c5f44c97"
 
 type HTTP2700Source struct {
@@ -37,6 +36,7 @@ type HTTP2700Edit struct {
 }
 
 type HTTP2700Continuation struct {
+	FileEdits                                                                []HTTP2700Edit
 	Index, Multiplicity, RemovedPolicySites                                  int
 	Class, Candidate, PriorRecipeRef, CurrentSourceRef, CurrentFileSHA256    string
 	CurrentDeclarationSHA256, BeforeSHA256, AfterSHA256, PriorEndpointSHA256 string
@@ -98,10 +98,22 @@ func HTTP2700PriorEndpoint(row HTTP2700Continuation) (string, error) {
 }
 
 func HTTP2700Reverse(row HTTP2700Continuation) (string, error) {
-	lines := strings.SplitAfter(row.Candidate, "\n")
+	got, err := http2700ReverseLines(row.Candidate, row.Edits)
+	if err != nil {
+		return "", err
+	}
+	prior, err := HTTP2700PriorEndpoint(row)
+	if err != nil || got != prior {
+		return "", fmt.Errorf("HTTP policy continuation does not restore its complete prior endpoint")
+	}
+	return prior, nil
+}
+
+func http2700ReverseLines(current string, edits []HTTP2700Edit) (string, error) {
+	lines := strings.SplitAfter(current, "\n")
 	end := len(lines)
-	for index := len(row.Edits) - 1; index >= 0; index-- {
-		edit := row.Edits[index]
+	for index := len(edits) - 1; index >= 0; index-- {
+		edit := edits[index]
 		stop := edit.Start + len(edit.Current)
 		if edit.Start < 0 || stop > end || !reflect.DeepEqual(lines[edit.Start:stop], edit.Current) {
 			return "", fmt.Errorf("HTTP policy continuation changed its exact edit %d", index)
@@ -109,11 +121,7 @@ func HTTP2700Reverse(row HTTP2700Continuation) (string, error) {
 		lines = append(append(append([]string{}, lines[:edit.Start]...), edit.Prior...), lines[stop:]...)
 		end = edit.Start
 	}
-	prior, err := HTTP2700PriorEndpoint(row)
-	if err != nil || strings.Join(lines, "") != prior {
-		return "", fmt.Errorf("HTTP policy continuation does not restore its complete prior endpoint")
-	}
-	return prior, nil
+	return strings.Join(lines, ""), nil
 }
 
 func http2700CurrentSource(root string, row HTTP2700Continuation, actual string) error {
@@ -271,11 +279,11 @@ func HTTP2700HistoricalSource(root, path string, current []byte) ([]byte, error)
 		if err := http2700CurrentSource(root, row, row.Candidate); err != nil {
 			return nil, err
 		}
-		prior, err := exec.Command("git", "-C", root, "show", row.PriorSource.Ref+":"+path).Output()
-		if err != nil || fmt.Sprintf("%x", sha256.Sum256(prior)) != row.PriorSource.FileSHA256 {
+		prior, err := http2700ReverseLines(string(current), row.FileEdits)
+		if err != nil || fmt.Sprintf("%x", sha256.Sum256([]byte(prior))) != row.PriorSource.FileSHA256 {
 			return nil, fmt.Errorf("HTTP policy signed predecessor changed: %s: %v", path, err)
 		}
-		return prior, nil
+		return []byte(prior), nil
 	}
 	return current, nil
 }

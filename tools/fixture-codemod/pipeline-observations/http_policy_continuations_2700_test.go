@@ -336,12 +336,23 @@ func proveHTTP2700CopiedSource(t *testing.T, pin selectedreadrole.HTTP2700Contin
 	if _, _, recognized, err := selectedreadrole.HTTP2700PriorRecipe(root, raw, actual); err != nil || !recognized {
 		t.Fatalf("exact copied source refused: %v", err)
 	}
+	if len(pin.FileEdits) != 0 {
+		prior, err := selectedreadrole.HTTP2700HistoricalSource(root, row.File, source)
+		if err != nil || fmt.Sprintf("%x", sha256.Sum256(prior)) != pin.PriorSource.FileSHA256 {
+			t.Fatalf("exact Git-less copied source lost its finite history: %v", err)
+		}
+	}
 	for _, changed := range [][]byte{append(bytes.Clone(source), []byte("\n// changed sibling\n")...), nil, source[:len(source)/2]} {
 		if err := os.WriteFile(path, changed, 0600); err != nil {
 			t.Fatal(err)
 		}
 		if _, _, _, err := selectedreadrole.HTTP2700PriorRecipe(root, raw, actual); err == nil {
 			t.Fatal("warm copied source hid a changed/missing sibling")
+		}
+		if len(pin.FileEdits) != 0 {
+			if _, err := selectedreadrole.HTTP2700HistoricalSource(root, row.File, source); err == nil {
+				t.Fatal("warm historical view accepted stale caller bytes over changed copied source")
+			}
 		}
 	}
 	if err := os.Remove(path); err != nil {
