@@ -2,7 +2,6 @@ package schemastore
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/url"
 	"os"
@@ -11,7 +10,6 @@ import (
 	"sync"
 
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
-	_ "modernc.org/sqlite"
 )
 
 type SQLite struct {
@@ -65,7 +63,7 @@ func openSQLite(path string, readOnly bool) (*SQLite, *sqlitebackend.Backend, er
 	if readOnly {
 		dsn = sqliteReadOnlyFileDSN(cleanPath)
 	}
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sqlitebackend.OpenDatabase(dsn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open sqlite schema store: %w", err)
 	}
