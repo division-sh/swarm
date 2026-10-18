@@ -47,22 +47,6 @@ func TestRequireAdmittedAgentIdentityRejectsRunlessAndMismatchedIdentity(t *test
 	}
 }
 
-func managerTestTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
-	t.Helper()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
-	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
-	if err != nil {
-		t.Fatalf("construct manager test topology plan: %v", err)
-	}
-	admission, err := runtimeagenttopology.StaticAdmission(
-		plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged,
-	)
-	if err != nil {
-		t.Fatalf("construct manager test topology admission: %v", err)
-	}
-	return admission
-}
-
 func managerTestTopologyAdmissionForSource(t testing.TB, source semanticview.Source) runtimeagenttopology.Admission {
 	t.Helper()
 	bundle, present := semanticview.Bundle(source)
@@ -85,13 +69,6 @@ func managerTestTopologyAdmissionForSource(t testing.TB, source semanticview.Sou
 	if err != nil {
 		t.Fatal(err)
 	}
-	return admission
-}
-
-func managerTestEphemeralTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
-	t.Helper()
-	admission := managerTestTopologyAdmission(t)
-	admission.Lifetime = runtimeagenttopology.LifetimeEphemeral
 	return admission
 }
 
