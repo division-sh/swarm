@@ -106,6 +106,8 @@ func (h *OriginalSessionInterruptionForTest) Interrupt(ctx context.Context, orig
 	if h == nil || h.interrupt == nil {
 		return errors.New("original session interruption is missing")
 	}
+	h.original.owner.opMu.Lock()
+	defer h.original.owner.opMu.Unlock()
 	if err := original.Validate(); err != nil {
 		return err
 	}

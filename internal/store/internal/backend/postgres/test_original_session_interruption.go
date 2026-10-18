@@ -36,6 +36,11 @@ func (b *Backend) PrepareOriginalSessionInterruptionForTest(ctx context.Context,
 		if !consumed.CompareAndSwap(false, true) {
 			return errors.New("original PostgreSQL session interruption was already consumed")
 		}
+		finish, err := session.beginOperation()
+		if err != nil {
+			return err
+		}
+		defer finish()
 		if _, err := session.connection(); err != nil {
 			return err
 		}
