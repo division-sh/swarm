@@ -19,7 +19,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func newSourceSetTestManager(t *testing.T, source semanticview.Source) (*AgentManager, runtimeagenttopology.SourceCoordinate, ProcessExecutionBinding) {
+func sourceSetFixtureAdmission(t *testing.T, source semanticview.Source) (AgentManagerOptions, runtimeagenttopology.SourceCoordinate, ProcessExecutionBinding) {
 	t.Helper()
 	bundle, present := semanticview.Bundle(source)
 	if !present || bundle == nil {
@@ -29,9 +29,15 @@ func newSourceSetTestManager(t *testing.T, source semanticview.Source) (*AgentMa
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := newTestAgentManagerWithOptions(t, &recoveryTestBus{}, nil, AgentManagerOptions{SemanticSource: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact)})
 	binding := lifecycleProbeProcessBinding()
 	binding.BundleHash = coordinate.BundleHash
+	return AgentManagerOptions{SemanticSource: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact)}, coordinate, binding
+}
+
+func newSourceSetTestManager(t *testing.T, source semanticview.Source) (*AgentManager, runtimeagenttopology.SourceCoordinate, ProcessExecutionBinding) {
+	t.Helper()
+	options, coordinate, binding := sourceSetFixtureAdmission(t, source)
+	manager := newTestAgentManagerWithOptions(t, &recoveryTestBus{}, nil, options)
 	return manager, coordinate, binding
 }
 
@@ -790,11 +796,23 @@ func TestPreparedDurableTopologySourceSetRebindPublishesBindingsOnlyAfterEveryCo
 
 type staticStartupReconcileStore struct {
 	recoveryTestStore
+	lifecycle   *sourceSetLifecycleCommitProbe
 	transitions []AgentLifecycleTransition
 }
 
+func (s *staticStartupReconcileStore) ProcessExecutionBinding() (ProcessExecutionBinding, error) {
+	return s.lifecycle.ProcessExecutionBinding()
+}
+
+func (s *staticStartupReconcileStore) LoadAgents(ctx context.Context) ([]PersistedAgent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return append([]PersistedAgent(nil), s.agents...), nil
+}
+
 func (s *staticStartupReconcileStore) CommitAgentLifecycleTransition(ctx context.Context, req AgentLifecycleTransition) (AgentLifecycleTransitionResult, error) {
-	result, err := s.recoveryTestStore.CommitAgentLifecycleTransition(ctx, req)
+	result, err := s.lifecycle.CommitAgentLifecycleTransition(ctx, req)
 	if err != nil {
 		return AgentLifecycleTransitionResult{}, err
 	}
@@ -809,22 +827,23 @@ func (s *staticStartupReconcileStore) CommitAgentLifecycleTransition(ctx context
 		s.agents[i].LifecyclePhase = req.TargetPhase
 		s.agents[i].LifecycleRunMode = req.RunMode
 		s.agents[i].Topology = req.Topology
+		s.agents[i].ProcessBinding = result.ProcessBinding
 	}
 	return result, nil
 }
 
 func TestStaticTopologyStartupReintroducesDesiredFailedDeclaration(t *testing.T) {
 	source := loadRootAndFlowStaticAgentSource(t)
+	options, coordinate, binding := sourceSetFixtureAdmission(t, source)
 	store := &staticStartupReconcileStore{}
-	manager := newTestAgentManager(t, &recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
+	store.lifecycle = &sourceSetLifecycleCommitProbe{lifecyclePersistenceProbe: store.lifecycleRows(), binding: binding}
+	manager := newTestAgentManagerWithOptions(t, &recoveryTestBus{}, func(cfg models.AgentConfig) (Agent, error) {
 		return recoveryTestAgent{id: cfg.ID}, nil
-	}, store)
-	manager.semanticSource = source
+	}, options, store)
 	records, err := manager.resolvedStaticTopologyRecords(managerIdentityTestRunID, source)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("resolve static records: count=%d err=%v", len(records), err)
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
 	desired, err := desiredAgentsFromRecords(records, coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -844,8 +863,8 @@ func TestStaticTopologyStartupReintroducesDesiredFailedDeclaration(t *testing.T)
 	failed.LifecyclePhase = AgentLifecycleFailed
 	failed.LifecycleRunMode = AgentRunModeStopped
 	failed.StartedAt = time.Now().UTC()
+	failed.ProcessBinding = binding
 	store.agents = []PersistedAgent{failed}
-	failed.ProcessBinding = lifecycleProbeProcessBinding()
 	if err := store.lifecycleRows().seedAgentRow(failed); err != nil {
 		t.Fatal(err)
 	}
