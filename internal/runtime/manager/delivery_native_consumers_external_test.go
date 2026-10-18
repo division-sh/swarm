@@ -386,7 +386,7 @@ func TestProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayRecord(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerFailureDeliverySource(t))
 			})
 		})
 	}
@@ -416,7 +416,7 @@ func TestProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay(t *testing
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerFailureDeliverySource(t))
 			})
 		})
 	}

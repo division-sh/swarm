@@ -61,6 +61,11 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 	if err != nil {
 		t.Fatal(err)
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	source := sourceartifactfixture.RequireArtifact(t, ctx, owner, bundle.SourceArtifact)
 	ctx = correlation.WithSourceArtifactFact(ctx, source)
 	runtimeID := uuid.NewString()

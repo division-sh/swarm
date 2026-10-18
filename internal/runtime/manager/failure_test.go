@@ -103,13 +103,13 @@ func ProveNativeProcessEventPreservesAgentFailureEnvelopeAcrossReceiptAndReplayR
 			nativeDelivery := newNativeDelivery(t)
 			deliveryStore := nativeDelivery
 			bus := &recordingReceiptBus{}
-			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore})
+			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveryStore, SemanticSource: nativeDelivery.SemanticSource, SourceArtifactFact: nativeDelivery.Authority.SourceArtifact()})
 			err := tt.newFailure()
 			expected := runtimeengine.NormalizeFailure(err, "agent-manager", "process_event.on_event").Failure
 			evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-"+tt.name), events.EventType("work.requested"), "", "", nil, 0, eventtest.UUID("failure-run-"+tt.name), "", events.EventEnvelope{}, time.Time{})
 			agent := failureReturningAgent{id: "agent-a", err: err}
 			nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
-			ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), evt, agent.ID())
+			ctx := managerClaimedDeliveryContext(t, am, nativeDelivery.Context, evt, agent.ID())
 			result := am.processEventDetailed(ctx, agent, evt)
 			if result.err == nil {
 				t.Fatal("processEventDetailed error = nil")
@@ -322,13 +322,13 @@ func ProveNativeProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay(t *
 	nativeDelivery := newNativeDelivery(t)
 	deliveryStore := nativeDelivery
 	store := &startupReplayTestStore{recoveryTestStore: recoveryTestStore{}, ManagerDeliveryNativeFixture: deliveryStore}
-	am := newTestAgentManager(t, &recordingReceiptBus{}, nil, store)
+	am := newTestAgentManagerWithOptions(t, &recordingReceiptBus{}, nil, AgentManagerOptions{DeliveryStore: deliveryStore, SemanticSource: nativeDelivery.SemanticSource, SourceArtifactFact: nativeDelivery.Authority.SourceArtifact()}, store)
 	err := runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "claude_cli_attempt_outcome_unconfirmed", "claude-cli-adapter", "wait", nil)
 	agent := &countingFailureAgent{failureReturningAgent: failureReturningAgent{id: "agent-a", err: err}}
 	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-uncertain"), events.EventType("work.requested"), "", "", nil, 0, eventtest.UUID("uncertain-run"), "", events.EventEnvelope{}, time.Time{})
 	deliveryStore.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
 	route := managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID())
-	ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), evt, agent.ID())
+	ctx := managerClaimedDeliveryContext(t, am, nativeDelivery.Context, evt, agent.ID())
 	first := am.processEventDetailed(ctx, agent, evt)
 	if first.err == nil || agent.calls != 1 {
 		t.Fatalf("first result err=%v calls=%d, want one terminal failure", first.err, agent.calls)
@@ -341,7 +341,7 @@ func ProveNativeProcessEventOutcomeUncertainTerminalDeliverySuppressesReplay(t *
 	if err != nil {
 		t.Fatalf("read terminal delivery: %v", err)
 	}
-	page, err := deliveryStore.ScanDeliveryContinuations(testAuthorActivityContext(context.Background()), snapshot.Authority, runtimedelivery.ContinuationCursor{}, 10)
+	page, err := deliveryStore.ScanDeliveryContinuations(nativeDelivery.Context, snapshot.Authority, runtimedelivery.ContinuationCursor{}, 10)
 	if err != nil {
 		t.Fatalf("scan terminal delivery continuation: %v", err)
 	}
