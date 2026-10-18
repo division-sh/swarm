@@ -133,12 +133,21 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 		})
 	}
 	generated := fmt.Errorf("%w: %w", runtimebus.ErrPayloadValidation, &eventschema.Violation{Path: "$.generated", Detail: "internal generated payload"})
+	_, normalizedNull := eventschema.NormalizeOptionalFieldNulls(
+		map[string]any{"type": "object", "required": []any{"generated"}, "properties": map[string]any{"generated": map[string]any{"type": "string"}}},
+		map[string]any{"generated": nil},
+	)
+	if normalizedNull == nil {
+		t.Fatal("generated null control requires a real normalization refusal")
+	}
 	for _, cell := range []struct {
 		name   string
 		err    error
 		status int
 	}{
 		{"generated_payload", generated, 503},
+		{"normalization_without_submitted_admission", normalizedNull, 503},
+		{"normalization_with_independent_cleanup", errors.Join(normalizedNull, cleanup), 503},
 		{"provider", providertriggers.Error{Status: 400, Message: "invalid provider request"}, 400},
 		{"provider_cleanup", errors.Join(providertriggers.Error{Status: 400, Message: "invalid provider request"}, cleanup), 503},
 		{"cleanup_provider", errors.Join(cleanup, providertriggers.Error{Status: 400, Message: "invalid provider request"}), 503},
