@@ -242,6 +242,7 @@ type Runtime struct {
 	fanOutContext               context.Context
 	startupLifecyclePrepared    bool
 	replacementQuiesced         bool
+	stopResult                  error
 	workOccurrence              *worklifetime.RuntimeOccurrence
 	runLifecycleExecutor        *runtimerunlifecycle.Executor
 	runLifecycleRegistration    runtimerunlifecycle.CandidateRegistration
@@ -2162,15 +2163,16 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	}
 	rt.generationMu.Lock()
 	defer rt.generationMu.Unlock()
-	rt.lifecycleMu.Lock()
-	completed := rt.replacementQuiesced && rt.startupGrant == nil
-	rt.lifecycleMu.Unlock()
-	if completed {
-		return nil
-	}
 	grace, err := runtimemanager.ResolveShutdownGrace(opts.Grace)
 	if err != nil {
 		return err
+	}
+	rt.lifecycleMu.Lock()
+	completed := rt.replacementQuiesced && rt.startupGrant == nil
+	completedResult := rt.stopResult
+	rt.lifecycleMu.Unlock()
+	if completed {
+		return completedResult
 	}
 	if rt.Manager != nil {
 		if err := rt.Manager.CheckShutdownAdmission(); err != nil {
@@ -2292,6 +2294,7 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	}
 	rt.lifecycleMu.Lock()
 	rt.replacementQuiesced = true
+	rt.stopResult = shutdownErr
 	rt.lifecycleMu.Unlock()
 	rt.releaseAuthorActivityCatalog()
 	return shutdownErr
