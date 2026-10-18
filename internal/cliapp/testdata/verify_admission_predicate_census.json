@@ -2865,7 +2865,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "7877f29de6095029847a5b0be52ce8eb6acc1c4c979ed6be10d1b2ee9c3142a8"
+    "body_sha256": "54637bd3422f5b199870e509cdac5468148d6b1f6944d05a49afa31b5bc08c75"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
