@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -268,11 +269,9 @@ func TestPublishedJoinContinuationRequiresAcceptedOriginal(t *testing.T) {
 				}
 			}
 			if change != "not_join" {
-				var err error
-				original, err = events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{Facts: facts, RunID: source.Command.RunID})
-				if err != nil {
-					t.Fatal(err)
-				}
+				original = eventtest.RuntimeControlWithRoutingSource(facts.ID, facts.Type, facts.Producer.ID,
+					facts.TaskID, facts.Payload, facts.ChainDepth, source.Command.RunID, "",
+					facts.Envelope, facts.RoutingSource, facts.CreatedAt)
 			}
 			if got, err := ProjectPublishedJoinContinuation(source, original, child); err == nil || got.Present() {
 				t.Fatalf("invalid original accepted: %+v err=%v", got, err)

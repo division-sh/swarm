@@ -20,7 +20,7 @@ func requireSurfaceLiveParentsTx(ctx context.Context, tx *sql.Tx, surface manage
 	if postgres {
 		// Serialize with removal of the exact association, not with a retained
 		// canonical row that must remain readable after reset.
-		query += ` FOR UPDATE`
+		query += ` FOR KEY SHARE OF p`
 	}
 	var id string
 	if err := tx.QueryRowContext(ctx, query, execution, child).Scan(&id); err != nil {

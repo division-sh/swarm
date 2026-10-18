@@ -27,20 +27,27 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 				verifyActivityExecutionBindingColumn(t, db, sourceRunID)
 			})
 			eventID := uuid.NewString()
+			otherEventID := uuid.NewString()
+			createdAt := time.Now().UTC()
 			runOwnerKey := "COALESCE('run:' || CAST($2 AS TEXT), '')"
 			if backend == "postgres" {
 				runOwnerKey = "COALESCE('run:' || CAST($2::uuid AS TEXT), '')"
 			}
-			if _, err := db.ExecContext(ctx, `INSERT INTO events
+			insertSourceEvent := func(id string) {
+				t.Helper()
+				if _, err := db.ExecContext(ctx, `INSERT INTO events
 				(event_class,event_id,run_id,event_name,scope,payload,payload_bytes,payload_schema_bundle_hash,
 				 payload_schema_event_key,payload_schema_digest,payload_schema_class,execution_mode,chain_depth,
 				 produced_by,produced_by_type,created_at,routing_source_kind,routing_source_authority,
 				 source_route,target_route,target_set,route_settlement,run_owner_key)
 				VALUES ('root_ingress',$1,$2,'test.received','global','{}',$3,$4,'test.received',$5,
-				'schema_less','live',0,'external','external',CURRENT_TIMESTAMP,'external_ingress','test',
-				'{"flow_path":"."}','{}','[]','{}',`+runOwnerKey+`)`, eventID, sourceRunID, []byte("{}"), bundleHash, "sha256:"+strings.Repeat("b", 64)); err != nil {
-				t.Fatalf("create source event: %v", err)
+				'schema_less','live',0,'external','external',$6,'external_ingress','test',
+				'{"flow_path":"."}','{}','[]','{}',`+runOwnerKey+`)`, id, sourceRunID, []byte("{}"), bundleHash, "sha256:"+strings.Repeat("b", 64), createdAt); err != nil {
+					t.Fatalf("create source event: %v", err)
+				}
 			}
+			insertSourceEvent(eventID)
+			insertSourceEvent(otherEventID)
 			insertForkRun := func(kind string, revision int64, eventID any) (string, error) {
 				t.Helper()
 				runID := uuid.NewString()
@@ -141,7 +148,7 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 				t.Fatalf("event runtime execution refused: %v", err)
 			}
 			t.Run("exact_live_parent_pairs", func(t *testing.T) {
-				verifyForkLiveParentPairs(t, db, eventID)
+				verifyForkLiveParentPairs(t, db, eventID, otherEventID)
 			})
 			t.Run("selected_grant_exact_execution", func(t *testing.T) {
 				verifySelectedGrantExactExecution(t, db, bundleHash, deploymentRunID, bindingID, eventBindingID)

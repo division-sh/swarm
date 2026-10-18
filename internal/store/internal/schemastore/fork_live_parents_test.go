@@ -4,8 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"testing"
-
-	"github.com/google/uuid"
 )
 
 type forkLiveParentFixture struct {
@@ -14,21 +12,8 @@ type forkLiveParentFixture struct {
 	event                            sql.NullString
 }
 
-func verifyForkLiveParentPairs(t *testing.T, db *sql.DB, sourceEventID string) {
+func verifyForkLiveParentPairs(t *testing.T, db *sql.DB, sourceEventID, otherEventID string) {
 	t.Helper()
-	otherEventID := uuid.NewString()
-	_, err := db.Exec(`INSERT INTO events
-		(event_class,event_id,run_id,event_name,scope,payload,payload_bytes,payload_schema_bundle_hash,
-		 payload_schema_event_key,payload_schema_digest,payload_schema_class,execution_mode,chain_depth,
-		 produced_by,produced_by_type,created_at,routing_source_kind,routing_source_authority,
-		 source_route,target_route,target_set,route_settlement,run_owner_key)
-		SELECT event_class,$2,run_id,event_name,scope,payload,payload_bytes,payload_schema_bundle_hash,
-		 payload_schema_event_key,payload_schema_digest,payload_schema_class,execution_mode,chain_depth,
-		 produced_by,produced_by_type,created_at,routing_source_kind,routing_source_authority,
-		 source_route,target_route,target_set,route_settlement,run_owner_key FROM events WHERE event_id=$1`, sourceEventID, otherEventID)
-	if err != nil {
-		t.Fatalf("create distinct event in the same source run: %v", err)
-	}
 	for _, execution := range []bool{false, true} {
 		canonical, parents, idColumn, bindingColumn := "run_fork_operations", "run_fork_operation_live_parents", "operation_id", "selected_binding_id"
 		generation := "1"
