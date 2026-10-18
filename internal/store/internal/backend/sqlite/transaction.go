@@ -339,14 +339,12 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 	probe.Begun()
 	ctx, releaseOrdering = authoractivity.BindTransaction(ctx, ctx, tx, authoractivity.DialectSQLite)
 	ctx = transactiontest.WithAttempt(ctx, probe)
-	if (opts == nil || !opts.ReadOnly) && runtimeownership.HasMutationAuthority(ctx) {
-		var retireAdmission func()
-		ctx, retireAdmission, err = generationauthority.AdmitMutationTx(ctx, tx, true)
-		if err != nil {
-			return false, err
-		}
-		defer retireAdmission()
+	var retireAdmission func()
+	ctx, retireAdmission, err = admitOptionalMutationTx(ctx, tx, opts)
+	if err != nil {
+		return false, err
 	}
+	defer retireAdmission()
 	if err = ctx.Err(); err != nil {
 		return false, err
 	}
@@ -412,6 +410,13 @@ func mutationBudgetError(label string, lastErr error) error {
 		return fmt.Errorf("%s busy recovery invariant violated: missing busy/locked cause", label)
 	}
 	return fmt.Errorf("%s retry budget %s exceeded: %w", label, mutationRetryBudget, lastErr)
+}
+
+func admitOptionalMutationTx(ctx context.Context, tx *sql.Tx, opts *sql.TxOptions) (context.Context, func(), error) {
+	if (opts == nil || !opts.ReadOnly) && runtimeownership.HasMutationAuthority(ctx) {
+		return generationauthority.AdmitMutationTx(ctx, tx, true)
+	}
+	return ctx, func() {}, nil
 }
 
 func mutationLabel(label string) string {

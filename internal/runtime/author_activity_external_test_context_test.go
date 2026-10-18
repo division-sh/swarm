@@ -577,11 +577,6 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 	return newRuntimeTestEventBusWithOptions(t, store, opts)
 }
 
-func newRuntimeTestEventBus(t testing.TB, store runtimebus.EventStore) (*runtimebus.EventBus, error) {
-	t.Helper()
-	return newRuntimeTestEventBusWithOptions(t, store, runtimebus.EventBusOptions{})
-}
-
 func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
 	t.Helper()
 	if opts.CarryMutationContext == nil {

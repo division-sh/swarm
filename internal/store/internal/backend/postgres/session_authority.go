@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
@@ -884,11 +883,9 @@ func runAuthorityTransactionWithProof(
 	if fn == nil {
 		return false, nil
 	}
-	if (opts == nil || !opts.ReadOnly) && runtimeownership.HasMutationAuthority(ctx) {
-		ctx, err = generationauthority.PrepareMutationAdmission(ctx)
-		if err != nil {
-			return false, err
-		}
+	ctx, err = prepareOptionalMutationAdmission(ctx, opts, true)
+	if err != nil {
+		return false, err
 	}
 	probe := session.testTransactions.Begin(opts != nil && opts.ReadOnly, true)
 	defer func() { probe.Finish(err) }()
@@ -922,15 +919,11 @@ func runAuthorityTransactionWithProof(
 	}()
 	if runErr := session.runWithCallerCancellation(orderingCtx, func(operationCtx context.Context) error {
 		operationCtx = transactiontest.WithAttempt(operationCtx, probe)
-		if (opts == nil || !opts.ReadOnly) && runtimeownership.HasMutationAuthority(operationCtx) {
-			var retireAdmission func()
-			var err error
-			operationCtx, retireAdmission, err = generationauthority.AdmitMutationTx(operationCtx, tx, false)
-			if err != nil {
-				return err
-			}
-			defer retireAdmission()
+		operationCtx, retireAdmission, err := admitOptionalMutationTx(operationCtx, tx, opts, true)
+		if err != nil {
+			return err
 		}
+		defer retireAdmission()
 		return fn(operationCtx, tx)
 	}); runErr != nil {
 		serializationConflict = (opts == nil || !opts.ReadOnly) && exactSerializationConflict(runErr)

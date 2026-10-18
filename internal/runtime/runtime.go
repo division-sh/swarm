@@ -2176,6 +2176,11 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	if completed {
 		return completedResult
 	}
+	return rt.stopWithGraceLocked(grace)
+}
+
+// The caller retains generationMu through this complete shutdown join.
+func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 	if rt.Manager != nil {
 		if err := rt.Manager.CheckShutdownAdmission(); err != nil {
 			return err

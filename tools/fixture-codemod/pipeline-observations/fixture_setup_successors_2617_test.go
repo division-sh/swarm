@@ -32,7 +32,7 @@ import (
 // #2730/6244831965 appends six mapped setup-chain endpoints, retaining
 // those 46 receipts and every prior Successor.
 // #2730/6246451663 and6246457824 append the 27 mapped fixture endpoints
-// and two exact callback continuations plus the timer-reopen endpoint,
+// and two exact callback continuations plus timer-reopen and native-coordinate endpoints,
 // retaining all 52 prior receipts and the complete mechanical history.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
@@ -98,14 +98,14 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "72ffda3b4e39eb978c9f082051d8efb6df2b871541bb89c0dcaafc73a6594ddb" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "f77513b684851a6d7ca4676b2a4afcd58fc9c740931b254c45714aec070cee25" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 82 {
+	if len(pins) != 83 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -267,7 +267,7 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "72ffda3b4e39eb978c9f082051d8efb6df2b871541bb89c0dcaafc73a6594ddb" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "f77513b684851a6d7ca4676b2a4afcd58fc9c740931b254c45714aec070cee25" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -278,7 +278,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 82 {
+	if len(pins) != 83 {
 		t.Fatal("fixture successor row count changed")
 	}
 	prefix, err := json.Marshal(pins[:39])

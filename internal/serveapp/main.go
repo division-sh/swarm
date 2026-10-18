@@ -925,6 +925,13 @@ type runtimeCompositionRequest struct {
 
 // buildRuntimeComposition owns the common acquisition/start/ready/close path for
 // live serving and private test execution. Existing owners retain all semantics.
+func bindCompositionProcessCapability(ctx context.Context, lifecycle *activatedServeLifecycle, capability runtimestartupownership.ProcessCapability) (context.Context, error) {
+	if err := lifecycle.SetProcessCapability(capability); err != nil {
+		return ctx, err
+	}
+	return runtimestartupownership.WithProcessMutationAuthority(ctx, capability)
+}
+
 func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest) (exitCode int) {
 	repo, opts, cfgResult := req.Repo, req.Options, req.Config
 	publicListener := opts.PublicWebhookListener
@@ -1106,11 +1113,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(5, "startup_ownership_lease", err)
 		return 3
 	}
-	if err := selectedLifecycle.SetProcessCapability(processCapability); err != nil {
-		presenter.fail(5, "startup_ownership_lease", err)
-		return 3
-	}
-	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, processCapability)
+	ctx, err = bindCompositionProcessCapability(ctx, selectedLifecycle, processCapability)
 	if err != nil {
 		presenter.fail(5, "startup_ownership_lease", err)
 		return 3
