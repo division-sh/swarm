@@ -12426,8 +12426,9 @@ tool_model:
         registration token. One acquired ingress runtime context supplies complete declared binding evidence and frozen learned
         credential ownership before selecting this arm; absence from the registration snapshot is never sufficient. Explicit
         declared registrations, operator-onboarded and prebinding registrations, and unresolved withdrawn registrations retain
-        the managed callback fence. Classification and publication use the same acquired context, source and target, retaining
-        the existing credential-replacement checks through commit. The public listener exposes no API, MCP, tools or health routes.
+        the managed callback fence. Classification and publication use the same acquired context, source and target.
+        Credential replacement is checked at the existing gateway validation and pre-publication boundaries.
+        The public listener exposes no API, MCP, tools or health routes.
       apply: >
         Provider registration apply is the only durable operation. It uses the managed external-effect journal with closed
         serve-registration authority, revalidates the currently admitted runtime-generation grant and all credential snapshots, commits the launched
