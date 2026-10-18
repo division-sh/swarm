@@ -5,6 +5,9 @@ import (
 	"strings"
 )
 
+type publicationSuccessorEdit struct{ before, after string }
+
+// Keep the actual codemod and its whole-source proofs on the same exact cuts.
 func q10FixtureSetupCurrentSource(row recipe) (string, error) {
 	current := row.Successor
 	if current == "" {
@@ -12,6 +15,21 @@ func q10FixtureSetupCurrentSource(row recipe) (string, error) {
 	}
 	var edits []publicationSuccessorEdit
 	switch row.File + "/" + row.Function {
+	case "internal/runtime/final_flow_instance_authoring_runtime_test.go/TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTemplateInstance":
+		edits = []publicationSuccessorEdit{{
+			"\t\tSELECT COUNT(*) FROM entity_state\n\t\tWHERE flow_instance LIKE 'account/%'\n\t\t  AND current_state = 'reviewed'\n\t\t  AND fields @> $1::jsonb\n",
+			"\t\tSELECT COUNT(*) FROM entity_state es JOIN flow_instances fi\n\t\t  ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id\n\t\tWHERE es.flow_instance LIKE 'account/%'\n\t\t  AND fi.current_state = 'reviewed'\n\t\t  AND es.fields @> $1::jsonb\n",
+		}}
+	case "internal/runtime/runforkexecution/activity_fork_execution_test.go/seedSource":
+		edits = []publicationSuccessorEdit{
+			{"source events.RoutingSource) {", "source events.RoutingSource) events.Event {"},
+			{"\t\tt.Fatalf(\"construct activity source tree: committed=%+v err=%v\", committed, err)\n\t}\n}", "\t\tt.Fatalf(\"construct activity source tree: committed=%+v err=%v\", committed, err)\n\t}\n\treturn event\n}"},
+		}
+	case "internal/runtime/runforkexecution/execution_test.go/seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource":
+		edits = []publicationSuccessorEdit{
+			{"\t\t\tcurrent_state, gates, fields, accumulator, revision,\n\t\t\tentered_state_at, created_at, updated_at\n", "\t\t\tfields, created_at, updated_at\n"},
+			{"\t\t\t'pending', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1,\n\t\t\t$4, $4, $4\n", "\t\t\t'{}'::jsonb, $4, $4\n"},
+		}
 	case "internal/runtime/pipeline/selection_retry_cas_external_test.go/TestSelectionRetryAfterRealCASConflictBothStores":
 		edits = []publicationSuccessorEdit{
 			{"fault := &selectionCASPersistence{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner), db: selected.db}", "fault := &selectionCASPersistence{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner)}"},

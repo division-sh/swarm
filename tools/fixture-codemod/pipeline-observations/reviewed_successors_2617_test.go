@@ -57,10 +57,6 @@ func loadReviewedSuccessors2617(t *testing.T) reviewedSuccessorPacket2617 {
 	return packet
 }
 
-func sameReviewedRecipeKey(left, right recipe) bool {
-	return left.Family == right.Family && left.File == right.File && left.Function == right.Function
-}
-
 func matchesReviewedSuccessor2617(row recipe, source string, pin reviewedSuccessor2617) bool {
 	row, source, err := embeddedSpecHistoricalPair1801(row, source)
 	if err != nil {
