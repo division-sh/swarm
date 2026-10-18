@@ -1,9 +1,11 @@
 package genericschedule
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -21,7 +23,8 @@ func TestPendingJoinContinuationPreservesImmediateObligationWithoutEvent(t *test
 					if err != nil {
 						t.Fatal(err)
 					}
-					if !continued.Present() || continued.Published() || continued.SourceEvent().ID() != "" ||
+					var absent events.Event
+					if !continued.Present() || continued.Published() || !reflect.DeepEqual(continued.SourceEvent(), absent) ||
 						continued.SourceRunID() != source.Command.RunID || continued.SourceEventID() != source.Publication.EventID {
 						t.Fatal("pending continuation fabricated publication or skipped its immediate parent")
 					}

@@ -186,7 +186,9 @@ func (p JoinContinuation) SourceEventID() string {
 
 func (p JoinContinuation) SourceEvent() events.Event {
 	if !p.Published() {
-		return events.Event{}
+		// Absence only: Present/Published distinguish pending evidence from a publication.
+		var absent events.Event
+		return absent
 	}
 	return p.original.Clone()
 }

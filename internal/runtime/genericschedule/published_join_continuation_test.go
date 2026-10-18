@@ -113,7 +113,7 @@ func TestPublishedJoinContinuationPreservesExactPublication(t *testing.T) {
 								t.Fatal(err)
 							}
 							continuation, err := ProjectPublishedJoinContinuation(source, original, child)
-							if err != nil || !continuation.Present() || !reflect.DeepEqual(continuation.ChildCommand(), child.Canonical()) ||
+							if err != nil || !continuation.Present() || !continuation.Published() || !reflect.DeepEqual(continuation.ChildCommand(), child.Canonical()) ||
 								!reflect.DeepEqual(continuation.SourceEvent(), original) {
 								t.Fatalf("continuation=%+v err=%v", continuation, err)
 							}
@@ -283,7 +283,7 @@ func TestPublishedJoinContinuationRequiresAcceptedOriginal(t *testing.T) {
 
 func TestPublishedJoinContinuationSealedValueAndEventIdentity(t *testing.T) {
 	var empty JoinContinuation
-	if empty.Present() || !reflect.DeepEqual(empty.SourceEvent(), events.Event{}) || !reflect.DeepEqual(empty.ChildCommand(), AdmissionCommand{}) {
+	if empty.Present() || empty.Published() || !reflect.DeepEqual(empty.SourceEvent(), events.Event{}) || !reflect.DeepEqual(empty.ChildCommand(), AdmissionCommand{}) {
 		t.Fatal("zero continuation is not absent")
 	}
 	if _, err := empty.Event(uuid.NewString(), "selection:exact"); err == nil {
@@ -307,6 +307,9 @@ func TestPublishedJoinContinuationSealedValueAndEventIdentity(t *testing.T) {
 	payload[0] = '!'
 	returned := continuation.ChildCommand()
 	returned.TaskID = "changed"
+	returnedEvent := continuation.SourceEvent()
+	returnedPayload := returnedEvent.Payload()
+	returnedPayload[0] = '!'
 	if _, err := continuation.Event(id, "selection:exact"); err != nil || !reflect.DeepEqual(continuation.SourceEvent(), original) || continuation.ChildCommand().TaskID != continuation.child.TaskID {
 		t.Fatalf("input or accessor mutation changed sealed evidence: %v", err)
 	}
