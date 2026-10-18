@@ -23,6 +23,10 @@ type ActiveRunSourceOwner interface {
 }
 
 func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, runLifecycle ActiveRunSourceOwner, rec runtimemutationlog.Record) error {
+	return insertPostgresAt(ctx, attempt, runLifecycle, rec, time.Time{})
+}
+
+func insertPostgresAt(ctx context.Context, attempt *mutationprotocol.Attempt, runLifecycle ActiveRunSourceOwner, rec runtimemutationlog.Record, occurredAt time.Time) error {
 	if attempt == nil {
 		return runtimemutationlog.ErrInvalidMutationLogWriter("mutation attempt is required")
 	}
@@ -73,7 +77,10 @@ func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, runLifecycle
 		}
 	}
 	mutationID := uuid.NewString()
-	occurredAt := time.Now().UTC()
+	if occurredAt.IsZero() {
+		occurredAt = time.Now().UTC()
+	}
+	occurredAt = occurredAt.UTC()
 	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
 		INSERT INTO entity_mutations (

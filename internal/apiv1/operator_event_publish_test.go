@@ -1167,13 +1167,8 @@ func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		UPDATE entity_state
-		SET fields = '{"entity_id":"authored-lookalike","flow_instance":"authored/lookalike"}'::jsonb,
-		    bookkeeping = '{"entity_id":"bookkeeping-lookalike","flow_instance":"bookkeeping/lookalike"}'::jsonb
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, runID, targetEntityID); err != nil {
-		t.Fatalf("seed hostile entity value-map identity lookalikes: %v", err)
+	if changed, err := storetest.SetWorkflowProjectionIdentityLookalikes(ctx, pg, runID, targetEntityID, targetFlowInstance); err != nil || changed != 1 {
+		t.Fatalf("seed hostile entity value-map identity lookalikes: rows=%d err=%v", changed, err)
 	}
 	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, mustAPITestSourceArtifactFact(bundleHash), targetOwner)
 	if err != nil {
@@ -2777,11 +2772,9 @@ func seedEventPublishImportedFields(t *testing.T, db *sql.DB, runID, entityID, f
 	// attachment authority. It remains the hostile unroutable-input control.
 	if _, err := db.Exec(`
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+			run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, $3, 'widget', 'pending',
-			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
+			$1::uuid, $2::uuid, $3, 'widget', '{}'::jsonb, now(), now()
 		)
 	`, runID, entityID, flowInstance); err != nil {
 		t.Fatalf("seed entity_state: %v", err)

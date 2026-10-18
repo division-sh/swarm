@@ -14,6 +14,8 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -183,12 +185,20 @@ type a2AccumulatorPersistedEvidence struct {
 func (p *a2AccumulatorPersistenceProof) evidence(t *testing.T) a2AccumulatorPersistedEvidence {
 	t.Helper()
 	var evidence a2AccumulatorPersistedEvidence
-	var fields, buckets []byte
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT revision, fields, accumulator FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, p.runID, p.runID).Scan(&evidence.Revision, &fields, &buckets); err != nil {
+	owner, err := flowidentity.NewRunScopedFlowInstance(p.runID, flowidentity.StoredRoute(".", p.runID, p.runID))
+	if err != nil {
 		t.Fatal(err)
 	}
-	evidence.Fields = a2AccumulatorJSONHash(t, fields)
-	evidence.Accumulator = a2AccumulatorJSONHash(t, buckets)
+	target, err := p.persistence.LoadWorkflowTargetPersistence(p.ctx, owner, identity.NormalizeEntityID(p.runID))
+	if err != nil || target.Presence != pipeline.WorkflowTargetPersistenceComplete {
+		t.Fatalf("read exact accumulator header/data pair: presence=%v err=%v", target.Presence, err)
+	}
+	if err := target.Validate(owner.Route, identity.NormalizeEntityID(p.runID)); err != nil {
+		t.Fatal(err)
+	}
+	evidence.Revision = target.Lifecycle.State.Revision
+	evidence.Fields = a2AccumulatorJSONHash(t, target.State.Fields)
+	evidence.Accumulator = a2AccumulatorJSONHash(t, target.Lifecycle.State.Accumulator)
 	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1`, p.runID).Scan(&evidence.Mutations); err != nil {
 		t.Fatal(err)
 	}

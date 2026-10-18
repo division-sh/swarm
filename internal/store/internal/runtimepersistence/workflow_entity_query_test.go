@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityquery"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -57,6 +58,21 @@ func TestWorkflowEntityQueryProjectionOnBothStores(t *testing.T) {
 			if count != 1 {
 				t.Fatalf("numeric count = %d, want one in-scope entity", count)
 			}
+			for _, field := range []string{"current_state", "workflow_state"} {
+				for _, op := range []string{"==", "!="} {
+					want := 0
+					if op == "!=" {
+						want = 2
+					}
+					count, err := owner.CountWorkflowEntities(ctx, entityquery.Request{
+						RunID: runID, Source: source, Contract: contract,
+						Predicate: entityquery.Predicate{Field: field, Op: op, Value: "ready"},
+					})
+					if err != nil || count != want {
+						t.Fatalf("data-only %s %s ready count=%d want=%d err=%v", field, op, count, want, err)
+					}
+				}
+			}
 		})
 	}
 }
@@ -64,58 +80,112 @@ func TestWorkflowEntityQueryProjectionOnBothStores(t *testing.T) {
 func TestWorkflowEntityCollectionIncludesStateOnlyRowsOnBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
-			reader, ok := selected.(interface {
-				QueryWorkflowEntityCollection(context.Context, runtimepipeline.WorkflowEntityCollectionOwner) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error)
-			})
-			if !ok {
-				t.Fatalf("%s selected store has no workflow entity collection operation", backend)
-			}
-			source := stateOnlyAcquisitionSourceWithMode(t, "child", runtimecontracts.FlowModeTemplate)
-			owner, err := runtimepipeline.AdmitWorkflowEntityCollectionOwner(source, "child", "review_item", runID)
-			if err != nil {
-				t.Fatalf("admit workflow entity collection owner: %v", err)
-			}
-			seedLifecycle := func(run, entity, path, status string) {
-				t.Helper()
-				now := time.Now().UTC().Truncate(time.Microsecond)
-				seedWorkflowHeaderProjectionFixture(t, ctx, db, run, entity, path, "child", "review_item", "ready", "{}", now)
-				if status == "terminated" {
-					if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET status='terminated', terminated_at=$3 WHERE run_id=$1 AND instance_path=$2`, run, path, now); err != nil {
-						t.Fatalf("seed terminated query projection: %v", err)
+			for _, inactiveStatus := range []string{"terminated", "draining"} {
+				t.Run(inactiveStatus, func(t *testing.T) {
+					selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
+					reader, ok := selected.(interface {
+						QueryWorkflowEntityCollection(context.Context, runtimepipeline.WorkflowEntityCollectionOwner) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error)
+					})
+					if !ok {
+						t.Fatalf("%s selected store has no workflow entity collection operation", backend)
 					}
-				}
-			}
+					source := stateOnlyAcquisitionSourceWithMode(t, "child", runtimecontracts.FlowModeTemplate)
+					owner, err := runtimepipeline.AdmitWorkflowEntityCollectionOwner(source, "child", "review_item", runID)
+					if err != nil {
+						t.Fatalf("admit workflow entity collection owner: %v", err)
+					}
+					seedLifecycle := func(run, entity, path, status string) {
+						t.Helper()
+						now := time.Now().UTC().Truncate(time.Microsecond)
+						seedWorkflowHeaderProjectionFixture(t, ctx, db, run, entity, path, "child", "review_item", "ready", "{}", now)
+						if status == "terminated" {
+							if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET status='terminated', terminated_at=$3 WHERE run_id=$1 AND instance_path=$2`, run, path, now); err != nil {
+								t.Fatalf("seed terminated query projection: %v", err)
+							}
+						} else if status == "draining" {
+							if changed, err := SetWorkflowProjectionDrainingForTest(ctx, selected, run, path); err != nil || changed != 1 {
+								t.Fatalf("seed draining query projection: changed=%d err=%v", changed, err)
+							}
+						}
+					}
 
-			seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/state-only", "review_item", map[string]any{"account_id": "state-only"})
-			materializedID := seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/materialized", "review_item", map[string]any{"account_id": "materialized"})
-			seedLifecycle(runID, materializedID, "child/materialized", "active")
-			terminatedID := seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/terminated", "review_item", map[string]any{"account_id": "terminated"})
-			seedLifecycle(runID, terminatedID, "child/terminated", "terminated")
-			seedWorkflowEntityQueryRowAs(t, backend, db, runID, "sibling/outside", "review_item", map[string]any{"account_id": "wrong-flow"})
-			seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/wrong-type", "other_item", map[string]any{"account_id": "wrong-type"})
+					stateOnlyID := seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/state-only", "review_item", map[string]any{"account_id": "state-only"})
+					materializedID := seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/materialized", "review_item", map[string]any{"account_id": "materialized"})
+					seedLifecycle(runID, materializedID, "child/materialized", "active")
+					terminatedID := seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/terminated", "review_item", map[string]any{"account_id": "terminated"})
+					seedLifecycle(runID, terminatedID, "child/terminated", inactiveStatus)
+					seedWorkflowEntityQueryRowAs(t, backend, db, runID, "sibling/outside", "review_item", map[string]any{"account_id": "wrong-flow"})
+					seedWorkflowEntityQueryRowAs(t, backend, db, runID, "child/wrong-type", "other_item", map[string]any{"account_id": "wrong-type"})
 
-			wrongRunID := uuid.NewString()
-			requireRunningRunForTest(t, context.Background(), selected, wrongRunID, time.Now().UTC())
-			seedWorkflowEntityQueryRowAs(t, backend, db, wrongRunID, "child/wrong-run", "review_item", map[string]any{"account_id": "wrong-run"})
-			// A sibling run's lifecycle must not hide this run's state-only row.
-			seedLifecycle(wrongRunID, uuid.NewString(), "child/state-only", "terminated")
+					wrongRunID := uuid.NewString()
+					requireRunningRunForTest(t, context.Background(), selected, wrongRunID, time.Now().UTC())
+					seedWorkflowEntityQueryRowAs(t, backend, db, wrongRunID, "child/wrong-run", "review_item", map[string]any{"account_id": "wrong-run"})
+					// A sibling run's lifecycle must not hide this run's state-only row.
+					seedLifecycle(wrongRunID, uuid.NewString(), "child/state-only", inactiveStatus)
+					instanceReader := selected.(runtimepipeline.WorkflowInstancePersistenceReader)
+					expectedInstances := map[string]runtimepipeline.WorkflowInstance{}
+					for _, tc := range []struct {
+						entity, path, status string
+						constructed          bool
+					}{
+						{stateOnlyID, "child/state-only", "", false},
+						{materializedID, "child/materialized", "active", true},
+						{terminatedID, "child/terminated", inactiveStatus, true},
+					} {
+						identity := flowidentity.RunScopedFlowInstance{RunID: runID,
+							Route: flowidentity.StoredRoute("child", flowidentity.LogicalInstanceID(tc.path), tc.path)}
+						stored, found, err := instanceReader.LoadWorkflowInstance(ctx, identity)
+						if err != nil || found != tc.constructed {
+							t.Fatalf("independent collection header membership for %s: found=%t want=%t err=%v", tc.path, found, tc.constructed, err)
+						}
+						if found && (stored.EntityID != tc.entity || stored.StorageRef != tc.path || stored.WorkflowName != "child" ||
+							stored.EntityType != "review_item" || !stored.StageDefined || stored.CurrentState != "ready" ||
+							stored.Status != tc.status || stored.Revision != 1) {
+							t.Fatalf("explicit collection header projection drifted: %+v", stored)
+						}
+						if found {
+							expectedInstances[tc.path] = stored
+						}
+					}
+					instances, err := instanceReader.ListWorkflowInstances(ctx, runID)
+					if err != nil || len(instances) != len(expectedInstances) {
+						t.Fatalf("instance directory lost inactive membership or acquired data-only membership: instances=%+v err=%v", instances, err)
+					}
+					for _, instance := range instances {
+						expected, found := expectedInstances[instance.StorageRef]
+						if !found || !reflect.DeepEqual(expected, instance) {
+							t.Fatalf("instance directory changed exact header readback: got=%+v expected=%+v", instance, expected)
+						}
+						delete(expectedInstances, instance.StorageRef)
+					}
+					if len(expectedInstances) != 0 {
+						t.Fatalf("instance directory omitted retained headers: %+v", expectedInstances)
+					}
 
-			records, err := reader.QueryWorkflowEntityCollection(runtimecorrelation.WithRunID(ctx, wrongRunID), owner)
-			if err != nil {
-				t.Fatalf("query workflow entity collection: %v", err)
-			}
-			got := make([]string, 0, len(records))
-			for _, record := range records {
-				var fields map[string]any
-				if err := json.Unmarshal(record.Fields, &fields); err != nil {
-					t.Fatalf("decode returned fields: %v", err)
-				}
-				got = append(got, fields["account_id"].(string))
-			}
-			sort.Strings(got)
-			if !reflect.DeepEqual(got, []string{"materialized", "state-only"}) {
-				t.Fatalf("entity collection = %#v, want state-only and materialized rows only", got)
+					records, err := reader.QueryWorkflowEntityCollection(runtimecorrelation.WithRunID(ctx, wrongRunID), owner)
+					if err != nil {
+						t.Fatalf("query workflow entity collection: %v", err)
+					}
+					included := map[string]string{"child/state-only": stateOnlyID, "child/materialized": materializedID}
+					seen := map[string]bool{}
+					got := make([]string, 0, len(records))
+					for _, record := range records {
+						entityID, expected := included[record.FlowInstance]
+						if !expected || seen[record.FlowInstance] || record.EntityID != entityID || record.EntityType != "review_item" {
+							t.Fatalf("entity collection changed exact membership: %+v", record)
+						}
+						seen[record.FlowInstance] = true
+						var fields map[string]any
+						if err := json.Unmarshal(record.Fields, &fields); err != nil {
+							t.Fatalf("decode returned fields: %v", err)
+						}
+						got = append(got, fields["account_id"].(string))
+					}
+					sort.Strings(got)
+					if !reflect.DeepEqual(got, []string{"materialized", "state-only"}) {
+						t.Fatalf("entity collection = %#v, want state-only and materialized rows only", got)
+					}
+				})
 			}
 		})
 	}
@@ -150,6 +220,7 @@ func seedWorkflowEntityQueryRow(t *testing.T, backend string, db *sql.DB, runID,
 	seedWorkflowEntityQueryRowAs(t, backend, db, runID, flowInstance, "child_entity", fields)
 }
 
+// Read-only data projections do not manufacture workflow lifecycle evidence.
 func seedWorkflowEntityQueryRowAs(t *testing.T, backend string, db *sql.DB, runID, flowInstance, entityType string, fields map[string]any) string {
 	t.Helper()
 	entityID := uuid.NewString()
@@ -162,10 +233,10 @@ func seedWorkflowEntityQueryRowAs(t *testing.T, backend string, db *sql.DB, runI
 	var args []any
 	switch backend {
 	case "sqlite":
-		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, ?, 'ready', '{}', ?, '{}', 1, ?, ?, ?)`
-		args = []any{runID, entityID, flowInstance, entityType, string(raw), now, now, now}
+		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+		args = []any{runID, entityID, flowInstance, entityType, string(raw), now, now}
 	case "postgres":
-		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, $4, 'ready', '{}'::jsonb, $5::jsonb, '{}'::jsonb, 1, $6, $6, $6)`
+		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6, $6)`
 		args = []any{runID, entityID, flowInstance, entityType, string(raw), now}
 	default:
 		t.Fatalf("unsupported backend %q", backend)

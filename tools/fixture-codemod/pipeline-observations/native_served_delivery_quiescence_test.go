@@ -59,7 +59,7 @@ func TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	matched := 0
+	matched, q10Endpoints := 0, 0
 	for _, row := range rows {
 		if row.Family != "native-served-delivery-quiescence-caller" {
 			continue
@@ -74,6 +74,28 @@ func TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork(t *
 		current := row.After
 		if row.Successor != "" {
 			current = row.Successor
+		}
+		historical := current
+		current, endpointErr := q10DeliveryCallerCurrentSource(row)
+		if endpointErr != nil {
+			t.Fatal(endpointErr)
+		}
+		if current != historical {
+			q10Endpoints++
+			currentGuard := row
+			currentGuard.Before, currentGuard.After, currentGuard.Successor = current, current, ""
+			if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+historical), currentGuard); err == nil || changed {
+				t.Fatalf("historical delivery reader accepted as current: %s", row.Function)
+			}
+			for _, cut := range []string{"ReadRunDeliveries", "CurrentState", "!reflect.DeepEqual", "fi.run_id=es.run_id", "fi.instance_path=es.flow_instance", "fi.entity_id=es.entity_id"} {
+				mutant := strings.Replace(current, cut, "foreignCut", 1)
+				if mutant == current {
+					continue
+				}
+				if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+mutant), currentGuard); err == nil || changed {
+					t.Fatalf("current delivery caller lost owner, stage, equality or join identity: %s/%s", row.Function, cut)
+				}
+			}
 		}
 		currentPin, pinErr := canonicalFunction(current)
 		activeName := row.Function
@@ -92,8 +114,8 @@ func TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork(t *
 			t.Fatalf("foreign owner admitted by finite rewrite: %s", row.Function)
 		}
 	}
-	if matched != 73 {
-		t.Fatalf("mechanical delivery caller recipes=%d,want73; construction is separate", matched)
+	if matched != 73 || q10Endpoints != 12 {
+		t.Fatalf("mechanical delivery caller recipes=%d,want73; Q10 endpoints=%d,want12; construction is separate", matched, q10Endpoints)
 	}
 }
 
@@ -159,6 +181,31 @@ func TestServedDeliveryQuiescenceOwnerRecipesRemainSourcePinned(t *testing.T) {
 		current := row.After
 		if row.Successor != "" {
 			current = row.Successor
+		}
+		if row.File == "internal/serveapp/receiver_restart_test.go" && row.Function == "TestReceiverCompositionRestartBothStores" {
+			const original = "`SELECT count(*) FROM entity_state WHERE run_id=$1 AND current_state='done'`"
+			const paired = "`SELECT count(*) FROM entity_state es JOIN flow_instances fi\n" +
+				"ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id\n" +
+				"WHERE es.run_id=$1 AND fi.current_state='done'`"
+			if strings.Count(current, original) != 1 {
+				t.Fatal("missing exact historical restart construction-count read")
+			}
+			historical := current
+			current = strings.Replace(current, original, paired, 1)
+			guard := row
+			guard.Before, guard.After, guard.Successor = current, current, ""
+			if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+historical), guard); err == nil || changed {
+				t.Fatal("retired data-row stage count admitted as the current restart reader")
+			}
+			for _, cut := range []string{"fi.run_id=es.run_id", "fi.instance_path=es.flow_instance", "fi.entity_id=es.entity_id", "fi.current_state='done'", "entities != 2"} {
+				mutant := strings.Replace(current, cut, "foreignCut", 1)
+				if mutant == current {
+					t.Fatalf("missing exact restart construction binding: %s", cut)
+				}
+				if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+mutant), guard); err == nil || changed {
+					t.Fatalf("restart lost lifecycle owner, composite membership or exact count: %s", cut)
+				}
+			}
 		}
 		want, err := canonicalFunction(current)
 		got, actualErr := canonicalFunction(actual)

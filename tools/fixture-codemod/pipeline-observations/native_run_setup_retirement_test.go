@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -28,15 +29,51 @@ type runSetupTransition struct {
 
 func runSetupTransitions(t *testing.T) []runSetupTransition {
 	t.Helper()
-	var rows []runSetupTransition
-	if err := json.Unmarshal(runSetupTransitionBytes, &rows); err != nil {
+	rows, err := decodeRunSetupTransitions(runSetupTransitionBytes)
+	if err != nil {
 		t.Fatal(err)
+	}
+	return rows
+}
+
+func decodeRunSetupTransitions(data []byte) ([]runSetupTransition, error) {
+	var rows []runSetupTransition
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, err
 	}
 	raw, err := json.Marshal(rows)
 	if err != nil || len(rows) != 149 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "8425ffe9aa580a48e765a5da1b12ce8c8ca14ab282b6c5cc1dddf1eb29cb3c2a" {
-		t.Fatalf("finite run-setup transformation changed: %d/%v", len(rows), err)
+		return nil, fmt.Errorf("finite run-setup transformation changed: %d/%v", len(rows), err)
 	}
-	return rows
+	return rows, nil
+}
+
+func runSetupRetiredHelperPredecessor(row recipe, source []byte) (recipe, error) {
+	if row.Family != "native-run-setup-family144" || row.File != "internal/runtime/tools/executor_entity_test.go" || row.Function != "ensureEntityToolTestRun" {
+		return recipe{}, fmt.Errorf("unlisted retired run-setup helper")
+	}
+	transitions, err := decodeRunSetupTransitions(runSetupTransitionBytes)
+	if err != nil {
+		return recipe{}, err
+	}
+	var prior recipe
+	matches := 0
+	for _, pin := range transitions {
+		if pin.File == row.File && pin.Function == row.Function && !pin.Removed {
+			matches++
+			prior = recipe{Family: row.Family, File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}
+		}
+	}
+	expected := prior
+	expected.Removed = true
+	if matches != 1 || !reflect.DeepEqual(row, expected) {
+		return recipe{}, fmt.Errorf("retired run-setup helper changed its complete frozen row")
+	}
+	current, err := checkpointRecipes(source, []recipe{row})
+	if err != nil || len(current) != 0 {
+		return recipe{}, fmt.Errorf("retired run-setup helper survives or is ambiguous: %v", err)
+	}
+	return prior, nil
 }
 
 func TestNativeRunSetupWholeFamilySnapshotsAndHostility(t *testing.T) {

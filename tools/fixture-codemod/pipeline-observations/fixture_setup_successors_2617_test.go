@@ -31,12 +31,6 @@ import (
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
 
-type fixtureSetupSuccessor2617 struct {
-	Original  recipe
-	Candidate string
-	Edits     []reviewedSuccessorEdit
-}
-
 // These settled fixture receipts compose with, but do not replace, the earlier
 // historical transformation and current-endpoint packets.
 func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) {
@@ -198,6 +192,18 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 			if err != nil {
 				t.Fatal(err)
 			}
+			historical, _, err := embeddedSpecHistoricalPair1801(row, actual)
+			if err != nil {
+				t.Fatal(err)
+			}
+			currentSource, err := q10FixtureSetupCurrentSource(historical)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expectedCurrent, err := canonicalFunction(currentSource)
+			if err != nil {
+				t.Fatal(err)
+			}
 			valid := func(candidate recipe, source string) bool {
 				candidate, source, err := embeddedSpecHistoricalPair1801(candidate, source)
 				if err != nil {
@@ -208,7 +214,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 				current, sourceErr := canonicalFunction(source)
 				endpoint, endpointErr := canonicalFunction(candidate.Successor)
 				return reflect.DeepEqual(history, pin.Original) && sourceErr == nil && endpointErr == nil &&
-					current == expected && endpoint == expected
+					current == expectedCurrent && endpoint == expected
 			}
 			if !valid(row, actual) {
 				t.Fatal("current fixture source/Successor differs from exact settled endpoint")
@@ -223,8 +229,33 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 			if err != nil || wantErr != nil || gotErr != nil || want != got {
 				t.Fatalf("fixture setup reversal failed: %v", err)
 			}
-			if files, changes, err := prepareFiles("../../..", []recipe{row}); err != nil || len(files) != 0 || len(changes) != 0 {
+			if err := validateRecipeSnapshots(row); err != nil {
+				t.Fatal(err)
+			}
+			liveSource := currentSource
+			if !reflect.DeepEqual(historical, row) {
+				liveSource, err = embeddedSpecFieldDeletion1801(currentSource)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if valid(row, currentSource) || valid(historical, actual) {
+					t.Fatal("partial embedded-spec fixture stage admitted as the complete live pair")
+				}
+			}
+			currentGuard := recipe{Family: row.Family, File: row.File, Function: row.Function, Before: liveSource, After: liveSource}
+			if files, changes, err := prepareFiles("../../..", []recipe{currentGuard}); err != nil || len(files) != 0 || len(changes) != 0 {
 				t.Fatalf("current fixture endpoint is not inert: %v", err)
+			}
+			if expectedCurrent != expected {
+				if valid(row, latest.Candidate) {
+					t.Fatal("historical fixture source admitted as the current header-backed endpoint")
+				}
+				for _, cut := range []string{"SourceArtifactFact: sourceFact", "fi.run_id=es.run_id", "fi.entity_id=es.entity_id", "fi.instance_path=es.flow_instance", "fi.revision", "ReadWorkflowDuplicateProjectionStorage", "initialRevision != 1", "fields != initialFields", "headerRevision != initialRevision", "current.Lifecycle.State.Revision"} {
+					mutant := strings.Replace(liveSource, cut, "foreignCut", 1)
+					if mutant != liveSource && valid(row, mutant) {
+						t.Fatalf("current fixture lost exact source, read owner, identity, field or revision: %s", cut)
+					}
+				}
 			}
 			for _, field := range []string{"history", "key", "missing", "body"} {
 				mutant := row

@@ -120,7 +120,9 @@ func TestReceiverCompositionRestartBothStores(t *testing.T) {
 				t.Fatalf("hash-only restart changed immutable construction: before=%+v after=%+v", constructionBefore, receipts)
 			}
 			var entities int
-			if err := db.QueryRow(`SELECT count(*) FROM entity_state WHERE run_id=$1 AND current_state='done'`, published.RunID).Scan(&entities); err != nil {
+			if err := db.QueryRow(`SELECT count(*) FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+WHERE es.run_id=$1 AND fi.current_state='done'`, published.RunID).Scan(&entities); err != nil {
 				t.Fatal(err)
 			}
 			if entities != 2 {

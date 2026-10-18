@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,11 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -535,7 +540,6 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'cli-test', 'seed', $4),
 			($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, '"CLI Entity"'::jsonb, $3::uuid, 'platform', 'cli-test', 'seed', $4)
 	`, runID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
@@ -543,17 +547,18 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			fields, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'CLI Entity',
-			'ready', '{}'::jsonb, '{"name":"CLI Entity"}'::jsonb, '{}'::jsonb, 1,
-			$3, $3, $3
+			'{"name":"CLI Entity"}'::jsonb, $3, $3
 		)
 	`, runID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
+	// Prove historical lifecycle through real declared construction; the
+	// independent import supplies business fields, not a fictional stage.
+	seedRunForkCLIConstruction(t, pg, runID, bundleHash, at)
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 	forkPointEventID := stageRunForkCLIForkPoint(t, db, runID, entityID, at.Add(time.Millisecond))
 	var buf bytes.Buffer
@@ -589,16 +594,47 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 		result.SelectedContractBinding.ContractSelection.BundleHash != bundleHash {
 		t.Fatalf("selected contract binding = %#v", result.SelectedContractBinding)
 	}
-	var forkState string
-	if err := db.QueryRowContext(ctx, `
-		SELECT current_state
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, result.ForkRunID, entityID).Scan(&forkState); err != nil {
-		t.Fatalf("load fork entity_state: %v", err)
+	evidence, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, pg, result.ForkRunID, entityID)
+	if err != nil {
+		t.Fatalf("load fork import and immutable history: %v", err)
 	}
-	if forkState != "ready" {
-		t.Fatalf("fork state = %q, want ready", forkState)
+	if evidence.CurrentState != nil || evidence.Revision != nil || evidence.Gates != nil || evidence.Bookkeeping != nil || evidence.Accumulator != nil {
+		t.Fatalf("materialize-only import acquired native lifecycle: %+v", evidence)
+	}
+	var forkFields map[string]any
+	if err := json.Unmarshal(evidence.Fields, &forkFields); err != nil || !reflect.DeepEqual(forkFields, map[string]any{"name": "CLI Entity"}) {
+		t.Fatalf("fork import fields changed: %s err=%v", evidence.Fields, err)
+	}
+	importOwner, err := flowidentity.NewRunScopedFlowInstance(result.ForkRunID, flowidentity.StoredRoute("flow-a", "1", "flow-a/1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := pg.LoadWorkflowTargetPersistence(ctx, importOwner, identity.NormalizeEntityID(entityID))
+	if err != nil || imported.Presence != pipeline.WorkflowTargetPersistenceStateOnly {
+		t.Fatalf("load independent physical fork import: %v", err)
+	}
+	if imported.State.FlowInstance != "flow-a/1" || imported.State.EntityType != "default" || imported.State.Name != "CLI Entity" || !imported.State.CreatedAt.Equal(at) || !imported.State.UpdatedAt.Equal(at) {
+		t.Fatalf("fork import changed identity/display/data clocks: %+v", imported.State)
+	}
+	var records []mutationlog.ProjectionMutation
+	for _, mutation := range evidence.Mutations {
+		var value any
+		if err := json.Unmarshal(mutation.NewValue, &value); err != nil {
+			t.Fatal(err)
+		}
+		records = append(records, mutationlog.ProjectionMutation{Domain: mutationlog.Domain(mutation.Domain), Path: mutation.Path, NewValue: value})
+	}
+	historical, err := mutationlog.ReconstructEntityStateProjection(records)
+	if err != nil || historical.CurrentState != nil || !reflect.DeepEqual(historical.Fields, forkFields) {
+		t.Fatalf("fork historical cut changed: %+v err=%v", historical, err)
+	}
+	rootOwner, err := flowidentity.NewRunScopedFlowInstance(result.ForkRunID, flowidentity.StoredRoute(".", result.ForkRunID, result.ForkRunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	forkRoot, found, err := pg.LoadWorkflowInstance(ctx, rootOwner)
+	if err != nil || !found || forkRoot.CurrentState != "idle" {
+		t.Fatalf("fork lost the actual declared root's fixed stage: stage=%q found=%v err=%v", forkRoot.CurrentState, found, err)
 	}
 	var persistedBindingMode string
 	if err := db.QueryRowContext(ctx, `
@@ -891,7 +927,7 @@ func seedRunForkCLIActivationSourceWithoutRevision(t *testing.T, db *sql.DB, run
 	})
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, runID, "fork.cli.activate",
 		eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at)
-	seedRunForkCLIConstruction(t, db, runID, bundleHash, at)
+	seedRunForkCLIConstruction(t, selected, runID, bundleHash, at)
 }
 
 func seedRunForkCLISelectedExecutionSource(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash string, at time.Time) {

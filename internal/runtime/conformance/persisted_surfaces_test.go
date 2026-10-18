@@ -1807,7 +1807,13 @@ func constructTrackedWorkflowMutationFixture(t *testing.T, selected fanInBarrier
 }
 
 func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t *testing.T) {
-	ctx, exec, selected, runID := newEntityToolConformanceHarness(t, ".")
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) { testTrackedEntityToolWrites(t, backend) })
+	}
+}
+
+func testTrackedEntityToolWrites(t *testing.T, backend string) {
+	ctx, exec, selected, runID := newEntityToolConformanceHarness(t, backend, ".")
 
 	requireMutationSurface(t, selected)
 
@@ -1860,7 +1866,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 	}
 
 	// Generated tools require a real non-root current subject, not the run's entity.
-	ctx, exec, selected, runID = newEntityToolConformanceHarness(t, "accounts")
+	ctx, exec, selected, runID = newEntityToolConformanceHarness(t, backend, "accounts")
 	current, ok := runtimebus.InboundEventFromContext(ctx)
 	if !ok || current.EntityID() == "" || current.EntityID() == runID {
 		t.Fatal("generated tool fixture requires its constructed non-root current subject")
@@ -1901,10 +1907,10 @@ func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *test
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator
+			run_id, entity_id, flow_instance, entity_type, fields
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'mutation-flow/inst-1', 'default', 'queued', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb
+			$1::uuid, $2::uuid, 'mutation-flow/inst-1', 'default', '{}'::jsonb
 		)
 	`, runID, entityID); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
@@ -2048,24 +2054,24 @@ func trackedMutationStateMatchesEntityState(selected any, runID, entityID string
 	}
 	currentState, fieldsRaw, bookRaw, gatesRaw, accRaw := evidence.CurrentState, evidence.Fields, evidence.Bookkeeping, evidence.Gates, evidence.Accumulator
 	want := runtimemutationlog.EntityStateProjection{
-		CurrentState: strings.TrimSpace(currentState),
+		CurrentState: currentState,
 		Fields:       map[string]any{},
-		Bookkeeping:  map[string]any{},
-		Gates:        map[string]any{},
-		Accumulator:  map[string]any{},
 	}
 	var err error
 	if want.Fields, err = decodeJSONMapErr(fieldsRaw); err != nil {
 		return fmt.Errorf("decode entity_state fields: %w", err)
 	}
-	if want.Bookkeeping, err = decodeJSONMapErr(bookRaw); err != nil {
-		return fmt.Errorf("decode entity_state bookkeeping: %w", err)
-	}
-	if want.Gates, err = decodeJSONMapErr(gatesRaw); err != nil {
-		return fmt.Errorf("decode entity_state gates: %w", err)
-	}
-	if want.Accumulator, err = decodeJSONMapErr(accRaw); err != nil {
-		return fmt.Errorf("decode entity_state accumulator: %w", err)
+	for _, bucket := range []struct {
+		name string
+		raw  []byte
+		dst  *map[string]any
+	}{{"bookkeeping", bookRaw, &want.Bookkeeping}, {"gates", gatesRaw, &want.Gates}, {"accumulator", accRaw, &want.Accumulator}} {
+		if bucket.raw == nil {
+			continue
+		}
+		if *bucket.dst, err = decodeJSONMapErr(bucket.raw); err != nil {
+			return fmt.Errorf("decode flow_instances %s: %w", bucket.name, err)
+		}
 	}
 
 	records := make([]runtimemutationlog.ProjectionMutation, 0, 8)
@@ -2130,7 +2136,30 @@ func mustCanonicalJSON(t *testing.T, value any) string {
 	return string(raw)
 }
 
-func newEntityToolConformanceHarness(t *testing.T, flowID string) (context.Context, *runtimetools.Executor, operatorread.EntityReader, string) {
+type mutationSurfaceConformanceStore interface {
+	fanInBarrierConformanceStore
+	storetest.RunFixtureStore
+	operatorread.EntityReader
+	runtimetools.EntityPersistence
+	runtimetools.HumanTaskCardStore
+	runtimebus.FlowInstanceActivationCommitOwner
+}
+
+func newMutationSurfaceConformanceStore(t *testing.T, backend string) mutationSurfaceConformanceStore {
+	t.Helper()
+	switch backend {
+	case "sqlite":
+		return storetest.StartSQLiteRuntimeStore(t)
+	case "postgres":
+		selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+		return selected
+	default:
+		t.Fatalf("unsupported mutation conformance backend %q", backend)
+		return nil
+	}
+}
+
+func newEntityToolConformanceHarness(t *testing.T, backend, flowID string) (context.Context, *runtimetools.Executor, operatorread.EntityReader, string) {
 	t.Helper()
 	if flowID != "." && flowID != "accounts" {
 		t.Fatalf("unsupported tool conformance fixture flow %q", flowID)
@@ -2154,11 +2183,11 @@ func newEntityToolConformanceHarness(t *testing.T, flowID string) (context.Conte
 	source := runtimesemanticview.Wrap(bundle)
 	fact := conformanceSourceArtifactFact(t, source)
 	ctx := testAuthorActivityContextForBundle(context.Background(), fact)
-	pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+	selected := newMutationSurfaceConformanceStore(t, backend)
 	runID := uuid.NewString()
 
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
-	construction := newFanInBarrierRuntimeForSource(t, pg, source, fact, 1)
+	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
+	construction := newFanInBarrierRuntimeForSource(t, selected, source, fact, 1)
 	constructionCtx := runtimecorrelation.WithRunID(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runID)
 	at := time.Now().UTC()
 	root := runtimeflowidentity.Stored(source, ".", runID, runID, runID, "")
@@ -2231,9 +2260,9 @@ func newEntityToolConformanceHarness(t *testing.T, flowID string) (context.Conte
 		t.Fatalf("tool actor does not retain its actual constructed flow: %+v", frame.Config.Identity)
 	}
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
-		EntityStore:                    pg,
+		EntityStore:                    selected,
 		EntityWriter:                   construction.pipeline,
-		HumanTaskStore:                 pg,
+		HumanTaskStore:                 selected,
 		WorkflowSource:                 source,
 		AllowInternalLegacyEntityTools: true,
 	})
@@ -2242,9 +2271,9 @@ func newEntityToolConformanceHarness(t *testing.T, flowID string) (context.Conte
 		inbound = eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("accounts.updated"), "", "", nil, 0, runID,
 			events.EnvelopeForEntityID(events.EventEnvelope{}, runID), time.Now().UTC())
 	}
-	storetest.CommitSemanticEvent(t, ctx, pg, inbound)
+	storetest.CommitSemanticEvent(t, ctx, selected, inbound)
 	ctx = runtimebus.WithInboundEvent(ctx, inbound)
-	return ctx, exec, pg, runID
+	return ctx, exec, selected, runID
 }
 
 func readString(value any) string {

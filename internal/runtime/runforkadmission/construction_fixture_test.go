@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -77,7 +78,7 @@ func withConstructedHeader(t testing.TB, plan runfork.RunForkPlan, source semant
 		ParentInstance:         instance.ParentRoute.FlowInstance, InstanceKey: "fixture-key",
 	}
 	plan.Entities = append(append([]runfork.RunForkEntityState(nil), plan.Entities...), runfork.RunForkEntityState{
-		EntityID: instance.EntityID, CurrentState: "active", EnteredStateAt: &entered, MaterializationMetadata: metadata,
+		EntityID: instance.EntityID, CurrentState: mutationlog.PresentLifecycleState("active"), EnteredStateAt: &entered, MaterializationMetadata: metadata,
 	})
 	return plan
 }

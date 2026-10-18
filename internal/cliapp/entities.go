@@ -66,16 +66,20 @@ type entityListResult struct {
 }
 
 type entitySummary struct {
-	EntityID     string `json:"entity_id"`
-	RunID        string `json:"run_id"`
-	FlowInstance string `json:"flow_instance"`
-	EntityType   string `json:"entity_type"`
-	CurrentState string `json:"current_state"`
-	Slug         string `json:"slug,omitempty"`
-	Name         string `json:"name,omitempty"`
-	Revision     int    `json:"revision"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	EntityID           string  `json:"entity_id"`
+	RunID              string  `json:"run_id"`
+	FlowInstance       string  `json:"flow_instance"`
+	EntityType         string  `json:"entity_type"`
+	StageDefined       *bool   `json:"stage_defined"`
+	CurrentState       *string `json:"current_state"`
+	Slug               string  `json:"slug,omitempty"`
+	Name               string  `json:"name,omitempty"`
+	Revision           *int64  `json:"revision"`
+	EnteredStateAt     *string `json:"entered_state_at"`
+	LifecycleCreatedAt *string `json:"lifecycle_created_at"`
+	LifecycleUpdatedAt *string `json:"lifecycle_updated_at"`
+	CreatedAt          string  `json:"created_at"`
+	UpdatedAt          string  `json:"updated_at"`
 }
 
 type entityFull struct {
@@ -84,11 +88,42 @@ type entityFull struct {
 	Bookkeeping map[string]any                 `json:"bookkeeping"`
 	Gates       map[string]bool                `json:"gates"`
 	Accumulated map[string]any                 `json:"accumulated"`
-	Loops       []loopruntime.PublicActivation `json:"loops,omitempty"`
+	Loops       []loopruntime.PublicActivation `json:"loops"`
 }
 
 type entityAggregateResult struct {
-	Counts map[string]int `json:"counts"`
+	Counts      map[string]int `json:"counts"`
+	AbsentCount *int           `json:"absent_count"`
+}
+
+func decodeRequiredEntityProperties(raw []byte, target any, required ...string) error {
+	var properties map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &properties); err != nil {
+		return err
+	}
+	for _, key := range required {
+		if _, ok := properties[key]; !ok {
+			return fmt.Errorf("malformed entity result: %s is required", key)
+		}
+	}
+	return json.Unmarshal(raw, target)
+}
+
+func (e *entitySummary) UnmarshalJSON(raw []byte) error {
+	type decoded entitySummary
+	return decodeRequiredEntityProperties(raw, (*decoded)(e),
+		"entity_id", "run_id", "flow_instance", "entity_type", "created_at", "updated_at",
+		"stage_defined", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at")
+}
+
+func (e *entityFull) UnmarshalJSON(raw []byte) error {
+	type decoded entityFull
+	return decodeRequiredEntityProperties(raw, (*decoded)(e), "entity", "fields", "bookkeeping", "gates", "accumulated", "loops")
+}
+
+func (e *entityAggregateResult) UnmarshalJSON(raw []byte) error {
+	type decoded entityAggregateResult
+	return decodeRequiredEntityProperties(raw, (*decoded)(e), "counts", "absent_count")
 }
 
 var (
@@ -438,6 +473,12 @@ func validateEntityFullResult(prefix string, result entityFull) error {
 	if result.Fields == nil {
 		return fmt.Errorf("malformed %s: fields is required", prefix)
 	}
+	if result.Entity.StageDefined == nil {
+		if result.Bookkeeping != nil || result.Gates != nil || result.Accumulated != nil || result.Loops != nil {
+			return fmt.Errorf("malformed %s: data-only entity cannot carry lifecycle maps or loops", prefix)
+		}
+		return nil
+	}
 	if result.Bookkeeping == nil {
 		return fmt.Errorf("malformed %s: bookkeeping is required", prefix)
 	}
@@ -446,6 +487,9 @@ func validateEntityFullResult(prefix string, result entityFull) error {
 	}
 	if result.Accumulated == nil {
 		return fmt.Errorf("malformed %s: accumulated is required", prefix)
+	}
+	if result.Loops == nil {
+		return fmt.Errorf("malformed %s: constructed loops must be an array", prefix)
 	}
 	return nil
 }
@@ -459,7 +503,6 @@ func validateEntitySummary(prefix string, entity entitySummary) error {
 		{name: "run_id", value: entity.RunID},
 		{name: "flow_instance", value: entity.FlowInstance},
 		{name: "entity_type", value: entity.EntityType},
-		{name: "current_state", value: entity.CurrentState},
 		{name: "created_at", value: entity.CreatedAt},
 		{name: "updated_at", value: entity.UpdatedAt},
 	} {
@@ -473,14 +516,51 @@ func validateEntitySummary(prefix string, entity entitySummary) error {
 	if err := validateEntityOpaqueIDField(prefix+".run_id", entity.RunID); err != nil {
 		return fmt.Errorf("malformed %s: %w", prefix, err)
 	}
-	if entity.Revision < 0 {
-		return fmt.Errorf("malformed %s: revision must be non-negative", prefix)
-	}
 	if err := validateRequiredTimestamp(prefix+".created_at", entity.CreatedAt); err != nil {
 		return err
 	}
 	if err := validateRequiredTimestamp(prefix+".updated_at", entity.UpdatedAt); err != nil {
 		return err
+	}
+	created, _ := time.Parse(time.RFC3339Nano, entity.CreatedAt)
+	updated, _ := time.Parse(time.RFC3339Nano, entity.UpdatedAt)
+	if updated.Before(created) {
+		return fmt.Errorf("malformed %s: data clocks are inconsistent", prefix)
+	}
+	if entity.StageDefined == nil {
+		if entity.CurrentState != nil || entity.Revision != nil || entity.EnteredStateAt != nil ||
+			entity.LifecycleCreatedAt != nil || entity.LifecycleUpdatedAt != nil {
+			return fmt.Errorf("malformed %s: data-only entity cannot carry lifecycle metadata", prefix)
+		}
+		return nil
+	}
+	if entity.Revision == nil || *entity.Revision <= 0 {
+		return fmt.Errorf("malformed %s: constructed revision must be positive", prefix)
+	}
+	for _, clock := range []struct {
+		name  string
+		value *string
+	}{{"lifecycle_created_at", entity.LifecycleCreatedAt}, {"lifecycle_updated_at", entity.LifecycleUpdatedAt}} {
+		if clock.value == nil {
+			return fmt.Errorf("malformed %s: %s is required for constructed lifecycle", prefix, clock.name)
+		}
+		if err := validateRequiredTimestamp(prefix+"."+clock.name, *clock.value); err != nil {
+			return err
+		}
+	}
+	lifecycleCreated, _ := time.Parse(time.RFC3339Nano, *entity.LifecycleCreatedAt)
+	lifecycleUpdated, _ := time.Parse(time.RFC3339Nano, *entity.LifecycleUpdatedAt)
+	if lifecycleUpdated.Before(lifecycleCreated) {
+		return fmt.Errorf("malformed %s: lifecycle clocks are inconsistent", prefix)
+	}
+	if *entity.StageDefined {
+		if entity.CurrentState == nil || strings.TrimSpace(*entity.CurrentState) == "" || entity.EnteredStateAt == nil {
+			return fmt.Errorf("malformed %s: named stage and entry time are required", prefix)
+		}
+		return validateRequiredTimestamp(prefix+".entered_state_at", *entity.EnteredStateAt)
+	}
+	if entity.CurrentState != nil || entity.EnteredStateAt != nil {
+		return fmt.Errorf("malformed %s: no-stage entity cannot carry a named stage or entry time", prefix)
 	}
 	return nil
 }
@@ -488,6 +568,9 @@ func validateEntitySummary(prefix string, entity entitySummary) error {
 func validateEntityAggregateResult(result entityAggregateResult) error {
 	if result.Counts == nil {
 		return fmt.Errorf("malformed entity.aggregate result: counts is required")
+	}
+	if result.AbsentCount == nil || *result.AbsentCount < 0 {
+		return fmt.Errorf("malformed entity.aggregate result: absent_count must be a non-negative integer")
 	}
 	for key, count := range result.Counts {
 		if count < 0 {
@@ -516,7 +599,7 @@ func writeEntityListResult(out io.Writer, result entityListResult, opts entityLi
 		cliTableColumn{Header: "TYPE"},
 		cliTableColumn{Header: "STATE"},
 		cliTableColumn{Header: "FLOW", IdentifierFamily: cliIdentifierFamilyFlowInstance},
-		cliTableColumn{Header: "UPDATED"},
+		cliTableColumn{Header: "DATA UPDATED"},
 	)
 	rows := make([][]string, 0, len(result.Entities))
 	for _, entity := range result.Entities {
@@ -526,7 +609,7 @@ func writeEntityListResult(out io.Writer, result entityListResult, opts entityLi
 		}
 		row = append(row,
 			entityDash(entityOneLine(entity.EntityType)),
-			entityDash(entityOneLine(entity.CurrentState)),
+			entityLifecycleStageText(entity),
 			cliSanitizeOneLineValue(entity.FlowInstance),
 			entityTimestampText(cliRelativeTimeNow(), entity.UpdatedAt, opts.verbose),
 		)
@@ -558,10 +641,15 @@ func writeEntityFullResult(out io.Writer, result entityFull, opts entityRenderOp
 		{Label: "run", Value: cliSanitizeOneLineValue(entity.RunID)},
 		{Label: "flow", Value: cliSanitizeOneLineValue(entity.FlowInstance)},
 		{Label: "type", Value: entityDash(entityOneLine(entity.EntityType))},
-		{Label: "state", Value: entityDash(entityOneLine(entity.CurrentState))},
-		{Label: "revision", Value: fmt.Sprintf("%d", entity.Revision)},
-		{Label: "created", Value: entityTimestampText(now, entity.CreatedAt, opts.verbose)},
-		{Label: "updated", Value: entityTimestampText(now, entity.UpdatedAt, opts.verbose)},
+		{Label: "state", Value: entityLifecycleStageText(entity)},
+		{Label: "data created", Value: entityTimestampText(now, entity.CreatedAt, opts.verbose)},
+		{Label: "data updated", Value: entityTimestampText(now, entity.UpdatedAt, opts.verbose)},
+	}
+	if entity.StageDefined != nil {
+		header = append(header,
+			cliLabeledDetailRow{Label: "revision", Value: fmt.Sprintf("%d", *entity.Revision)},
+			cliLabeledDetailRow{Label: "lifecycle created", Value: entityTimestampText(now, *entity.LifecycleCreatedAt, opts.verbose)},
+			cliLabeledDetailRow{Label: "lifecycle updated", Value: entityTimestampText(now, *entity.LifecycleUpdatedAt, opts.verbose)})
 	}
 	header = append(header,
 		cliLabeledDetailRow{Label: "slug", Value: entityDash(entityOneLine(entity.Slug))},
@@ -576,6 +664,16 @@ func writeEntityFullResult(out io.Writer, result entityFull, opts entityRenderOp
 	if opts.verbose {
 		writeEntityLoopSection(out, result.Loops)
 	}
+}
+
+func entityLifecycleStageText(entity entitySummary) string {
+	if entity.StageDefined == nil {
+		return "no lifecycle"
+	}
+	if !*entity.StageDefined {
+		return "no named stage"
+	}
+	return entityOneLine(*entity.CurrentState)
 }
 
 // entityTimestampText renders a humanized relative time; under --verbose it
@@ -728,6 +826,9 @@ func writeEntityAggregateResult(out io.Writer, result entityAggregateResult) {
 	rows := make([][]string, 0, len(keys))
 	for _, key := range keys {
 		rows = append(rows, []string{entityDash(key), fmt.Sprintf("%d", result.Counts[key])})
+	}
+	if result.AbsentCount != nil && *result.AbsentCount > 0 {
+		rows = append(rows, []string{"(absent)", fmt.Sprintf("%d", *result.AbsentCount)})
 	}
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{

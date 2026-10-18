@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	storerunfork "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -95,10 +97,20 @@ func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
 	}
 }
 
-func insertMutationLogPrivateAdapter(ctx context.Context, selected *PostgresStore, record runtimemutationlog.Record) error {
+func insertMutationLogPrivateAdapter(ctx context.Context, selected any, record runtimemutationlog.Record) error {
 	return runSelectedFixtureMutation(ctx, selected, "test mutation log adapter", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			return privatemutationlog.Insert(txctx, attempt, postgresActiveRunSourceOwner(selected, tx), record)
+			switch store := selected.(type) {
+			case *PostgresStore:
+				return privatemutationlog.Insert(txctx, attempt, postgresActiveRunSourceOwner(store, tx), record)
+			case *SQLiteRuntimeStore:
+				owner := storerunfork.ActiveRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+					return store.runLifecycleSQLiteOwner.RequireActiveSourceTx(ctx, tx, runID)
+				})
+				return privatemutationlog.InsertSQLite(txctx, attempt, owner, record)
+			default:
+				return fmt.Errorf("mutation log fixture store %T is unsupported", selected)
+			}
 		})
 	})
 }

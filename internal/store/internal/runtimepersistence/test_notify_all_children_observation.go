@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 )
 
 type NotifyAllChildrenItemStorage struct {
@@ -52,9 +53,7 @@ func ReadNotifyAllChildrenDiagnosticStorageForTest(ctx context.Context, selected
 			return readNotifyAllChildrenDiagnosticSection(ctx, tx, `SELECT event_id, subscriber_type, subscriber_id, outcome, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), '') FROM event_receipts ORDER BY event_id, subscriber_type, subscriber_id`)
 		},
 		readNotifyAllChildrenDeliveryDiagnosticSection,
-		func(ctx context.Context, tx *sql.Tx) (NotifyAllChildrenDiagnosticStorage, error) {
-			return readNotifyAllChildrenDiagnosticSection(ctx, tx, `SELECT flow_instance, current_state, fields FROM entity_state ORDER BY flow_instance`)
-		},
+		readNotifyAllChildrenEntityDiagnosticSection,
 		func(ctx context.Context, tx *sql.Tx) (NotifyAllChildrenDiagnosticStorage, error) {
 			return readNotifyAllChildrenDiagnosticSection(ctx, tx, `SELECT run_id, instance_path, flow_template, status, config FROM flow_instances ORDER BY run_id, instance_path`)
 		},
@@ -76,6 +75,33 @@ func ReadNotifyAllChildrenDiagnosticStorageForTest(ctx context.Context, selected
 		evidence = append(evidence, section)
 	}
 	return evidence, nil
+}
+
+func readNotifyAllChildrenEntityDiagnosticSection(ctx context.Context, tx *sql.Tx) (section NotifyAllChildrenDiagnosticStorage, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT `+workflowheader.DataReadColumns+`, CAST(es.fields AS TEXT) `+workflowheader.DataReadFrom+` ORDER BY es.flow_instance, es.run_id, es.entity_id`)
+	if err != nil {
+		return NotifyAllChildrenDiagnosticStorage{}, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			section = NotifyAllChildrenDiagnosticStorage{}
+		}
+	}()
+	section.Columns = []string{"flow_instance", "current_state", "fields"}
+	for rows.Next() {
+		var fields []byte
+		data, err := workflowheader.ScanData(rows, sqliteTimeValue, &fields)
+		if err != nil {
+			return NotifyAllChildrenDiagnosticStorage{}, err
+		}
+		var stage any
+		if data.Entity.CurrentState != nil {
+			stage = *data.Entity.CurrentState
+		}
+		section.Rows = append(section.Rows, []any{data.Entity.FlowInstance, stage, string(fields)})
+	}
+	return section, rows.Err()
 }
 
 func readNotifyAllChildrenDeliveryDiagnosticSection(ctx context.Context, tx *sql.Tx) (NotifyAllChildrenDiagnosticStorage, error) {

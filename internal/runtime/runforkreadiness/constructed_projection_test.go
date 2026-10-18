@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -95,7 +96,7 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 						}
 						want[actor] = child
 						entered := time.Now().UTC()
-						row := runfork.RunForkEntityState{EntityID: child.EntityID, CurrentState: "active", EnteredStateAt: &entered,
+						row := runfork.RunForkEntityState{EntityID: child.EntityID, CurrentState: mutationlog.PresentLifecycleState("active"), EnteredStateAt: &entered,
 							MaterializationMetadata: selectedAgentConstructionMetadata(t, source, runID, child, "", entered)}
 						if fields {
 							row.MaterializationMetadata.EntityType = "child_state"

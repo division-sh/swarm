@@ -89,7 +89,7 @@ func TestServedRootInputFeedsExecuteAndSettleBothStores(t *testing.T) {
 						t.Fatalf("feed fabricated a producer or lost a receiver: %+v", entities)
 					}
 					for _, entity := range entities.Entities {
-						if entity.CurrentState != "done" || entity.RunID != runID {
+						if entity.CurrentState == nil || *entity.CurrentState != "done" || entity.RunID != runID {
 							t.Fatalf("feed receiver did not reach its lawful final state: %+v", entity)
 						}
 					}

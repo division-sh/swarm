@@ -2,9 +2,11 @@ package runtimepersistence
 
 import (
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/google/uuid"
 )
@@ -17,10 +19,16 @@ func TestToolEntityReadbackProjectsLoopsWithoutReservedState(t *testing.T) {
 	defer db.Close()
 	now := time.Now().UTC().Round(time.Microsecond)
 	accumulated := operatorLoopAccumulatedJSON(t, uuid.NewString(), uuid.NewString(), now)
+	config := operatorEntityHeaderConfig(t, flowidentity.Stored(nil, "review", "review/primary", "primary", "entity-1", ""), "1")
+	if !json.Valid([]byte(config)) {
+		t.Fatal("component header config is not JSON")
+	}
 	rows, err := db.Query(`
-		SELECT 'entity-1', 'run-1', 'review/primary', 'mvp_spec', 'Primary', 'collecting',
-		       '{}', '{}', '{}', ?, 1, ?, ?, ?
-	`, accumulated, now, now, now)
+		SELECT 'run-1', 'entity-1', 'review/primary', 'mvp_spec', '', 'Primary', '{}', ?, ?,
+		       'entity-1', 'review/primary', 'mvp_spec', 'review', 'template', 'active',
+		       ?, 'collecting', TRUE, 1, ?, ?, ?, NULL,
+		       '{}', '{}', ?, '', 'primary', 1
+	`, now, now, config, now, now, now, accumulated)
 	if err != nil {
 		t.Fatal(err)
 	}

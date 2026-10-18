@@ -33,7 +33,9 @@ func TestBaselineServedRepeatedStaticRunProbe(t *testing.T) {
 				}
 				count := 0
 				for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
-					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND flow_instance='producer' AND current_state='active'`, seed.RunID).Scan(&count); err != nil {
+					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+WHERE es.run_id=$1 AND es.flow_instance='producer' AND fi.current_state='active'`, seed.RunID).Scan(&count); err != nil {
 						t.Fatal(err)
 					}
 					if count == 1 {

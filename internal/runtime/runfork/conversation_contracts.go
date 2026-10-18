@@ -183,7 +183,7 @@ type ConversationForkSourceTurn struct {
 
 type ConversationForkEntitySnapshot struct {
 	EntityID       string         `json:"entity_id"`
-	CurrentState   string         `json:"current_state,omitempty"`
+	CurrentState   *string        `json:"current_state,omitempty"`
 	EnteredStateAt *time.Time     `json:"entered_state_at,omitempty"`
 	Fields         map[string]any `json:"fields,omitempty"`
 	Bookkeeping    map[string]any `json:"bookkeeping,omitempty"`

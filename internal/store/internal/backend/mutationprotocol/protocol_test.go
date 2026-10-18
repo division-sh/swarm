@@ -68,14 +68,28 @@ func TestAttemptResultUsesOnlyAcknowledgedRetry(t *testing.T) {
 	db := mutationTestDB(t)
 	baseline := NewBaseline()
 	var attempts []*Attempt
+	var identities []uuid.UUID
 	result := run(ctx, privateactivity.DialectSQLite, RevisionOnly, Ordinary, baseline, nil,
 		mutationTestRunner(t, db, false, true), func(ctx context.Context, attempt *Attempt) (string, error) {
 			attempts = append(attempts, attempt)
+			id, err := attempt.Identity(ctx)
+			if err != nil || id == uuid.Nil {
+				t.Fatalf("live attempt identity = %s, %v", id, err)
+			}
+			if repeated, err := attempt.Identity(ctx); err != nil || repeated != id {
+				t.Fatalf("one attempt changed identity: %s -> %s, %v", id, repeated, err)
+			}
+			identities = append(identities, id)
+			for _, wrong := range []context.Context{context.Background(), context.WithValue(ctx, sqlAttemptKey{}, &Attempt{})} {
+				if _, err := attempt.Identity(wrong); err == nil || err.Error() != "mutation identity requires its exact attempt context" {
+					t.Fatalf("foreign context retained attempt identity: %v", err)
+				}
+			}
 			value := "rolled-back"
 			if len(attempts) == 2 {
 				value = "committed"
 			}
-			err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			err = attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 				_, err := tx.ExecContext(ctx, `INSERT INTO mutation_protocol_probe (value) VALUES (?)`, value)
 				return err
 			})
@@ -92,9 +106,15 @@ func TestAttemptResultUsesOnlyAcknowledgedRetry(t *testing.T) {
 		t.Fatalf("wrong durable attempt: %q, %v", got, err)
 	}
 	for _, attempt := range attempts {
+		if _, err := attempt.Identity(ctx); err == nil {
+			t.Fatal("retired attempt retained a live identity")
+		}
 		if err := attempt.WithSQL(ctx, func(context.Context, *sql.Tx) error { return nil }); err == nil {
 			t.Fatal("retired attempt retained SQL access")
 		}
+	}
+	if len(identities) != 2 || identities[0] == identities[1] {
+		t.Fatalf("retry reused attempt identity: %v", identities)
 	}
 	if err := baseline.AddWholeFamily("00000000-0000-0000-0000-000000000001", "events"); err == nil {
 		t.Fatal("used baseline remained mutable")

@@ -1905,21 +1905,17 @@ func seedImportedSelectedContractSourceWithEvent(t *testing.T, db *sql.DB, run s
 			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
 		)
 		VALUES
-			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'selected-store-test', 'seed', $4),
 			($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, '"Selected Store Entity"'::jsonb, $3::uuid, 'platform', 'selected-store-test', 'seed', $4)
 	`, sourceRunID, entityID, eventID, at); err != nil {
 				return fmt.Errorf("seed mutations: %w", err)
 			}
 			if _, err := tx.ExecContext(txctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			run_id, entity_id, flow_instance, entity_type, name, fields, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $4, 'default', 'Selected Store Entity',
-			'pending', '{}'::jsonb, '{"name":"Selected Store Entity"}'::jsonb, '{}'::jsonb, 1,
-			$3, $3, $3
+			'{"name":"Selected Store Entity"}'::jsonb, $3, $3
 		)
 	`, sourceRunID, entityID, at, flowInstance); err != nil {
 				return fmt.Errorf("seed entity_state: %w", err)
