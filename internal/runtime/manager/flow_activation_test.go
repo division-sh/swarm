@@ -30,8 +30,8 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
-	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -2214,14 +2214,19 @@ func TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure(t
 		t.Run(failure, func(t *testing.T) {
 			bus := &flowActivationTestBus{}
 			instances := &flowActivationTestInstanceStore{}
-			am := newFlowActivationManager(t, bus, instances)
-			ctx := testAuthorActivityContext(context.Background())
+			req := testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")
+			am, ctx := newFlowActivationManagerForSource(t, bus, instances, req.ContractBundle)
 			if failure == "agent_join" {
-				if err := am.Run(managedExecutionTestContext(t, ctx)); err != nil {
+				runCtx := managedExecutionTestContextForCapturedSource(t, ctx)
+				execution, executionOK := managedexecution.FromContext(runCtx)
+				captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+				if !executionOK || !capturedOK || execution.BundleHash != captured.BundleHash() {
+					t.Fatalf("retirement managed execution source differs from captured source: execution=%t/%s captured=%t/%s", executionOK, execution.BundleHash, capturedOK, captured.BundleHash())
+				}
+				if err := am.Run(runCtx); err != nil {
 					t.Fatalf("run agent-join fixture manager: %v", err)
 				}
 			}
-			req := testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")
 			if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 				t.Fatalf("activate exact flow owner: %v", err)
 			}
@@ -2338,14 +2343,12 @@ func TestFlowActivationRetirementResumesExactOwnerAfterTransientCleanupFailure(t
 
 func TestJoinedFlowAttemptRetirementBatchesOnlyAfterLocalCleanupAndRetries(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{activationAttempts: make(map[string]runtimepipeline.DynamicFlowRuntimeActivationAttempt)}
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
+	bundle := testFlowBundle(t, "")
+	am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle))
 	am.dynamicFlowActiveAttempts = make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowActiveAttempt)
-	ctx := testAuthorActivityContext(context.Background())
-	binding := runtimeprocessbinding.Binding{
-		ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "flow-retirement-test",
-		ProcessBootID: uuid.NewString(), GenerationGrantID: uuid.NewString(),
-		BundleHash:        authorActivityTestSourceArtifactFact.BundleHash(),
-		RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1,
+	binding, err := am.lifecycle.store.(processExecutionBindingProvider).ProcessExecutionBinding()
+	if err != nil {
+		t.Fatal(err)
 	}
 	const count = runtimepipeline.DynamicFlowRuntimeRetirementBatchLimit + 1
 	retiredTimers := 0
@@ -2428,7 +2431,8 @@ func TestSelectedFlowActivationRetainsExactRetirementIdentity(t *testing.T) {
 	for _, kind := range []string{"root", "static", "keyed"} {
 		t.Run(kind, func(t *testing.T) {
 			instances := &flowActivationTestInstanceStore{activationAttempts: make(map[string]runtimepipeline.DynamicFlowRuntimeActivationAttempt)}
-			am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
+			bundle := testFlowBundle(t, "")
+			am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle))
 			binding, err := am.lifecycle.store.(processExecutionBindingProvider).ProcessExecutionBinding()
 			if err != nil {
 				t.Fatal(err)
@@ -2448,7 +2452,6 @@ func TestSelectedFlowActivationRetainsExactRetirementIdentity(t *testing.T) {
 			}
 			foreign := owner
 			foreign.RunID = uuid.NewString()
-			ctx := testAuthorActivityContext(context.Background())
 			if err := am.AdoptSelectedFlowActivation(ctx, foreign, attempt, true); err == nil || len(am.dynamicFlowActiveAttempts) != 0 {
 				t.Fatalf("foreign transfer changed ownership: %v", err)
 			}
@@ -2468,7 +2471,7 @@ func TestSelectedFlowActivationRetainsExactRetirementIdentity(t *testing.T) {
 			if err := am.AdoptSelectedFlowActivation(ctx, owner, attempt, true); err == nil {
 				t.Fatal("duplicate transfer acquired a second owner")
 			}
-			if err := am.retireDynamicFlowAttemptsAfterJoin(testAuthorActivityContext(context.Background())); err != nil {
+			if err := am.retireDynamicFlowAttemptsAfterJoin(ctx); err != nil {
 				t.Fatal(err)
 			}
 			if len(am.dynamicFlowActiveAttempts) != 0 || !reflect.DeepEqual(instances.retiredTimerOwners, []runtimeflowidentity.RunScopedFlowInstance{owner}) {
@@ -2477,7 +2480,7 @@ func TestSelectedFlowActivationRetainsExactRetirementIdentity(t *testing.T) {
 			if _, found := instances.retiredAttemptIDs[attempt]; !found {
 				t.Fatal("cleanup did not settle the exact durable attempt")
 			}
-			if err := am.retireDynamicFlowAttemptsAfterJoin(testAuthorActivityContext(context.Background())); err != nil || len(instances.retiredTimerOwners) != 1 {
+			if err := am.retireDynamicFlowAttemptsAfterJoin(ctx); err != nil || len(instances.retiredTimerOwners) != 1 {
 				t.Fatalf("joined cleanup was repeated: owners=%+v err=%v", instances.retiredTimerOwners, err)
 			}
 		})
