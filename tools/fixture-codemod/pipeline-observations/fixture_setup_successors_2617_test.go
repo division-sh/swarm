@@ -34,6 +34,8 @@ import (
 // #2730/6246451663 and6246457824 append the 27 mapped fixture endpoints
 // and two exact callback continuations plus timer-reopen and native-coordinate endpoints,
 // retaining all 52 prior receipts and the complete mechanical history.
+// The final native-runtime fixture sweep appends 21 original-context/grant
+// continuations, retaining the complete 83-receipt predecessor prefix.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
@@ -56,6 +58,8 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 		"native-pipeline-delivery-exact-join-semantic/internal/runtime/pipeline/workflow_join_lifecycle_test.go/TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog",
 		"native-shared-coordinator-authority/internal/runtime/node_delivery_startup_recovery_test.go/TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity",
 		"native-shared-coordinator-authority/internal/runtime/node_delivery_startup_recovery_test.go/TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries",
+		"native-shared-coordinator-authority/internal/runtime/node_delivery_startup_recovery_test.go/TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSelectedStore",
+		"native-shared-coordinator-authority/internal/runtime/template_instance_delivery_test.go/TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows",
 		"native-bus-terminal-refusal-state/internal/runtime/bus/eventbus_publish_test.go/TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres",
 		"native-bus-terminal-refusal-state/internal/runtime/bus/eventbus_publish_test.go/TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite",
 		"native-bus-selected-run-construction/internal/runtime/bus/eventbus_publish_test.go/eventBusTestRunContextForSource",
@@ -94,18 +98,35 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 		"native-run-setup-family144/internal/runtime/runtime_shutdown_fan_out_test.go/TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive",
 		"native-run-setup-family144/internal/runtime/runtime_startup_readiness_test.go/newStartupReadinessTestRuntime",
 		"native-run-setup-family144/internal/runtime/workflow_timer_startup_recovery_test.go/TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersOnBothStores",
-		"native-handler-source-coordinator/internal/runtime/pipeline/workflow_timer_replay_selected_store_external_test.go/TestWorkflowTimerCauseReplayReopenAndIsolationBothStores":
+		"native-handler-source-coordinator/internal/runtime/pipeline/workflow_timer_replay_selected_store_external_test.go/TestWorkflowTimerCauseReplayReopenAndIsolationBothStores",
+		"native-startup-actor-construction/internal/runtime/runtime_agent_memory_native_startup_test.go/assertNativeRuntimeStartCarriesMemoryIdentity",
+		"native-runtime-recovery-log/internal/runtime/runtime_recovery_diagnostics_test.go/TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules",
+		"native-runtime-recovery-log/internal/runtime/runtime_recovery_diagnostics_test.go/TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork",
+		"native-runtime-recovery-log/internal/runtime/runtime_recovery_diagnostics_test.go/TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary",
+		"native-runtime-recovery-log/internal/runtime/runtime_recovery_diagnostics_test.go/TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetail",
+		"native-runtime-recovery-log/internal/runtime/runtime_recovery_diagnostics_test.go/TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary",
+		"native-runtime-recovery-log/internal/runtime/runtime_recovery_diagnostics_test.go/TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal",
+		"native-runtime-recovery-log/internal/runtime/runtime_recovery_diagnostics_test.go/TestRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatal",
+		"native-runtime-log-persistence/internal/runtime/diagnostics_test.go/TestRuntimeLogger_Log_StampsSourceArtifactFactOnRunRow",
+		"native-runtime-log-persistence/internal/runtime/diagnostics_test.go/TestRuntimeLogger_LogRejectsDeletedPersistedSourceArtifactFact",
+		"native-runtime-log-persistence/internal/runtime/diagnostics_test.go/TestRuntimeLogger_Log_PersistsCanonicalRunOwnershipFromContext",
+		"native-runtime-log-persistence/internal/runtime/diagnostics_test.go/TestRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEvent",
+		"native-runtime-log-persistence/internal/runtime/diagnostics_test.go/TestRuntimeLogger_Log_DoesNotDeriveLineageFromUnpersistedSubjectEvent",
+		"native-runtime-log-persistence/internal/runtime/diagnostics_test.go/TestRuntimeLogger_Log_PersistsTypedRuntimeLineage",
+		"native-run-setup-family144/internal/runtime/workflow_timer_startup_recovery_test.go/TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRuntimeOnBothStores",
+		"native-run-setup-family144/internal/runtime/workflow_timer_startup_recovery_test.go/TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStores",
+		"native-run-setup-family144/internal/runtime/workflow_timer_startup_recovery_test.go/TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletesOnBothStores":
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "f77513b684851a6d7ca4676b2a4afcd58fc9c740931b254c45714aec070cee25" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "695c4885b5047f74969c970a3cc873dd6e89350c9ca5365e29dc67995ff66b22" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 83 {
+	if len(pins) != 104 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -177,6 +198,8 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			row.Function != "TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog" &&
 			row.Function != "TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity" &&
 			row.Function != "TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries" &&
+			row.Function != "TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSelectedStore" &&
+			row.Function != "TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows" &&
 			row.Function != "TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerPostgres" &&
 			row.Function != "TestEventBusRejectsTerminalRunEventsThroughEveryPublishOwnerSQLite" &&
 			row.Function != "eventBusTestRunContextForSource" &&
@@ -215,6 +238,23 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			row.Function != "TestRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLive" &&
 			row.Function != "newStartupReadinessTestRuntime" &&
 			row.Function != "TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersOnBothStores" &&
+			row.Function != "assertNativeRuntimeStartCarriesMemoryIdentity" &&
+			row.Function != "TestRuntimeStart_RecoveryDisabledEmitsDeniedDecisionForActiveSchedules" &&
+			row.Function != "TestRuntimeStart_RecoveryDisabledAllowsAndLogsManagerSnapshotWork" &&
+			row.Function != "TestRuntimeStart_RecoveryEnabledEmitsAllowedDecisionSummary" &&
+			row.Function != "TestRuntimeStart_WorkflowOnlyRecoveryUsesFamilyAwareBootAndRestorationDetail" &&
+			row.Function != "TestRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummary" &&
+			row.Function != "TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal" &&
+			row.Function != "TestRuntimeStart_RecoveryInspectionAndManagerHydrationFailureIsBootFatal" &&
+			row.Function != "TestRuntimeLogger_Log_StampsSourceArtifactFactOnRunRow" &&
+			row.Function != "TestRuntimeLogger_LogRejectsDeletedPersistedSourceArtifactFact" &&
+			row.Function != "TestRuntimeLogger_Log_PersistsCanonicalRunOwnershipFromContext" &&
+			row.Function != "TestRuntimeLogger_Log_DerivesLineageFromPersistedSubjectEvent" &&
+			row.Function != "TestRuntimeLogger_Log_DoesNotDeriveLineageFromUnpersistedSubjectEvent" &&
+			row.Function != "TestRuntimeLogger_Log_PersistsTypedRuntimeLineage" &&
+			row.Function != "TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRuntimeOnBothStores" &&
+			row.Function != "TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStores" &&
+			row.Function != "TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletesOnBothStores" &&
 			row.Function != "TestWorkflowTimerCauseReplayReopenAndIsolationBothStores" {
 			continue
 		}
@@ -261,13 +301,13 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			}
 		})
 	}
-	if matched != 47 {
-		t.Fatalf("fixture comparator endpoints=%d, want47", matched)
+	if matched != 66 {
+		t.Fatalf("fixture comparator endpoints=%d, want66", matched)
 	}
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "f77513b684851a6d7ca4676b2a4afcd58fc9c740931b254c45714aec070cee25" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "695c4885b5047f74969c970a3cc873dd6e89350c9ca5365e29dc67995ff66b22" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -278,7 +318,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 83 {
+	if len(pins) != 104 {
 		t.Fatal("fixture successor row count changed")
 	}
 	prefix, err := json.Marshal(pins[:39])
@@ -292,6 +332,10 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	prefix, err = json.Marshal(pins[:52])
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "4499a4f76b279ef56f5d28abb97f55fac5a29f5719090fcb5345d2e09764e1ed" {
 		t.Fatal("#2730 changed the immutable 52-receipt setup predecessor")
+	}
+	prefix, err = json.Marshal(pins[:83])
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prefix)) != "84f07ee185996ade04d083e3c4e17f5b182b41528d57ac8e4e2711f3aa090c5f" {
+		t.Fatal("#2730 changed the immutable 83-receipt setup predecessor")
 	}
 	for index, pin := range pins {
 		t.Run(pin.Original.Function, func(t *testing.T) {

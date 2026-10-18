@@ -43,6 +43,9 @@ func sharedCoordinatorComposition2617(row recipe) (sharedCoordinatorCompositionP
 }
 
 func validateSharedCoordinatorComposition2617(row recipe, actual string, directive r52DirectiveSuccessorPin, pin sharedCoordinatorCompositionPin2617) error {
+	if original, err := fixtureSetupCurrentEndpoint2617(row, actual); err == nil {
+		row, actual = original, original.Successor
+	}
 	if !reflect.DeepEqual(row, pin.Combined) {
 		return fmt.Errorf("combined coordinator history or endpoint changed")
 	}
