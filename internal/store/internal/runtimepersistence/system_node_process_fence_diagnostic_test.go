@@ -60,7 +60,12 @@ func TestSystemNodeMutationRejectsPredecessorAfterProcessCutoverBothStores(t *te
 
 func proveOriginalSessionProofConfinement(t *testing.T, backend string) {
 	t.Helper()
-	f, _ := constructWorkflowMutationFixture(t, backend, "original-session-proof", time.Now().UTC().Add(-time.Minute))
+	_, selected := newAgentFixtureAuthorityStore(t, backend)
+	capture, captureErr := CaptureOriginalProcessForTest(selected)
+	if (backend == "postgres") != (captureErr == nil) {
+		t.Fatalf("original construction capture: %v", captureErr)
+	}
+	f, _ := constructWorkflowMutationFixture(t, backend, "original-session-proof", time.Now().UTC().Add(-time.Minute), selected)
 	if err := f.manager.Shutdown(); err != nil {
 		t.Fatal(err)
 	}
@@ -68,17 +73,17 @@ func proveOriginalSessionProofConfinement(t *testing.T, backend string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var missing *startupownership.OriginalSessionInterruptionForTest
+	var missing *OriginalSessionInterruptionForTest
 	if err := missing.Interrupt(t.Context(), original); err == nil {
 		t.Fatal("nil native interruption admitted")
 	}
-	if _, err := startupownership.PrepareOriginalSessionInterruptionForTest(t.Context(), startupownership.MutationAuthority{}); err == nil {
+	if _, err := capture.PrepareForTest(t.Context(), startupownership.MutationAuthority{}); err == nil {
 		t.Fatal("missing original authority issued a native interruption")
 	}
 	if _, err := startupownership.HoldOriginalPossessionObservationForTest(startupownership.MutationAuthority{}); err == nil {
 		t.Fatal("missing original authority held a possession observer")
 	}
-	interruption, err := startupownership.PrepareOriginalSessionInterruptionForTest(t.Context(), original)
+	interruption, err := capture.PrepareForTest(t.Context(), original)
 	if backend == "sqlite" {
 		if err == nil || interruption != nil {
 			t.Fatal("SQLite issued a PostgreSQL session interruption")
@@ -88,7 +93,7 @@ func proveOriginalSessionProofConfinement(t *testing.T, backend string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := startupownership.PrepareOriginalSessionInterruptionForTest(t.Context(), original); err == nil {
+	if _, err := capture.PrepareForTest(t.Context(), original); err == nil {
 		t.Fatal("one original session issued a second interruption handle")
 	}
 	foreign, _ := constructWorkflowMutationFixture(t, backend, "foreign-original-session-proof", time.Now().UTC().Add(-time.Minute))
@@ -142,7 +147,16 @@ func proveSystemNodeProcessCutover(t *testing.T, backend string, mode mutationpr
 	t.Helper()
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	flowID := "system-node-process-fence"
-	f, record := constructWorkflowMutationFixture(t, backend, flowID, at)
+	_, initial := newAgentFixtureAuthorityStore(t, backend)
+	var capture *OriginalProcessCaptureForTest
+	if cut == "native_loss" {
+		var err error
+		capture, err = CaptureOriginalProcessForTest(initial)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	f, record := constructWorkflowMutationFixture(t, backend, flowID, at, initial)
 	selected := f.store.(stateOnlyAcquisitionStore)
 	node := mustPersistenceNode(flowID, "predecessor-handler")
 	route := events.DeliveryRoute{
@@ -217,7 +231,7 @@ func proveSystemNodeProcessCutover(t *testing.T, backend string, mode mutationpr
 		if err != nil {
 			t.Fatal(err)
 		}
-		interruption, err := startupownership.PrepareOriginalSessionInterruptionForTest(ctx, original)
+		interruption, err := capture.PrepareForTest(ctx, original)
 		if err != nil {
 			t.Fatal(err)
 		}

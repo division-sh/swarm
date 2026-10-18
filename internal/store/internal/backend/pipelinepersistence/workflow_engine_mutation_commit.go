@@ -530,10 +530,10 @@ func commitWorkflowEngineMutation(
 				}
 				result.DeliverySuccess = &claim
 			}
-			return captureWorkflowMutationDomainForTest(txctx, tx, store, command)
+			return nil
 		})
-		if err == nil {
-			err = observeWorkflowMutationDomainForTest(txctx, store, command)
+		if err == nil && command.DeliverySuccess != nil {
+			err = transactiontest.NotifyWorkflowDomainExit(txctx, command.DeliverySuccess.Claim)
 		}
 		return result, err
 	})

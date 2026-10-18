@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
@@ -224,6 +225,11 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	sqlCtx = transactiontest.WithWorkflowDomainNotification(sqlCtx, func(notify context.Context, claim deliverylifecycle.Claim) error {
+		return b.testTransactions.WorkflowDomainExit(notify, claim, func() (transactiontest.WorkflowOrderWait, error) {
+			return b.captureMutationOrderWait(notify, tx)
+		})
+	})
 	if operationErr := operation(sqlCtx, tx); operationErr != nil {
 		if callerErr := ctx.Err(); callerErr != nil {
 			return false, errors.Join(callerErr, operationErr)

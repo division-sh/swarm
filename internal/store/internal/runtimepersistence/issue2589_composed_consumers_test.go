@@ -20,7 +20,7 @@ func TestIssue2589ComposedConsumersPreserveResultsBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			opened := backend.open(t)
 			selected := opened.store
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			owner := selected.(snapshotOwnershipStore)
 			cards := selected.(decisioncard.Store)
 			at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
@@ -130,7 +130,7 @@ func TestIssue2589NativeAdmissionFrameIsolationBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			opened := backend.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), opened.store)
 			runs := []string{uuid.NewString(), uuid.NewString()}
 			for _, runID := range runs {
 				requireRunningRunForTest(t, ctx, opened.store, runID, time.Now().UTC())

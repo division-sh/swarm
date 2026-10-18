@@ -40,7 +40,7 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 			}
 			t.Run(backend.name+"/"+mode, func(t *testing.T) {
 				fixture := backend.open(t)
-				ctx := testAuthorActivityContext()
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 				eventBus, err := newRunConvergenceEventBus(t, fixture.store)
 				if err != nil {
 					t.Fatalf("NewEventBus: %v", err)
@@ -205,7 +205,7 @@ func TestSameLabelCausalAndRunScopedEventsCannotConvergeExistingRunParity(t *tes
 			backend, intent := backend, intent
 			t.Run(backend.name+"/"+intent, func(t *testing.T) {
 				fixture := backend.open(t)
-				ctx := testAuthorActivityContext()
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 				at := time.Date(2026, 7, 14, 10, 30, 0, 0, time.UTC)
 				runID := uuid.NewString()
 				root := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.trigger", "ingress", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, at)
@@ -236,7 +236,7 @@ func TestSameLabelCausalAndRunScopedEventsCannotConvergeExistingRunParity(t *tes
 func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testing.T) {
 	fixture := openPostgresAuthorActivityReceiptFixture(t)
 	pg := fixture.store.(*PostgresStore)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 	candidate := eventtest.RuntimeControl(
 		uuid.NewString(), "platform.paused", "runtime", "", json.RawMessage(`{}`), 0,
 		"", "", events.EventEnvelope{}, time.Date(2026, 7, 19, 21, 0, 0, 0, time.UTC),

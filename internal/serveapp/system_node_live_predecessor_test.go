@@ -31,7 +31,17 @@ func TestServeProcessTakeoverRejectsLivePredecessorMutationBothStores(t *testing
 			opts, start := issue2564ServeHarness(t, backend, canonicalrouting.CopyRootIngressServedFollowUp(t), false)
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 			var latest serveRuntimePersistence
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { latest = p })
+			var originalCapture *storetest.OriginalProcessCapture
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				latest = p
+				if backend == "postgres" && originalCapture == nil {
+					var err error
+					originalCapture, err = storetest.CaptureOriginalProcess(p.deps.EventStore)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+			})
 			type heldMutation struct {
 				probe *storetest.WorkflowMutationCommitObservation
 				err   error
@@ -100,9 +110,9 @@ func TestServeProcessTakeoverRejectsLivePredecessorMutationBothStores(t *testing
 			}
 			oldEvent := eventtest.ExistingRunRootIngress(uuid.NewString(), "item.received", "takeover-proof", "", []byte(`{"item_id":"stale"}`), 0, seed.RunID, events.EventEnvelope{}, time.Now().UTC())
 			var hold *startupownership.PossessionObservationHoldForTest
-			var interruption *startupownership.OriginalSessionInterruptionForTest
+			var interruption *storetest.OriginalSessionInterruption
 			if backend == "postgres" {
-				interruption, err = startupownership.PrepareOriginalSessionInterruptionForTest(ctx, original)
+				interruption, err = originalCapture.PrepareForTest(ctx, original)
 				if err != nil {
 					t.Fatal(err)
 				}

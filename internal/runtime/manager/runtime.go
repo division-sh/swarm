@@ -2151,6 +2151,11 @@ func (am *AgentManager) beginWork(ctx context.Context, kind string) (*worklifeti
 	if am == nil || am.workOwner == nil {
 		return nil, fmt.Errorf("%s requires a runtime work occurrence", strings.TrimSpace(kind))
 	}
+	var err error
+	ctx, err = am.bindRuntimeOperationContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var companion worklifetime.Occurrence
 	if contextualOwner, ok := worklifetime.OccurrenceFromContext(ctx); ok {
 		if contextualOwner != am.workOwner {
@@ -2167,6 +2172,11 @@ func (am *AgentManager) beginWork(ctx context.Context, kind string) (*worklifeti
 func (am *AgentManager) beginStandingWork(ctx context.Context, kind string) (*worklifetime.Lease, error) {
 	if am == nil || am.workOwner == nil {
 		return nil, fmt.Errorf("%s requires a runtime work occurrence", strings.TrimSpace(kind))
+	}
+	var err error
+	ctx, err = am.bindRuntimeOperationContext(ctx)
+	if err != nil {
+		return nil, err
 	}
 	lease, err := am.lifecycle.beginStandingWork(ctx)
 	if err != nil {

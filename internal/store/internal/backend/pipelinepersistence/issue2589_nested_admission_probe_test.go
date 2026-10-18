@@ -13,12 +13,15 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/google/uuid"
 )
+
+var OriginalNestedAdmissionContextForTest func(*testing.T, bool) context.Context
 
 // Statement/order control only; native correctness is covered separately.
 func TestIssue2589NestedStateGuardReusesRunAdmissionAndPreservesState(t *testing.T) {
@@ -43,6 +46,29 @@ func TestIssue2589NestedStateGuardReusesRunAdmissionAndPreservesState(t *testing
 					artifactQuery = `^SELECT\s+EXISTS \(SELECT 1 FROM source_artifacts WHERE bundle_hash = \$1\)$`
 				}
 				mock.ExpectBegin()
+				ctx := OriginalNestedAdmissionContextForTest(t, postgres)
+				original, err := startupownership.CaptureMutationAuthority(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stamp := original.ProcessAuthority().LeaseStamp()
+				if postgres {
+					mock.ExpectQuery(regexp.QuoteMeta(`SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1 FOR UPDATE`)).
+						WillReturnRows(sqlmock.NewRows([]string{"last_sequence"}).AddRow(0))
+				} else {
+					mock.ExpectExec(regexp.QuoteMeta(`INSERT OR IGNORE INTO author_activity_order (singleton_id, last_sequence) VALUES (1, 0)`)).WillReturnResult(sqlmock.NewResult(0, 0))
+					mock.ExpectExec(regexp.QuoteMeta(`UPDATE author_activity_order SET last_sequence = last_sequence WHERE singleton_id = 1`)).WillReturnResult(sqlmock.NewResult(0, 1))
+					mock.ExpectQuery(regexp.QuoteMeta(`SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1`)).
+						WillReturnRows(sqlmock.NewRows([]string{"last_sequence"}).AddRow(0))
+				}
+				processQuery := `SELECT generation, CAST(lease_id AS TEXT), owner_id, CAST(boot_id AS TEXT),
+					CAST(runtime_instance_id AS TEXT), backend
+					FROM runtime_process_generation WHERE singleton_id = 1`
+				if postgres {
+					processQuery += " FOR UPDATE"
+				}
+				mock.ExpectQuery(regexp.QuoteMeta(processQuery)).WillReturnRows(sqlmock.NewRows([]string{"generation", "lease_id", "owner_id", "boot_id", "runtime_instance_id", "backend"}).
+					AddRow(stamp.Generation, stamp.LeaseID, stamp.OwnerID, stamp.BootID, stamp.RuntimeInstanceID, stamp.Backend))
 				mock.ExpectQuery(runQuery).WithArgs(runID).WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", bundle))
 				mock.ExpectQuery(artifactQuery).WithArgs(bundle).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 				mock.ExpectQuery(artifactQuery).WithArgs(bundle).WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(cut != "missing_artifact"))
@@ -98,13 +124,13 @@ func TestIssue2589NestedStateGuardReusesRunAdmissionAndPreservesState(t *testing
 					if err != nil {
 						t.Fatal(err)
 					}
-					result = mutationprotocol.RunPostgres(context.Background(), backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
+					result = mutationprotocol.RunPostgres(ctx, backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
 				} else {
 					backend, err := sqlitebackend.New(db)
 					if err != nil {
 						t.Fatal(err)
 					}
-					result = mutationprotocol.RunSQLite(context.Background(), backend, "nested run-admission probe", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
+					result = mutationprotocol.RunSQLite(ctx, backend, "nested run-admission probe", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
 				}
 				if cut == "acknowledged" {
 					if !result.Acknowledged() || result.Err() != nil {

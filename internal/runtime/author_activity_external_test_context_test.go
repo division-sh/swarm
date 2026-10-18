@@ -43,6 +43,29 @@ func testLiveExecutionContext(ctx context.Context) context.Context {
 	return runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 }
 
+func originalRuntimeFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if runtimestartupownership.HasMutationAuthority(ctx) {
+		if _, err := runtimestartupownership.CaptureMutationAuthority(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return ctx
+	}
+	owner, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("fixture requires its original selected lifecycle owner: %T", selected)
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
+
 var authorActivityTestSourceArtifact = sourceartifactfixture.Artifact()
 var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
 
@@ -274,6 +297,7 @@ func installExternalRuntimeTestGeneration(
 	ctx context.Context,
 	selected any,
 	runtime *runtimepkg.Runtime,
+	prepared ...runtimestartupownership.ProcessCapability,
 ) (runtimestartupownership.ProcessCapability, runtimestartupownership.LiveGenerationGrant) {
 	t.Helper()
 	store, ok := selected.(runtimestartupownership.Store)
@@ -289,9 +313,21 @@ func installExternalRuntimeTestGeneration(
 	if err != nil {
 		t.Fatalf("compile external runtime test source set: %v", err)
 	}
-	capability, err := store.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "external-runtime-test", BootID: uuid.NewString(), RuntimeInstanceID: runtime.Options.RuntimeInstanceID,
-	})
+	if len(prepared) > 1 || (len(prepared) == 1 && prepared[0] == nil) {
+		t.Fatal("external runtime requires one exact prepared process capability")
+	}
+	var capability runtimestartupownership.ProcessCapability
+	if len(prepared) == 1 {
+		capability = prepared[0]
+		authority, evidenceErr := capability.Evidence()
+		if evidenceErr != nil || authority.RuntimeInstanceID != runtime.Options.RuntimeInstanceID {
+			t.Fatalf("prepared runtime capability differs: %v", evidenceErr)
+		}
+	} else {
+		capability, err = store.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+			OwnerID: "external-runtime-test", BootID: uuid.NewString(), RuntimeInstanceID: runtime.Options.RuntimeInstanceID,
+		})
+	}
 	if err != nil {
 		t.Fatalf("acquire external runtime test process capability: %v", err)
 	}
@@ -344,6 +380,22 @@ func installExternalRuntimeTestGeneration(
 		t.Fatalf("install external runtime test generation grant: %v", err)
 	}
 	return capability, grant
+}
+
+func prepareExternalRuntimeFixtureProcess(t testing.TB, ctx context.Context, selected any) runtimestartupownership.ProcessCapability {
+	t.Helper()
+	owner, ok := selected.(runtimestartupownership.Store)
+	if !ok {
+		t.Fatalf("runtime fixture requires its selected process owner: %T", selected)
+	}
+	capability, err := owner.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "external-runtime-test", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = capability.Release(context.Background()) })
+	return capability
 }
 
 func installExternalManagerTestGeneration(
@@ -525,6 +577,19 @@ func newRuntimeTestEventBus(t testing.TB, store runtimebus.EventStore) (*runtime
 
 func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
 	t.Helper()
+	if opts.CarryMutationContext == nil {
+		opts.CarryMutationContext = runtimestartupownership.CarryMutationAuthority
+	}
+	if _, native := store.(agentfixture.Store); native && opts.MutationContext == nil {
+		original := originalRuntimeFixtureContext(t, testAuthorActivityContext(context.Background()), store)
+		opts.MutationContext = func(ctx context.Context) (context.Context, error) {
+			if !runtimestartupownership.HasMutationAuthority(ctx) {
+				ctx = runtimestartupownership.CarryMutationAuthority(ctx, original)
+			}
+			_, err := runtimestartupownership.CaptureMutationAuthority(ctx)
+			return ctx, err
+		}
+	}
 	var lifetimeOwner *externalRuntimeTestEventBusOwner
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live
