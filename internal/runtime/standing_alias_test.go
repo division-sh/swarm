@@ -36,8 +36,9 @@ func proveA9AliasSystematicConsumption(t *testing.T, override bool) {
 	}
 	// Readers must consume the admitted fact even if a raw DTO is later changed.
 	bundle.RootSchema.Name = "changed-root"
-	bundle.RootSchema.Ingress.Alias = "changed-root-alias"
-	bundle.FlowSchemas["beta"].Ingress.Alias = "changed-child-alias"
+	rootAlias, childAlias := "changed-root-alias", "changed-child-alias"
+	bundle.RootSchema.Ingress.Alias = &rootAlias
+	bundle.FlowSchemas["beta"].Ingress.Alias = &childAlias
 	declarations, err := ResolveStandingTargetDeclarations(composed, catalog)
 	if err != nil {
 		t.Fatal(err)

@@ -292,54 +292,6 @@ func TestR3PolicyRulesDiskArtifactCatalogRetainedParity(t *testing.T) {
 	}
 }
 
-func TestR3PolicyRulesProvenanceComposition(t *testing.T) {
-	repo := repoRootForContractsTest(t)
-	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: r3-provenance\n")
-	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "task.ready:\ntask.done:\n")
-	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  event_handlers:\n    task.ready:\n      emit: task.done\n")
-	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: business intent}\n  criteria: [review]\n  model: regular\n")
-	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "\" spaced \": &literal {value: 1, description: data, override: false}\nalias: *literal\n")
-	writeFixtureFile(t, filepath.Join(root, "rules.yaml"), r3AgentRules)
-	artifact, err := sourceartifact.AdmitDirectory(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, mode := range []string{"disk", "artifact"} {
-		var bundle *WorkflowContractBundle
-		if mode == "disk" {
-			bundle, err = LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
-		} else {
-			bundle, err = LoadWorkflowContractBundleFromArtifact(repo, artifact, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		families := map[string]bool{}
-		for _, entry := range bundle.EffectiveProvenance().Entries() {
-			for _, family := range []string{"policy[", "rules[", "agents[", "nodes[", "events[", "schemas["} {
-				if strings.HasPrefix(entry.Path, family) {
-					families[family] = true
-				}
-			}
-			if entry.Path == `policy[".:alias"].value` && (entry.Provenance.SourceLine != 2 || entry.Provenance.SourcePresence != "scalar") {
-				t.Fatalf("alias introduction lost: %+v", entry)
-			}
-		}
-		for _, family := range []string{"policy[", "rules[", "agents[", "nodes[", "events[", "schemas["} {
-			if !families[family] {
-				t.Fatalf("%s ledger family lost in %s", family, mode)
-			}
-		}
-		if _, ok := bundle.EffectiveProvenance().Lookup(`policy[".: spaced "].override`); !ok {
-			t.Fatal("exact literal interior provenance lost")
-		}
-		if _, ok := bundle.EffectiveProvenance().Lookup(`rules[".:review"].rules[0].id`); !ok {
-			t.Fatal("rule field provenance lost")
-		}
-	}
-}
-
 func TestR3PolicyRulesDocumentWideExpansionBudget(t *testing.T) {
 	for _, family := range []string{"policy", "rules"} {
 		for _, mode := range []string{"alias", "merge"} {

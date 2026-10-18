@@ -12,8 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-const eventRequiredByDefaultRule = "event_payload_field_required_by_default/v1"
-
 // Reserved names cannot be reinterpreted as business payload fields.
 var reservedEventCatalogFieldNames = map[string]struct{}{
 	"swarm":                {},
@@ -106,17 +104,7 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 	if err != nil {
 		return EventCatalogEntry{}, err
 	}
-	entry := EventCatalogEntry{
-		Payload:             EventPayloadSpec{Properties: map[string]EventFieldSpec{}},
-		admissionProvenance: map[string]EffectiveValueProvenance{},
-	}
-	entry.admissionProvenance["declaration"] = EffectiveValueProvenance{
-		Origin:         EffectiveValueOriginAuthored,
-		SourceFile:     declaration.IntroductionLocation().File,
-		SourceLine:     declaration.IntroductionLocation().Line,
-		SourceColumn:   declaration.IntroductionLocation().Column,
-		SourcePresence: value.Presence().String(),
-	}
+	entry := EventCatalogEntry{Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{}}}
 	if field, ok := byName["key"]; ok {
 		key, err := requiredLiteralString(field.Value, "event key")
 		if err != nil {
@@ -126,7 +114,6 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 			return EventCatalogEntry{}, fmt.Errorf("event key at %s must not have surrounding whitespace", field.Value.Location())
 		}
 		entry.BusinessKeyField = key
-		entry.admissionProvenance["business_key"] = authoredSourceProvenance(field.Value)
 	}
 	if err := populateEventCatalogPayload(&entry, fields); err != nil {
 		return EventCatalogEntry{}, err
@@ -178,12 +165,11 @@ func admitEventCatalogFields(name string, value yamlsource.Value, bare bool) ([]
 }
 
 func populateEventCatalogPayload(entry *EventCatalogEntry, fields []yamlsource.MappingField) error {
-	payloadFieldNames := make([]string, 0, len(fields))
 	for _, field := range fields {
 		if field.Name == "key" || field.Name == "description" {
 			continue
 		}
-		payloadField, optional, typeSource, err := admitEventPayloadField(field.Value)
+		payloadField, optional, err := admitEventPayloadField(field.Value)
 		if err != nil {
 			return fmt.Errorf("payload field %q at %s: %w", field.Name, field.Value.Location(), err)
 		}
@@ -191,34 +177,8 @@ func populateEventCatalogPayload(entry *EventCatalogEntry, fields []yamlsource.M
 			entry.Payload.Required = append(entry.Payload.Required, field.Name)
 		}
 		entry.Payload.Properties[field.Name] = payloadField
-		payloadFieldNames = append(payloadFieldNames, field.Name)
-		typePath := "fields." + field.Name + ".type"
-		entry.admissionProvenance[typePath] = authoredSourceProvenance(typeSource)
-		optionalPath := "fields." + field.Name + ".is_optional"
-		if optional {
-			entry.admissionProvenance[optionalPath] = authoredSourceProvenance(typeSource)
-		} else {
-			location := typeSource.IntroductionLocation()
-			entry.admissionProvenance[optionalPath] = EffectiveValueProvenance{
-				Origin:       EffectiveValueOriginDerived,
-				RuleID:       eventRequiredByDefaultRule,
-				InputPaths:   []string{typePath},
-				SourceFile:   location.File,
-				SourceLine:   location.Line,
-				SourceColumn: location.Column,
-			}
-		}
-		if err := populateEventPayloadFieldAdmissionProvenance(entry, field.Name, field.Value); err != nil {
-			return err
-		}
 	}
 	sort.Strings(entry.Payload.Required)
-	sort.Strings(payloadFieldNames)
-	entry.admissionProvenance["payload.required"] = EffectiveValueProvenance{
-		Origin:     EffectiveValueOriginDerived,
-		RuleID:     eventRequiredByDefaultRule,
-		InputPaths: eventFieldTypePaths(payloadFieldNames),
-	}
 
 	return nil
 }
@@ -279,141 +239,82 @@ func admitEventDeclarationShape(name string, value yamlsource.Value) (bool, erro
 	}
 }
 
-func populateEventPayloadFieldAdmissionProvenance(entry *EventCatalogEntry, fieldName string, value yamlsource.Value) error {
-	if entry == nil || value.Presence() != yamlsource.PresenceMapping {
-		return nil
-	}
-	fields, err := uniqueYAMLMappingFields(value, "event payload field provenance")
-	if err != nil {
-		return err
-	}
-	byName := make(map[string]yamlsource.MappingField, len(fields))
-	for _, field := range fields {
-		byName[field.Name] = field
-	}
-	prefix := "fields." + strings.TrimSpace(fieldName) + "."
-	for _, name := range []string{"description", "pattern", "equal_to"} {
-		if field, ok := byName[name]; ok {
-			path := name
-			if name != "description" {
-				path = "refinements." + name
-			}
-			entry.admissionProvenance[prefix+path] = authoredSourceProvenance(field.Value)
-		}
-	}
-	for _, nested := range []struct {
-		prefix string
-		field  yamlsource.MappingField
-		names  []string
-	}{
-		{prefix: prefix + "refinements.length.", field: byName["length"], names: []string{"min", "max"}},
-		{prefix: prefix + "refinements.range.", field: byName["range"], names: []string{"min", "max"}},
-		{prefix: prefix + "citation.", field: byName["citation"], names: []string{"criteria", "allowed_classes"}},
-	} {
-		if err := populateEventNestedAdmissionProvenance(entry, nested.prefix, nested.field, nested.names); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func populateEventNestedAdmissionProvenance(entry *EventCatalogEntry, prefix string, parent yamlsource.MappingField, names []string) error {
-	if entry == nil || parent.Value.Presence() != yamlsource.PresenceMapping {
-		return nil
-	}
-	fields, err := uniqueYAMLMappingFields(parent.Value, "event nested provenance")
-	if err != nil {
-		return err
-	}
-	allowed := make(map[string]struct{}, len(names))
-	for _, name := range names {
-		allowed[name] = struct{}{}
-	}
-	for _, field := range fields {
-		if _, ok := allowed[field.Name]; ok {
-			entry.admissionProvenance[prefix+field.Name] = authoredSourceProvenance(field.Value)
-		}
-	}
-	return nil
-}
-
-func admitEventPayloadField(value yamlsource.Value) (EventFieldSpec, bool, yamlsource.Value, error) {
+func admitEventPayloadField(value yamlsource.Value) (EventFieldSpec, bool, error) {
 	const context = "event payload field"
 	switch value.Presence() {
 	case yamlsource.PresenceScalar:
 		rawType, err := listDeclarationScalar(value, context, false)
 		if err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, err
+			return EventFieldSpec{}, false, err
 		}
 		typeName, optional, err := admitEventFieldTypeMarker(rawType, context)
 		if err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, err
+			return EventFieldSpec{}, false, err
 		}
 		if err := validateWave1TypeRef(typeName, context); err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, err
+			return EventFieldSpec{}, false, err
 		}
-		return EventFieldSpec{Type: typeName}, optional, value, nil
+		return EventFieldSpec{Type: typeName}, optional, nil
 	case yamlsource.PresenceSequence, yamlsource.PresenceEmptySequence:
 		typeName, err := listDeclarationSequence(value, context)
 		if err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, err
+			return EventFieldSpec{}, false, err
 		}
 		if err := rejectEventTypeOptionalMarker(typeName, context); err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, err
+			return EventFieldSpec{}, false, err
 		}
 		if err := validateWave1TypeRef(typeName, context); err != nil {
-			return EventFieldSpec{}, false, yamlsource.Value{}, err
+			return EventFieldSpec{}, false, err
 		}
-		values, _ := value.Sequence()
-		return EventFieldSpec{Type: typeName}, false, values[0], nil
+		return EventFieldSpec{Type: typeName}, false, nil
 	case yamlsource.PresenceMapping:
 	case yamlsource.PresenceEmptyMapping:
-		return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("%s type is required", context)
+		return EventFieldSpec{}, false, fmt.Errorf("%s type is required", context)
 	default:
-		return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("%s type is required", context)
+		return EventFieldSpec{}, false, fmt.Errorf("%s type is required", context)
 	}
 	return admitEventPayloadMapping(value)
 }
 
-func admitEventPayloadMapping(value yamlsource.Value) (EventFieldSpec, bool, yamlsource.Value, error) {
+func admitEventPayloadMapping(value yamlsource.Value) (EventFieldSpec, bool, error) {
 	const context = "event payload field"
 	fields, err := uniqueYAMLMappingFields(value, context)
 	if err != nil {
-		return EventFieldSpec{}, false, yamlsource.Value{}, err
+		return EventFieldSpec{}, false, err
 	}
 	if err := rejectLongListField(fields, context); err != nil {
-		return EventFieldSpec{}, false, yamlsource.Value{}, err
+		return EventFieldSpec{}, false, err
 	}
 	byName := make(map[string]yamlsource.MappingField, len(fields))
 	for _, field := range fields {
 		if _, ok := eventPayloadFieldMappingKeys[field.Name]; !ok {
-			return EventFieldSpec{}, false, yamlsource.Value{}, NewUndefinedFieldDiagnostic(context, field.Name, eventPayloadFieldMappingKeys, field)
+			return EventFieldSpec{}, false, NewUndefinedFieldDiagnostic(context, field.Name, eventPayloadFieldMappingKeys, field)
 		}
 		byName[field.Name] = field
 	}
 	typeField, hasType := byName["type"]
 	if !hasType {
-		return EventFieldSpec{}, false, yamlsource.Value{}, fmt.Errorf("%s type is required", context)
+		return EventFieldSpec{}, false, fmt.Errorf("%s type is required", context)
 	}
 	rawType, err := listDeclarationScalar(typeField.Value, context, true)
 	if err != nil {
-		return EventFieldSpec{}, false, yamlsource.Value{}, err
+		return EventFieldSpec{}, false, err
 	}
 	typeName, optional, err := admitEventFieldTypeMarker(rawType, context)
 	if err != nil {
-		return EventFieldSpec{}, false, yamlsource.Value{}, err
+		return EventFieldSpec{}, false, err
 	}
 	if err := rejectEventTypeOptionalMarker(typeName, context); err != nil {
-		return EventFieldSpec{}, false, yamlsource.Value{}, err
+		return EventFieldSpec{}, false, err
 	}
 	if err := validateWave1TypeRef(typeName, context); err != nil {
-		return EventFieldSpec{}, false, yamlsource.Value{}, err
+		return EventFieldSpec{}, false, err
 	}
 	out := EventFieldSpec{Type: typeName}
 	if err := populateEventPayloadRefinements(&out, byName); err != nil {
-		return EventFieldSpec{}, false, yamlsource.Value{}, err
+		return EventFieldSpec{}, false, err
 	}
-	return out, optional, typeField.Value, nil
+	return out, optional, nil
 }
 
 func populateEventPayloadRefinements(out *EventFieldSpec, byName map[string]yamlsource.MappingField) error {
@@ -605,23 +506,4 @@ func optionalStrictStringSequence(value yamlsource.Value, context string) ([]str
 	default:
 		return nil, fmt.Errorf("%s at %s is %s, want sequence", context, value.Location(), value.Presence())
 	}
-}
-
-func authoredSourceProvenance(value yamlsource.Value) EffectiveValueProvenance {
-	location := value.IntroductionLocation()
-	return EffectiveValueProvenance{
-		Origin:         EffectiveValueOriginAuthored,
-		SourceFile:     location.File,
-		SourceLine:     location.Line,
-		SourceColumn:   location.Column,
-		SourcePresence: value.Presence().String(),
-	}
-}
-
-func eventFieldTypePaths(fields []string) []string {
-	out := make([]string, 0, len(fields))
-	for _, field := range fields {
-		out = append(out, "fields."+field+".type")
-	}
-	return out
 }

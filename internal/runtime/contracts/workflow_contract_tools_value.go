@@ -30,15 +30,6 @@ func projectToolDeclarationsValue(root yamlsource.Value) (map[string]ToolSchemaE
 		if err != nil {
 			return nil, fmt.Errorf("tool %q: %w", declaration.Name, err)
 		}
-		entry.admissionProvenance = map[string]EffectiveValueProvenance{"declaration": authoredSourceProvenance(declaration.Value)}
-		if err := collectNodeValueProvenance(declaration.Value, "", entry.admissionProvenance, nil); err != nil {
-			return nil, err
-		}
-		for _, name := range []string{"input_schema", "output_schema"} {
-			if _, present := entry.admissionProvenance[name]; !present {
-				entry.admissionProvenance[name] = EffectiveValueProvenance{Origin: EffectiveValueOriginDerived, RuleID: "tool.default_object_schema"}
-			}
-		}
 		out[declaration.Name] = entry
 	}
 	return out, nil

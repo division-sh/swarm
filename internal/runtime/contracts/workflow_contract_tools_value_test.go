@@ -61,10 +61,6 @@ func TestW5ToolFieldPresenceMatrix(t *testing.T) {
 					return
 				}
 				entry := entries["worker"]
-				_, authored := entry.admissionProvenance[row.field]
-				if authored && state == "missing" && row.field != "input_schema" && row.field != "output_schema" {
-					t.Fatal("missing field became authored")
-				}
 				if state == "empty_mapping" && strings.HasSuffix(row.field, "schema") && entry.InputSchema().Kind() != ToolSchemaAny && entry.OutputSchema().Kind() != ToolSchemaAny {
 					t.Fatal("Any collapsed to default object")
 				}
