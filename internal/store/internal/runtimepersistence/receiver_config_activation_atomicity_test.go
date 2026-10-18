@@ -120,11 +120,19 @@ func newReceiverConfigActivationFixtureForStore(t *testing.T, selected agentFixt
 	}
 	bundle := loadLifecyclePersistenceFixtureForTest(t, files)
 	fact := mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), uuid.NewString())
-	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: correlation.RunIDFromContext(ctx), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: correlation.RunIDFromContext(ctx), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash(), RootAdmission: rooted.Admission()})
 	bus := &sqliteFlowActivationBus{}
 	workflows := configureAgentFixtureFlowLifecycle(t, selected, bus, bundle, configureLifecycle)
-	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	sourceSet, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
