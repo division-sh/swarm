@@ -1,0 +1,6 @@
+<!-- receipt v1 -->
+receipt: head=24045c6bf5040d2663a1b1724fce0bbdd0b48056 tree=844437716aa4af449d8958d554adcc141ebf0a2a parent=0e78f146d8a0afb141628520c3e7c4f32033c339 branch=agent-d/2720-stall-attribution signed=G dirty_files=0
+preflight: test-results/preflight/20261018T175033.172999921-108b7493-74de-4d48-9d38-44dfb08c0fb1/receipt.json sha256=793e1d4b5d5a401c360bd1dc664ba9df2481be4bb447af204ce94059450de9fc (exact-head complete unstarted=0)
+tests: 2735 population RED classified, no source edits/push/rerun: tools/fixture-codemod/... 387 roots PASS, one frozen-history root FAIL; base 909222b50c failed root PASS; catalog-required-verify same head PASS 894 roots/4106 cases; exact N19 comparison-only continuation proposed, trusted hash unchanged
+regenerated: not-claimed
+generated: 2026-10-18T18:26:24Z

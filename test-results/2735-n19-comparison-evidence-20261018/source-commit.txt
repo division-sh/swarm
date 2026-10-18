@@ -1,0 +1,14 @@
+commit 95464fccbd3d3efa4238b71325d3685f25c93644
+Author:     Youssef Azzaoui <y@azzaoui.fr>
+AuthorDate: Sun Oct 18 18:38:54 2026 +0000
+Commit:     Youssef Azzaoui <y@azzaoui.fr>
+CommitDate: Sun Oct 18 18:38:54 2026 +0000
+
+    test(codemod): compose the exact N19 historical predecessor
+    
+    Validate the sole live N19 barrier successor through its existing owner before reversing only the copied Successor for the immutable population comparison. Keep historical pins and current recipes unchanged; add missing, crossed, changed-source, observation and unrelated-row refusal reaches in the existing root.
+    
+    Authorization: https://github.com/division-sh/swarm/pull/2735#issuecomment-6253576563
+    
+    Track: FULL
+

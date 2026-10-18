@@ -1,0 +1,3 @@
+Precompile outside test slot: environment=0.003s build=0.320s cleanup=0.000s total=0.323s
+Test slot acquired after 9ms. Starting go test ./tools/fixture-codemod/pipeline-observations -run ^TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork$ -count=1
+ok  	github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations	4.896s

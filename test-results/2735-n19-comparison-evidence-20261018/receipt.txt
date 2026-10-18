@@ -1,0 +1,6 @@
+<!-- receipt v1 -->
+receipt: head=95464fccbd3d3efa4238b71325d3685f25c93644 tree=1602d55295c0c3079ea6737df6e0e53410f7652f parent=24045c6bf5040d2663a1b1724fce0bbdd0b48056 branch=agent-d/2720-stall-attribution signed=G dirty_files=0
+preflight: test-results/preflight/20261018T184230.665123981-289cec15-4fe7-4f0a-9d69-039bc9c184b3/receipt.json sha256=af50bec2fec90fbfa1df4db34e724603c962c270efed4ee77c9bed5c9862d4c4 (exact-head complete unstarted=0)
+tests: 2735 FULL comparison-only repair: complete tools/fixture-codemod/... PASS 388 roots/2194 cases, zero failures/skipped tests, all 27 new refusal reaches; catalog green carried from unchanged inputs at 24045c6bf5 (894 roots/4106 cases); Preflight: pass (286.234s) at exact signed head; lifecycle/focused unchanged
+regenerated: not-claimed
+generated: 2026-10-18T18:47:32Z

@@ -1,0 +1,22 @@
+{
+  "old_rows": 893,
+  "current_rows": 893,
+  "identity_and_order_preserved": true,
+  "changes": [
+    {
+      "index": 424,
+      "Family": "native-fanout-barrier-authority",
+      "File": "internal/store/internal/runtimepersistence/fan_out_delivery_barrier_selected_store_test.go",
+      "Function": "TestFanOutDeliveryBarrierMixedDispositionLifecycleOnBothStores",
+      "changed": [
+        {
+          "field": "Successor",
+          "old_length": 0,
+          "new_length": 4194,
+          "old_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "new_sha256": "001c6c94ac576cd76437f5466c7b2b5bc85fe2c1b6bcf9db876ab9a4e6242b88"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "passed_roots": 388,
+  "passed_cases": 2194,
+  "failed": 0,
+  "skipped_named_tests": 0,
+  "no_test_packages": [
+    "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/reconcile-family143",
+    "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/reconcile-family144",
+    "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/reconcile-historical-models",
+    "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/reconcile-rebase336",
+    "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/reconcile-rebase44"
+  ],
+  "packages": [
+    {
+      "Package": "github.com/division-sh/swarm/tools/fixture-codemod",
+      "Action": "pass",
+      "Elapsed": 0.118
+    },
+    {
+      "Package": "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations",
+      "Action": "pass",
+      "Elapsed": 192.633
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "passed_roots": 387,
+  "passed_cases": 2166,
+  "failed_roots": [
+    {
+      "Package": "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations",
+      "Test": "TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork",
+      "Elapsed": 6.12
+    }
+  ],
+  "skips": 5,
+  "packages": [
+    {
+      "Package": "github.com/division-sh/swarm/tools/fixture-codemod",
+      "Action": "pass",
+      "Elapsed": 0.115
+    },
+    {
+      "Package": "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations",
+      "Action": "fail",
+      "Elapsed": 453.581
+    }
+  ]
+}

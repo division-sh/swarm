@@ -1,0 +1,32 @@
+{
+  "passed_roots": 894,
+  "passed_cases": 4106,
+  "failed": 0,
+  "skipped": 0,
+  "package": [
+    {
+      "Time": "2026-10-18T17:50:14.625569131Z",
+      "Action": "pass",
+      "Package": "github.com/division-sh/swarm/internal/cliapp",
+      "Elapsed": 226.164
+    }
+  ],
+  "wire_negatives": [
+    {
+      "Test": "TestDiagnosticsFailClosedOnAPIAndMalformedResults/run_diagnose_missing_instances",
+      "Elapsed": 0
+    },
+    {
+      "Test": "TestDiagnosticsFailClosedOnAPIAndMalformedResults/run_diagnose_null_instances",
+      "Elapsed": 0
+    },
+    {
+      "Test": "TestDiagnosticsFailClosedOnAPIAndMalformedResults/run_diagnose_missing_attributions",
+      "Elapsed": 0
+    },
+    {
+      "Test": "TestDiagnosticsFailClosedOnAPIAndMalformedResults/run_diagnose_null_attributions",
+      "Elapsed": 0
+    }
+  ]
+}
