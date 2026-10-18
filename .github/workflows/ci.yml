@@ -402,7 +402,37 @@ jobs:
             echo 'Workspace image cache: miss (pinned public mirror build)'
             rm -rf "$WORKSPACE_IMAGE_CACHE"
             mkdir -p "$WORKSPACE_IMAGE_CACHE"
-            docker build -t swarm-workspace:latest -f Dockerfile.workspace .
+            build_log="$WORKSPACE_IMAGE_CACHE/build.log"
+            base_ref='public.ecr.aws/docker/library/golang:1.25-bookworm@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437'
+            manifest_error='https://public.ecr.aws/v2/docker/library/golang/manifests/sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437: 429 Too Many Requests'
+            error_prefix="ERROR: failed to build: failed to solve: $base_ref: failed to resolve source metadata for $base_ref: failed to copy: httpReadSeeker: failed open: unexpected status code "
+            built=false
+            attempt=0
+            build_started=$SECONDS
+            for backoff in 5 10 20 40 0; do
+              attempt=$((attempt + 1))
+              if docker build -t swarm-workspace:latest -f Dockerfile.workspace . > "$build_log" 2>&1; then
+                cat "$build_log"
+                built=true
+                break
+              else
+                build_status=$?
+              fi
+              cat "$build_log" >&2
+              terminal_error=$(awk '/^ERROR:/ { errors++; terminal=$0 } NF { last=$0 } END { if (errors == 1 && terminal == last) print terminal }' "$build_log")
+              retryable=false
+              case "$terminal_error" in
+                "$error_prefix$manifest_error"|"$error_prefix$manifest_error - Server message: toomanyrequests: Data limit exceeded") retryable=true ;;
+              esac
+              if [ "$build_status" -ne 1 ] || [ "$backoff" -eq 0 ] || [ "$retryable" != true ]; then
+                exit "$build_status"
+              fi
+              printf 'Workspace base transiently throttled; next acquisition attempt in %ss\n' "$backoff" >&2
+              sleep "$backoff"
+            done
+            test "$built" = true
+            printf 'Workspace cold acquisition: attempts=%s duration=%ss\n' "$attempt" "$((SECONDS - build_started))"
+            rm "$build_log"
             expected_id=$(docker image inspect --format '{{.Id}}' swarm-workspace:latest)
             [[ "$expected_id" =~ ^sha256:[0-9a-f]{64}$ ]]
             printf '%s\n' "$expected_id" > "$WORKSPACE_IMAGE_CACHE/image.id"

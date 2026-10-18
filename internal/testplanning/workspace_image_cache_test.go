@@ -89,10 +89,24 @@ func validateWorkspaceImageCache(raw []byte) error {
 		return fmt.Errorf("workspace archive must be captured before proofs and published only afterward")
 	}
 	builds := 0
+	for _, required := range []string{
+		`manifest_error='https://public.ecr.aws/v2/docker/library/golang/manifests/sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437: 429 Too Many Requests'`,
+		`for backoff in 5 10 20 40 0; do`,
+		`terminal_error=$(awk '/^ERROR:/ { errors++; terminal=$0 } NF { last=$0 } END { if (errors == 1 && terminal == last) print terminal }' "$build_log")`,
+		`"$error_prefix$manifest_error"|"$error_prefix$manifest_error - Server message: toomanyrequests: Data limit exceeded") retryable=true ;;`,
+		`if [ "$build_status" -ne 1 ] || [ "$backoff" -eq 0 ] || [ "$retryable" != true ]; then`,
+		`exit "$build_status"`,
+		`sleep "$backoff"`,
+		`test "$built" = true`,
+	} {
+		if !strings.Contains(prepare.Run, required) {
+			return fmt.Errorf("workspace acquisition lost finite classified retry: %s", required)
+		}
+	}
 	for _, line := range strings.Split(prepare.Run, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.Contains(line, "docker build") {
-			if line != "docker build -t swarm-workspace:latest -f Dockerfile.workspace ." {
+			if line != `if docker build -t swarm-workspace:latest -f Dockerfile.workspace . > "$build_log" 2>&1; then` {
 				return fmt.Errorf("unkeyed workspace build arguments/platform/context")
 			}
 			builds++
@@ -126,6 +140,11 @@ func TestWorkspaceImageCacheHostedContract(t *testing.T) {
 		"unkeyed build arg":   {"docker build -t swarm-workspace:latest", "docker build --build-arg INSTALL_CLAUDE_CLI=true -t swarm-workspace:latest"},
 		"unkeyed platform":    {"docker build -t swarm-workspace:latest", "docker build --platform linux/arm64 -t swarm-workspace:latest"},
 		"inherited platform":  {"  sqlite-local-dev:\n", "  sqlite-local-dev:\n    env:\n      DOCKER_DEFAULT_PLATFORM: linux/arm64\n"},
+		"unbounded retry":     {"for backoff in 5 10 20 40 0; do", "while true; do"},
+		"larger retry budget": {"for backoff in 5 10 20 40 0; do", "for backoff in 5 10 20 40 80 0; do"},
+		"unclassified retry":  {`[ "$retryable" != true ]`, "false"},
+		"accumulated errors":  {`errors == 1 && terminal == last`, `errors >= 1`},
+		"build fallthrough":   {`test "$built" = true`, "true"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := strings.Replace(string(raw), pair[0], pair[1], 1)
@@ -189,6 +208,9 @@ func TestWorkspaceImageCacheExecutesActualHitMissAndRefusals(t *testing.T) {
 	for _, test := range []struct {
 		name, hit, archive, savedID, actualID, failure string
 		wantError                                      bool
+		wantBuilds                                     int
+		wantSleeps                                     string
+		wantStatus                                     int
 	}{
 		{name: "exact hit", hit: "true", archive: "workspace-image", savedID: id},
 		{name: "miss"},
@@ -204,6 +226,17 @@ func TestWorkspaceImageCacheExecutesActualHitMissAndRefusals(t *testing.T) {
 		{name: "decompress failure", hit: "true", archive: "workspace-image", savedID: id, failure: "decompress", wantError: true},
 		{name: "load failure", hit: "true", archive: "workspace-image", savedID: id, failure: "load", wantError: true},
 		{name: "build failure", failure: "build", wantError: true},
+		{name: "registry 429 then success", failure: "registry_429_transient", wantBuilds: 3, wantSleeps: "5\n10\n"},
+		{name: "success on fifth attempt", failure: "registry_429_last", wantBuilds: 5, wantSleeps: "5\n10\n20\n40\n"},
+		{name: "permanent registry 429", failure: "registry_429", wantError: true, wantBuilds: 5, wantSleeps: "5\n10\n20\n40\n"},
+		{name: "data allowance exhausted", failure: "registry_data_limit", wantError: true, wantBuilds: 5, wantSleeps: "5\n10\n20\n40\n"},
+		{name: "registry forbidden", failure: "registry_403", wantError: true, wantBuilds: 1},
+		{name: "apt 429 is not registry throttling", failure: "apt_429", wantError: true, wantBuilds: 1},
+		{name: "mixed endpoint and status", failure: "mixed_status", wantError: true, wantBuilds: 1},
+		{name: "ambiguous terminal errors", failure: "mixed_errors", wantError: true, wantBuilds: 1},
+		{name: "later unrelated failure", failure: "registry_429_then_403", wantError: true, wantBuilds: 2, wantSleeps: "5\n"},
+		{name: "docker status retained", failure: "registry_status_7", wantError: true, wantBuilds: 1, wantStatus: 7},
+		{name: "earlier 429 is not terminal", failure: "terminal_apt", wantError: true, wantBuilds: 1},
 		{name: "save failure", failure: "save", wantError: true},
 		{name: "compress failure", failure: "compress", wantError: true},
 		{name: "invalid built ID", actualID: "not-an-image", wantError: true},
@@ -231,6 +264,7 @@ func TestWorkspaceImageCacheExecutesActualHitMissAndRefusals(t *testing.T) {
 			}
 			write("docker", workspaceCacheDockerStub, 0o700)
 			write("zstd", workspaceCacheZstdStub, 0o700)
+			write("sleep", "#!/bin/bash\nset -euo pipefail\nprintf '%s\\n' \"$*\" >> \"$CALLS.sleep\"\n", 0o700)
 			actualID := test.actualID
 			if actualID == "" {
 				actualID = id
@@ -256,12 +290,37 @@ func TestWorkspaceImageCacheExecutesActualHitMissAndRefusals(t *testing.T) {
 			if test.hit == "true" && (strings.Contains(string(calls), "build") || strings.Contains(string(calls), "save")) {
 				t.Fatalf("exact hit rebuilt/fell back: %s", calls)
 			}
+			sleeps, sleepErr := os.ReadFile(filepath.Join(root, "calls.sleep"))
+			if sleepErr != nil && !os.IsNotExist(sleepErr) {
+				t.Fatal(sleepErr)
+			}
+			if string(sleeps) != test.wantSleeps {
+				t.Fatalf("backoffs=%q want=%q", sleeps, test.wantSleeps)
+			}
+			if test.wantBuilds != 0 && strings.Count(string(calls), "build -t ") != test.wantBuilds {
+				t.Fatalf("build attempts=%q want=%d", calls, test.wantBuilds)
+			}
 			if test.wantError {
+				if test.wantBuilds != 0 {
+					status := test.wantStatus
+					if status == 0 {
+						status = 1
+					}
+					if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != status {
+						t.Fatalf("docker failure status lost: %v want=%d", err, status)
+					}
+				}
+				if test.wantBuilds != 0 && (strings.Contains(string(calls), "image inspect") || strings.Contains(string(calls), "save ")) {
+					t.Fatalf("failed build fell through to inspection/save: %s", calls)
+				}
 				return
 			}
 			want := "load\nimage inspect --format {{.Id}} swarm-workspace:latest\n"
 			if test.hit != "true" {
 				want = "build -t swarm-workspace:latest -f Dockerfile.workspace .\nimage inspect --format {{.Id}} swarm-workspace:latest\nsave swarm-workspace:latest\nimage inspect --format {{.Id}} swarm-workspace:latest\n"
+				if test.wantBuilds > 1 {
+					want = strings.Repeat("build -t swarm-workspace:latest -f Dockerfile.workspace .\n", test.wantBuilds-1) + want
+				}
 				if _, err := os.Stat(filepath.Join(cache, "stale")); !os.IsNotExist(err) {
 					t.Fatal("miss retained partial restore payload")
 				}
@@ -282,8 +341,54 @@ func TestWorkspaceImageCacheExecutesActualHitMissAndRefusals(t *testing.T) {
 const workspaceCacheDockerStub = `#!/bin/bash
 set -euo pipefail
 printf '%s\n' "$*" >> "$CALLS"
+base_error() {
+  ref='public.ecr.aws/docker/library/golang:1.25-bookworm@sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437'
+  endpoint='https://public.ecr.aws/v2/docker/library/golang/manifests/sha256:3b4a11519ad929d1e1d261a12cff056f0c85b735253d7d861346b9c6f8b36437'
+  printf 'ERROR: failed to build: failed to solve: %s: failed to resolve source metadata for %s: failed to copy: httpReadSeeker: failed open: unexpected status code %s: %s\n' "$ref" "$ref" "$endpoint" "$1" >&2
+}
 case "$*" in
-  'build -t swarm-workspace:latest -f Dockerfile.workspace .') test "$FAIL_STAGE" != build ;;
+  'build -t swarm-workspace:latest -f Dockerfile.workspace .')
+    attempt=$(grep -c '^build ' "$CALLS")
+    if [ "$FAIL_STAGE" = registry_429 ] ||
+       { [ "$FAIL_STAGE" = registry_429_transient ] && [ "$attempt" -le 2 ]; } ||
+       { [ "$FAIL_STAGE" = registry_429_last ] && [ "$attempt" -le 4 ]; } ||
+       { [ "$FAIL_STAGE" = registry_429_then_403 ] && [ "$attempt" -eq 1 ]; }; then
+      base_error '429 Too Many Requests'
+      exit 1
+    fi
+    if [ "$FAIL_STAGE" = registry_403 ] || [ "$FAIL_STAGE" = registry_429_then_403 ]; then
+      base_error '403 Forbidden'
+      exit 1
+    fi
+    if [ "$FAIL_STAGE" = apt_429 ]; then
+      echo '#2 load metadata for public.ecr.aws/docker/library/golang' >&2
+      echo 'E: Failed to fetch https://deb.debian.org/debian/dists/bookworm/InRelease 429 Too Many Requests' >&2
+      exit 1
+    fi
+    if [ "$FAIL_STAGE" = mixed_status ]; then
+      echo 'https://deb.debian.org/debian/dists/bookworm/InRelease: 429 Too Many Requests' >&2
+      base_error '403 Forbidden'
+      exit 1
+    fi
+    if [ "$FAIL_STAGE" = mixed_errors ]; then
+      echo 'ERROR: apt install failed with status 100' >&2
+      base_error '429 Too Many Requests'
+      exit 1
+    fi
+    if [ "$FAIL_STAGE" = registry_status_7 ]; then
+      base_error '429 Too Many Requests'
+      exit 7
+    fi
+    if [ "$FAIL_STAGE" = terminal_apt ]; then
+      base_error '429 Too Many Requests'
+      echo 'E: apt install failed with status 100' >&2
+      exit 1
+    fi
+    if [ "$FAIL_STAGE" = registry_data_limit ]; then
+      base_error '429 Too Many Requests - Server message: toomanyrequests: Data limit exceeded'
+      exit 1
+    fi
+    test "$FAIL_STAGE" != build ;;
   'save swarm-workspace:latest') printf workspace-image; test "$FAIL_STAGE" != save ;;
   load) test "$(cat)" = workspace-image; test "$FAIL_STAGE" != load ;;
   'image inspect --format {{.Id}} swarm-workspace:latest') test "$FAIL_STAGE" != inspect; printf '%s\n' "$ACTUAL_ID" ;;
