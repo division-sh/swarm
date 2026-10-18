@@ -75,11 +75,9 @@ func (p *runExecutionOwnerProbe) ProcessExecutionBinding() (ProcessExecutionBind
 func TestLifecycleRegistrationRequiresRunOwnershipForSpawnAndAdoption(t *testing.T) {
 	for _, persist := range []bool{false, true} {
 		t.Run(map[bool]string{false: "adoption", true: "spawn"}[persist], func(t *testing.T) {
-			store := newLifecyclePersistenceProbe()
+			ctx, record, store := newLifecycleCacheFixture(t)
 			owner := &runExecutionOwnerProbe{AgentLifecyclePersistence: store, disposition: RunExecutionForeign}
 			coordinator := newAgentLifecycleCoordinator(owner, nil, nil, nil)
-			record := lifecycleTestPersistedAgent(t)
-			ctx := testAuthorActivityContext(context.Background())
 			register := func() error {
 				return coordinator.registerExecution(ctx, record, persist, recoveryTestAgent{id: record.Config.ID}, testManagerSubscriptionAdmission(t, record.Config))
 			}
@@ -98,7 +96,6 @@ func TestLifecycleRegistrationRequiresRunOwnershipForSpawnAndAdoption(t *testing
 			if !persist {
 				record.LifecycleEpoch, record.LifecycleGeneration = 1, 1
 				record.LifecyclePhase, record.LifecycleRunMode = AgentLifecycleRegistered, AgentRunModeStopped
-				record.ProcessBinding = lifecycleProbeProcessBinding()
 				if err := store.seedAgentRow(record); err != nil {
 					t.Fatal(err)
 				}
