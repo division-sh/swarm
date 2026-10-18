@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strings"
 	"testing"
@@ -120,7 +121,18 @@ func managerTestStaticAgentRecord(am *AgentManager, cfg runtimeactors.AgentConfi
 	if err != nil {
 		return PersistedAgent{}, err
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: managerTestTopologyBundleHash}
+	bundle, present := semanticview.Bundle(am.semanticSource)
+	if !present || bundle == nil {
+		return PersistedAgent{}, fmt.Errorf("manager agent record fixture requires its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return PersistedAgent{}, err
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		return PersistedAgent{}, err
+	}
 	plan, err := runtimeagenttopology.NewSourceSetPlan(
 		[]runtimeagenttopology.SourceCoordinate{coordinate},
 		[]runtimeagenttopology.DesiredAgent{{Identity: identityPlan, Source: coordinate, ConfigRevision: revision}},
