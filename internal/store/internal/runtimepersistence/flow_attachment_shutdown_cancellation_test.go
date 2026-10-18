@@ -10,22 +10,22 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
 type attachmentShutdownProgressObservation struct {
 	result pipeline.FlowAttachmentAdvanceResult
 	err    error
-	native transactiontest.Snapshot
 }
 
 type attachmentShutdownProgressWorkflow struct {
 	*pipeline.PipelineCoordinator
-	selected  any
+	barrier   *attachmentProgressNativeBarrier
+	cut       string
 	enabled   atomic.Bool
 	entered   chan context.Context
 	release   chan struct{}
@@ -37,18 +37,17 @@ func (w *attachmentShutdownProgressWorkflow) AdvanceFlowAttachment(ctx context.C
 	if previous != pipeline.FlowAttachmentPlanned || !w.enabled.CompareAndSwap(true, false) {
 		return w.PipelineCoordinator.AdvanceFlowAttachment(ctx, attempt, previous, at)
 	}
-	probe, restore, err := InstallTransactionProbeForTest(w.selected, transactiontest.Options{})
-	if err != nil {
-		return pipeline.FlowAttachmentAdvanceResult{}, err
+	readiness, found, err := w.LoadDynamicFlowRuntimeReadiness(ctx, attempt.RunID(), flowidentity.RouteForInstancePath(attempt.InstancePath()))
+	if err != nil || !found || readiness.AttemptOrdinal != attempt.Ordinal() {
+		return pipeline.FlowAttachmentAdvanceResult{}, errors.Join(err, errors.New("shutdown fixture requires the exact admitted attempt"))
 	}
-	defer restore()
+	w.barrier.arm(attempt, previous, readiness.PlanHash)
 	w.entered <- ctx
-	<-w.release
+	if w.cut == "before_progress" {
+		<-w.release
+	}
 	result, err := w.PipelineCoordinator.AdvanceFlowAttachment(ctx, attempt, previous, at)
-	joinCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	err = errors.Join(err, probe.StopAndJoin(joinCtx))
-	w.observed <- attachmentShutdownProgressObservation{result: result, err: err, native: probe.Snapshot()}
+	w.observed <- attachmentShutdownProgressObservation{result: result, err: err}
 	return result, err
 }
 
@@ -60,15 +59,17 @@ func (w *attachmentShutdownProgressWorkflow) AbandonDynamicFlowRuntimeActivation
 
 // Adds the shutdown-cancellation reach to the existing native phase-failure
 // invariant: a cancelled progress call is not itself proof of clean settlement.
-func proveAttachmentShutdownBeforeProgress(t *testing.T, backend string) {
+func proveAttachmentShutdownProgress(t *testing.T, backend, cut string) {
 	t.Helper()
+	selected, barrier := newAttachmentProgressBarrierStore(t, backend)
 	workflow := &attachmentShutdownProgressWorkflow{
+		barrier: barrier, cut: cut,
 		entered: make(chan context.Context, 1), release: make(chan struct{}),
 		observed: make(chan attachmentShutdownProgressObservation, 1), abandoned: make(chan error, 1),
 	}
-	release := sync.OnceFunc(func() { close(workflow.release) })
+	release := sync.OnceFunc(func() { close(workflow.release); barrier.releaseStatement() })
 	defer release()
-	f := newReceiverConfigActivationFixtureWithOwnership(t, backend, true, map[string]string{
+	f := newReceiverConfigActivationFixtureForStore(t, selected, true, map[string]string{
 		"schema.yaml":          "name: shutdown-progress\n",
 		"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
 		"review/entities.yaml": "review_item:\n  request_id: text\n",
@@ -78,7 +79,6 @@ func proveAttachmentShutdownBeforeProgress(t *testing.T, backend string) {
 		options.WorkflowInstances = workflow
 	})
 	f.constructKeylessRoot(t)
-	workflow.selected = f.store
 	binding, err := f.grant.ProcessExecutionBinding()
 	if err != nil {
 		t.Fatal(err)
@@ -112,6 +112,13 @@ func proveAttachmentShutdownBeforeProgress(t *testing.T, backend string) {
 	case <-ctx.Done():
 		t.Fatal("admitted attempt did not reach the real progress owner")
 	}
+	if cut == "inside_progress" {
+		select {
+		case <-barrier.entered:
+		case <-ctx.Done():
+			t.Fatal("exact attachment UPDATE did not enter its real native transaction")
+		}
+	}
 	shutdown := make(chan error, 1)
 	go func() { shutdown <- f.manager.ShutdownWithOptions(manager.ShutdownOptions{Grace: 5 * time.Second}) }()
 	select {
@@ -126,8 +133,15 @@ func proveAttachmentShutdownBeforeProgress(t *testing.T, backend string) {
 	case <-ctx.Done():
 		t.Fatal("native progress result did not join")
 	}
-	if observed.result.Acknowledged || !errors.Is(observed.err, context.Canceled) || observed.native.Total.WriteCommits != 0 || observed.native.Active != 0 {
-		t.Fatalf("cancelled-before-entry result: %+v error=%v native=%+v", observed.result, observed.err, observed.native)
+	if observed.result.Acknowledged || !errors.Is(observed.err, context.Canceled) {
+		t.Fatalf("cancelled progress result: %+v error=%v", observed.result, observed.err)
+	}
+	if cut == "inside_progress" {
+		if err := barrier.joinRollback(ctx); err != nil {
+			t.Fatalf("exact physical rollback did not join: %v", err)
+		}
+	} else if barrier.matchedStatement() {
+		t.Fatal("before-entry control executed an attachment UPDATE")
 	}
 	select {
 	case err := <-workflow.abandoned:
@@ -141,7 +155,7 @@ func proveAttachmentShutdownBeforeProgress(t *testing.T, backend string) {
 	if err != nil || !found || row.Phase != pipeline.FlowAttachmentPlanned || row.AttemptState != "aborted" {
 		t.Fatalf("exact cancelled attachment evidence: %+v found=%t err=%v", row, found, err)
 	}
-	t.Logf("shutdown progress pin: backend=%s acknowledgement=%t phase=%s attempt=%s native_begun=%d commits=%d commit_attempts=%d rollbacks=%d cleanup_failures=%d active=%d abandonment=acknowledged", backend, observed.result.Acknowledged, row.Phase, row.AttemptState, observed.native.Total.Begun, observed.native.Total.WriteCommits, observed.native.Total.CommitAttempts, observed.native.Total.RollbackAttempts, observed.native.Total.CleanupFailures, observed.native.Active)
+	t.Logf("shutdown progress pin: backend=%s cut=%s acknowledgement=%t phase=%s attempt=%s matched_statement=%t abandonment=acknowledged", backend, cut, observed.result.Acknowledged, row.Phase, row.AttemptState, barrier.matchedStatement())
 	select {
 	case err := <-finalized:
 		t.Logf("readiness caller returned after retirement handoff: %v", err)
