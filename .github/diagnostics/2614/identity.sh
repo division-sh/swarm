@@ -2,7 +2,7 @@
 set -euo pipefail
 [[ "$GITHUB_EVENT_NAME" = workflow_dispatch ]]
 [[ "$GITHUB_RUN_ATTEMPT" = 1 ]]
-[[ "$GITHUB_REF" = refs/heads/agent-g/diagnostic-2614-original-cause ]]
+[[ "$GITHUB_REF" = refs/heads/agent-g/diagnostic-2614-deadlock-cycle ]]
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
 [[ "$EXPECTED_SHA" = "$GITHUB_SHA" && "$GITHUB_SHA" = "$(git rev-parse HEAD)" ]]
 git merge-base --is-ancestor f2e0d031a06d3f8e5a6ec487c8f90c3e212860d8 HEAD

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
+	"github.com/lib/pq"
 )
 
 // Disposable original-error observation, reviewer-g 6251306217. Never land this
@@ -19,14 +20,15 @@ import (
 const onboardingOriginalCausePrefix = "ONBOARDING_ORIGINAL_CAUSE "
 
 type onboardingOriginalCauseNode struct {
-	Index           int      `json:"index"`
-	Parent          int      `json:"parent"`
-	Depth           int      `json:"depth"`
-	Type            string   `json:"type"`
-	Sentinels       []string `json:"sentinels,omitempty"`
-	Class           string   `json:"class,omitempty"`
-	SQLState        string   `json:"sqlstate,omitempty"`
-	SQLStateInvalid bool     `json:"sqlstate_invalid,omitempty"`
+	Index           int                      `json:"index"`
+	Parent          int                      `json:"parent"`
+	Depth           int                      `json:"depth"`
+	Type            string                   `json:"type"`
+	Sentinels       []string                 `json:"sentinels,omitempty"`
+	Class           string                   `json:"class,omitempty"`
+	SQLState        string                   `json:"sqlstate,omitempty"`
+	SQLStateInvalid bool                     `json:"sqlstate_invalid,omitempty"`
+	DeadlockCycle   *onboardingDeadlockCycle `json:"deadlock_cycle,omitempty"`
 }
 
 type onboardingOriginalCauseReport struct {
@@ -91,6 +93,10 @@ func onboardingOriginalCauseMetadata(err error, ordinal uint64) onboardingOrigin
 			} else {
 				node.SQLStateInvalid = true
 			}
+		}
+		if pg, ok := cause.(*pq.Error); ok && pg != nil && pg.Code == "40P01" {
+			cycle := onboardingDeadlockMetadata(pg.Detail)
+			node.DeadlockCycle = &cycle
 		}
 		report.Nodes = append(report.Nodes, node)
 		if joined, ok := cause.(interface{ Unwrap() []error }); ok {

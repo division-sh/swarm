@@ -1,0 +1,7 @@
+PASS actual parser: cycles, aliases, bounded/atomic refusal, secret-bearing detail and native-number redaction; no owner inference
+PASS actual collector: cycle finite edges/unparsed with no prose/native-number export
+PASS actual collector: unparsed finite edges/unparsed with no prose/native-number export
+PASS actual collector: bad-mode finite edges/unparsed with no prose/native-number export
+PASS actual collector: bad-label finite edges/unparsed with no prose/native-number export
+PASS actual collector: wrong-state finite edges/unparsed with no prose/native-number export
+PASS actual collector: not-deadlock finite edges/unparsed with no prose/native-number export

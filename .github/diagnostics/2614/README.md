@@ -7,7 +7,7 @@ Do not merge this branch. No dispatch is authorized by committing this packet.
 ## Proposed route
 
 After explicit route/head approval, dispatch the existing `ci.yml` workflow on
-`agent-g/diagnostic-2614-original-cause`, passing its full signed commit as
+`agent-g/diagnostic-2614-deadlock-cycle`, passing its full signed commit as
 `expected_sha`. Only workflow_dispatch is enabled. The route refuses any other
 branch, SHA, event, base ancestry or run attempt; attempt 2 is refused, not a retry.
 Both jobs have read-only contents/actions permissions. It has no Required-summary,
@@ -38,7 +38,8 @@ The evidence artifact retains full plan/matrix, source/run/attempt/tree identity
 untouched typed canonical command evidence, every terminal test/package record,
 capture validation/provenance, allowlisted Go/runner/Docker metadata, timestamps,
 wrapper exit and cleanup-error flags, redacted original-cause trace and hashes.
-The seven capture files are byte-identical to the locally validated overlay.
+The original seven-file receipt is retained as historical evidence; the current
+capture manifest separately pins the cycle-parser continuation and its controls.
 Raw stdout/stderr/test Output stays private on the ephemeral runner and is NOT
 uploaded: these other roots may print pairing/session content. Only its hashes,
 terminal records and the bounded type/sentinel/class/SQLSTATE trace leave it.
@@ -68,7 +69,8 @@ authorizes offline preparation of this continuation, not its dispatch. The first
 observation was negative for the PostgreSQL rebind and red in the SQLite
 PublicLogout root; it did not establish which assertion/cause recurred.
 
-The original seven-file Retry capture stays unchanged. Test-only additions give
+At the f4fb254011 failure-site checkpoint the original seven-file Retry capture
+was unchanged. Test-only additions give
 the explicit-logout journey finite phase markers in its existing failure cleanup,
 plus fixed labels at failing pairing/restart/logout checks. Shared Inbox checks
 cover paging/notices, labels, card correspondence, delivery/receipt reads, missing
@@ -110,3 +112,43 @@ and absent-site failures, unknown/malformed labels, wrong flags, secret-bearing
 payloads, and a negative attempt. The normal source/attempt identity and original
 Retry privacy controls remain required. A further hosted observation waits for
 review of the exact signed delta; no rerun is authorized by these controls.
+
+## Deadlock cycle preparation (not dispatch-ready)
+
+Run 39148416408 captured concrete PostgreSQL 40P01 at both original rebind
+pairing-checkpoint proof=true leaves. See [the cycle gate](https://github.com/division-sh/swarm/pull/2614#issuecomment-6252997547)
+and lock-order-map.md. That finite source map is the first step; it includes the
+new operation's implicit principal FK key-share and the principal-first standing
+owner. It does not identify the hosted competing transaction.
+
+The cycle delta inspects Detail only for a concrete pq.Error with code 40P01.
+It recognizes at most eight complete transactionid wait edges in 4096 bytes,
+requires one closed cycle, and exports only local pN/xN labels and finite modes.
+No raw Detail, Where, InternalQuery, SQL, values, PIDs or transaction numbers are
+retained in output. Other shapes and partial/extra prose are cycle_unparsed;
+there is no guessed partial graph. The collector independently limits its output
+to these fields. A parsed cycle is cycle_observed_owners_unmapped, not complete
+causal attribution. Existing Retry/joined-error and site evidence are preserved.
+
+Offline replay (no SDK/runtime/database execution, zero new test roots):
+
+```sh
+ruby .github/diagnostics/2614/offline-cycles.rb
+```
+
+cycle-validation.txt contains that actual parser/collector validation receipt;
+the existing API contract root additionally exercises the method boundary with
+real pq.Error values, wrapped/joined causes, secret-bearing/unrecognized Detail,
+and unchanged public responses. Its prior validation receipt remains historical.
+
+The workflow composition, canonical unit, runner, count/backends and timeouts are
+unchanged. The identity guard names only this separate preparation branch and
+still requires exact expected SHA, frozen ancestry and attempt 1. NO dispatch is
+authorized. The named owner-correlation hunks at the end of lock-order-map.md
+need review/handoff before execution: parser-only labels cannot map both owners,
+and a post-abort lock snapshot would not fix that gap. No owner/runner SQL hook,
+new fault port, shared PG setting, product repair or retry has been added here.
+For any subsequently approved route the artifacts retain this map, parser,
+offline/API receipts, canonical plan/command evidence, terminal records, sanitized
+cycle graph and the unchanged site evidence, on either worker success or failure.
+Missing/unknown owners remain INCOMPLETE; no qualification credit is possible.

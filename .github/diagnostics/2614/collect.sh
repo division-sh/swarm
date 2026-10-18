@@ -21,6 +21,7 @@ if ! jq -e --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
 cp "$dir/frozen-selection.json" "$dir/capture-files.sha256" "$dir/validation.sha256" \
   "$dir/capture-validation.log" "$dir/provenance.json" "$out/"
 cp "$dir/sites.jq" "$dir/sites-validation.txt" "$out/"
+cp "$dir/trace.jq" "$dir/cycle-validation.txt" "$dir/cycle-api-validation.log" "$dir/lock-order-map.md" "$out/"
 receipt="$evidence/serveapp-runtime-primary-evidence.json"
 raw="$evidence/serveapp-runtime-primary.json"
 if [ -f "$receipt" ]; then

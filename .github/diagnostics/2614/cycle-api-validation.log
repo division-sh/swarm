@@ -1,0 +1,9 @@
+DIAGNOSTIC ONLY; offline API error machinery, not a runtime reproduction or qualification.
+Command: go run ./cmd/swarm-test -- -race -count=1 -run '^TestChannelOnboardingAPIContractEvidence$' ./internal/apiv1
+Exit: 0
+ok  github.com/division-sh/swarm/internal/apiv1 7.094s
+Original log SHA256: b95d231cc58a62b5ceaf675a02b58baf1fe4cc3eb86f5d335ee68aa884779794
+Execution HEAD: f4fb25401114b8aa1bf994bcb97e8fd91c44b77b, with the cycle-preparation source delta present before signing.
+Source binding: current capture-files.sha256 pins the tested source files; no receipt header is rebound.
+Controls: actual pq.Error 40P01; wrapped/joined causes; secret-bearing/unrecognized Detail; non-deadlock SQLSTATE; bounded original cause graph; unchanged method responses.
+No original-error Error(), Detail, Where, InternalQuery, native process/transaction number or raw API output is reproduced in this receipt.

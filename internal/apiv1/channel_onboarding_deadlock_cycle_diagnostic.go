@@ -1,0 +1,98 @@
+package apiv1
+
+import (
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// Disposable parser only (reviewer-g 6252997547). Never retain the input, print
+// driver prose, or infer a transaction owner from a lock or an error wrapper.
+type onboardingDeadlockEdge struct {
+	Waiter  string `json:"waiter"`
+	Blocker string `json:"blocker"`
+	Lock    string `json:"lock"`
+	Mode    string `json:"mode"`
+	Object  string `json:"object"`
+}
+
+type onboardingDeadlockCycle struct {
+	State string                   `json:"state"`
+	Edges []onboardingDeadlockEdge `json:"edges,omitempty"`
+}
+
+var onboardingDeadlockWait = regexp.MustCompile(`^Process ([1-9][0-9]{0,9}) waits for (ShareLock|ExclusiveLock) on transaction ([1-9][0-9]{0,19}); blocked by process ([1-9][0-9]{0,9})\.$`)
+
+func onboardingDeadlockMetadata(detail string) onboardingDeadlockCycle {
+	unparsed := onboardingDeadlockCycle{State: "cycle_unparsed"}
+	if len(detail) == 0 || len(detail) > 4096 {
+		return unparsed
+	}
+	lines := strings.Split(detail, "\n")
+	if len(lines) < 2 || len(lines) > 8 {
+		return unparsed
+	}
+	type wait struct {
+		waiter, blocker, object uint64
+		mode                    string
+	}
+	waits := make(map[uint64]wait, len(lines))
+	objects := make(map[uint64]bool, len(lines))
+	for _, line := range lines {
+		match := onboardingDeadlockWait.FindStringSubmatch(line)
+		if match == nil {
+			return unparsed
+		}
+		waiter, err1 := strconv.ParseUint(match[1], 10, 32)
+		object, err2 := strconv.ParseUint(match[3], 10, 64)
+		blocker, err3 := strconv.ParseUint(match[4], 10, 32)
+		if err1 != nil || err2 != nil || err3 != nil || waiter == blocker {
+			return unparsed
+		}
+		if _, duplicate := waits[waiter]; duplicate {
+			return unparsed
+		}
+		waits[waiter] = wait{waiter, blocker, object, match[2]}
+		objects[object] = true
+	}
+	processes := make([]uint64, 0, len(waits))
+	for process, edge := range waits {
+		if _, found := waits[edge.blocker]; !found {
+			return unparsed
+		}
+		processes = append(processes, process)
+	}
+	sort.Slice(processes, func(i, j int) bool { return processes[i] < processes[j] })
+	seen := make(map[uint64]bool, len(waits))
+	next := processes[0]
+	for !seen[next] {
+		seen[next] = true
+		next = waits[next].blocker
+	}
+	if next != processes[0] || len(seen) != len(waits) {
+		return unparsed
+	}
+	transactions := make([]uint64, 0, len(objects))
+	for object := range objects {
+		transactions = append(transactions, object)
+	}
+	sort.Slice(transactions, func(i, j int) bool { return transactions[i] < transactions[j] })
+	processLabels := make(map[uint64]string, len(processes))
+	for i, process := range processes {
+		processLabels[process] = "p" + strconv.Itoa(i+1)
+	}
+	transactionLabels := make(map[uint64]string, len(transactions))
+	for i, transaction := range transactions {
+		transactionLabels[transaction] = "x" + strconv.Itoa(i+1)
+	}
+	report := onboardingDeadlockCycle{State: "cycle_observed_owners_unmapped"}
+	for _, process := range processes {
+		edge := waits[process]
+		report.Edges = append(report.Edges, onboardingDeadlockEdge{
+			Waiter: processLabels[edge.waiter], Blocker: processLabels[edge.blocker],
+			Lock: "transactionid", Mode: edge.mode, Object: transactionLabels[edge.object],
+		})
+	}
+	return report
+}

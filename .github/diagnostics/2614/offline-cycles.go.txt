@@ -1,0 +1,62 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"reflect"
+	"strings"
+)
+
+func require(ok bool, invariant string) {
+	if !ok {
+		panic(invariant)
+	}
+}
+
+func main() {
+	two := "Process 402715 waits for ShareLock on transaction 701234; blocked by process 402716.\nProcess 402716 waits for ShareLock on transaction 701235; blocked by process 402715."
+	want := onboardingDeadlockMetadata(two)
+	require(want.State == "cycle_observed_owners_unmapped" && len(want.Edges) == 2, "two participants retained without owner inference")
+	require(want.Edges[0].Waiter == "p1" && want.Edges[0].Blocker == "p2" && want.Edges[0].Object == "x1", "per-observation labels")
+	lines := strings.Split(two, "\n")
+	require(reflect.DeepEqual(want, onboardingDeadlockMetadata(lines[1]+"\n"+lines[0])), "input line order does not alter normalized graph")
+	three := "Process 402715 waits for ShareLock on transaction 701234; blocked by process 402716.\nProcess 402716 waits for ExclusiveLock on transaction 701235; blocked by process 402717.\nProcess 402717 waits for ShareLock on transaction 701236; blocked by process 402715."
+	require(len(onboardingDeadlockMetadata(three).Edges) == 3, "three participant cycle retained")
+	reject := []string{
+		"", lines[0], two+"\n", two+"\nPRIVATE_CYCLE_PROSE",
+		strings.Replace(two, "ShareLock", "PRIVATE_CYCLE_PROSE", 1),
+		strings.Replace(two, "transaction 701234", "relation 701234 of database 701239", 1),
+		strings.Replace(two, "402715 waits", "0 waits", 1),
+		strings.Replace(two, "402715 waits", "9999999999 waits", 1),
+		strings.Replace(two, "701234", "18446744073709551616", 1),
+		strings.Replace(two, "402715 waits", "-402715 waits", 1),
+		strings.Replace(two, "blocked by process 402716", "blocked by process 402715", 1),
+		strings.Replace(two, "blocked by process 402715.", "blocked by process 402718.", 1),
+		strings.Replace(two, "Process 402716 waits", "Process 402715 waits", 1),
+		two+"\n"+strings.ReplaceAll(strings.ReplaceAll(two, "402715", "502715"), "402716", "502716"),
+		strings.Repeat("PRIVATE_CYCLE_PROSE", 4096),
+	}
+	for i, input := range reject {
+		got := onboardingDeadlockMetadata(input)
+		require(got.State == "cycle_unparsed" && len(got.Edges) == 0, fmt.Sprintf("unrecognized input %d must be atomic unparsed", i))
+	}
+	var eight []string
+	for i := 1; i <= 8; i++ {
+		eight = append(eight, fmt.Sprintf("Process %d waits for ShareLock on transaction %d; blocked by process %d.", i, i+100, i%8+1))
+	}
+	require(len(onboardingDeadlockMetadata(strings.Join(eight, "\n")).Edges) == 8, "bounded eight participant cycle retained")
+	require(onboardingDeadlockMetadata(strings.Join(eight, "\n")+"\n"+eight[0]).State == "cycle_unparsed", "ninth record refused")
+	raw, err := json.Marshal(want)
+	require(err == nil, "JSON encoding")
+	for _, forbidden := range []string{"402715", "402716", "701234", "701235", "PRIVATE_CYCLE_PROSE", "Detail", "Where", "InternalQuery"} {
+		require(!strings.Contains(string(raw), forbidden), "native values/prose not exported")
+	}
+	if len(os.Args) != 2 {
+		panic("one generated output directory required")
+	}
+	if err := os.WriteFile(os.Args[1]+"/cycle.json", raw, 0600); err != nil {
+		panic(err)
+	}
+	fmt.Println("PASS actual parser: cycles, aliases, bounded/atomic refusal, secret-bearing detail and native-number redaction; no owner inference")
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
+	"github.com/lib/pq"
 )
 
 type originalCauseSQLFixture struct {
@@ -27,6 +28,7 @@ func exerciseOnboardingOriginalCauseDiagnostic(t *testing.T, handler *Handler, l
 	t.Helper()
 	const secret = "PRIVATE_DIAGNOSTIC_PROSE_2614"
 	called := 0
+	cycle := "Process 402715 waits for ShareLock on transaction 701234; blocked by process 402716.\nProcess 402716 waits for ShareLock on transaction 701235; blocked by process 402715."
 	sql := &originalCauseSQLFixture{state: "40P01", secret: secret, calls: &called}
 	deep := error(sql)
 	for i := 0; i < 12; i++ {
@@ -45,6 +47,10 @@ func exerciseOnboardingOriginalCauseDiagnostic(t *testing.T, handler *Handler, l
 		{"wrapped", fmt.Errorf("%s: %w", secret, context.DeadlineExceeded), "context_deadline", false},
 		{"joined", errors.Join(fmt.Errorf("%s: %w", secret, sessionstate.ErrSessionAccount), context.Canceled), "session_account", false},
 		{"sqlstate", sql, "40P01", false},
+		{"native_deadlock_cycle", &pq.Error{Code: "40P01", Message: secret, Detail: cycle, Where: secret, InternalQuery: secret}, "cycle_observed_owners_unmapped", false},
+		{"joined_native_deadlock", errors.Join(fmt.Errorf("%s: %w", secret, &pq.Error{Code: "40P01", Message: secret, Detail: cycle, Where: secret, InternalQuery: secret}), context.Canceled), "cycle_observed_owners_unmapped", false},
+		{"native_deadlock_unparsed", &pq.Error{Code: "40P01", Message: secret, Detail: cycle + "\n" + secret, Where: secret, InternalQuery: secret}, "cycle_unparsed", false},
+		{"native_other_sqlstate", &pq.Error{Code: "23505", Message: secret, Detail: cycle, Where: secret, InternalQuery: secret}, "23505", false},
 		{"unknown_secret_prose", errors.New(secret), "*errors.errorString", false},
 		{"typed", runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "unclassified_runtime_error", "api", "channel.onboarding_retry", nil, errors.New(secret)), "platform.internal_failure", false},
 		{"invalid_sqlstate", &originalCauseSQLFixture{state: "40p01\n" + secret, secret: secret, calls: &called}, "sqlstate_invalid", false},
@@ -60,6 +66,14 @@ func exerciseOnboardingOriginalCauseDiagnostic(t *testing.T, handler *Handler, l
 			raw, err := json.Marshal(metadata)
 			if err != nil || len(metadata.Nodes) > 32 || metadata.Truncated != tc.truncated || !strings.Contains(string(raw), tc.want) || strings.Contains(string(raw), secret) {
 				t.Fatal("capture lost bounded metadata or disclosed error prose")
+			}
+			for _, private := range []string{"402715", "402716", "701234", "701235", "Detail", "Where", "InternalQuery"} {
+				if strings.Contains(string(raw), private) {
+					t.Fatal("cycle capture disclosed a native number or driver field")
+				}
+			}
+			if tc.name == "native_other_sqlstate" && strings.Contains(string(raw), "deadlock_cycle") {
+				t.Fatal("cycle capture ran for another SQLSTATE")
 			}
 			for _, node := range metadata.Nodes {
 				if node.Depth > 8 {

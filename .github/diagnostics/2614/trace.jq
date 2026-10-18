@@ -1,6 +1,23 @@
+def deadlock_cycle:
+  if type != "object" then {state:"cycle_unparsed"}
+  elif .state == "cycle_unparsed" then {state:"cycle_unparsed"}
+  elif .state == "cycle_observed_owners_unmapped" and
+      (.edges|type)=="array" and (.edges|length)>=2 and (.edges|length)<=8 and
+      all(.edges[];
+        type=="object" and
+        (.waiter|type)=="string" and (.waiter|test("^p[1-8]$")) and
+        (.blocker|type)=="string" and (.blocker|test("^p[1-8]$")) and
+        .waiter!=.blocker and .lock=="transactionid" and
+        (.mode=="ShareLock" or .mode=="ExclusiveLock") and
+        (.object|type)=="string" and (.object|test("^x[1-8]$")))
+    then {state,edges:[.edges[]|{waiter,blocker,lock,mode,object}]}
+  else {state:"cycle_unparsed"} end;
 def metadata:
   {request_ordinal, truncated, nodes: [.nodes[] |
-    {index,parent,depth,type,sentinels,class,sqlstate,sqlstate_invalid} |
+    . as $node |
+    {index,parent,depth,type,sentinels,class,sqlstate,sqlstate_invalid} +
+    (if .sqlstate=="40P01" and has("deadlock_cycle") then
+      {deadlock_cycle:($node.deadlock_cycle|deadlock_cycle)} else {} end) |
     with_entries(select(.value != null))]};
 def only_match(pattern):
   [capture(pattern)] | if length==1 then .[0] else error("malformed diagnostic trace") end;
