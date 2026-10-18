@@ -37,6 +37,32 @@ type managerNativeDeliveryOwner interface {
 	ListAuthorActivity(context.Context, authoractivity.ListOptions) (authoractivity.ListResult, error)
 }
 
+func originalManagerFixtureContext(t testing.TB, ctx context.Context, selected agentfixture.Store) context.Context {
+	t.Helper()
+	if startupownership.HasMutationAuthority(ctx) {
+		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return ctx
+	}
+	if _, present := correlation.RuntimeInstanceIDFromContext(ctx); !present {
+		scope, ok := authoractivity.ScopeFromContext(ctx)
+		if !ok || scope.RuntimeInstanceID == "" {
+			t.Fatal("native manager fixture requires its declared runtime scope before acquisition")
+		}
+		ctx = correlation.WithRuntimeInstanceID(ctx, scope.RuntimeInstanceID)
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
+
 func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDeliveryNativeFixture {
 	t.Helper()
 	var selected managerNativeDeliveryOwner

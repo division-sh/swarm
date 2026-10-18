@@ -24,7 +24,7 @@ func (g *shutdownRetryGrant) Retire(ctx context.Context) error {
 
 func TestRuntimeShutdownRetriesFailedGenerationRetirement(t *testing.T) {
 	rt := &Runtime{workOccurrence: runtimeTestOccurrence(t, runtimeTestBundleHash)}
-	newShutdownFanOutRegistration(t, rt)
+	newShutdownFanOutRegistration(t, testAuthorActivityContext(context.Background()), rt)
 	underlying := rt.startupGrant
 	failure := errors.New("one-shot generation retirement refusal")
 	grant := &shutdownRetryGrant{LiveGenerationGrant: underlying, failure: failure}

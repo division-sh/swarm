@@ -28,7 +28,7 @@ func (*shutdownFanOutSession) FanOutServingCapacity() (startupownership.FanOutCa
 	return startupownership.SQLiteFanOutCapacity(), nil
 }
 
-func newShutdownFanOutRegistration(t *testing.T, rt *Runtime) *startupownership.FanOutServingRegistration {
+func newShutdownFanOutRegistration(t *testing.T, ctx context.Context, rt *Runtime) *startupownership.FanOutServingRegistration {
 	t.Helper()
 	session := &shutdownFanOutSession{newRuntimeTestRetainedSession(t)}
 	var err error
@@ -58,14 +58,14 @@ func newShutdownFanOutRegistration(t *testing.T, rt *Runtime) *startupownership.
 	if _, err := grant.AdmitExecution(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	registration, err := startupownership.RegisterFanOutServing(context.Background(), grant, rt.workOccurrence, nil)
+	registration, err := startupownership.RegisterFanOutServing(ctx, grant, rt.workOccurrence, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(registration.Close)
 	rt.startupGrant = grant
 	rt.fanOutServing = registration
-	rt.fanOutContext = context.Background()
+	rt.fanOutContext = ctx
 	return registration
 }
 
@@ -100,15 +100,15 @@ func assertShutdownFanOutPending(t *testing.T, shutdown <-chan error) {
 }
 
 func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
-	ctx := testAuthorActivityContext(context.Background())
 	store, fixture := newRuntimeShutdownDeliveryStore(t, open)
+	ctx := testAuthorActivityContext(fixture.Context)
 	bus, err := newRuntimeTestEventBus(t, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	activateRuntimeShutdownDelivery(t, store, bus, fixture.Context)
 	rt := &Runtime{Bus: bus, workOccurrence: runtimeTestEventBusRuntimeOccurrence(t, bus)}
-	registration := newShutdownFanOutRegistration(t, rt)
+	registration := newShutdownFanOutRegistration(t, ctx, rt)
 	grant := rt.startupGrant
 
 	// A real running manager is an independent dependency, not part of the
@@ -123,7 +123,7 @@ func VerifyRuntimeShutdownFanOutCommittedTurnKeepsDependenciesLiveForTest(t *tes
 			return nil, ctx.Err()
 		},
 	}
-	lifecycle, roles := runtimeTestEphemeralManagerLifecycle(t)
+	lifecycle, roles := runtimeTestEphemeralManagerRows(t)
 	busRoles := runtimeTestManagerBusRoles(bus)
 	busRoles.LifecycleState, busRoles.LifecycleOutcome = roles.LifecycleState, roles.LifecycleOutcome
 	rt.Manager = manager.NewAgentManagerWithOptions(bus, func(actors.AgentConfig) (manager.Agent, error) {
@@ -294,7 +294,7 @@ func TestRuntimeShutdownFanOutDoesNotJoinBufferedOccurrenceBeforeBusRetirement(t
 		t.Fatal(err)
 	}
 	rt := &Runtime{Bus: bus, workOccurrence: runtimeTestEventBusRuntimeOccurrence(t, bus)}
-	registration := newShutdownFanOutRegistration(t, rt)
+	registration := newShutdownFanOutRegistration(t, ctx, rt)
 	subscription, err := bus.SubscribeInternal(ctx, "fan-out-shutdown-buffer", "test.buffered")
 	if err != nil {
 		t.Fatal(err)

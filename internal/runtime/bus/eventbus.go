@@ -725,7 +725,7 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	if eb == nil {
 		return nil
 	}
-	cleanupCtx, err := eb.admitSourceArtifactFact(context.Background())
+	cleanupCtx, err := eb.sourceArtifactContext(context.Background())
 	if err != nil {
 		return err
 	}
@@ -807,9 +807,10 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	retirementSucceeded = true
 	var releaseErr error
 	for _, operation := range pendingOperations {
-		releaseErr = errors.Join(releaseErr, operation.publicationClaim.Release(cleanupCtx))
-	}
-	for _, operation := range pendingOperations {
+		if err := operation.publicationClaim.Release(cleanupCtx); err != nil {
+			releaseErr = errors.Join(releaseErr, err)
+			continue
+		}
 		eb.removePendingOutboxOperation(operation.intent.Event.ID(), operation.sequence)
 	}
 
@@ -851,7 +852,7 @@ func (eb *EventBus) WaitForQuiescence(ctx context.Context) error {
 		return nil
 	}
 	var err error
-	ctx, err = eb.admitSourceArtifactFact(ctx)
+	ctx, err = eb.sourceArtifactContext(ctx)
 	if err != nil {
 		return err
 	}
