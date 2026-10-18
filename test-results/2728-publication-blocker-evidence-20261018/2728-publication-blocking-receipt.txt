@@ -1,0 +1,6 @@
+<!-- receipt v1 -->
+receipt: head=ffa979bbaa7ca5cf8e3120e16f6249670ba136de tree=1abbfd155f9ee30914bd6a5d0395a7eebe404768 parent=c12f95e674c7ba308da16d09f8ace5ffa9f63f5f branch=agent-d/2728-delete-eager-provenance signed=G dirty_files=0
+preflight: test-results/preflight/20261018T205747.694805164-71a04d87-6e56-4512-a839-17129a230093/receipt.json sha256=5ecefe66aed645324a44fdb9d833127fe59a0932e8836ec9f07cf0c4037ba227 (exact-head INCOMPLETE unstarted=4)
+tests: ./internal/store:TestPersistenceAuthorityFindingRegistry(RED:two-stale-typed-callbacks)
+regenerated: not-claimed
+generated: 2026-10-18T21:11:11Z

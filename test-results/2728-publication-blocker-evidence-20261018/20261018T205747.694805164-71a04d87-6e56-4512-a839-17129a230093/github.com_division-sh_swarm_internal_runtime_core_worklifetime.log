@@ -1,0 +1,8 @@
+{"Time":"2026-10-18T20:57:58.545275701Z","Action":"start","Package":"github.com/division-sh/swarm/internal/runtime/core/worklifetime"}
+{"Time":"2026-10-18T20:57:58.54826645Z","Action":"run","Package":"github.com/division-sh/swarm/internal/runtime/core/worklifetime","Test":"TestProductionAsyncSitesAreClassified"}
+{"Time":"2026-10-18T20:57:58.54833731Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/core/worklifetime","Test":"TestProductionAsyncSitesAreClassified","Output":"=== RUN   TestProductionAsyncSitesAreClassified\n"}
+{"Time":"2026-10-18T20:57:59.446410864Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/core/worklifetime","Test":"TestProductionAsyncSitesAreClassified","Output":"--- PASS: TestProductionAsyncSitesAreClassified (0.90s)\n"}
+{"Time":"2026-10-18T20:57:59.446582375Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/runtime/core/worklifetime","Test":"TestProductionAsyncSitesAreClassified","Elapsed":0.9}
+{"Time":"2026-10-18T20:57:59.446599436Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/core/worklifetime","Output":"PASS\n"}
+{"Time":"2026-10-18T20:57:59.449073931Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/core/worklifetime","Output":"ok  \tgithub.com/division-sh/swarm/internal/runtime/core/worklifetime\t0.904s\n"}
+{"Time":"2026-10-18T20:57:59.449139701Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/runtime/core/worklifetime","Elapsed":0.904}
