@@ -229,10 +229,19 @@ func proveLockOrderBeginAdmission(t *testing.T, f *activeInputFixture, request o
 	if err != nil {
 		lockOrderStop(t, "begin_before_admission_controls", err)
 	}
+	var durable operatorchannel.Operation
+	for _, operation := range before {
+		if operation.OperationID == created.OperationID {
+			durable = operation
+		}
+	}
+	if durable.OperationID == "" {
+		t.Fatal("created identity has no exact durable row")
+	}
 	replay := request
 	replay.OperationID = uuid.NewString()
 	repeated, err := f.selected.BeginChannelBinding(f.ctx, replay)
-	if err != nil || !reflect.DeepEqual(repeated, created) {
+	if err != nil || !reflect.DeepEqual(repeated, durable) {
 		lockOrderStop(t, "begin_exact_replay", err)
 	}
 	conflicting := request
@@ -305,12 +314,14 @@ func proveLockOrderFenceCancellation(t *testing.T, f *activeInputFixture, reques
 		t.Fatal("cancellation control missed the original fence attempt")
 	}
 	cancel()
+	// The canonical write owner drains SQL and checks cancellation before
+	// COMMIT. Release the competing owner so that drain and rollback can join.
+	probe.Release()
 	select {
 	case <-beginDone:
 	case <-ctx.Done():
-		t.Fatal("cancelled begin did not join before releasing the other owner")
+		t.Fatal("cancelled begin did not join after releasing the other owner")
 	}
-	probe.Release()
 	workers.Wait()
 	if !errors.Is(beginErr, context.Canceled) || standingErr != nil || !current {
 		logLockOrder(t, map[string]any{"stage": "fence_cancel_joined", "begin": lockOrderError(beginErr), "standing": lockOrderError(standingErr), "standing_current": current})
