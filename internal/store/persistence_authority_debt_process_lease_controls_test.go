@@ -24,6 +24,21 @@ const debtR04CollectorTo = "34691798f6437c504ebc6ef1c3cb359bccd0d368a515456f4aeb
 const debtR04OwnerPath = "internal/store/internal/startupownership/owner.go"
 const debtR04ActivityPath = "internal/store/internal/startupownership/activity_recovery.go"
 const debtR04CompositionPath = "internal/store/internal/runtimepersistence/composition.go"
+const debtR04NativeRepairAfter = "a88c60be70f6923ef7a3960aa12dcbf2e124e06c"
+const debtR04NativeCustodyTo = "ec1fec1bdff3d92cf2de9f414fff6cc5c9a74feb8138313b8bb4e92e246ab3fa"
+const debtR04NativeCollectorTo = "c79af9700325a028f169ec3c2284828751f97be022233cfd6356f1c726e4ce3d"
+
+var debtR04NativeRepairPins = [...]debtRepair2698SourceFile{
+	{"internal/store/internal/backend/activityjournal/activity_execution_grant.go", "absent", "00e81af8c72afe78c7097610ca7ce5fde612091edb270edb4729185977220925"},
+	{"internal/store/internal/backend/activityjournal/displaced_recovery.go", "13a9f50ced01b7043756f79e81ea40be25e728a7cd6b849c2a43e22ffde6294f", "absent"},
+	{"internal/store/internal/backend/activityjournal/execution_grant.go", "ab720d379d250a2dfb764c5d7d876b6f6778798c99dadd7882851cc99722763d", "d1e8d847374ef53d35d4c7b43fbe1a41f4a2f83625a6ef563bbb9d428c649968"},
+	{"internal/store/internal/backend/activityjournal/recovery_binding.go", "absent", "2d394f12068f129fb4f0676124d866dd999b0d120db409e4b25f8b982a729317"},
+	{"internal/store/internal/startupownership/activity_execution_grant.go", "ead99b547ad30fb9ef5776f1281d3d2c146757d3e2ceeb7652b4d38337f7b12f", "absent"},
+	{"internal/store/internal/startupownership/activity_recovery.go", "3cc9b6af3c7bdf6b5664c88bd6b0f5cfdb0e36891eae5c5944a1fc4b4bf5e91e", "cef83d1ec303eecadd52afd40fad49f9dfcfd99dbb74b4fad3ca32cffbc38bc8"},
+	{"internal/store/internal/startupownership/activity_recovery_native.go", "absent", "f992d066041b3161a11832afe5754cec2f97c5bb8acc12d2f12c8db461ab6e49"},
+	{"internal/store/internal/startupownership/displaced_http_activity.go", "51b6d4c5e1b341a898b0a5b9010ea4abc63234af130ee220d4f6106dc2f4a693", "12abf02bddb116f976d3fe29da263bf35b0a61e6ae1eab4a2d7afdefa6e8dec7"},
+	{"internal/store/internal/startupownership/owner.go", "b189576ad1095fdf2d4d25e73e7baa536333084fad4b289853cc2fdabdf68f68", "6cb13742409e290fce5e5d62177b4dd79b7882cd267b4cafcc5bfde1399ef355"},
+}
 
 var debtR04SourcePins = [...]debtRepair2698SourceFile{
 	{debtR04OwnerPath, "efa6f487608ad86229e863bb8717c98d92745ea25757696346c66da07540e4d7", "b189576ad1095fdf2d4d25e73e7baa536333084fad4b289853cc2fdabdf68f68"},

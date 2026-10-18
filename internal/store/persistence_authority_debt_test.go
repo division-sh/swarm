@@ -2432,6 +2432,9 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
+	if debtR04NativeCollectorTransition(base, current, trusted, head, retirement...) {
+		return nil
+	}
 	if debtR04JoinedCollectorTransition(base, current, trusted, head, retirement...) {
 		return nil
 	}

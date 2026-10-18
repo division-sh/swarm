@@ -114,7 +114,7 @@ func TestPersistenceAuthorityDebtRepair2698DeclarationCacheUsesActualBytes(t *te
 
 func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	if actual, err := debtCollectorDigest(root); err != nil || actual != debtRepair2698ProofCostCollectorTo && actual != debtR04CollectorTo && actual != debtR04HistoricalCollectorTo && actual != debtR04JoinedCollectorTo {
+	if actual, err := debtCollectorDigest(root); err != nil || actual != debtRepair2698ProofCostCollectorTo && actual != debtR04CollectorTo && actual != debtR04HistoricalCollectorTo && actual != debtR04JoinedCollectorTo && actual != debtR04NativeCollectorTo {
 		t.Fatalf("native repair collector=%s expected=%s: %v", actual, debtRepair2698ProofCostCollectorTo, err)
 	}
 	if err := debtCatchUpCollectorSource(root); err != nil {
@@ -140,7 +140,7 @@ func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testin
 func proveR04CollectorContinuation(t *testing.T, root string) {
 	t.Helper()
 	actual, err := debtCollectorDigest(root)
-	if err != nil || actual != debtR04JoinedCollectorTo {
+	if err != nil || actual != debtR04NativeCollectorTo {
 		t.Fatalf("R04 continuation must use its executing collector: %s: %v", actual, err)
 	}
 	before, _, err := debtCatchUpSignedBaseline(root, debtR04After, debtRepair2698ProofCostCollectorTo)
@@ -148,7 +148,7 @@ func proveR04CollectorContinuation(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	after := before
-	after.Collector = actual
+	after.Collector = debtR04JoinedCollectorTo
 	proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(after.Sites)}
 	if !debtR04JoinedCollectorTransition(before.Collector, after.Collector, before, after, proof) {
 		t.Fatal("complete authenticated R04 continuation refused")
@@ -172,9 +172,25 @@ func proveR04CollectorContinuation(t *testing.T, root string) {
 		t.Fatal("joined continuation retargeted its historical edge or accepted reverse provenance")
 	}
 	assertDebtCatchUpForeignProvenance(t, before, after, proof)
+	proveR04NativeCollectorContinuation(t, root, after, proof)
 	proveR04SourceContinuation(t, root)
 	proveR04HistoricalSourceContinuation(t, root)
 	proveR04JoinedSourceContinuation(t, root)
+}
+
+func proveR04NativeCollectorContinuation(t *testing.T, root string, previous authorityDebtBaseline, proof debtDeliveryRetirementProof) {
+	t.Helper()
+	current := previous
+	current.Collector = debtR04NativeCollectorTo
+	if !debtR04NativeCollectorTransition(previous.Collector, current.Collector, previous, current, proof) ||
+		debtR04NativeCollectorTransition(current.Collector, previous.Collector, current, previous, proof) ||
+		debtR04JoinedCollectorTransition(previous.Collector, current.Collector, previous, current, proof) {
+		t.Fatal("native R04 forward edge failed or retargeted/reversed prior provenance")
+	}
+	assertDebtCatchUpForeignProvenance(t, previous, current, proof)
+	if _, _, err := debtR04NativeRepairImages(root); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func proveR04HistoricalSourceContinuation(t *testing.T, root string) {
@@ -375,6 +391,7 @@ func TestPersistenceAuthorityDebtRepair2698CopiedWarmSourceRefusesEscapes(t *tes
 	assertRepair2698CleanupActualMutants(t, copy)
 	assertR04ExecutionActualMutants(t, copy)
 	assertR04JoinedActualMutants(t, copy)
+	assertR04NativeRepairActualMutants(t, copy)
 	for _, file := range packet.Files {
 		actual, err := os.ReadFile(filepath.Join(copy, file.File))
 		if err != nil {
@@ -584,6 +601,52 @@ func assertR04JoinedActualMutants(t *testing.T, root string) {
 	}
 }
 
+func assertR04NativeRepairActualMutants(t *testing.T, root string) {
+	t.Helper()
+	before, after, err := debtR04NativeRepairImages(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pin := range debtR04NativeRepairPins {
+		path := filepath.Join(root, pin.File)
+		if pin.AfterSHA256 == "absent" {
+			debtWriteModuleSource(t, root, pin.File, string(before[pin.File]))
+			if _, _, err := debtR04NativeRepairImages(root); err == nil {
+				t.Fatal("native repair accepted a coexisting old relocated source:", pin.File)
+			}
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		current := after[pin.File]
+		for _, changed := range [][]byte{
+			append(bytes.Clone(current), '\n'),
+			append(bytes.Clone(current), []byte("\nfunc extraRawRecoveryCaller(db interface{ Exec(string, ...any) }) { db.Exec(\"DELETE FROM events\") }\n")...),
+		} {
+			debtWriteModuleSource(t, root, pin.File, string(changed))
+			if err := debtCatchUpCollectorSource(root); err == nil {
+				t.Fatal("warm native repair accepted changed source or an extra raw caller:", pin.File)
+			}
+			if pin.File == debtR04OwnerPath || pin.File == debtR04ActivityPath {
+				if _, err := debtR04NativeRepairPredecessor(root, pin.File, current); err == nil {
+					t.Fatal("supplied pristine source concealed changed native repair:", pin.File)
+				}
+			}
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := debtR04NativeRepairImages(root); err == nil {
+			t.Fatal("pristine gitdir concealed missing actual native repair:", pin.File)
+		}
+		debtWriteModuleSource(t, root, pin.File, string(current))
+	}
+	if err := debtCatchUpCollectorSource(root); err != nil {
+		t.Fatal("restored native repair refused:", err)
+	}
+}
+
 func copyRepair2698CustodySources(t *testing.T, root, destination string) {
 	t.Helper()
 	const owner = "internal/store/internal/startupownership"
@@ -617,6 +680,23 @@ func copyR04CompositionSource(t *testing.T, root, destination string) {
 		t.Fatal(err)
 	}
 	debtWriteModuleSource(t, destination, ".git", "gitdir: "+strings.TrimSpace(string(gitdir))+"\n")
+	for _, pin := range debtR04NativeRepairPins {
+		if pin.AfterSHA256 == "absent" {
+			if err := os.Remove(filepath.Join(destination, pin.File)); err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			continue
+		}
+		// Startup files are already copied and may contain hostile mutations.
+		if !strings.HasPrefix(pin.File, "internal/store/internal/backend/activityjournal/") {
+			continue
+		}
+		current, err := os.ReadFile(filepath.Join(root, pin.File))
+		if err != nil {
+			t.Fatal(err)
+		}
+		debtWriteModuleSource(t, destination, pin.File, string(current))
+	}
 }
 
 func TestPersistenceAuthorityDebtRepair2698FixtureNameCopiedWarmBoundary(t *testing.T) {
