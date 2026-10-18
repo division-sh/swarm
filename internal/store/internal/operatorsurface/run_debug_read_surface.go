@@ -438,7 +438,7 @@ func (s *RunPostgres) loadRunDebugReport(ctx context.Context, runID string, opts
 	report.TestQuiescence.FanOutBarriers = report.FanOut.BarrierArmed + report.FanOut.BarrierPending
 	report.TestQuiescence.Ready = runTestQuiescenceReady(report.TestQuiescence)
 
-	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorPostgresDelivery, s.sources, s.pipeline, s.timers, header, report.TestQuiescence, time.Now().UTC())
+	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorPostgresDelivery, s.sources, s.sourceMemo, s.pipeline, s.timers, header, report.TestQuiescence, time.Now().UTC())
 	if err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
