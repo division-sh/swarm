@@ -1,7 +1,6 @@
 package manager
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -81,9 +80,8 @@ func TestSuppliedStateHasNoParallelConfigurationAdmission(t *testing.T) {
 	req.ConstructorInput = "construction.requested"
 	setSuppliedPayload(&req, `{"brief":"exact supplied value"}`)
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
-	plan, err := am.PrepareFlowInstanceActivation(testAuthorActivityContext(context.Background()), req)
+	am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle))
+	plan, err := am.PrepareFlowInstanceActivation(ctx, req)
 	if err != nil || plan.Instance.Fields["brief"] != "exact supplied value" {
 		t.Fatalf("canonical constructor was blocked by a second authority: %+v %v", plan, err)
 	}

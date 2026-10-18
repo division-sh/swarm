@@ -19,10 +19,9 @@ type activationFinalizerEvidenceStore struct {
 
 func TestFlowReadinessVerifiesAgentEntityOwnership(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	req := testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")
-	setFlowActivationManagerSemanticSource(am, req.ContractBundle)
-	plan, err := am.PrepareFlowInstanceActivation(testAuthorActivityContext(context.Background()), req)
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, req.ContractBundle)
+	plan, err := am.PrepareFlowInstanceActivation(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,10 +51,8 @@ func (s *activationFinalizerEvidenceStore) FinalizeInitialEntryLifecycle(context
 func TestFlowActivationFinalizerRefusesUnacknowledgedEvidence(t *testing.T) {
 	instances := &activationFinalizerEvidenceStore{flowActivationTestInstanceStore: &flowActivationTestInstanceStore{}}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	req := testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
-	setFlowActivationManagerSemanticSource(am, req.ContractBundle)
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, req.ContractBundle)
 	plan, err := am.PrepareFlowInstanceActivation(ctx, req)
 	if err != nil {
 		t.Fatal(err)
@@ -77,11 +74,9 @@ func TestFlowReadinessPassUsesAtMostTwoPublicLoads(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			instances := &flowActivationTestInstanceStore{}
 			bus := &flowActivationTestBus{}
-			am := newFlowActivationManager(t, bus, instances)
 			bundle := testFlowBundle(t, "")
-			setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+			am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 			req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-			ctx := testAuthorActivityContext(context.Background())
 			if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 				t.Fatal(err)
 			}
