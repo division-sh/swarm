@@ -2751,7 +2751,6 @@ func TestDynamicFlowRuntimeReadinessRejectsABAAfterAdmissionBeforeExecution(t *t
 func TestDynamicFlowRuntimeReadinessRejectsCurrentFactWithOldSemanticSource(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	oldBundle := testFlowBundle(t, "")
 	currentBundle := testFlowBundle(t, "")
 	currentBundle.FlowTree.ByID["review"].Agents["editor"] = runtimecontracts.AgentRegistryEntry{
@@ -2761,13 +2760,13 @@ func TestDynamicFlowRuntimeReadinessRejectsCurrentFactWithOldSemanticSource(t *t
 	oldSource := semanticview.Wrap(oldBundle)
 	currentSource := semanticview.Wrap(currentBundle)
 	currentFact, err := runtimecorrelation.NewSourceArtifactFact(
-		"bundle-v2:sha256:" + strings.Repeat("d", 64),
+		currentBundle.SourceArtifact.BundleHash(),
 	)
 	if err != nil {
 		t.Fatalf("current bundle source fact: %v", err)
 	}
-	setFlowActivationManagerSemanticSource(am, currentSource, currentFact)
-	ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), currentFact)
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, currentSource)
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, currentFact)
 	req := testActivationRequest(currentBundle, "review", "inst-1", "ent-1", "review/inst-1")
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance current source: %v", err)
@@ -2793,15 +2792,13 @@ func TestFlowActivationRejectsForeignSemanticSourceBeforeAnyMutation(t *testing.
 				instances := &flowActivationTestInstanceStore{}
 				agents := &flowActivationTestStore{}
 				bus := &flowActivationTestBus{}
-				manager := newFlowActivationManager(t, bus, instances, agents)
 				currentBundle := testFlowBundle(t, "")
 				foreignBundle := testFlowBundle(t, "")
 				foreignBundle.FlowTree.ByID["review"].Agents["editor"] = runtimecontracts.AgentRegistryEntry{
 					ID: "editor", Type: "generic", Role: "editor",
 				}
 				registerTestFlowAgentOwner(foreignBundle, "review", "editor")
-				setFlowActivationManagerSemanticSource(manager, semanticview.Wrap(currentBundle))
-				ctx := testAuthorActivityContext(context.Background())
+				manager, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(currentBundle), agents)
 				currentReq := testActivationRequest(
 					currentBundle,
 					"review",
