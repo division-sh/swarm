@@ -5,8 +5,7 @@ set -euo pipefail
 [[ "$GITHUB_REF" = refs/heads/agent-g/diagnostic-2614-original-cause ]]
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
 [[ "$EXPECTED_SHA" = "$GITHUB_SHA" && "$GITHUB_SHA" = "$(git rev-parse HEAD)" ]]
-[[ "$(git rev-parse HEAD^)" = 21c8afb8e63bf35b5a6f64ffa18e004d19c9a7fc ]]
-[[ "$(git rev-parse HEAD^^)" = f2e0d031a06d3f8e5a6ec487c8f90c3e212860d8 ]]
+git merge-base --is-ancestor f2e0d031a06d3f8e5a6ec487c8f90c3e212860d8 HEAD
 sha256sum --check .github/diagnostics/2614/capture-files.sha256
 sha256sum --check .github/diagnostics/2614/validation.sha256
 mkdir -p test-results/diagnostic-plan

@@ -9,7 +9,7 @@ Do not merge this branch. No dispatch is authorized by committing this packet.
 After explicit route/head approval, dispatch the existing `ci.yml` workflow on
 `agent-g/diagnostic-2614-original-cause`, passing its full signed commit as
 `expected_sha`. Only workflow_dispatch is enabled. The route refuses any other
-branch, SHA, event, parent or run attempt; attempt 2 is refused, not a retry.
+branch, SHA, event, base ancestry or run attempt; attempt 2 is refused, not a retry.
 Both jobs have read-only contents/actions permissions. It has no Required-summary,
 timing-budget, preflight, selection-status or trusted-master publisher. The names
 and artifacts are DIAGNOSTIC ONLY, never qualifying evidence for #2614.
