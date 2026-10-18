@@ -13,9 +13,6 @@ func TestClockScheduleSchemaAdmission(t *testing.T) {
 	if err != nil || len(schema.Schedules) != 2 || schema.Schedules["poll"].Every != "5m" {
 		t.Fatalf("minimal declaration = %#v, %v", schema.Schedules, err)
 	}
-	if got := schema.admissionProvenance[`schedules.poll.every`]; got.Origin != EffectiveValueOriginAuthored {
-		t.Fatalf("cadence provenance lost: %#v", schema.admissionProvenance)
-	}
 	var direct FlowSchemaDocument
 	if err := decodeNodeTestYAML([]byte(source), &direct); err != nil || direct.Schedules["morning_report"].Cron != "0 9 * * *" {
 		t.Fatalf("direct typed admission = %#v, %v", direct.Schedules, err)

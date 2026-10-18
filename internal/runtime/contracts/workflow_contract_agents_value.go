@@ -30,12 +30,6 @@ func projectAgentDeclarationsValue(root yamlsource.Value) (map[string]AgentRegis
 		if err != nil {
 			return nil, fmt.Errorf("agent %q: %w", declaration.Name, err)
 		}
-		entry.admissionProvenance = map[string]EffectiveValueProvenance{"declaration": authoredSourceProvenance(declaration.Value)}
-		if err := collectNodeValueProvenance(declaration.Value, "", entry.admissionProvenance, nil); err != nil {
-			return nil, err
-		}
-		// Memory is an enablement fact, not a separately carried source fact.
-		delete(entry.admissionProvenance, "memory")
 		out[declaration.Name] = entry
 	}
 	return out, nil

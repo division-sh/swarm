@@ -306,7 +306,7 @@ rows:
   - id: event.schema_ownership
     ruled: mechanical-ratified
     paths: "events.<event>, events.<event>.key, events.<event>.swarm, events.<event>.<payload_field>, events.<event>.<payload_field>.type?"
-    owners: [yamlsource.Document, admitEventCatalogDocument, admitEventCatalogEntry, admitEventPayloadField, effectiveEventDeclarationForFlowEvent, EffectiveProvenanceLedger]
+    owners: [yamlsource.Document, admitEventCatalogDocument, admitEventCatalogEntry, admitEventPayloadField, effectiveEventDeclarationForFlowEvent, WorkflowContractBundle.IntroductionLocation]
     information:
       fact: [producer-owned event ID and payload schema]
       derived_projection: [compiled-connect consumer schema]
@@ -771,7 +771,7 @@ node_root_admission:
   owner: projectNodeDeclarationsValue
   source_owner: yamlsource.Document.Root/Value
   nested_owner_family: workflow_contract_nodes_*_value.go
-  provenance_owner: populateEffectiveProvenance
+  diagnostic_location_owner: WorkflowContractBundle.IntroductionLocation
   retired_fields: [node.permissions, node.implementation, node.owned_transitions, node.idempotency_table, handler.from, handler.dedup_by, query.sequence, query.operation, compute.params, sets_gate.value, filter.predicate, reduce.params]
   retained_raw_callers: [W1.scalar_helpers, durable_data.mapping_helper]
   remaining_parent: "W5 and pack/platform roots under #2300"
@@ -781,7 +781,7 @@ schema_root_admission:
   owner: AdmitFlowSchemaValue
   source_owner: yamlsource.Document.Root/Value
   nested_owner_family: workflow_contract_schema_*_value.go
-  provenance_owner: populateEffectiveProvenance
+  diagnostic_location_owner: WorkflowContractBundle.IntroductionLocation
   presence_oracle: TestSchemaAdmissionFieldPresenceMatrix
   retired_fields: [initial_state, states, terminal_states, tool_surface, entity, namespace_prefix, namespace_rule]
   bound_owner: [decodeSchemaLengthRefinementValue, decodeSchemaRangeRefinementValue]

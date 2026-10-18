@@ -35,24 +35,6 @@ func projectNodeDeclarationsValue(root yamlsource.Value) (map[string]SystemNodeC
 		if err != nil {
 			return nil, fmt.Errorf("node %q: %w", field.Name, err)
 		}
-		projected.admissionProvenance = map[string]EffectiveValueProvenance{
-			"declaration": authoredSourceProvenance(field.Value),
-		}
-		if err := collectNodeValueProvenance(field.Value, "", projected.admissionProvenance, annotations); err != nil {
-			return nil, fmt.Errorf("node %q provenance: %w", field.Name, err)
-		}
-		// Transfer each admitted ordered row's source facts to its exact position.
-		for event, handler := range projected.EventHandlers {
-			for collection, rows := range map[string][]HandlerRuleEntry{"rules": handler.Rules, "on_complete": handler.OnComplete} {
-				for index := range rows {
-					prefix := NodeProvenanceMapPath("event_handlers", event) + fmt.Sprintf(".%s[%d]", collection, index)
-					for path, source := range rows[index].admissionProvenance {
-						projected.admissionProvenance[prefix+"."+path] = source
-					}
-					rows[index].admissionProvenance = nil
-				}
-			}
-		}
 		out[field.Name] = projected
 	}
 	return out, nil

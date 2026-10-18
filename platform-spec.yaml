@@ -215,7 +215,7 @@ spec_authority:
     handoff: >
       Admitted inventory entries hand their typed envelope and exact body to each existing body owner. Serialization back to
       YAML and reflected re-decoding are not admission. Project manifest_hash remains authored derived while its effective
-      digest is computed from exact body bytes; provenance records those as distinct facts.
+      digest is computed from exact body bytes; those remain distinct typed facts, not coordinate-ledger entries.
       Development envelopes retain their original configured absolute source paths through this handoff. Synthesized
       complete-development membership is a boundary snapshot, not an authored inventory with synthetic YAML coordinates.
     platform_catalog: >
@@ -224,8 +224,8 @@ spec_authority:
     consumed_law: >
       Platform DDL, interface, catalog, permission and participant consumers all use the same admitted platform projection.
       The platform spec is an open normative document: inert prose is retained in its immutable source, not reinterpreted as
-      executable fields. API schemas preserve their own extended dialect. Effective describe provenance composes these sources
-      with existing schema, event, node, agent, tool and policy evidence without replacing their ledger entries.
+      executable fields. API schemas preserve their own extended dialect. Diagnostic positions are looked up on demand
+      from the exact retained source or pack body; describe does not expose an effective-provenance ledger.
   tracker_repairs:
     explicit_superseding_comments:
     - '#852'
@@ -462,7 +462,7 @@ contract_formats:
       collection or record elements.
   authoritative_yaml_source:
     canonical_owner: platform-spec.yaml#filesystem_source_model
-    scope: All authored YAML is admitted once as exact bytes by AdmittedSourceArtifact; consumers use admitted provenance and never reopen host paths.
+    scope: All authored YAML is admitted once as exact bytes by AdmittedSourceArtifact; diagnostic positions are looked up on demand from those bytes or exact retained pack bodies with yamlsource, never by reopening host paths or reading raw YAML nodes. Missing positions do not fail the original refusal; no lookup cache or coordinate sidecar is retained.
   node_declarations:
     owner_file: <flow-path>/nodes.yaml
     canonical_admission: internal/yamlsource.Value projected by internal/runtime/contracts
@@ -491,17 +491,16 @@ contract_formats:
       Ordinary on_complete rejects authored activity in every presence state.
       Semantic-validator diagnostics retain the complete source path and
       authored, introduction and resolved coordinates.
-    provenance: >
-      Effective node-declaration provenance retains authored coordinates for
-      declaration and nested values and composes with event-catalog provenance;
-      neither owner replaces the other's ledger. Verification, description,
-      plan construction, and retained-source reconstruction consume the same
-      admitted projection. Public provenance uses snake_case field names and
-      omits absent optional evidence, without changing the underlying ledger.
-      Handler _note annotations retain their outer provenance occurrence only;
-      their descendants are not effective behavior. This exemption is scoped to
+    source_diagnostics: >
+      Verification, description, plan construction and retained-source reconstruction
+      consume the same admitted projection. Refusals obtain declaration and nested
+      value introduction locations on demand from the exact retained bytes, including
+      alias and merge sites. Missing or unresolved source keeps the position-less
+      refusal; no effective-provenance ledger or describe section is constructed.
+      Handler _note annotations are not effective behavior. Their source-expansion
+      exemption is scoped to
       the annotation occurrence, not its anchor or any business-data field named
-      _note. Before node projection or provenance expansion, the complete
+      _note. Before node projection, the complete
       nodes.yaml document shares one 65,536-expanded-source-node allowance
       enforced by the source-value owner, excluding exact annotation occurrences.
       Declaration aliases and merges consume that same document allowance;
@@ -532,8 +531,8 @@ contract_formats:
       admitted from the authoritative yamlsource.Value. No reflected root
       decoder, raw-node child decoder or reconstructed receiver YAML is an
       alternate source owner. One whole-document expansion budget precedes
-      projection and provenance. Effective schema, node and event provenance
-      compose in the same immutable ledger without overwriting other families.
+      projection. Schema, node and event diagnostics resolve their exact semantic
+      paths against retained admitted bytes on demand, not a composed coordinate ledger.
       Missing metadata is not explicit null, an empty string, mapping or list.
       Nonempty exact text is required for supplied identities, mode choices,
       source paths and required child references; textual annotations may be
@@ -3332,7 +3331,7 @@ literal_policy_contracts:
   - A nearer root declaration replaces the whole inherited value. Both ordinary and owner-bearing lookup select that root once, then descend only within it; missing, null or incompatible child interiors cannot resurrect parent fields.
   - Effective resolution, cloning and preview overrides deep-copy literal containers, including caller-owned override inputs.
   - Admitted rule declarations and executable module definitions are separate authorities in rules.yaml and tools.yaml. Literal policy keys with those names grant no authority.
-  - Policy and rule source admission uses the existing document-wide expansion bound, finite artifact classification and composed provenance ledger. Source bytes, catalog and retained identity remain authoritative for reconstruction.
+  - Policy and rule source admission uses the existing document-wide expansion bound and finite artifact classification. Diagnostic introduction locations are looked up on demand in the exact retained bytes; source bytes, catalog and retained identity remain authoritative for reconstruction.
   - Static executable policy reads are checked against scoped declarations through the canonical checked CEL reader census. Query-count operands are checked before count lowering; timer placeholders use their existing exact-key dialect and active builtin guard selectors retain their existing path dialect. Missing declarations are hard teaching errors, not warnings.
   - Executable-expression admission must construct the program through the same CEL preparation owner and numeric bindings used by execution before applying declaration-presence, optional-absence or unreachable-branch exemptions. A type-checked AST alone is insufficient. Program-construction failures are hard errors at the owning guard or value-expression reader, including failures in branches that would not execute; policy-reference diagnostics must not swallow them.
   - Stock has/optional selection, short-circuit presence and lexical shadowing retain their existing semantics. Direct dynamic subscripts remain subject to existing structural admission; optional dynamic lookups are not guessed into static keys.
@@ -10642,8 +10641,8 @@ tool_model:
     - minLength/maxLength/minItems/maxItems require actual nonnegative integers. Zero is legal; quoted numbers,
       floats including integral floats, negative fractions, non-finite values and overflow fail closed.
       minimum/maximum require finite numeric values and preserve fractional ranges.
-    - Recursive admission and provenance are bounded across the entire declaration document. Source locations and
-      alias/merge introductions survive typed admission and compose into the existing effective-provenance ledger.
+    - Recursive admission is bounded across the entire declaration document. Diagnostic source locations and
+      alias/merge introductions are resolved on demand from the exact retained declaration bytes, not stored in a ledger.
     - Module entries use the same flat declaration identity but are never agent-exposable; compute_module_contracts
       owns their unchanged ABI, pinned bytes, limits and execution behavior.
   description: The platform owns all tool schema serving, call validation, and execution routing. Every tool has an implementation
@@ -13926,7 +13925,7 @@ flow_model:
       declaration_surface: 'schema.yaml ingress or compiled schedules; retention derives from an enabled binding or an active deployment clock'
       canonical_owners:
         declaration: internal/runtime.ResolveStandingTargetDeclarations over the admitted ingress and compiled clock declarations
-        alias: internal/runtime/contracts.WorkflowContractBundle.FlowIngressAlias compiled with the immutable workflow semantics and effective provenance
+        alias: internal/runtime/contracts.WorkflowContractBundle.FlowIngressAlias compiled with the immutable workflow semantics and typed authored alias presence
         verification: internal/runtime.ResolveStandingTargetDeclarations
         provider_catalog: internal/providertriggers.CatalogSnapshot
         admission_plan: internal/providertriggers.InboundAdmissionPlan and its authenticated PublicationAdmission output handoff
@@ -13959,7 +13958,7 @@ flow_model:
         - 'Provider publications carry the exact pinned declaring flow, not a concrete source instance or entity. InboundAdmissionPlan authenticates the request and transfers its exact ordered output names, kinds, payloads and pack authorization through PublicationAdmission before planning. An ingress source enum, schema import, endpoint alias or capability subject ID cannot grant that admission. Concrete execution still requires the shared constructor, explicit connection where crossing a boundary, selected-run receiver ownership and actual attachment'
         - 'The inbound receipt identity is exactly service/run/generation/provider/provider-delivery. Alias and concrete receiver coordinates are projections, never deduplication identity. Exact retries return the immutable committed batch before current output projection or construction; changed semantic content at the same identity refuses before mutation. Current binding source, generation, publication sequence and run fences remain mandatory for fresh publication'
         - 'Omitted ingress.alias is derived once from the selected root flow name and declaration path: root shop becomes shop, child shop becomes shop.shop, and nested shop/leaf becomes shop.shop.leaf. The root name must be an exact single-segment addressable name; an absent or invalid name cannot be repaired from a host directory, execution hash or label. An explicit valid override does not require a derivable root name'
-        - 'Explicit alias presence is exact non-empty text and a valid URL segment; empty, null, malformed and normalized-equivalent spellings refuse rather than becoming omission. Provider composition, runtime declaration/lookup, describe/topology and registration consume the same compiled alias and its provenance, never raw-override reconstruction'
+        - 'Explicit alias presence is recorded by the optional decoded alias field and requires exact non-empty text and a valid URL segment; empty, null, malformed and normalized-equivalent spellings refuse rather than becoming omission. Provider composition, runtime declaration/lookup, describe/topology and registration consume the same compiled alias, never a side-table presence check or raw-override reconstruction'
         - 'ingress alias is exactly one URL path segment matching [A-Za-z0-9][A-Za-z0-9._-]* so every verified alias is addressable as /webhooks/{alias}/{provider}'
         - 'Declaration inventory and dormant discovery preserve equal aliases with distinct source/flow/provider identity. An enabled alias can have only one declaring flow owner in the process; providers on that same declaration share its alias and retain their provider path segment. Complete-set startup admission and later channel promotion reject a collision naming both owners before durable mutation or publication, preserving incumbent state and readback'
         - ingress providers are a list so duplicate provider declarations remain visible to strict verification
@@ -14543,10 +14542,9 @@ flow_model:
     migration_boundary: >-
       The stable compiled interface and W3 event-family migration are complete.
       Producer-only exact-flow ownership and compiled-connect receiver delivery projections
-      consume the immutable provenance ledger. The ledger covers declarations,
-      business keys, field types and optionality, descriptions, refinements,
-      citations, payload requiredness, event metadata, receiver aliases and
-      generated carries, plus source-artifact-identified boundary snapshots. The
+      consume the same admitted typed declarations. Producer-conflict diagnostics
+      obtain the exact declaration-key introduction location on demand from
+      retained source bytes; diagnostic coordinates are not event identity. The
       remaining unrelated decoder families continue under #2300 without reopening event/named-record field grammar or compatibility paths.
   stateless_flows:
     description: 'Some flows are stateless producers — they process events without tracking entity lifecycle. A signal-processing
@@ -27886,7 +27884,9 @@ cli_specification:
                 root, flows and approvals. Diagnostic views retain invalid-source findings instead of asserting live readiness.
                 Root and flow policy fields expose cloned effective literal values; rules fields expose the nearest
                 scoped agent or machine declarations in their flat authored shape, not wrapper metadata or two namespaces.
-                Source files and the composed effective provenance ledger include policy.yaml and rules.yaml.
+                Source files include policy.yaml and rules.yaml; no effective_provenance section is emitted.
+                Expanded-field provenance, when present, is computed from the expansion at describe time and printed
+                as one text line: 'derived from `_embed[i]`, types.yaml:LINE'.
               quiet_values:
               - flow ids and summary values declared by the command implementation
             describe_routes:

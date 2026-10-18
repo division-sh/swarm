@@ -12,13 +12,15 @@ func projectSchemaIngressValue(value yamlsource.Value) (*ProjectFlowIngress, err
 		return nil, err
 	}
 	out := &ProjectFlowIngress{}
-	if err := schemaValueTexts(fields, map[string]*string{"alias": &out.Alias}, true); err != nil {
-		return nil, err
-	}
-	if _, present := fields["alias"]; present {
-		if err := ValidateIngressAlias(out.Alias); err != nil {
-			return nil, nodeValueError(fields["alias"], err)
+	if value, present := fields["alias"]; present {
+		alias, err := schemaValueText(value, true)
+		if err != nil {
+			return nil, err
 		}
+		if err := ValidateIngressAlias(alias); err != nil {
+			return nil, nodeValueError(value, err)
+		}
+		out.Alias = &alias
 	}
 	providers, present := fields["providers"]
 	if !present {

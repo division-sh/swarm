@@ -39,10 +39,6 @@ func TestDerivedFlowShapeRejectsAuthoredMode(t *testing.T) {
 		if err != nil || schema.EffectiveMode() != tc.mode {
 			t.Fatalf("derived shape = %s, %v; want %s", schema.EffectiveMode(), err, tc.mode)
 		}
-		provenance := schema.admissionProvenance["mode"]
-		if provenance.Origin != EffectiveValueOriginDerived || provenance.RuleID != "flow.shape_from_instance" {
-			t.Fatalf("shape provenance = %#v", provenance)
-		}
 	}
 }
 

@@ -129,7 +129,6 @@ var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableRea
 	},
 	"declarationIdentity": noHandlerRuleExecutableReaders,
 	"authored":            noHandlerRuleExecutableReaders,
-	"admissionProvenance": noHandlerRuleExecutableReaders,
 	"predicateDisplay":    noHandlerRuleExecutableReaders,
 }
 

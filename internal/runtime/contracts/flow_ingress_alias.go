@@ -2,15 +2,13 @@ package contracts
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type compiledFlowIngressAlias struct {
-	value      string
-	provenance EffectiveValueProvenance
+	value string
 }
 
 // FlowIngressAlias is an immutable declaration fact, not deployment enablement.
@@ -42,30 +40,20 @@ func compileFlowIngressAliases(bundle *WorkflowContractBundle) (map[string]compi
 			continue
 		}
 		flowID := view.Paths.FlowPath
-		alias := view.Schema.Ingress.Alias
-		provenance, authored := view.Schema.admissionProvenance["ingress.alias"]
-		provenance = cloneEffectiveValueProvenance(provenance)
-		if alias == "" {
-			if authored {
-				return nil, fmt.Errorf("%s: %w", view.Paths.SchemaFile, ValidateIngressAlias(alias))
-			}
+		var alias string
+		if view.Schema.Ingress.Alias == nil {
 			var err error
 			alias, err = deriveRootedIngressAlias(bundle.RootSchema, flowID)
 			if err != nil {
 				return nil, fmt.Errorf("%s ingress.alias: %w", view.Paths.SchemaFile, err)
 			}
-			provenance = EffectiveValueProvenance{
-				Origin: EffectiveValueOriginDerived, RuleID: "flow.rooted_ingress_alias",
-				InputPaths: []string{`schemas["."].name`, "schemas[" + strconv.Quote(flowID) + "].declaration"},
-				SourceFile: view.Paths.SchemaFile,
-			}
 		} else {
-			provenance.InputPaths = qualifyEffectiveEventInputPaths("schemas["+strconv.Quote(flowID)+"]", provenance.InputPaths)
+			alias = *view.Schema.Ingress.Alias
 		}
 		if err := ValidateIngressAlias(alias); err != nil {
 			return nil, fmt.Errorf("%s: %w", view.Paths.SchemaFile, err)
 		}
-		out[flowID] = compiledFlowIngressAlias{value: alias, provenance: provenance}
+		out[flowID] = compiledFlowIngressAlias{value: alias}
 	}
 	return out, nil
 }

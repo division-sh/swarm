@@ -3,7 +3,6 @@ package contracts
 import (
 	"bytes"
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -127,25 +126,6 @@ func TestPlatformCatalogMaterializationIsImmutableAndPreservesExactDDL(t *testin
 	projected["platform"] = nil
 	if _, err := platform.PlatformVersionFromValue(spec.SourceValue()); err != nil {
 		t.Fatalf("source projection mutated authority: %v", err)
-	}
-}
-
-func TestPackPlatformProvenanceComposesWithoutOverwrite(t *testing.T) {
-	bundle, err := loadSchemaFragment(t, "name: provenance\nstages: []\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	before := bundle.EffectiveProvenance().Entries()
-	for _, path := range []string{"platform.platform.version", "platform.interfaces[\"swarm.hitl-channel\"].v2.kind", "packs.platform_membership.version", "packs[\"provider.telegram\"].envelope.id", "schemas[\".\"].name"} {
-		if proof, ok := bundle.EffectiveProvenance().Lookup(path); !ok || proof.SourceLine == 0 || proof.SourcePresence != "scalar" {
-			t.Fatalf("source evidence missing for %s: %#v", path, proof)
-		}
-	}
-	if err := populateEffectiveProvenance(bundle); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(before, bundle.EffectiveProvenance().Entries()) {
-		t.Fatal("ledger overwritten or duplicated")
 	}
 }
 
