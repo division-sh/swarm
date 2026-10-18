@@ -177,6 +177,10 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 	if err := command.Validate(); err != nil {
 		return CommittedPublication{}, err
 	}
+	return s.commitValidatedPublication(command)
+}
+
+func (s *targetRouteMemoryStore) commitValidatedPublication(command PublicationCommand) (CommittedPublication, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	event := command.Commit.Event.Event()

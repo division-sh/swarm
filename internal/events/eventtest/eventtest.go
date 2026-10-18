@@ -201,6 +201,13 @@ func ReplayForProducer(id string, eventType events.EventType, producer events.Pr
 	}))
 }
 
+// ReplayForProducerWithRoutingSource preserves the recorded provider provenance
+// without granting fresh inbound publication authority.
+func ReplayForProducerWithRoutingSource(id string, eventType events.EventType, producer events.ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, lineage events.EventLineage, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
+	facts := fixtureFactsWithRoutingSource(id, eventType, producer.Type(), producer.ID(), taskID, payload, chainDepth, envelope, createdAt, lineage.ExecutionMode, source)
+	return mustEvent(events.NewReplayEvent(events.ReplayEventInput{Facts: facts, Lineage: lineage}))
+}
+
 // SelectedForkReplay builds a cross-run replay fixture with an exact typed lineage owner.
 func SelectedForkReplay(id string, eventType events.EventType, producer events.ProducerIdentity, taskID string, payload json.RawMessage, chainDepth int, lineage events.SelectedForkLineage, envelope events.EventEnvelope, createdAt time.Time) events.Event {
 	facts := fixtureFacts(id, eventType, producer.Type(), producer.ID(), taskID, payload, chainDepth, envelope, createdAt, lineage.ExecutionMode())

@@ -8661,8 +8661,8 @@ func assertServePreflightTypedGateway(t *testing.T, opts cliapp.ServeOptions, wa
 	if report.HasBlockers() {
 		t.Fatalf("valid typed gateway configuration produced blockers:\n%#v", report)
 	}
-	if len(report.CapabilitySubjects) != 21 {
-		t.Fatalf("%s capability subjects = %#v, want eight triggers, twelve connector actions, and one channel", wantMode, report.CapabilitySubjects)
+	if len(report.CapabilitySubjects) != 24 {
+		t.Fatalf("%s capability subjects = %#v, want nine triggers, thirteen connector actions, and two channels", wantMode, report.CapabilitySubjects)
 	}
 }
 

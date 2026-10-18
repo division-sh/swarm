@@ -13,10 +13,12 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedWhatsAppOrderedInputRestartBothStores(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/serveapp/testdata/whatsapp-session-input"))
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
