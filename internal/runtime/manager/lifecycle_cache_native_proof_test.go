@@ -11,8 +11,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -455,16 +460,22 @@ func proveAgentRowNativePublicationPanic(t *testing.T, ctx context.Context, am *
 	}
 }
 
-func ProveAgentRowIndividualSourceSetReplacement(t *testing.T, previous AgentLifecyclePersistence, reader AgentLifecycleStateReader, record PersistedAgent, advance func() (AgentLifecyclePersistence, agenttopology.Admission)) {
+func ProveAgentRowIndividualSourceSetReplacement(t *testing.T, ctx context.Context, rooted sourceartifact.RootedSource, previous AgentLifecyclePersistence, reader AgentLifecycleStateReader, record PersistedAgent, advance func() (AgentLifecyclePersistence, agenttopology.Admission)) {
 	t.Helper()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	bus := newProjectionTestBus()
-	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{LifecycleStore: previous, PersistenceRoles: PersistenceRoles{LifecycleState: reader}})
-	ctx := testAuthorActivityContext(context.Background())
+	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{
+		BaseContext: ctx, SemanticSource: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
+		LLMBackend: record.Config.LLMBackend, LifecycleStore: previous, PersistenceRoles: PersistenceRoles{LifecycleState: reader},
+	})
 	agent := &reconfigureTestAgent{id: record.Config.ID}
 	if err := am.lifecycle.registerExecution(ctx, record, false, agent, testManagerSubscriptionAdmission(t, record.Config)); err != nil {
 		t.Fatal(err)
 	}
-	if err := am.Run(managedExecutionTestContext(t, ctx)); err != nil {
+	if err := am.Run(managedExecutionTestContextForCapturedSource(t, ctx)); err != nil {
 		t.Fatalf("install original running Manager projection: %v", err)
 	}
 	t.Cleanup(func() {
