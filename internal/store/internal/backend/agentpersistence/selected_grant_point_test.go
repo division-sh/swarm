@@ -91,6 +91,7 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 				}
 				pair()
 				binding := startupownership.SelectedForkGrantBinding{ExecutionID: executionID}
+				var observed startupownership.GrantEvidence
 				load := func(want bool) {
 					t.Helper()
 					tx, err := db.BeginTx(ctx, nil)
@@ -109,6 +110,7 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 						grant := startupownership.GrantEvidence{GrantID: uuid.NewString(), ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "owner",
 							ProcessBootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), RuntimeGeneration: 1,
 							BundleHash: bundleHash, StateVersion: 1, State: startupownership.GrantAdmitted, SelectedFork: &row.Binding}
+						observed = grant
 						// A real read-only transaction must not acquire the mutation
 						// fence or FOR UPDATE locks. Observation never authorizes work.
 						_ = tx.Rollback()
@@ -134,7 +136,26 @@ func TestSelectedGenerationGrantExecutionRequiresExactForkPointBothStores(t *tes
 					t.Fatal(err)
 				}
 				load(false)
+				if arm.status == "running" {
+					read, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+					if err != nil {
+						t.Fatal(err)
+					}
+					active, err := ObserveSelectedForkGenerationGrantTx(ctx, read, observed, backend == "sqlite")
+					_ = read.Rollback()
+					if err == nil || active || !strings.Contains(err.Error(), "lacks its exact live-parent association") {
+						t.Fatalf("missing pair became ordinary read-only ineligibility: active=%t error=%v", active, err)
+					}
+				}
 				pair()
+				load(true)
+				if _, err := db.ExecContext(ctx, `UPDATE run_fork_selected_contract_execution_live_parents SET generation=generation+1 WHERE execution_id=$1`, executionID); err != nil {
+					t.Fatal(err)
+				}
+				load(false)
+				if _, err := db.ExecContext(ctx, `UPDATE run_fork_selected_contract_execution_live_parents SET generation=generation-1 WHERE execution_id=$1`, executionID); err != nil {
+					t.Fatal(err)
+				}
 				load(true)
 				if _, err := db.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET fork_revision=fork_revision+1 WHERE execution_id=$1`, executionID); err != nil {
 					t.Fatal(err)

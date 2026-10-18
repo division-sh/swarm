@@ -18316,6 +18316,7 @@ platform_tables:
             CHECK ((state IN ('prepared', 'running') AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND lease_expires_at IS NOT NULL AND terminal_at IS NULL) OR (state = 'quiesced' AND NULLIF(TRIM(COALESCE(execution_owner, '')), '') IS NOT NULL AND terminal_at IS NOT NULL) OR (state IN ('failed', 'closed') AND terminal_at IS NOT NULL)),
             CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind IN ('deployment_revision', 'run_start') AND fork_event_id IS NULL)),
             UNIQUE (execution_id, fork_run_id, generation),
+            UNIQUE (execution_id, binding_id, fork_run_id, generation),
             UNIQUE (execution_id, binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision, generation),
             UNIQUE (execution_id, fork_event_id),
             UNIQUE (fork_run_id, generation),
@@ -18931,6 +18932,7 @@ platform_tables:
             UNIQUE (selected_execution_id, state_version),
             CHECK ((source_set_revision IS NOT NULL AND source_set_revision <> '' AND selected_binding_id IS NULL AND selected_fork_run_id IS NULL AND selected_execution_id IS NULL) OR (source_set_revision IS NULL AND selected_binding_id IS NOT NULL AND selected_fork_run_id IS NOT NULL AND selected_execution_id IS NOT NULL)),
             FOREIGN KEY (selected_execution_id, selected_fork_run_id, runtime_generation) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, fork_run_id, generation),
+            FOREIGN KEY (selected_execution_id, selected_binding_id, selected_fork_run_id, runtime_generation) REFERENCES run_fork_selected_contract_runtime_executions(execution_id, binding_id, fork_run_id, generation),
             INDEX idx_runtime_generation_grant_head (grant_id, state_version),
             INDEX idx_runtime_generation_grant_runtime (runtime_instance_id, runtime_generation)
         );

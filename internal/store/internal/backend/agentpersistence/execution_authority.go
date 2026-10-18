@@ -540,7 +540,14 @@ func loadSelectedForkGrantExecutionModeTx(ctx context.Context, tx *sql.Tx, bindi
 		execution.actor_census_fingerprint, execution.effective_config_fingerprint,
 		execution.declaration_plan_fingerprint, execution.declaration_plan,
 		execution.preparation_fingerprint, execution.preparation_binding,
-		run.bundle_hash
+		run.bundle_hash,
+		EXISTS (SELECT 1 FROM run_fork_selected_contract_execution_live_parents AS parents
+		 WHERE parents.execution_id=execution.execution_id AND parents.binding_id=execution.binding_id
+		 AND parents.fork_run_id=execution.fork_run_id AND parents.source_run_id=execution.source_run_id
+		 AND parents.fork_point_kind=execution.fork_point_kind AND parents.fork_revision=execution.fork_revision
+		 AND parents.generation=execution.generation
+		 AND (parents.fork_event_id=execution.fork_event_id
+		      OR (parents.fork_event_id IS NULL AND execution.fork_event_id IS NULL)))
 		FROM run_fork_selected_contract_runtime_executions AS execution
 		JOIN run_fork_selected_contract_bindings AS binding ON binding.binding_id = execution.binding_id
 		JOIN runs AS run ON run.run_id = binding.fork_run_id
@@ -567,14 +574,18 @@ func loadSelectedForkGrantExecutionModeTx(ctx context.Context, tx *sql.Tx, bindi
 		}
 	}
 	row := selectedForkGrantExecutionRow{Binding: startupownership.SelectedForkGrantBinding{ExecutionID: binding.ExecutionID}}
+	var liveParentsMatch bool
 	err := tx.QueryRowContext(ctx, query, args...).Scan(
 		&row.Binding.BindingID, &row.Binding.ForkRunID, &row.Binding.ExecutionGeneration,
 		&row.Binding.FenceGeneration, &row.Binding.ExecutionOwner, &row.Binding.AdmissionFingerprint,
 		&row.Binding.ContainerPlanFingerprint, &row.Binding.ActorCensusFingerprint,
 		&row.Binding.EffectiveConfigFingerprint, &row.Binding.DeclarationPlanFingerprint, &row.Declaration,
-		&row.Binding.PreparationFingerprint, &row.Preparation, &row.BundleHash)
+		&row.Binding.PreparationFingerprint, &row.Preparation, &row.BundleHash, &liveParentsMatch)
 	if err != nil {
 		return selectedForkGrantExecutionRow{}, fmt.Errorf("prove selected-fork grant execution: %w", err)
+	}
+	if !liveParentsMatch {
+		return selectedForkGrantExecutionRow{}, errors.New("selected-fork grant execution lacks its exact live-parent association")
 	}
 	return row, nil
 }
