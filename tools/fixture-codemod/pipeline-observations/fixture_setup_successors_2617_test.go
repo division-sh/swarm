@@ -192,7 +192,8 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 		if row.Family == "native-pipeline-delivery-exact-join-semantic" {
 			name = nativePipelineRecipeReplacementName(t, row)
 		}
-		if row.Function != "TestFanOutDeliveryBarrierCompletionAndSupersessionWinnerMatrixOnBothStores" &&
+		if row.Function != "newRuntimeHarnessWithTerminalProvider" &&
+			row.Function != "TestFanOutDeliveryBarrierCompletionAndSupersessionWinnerMatrixOnBothStores" &&
 			row.Function != "TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores" &&
 			row.Function != "TestWorkflowJoinSchedulePreservesMockExecutionModeOnBothStores" &&
 			row.Function != "TestWorkflowJoinDurableIdentityIncludesStageOnBothStores" &&
