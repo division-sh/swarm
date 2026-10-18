@@ -233,6 +233,16 @@ func TestFaultMatrixCancellationAndCommitAcknowledgement(t *testing.T) {
 				if _, clean := acknowledged.CleanCancellation(); clean {
 					t.Fatal("acknowledged COMMIT inherited clean cancellation")
 				}
+				for _, foreign := range []privateactivity.Dialect{"", privateactivity.DialectSQLite, privateactivity.DialectPostgres} {
+					if foreign == dialect {
+						continue
+					}
+					crossed := result
+					crossed.dialect = foreign
+					if _, clean := crossed.CleanCancellation(); clean {
+						t.Fatalf("native %s receipt substituted for owner %s", dialect, foreign)
+					}
+				}
 			}
 		})
 		t.Run("cancel_after_domain_write", func(t *testing.T) {
