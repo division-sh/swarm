@@ -86,6 +86,22 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
+			var diagnostic *nativeJourneyDiagnostic
+			if proof.explicitLogout {
+				var restore func()
+				diagnostic, restore = nativeJourneyDiagnosticScope(t, "setup")
+				defer restore()
+			}
+			mark := func(phase string) {
+				if diagnostic != nil {
+					diagnostic.mark(phase)
+				}
+			}
+			failure := func(site string, flags map[string]bool, err error) {
+				if diagnostic != nil {
+					logNativeJourneyFailure(t, diagnostic.phase.Load().(string), site, flags, err)
+				}
+			}
 			isolateCLIAPIConfigEnv(t)
 			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 			peer := newServeNativeProtocolPeer(t)
@@ -100,6 +116,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				opts.SourceRoot = filepath.Join(repoRootForTest(), "internal/serveapp/testdata/whatsapp-session-notice")
 			}
 			if err := os.Chmod(opts.SwarmDir, 0o700); err != nil {
+				failure("setup_permissions", nil, err)
 				t.Fatal(err)
 			}
 			var activationCommitted atomic.Bool
@@ -129,10 +146,14 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			peer.onACKTimeout = func(id string) { logServedNativeWait(t, endpoint, peer, "encrypted_ack:"+id) }
 			t.Cleanup(func() {
 				if t.Failed() {
+					if diagnostic != nil {
+						diagnostic.failed(t)
+					}
 					logServedNativeWait(t, endpoint, peer, "failed_original_journey")
 					t.Logf("original served output:\n%s", process.outputString())
 				}
 			})
+			mark("pairing")
 			var result channelonboarding.Result
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{
 				"provider": "whatsapp", "verb": "connect", "save_proof": false, "idempotency_key": "native-pairing"}, &result)
@@ -145,12 +166,16 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id}, &result)
 			if result.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity || result.IdentityOperation == nil ||
 				result.Pairing != nil || result.Operation.Coordinate.TargetGeneration != 0 {
+				failure("pairing_claim_readback", map[string]bool{"awaiting_identity": result.Operation.Phase == channelonboarding.PhaseAwaitingExternalIdentity,
+					"identity_present": result.IdentityOperation != nil, "pairing_absent": result.Pairing == nil, "generation_zero": result.Operation.Coordinate.TargetGeneration == 0}, nil)
 				t.Fatal("signed pairing did not reach the original runless operator claim", result)
 			}
 			identityID := result.IdentityOperation.OperationID
 			from := peer.claim(result.IdentityOperation.Challenge)
 			previous := result.Operation.Coordinate
+			mark("claim_restart")
 			if code := process.stop(); code != 0 {
+				failure("paired_shutdown", map[string]bool{"exit_zero": code == 0}, nil)
 				t.Fatal("paired RunServe did not join before recovery", code, process.outputString())
 			}
 			process = startServeRuntimeTestProcess(t, opts)
@@ -158,8 +183,10 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 			postLogins, uploads := peer.awaitPostLogin()
 			if postLogins < 2 || uploads != initialPrekeyUploads {
+				failure("prekey_restore", map[string]bool{"second_login": postLogins >= 2, "prekeys_equal": uploads == initialPrekeyUploads}, nil)
 				t.Fatal("normal restart lost provider prekey state or skipped post-login", postLogins, uploads, initialPrekeyUploads)
 			}
+			mark("confirmation")
 			result = channelonboarding.Result{}
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id}, &result)
 			if result.Operation.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation || result.IdentityOperation == nil ||
@@ -167,12 +194,22 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				result.IdentityOperation.State != operatorchannel.StateAwaitingConfirmation ||
 				result.IdentityOperation.ExternalAccountRef != operatorchannel.MaskPresentation(from.String()) || result.Operation.Coordinate.TargetGeneration != 0 ||
 				result.Operation.Coordinate.RuntimeInstanceID == previous.RuntimeInstanceID || result.Operation.Coordinate.BundleHash != previous.BundleHash {
+				flags := map[string]bool{"awaiting_confirmation": result.Operation.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation,
+					"identity_present": result.IdentityOperation != nil, "generation_zero": result.Operation.Coordinate.TargetGeneration == 0,
+					"runtime_changed": result.Operation.Coordinate.RuntimeInstanceID != previous.RuntimeInstanceID, "bundle_equal": result.Operation.Coordinate.BundleHash == previous.BundleHash}
+				if result.IdentityOperation != nil {
+					flags["identity_equal"] = result.IdentityOperation.OperationID == identityID
+					flags["awaiting_identity_confirmation"] = result.IdentityOperation.State == operatorchannel.StateAwaitingConfirmation
+					flags["external_equal"] = result.IdentityOperation.ExternalAccountRef == operatorchannel.MaskPresentation(from.String())
+				}
+				failure("confirmation_readback", flags, nil)
 				t.Fatal("encrypted claim did not reach authenticated confirmation without a business target", result.Operation, result.IdentityOperation, "want sender", from.String())
 			}
 			peer.mu.Lock()
 			connections := peer.connections
 			peer.mu.Unlock()
 			if connections < 2 {
+				failure("restored_sdk_connection", map[string]bool{"second_connection": connections >= 2}, nil)
 				t.Fatal("ordinary restart did not restore a genuine SDK connection", connections)
 			}
 			var confirmed struct {
@@ -182,45 +219,64 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			requireServedJSONRPCResult(t, endpoint, "channel.confirm", map[string]any{
 				"operation_id": result.IdentityOperation.OperationID, "expected_revision": result.IdentityOperation.Revision, "approve": true}, &confirmed)
 			if confirmed.Operation.State != operatorchannel.StateBound || confirmed.Binding.Status != operatorchannel.BindingCurrent {
+				failure("confirmation_binding", map[string]bool{"bound": confirmed.Operation.State == operatorchannel.StateBound, "current": confirmed.Binding.Status == operatorchannel.BindingCurrent}, nil)
 				t.Fatal("public confirmation did not commit the exact encrypted claimant", confirmed)
 			}
 			if confirmed.Binding.ExternalAccountRef != from.String() || confirmed.Binding.ConversationRef != from.String() {
+				failure("confirmation_identity", map[string]bool{"external_equal": confirmed.Binding.ExternalAccountRef == from.String(), "conversation_equal": confirmed.Binding.ConversationRef == from.String()}, nil)
 				t.Fatal("confirmed binding differs from the genuine encrypted claimant", confirmed.Binding)
 			}
+			mark("activation")
 			interrupted := requestServedJSONRPC(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id})
 			if interrupted.Error == nil || !activationCommitted.Load() {
+				flags := map[string]bool{"rpc_error": interrupted.Error != nil}
+				if interrupted.Error != nil {
+					flags["activation_committed"] = false
+				}
+				failure("activation_interruption", flags, nil)
 				t.Fatal("native target/activation did not reach the deliberate publication interruption", interrupted)
 			}
 			result = channelonboarding.Result{}
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
 			if result.Operation.Phase != channelonboarding.PhasePublishingProcessActivation || result.Operation.Coordinate.TargetGeneration < 1 ||
 				result.Operation.BindingRevision != confirmed.Binding.Revision || result.Operation.ActivationRevision < 1 {
+				failure("activation_commit", map[string]bool{"publishing": result.Operation.Phase == channelonboarding.PhasePublishingProcessActivation,
+					"generation_positive": result.Operation.Coordinate.TargetGeneration >= 1, "binding_revision_equal": result.Operation.BindingRevision == confirmed.Binding.Revision,
+					"activation_positive": result.Operation.ActivationRevision >= 1}, nil)
 				t.Fatal("served native target and activation were not committed through their canonical owners", result.Operation)
 			}
 			if code := process.stop(); code != 0 {
+				failure("activation_shutdown", map[string]bool{"exit_zero": code == 0}, nil)
 				t.Fatal("paired RunServe shutdown failed", code, process.outputString())
 			}
 			opts.TestChannelOnboardingBarrier = nil
+			mark("activation_recovery")
 			process = startServeRuntimeTestProcess(t, opts)
 			process.waitForReadyLine()
 			endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 			result = channelonboarding.Result{}
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
 			if result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Readiness == nil || !result.Readiness.Ready {
+				failure("activation_recovery", map[string]bool{"succeeded": result.Operation.Phase == channelonboarding.PhaseSucceeded,
+					"readiness_present": result.Readiness != nil, "ready": result.Readiness != nil && result.Readiness.Ready}, nil)
 				t.Fatal("interrupted native activation did not recover to executable readiness", result)
 			}
 			select {
 			case sent := <-peer.sent:
 				if sent.ID != strings.ReplaceAll(result.Operation.ConfirmationOperationID, "-", "") || sent.Body.GetConversation() != "Swarm channel connected." {
+					failure("confirmation_delivery", map[string]bool{"message_operation_equal": sent.ID == strings.ReplaceAll(result.Operation.ConfirmationOperationID, "-", ""), "text_equal": sent.Body.GetConversation() == "Swarm channel connected."}, nil)
 					t.Fatal("served confirmation journal differs from decrypted provider output", sent)
 				}
 			case <-time.After(5 * time.Second):
+				failure("confirmation_delivery_missing", map[string]bool{"confirmation_received": false}, nil)
 				t.Fatal("ready native channel had no genuine decrypted confirmation send")
 			}
 			if code := process.stop(); code != 0 {
+				failure("enabled_shutdown", map[string]bool{"exit_zero": code == 0}, nil)
 				t.Fatal("enabled RunServe shutdown failed", code, process.outputString())
 			}
 			completed := result.Operation
+			mark("enabled_restart")
 			process = startServeRuntimeTestProcess(t, opts)
 			process.waitForReadyLine()
 			endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
@@ -230,19 +286,27 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				result.Operation.IdentityOperationID != identityID || result.Operation.BindingRevision != completed.BindingRevision ||
 				result.Operation.Coordinate.TargetGeneration != completed.Coordinate.TargetGeneration ||
 				result.Operation.Coordinate.RuntimeInstanceID == completed.Coordinate.RuntimeInstanceID {
+				failure("enabled_restart_readback", map[string]bool{"succeeded": result.Operation.Phase == channelonboarding.PhaseSucceeded,
+					"readiness_present": result.Readiness != nil, "ready": result.Readiness != nil && result.Readiness.Ready,
+					"identity_equal": result.Operation.IdentityOperationID == identityID, "binding_revision_equal": result.Operation.BindingRevision == completed.BindingRevision,
+					"generation_equal": result.Operation.Coordinate.TargetGeneration == completed.Coordinate.TargetGeneration,
+					"runtime_changed":  result.Operation.Coordinate.RuntimeInstanceID != completed.Coordinate.RuntimeInstanceID}, nil)
 				t.Fatal("completed native restart lost its original responsibility", result.Operation, result.Readiness)
 			}
 			select {
 			case sent := <-peer.sent:
+				failure("confirmation_resent", map[string]bool{"unsolicited_send": true}, nil)
 				t.Fatal("completed confirmation was resent during ordinary restart", sent.ID)
 			default:
 			}
 			reader, err := storetest.OpenChannelObservation(backend, storeDSN)
 			if err != nil {
+				failure("reader_open", nil, err)
 				t.Fatal(err)
 			}
 			t.Cleanup(func() {
 				if err := reader.Close(); err != nil {
+					failure("reader_close", nil, err)
 					t.Error(err)
 				}
 			})
@@ -296,6 +360,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				peer.text("Please review the service", "SERVED_RETIRE_TRIGGER")
 				waitServedNativePendingCard(t, endpoint)
 			}
+			mark("inbox")
 			peer.text("/inbox", "SERVED_INBOX")
 			observation := render.IntentObservationQuery{Kind: render.IntentText, Provider: "whatsapp",
 				MessageReference: "SERVED_INBOX", ConversationReference: from.String(), InterfaceKey: result.Operation.Interface.Key()}
@@ -303,14 +368,17 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			requireNativeIntentObservationScope(t, reader, observation)
 			cards := requireServedNativeInboxReply(t, endpoint, peer, reader)
 			if proof.explicitLogout {
+				mark("logout")
 				requireServedNativeExplicitLogout(t, endpoint, peer, result.Operation)
 				if code := process.stop(); code != 0 {
+					failure("logout_shutdown", map[string]bool{"exit_zero": code == 0}, nil)
 					t.Fatal("explicit logout RunServe failed to join", code, process.outputString())
 				}
 				requireServedNativeDisconnect(t, peer)
 				peer.mu.Lock()
 				connections := peer.connections
 				peer.mu.Unlock()
+				mark("logout_restart")
 				process = startServeRuntimeTestProcess(t, opts)
 				process.waitForReadyLine()
 				endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
@@ -318,15 +386,23 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &historical)
 				if historical.Operation.Phase != channelonboarding.PhaseRetired || historical.Logout == nil ||
 					historical.Logout.Teardown.Phase != channelonboarding.TeardownSucceeded || historical.Readiness != nil && historical.Readiness.Ready {
+					flags := map[string]bool{"retired": historical.Operation.Phase == channelonboarding.PhaseRetired,
+						"logout_present": historical.Logout != nil, "ready": historical.Readiness != nil && historical.Readiness.Ready}
+					if historical.Logout != nil {
+						flags["teardown_succeeded"] = historical.Logout.Teardown.Phase == channelonboarding.TeardownSucceeded
+					}
+					failure("logout_restart_readback", flags, nil)
 					t.Fatal("logout restart restored executable authority or lost history", historical)
 				}
 				if code := process.stop(); code != 0 {
+					failure("logout_history_shutdown", map[string]bool{"exit_zero": code == 0}, nil)
 					t.Fatal("historical logout RunServe failed to join", code, process.outputString())
 				}
 				peer.mu.Lock()
 				resumed := peer.connections
 				peer.mu.Unlock()
 				if resumed != connections {
+					failure("logout_restart_connection", map[string]bool{"connections_equal": resumed == connections}, nil)
 					t.Fatal("logout restart implicitly reconnected the retired account", connections, resumed)
 				}
 				return
@@ -479,12 +555,15 @@ func requireServedNativeDisconnect(t *testing.T, peer *serveNativeProtocolPeer) 
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	logNativeJourneyRPCFailure(t, "", "disconnect_timeout", map[string]bool{"connections_equal": false}, nil)
 	t.Fatal("public unbind did not close its original SDK wire")
 	return 0
 }
 
 func requireServedNativeInboxReply(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, reader storetest.ChannelObservation) []servedNativeMessage {
 	t.Helper()
+	_, restore := nativeJourneyDiagnosticScope(t, "inbox")
+	defer restore()
 	var sent servedNativeMessage
 	var cards []servedNativeMessage
 	deadline := time.After(5 * time.Second)
@@ -497,6 +576,7 @@ waiting:
 			}
 			cards = append(cards, sent)
 		case <-deadline:
+			logNativeJourneyFailure(t, "inbox", "inbox_reply_missing", map[string]bool{"reply_received": false}, nil)
 			t.Fatal("served encrypted Inbox request did not produce a decrypted reply", cards)
 		}
 	}
@@ -516,6 +596,7 @@ waiting:
 	}
 	requireServedJSONRPCResult(t, endpoint, "mailbox.list", map[string]any{"status": "pending", "limit": 200}, &page)
 	if page.NextCursor != "" || page.Unread != 0 {
+		logNativeJourneyFailure(t, "inbox", "inbox_list_prerequisites", map[string]bool{"cursor_absent": page.NextCursor == "", "unread_zero": page.Unread == 0}, nil)
 		t.Fatal("served baseline Inbox has unexpected notices or pages", page)
 	}
 	lines := []string{"Inbox", "Unread notices: 0", "No open items"}
@@ -527,6 +608,7 @@ waiting:
 				label = item.Notice.Type
 			}
 			if label == "" {
+				logNativeJourneyFailure(t, "inbox", "inbox_entry_label", map[string]bool{"label_present": false, "notice": item.Kind == "notice"}, nil)
 				t.Fatal("public Inbox entry lost its canonical label", item)
 			}
 			lines = append(lines, "- "+label)
@@ -541,36 +623,51 @@ waiting:
 			}
 		}
 		if !matched {
+			logNativeJourneyFailure(t, "inbox", "inbox_card_correspondence", map[string]bool{"card_matched": matched}, nil)
 			t.Fatal("served peer emitted output outside the public pending cards/Inbox", card.Body.GetConversation())
 		}
 	}
 	settlementDeadline := time.Now().Add(5 * time.Second)
 	var last []render.Candidate
+	var sentCandidate, receiptFound, receiptReferenceEqual bool
 	for time.Now().Before(settlementDeadline) {
 		plans, err := reader.ListCurrentChannelDeliveryPlans(context.Background(), "", 200)
 		last = plans
 		if err != nil {
+			logNativeJourneyFailure(t, "inbox", "delivery_read_error", nil, err)
 			t.Fatal(err)
 		}
 		for _, plan := range plans {
 			if plan.SourceKind != "response" || plan.State != "sent" {
 				continue
 			}
+			sentCandidate = true
 			receipt, found, err := reader.GetCurrentChannelSentReceipt(context.Background(), plan.DeliveryID, plan.CurrentReceiptID)
 			if err != nil {
+				logNativeJourneyFailure(t, "inbox", "receipt_read_error", nil, err)
 				t.Fatal(err)
 			}
+			receiptFound, receiptReferenceEqual = found, receipt.DeliveryReference == sent.ID
 			if !found || receipt.DeliveryReference != sent.ID {
 				continue
 			}
 			want := strings.Join(lines, "\n") + "\nReference: " + plan.SourceID
 			if sent.Body.GetConversation() != want || sent.ID != strings.ReplaceAll(receipt.OperationID, "-", "") {
+				flags := map[string]bool{"text_equal": sent.Body.GetConversation() == want,
+					"message_operation_equal": sent.ID == strings.ReplaceAll(receipt.OperationID, "-", ""), "receipt_found": found, "receipt_reference_equal": receipt.DeliveryReference == sent.ID}
+				if !flags["text_equal"] {
+					logNativeJourneyFailure(t, "inbox", "inbox_text_mismatch", flags, nil)
+				}
+				if !flags["message_operation_equal"] {
+					logNativeJourneyFailure(t, "inbox", "inbox_operation_mismatch", flags, nil)
+				}
 				t.Fatal("decrypted native Inbox differs from canonical public list/exact journal", sent.Body.GetConversation(), want, receipt)
 			}
 			return cards
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	logNativeJourneyFailure(t, "inbox", "receipt_missing", map[string]bool{"sent_candidate": sentCandidate, "receipt_found": receiptFound, "receipt_reference_equal": receiptReferenceEqual}, nil)
 	t.Fatal("decrypted native Inbox had no exact settled delivery receipt", sent.ID, sent.Body.GetConversation(), last)
 	return nil
 }

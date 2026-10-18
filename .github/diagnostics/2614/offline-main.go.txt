@@ -1,0 +1,68 @@
+// Standalone offline control, not a Go test root or a served reproduction.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"testing"
+)
+
+type privateError struct{ calls *int }
+
+func (e privateError) Error() string {
+	*e.calls++
+	return "SECRET_FIXTURE_ONLY_NEVER_EXPORT"
+}
+
+func main() {
+	const secret = "SECRET_FIXTURE_ONLY_NEVER_EXPORT"
+	const leaf = "TestRunServeWhatsAppPublicLogoutBothStores/sqlite"
+	calls := 0
+	prose := privateError{&calls}
+	rows := []struct {
+		phase, site string
+		flags       map[string]bool
+		err         error
+	}{
+		{"inbox", "inbox_text_mismatch", map[string]bool{"text_equal": false, "message_operation_equal": true, "receipt_found": true, "receipt_reference_equal": true}, nil},
+		{"inbox", "inbox_operation_mismatch", map[string]bool{"text_equal": true, "message_operation_equal": false}, nil},
+		{"inbox", "receipt_missing", map[string]bool{"sent_candidate": true, "receipt_found": false, "receipt_reference_equal": false}, nil},
+		{"inbox", "receipt_read_error", nil, prose},
+		{"logout", "logout_replay", map[string]bool{"effect_equal": false, "revision_equal": true}, nil},
+		{"logout", "logout_cli_exit", map[string]bool{"exit_zero": false}, context.DeadlineExceeded},
+		{"logout", "logout_cli_token_file", nil, &os.PathError{Op: secret, Path: secret, Err: prose}},
+	}
+	for _, row := range rows {
+		raw := nativeJourneyFailureJSON(leaf, "site", row.phase, row.site, secret, row.flags, row.err, false)
+		if strings.Contains(raw, secret) {
+			panic("formatter leaked private data")
+		}
+		var decoded map[string]any
+		if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+			panic("formatter did not produce JSON")
+		}
+		fmt.Println(raw)
+	}
+	fmt.Println(nativeJourneyFailureJSON(leaf, "phase", "inbox", "", "", nil, nil, true))
+	if calls != 0 {
+		panic("capture invoked Error")
+	}
+	scope, restore := nativeJourneyDiagnosticScope(&testing.T{}, "pairing")
+	var workers sync.WaitGroup
+	for n := 0; n < 2; n++ {
+		workers.Go(func() {
+			for range 100 {
+				scope.mark("inbox")
+				if scope.phase.Load().(string) != "inbox" {
+					panic("phase read changed")
+				}
+			}
+		})
+	}
+	workers.Wait()
+	restore()
+}

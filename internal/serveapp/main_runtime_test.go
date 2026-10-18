@@ -5593,9 +5593,11 @@ func requireServedJSONRPCResult(t *testing.T, endpoint, method string, params ma
 	t.Helper()
 	resp := requestServedJSONRPC(t, endpoint, method, params)
 	if resp.Error != nil {
+		logNativeJourneyRPCFailure(t, method, "rpc_result_error", map[string]bool{"rpc_error": true}, nil)
 		t.Fatalf("%s error = %#v", method, resp.Error)
 	}
 	if err := json.Unmarshal(resp.Result, out); err != nil {
+		logNativeJourneyRPCFailure(t, method, "rpc_decode_result", nil, err)
 		t.Fatalf("decode %s result: %v\n%s", method, err, string(resp.Result))
 	}
 }
@@ -5622,24 +5624,29 @@ func requestServedJSONRPCWithTimeout(t *testing.T, endpoint, method string, para
 		"params":  params,
 	})
 	if err != nil {
+		logNativeJourneyRPCFailure(t, method, "rpc_marshal_request", nil, err)
 		t.Fatalf("marshal %s request: %v", method, err)
 	}
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
+		logNativeJourneyRPCFailure(t, method, "rpc_build_request", nil, err)
 		t.Fatalf("build %s request: %v", method, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiv1.DefaultLoopbackAPIToken)
 	resp, err := (&http.Client{Timeout: timeout}).Do(req)
 	if err != nil {
+		logNativeJourneyRPCFailure(t, method, "rpc_post_request", nil, err)
 		t.Fatalf("post %s request: %v", method, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		logNativeJourneyRPCFailure(t, method, "rpc_http_status", map[string]bool{"http_ok": false}, nil)
 		t.Fatalf("%s HTTP status = %d, want 200", method, resp.StatusCode)
 	}
 	var envelope servedJSONRPCEnvelope
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		logNativeJourneyRPCFailure(t, method, "rpc_decode_envelope", nil, err)
 		t.Fatalf("decode %s envelope: %v", method, err)
 	}
 	return envelope

@@ -6,7 +6,7 @@ plan=${DIAGNOSTIC_PLAN_DIR:-test-results/plan}
 evidence=${DIAGNOSTIC_COMMAND_DIR:-test-results/evidence}
 private=${DIAGNOSTIC_PRIVATE_DIR:-$RUNNER_TEMP/diagnostic-2614-private}
 mkdir -p "$out"
-printf '%s\n' '{"purpose":"DIAGNOSTIC ONLY","evidence":"INCOMPLETE","qualification_credit":false}' > "$out/result.json"
+printf '%s\n' '{"purpose":"DIAGNOSTIC ONLY","evidence":"INCOMPLETE","causal_evidence":"INCOMPLETE","qualification_credit":false}' > "$out/result.json"
 printf 'DIAGNOSTIC ONLY. Never use this artifact for qualification.\n' > "$out/DIAGNOSTIC-ONLY.txt"
 missing=()
 for file in proof-plan.json proof-matrix.json identity.json; do
@@ -20,6 +20,7 @@ if ! jq -e --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
   ' "$plan/identity.json" >/dev/null 2>&1; then missing+=("valid_plan_identity"); fi
 cp "$dir/frozen-selection.json" "$dir/capture-files.sha256" "$dir/validation.sha256" \
   "$dir/capture-validation.log" "$dir/provenance.json" "$out/"
+cp "$dir/sites.jq" "$dir/sites-validation.txt" "$out/"
 receipt="$evidence/serveapp-runtime-primary-evidence.json"
 raw="$evidence/serveapp-runtime-primary.json"
 if [ -f "$receipt" ]; then
@@ -45,6 +46,9 @@ if [ -f "$raw" ]; then
     {Time,Action,Package,Test,Elapsed} | with_entries(select(.value!=null))' "$raw" > "$out/terminal-records.jsonl"
   if ! jq -Rnc -f "$dir/trace.jq" "$raw" > "$out/redacted-trace.jsonl" 2>/dev/null; then
     missing+=("valid_redacted_trace")
+  fi
+  if ! jq -Rnc -f "$dir/sites.jq" "$raw" > "$out/failure-sites.jsonl" 2>/dev/null; then
+    missing+=("valid_failure_site_stream")
   fi
   if ! jq -es 'any(.[]; .Package=="github.com/division-sh/swarm/internal/serveapp" and
     (.Test//"")=="" and (.Action=="pass" or .Action=="fail"))' "$out/terminal-records.jsonl" >/dev/null; then
@@ -75,13 +79,28 @@ done
 for file in go-environment.json runner-environment.json docker-version.txt; do
   [ -s "$out/$file" ] || missing+=("$file")
 done
+if [ -f "$out/terminal-records.jsonl" ] && [ -f "$out/failure-sites.jsonl" ]; then
+  jq -n --slurpfile records "$out/terminal-records.jsonl" --slurpfile sites "$out/failure-sites.jsonl" '
+    [$records[]|select(.Action=="fail" and .Test!=null)|.Test] as $failed |
+    [$failed[]|. as $test|select(any($failed[];startswith($test+"/"))|not)] as $leaves |
+    [$sites[]|select(.validation=="valid" and .kind=="site" and .prior_failure==false)|.test]|unique as $located |
+    ([$sites[]|select(.validation=="rejected")]|length) as $rejected |
+    ($leaves-$located) as $missing |
+    {causal_evidence:(if ($missing|length)>0 or $rejected>0 then "INCOMPLETE"
+      elif ($leaves|length)==0 then "NEGATIVE" else "SITE_OBSERVED" end),
+      failed_leaves_without_site:$missing,rejected_site_records:$rejected}
+  ' > "$out/site-attribution.json"
+else
+  printf '%s\n' '{"causal_evidence":"INCOMPLETE","failed_leaves_without_site":[],"rejected_site_records":0}' > "$out/site-attribution.json"
+fi
 missing_json=$(printf '%s\n' "${missing[@]}" | jq -Rsc 'split("\n")|map(select(length>0))')
-jq -n --argjson missing "$missing_json" --argjson code "$code" --argjson cleanup_error "$cleanup_error" '
+jq -n --slurpfile attribution "$out/site-attribution.json" --argjson missing "$missing_json" --argjson code "$code" --argjson cleanup_error "$cleanup_error" '
   {purpose:"DIAGNOSTIC ONLY",qualification_credit:false,
     evidence:(if ($missing|length)>0 then "INCOMPLETE" else "OBSERVED" end),
     missing:$missing,wrapper_exit:$code,cleanup_error_reported:$cleanup_error,
     cleanup:(if $code==null then "unobserved" elif $cleanup_error then "runner_reported_error"
-      else "runner_returned_no_cleanup_error_reported" end)}' > "$out/result.json"
+      else "runner_returned_no_cleanup_error_reported" end)} + $attribution[0]' > "$out/result.json"
 (cd "$out" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum) > "$out/SHA256SUMS"
 cat "$out/result.json"
 [ "${#missing[@]}" -eq 0 ]
+jq -e '.causal_evidence!="INCOMPLETE"' "$out/result.json" >/dev/null

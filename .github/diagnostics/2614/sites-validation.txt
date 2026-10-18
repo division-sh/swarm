@@ -1,0 +1,19 @@
+PASS actual Go formatter/classifier: no Error calls, no prose/path/method leak; race-enabled atomic phase bookkeeping
+PASS inbox_text_mismatch: transport OBSERVED, causal SITE_OBSERVED; no private payload exported
+PASS inbox_operation_mismatch: transport OBSERVED, causal SITE_OBSERVED; no private payload exported
+PASS receipt_missing: transport OBSERVED, causal SITE_OBSERVED; no private payload exported
+PASS receipt_read_error: transport OBSERVED, causal SITE_OBSERVED; no private payload exported
+PASS logout_replay: transport OBSERVED, causal SITE_OBSERVED; no private payload exported
+PASS logout_cli_exit: transport OBSERVED, causal SITE_OBSERVED; no private payload exported
+PASS logout_cli_token_file: transport OBSERVED, causal SITE_OBSERVED; no private payload exported
+PASS phase_only: transport OBSERVED, causal INCOMPLETE; no private payload exported
+PASS missing_site: transport OBSERVED, causal INCOMPLETE; no private payload exported
+PASS secondary_cleanup: transport OBSERVED, causal INCOMPLETE; no private payload exported
+PASS unknown_site: transport OBSERVED, causal INCOMPLETE; no private payload exported
+PASS malformed_label: transport OBSERVED, causal INCOMPLETE; no private payload exported
+PASS malformed_json: transport OBSERVED, causal INCOMPLETE; no private payload exported
+PASS unknown_phase: transport OBSERVED, causal INCOMPLETE; no private payload exported
+PASS wrong_flag_type: transport OBSERVED, causal INCOMPLETE; no private payload exported
+PASS false_flags: transport OBSERVED, causal INCOMPLETE; no private payload exported
+PASS secret_payload: transport OBSERVED, causal SITE_OBSERVED; no private payload exported
+PASS negative: transport OBSERVED, causal NEGATIVE; no private payload exported
