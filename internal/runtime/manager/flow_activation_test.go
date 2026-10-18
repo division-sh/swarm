@@ -1879,28 +1879,28 @@ func findPublishedFlowActivationEvent(t *testing.T, bus *flowActivationTestBus, 
 func TestActivateFlowInstanceUsesConstructedAttachmentEvidence(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	schema := bundle.FlowSchemas["review"]
 	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "queued"}}}
 	bundle.FlowSchemas["review"] = schema
 	compileFlowActivationFixture(t, bundle)
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.InitialState = "queued"
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+	err := activateFlowInstanceForTest(am, ctx, req)
 	if err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
-	stored, found, err := instances.Load(flowActivationRunContext(), testActivationFlowIdentity(req))
+	stored, found, err := instances.Load(ctx, testActivationFlowIdentity(req))
 	if err != nil || !found || stored.StorageRef != req.Instance.InstancePath || stored.EntityID != req.Instance.EntityID {
 		t.Fatalf("constructed instance evidence = %+v found=%t err=%v", stored, found, err)
 	}
-	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(flowActivationRunContext(), req.TriggerEvent.RunID(), req.Instance.Route())
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
 	if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentReady || readiness.Plan.Identity != req.Instance {
 		t.Fatalf("exact attachment evidence = %+v found=%t err=%v", readiness, found, err)
 	}
-	if !flowActivationAttemptReadyForTest(am, flowActivationRunContext(), req) {
+	if !flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatal("constructed receiver did not acquire its exact ready activation attempt")
 	}
 	if len(instances.creates) != 1 || instances.creates[0].EntityType != "review_entity" {
@@ -1923,11 +1923,9 @@ func TestFlowActivationCommitErrorFinalizesOnlyAcknowledgedReadiness(t *testing.
 				commitErr := errors.New("commit cleanup failed")
 				readinessErr := errors.New("readiness finalization failed")
 				instances := &flowActivationTestInstanceStore{topologyMarkErr: readinessErr}
-				am := newFlowActivationManager(t, bus, instances)
 				bundle := testFlowBundle(t, "")
 				req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-				ctx := testAuthorActivityContext(context.Background())
-				setFlowActivationManagerSemanticSource(am, req.ContractBundle)
+				am, ctx := newFlowActivationManagerForSource(t, bus, instances, req.ContractBundle)
 				am.roles.FlowActivation = flowActivationOutcomeCommitter{
 					base: am.roles.FlowActivation, acknowledged: acknowledged, err: commitErr,
 				}
@@ -1977,10 +1975,10 @@ func TestActivateFlowInstanceRejectsMissingCanonicalEntityContract(t *testing.T)
 func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	ctx := runtimepipelinefixture.WithSQLTx(testAuthorActivityContext(context.Background()), &sql.Tx{})
+	ctx = runtimepipelinefixture.WithSQLTx(ctx, &sql.Tx{})
 	ctx = withFlowActivationPostCommit(ctx, &postCommit)
 
 	if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
@@ -1989,7 +1987,7 @@ func TestActivateFlowInstanceDoesNotConsumeAmbientTransactionAuthority(t *testin
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("flow agent did not start from the closed activation result")
 	}
-	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(flowActivationRunContext(), flowActivationTestRunID, runtimeflowidentity.DeriveRoute("review", "inst-1"))
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, flowActivationTestRunID, runtimeflowidentity.DeriveRoute("review", "inst-1"))
 	if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentReady {
 		t.Fatalf("committed attachment evidence = %+v found=%t err=%v", readiness, found, err)
 	}
@@ -2005,11 +2003,12 @@ func TestActivateFlowInstanceArmsInitialTimersOnlyAfterRuntimeInstallation(t *te
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	var am *AgentManager
+	var ctx context.Context
 	instances.armInitialEntry = func(instanceID string) error {
 		if instanceID != "review/inst-1" {
 			return fmt.Errorf("armed instance = %q, want review/inst-1", instanceID)
 		}
-		readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(flowActivationRunContext(), flowActivationTestRunID, runtimeflowidentity.DeriveRoute("review", "inst-1"))
+		readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, flowActivationTestRunID, runtimeflowidentity.DeriveRoute("review", "inst-1"))
 		if err != nil || !found || readiness.Phase != runtimepipeline.FlowAttachmentRouteInstalled || len(instances.creates) != 1 || instances.creates[0].StorageRef != instanceID {
 			return fmt.Errorf("timer armed without exact constructed attachment: readiness=%+v found=%t creates=%+v err=%v", readiness, found, instances.creates, err)
 		}
@@ -2018,8 +2017,9 @@ func TestActivateFlowInstanceArmsInitialTimersOnlyAfterRuntimeInstallation(t *te
 		}
 		return nil
 	}
-	am = newFlowActivationManager(t, bus, instances)
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
+	bundle := testFlowBundle(t, "")
+	am, ctx = newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
+	if err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if len(instances.armedEntries) != 1 || instances.armedEntries[0] != "review/inst-1" {
@@ -2033,9 +2033,8 @@ func TestActivateFlowInstanceArmsInitialTimersOnlyAfterRuntimeInstallation(t *te
 func TestFlowAttachmentReadyReplayDoesNotRepeatInstallation(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
-	ctx := testAuthorActivityContext(context.Background())
 	req := testActivationRequest(testFlowBundle(t, ""), "review", "inst-1", "ent-1", "review/inst-1")
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, req.ContractBundle)
 	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatal(err)
 	}
