@@ -45,10 +45,18 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 						return owner
 					}
 				}
-				ctx := manager.TerminalPanicFixtureContext()
+				rooted, _ := sourceartifactfixture.Rooted(t, "review", sourceartifactfixture.Artifact())
+				ctx := correlation.WithRootAdmission(manager.TerminalPanicFixtureContext(), rooted.Admission())
 				record := manager.ReconfigureMemoryNativeFixture(t, false)
+				storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+					RunID: record.Config.Identity.RunID, Origin: storetest.ScenarioSetupOrigin(),
+					Artifact: rooted.Artifact(), StartedAt: record.StartedAt,
+				})
+				coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+				if err != nil {
+					t.Fatal(err)
+				}
 				if cut != "replacement" {
-					storetest.RequireRunningRun(t, ctx, selected.(storetest.RunFixtureStore), record.Config.Identity.RunID, time.Now().UTC())
 					identity, err := record.Config.Identity.Plan()
 					if err != nil {
 						t.Fatal(err)
@@ -57,7 +65,6 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					coordinate := agenttopology.SourceCoordinate{BundleHash: sourceartifactfixture.BundleHash}
 					plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, []agenttopology.DesiredAgent{{Identity: identity, ConfigRevision: revision, Source: coordinate}})
 					if err != nil {
 						t.Fatal(err)
@@ -101,7 +108,7 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					manager.ProveAgentRowNativeSpawnAdoption(t, grant, selected, selected.(manager.AgentLifecycleOutcomeReader), record, func() any {
+					manager.ProveAgentRowNativeSpawnAdoption(t, ctx, rooted, grant, selected, selected.(manager.AgentLifecycleOutcomeReader), record, func() any {
 						value, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 						if err != nil {
 							t.Fatal(err)
@@ -124,12 +131,12 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 					t.Fatalf("native row: found=%v err=%v", found, err)
 				}
 				record.Topology = view.Topology
-				proveNativeAgentRowCAS(t, selected, reopen(), record)
+				proveNativeAgentRowCAS(t, ctx, coordinate, selected, reopen(), record)
 				outcomes, ok := selected.(manager.AgentLifecycleOutcomeReader)
 				if !ok {
 					t.Fatal("selected store lacks the native immutable-outcome owner")
 				}
-				manager.ProveAgentRowNativeLostAckCacheAdoption(t, storetest.AgentLifecycleFixture(t, selected), selected, outcomes, record, func() any {
+				manager.ProveAgentRowNativeLostAckCacheAdoption(t, ctx, rooted, storetest.AgentLifecycleFixture(t, selected), selected, outcomes, record, func() any {
 					snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 					if err != nil {
 						t.Fatal(err)
@@ -145,9 +152,8 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 	}
 }
 
-func proveNativeAgentRowCAS(t *testing.T, selected storetest.AgentFixtureStore, peer manager.AgentLifecycleStateReader, record manager.PersistedAgent) {
+func proveNativeAgentRowCAS(t *testing.T, ctx context.Context, coordinate agenttopology.SourceCoordinate, selected storetest.AgentFixtureStore, peer manager.AgentLifecycleStateReader, record manager.PersistedAgent) {
 	t.Helper()
-	ctx := manager.TerminalPanicFixtureContext()
 	before, found, err := selected.LoadAgentLifecycleState(ctx, record.Config.Identity)
 	if err != nil || !found || before.Phase != manager.AgentLifecycleRunning {
 		t.Fatalf("native CAS predecessor: found=%v row=%+v err=%v", found, before, err)
@@ -164,7 +170,7 @@ func proveNativeAgentRowCAS(t *testing.T, selected storetest.AgentFixtureStore, 
 	if err != nil || !found {
 		t.Fatalf("native CAS source set: found=%v err=%v", found, err)
 	}
-	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, agenttopology.SourceCoordinate{BundleHash: before.ProcessBinding.BundleHash})
+	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate)
 	if err != nil {
 		t.Fatal(err)
 	}
