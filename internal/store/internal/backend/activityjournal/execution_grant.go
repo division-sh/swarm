@@ -13,7 +13,6 @@ import (
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
-	storestartup "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
 
 // This is one captured installed role, never a lookup of the runtime's mutable
@@ -111,7 +110,7 @@ func (g *activityExecutionGrant) proveOriginalTx(ctx context.Context, tx *sql.Tx
 	if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
 		return err
 	}
-	historical, err := storestartup.ReadActivityExecutionGrantTx(ctx, tx, g.reference.GrantID, g.reference.StateVersion)
+	historical, err := ReadActivityExecutionGrantTx(ctx, tx, g.reference.GrantID, g.reference.StateVersion)
 	if err != nil {
 		return err
 	}

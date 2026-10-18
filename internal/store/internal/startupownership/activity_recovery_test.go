@@ -9,7 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	"github.com/google/uuid"
 )
 
@@ -23,41 +23,58 @@ func (p *activityRecoveryRoleProbe) BindActivityGrant(grant runtimeownership.Gra
 	return p, nil
 }
 
-func (p *activityRecoveryRoleProbe) ReconcileDisplacedHTTPActivitiesTx(context.Context, *mutationprotocol.Attempt, DisplacedHTTPActivityCut) (pipeline.ActivityRecoverySummary, error) {
-	panic("unit binding control must not enter native recovery")
-}
-
 func TestStartupActivityJournalRequiresOneDualRole(t *testing.T) {
 	pg, sqlite := &StartupPostgresOwner{}, &StartupSQLiteOwner{}
 	for _, test := range []struct {
 		name string
-		bind func(displacedHTTPActivityJournal) error
-		read func() displacedHTTPActivityJournal
+		bind func(bool) error
+		read func() bool
 	}{
-		{"postgres", pg.BindActivityJournalRole, func() displacedHTTPActivityJournal { return pg.activityJournal }},
-		{"sqlite", sqlite.BindActivityJournalRole, func() displacedHTTPActivityJournal { return sqlite.activityJournal }},
-		{"nil_postgres", (*StartupPostgresOwner)(nil).BindActivityJournalRole, nil},
-		{"nil_sqlite", (*StartupSQLiteOwner)(nil).BindActivityJournalRole, nil},
+		{"postgres", func(missing bool) error {
+			if missing {
+				return pg.BindActivityJournalRole(nil)
+			}
+			return pg.BindActivityJournalRole(&activityjournal.ActivityPostgresOwner{})
+		}, func() bool { return pg.activityJournal != nil }},
+		{"sqlite", func(missing bool) error {
+			if missing {
+				return sqlite.BindActivityJournalRole(nil)
+			}
+			return sqlite.BindActivityJournalRole(&activityjournal.ActivitySQLiteOwner{})
+		}, func() bool { return sqlite.activityJournal != nil }},
+		{"nil_postgres", func(missing bool) error {
+			var role *activityjournal.ActivityPostgresOwner
+			if !missing {
+				role = &activityjournal.ActivityPostgresOwner{}
+			}
+			return (*StartupPostgresOwner)(nil).BindActivityJournalRole(role)
+		}, nil},
+		{"nil_sqlite", func(missing bool) error {
+			var role *activityjournal.ActivitySQLiteOwner
+			if !missing {
+				role = &activityjournal.ActivitySQLiteOwner{}
+			}
+			return (*StartupSQLiteOwner)(nil).BindActivityJournalRole(role)
+		}, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			var missing *activityRecoveryRoleProbe
-			for _, input := range []displacedHTTPActivityJournal{nil, missing} {
-				if test.bind(input) == nil {
+			for range 2 {
+				if test.bind(true) == nil {
 					t.Fatal("missing activity role accepted")
 				}
 			}
-			role := &activityRecoveryRoleProbe{}
 			if test.read == nil {
-				if test.bind(role) == nil {
+				if test.bind(false) == nil {
 					t.Fatal("nil owner accepted an activity role")
 				}
 				return
 			}
-			if err := test.bind(role); err != nil {
+			if err := test.bind(false); err != nil {
 				t.Fatal(err)
 			}
-			for _, duplicate := range []displacedHTTPActivityJournal{role, &activityRecoveryRoleProbe{}} {
-				if test.bind(duplicate) == nil || test.read() != role {
+			originalPG, originalSQLite := pg.activityJournal, sqlite.activityJournal
+			for range 2 {
+				if test.bind(false) == nil || !test.read() || pg.activityJournal != originalPG || sqlite.activityJournal != originalSQLite {
 					t.Fatal("duplicate binding changed the original activity owner")
 				}
 			}
