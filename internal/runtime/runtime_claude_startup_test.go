@@ -223,6 +223,54 @@ func TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBindingForRec
 	if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_credential_missing" {
 		t.Fatalf("expected oauth token error, got %v", err)
 	}
+
+	t.Run("active_provider_source_boundary", func(t *testing.T) {
+		// This proves the manager-only validation boundary, not a recovered boot.
+		ctx := testAuthorActivityContext(context.Background())
+		source := claudeStartupAgentFreeSource()
+		if semanticview.SourceDeclaresAgents(source) || len(manager.ListAgentConfigs()) != 1 {
+			t.Fatal("boundary fixture must have one manager agent and no source declarations")
+		}
+		path := filepath.Join(t.TempDir(), "credentials.json")
+		store, err := runtimecredentials.NewFileStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		activeOpts := RuntimeOptions{ExecutionPosture: executionposture.Live, ProviderCredentials: store}
+		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "environment-must-not-satisfy-provider")
+		fact, err := validateSelectedBackendCredentialForActiveAgents(ctx, cfg, activeOpts, source, manager)
+		failure, ok := runtimefailures.As(err)
+		if !ok || failure.Failure.Detail.Code != "provider_credential_missing" || fact != (runtimecredentials.SourceFact{}) {
+			t.Fatalf("missing file provider = %+v, %v; want missing-provider refusal without a fact", fact, err)
+		}
+		if _, err := store.AdmitWithReceipt(ctx, "CLAUDE_CODE_OAUTH_TOKEN", "provider-value-must-not-be-presented", "provider-receipt-must-not-be-presented"); err != nil {
+			t.Fatal(err)
+		}
+		fact, err = validateSelectedBackendCredentialForActiveAgents(ctx, cfg, activeOpts, source, manager)
+		want := runtimecredentials.SourceFact{Key: "CLAUDE_CODE_OAUTH_TOKEN", Reference: "file:" + path}
+		if err != nil || fact != want {
+			t.Fatalf("active provider source = %+v, %v; want %+v", fact, err, want)
+		}
+		declaredFact, err := validateSelectedBackendCredentialForDeclaredAgents(ctx, cfg, activeOpts, claudeStartupAgentSource("recovered-agent"))
+		if err != nil || declaredFact != fact {
+			t.Fatalf("declared and active observations must supply the identical presenter fact: %+v, %v", declaredFact, err)
+		}
+		encoded, err := json.Marshal(fact)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, private := range []string{"provider-value-must-not-be-presented", "provider-receipt-must-not-be-presented", "seal"} {
+			if strings.Contains(string(encoded), private) {
+				t.Fatalf("source fact disclosed private credential evidence: %s", encoded)
+			}
+		}
+		for _, posture := range []executionposture.Posture{executionposture.Live, executionposture.MockOnly} {
+			fact, err := validateSelectedBackendCredentialForActiveAgents(ctx, cfg, RuntimeOptions{ExecutionPosture: posture}, source, nil)
+			if err != nil || fact != (runtimecredentials.SourceFact{}) {
+				t.Fatalf("agent-free %v validation = %+v, %v; want no observation", posture, fact, err)
+			}
+		}
+	})
 }
 
 func TestValidateClaudeManagedAgentWorkspaces_RequiresResolvedContainerTargets(t *testing.T) {
