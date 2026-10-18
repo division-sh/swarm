@@ -48,6 +48,7 @@ type RunPostgres struct {
 	timers      TimerObligationSource
 	deadLetters DeadLetterProjection
 	sources     sourceartifact.Reader
+	sourceMemo  *runOperationalSourceMemo
 }
 
 type EntityPostgres struct {
@@ -86,7 +87,7 @@ func NewRunPostgres(backend *postgresbackend.Backend, schemaGuard func() error, 
 	if pipeline == nil || timers == nil || deadLetters == nil || sources == nil {
 		return nil, fmt.Errorf("run diagnostics sources are required")
 	}
-	return &RunPostgres{backend: backend, schemaGuard: schemaGuard, pipeline: pipeline, timers: timers, deadLetters: deadLetters, sources: sources}, nil
+	return &RunPostgres{backend: backend, schemaGuard: schemaGuard, pipeline: pipeline, timers: timers, deadLetters: deadLetters, sources: sources, sourceMemo: newRunOperationalSourceMemo()}, nil
 }
 
 func NewEntityPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*EntityPostgres, error) {
@@ -169,6 +170,7 @@ type RunSQLite struct {
 	timers      TimerObligationSource
 	deadLetters DeadLetterProjection
 	sources     sourceartifact.Reader
+	sourceMemo  *runOperationalSourceMemo
 }
 
 type EntitySQLite struct {
@@ -207,7 +209,7 @@ func NewRunSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, nowF
 	if pipeline == nil || timers == nil || deadLetters == nil || sources == nil {
 		return nil, fmt.Errorf("run diagnostics sources are required")
 	}
-	return &RunSQLite{backend: backend, schemaGuard: schemaGuard, nowFn: nowFn, pipeline: pipeline, timers: timers, deadLetters: deadLetters, sources: sources}, nil
+	return &RunSQLite{backend: backend, schemaGuard: schemaGuard, nowFn: nowFn, pipeline: pipeline, timers: timers, deadLetters: deadLetters, sources: sources, sourceMemo: newRunOperationalSourceMemo()}, nil
 }
 
 func NewEntitySQLite(backend *sqlitebackend.Backend, schemaGuard func() error) (*EntitySQLite, error) {
