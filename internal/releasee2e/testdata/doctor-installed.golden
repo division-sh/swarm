@@ -921,12 +921,291 @@
           ]
         }
       ]
+    },
+    {
+      "id": "provider.whatsapp",
+      "kind": "provider_trigger",
+      "provider": "whatsapp",
+      "source": "trigger_pack",
+      "provenance": "platform",
+      "source_path": "provider-triggers/whatsapp",
+      "applicability": "installed",
+      "status": "AVAILABLE",
+      "capabilities": [
+        {
+          "code": "emit_event",
+          "target": "inbound.whatsapp"
+        },
+        {
+          "code": "emit_event",
+          "target": "inbound.whatsapp.edit"
+        },
+        {
+          "code": "emit_event",
+          "target": "inbound.whatsapp.message"
+        },
+        {
+          "code": "emit_event",
+          "target": "inbound.whatsapp.revoke"
+        },
+        {
+          "code": "persist_dedupe_markers"
+        },
+        {
+          "code": "receive_session_events",
+          "target": "whatsapp"
+        }
+      ],
+      "guarantees": [
+        {
+          "code": "emit_undeclared_events",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "run_code_before_admission",
+          "enforced_by": "internal/providertriggers.InboundAdmissionPlan.Accept"
+        },
+        {
+          "code": "touch_unbound_resources",
+          "enforced_by": "internal/runtime.InboundGateway.HandleResolvedWebhook"
+        }
+      ],
+      "trigger_events": [
+        {
+          "event": "inbound.whatsapp",
+          "kind": "raw",
+          "fields": [
+            {
+              "name": "event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "headers",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "payload",
+              "type": "json",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_delivery_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_id",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "provider_event_type",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            },
+            {
+              "name": "received_at",
+              "type": "text",
+              "required": true,
+              "carry_eligible": false
+            }
+          ]
+        },
+        {
+          "event": "inbound.whatsapp.edit",
+          "kind": "normalized",
+          "fields": [
+            {
+              "name": "conversation_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "conversation_scope",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "ephemeral",
+              "type": "boolean",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "external_account_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "provider_message_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "provider_timestamp_ms",
+              "type": "integer",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "reply_to_message_reference",
+              "type": "text",
+              "required": false,
+              "carry_eligible": false
+            },
+            {
+              "name": "target_message_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "text",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            }
+          ]
+        },
+        {
+          "event": "inbound.whatsapp.message",
+          "kind": "normalized",
+          "fields": [
+            {
+              "name": "conversation_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "conversation_scope",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "entry_invocation",
+              "type": "object",
+              "required": false,
+              "carry_eligible": false
+            },
+            {
+              "name": "ephemeral",
+              "type": "boolean",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "external_account_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "provider_message_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "provider_timestamp_ms",
+              "type": "integer",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "reply_to_message_reference",
+              "type": "text",
+              "required": false,
+              "carry_eligible": false
+            },
+            {
+              "name": "text",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            }
+          ]
+        },
+        {
+          "event": "inbound.whatsapp.revoke",
+          "kind": "normalized",
+          "fields": [
+            {
+              "name": "conversation_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "conversation_scope",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "ephemeral",
+              "type": "boolean",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "external_account_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "provider_message_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "provider_timestamp_ms",
+              "type": "integer",
+              "required": true,
+              "carry_eligible": true
+            },
+            {
+              "name": "reply_to_message_reference",
+              "type": "text",
+              "required": false,
+              "carry_eligible": false
+            },
+            {
+              "name": "target_message_reference",
+              "type": "text",
+              "required": true,
+              "carry_eligible": true
+            }
+          ]
+        }
+      ]
     }
   ],
   "pack_inventory": {
     "base_mode": "embedded",
-    "base_digest": "sha256:5335874874366213046c3477f8862e05b1146ed3e7281a587d7d25df3be39d31",
-    "effective_digest": "sha256:23fa537745f0149a73c14b587f6947307e2df9d712a76887f7f6d9ce26f81f65",
+    "base_digest": "sha256:8a24efde0b451665b2602ee116b23dc85e579558664dc75a9b822900c51dc119",
+    "effective_digest": "sha256:55a789287f2af9a3c6e1708a574dce67555df248af0c4ed41a1025aea6f88b4b",
     "packs": [
       {
         "id": "provider.github",
@@ -1165,6 +1444,57 @@
         },
         "modified": false,
         "shadows_base": false
+      },
+      {
+        "id": "provider.whatsapp",
+        "type": "trigger",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:d48061410533e79556688fa1d7aad975175e95529c8c09874a2cc0ee352b4205",
+        "source": "embedded",
+        "directory": "provider-triggers/whatsapp",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.whatsapp.connector",
+        "type": "connector",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:f7fdf6d3620a1b54b5cfe1c0ecd054daba7bd2cc77c9a263f16f55beee2ba1ea",
+        "source": "embedded",
+        "directory": "provider-connectors/whatsapp",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
+      },
+      {
+        "id": "provider.whatsapp.hitl_channel",
+        "type": "channel",
+        "version": "0.1.0",
+        "manifest_hash": "sha256:b3488106385f2f9590786beadeb041d1e3d99a05fdc04c32e4fd9285e5a6095e",
+        "source": "embedded",
+        "directory": "channels/whatsapp",
+        "origin": {
+          "source": "",
+          "id": "",
+          "version": "",
+          "manifest_hash": "",
+          "envelope_hash": ""
+        },
+        "modified": false,
+        "shadows_base": false
       }
     ]
   },
@@ -1231,6 +1561,14 @@
       "status": "ok",
       "severity": "info",
       "message": "provider trigger pack provider.typeform AVAILABLE; provenance=platform; source_path=provider-triggers/typeform; requires webhook_signing.typeform (target-scoped); CAN emit named event inbound.typeform; CAN persist dedupe markers; CAN receive HTTPS route /webhooks/{alias}/typeform; CAN verify named secret webhook_signing.typeform; event_descriptor=inbound.typeform kind=raw fields=event_type:text:required:not-carry-eligible,headers:json:required:not-carry-eligible,payload:json:required:not-carry-eligible,provider:text:required:not-carry-eligible,provider_delivery_id:text:required:not-carry-eligible,provider_event_id:text:required:not-carry-eligible,provider_event_type:text:required:not-carry-eligible,received_at:text:required:not-carry-eligible; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
+      "owner": "internal/cliapp local claude_cli preflight/admission owner"
+    },
+    {
+      "category": "provider_pack_prerequisite",
+      "code": "provider_trigger_pack_whatsapp",
+      "status": "ok",
+      "severity": "info",
+      "message": "provider trigger pack provider.whatsapp AVAILABLE; provenance=platform; source_path=provider-triggers/whatsapp; CAN emit named event inbound.whatsapp; CAN emit named event inbound.whatsapp.edit; CAN emit named event inbound.whatsapp.message; CAN emit named event inbound.whatsapp.revoke; CAN persist dedupe markers; CAN receive authenticated session events whatsapp; event_descriptor=inbound.whatsapp kind=raw fields=event_type:text:required:not-carry-eligible,headers:json:required:not-carry-eligible,payload:json:required:not-carry-eligible,provider:text:required:not-carry-eligible,provider_delivery_id:text:required:not-carry-eligible,provider_event_id:text:required:not-carry-eligible,provider_event_type:text:required:not-carry-eligible,received_at:text:required:not-carry-eligible; event_descriptor=inbound.whatsapp.edit kind=normalized fields=conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,ephemeral:boolean:required:carry-eligible,external_account_reference:text:required:carry-eligible,provider_message_reference:text:required:carry-eligible,provider_timestamp_ms:integer:required:carry-eligible,reply_to_message_reference:text:optional:not-carry-eligible,target_message_reference:text:required:carry-eligible,text:text:required:carry-eligible; event_descriptor=inbound.whatsapp.message kind=normalized fields=conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,entry_invocation:object:optional:not-carry-eligible,ephemeral:boolean:required:carry-eligible,external_account_reference:text:required:carry-eligible,provider_message_reference:text:required:carry-eligible,provider_timestamp_ms:integer:required:carry-eligible,reply_to_message_reference:text:optional:not-carry-eligible,text:text:required:carry-eligible; event_descriptor=inbound.whatsapp.revoke kind=normalized fields=conversation_reference:text:required:carry-eligible,conversation_scope:text:required:carry-eligible,ephemeral:boolean:required:carry-eligible,external_account_reference:text:required:carry-eligible,provider_message_reference:text:required:carry-eligible,provider_timestamp_ms:integer:required:carry-eligible,reply_to_message_reference:text:optional:not-carry-eligible,target_message_reference:text:required:carry-eligible; guarantee: cannot emit undeclared events - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot run code before admission - enforced by internal/providertriggers.InboundAdmissionPlan.Accept; guarantee: cannot touch unbound resources - enforced by internal/runtime.InboundGateway.HandleResolvedWebhook",
       "owner": "internal/cliapp local claude_cli preflight/admission owner"
     }
   ]

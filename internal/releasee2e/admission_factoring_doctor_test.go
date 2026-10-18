@@ -31,6 +31,8 @@ func TestAdmissionFactoringDoctorReadback(t *testing.T) {
 	root := goldenReleaseRoot(t)
 	binary := buildReleaseBinary(t, root)
 	// Captured through compiled public doctor at pre-extraction49abcf245.
+	// Refreshed at 8ef9ebeada for #2577's installed WhatsApp trigger, connector,
+	// and channel packs; all prior subject, pack and finding rows are unchanged.
 	// This oracle imports no in-process admission or renderer implementation.
 	raw, err := os.ReadFile(filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/doctor-installed.golden"))
 	if err != nil {
@@ -40,7 +42,7 @@ func TestAdmissionFactoringDoctorReadback(t *testing.T) {
 	if err := json.Unmarshal(raw, &want); err != nil {
 		t.Fatal(err)
 	}
-	if len(want.CapabilitySubjects) != 8 || len(want.PackInventory.Packs) != 14 || len(want.Findings) != 8 {
+	if len(want.CapabilitySubjects) != 9 || len(want.PackInventory.Packs) != 17 || len(want.Findings) != 9 {
 		t.Fatal("incomplete pinned installed inventory oracle")
 	}
 	for _, hostile := range []bool{false, true} {
