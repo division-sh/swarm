@@ -1,0 +1,19 @@
+Precompile outside test slot: environment=0.003s build=16.712s cleanup=0.000s total=16.716s
+Precompile compile tests diagnostics (not test evidence):
+FAIL	github.com/division-sh/swarm/internal/runtime/contracts [build failed]
+ok  	github.com/division-sh/swarm/internal/runtime/bootverify	0.001s
+FAIL	github.com/division-sh/swarm/internal/runtime/authoringview [build failed]
+FAIL	github.com/division-sh/swarm/internal/packadmission [build failed]
+FAIL
+# github.com/division-sh/swarm/internal/runtime/contracts [github.com/division-sh/swarm/internal/runtime/contracts.test]
+internal/runtime/contracts/event_catalog_factoring_test.go:219:25: undefined: TestNodeAdmissionProvenanceComposesWithEvents
+internal/runtime/contracts/event_catalog_factoring_test.go:220:23: undefined: TestPackPlatformProvenanceComposesWithoutOverwrite
+internal/runtime/contracts/node_admission_review_regression_test.go:247:87: undefined: reflect
+internal/runtime/contracts/platform_spec_value_test.go:6:2: "reflect" imported and not used
+internal/runtime/contracts/tool_schema_presence_w5_test.go:7:2: "reflect" imported and not used
+# github.com/division-sh/swarm/internal/packadmission [github.com/division-sh/swarm/internal/packadmission.test]
+internal/packadmission/admission_test.go:16:2: "github.com/division-sh/swarm/internal/testutil/packfixture" imported and not used
+# github.com/division-sh/swarm/internal/runtime/authoringview [github.com/division-sh/swarm/internal/runtime/authoringview.test]
+internal/runtime/authoringview/view_test.go:27:2: "gopkg.in/yaml.v3" imported as yaml and not used
+precompile before test admission: compile tests: exit status 1
+exit status 1

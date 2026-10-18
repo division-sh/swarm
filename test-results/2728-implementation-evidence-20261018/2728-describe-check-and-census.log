@@ -1,0 +1,260 @@
+Precompile outside test slot: environment=0.003s build=8.768s cleanup=0.000s total=8.771s
+Test slot acquired after 2ms. Starting go test ./internal/cliapp -run ^(TestReadProofFactoringCompiledDescribe|TestDescribeProofNormalization|TestDescribeProofCorpusAdmission|TestVerifyBootStartupPredicateCensus|TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal|TestAdmissionPredicateRatchetRejectsRemovedVerifyConsumer|TestAdmissionPredicateRatchetRejectsUncoveredProviderPrerequisite)$ -count=1 -v
+=== RUN   TestDescribeProofCorpusAdmission
+=== RUN   TestDescribeProofCorpusAdmission/none
+=== RUN   TestDescribeProofCorpusAdmission/missing
+=== RUN   TestDescribeProofCorpusAdmission/extra
+=== RUN   TestDescribeProofCorpusAdmission/extra_directory
+=== RUN   TestDescribeProofCorpusAdmission/symlink
+--- PASS: TestDescribeProofCorpusAdmission (0.03s)
+    --- PASS: TestDescribeProofCorpusAdmission/none (0.00s)
+    --- PASS: TestDescribeProofCorpusAdmission/missing (0.01s)
+    --- PASS: TestDescribeProofCorpusAdmission/extra (0.00s)
+    --- PASS: TestDescribeProofCorpusAdmission/extra_directory (0.01s)
+    --- PASS: TestDescribeProofCorpusAdmission/symlink (0.00s)
+=== RUN   TestDescribeProofNormalization
+=== RUN   TestDescribeProofNormalization/line
+=== RUN   TestDescribeProofNormalization/column
+=== RUN   TestDescribeProofNormalization/authored_coordinate
+=== RUN   TestDescribeProofNormalization/line_presence
+=== RUN   TestDescribeProofNormalization/zero_line
+=== RUN   TestDescribeProofNormalization/column_presence
+=== RUN   TestDescribeProofNormalization/file_identity
+=== RUN   TestDescribeProofNormalization/authored_file
+=== RUN   TestDescribeProofNormalization/coordinate_presence
+=== RUN   TestDescribeProofNormalization/event
+=== RUN   TestDescribeProofNormalization/edge_id
+=== RUN   TestDescribeProofNormalization/producer_schema
+=== RUN   TestDescribeProofNormalization/receiver_schema
+=== RUN   TestDescribeProofNormalization/carries_derivation
+=== RUN   TestDescribeProofNormalization/stage_initial
+=== RUN   TestDescribeProofNormalization/stage_terminal
+=== RUN   TestDescribeProofNormalization/approval
+=== RUN   TestDescribeProofNormalization/rule
+=== RUN   TestDescribeProofNormalization/severity
+=== RUN   TestDescribeProofNormalization/message_coordinate
+=== RUN   TestDescribeProofNormalization/policy_numeric_field
+--- PASS: TestDescribeProofNormalization (0.03s)
+    --- PASS: TestDescribeProofNormalization/line (0.00s)
+    --- PASS: TestDescribeProofNormalization/column (0.00s)
+    --- PASS: TestDescribeProofNormalization/authored_coordinate (0.00s)
+    --- PASS: TestDescribeProofNormalization/line_presence (0.00s)
+    --- PASS: TestDescribeProofNormalization/zero_line (0.00s)
+    --- PASS: TestDescribeProofNormalization/column_presence (0.00s)
+    --- PASS: TestDescribeProofNormalization/file_identity (0.00s)
+    --- PASS: TestDescribeProofNormalization/authored_file (0.00s)
+    --- PASS: TestDescribeProofNormalization/coordinate_presence (0.00s)
+    --- PASS: TestDescribeProofNormalization/event (0.00s)
+    --- PASS: TestDescribeProofNormalization/edge_id (0.00s)
+    --- PASS: TestDescribeProofNormalization/producer_schema (0.00s)
+    --- PASS: TestDescribeProofNormalization/receiver_schema (0.01s)
+    --- PASS: TestDescribeProofNormalization/carries_derivation (0.00s)
+    --- PASS: TestDescribeProofNormalization/stage_initial (0.00s)
+    --- PASS: TestDescribeProofNormalization/stage_terminal (0.00s)
+    --- PASS: TestDescribeProofNormalization/approval (0.00s)
+    --- PASS: TestDescribeProofNormalization/rule (0.00s)
+    --- PASS: TestDescribeProofNormalization/severity (0.00s)
+    --- PASS: TestDescribeProofNormalization/message_coordinate (0.00s)
+    --- PASS: TestDescribeProofNormalization/policy_numeric_field (0.00s)
+=== RUN   TestReadProofFactoringCompiledDescribe
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/describe-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/describe-text
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/describe-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/describe-json
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/describe-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/describe-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/describe-no-color
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/describe-no-color
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-text
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-json
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/routes-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/routes-text
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/routes-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/routes-json
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/routes-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/routes-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/describe-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/describe-text
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/describe-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/describe-json
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/describe-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/describe-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/describe-no-color
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/describe-no-color
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-text
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-json
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/routes-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/routes-text
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/routes-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/routes-json
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/routes-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/routes-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/describe-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/describe-text
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/describe-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/describe-json
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/describe-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/describe-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/describe-no-color
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/describe-no-color
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-text
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-json
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/routes-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/routes-text
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/routes-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/routes-json
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/routes-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/routes-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/describe-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/describe-text
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/describe-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/describe-json
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/describe-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/describe-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/describe-no-color
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/describe-no-color
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/describe-graph-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/describe-graph-text
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/describe-graph-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/describe-graph-json
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/routes-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/routes-text
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/routes-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/routes-json
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/routes-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/routes-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/describe-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/describe-text
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/describe-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/describe-json
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/describe-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/describe-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/describe-no-color
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/describe-no-color
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-text
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-json
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/routes-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/routes-text
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/routes-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/routes-json
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/routes-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/routes-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/describe-text
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-json
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/describe-no-color
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-text
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/describe-no-color
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/describe-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/describe-json
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/routes-json
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/describe-text
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/routes-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/routes-json
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/routes-text
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-json
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-text
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/describe-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/routes-text
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/describe-graph-json
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/describe-graph-text
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/describe-no-color
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-text
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/routes-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/routes-json
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/routes-text
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-json
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/routes-json
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/describe-json
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/describe-json
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/describe-no-color
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/describe-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/routes-text
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/describe-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/describe-json
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/describe-text
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/routes-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/routes-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/describe-text
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/routes-json
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/routes-text
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/describe-text
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/describe-no-color
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/describe-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-text
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-json
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/routes-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/describe-json
+--- PASS: TestReadProofFactoringCompiledDescribe (11.26s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/describe-text (0.49s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/describe-no-color (1.21s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-json (5.08s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-text (6.58s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/describe-no-color (12.56s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/describe-quiet (15.16s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/routes-json (17.12s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/describe-json (21.49s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/routes-quiet (22.21s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/routes-json (24.15s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/routes-text (25.25s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/describe-text (26.27s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-json (26.05s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-text (26.36s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/describe-quiet (23.28s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/routes-text (22.68s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/describe-graph-json (18.04s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/describe-graph-text (15.89s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/describe-no-color (15.15s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-text (20.16s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/routes-quiet (19.73s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/routes-json (28.07s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/routes-text (27.61s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/routes-json (34.56s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-json (35.85s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/describe-json (35.11s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/describe-json (44.62s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/describe-no-color (43.75s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/routes-text (42.82s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/describe-quiet (42.64s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/describe-json (34.85s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/describe-text (35.52s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/describe-quiet (52.41s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/routes-quiet (31.04s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/routes-quiet (32.42s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/routes-json (23.21s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/describe-text (24.33s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/routes-text (30.81s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/describe-no-color (21.19s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/describe-quiet (21.00s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/describe-text (21.95s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-text (20.57s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-json (18.98s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/describe-json (13.14s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/routes-quiet (19.02s)
+=== RUN   TestVerifyBootStartupPredicateCensus
+--- PASS: TestVerifyBootStartupPredicateCensus (0.11s)
+=== RUN   TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal
+=== RUN   TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal/native_cancellation_owner_hostiles
+=== RUN   TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal/native_cancellation_owner_hostiles/Error
+=== RUN   TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal/native_cancellation_owner_hostiles/Unwrap
+=== RUN   TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal/native_cancellation_owner_hostiles/CleanCancellationBeforeCommit
+=== RUN   TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal/native_cancellation_owner_hostiles/onlyCallerCancellation
+--- PASS: TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal (0.03s)
+    --- PASS: TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal/native_cancellation_owner_hostiles (0.00s)
+        --- PASS: TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal/native_cancellation_owner_hostiles/Error (0.00s)
+        --- PASS: TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal/native_cancellation_owner_hostiles/Unwrap (0.00s)
+        --- PASS: TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal/native_cancellation_owner_hostiles/CleanCancellationBeforeCommit (0.00s)
+        --- PASS: TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal/native_cancellation_owner_hostiles/onlyCallerCancellation (0.00s)
+=== RUN   TestAdmissionPredicateRatchetRejectsRemovedVerifyConsumer
+--- PASS: TestAdmissionPredicateRatchetRejectsRemovedVerifyConsumer (0.01s)
+=== RUN   TestAdmissionPredicateRatchetRejectsUncoveredProviderPrerequisite
+--- PASS: TestAdmissionPredicateRatchetRejectsUncoveredProviderPrerequisite (0.00s)
+PASS
+ok  	github.com/division-sh/swarm/internal/cliapp	108.059s

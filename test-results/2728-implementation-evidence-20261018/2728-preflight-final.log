@@ -1,0 +1,24 @@
+preflight format: passed=true 1.521s
+api spec valid: methods=71 schemas=252 errors=69 mutating=30 subscriptions=5
+preflight openrpc: passed=true 0.245s
+preflight github.com/division-sh/swarm/internal/runtime/core/worklifetime: passed=true 0.760s
+preflight github.com/division-sh/swarm/internal/runtime/effects: passed=true 0.739s
+preflight github.com/division-sh/swarm/internal/runtime/deliverycontinuation: passed=true 1.293s
+preflight github.com/division-sh/swarm/internal/runtime/manager: passed=true 20.147s
+preflight github.com/division-sh/swarm/internal/testutil: passed=true 4.268s
+preflight github.com/division-sh/swarm/scripts/rewrite-stages-2566: passed=true 2.449s
+preflight github.com/division-sh/swarm/internal/store/internal/backend/authoractivity: passed=true 2.251s
+preflight github.com/division-sh/swarm/cmd/swarm-test-timing: passed=true 1.290s
+preflight github.com/division-sh/swarm/internal/testtiming: passed=true 0.263s
+preflight complexity: passed=true 9.718s
+preflight github.com/division-sh/swarm/cmd/swarm-test: passed=true 17.372s
+preflight github.com/division-sh/swarm/internal/cliapp: passed=true 16.481s
+preflight github.com/division-sh/swarm/internal/releasee2e: passed=true 3.455s
+preflight github.com/division-sh/swarm/internal/runtime: passed=true 20.674s
+preflight github.com/division-sh/swarm/internal/runtime/conformance: passed=false 222.317s
+preflight soft target exceeded: review/re-rank membership; no test deadline or selector changed
+preflight: complete=false end-to-end=330.611s queue=0.000s setup/validation=6.076s execution=324.534s cleanup=0.001s; source=ffa979bbaa7ca5cf8e3120e16f6249670ba136de go=go1.26.8 selection=3df338ce696a286fb9ad0834f73efbac3877a0a0252a0c19061c3697e6cd516b receipts=test-results/preflight/20261018T203731.530224097-3df9d3f8-1957-46cf-9a65-920ed80a3802
+preflight comparison: debt-required=true origin/master=fe9fb54200cff883ce337b377c02e791d6d195bd native-source=fe9fb54200cff883ce337b377c02e791d6d195bd diff=766ee60fcbbcad95457e840a3680a402516210f8fe32cc7b763573b9eeed042d
+preflight status: context=preflight/local repository=division-sh/swarm head=ffa979bbaa7ca5cf8e3120e16f6249670ba136de attempt=3df9d3f8-1957-46cf-9a65-920ed80a3802 receipt=20261018T203731.530224097-3df9d3f8-1957-46cf-9a65-920ed80a3802 id=56644601871 publication=1.193s
+preflight github.com/division-sh/swarm/internal/runtime/conformance: preflight trusted origin/master identity changed
+exit status 1

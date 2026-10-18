@@ -1,0 +1,78 @@
+{
+  "base": "fe9fb54200cff883ce337b377c02e791d6d195bd",
+  "head": "ffa979bbaa7ca5cf8e3120e16f6249670ba136de",
+  "only_retired_ledger_removed": true,
+  "goldens": [
+    {
+      "file": "internal/cliapp/testdata/describe/barrier/describe-graph-json.golden",
+      "before_lines": 37711,
+      "after_lines": 1662,
+      "before_sha256": "9287e6d5d3a02e1cea22d8f0efc5b7132ca3ad77093ca2b36b8fbd97394f43aa",
+      "after_sha256": "b770909cb7e9ae0aae7b0fc56f10c7695bf214cbd2bfd75712298a9023aa675f"
+    },
+    {
+      "file": "internal/cliapp/testdata/describe/barrier/describe-json.golden",
+      "before_lines": 37629,
+      "after_lines": 1580,
+      "before_sha256": "28bb91f055d50950404a0549ce56beea2fdcfdaab91ab4a43fa29fb0375640d0",
+      "after_sha256": "9dcb456f5d7a4752ea35c54f93366860cc0a656c5c03c1114a7de31b67ff10a3"
+    },
+    {
+      "file": "internal/cliapp/testdata/describe/create-minted-key/describe-graph-json.golden",
+      "before_lines": 34728,
+      "after_lines": 765,
+      "before_sha256": "255731673a285af293b21471bc406ab1e5f1e79fd4f87e253c49a13bc2d3ad3f",
+      "after_sha256": "3fab64107a254b91294a5c532cb82bac698c91d6a0fb9a2001a2276482599bac"
+    },
+    {
+      "file": "internal/cliapp/testdata/describe/create-minted-key/describe-json.golden",
+      "before_lines": 34728,
+      "after_lines": 765,
+      "before_sha256": "255731673a285af293b21471bc406ab1e5f1e79fd4f87e253c49a13bc2d3ad3f",
+      "after_sha256": "3fab64107a254b91294a5c532cb82bac698c91d6a0fb9a2001a2276482599bac"
+    },
+    {
+      "file": "internal/cliapp/testdata/describe/golden-workload/describe-graph-json.golden",
+      "before_lines": 37961,
+      "after_lines": 2045,
+      "before_sha256": "7c81f4a585f3e5785a2be2099bc9bb8500cec14d7063ce9ed8bf47a1bb4e71ab",
+      "after_sha256": "28c5695fe7c6d65ff749ac9f577ca6208dc36d3937977b5908a3cb74d2fd8e33"
+    },
+    {
+      "file": "internal/cliapp/testdata/describe/golden-workload/describe-json.golden",
+      "before_lines": 37701,
+      "after_lines": 1785,
+      "before_sha256": "09b80f977c198e86c03e6d004e4bfe562516fe2d90d1a657b258272839202652",
+      "after_sha256": "fc740a880cbb86dde45482bfd60af40dcdc051cd71f4626785dcfd065b07f703"
+    },
+    {
+      "file": "internal/cliapp/testdata/describe/select-or-create/describe-graph-json.golden",
+      "before_lines": 34142,
+      "after_lines": 533,
+      "before_sha256": "7153fd96180bfefaa9513c82c99a22c05c5faa3cc5a3d0145df4afb9cca7c04e",
+      "after_sha256": "59d48f7980f399beaac9c17eca7c6f093108d19b3423bf08778d9305042d75ff"
+    },
+    {
+      "file": "internal/cliapp/testdata/describe/select-or-create/describe-json.golden",
+      "before_lines": 34142,
+      "after_lines": 533,
+      "before_sha256": "7153fd96180bfefaa9513c82c99a22c05c5faa3cc5a3d0145df4afb9cca7c04e",
+      "after_sha256": "59d48f7980f399beaac9c17eca7c6f093108d19b3423bf08778d9305042d75ff"
+    },
+    {
+      "file": "internal/cliapp/testdata/describe/telegram-agent/describe-graph-json.golden",
+      "before_lines": 34665,
+      "after_lines": 783,
+      "before_sha256": "67ebbf9df3ba40d0d2a309686eeacc34b8902627a64ad086c80326d784cbe75a",
+      "after_sha256": "b75f20136122444e1e3fd749022e016962e50f37f5a0dfcfa288e586f04d56e3"
+    },
+    {
+      "file": "internal/cliapp/testdata/describe/telegram-agent/describe-json.golden",
+      "before_lines": 34619,
+      "after_lines": 737,
+      "before_sha256": "2ec90d3b0ec1bc33473213bb81c6cc7b1cc6f4aa88e090fc9453ee4d75f6f272",
+      "after_sha256": "fe488215f2623e541aecdec406386765b75533c85eca07f95f2f27f470f22ad8"
+    }
+  ],
+  "event_characterization_rows": 143
+}

@@ -1,0 +1,1138 @@
+{
+  "policy_verdict": "equal-reviewed-policy; independently-measured-base-and-head",
+  "base": "fe9fb54200cff883ce337b377c02e791d6d195bd",
+  "head": "c12f95e674c7ba308da16d09f8ace5ffa9f63f5f",
+  "base_summary": {
+    "cognit": {
+      "callables": 22609,
+      "at_least_30": 539,
+      "at_least_50": 192,
+      "maximum": 302
+    },
+    "cyclo": {
+      "callables": 22609,
+      "at_least_30": 247,
+      "at_least_50": 57,
+      "maximum": 186
+    }
+  },
+  "head_summary": {
+    "cognit": {
+      "callables": 22580,
+      "at_least_30": 540,
+      "at_least_50": 192,
+      "maximum": 302
+    },
+    "cyclo": {
+      "callables": 22580,
+      "at_least_30": 247,
+      "at_least_50": 57,
+      "maximum": 186
+    }
+  },
+  "hotspot_count_increased": true,
+  "removed_file_facts": [
+    {
+      "path": "internal/runtime/contracts/effective_provenance.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/runtime/contracts/pack_platform_provenance.go",
+      "class": "authored"
+    },
+    {
+      "path": "internal/runtime/contracts/workflow_contract_policy_rules_provenance.go",
+      "class": "authored"
+    }
+  ],
+  "added_file_facts": [
+    {
+      "path": "internal/runtime/contracts/source_location.go",
+      "class": "authored"
+    }
+  ],
+  "callable_changes": [
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/bootverify/workflow_expression_diagnostics.go",
+        "package": "bootverify",
+        "kind": "declaration",
+        "name": "(*checkerContext).authoredGateContextError",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 5
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(*WorkflowContractBundle).EffectiveProvenance",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(*WorkflowContractBundle).GateContextProvenance",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(*WorkflowContractBundle).HandlerValueProvenance",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(*effectiveProvenanceBuilder).ledger",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(*effectiveProvenanceBuilder).set",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(EffectiveProvenanceLedger).Entries",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(EffectiveProvenanceLedger).Lookup",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "cloneEffectiveProvenanceLedger",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "cloneEffectiveValueProvenance",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "effectiveConnectionSourcePath",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "effectiveEventProjectionProvenancePrefix",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "effectiveEventProvenancePrefix",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "effectiveNodeProvenancePrefix",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "newEffectiveProvenanceBuilder",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populateEffectiveEventProjectionProvenance",
+        "occurrence": 1
+      },
+      "before": 11,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populateEffectiveProvenance",
+        "occurrence": 1
+      },
+      "before": 18,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "qualifyEffectiveEventInputPaths",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/event_catalog_admission.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "authoredSourceProvenance",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/event_catalog_admission.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "eventFieldTypePaths",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/event_catalog_admission.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populateEventCatalogPayload",
+        "occurrence": 1
+      },
+      "before": 8,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/event_catalog_admission.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populateEventNestedAdmissionProvenance",
+        "occurrence": 1
+      },
+      "before": 7,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/event_catalog_admission.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populateEventPayloadFieldAdmissionProvenance",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/event_schema_ownership.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "eventDeclarationLocation",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 5
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/flow_ingress_alias.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "compileFlowIngressAliases",
+        "occurrence": 1
+      },
+      "before": 7,
+      "after": 6
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/pack_platform_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "addPackPlatformSourceProvenance",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/pack_platform_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "platformProvenanceValueAt",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/pack_platform_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populatePackPlatformProvenance",
+        "occurrence": 1
+      },
+      "before": 14,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/pack_platform_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populatePlatformCatalogProvenance",
+        "occurrence": 1
+      },
+      "before": 6,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/pack_platform_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populatePlatformLawProvenance",
+        "occurrence": 1
+      },
+      "before": 8,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/source_location.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(*WorkflowContractBundle).IntroductionLocation",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 25
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/source_location.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "introductionPathSegment",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 9
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/tool_input_schema.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "cloneEventCatalogEntry",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 3
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_agents_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "projectAgentDeclarationsValue",
+        "occurrence": 1
+      },
+      "before": 8,
+      "after": 7
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_loading.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "finalizeWorkflowContractBundle",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": 4
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_nodes_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "collectNodeValueProvenance",
+        "occurrence": 1
+      },
+      "before": 11,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_nodes_root_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "projectNodeDeclarationsValue",
+        "occurrence": 1
+      },
+      "before": 14,
+      "after": 9
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_nodes_rules_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "projectNodeRuleEntryValue",
+        "occurrence": 1
+      },
+      "before": 19,
+      "after": 18
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_paths.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "cloneAgentRegistryEntry",
+        "occurrence": 1
+      },
+      "before": 6,
+      "after": 5
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_policy_rules_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populatePolicyRulesFileProvenance",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_policy_rules_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populatePolicyRulesProvenance",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_schema_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "AdmitFlowSchemaValue",
+        "occurrence": 1
+      },
+      "before": 24,
+      "after": 23
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_schema_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "deriveSchemaProvenance",
+        "occurrence": 1
+      },
+      "before": 11,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_schema_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populateEffectiveSchemaProvenance",
+        "occurrence": 1
+      },
+      "before": 7,
+      "after": null
+    },
+    {
+      "metric": "cyclo",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_tools_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "projectToolDeclarationsValue",
+        "occurrence": 1
+      },
+      "before": 9,
+      "after": 6
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/bootverify/workflow_expression_diagnostics.go",
+        "package": "bootverify",
+        "kind": "declaration",
+        "name": "(*checkerContext).authoredGateContextError",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 7
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(*WorkflowContractBundle).EffectiveProvenance",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(*WorkflowContractBundle).GateContextProvenance",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(*WorkflowContractBundle).HandlerValueProvenance",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(*effectiveProvenanceBuilder).ledger",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(*effectiveProvenanceBuilder).set",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(EffectiveProvenanceLedger).Entries",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(EffectiveProvenanceLedger).Lookup",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "cloneEffectiveProvenanceLedger",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "cloneEffectiveValueProvenance",
+        "occurrence": 1
+      },
+      "before": 0,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "effectiveConnectionSourcePath",
+        "occurrence": 1
+      },
+      "before": 6,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "effectiveEventProjectionProvenancePrefix",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "effectiveEventProvenancePrefix",
+        "occurrence": 1
+      },
+      "before": 2,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "effectiveNodeProvenancePrefix",
+        "occurrence": 1
+      },
+      "before": 0,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "newEffectiveProvenanceBuilder",
+        "occurrence": 1
+      },
+      "before": 0,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populateEffectiveEventProjectionProvenance",
+        "occurrence": 1
+      },
+      "before": 15,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populateEffectiveProvenance",
+        "occurrence": 1
+      },
+      "before": 25,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/effective_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "qualifyEffectiveEventInputPaths",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/event_catalog_admission.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "authoredSourceProvenance",
+        "occurrence": 1
+      },
+      "before": 0,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/event_catalog_admission.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "eventFieldTypePaths",
+        "occurrence": 1
+      },
+      "before": 1,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/event_catalog_admission.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populateEventCatalogPayload",
+        "occurrence": 1
+      },
+      "before": 13,
+      "after": 8
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/event_catalog_admission.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populateEventNestedAdmissionProvenance",
+        "occurrence": 1
+      },
+      "before": 7,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/event_catalog_admission.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populateEventPayloadFieldAdmissionProvenance",
+        "occurrence": 1
+      },
+      "before": 13,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/flow_ingress_alias.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "compileFlowIngressAliases",
+        "occurrence": 1
+      },
+      "before": 14,
+      "after": 11
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/pack_platform_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "addPackPlatformSourceProvenance",
+        "occurrence": 1
+      },
+      "before": 3,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/pack_platform_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "platformProvenanceValueAt",
+        "occurrence": 1
+      },
+      "before": 5,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/pack_platform_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populatePackPlatformProvenance",
+        "occurrence": 1
+      },
+      "before": 27,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/pack_platform_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populatePlatformCatalogProvenance",
+        "occurrence": 1
+      },
+      "before": 7,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/pack_platform_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populatePlatformLawProvenance",
+        "occurrence": 1
+      },
+      "before": 9,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/source_location.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "(*WorkflowContractBundle).IntroductionLocation",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 42
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/source_location.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "introductionPathSegment",
+        "occurrence": 1
+      },
+      "before": null,
+      "after": 9
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/tool_input_schema.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "cloneEventCatalogEntry",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 3
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_agents_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "projectAgentDeclarationsValue",
+        "occurrence": 1
+      },
+      "before": 10,
+      "after": 8
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_loading.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "finalizeWorkflowContractBundle",
+        "occurrence": 1
+      },
+      "before": 4,
+      "after": 3
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_nodes_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "collectNodeValueProvenance",
+        "occurrence": 1
+      },
+      "before": 20,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_nodes_root_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "projectNodeDeclarationsValue",
+        "occurrence": 1
+      },
+      "before": 26,
+      "after": 10
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_nodes_rules_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "projectNodeRuleEntryValue",
+        "occurrence": 1
+      },
+      "before": 24,
+      "after": 23
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_paths.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "cloneAgentRegistryEntry",
+        "occurrence": 1
+      },
+      "before": 7,
+      "after": 6
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_policy_rules_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populatePolicyRulesFileProvenance",
+        "occurrence": 1
+      },
+      "before": 14,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_policy_rules_provenance.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populatePolicyRulesProvenance",
+        "occurrence": 1
+      },
+      "before": 7,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_schema_ingress_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "projectSchemaIngressValue",
+        "occurrence": 1
+      },
+      "before": 27,
+      "after": 28
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_schema_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "AdmitFlowSchemaValue",
+        "occurrence": 1
+      },
+      "before": 23,
+      "after": 22
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_schema_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "deriveSchemaProvenance",
+        "occurrence": 1
+      },
+      "before": 24,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_schema_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "populateEffectiveSchemaProvenance",
+        "occurrence": 1
+      },
+      "before": 12,
+      "after": null
+    },
+    {
+      "metric": "cognit",
+      "identity": {
+        "file": "internal/runtime/contracts/workflow_contract_tools_value.go",
+        "package": "contracts",
+        "kind": "declaration",
+        "name": "projectToolDeclarationsValue",
+        "occurrence": 1
+      },
+      "before": 13,
+      "after": 6
+    }
+  ]
+}
+complexity hotspot count increased; generated evidence cannot approve growth
+exit status 1

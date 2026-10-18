@@ -1,0 +1,110 @@
+Precompile outside test slot: environment=0.003s build=12.540s cleanup=0.000s total=12.543s
+Test slot acquired after 6ms. Starting go test ./internal/runtime/contracts ./internal/runtime/bootverify ./internal/packadmission -run ^(TestNodeAdmissionAliasMergeAndNestedCoordinates|TestEventCatalogAdmissionRetainsAliasValues|TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations|TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder|TestScalar2556RuleDiagnosticCoordinatesUsePositions|TestScalar2556NestedDiagnosticSourceOwnership|TestScalar2556DiagnosticPreservesAuthoredFieldNames|TestScalar2556GateContextSourceDiagnostic|TestPackPlatformAdmissionDiskLogicalRetainedParity|TestW5AgentAliasMergeNestedProvenance)$ -count=1 -v
+=== RUN   TestEventCatalogAdmissionRetainsAliasValues
+--- PASS: TestEventCatalogAdmissionRetainsAliasValues (0.00s)
+=== RUN   TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations
+=== RUN   TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations/nested_mapping_alias
+=== RUN   TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations/merge_alias
+--- PASS: TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations (0.00s)
+    --- PASS: TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations/nested_mapping_alias (0.00s)
+    --- PASS: TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations/merge_alias (0.00s)
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/authored_order
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/reversed_order
+--- PASS: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder (0.11s)
+    --- PASS: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/authored_order (0.00s)
+    --- PASS: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/reversed_order (0.00s)
+=== RUN   TestW5AgentAliasMergeNestedProvenance
+=== RUN   TestW5AgentAliasMergeNestedProvenance/alias
+=== RUN   TestW5AgentAliasMergeNestedProvenance/merge
+--- PASS: TestW5AgentAliasMergeNestedProvenance (0.00s)
+    --- PASS: TestW5AgentAliasMergeNestedProvenance/alias (0.00s)
+    --- PASS: TestW5AgentAliasMergeNestedProvenance/merge (0.00s)
+=== RUN   TestNodeAdmissionAliasMergeAndNestedCoordinates
+=== RUN   TestNodeAdmissionAliasMergeAndNestedCoordinates/alias
+=== RUN   TestNodeAdmissionAliasMergeAndNestedCoordinates/merge
+--- PASS: TestNodeAdmissionAliasMergeAndNestedCoordinates (0.00s)
+    --- PASS: TestNodeAdmissionAliasMergeAndNestedCoordinates/alias (0.00s)
+    --- PASS: TestNodeAdmissionAliasMergeAndNestedCoordinates/merge (0.00s)
+PASS
+ok  	github.com/division-sh/swarm/internal/runtime/contracts	0.125s
+=== RUN   TestScalar2556RuleDiagnosticCoordinatesUsePositions
+=== RUN   TestScalar2556RuleDiagnosticCoordinatesUsePositions/rules/
+=== RUN   TestScalar2556RuleDiagnosticCoordinatesUsePositions/rules/named
+=== RUN   TestScalar2556RuleDiagnosticCoordinatesUsePositions/rules/1
+=== RUN   TestScalar2556RuleDiagnosticCoordinatesUsePositions/rules/0
+=== RUN   TestScalar2556RuleDiagnosticCoordinatesUsePositions/rules/bracket]label
+=== RUN   TestScalar2556RuleDiagnosticCoordinatesUsePositions/on_complete/
+=== RUN   TestScalar2556RuleDiagnosticCoordinatesUsePositions/on_complete/named
+=== RUN   TestScalar2556RuleDiagnosticCoordinatesUsePositions/on_complete/1
+=== RUN   TestScalar2556RuleDiagnosticCoordinatesUsePositions/on_complete/0
+=== RUN   TestScalar2556RuleDiagnosticCoordinatesUsePositions/on_complete/bracket]label
+--- PASS: TestScalar2556RuleDiagnosticCoordinatesUsePositions (0.13s)
+    --- PASS: TestScalar2556RuleDiagnosticCoordinatesUsePositions/rules/ (0.11s)
+    --- PASS: TestScalar2556RuleDiagnosticCoordinatesUsePositions/rules/named (0.00s)
+    --- PASS: TestScalar2556RuleDiagnosticCoordinatesUsePositions/rules/1 (0.00s)
+    --- PASS: TestScalar2556RuleDiagnosticCoordinatesUsePositions/rules/0 (0.00s)
+    --- PASS: TestScalar2556RuleDiagnosticCoordinatesUsePositions/rules/bracket]label (0.00s)
+    --- PASS: TestScalar2556RuleDiagnosticCoordinatesUsePositions/on_complete/ (0.02s)
+    --- PASS: TestScalar2556RuleDiagnosticCoordinatesUsePositions/on_complete/named (0.00s)
+    --- PASS: TestScalar2556RuleDiagnosticCoordinatesUsePositions/on_complete/1 (0.00s)
+    --- PASS: TestScalar2556RuleDiagnosticCoordinatesUsePositions/on_complete/0 (0.00s)
+    --- PASS: TestScalar2556RuleDiagnosticCoordinatesUsePositions/on_complete/bracket]label (0.00s)
+=== RUN   TestScalar2556NestedDiagnosticSourceOwnership
+=== RUN   TestScalar2556NestedDiagnosticSourceOwnership/rule_activity_escaped_key
+=== RUN   TestScalar2556NestedDiagnosticSourceOwnership/rule_write
+=== RUN   TestScalar2556NestedDiagnosticSourceOwnership/completion_write
+=== RUN   TestScalar2556NestedDiagnosticSourceOwnership/rule_emit_escaped_key
+=== RUN   TestScalar2556NestedDiagnosticSourceOwnership/completion_emit
+=== RUN   TestScalar2556NestedDiagnosticSourceOwnership/template_specialized
+=== RUN   TestScalar2556NestedDiagnosticSourceOwnership/template_inherited
+=== RUN   TestScalar2556NestedDiagnosticSourceOwnership/formerly_keyed_rule
+=== RUN   TestScalar2556NestedDiagnosticSourceOwnership/formerly_singleton_rule_write
+=== RUN   TestScalar2556NestedDiagnosticSourceOwnership/rule_fanout_identity
+=== RUN   TestScalar2556NestedDiagnosticSourceOwnership/completion_fanout_emit
+--- PASS: TestScalar2556NestedDiagnosticSourceOwnership (0.19s)
+    --- PASS: TestScalar2556NestedDiagnosticSourceOwnership/rule_activity_escaped_key (0.02s)
+    --- PASS: TestScalar2556NestedDiagnosticSourceOwnership/rule_write (0.02s)
+    --- PASS: TestScalar2556NestedDiagnosticSourceOwnership/completion_write (0.01s)
+    --- PASS: TestScalar2556NestedDiagnosticSourceOwnership/rule_emit_escaped_key (0.02s)
+    --- PASS: TestScalar2556NestedDiagnosticSourceOwnership/completion_emit (0.01s)
+    --- PASS: TestScalar2556NestedDiagnosticSourceOwnership/template_specialized (0.01s)
+    --- PASS: TestScalar2556NestedDiagnosticSourceOwnership/template_inherited (0.02s)
+    --- PASS: TestScalar2556NestedDiagnosticSourceOwnership/formerly_keyed_rule (0.03s)
+    --- PASS: TestScalar2556NestedDiagnosticSourceOwnership/formerly_singleton_rule_write (0.02s)
+    --- PASS: TestScalar2556NestedDiagnosticSourceOwnership/rule_fanout_identity (0.03s)
+    --- PASS: TestScalar2556NestedDiagnosticSourceOwnership/completion_fanout_emit (0.01s)
+=== RUN   TestScalar2556DiagnosticPreservesAuthoredFieldNames
+=== RUN   TestScalar2556DiagnosticPreservesAuthoredFieldNames/activity/ref
+=== RUN   TestScalar2556DiagnosticPreservesAuthoredFieldNames/activity/cel
+=== RUN   TestScalar2556DiagnosticPreservesAuthoredFieldNames/activity/condition
+=== RUN   TestScalar2556DiagnosticPreservesAuthoredFieldNames/activity/value"[part]
+=== RUN   TestScalar2556DiagnosticPreservesAuthoredFieldNames/emit/ref
+=== RUN   TestScalar2556DiagnosticPreservesAuthoredFieldNames/emit/cel
+=== RUN   TestScalar2556DiagnosticPreservesAuthoredFieldNames/emit/condition
+=== RUN   TestScalar2556DiagnosticPreservesAuthoredFieldNames/emit/value"[part]
+--- PASS: TestScalar2556DiagnosticPreservesAuthoredFieldNames (0.10s)
+    --- PASS: TestScalar2556DiagnosticPreservesAuthoredFieldNames/activity/ref (0.01s)
+    --- PASS: TestScalar2556DiagnosticPreservesAuthoredFieldNames/activity/cel (0.01s)
+    --- PASS: TestScalar2556DiagnosticPreservesAuthoredFieldNames/activity/condition (0.01s)
+    --- PASS: TestScalar2556DiagnosticPreservesAuthoredFieldNames/activity/value"[part] (0.01s)
+    --- PASS: TestScalar2556DiagnosticPreservesAuthoredFieldNames/emit/ref (0.01s)
+    --- PASS: TestScalar2556DiagnosticPreservesAuthoredFieldNames/emit/cel (0.01s)
+    --- PASS: TestScalar2556DiagnosticPreservesAuthoredFieldNames/emit/condition (0.01s)
+    --- PASS: TestScalar2556DiagnosticPreservesAuthoredFieldNames/emit/value"[part] (0.01s)
+=== RUN   TestScalar2556GateContextSourceDiagnostic
+=== RUN   TestScalar2556GateContextSourceDiagnostic/ready
+=== RUN   TestScalar2556GateContextSourceDiagnostic/${entity.name}
+=== RUN   TestScalar2556GateContextSourceDiagnostic/'ready'
+=== RUN   TestScalar2556GateContextSourceDiagnostic/"${7}"
+--- PASS: TestScalar2556GateContextSourceDiagnostic (0.05s)
+    --- PASS: TestScalar2556GateContextSourceDiagnostic/ready (0.01s)
+    --- PASS: TestScalar2556GateContextSourceDiagnostic/${entity.name} (0.01s)
+    --- PASS: TestScalar2556GateContextSourceDiagnostic/'ready' (0.01s)
+    --- PASS: TestScalar2556GateContextSourceDiagnostic/"${7}" (0.01s)
+PASS
+ok  	github.com/division-sh/swarm/internal/runtime/bootverify	0.485s
+=== RUN   TestPackPlatformAdmissionDiskLogicalRetainedParity
+--- PASS: TestPackPlatformAdmissionDiskLogicalRetainedParity (0.22s)
+PASS
+ok  	github.com/division-sh/swarm/internal/packadmission	0.223s

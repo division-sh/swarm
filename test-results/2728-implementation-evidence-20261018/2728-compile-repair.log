@@ -1,0 +1,6 @@
+Precompile outside test slot: environment=0.003s build=5.867s cleanup=0.000s total=5.870s
+Test slot acquired after 1ms. Starting go test ./internal/runtime/contracts ./internal/runtime/bootverify ./internal/runtime/authoringview ./internal/packadmission -run ^$
+ok  	github.com/division-sh/swarm/internal/runtime/contracts	0.005s [no tests to run]
+ok  	github.com/division-sh/swarm/internal/runtime/bootverify	0.006s [no tests to run]
+ok  	github.com/division-sh/swarm/internal/runtime/authoringview	0.007s [no tests to run]
+ok  	github.com/division-sh/swarm/internal/packadmission	0.006s [no tests to run]

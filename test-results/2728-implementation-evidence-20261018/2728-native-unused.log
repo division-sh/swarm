@@ -1,0 +1,9 @@
+swarm-unused: local native-only default/race/issue2413 matrix; NOT Linux/Darwin union (issue2438 parked)
+internal/runtime/cataloge2e/helpers_test.go:27:6: func platformSpecPathFromCatalogE2E is unused [default,issue2413,race] (U1000)
+test-results/2287-cas-quiet-server2-66e70093c0/selection_retry_cas_diagnostic_test.go:16:6: type selectionCASDiagnostic is unused [default,issue2413,race] (U1000)
+test-results/2287-cas-quiet-server2-66e70093c0/selection_retry_cas_diagnostic_test.go:22:6: func newSelectionCASDiagnostic is unused [default,issue2413,race] (U1000)
+test-results/2287-cas-quiet-server2-66e70093c0/selection_retry_cas_diagnostic_test.go:29:34: func (*selectionCASDiagnostic).report is unused [default,issue2413,race] (U1000)
+test-results/2287-cas-quiet-server2-66e70093c0/selection_retry_cas_diagnostic_test.go:75:34: func (*selectionCASDiagnostic).retainFailureBeforeCleanup is unused [default,issue2413,race] (U1000)
+exit status 1
+swarm-unused: upstream U1000 merge failed: exit status 1
+exit status 1
