@@ -3466,24 +3466,23 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureConvergesAfterMissedSign
 		return nil
 	}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	foreignKey := seedForeignMalformedDynamicFlowRuntimeReadiness(t, instances)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err == nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
 		t.Fatal("ActivateFlowInstance succeeded across injected timer arm failure")
 	}
 	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(
-		context.Background(),
+		ctx,
 		req.TriggerEvent.RunID(),
 		req.Instance.Route(),
 	)
 	if err != nil || !found || !readiness.Pending() || (readiness.Phase == runtimepipeline.FlowAttachmentReady) {
 		t.Fatalf("failed no-auto readiness: found=%v readiness=%#v err=%v", found, readiness, err)
 	}
-	if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+	if flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatal("failed no-auto readiness retained an executable activation receipt")
 	}
 	for {
@@ -3496,7 +3495,13 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureConvergesAfterMissedSign
 	}
 	am.dynamicFlowReadinessRetryInterval = 10 * time.Millisecond
 
-	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+	runCtx := managedExecutionTestContextForCapturedSource(t, ctx)
+	execution, executionOK := managedexecution.FromContext(runCtx)
+	captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !executionOK || !capturedOK || execution.BundleHash != captured.BundleHash() {
+		t.Fatalf("no-auto retry managed execution source differs from captured source: execution=%t/%s captured=%t/%s", executionOK, execution.BundleHash, capturedOK, captured.BundleHash())
+	}
+	if err := am.Run(runCtx); err != nil {
 		t.Fatalf("Run automatic readiness owner: %v", err)
 	}
 	select {
@@ -3528,7 +3533,7 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureConvergesAfterMissedSign
 		t.Fatal("retry did not complete the exact successor attachment")
 	}
 	readiness, found, err = instances.LoadDynamicFlowRuntimeReadiness(
-		context.Background(),
+		ctx,
 		req.TriggerEvent.RunID(),
 		req.Instance.Route(),
 	)
