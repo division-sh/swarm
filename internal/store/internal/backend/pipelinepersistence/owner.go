@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -125,9 +126,10 @@ func nullUUIDString(raw string) string {
 }
 
 type PipelinePostgresOwner struct {
-	channelChanges  *render.ReconcileSignal
-	fanOutReadiness FanOutReadiness
-	apiIdempotency  *storeapiidempotency.PostgresOwner
+	workflowCommitObservation atomic.Pointer[WorkflowMutationCommitObservationForTest]
+	channelChanges            *render.ReconcileSignal
+	fanOutReadiness           FanOutReadiness
+	apiIdempotency            *storeapiidempotency.PostgresOwner
 	*storerunlifecycle.RunLifecyclePostgresOwner
 	*storedecision.DecisionPostgresOwner
 	*storedelivery.DeliveryPostgresOwner
@@ -148,9 +150,10 @@ type PipelinePostgresOwner struct {
 }
 
 type PipelineSQLiteOwner struct {
-	channelChanges  *render.ReconcileSignal
-	fanOutReadiness FanOutReadiness
-	apiIdempotency  *storeapiidempotency.SQLiteOwner
+	workflowCommitObservation atomic.Pointer[WorkflowMutationCommitObservationForTest]
+	channelChanges            *render.ReconcileSignal
+	fanOutReadiness           FanOutReadiness
+	apiIdempotency            *storeapiidempotency.SQLiteOwner
 	*storerunlifecycle.RunLifecycleSQLiteOwner
 	*storedecision.DecisionSQLiteOwner
 	*storedelivery.DeliverySQLiteOwner

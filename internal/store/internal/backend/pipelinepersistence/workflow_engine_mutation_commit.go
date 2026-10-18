@@ -532,6 +532,9 @@ func commitWorkflowEngineMutation(
 			}
 			return nil
 		})
+		if err == nil {
+			err = observeWorkflowMutationDomainForTest(txctx, store, command)
+		}
 		return result, err
 	})
 	result, committed := outcome.Value()
