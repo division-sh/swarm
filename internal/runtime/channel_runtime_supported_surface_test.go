@@ -176,6 +176,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			sourceFact := sourceartifactfixture.RequireArtifact(t, ctx, writer, bundle.SourceArtifact)
 			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, sourceFact.BundleHash()))
+			ctx = originalRuntimeFixtureContext(t, ctx, eventStore)
 			switch typed := eventStore.(type) {
 			case *store.PostgresStore:
 				storetest.RequireRun(t, ctx, typed, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact})

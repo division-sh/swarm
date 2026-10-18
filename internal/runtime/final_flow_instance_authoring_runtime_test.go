@@ -51,10 +51,25 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	ctx = correlation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	capability, err := pg.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+		OwnerID: "final-flow-activation-test", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	var manager *runtimemanager.AgentManager
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
+		MutationContext: func(input context.Context) (context.Context, error) {
+			input = startupownership.CarryMutationAuthority(input, ctx)
+			_, err := startupownership.CaptureMutationAuthority(input)
+			return input, err
+		},
 		ContractBundle:     source,
 		SourceArtifactFact: fact,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
@@ -105,12 +120,6 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		t.Fatal(err)
 	}
 	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, desired)
-	if err != nil {
-		t.Fatal(err)
-	}
-	capability, err := pg.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-		OwnerID: "final-flow-activation-test", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -891,6 +891,7 @@ func seedRuntimeTestRunForSource(t *testing.T, selected *store.PostgresStore, so
 	fact := runtimeTestSourceArtifactFact(t, source)
 	ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), templateInstanceDeliveryRunID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+	ctx = originalRuntimeFixtureContext(t, ctx, selected)
 	bundle, _ := semanticview.Bundle(source)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	return ctx

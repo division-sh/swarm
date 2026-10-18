@@ -55,6 +55,13 @@ func originalRuntimeFixtureContext(t testing.TB, ctx context.Context, selected a
 	if !ok {
 		t.Fatalf("fixture requires its original selected lifecycle owner: %T", selected)
 	}
+	if _, present := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !present {
+		scope, found := runtimeauthoractivity.ScopeFromContext(ctx)
+		if !found || scope.RuntimeInstanceID == "" {
+			t.Fatal("fixture requires its declared runtime instance before process acquisition")
+		}
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, scope.RuntimeInstanceID)
+	}
 	process, err := agentfixture.ProcessCapability(t, ctx, owner)
 	if err != nil {
 		t.Fatal(err)
