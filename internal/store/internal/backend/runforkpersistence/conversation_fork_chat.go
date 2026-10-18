@@ -97,7 +97,7 @@ func (s conversationForkStore) prepareOperatorConversationForkChat(ctx context.C
 	}
 
 	var prepared runtimerunfork.ConversationForkChatPrepared
-	err = s.runForkMutation(ctx, forkID, true, func(txctx context.Context, tx *sql.Tx) error {
+	err = s.runForkPreparation(ctx, forkID, func(txctx context.Context, tx *sql.Tx) error {
 		if idempotencyKey != "" {
 			if err := rejectConversationForkChatReplay(txctx, s, tx, forkID, method, actorTokenID, idempotencyKey, requestHash); err != nil {
 				return err
