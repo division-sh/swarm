@@ -142,3 +142,54 @@ ref under the push hold. Existing local receipts are not hosted-tier credit.
 Hosted lifecycle remains provisional to its final path/owned-unit map; no
 extra local tier or server2 run. No CI slot is requested while the H2 accounting
 and final-base preflight remain unresolved. S2 coding still waits for #2698.
+
+## Post-Rebase H2 Follow-Up
+
+Rebased onto the requested master0576b61120ad0f9a188508e084efd74c7e5b1fed,
+which includes #2732 at74a18803b1. Signed source/test head663a764f24. The old
+c772c14791 is retained locally at
+agent-a/backup-2700-pre-master-20261018-c772c14791; no ref was pushed.
+Existing B/E integration merges were preserved, not flattened. At the first
+recreated merge, both resolved conflict files matched the original merge's
+blobs exactly. A final tree comparison caught and restored two other recorded
+merge details: no duplicate ActivityRecoverySummary and no retired effect_class
+column in the historical fixture. Both restored files match the signed backup
+byte-for-byte. The final old/new changed-path list equals the master's16 paths;
+no additional original-owner file differs. This is a real master rebase, NOT
+an identical-tree or final-head approval claim.
+
+Lean post-rebase proof: normal runner, GOMAXPROCS=2, -p=1, -count=1,
+unchanged180s limits; no repeated local tier or race-only repetition.
+
+| Exact-head selected proof at663a764f24 | Actual result |
+| --- | --- |
+| Five-case recorded/unapproved runtime execution, both stores | PASS8.520s,10/10 cells. |
+| Genuine approval status matrix, both stores, plus selected EventBus negative control | PASS runtimepersistence6.840s; all10 approved status cells retain their intended assertions. |
+| Compiled transition ownership guard and its negative control | PASS contracts41.343s. |
+| Historical admission guard | Still RED12.574s; same single production census identifier below. Closed-family and negative controls PASS. |
+| TestRepositoryEventBusSourceOperationLedgerIsExhaustive | PASS0.051s, separate exact-root count1 invocation. The first command's bare Ledger selector did not select this root; no credit is assigned to it there. |
+
+Exact surviving guard output:
+
+```text
+historical_admission_boundary_test.go:154: historical admission bypass or stale owner census:
+    store/internal/backend/runforkrevision::ObserveH2CommittedHistoryForTest/ledger_sql at /home/youmew/dev/wt/agent-a/scratch/internal/store/internal/backend/runforkrevision/test_timer_fact_observation.go:56:36
+--- FAIL: TestRunForkHistoricalAdmissionConsumers (12.54s)
+    --- FAIL: TestRunForkHistoricalAdmissionConsumers/production (0.00s)
+```
+
+This is distinct from #2732's stage-entry transition/Bus registrations:
+master0576's test_timer_fact_observation.go has CountWorkflowTimerRevisionFactsForTest
+and ObserveH2CounterCommitsForTest, but NOT ObserveH2CommittedHistoryForTest.
+The latter comes through the retained c59becc502 #2715 diagnostic input already
+identified above; rebasing cannot add its missing historical-consumer entry.
+This trace is not a new per-merge ownership attribution. Reviewer-a: please
+disposition that exact remaining reader/accounting boundary. No allowance,
+classifier, baseline or diagnostic semantics was changed to hide the RED.
+
+Receipt: amendment2-master-0576-rebase-h2-and-affected-focused-count1.log,
+SHA2566f18b7b245defa0c82397d3b81749e4dae57d98881bc91504f44f9d283ee1a3f,
+under the same retained local directory. Overall EXIT=1, not guard-sweep GREEN.
+The separate passing EventBus receipt is
+amendment2-master-0576-eventbus-ledger-guard-count1.log in that directory.
+No push or hosted dispatch; preflight/landing qualification remains unclaimed.
