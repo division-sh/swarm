@@ -163,7 +163,11 @@ func assertQ10EmbeddedSpecComposition1801(t *testing.T, row recipe, actual strin
 		t.Fatal("Q10 restart reversal did not recover the exact delivered embedded-spec endpoint")
 	}
 	prior, err := reverseReviewedSuccessor2617(pin.Candidate, pin.Edits)
-	if err != nil || !canonicalComparatorEqual2617(prior, embedded.Original.Successor) {
+	historical := embedded.Original.After
+	if embedded.Original.Successor != "" {
+		historical = embedded.Original.Successor
+	}
+	if err != nil || !canonicalComparatorEqual2617(prior, historical) {
 		t.Fatalf("Q10 restart lost its exact pre-embedded historical endpoint: %v", err)
 	}
 	for _, field := range []string{"family", "file", "function", "before", "after", "successor", "removed", "mechanical", "old-row"} {
@@ -203,7 +207,7 @@ func assertQ10EmbeddedSpecComposition1801(t *testing.T, row recipe, actual strin
 		"construction":  strings.Replace(actual, "!reflect.DeepEqual(constructionBefore, receipts)", "!reflect.DeepEqual(receipts, receipts)", 1),
 		"q10-only":      pin.Candidate,
 		"embedded-only": embedded.Candidate,
-		"historical":    embedded.Original.Successor,
+		"historical":    historical,
 	}
 	for name, source := range mutants {
 		t.Run("q10-composition/source/"+name, func(t *testing.T) {
