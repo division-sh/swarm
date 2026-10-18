@@ -925,6 +925,14 @@ type runtimeCompositionRequest struct {
 	DataProjectionRoot   string
 }
 
+func buildRecoveredSelectedAPICapabilities(ctx context.Context, stores *storeselected.Owner, req selectedAPICapabilityRequest, contexts []serveRuntimeBundleContext) (selectedAPICapabilities, string, error) {
+	if err := recoverServeDisplacedHTTPActivities(ctx, req.ProcessCapability, contexts); err != nil {
+		return selectedAPICapabilities{}, "activity_startup_recovery", err
+	}
+	caps, err := buildSelectedAPICapabilities(stores, req)
+	return caps, "runtime_context", err
+}
+
 // buildRuntimeComposition owns the common acquisition/start/ready/close path for
 // live serving and private test execution. Existing owners retain all semantics.
 func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest) (exitCode int) {
@@ -1447,13 +1455,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		NoticePresentation:      noticePresentation,
 		SelectedFork:            supervisor.selected,
 	}
-	if err := recoverServeDisplacedHTTPActivities(ctx, processCapability, runtimeContexts); err != nil {
-		presenter.fail(5, "activity_startup_recovery", err)
-		return 1
-	}
-	apiStoreCaps, err := buildSelectedAPICapabilities(stores, apiCapabilityRequest)
+	apiStoreCaps, failureStage, err := buildRecoveredSelectedAPICapabilities(ctx, stores, apiCapabilityRequest, runtimeContexts)
 	if err != nil {
-		presenter.fail(5, "runtime_context", err)
+		presenter.fail(5, failureStage, err)
 		return 1
 	}
 	supervisor.selectedRecoveryEnvironment = apiStoreCaps.SelectedForkRecovery
