@@ -153,5 +153,6 @@ func (g *selectedChildContextProofGrant) requireGatewayCustody(ctx context.Conte
 	if _, ok := hooks.ResolveTurnContext(token); ok {
 		return errors.New("gateway retained unregistered turn authority")
 	}
+	g.gatewayChecks.Add(1)
 	return nil
 }

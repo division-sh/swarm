@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -78,9 +80,10 @@ type selectedChildContextProofCapability struct {
 
 type selectedChildContextProofGrant struct {
 	startupownership.GenerationGrant
-	proof *selectedChildContextProofCapability
-	ctx   context.Context
-	stale context.Context
+	proof         *selectedChildContextProofCapability
+	ctx           context.Context
+	stale         context.Context
+	gatewayChecks atomic.Int64
 }
 
 type selectedChildContextProofKey struct{}
@@ -106,6 +109,14 @@ func (p *selectedChildContextProofCapability) IssueSelectedForkGenerationGrant(c
 
 func (g *selectedChildContextProofGrant) BindRuntimeMutationContext(ctx context.Context) (context.Context, error) {
 	return startupownership.WithRuntimeMutationAuthority(ctx, g.GenerationGrant)
+}
+
+func (g *selectedChildContextProofGrant) CommitAgentLifecycleTransition(ctx context.Context, req manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, error) {
+	result, err := g.GenerationGrant.CommitAgentLifecycleTransition(ctx, req)
+	if err == nil && req.Agent != nil {
+		err = g.requireGatewayCustody(ctx, req.Agent.Config)
+	}
+	return result, err
 }
 
 func (g *selectedChildContextProofGrant) BindSelectedForkMutationContext(ctx context.Context) (context.Context, error) {
@@ -172,6 +183,9 @@ func (p *selectedChildContextProofCapability) requireRetiredChildren(t *testing.
 		t.Fatal("parent-bound proof never issued a real selected child")
 	}
 	for _, grant := range p.issued {
+		if grant.gatewayChecks.Load() == 0 {
+			t.Fatal("selected child never reached its actual-actor gateway custody controls")
+		}
 		owner := grant.GenerationGrant.(startupownership.SelectedForkMutationContextOwner)
 		if _, err := owner.BindSelectedForkMutationContext(context.WithoutCancel(grant.ctx)); err == nil {
 			t.Fatal("retired selected child regained an operation context")
