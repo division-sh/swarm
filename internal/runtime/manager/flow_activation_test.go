@@ -4401,11 +4401,11 @@ func TestActivateFlowInstanceRejectsAgentNameInterpolationBeforeMutation(t *test
 func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "task.started")
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	const runID = "11111111-1111-1111-1111-111111111115"
 	const triggerEventID = "33333333-3333-3333-3333-333333333333"
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEventWithMode(triggerEventID, executionmode.Mock, runID)
 	parent := runtimeflowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), runID, runID, runID, "")
@@ -4456,10 +4456,10 @@ func TestActivateFlowInstancePublishesAutoEmitEvent(t *testing.T) {
 func TestActivateFlowInstancePreservesReplyContextIntoAutoEmit(t *testing.T) {
 	bundle := testFlowBundle(t, "review.created")
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-v1:child-activation"}}
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if len(bus.publishedContexts) != 1 || bus.publishedContexts[0].ReplyContextID() != req.Context.ReplyContextID() {
@@ -4472,12 +4472,12 @@ func TestActivateFlowInstancePreservesReplyContextIntoAutoEmit(t *testing.T) {
 
 func TestActivateFlowInstanceAutoEmitRejectsMissingTriggerLineage(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "task.started")
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = events.Event{}
 
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+	err := activateFlowInstanceForTest(am, ctx, req)
 	if err == nil || !strings.Contains(err.Error(), "requires exact trigger run_id and parent_event_id") {
 		t.Fatalf("ActivateFlowInstance error = %v, want exact trigger lineage failure", err)
 	}
@@ -4488,7 +4488,6 @@ func TestActivateFlowInstanceAutoEmitRejectsMissingTriggerLineage(t *testing.T) 
 
 func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationContext(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundleWithAutoEmitEntry(t, "component.scaffold.start", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -4504,6 +4503,7 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 		"component_id": {Type: "string"}, "component_type": {Type: "string"},
 		"integer_score": {Type: "integer"}, "double_score": {Type: "number"},
 	})
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "component_id": "component-1",
 		"component_type": "api",
@@ -4511,7 +4511,7 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 		"double_score":   float64(75),
 	})
 
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/component.scaffold.start")
@@ -4540,7 +4540,6 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 
 func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundleWithAutoEmitEntry(t, "component.scaffold.start", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -4550,13 +4549,14 @@ func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t
 		},
 	})
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"source_event_id": {Type: "string"}})
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	const triggerEventID = "44444444-4444-4444-4444-444444444444"
 	const payloadSourceEventID = "business-payload-source"
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID)
 	setSuppliedFields(t, &req, map[string]any{"instance_key": req.Instance.InstanceID, "source_event_id": payloadSourceEventID})
 
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/component.scaffold.start")
@@ -4574,7 +4574,6 @@ func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t
 
 func TestActivateFlowInstanceCommittedAutoEmitUsesInitialStatePayload(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundleWithAutoEmitEntry(t, "component.scaffold.start", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -4584,7 +4583,7 @@ func TestActivateFlowInstanceCommittedAutoEmitUsesInitialStatePayload(t *testing
 		},
 	})
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"component_id": {Type: "string"}})
-	ctx := testAuthorActivityContext(context.Background())
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"component_id": "component-1"})
 
@@ -4605,7 +4604,6 @@ func TestActivateFlowInstanceCommittedAutoEmitUsesInitialStatePayload(t *testing
 
 func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundleWithAutoEmitEntry(t, "repo.template.selected", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -4615,10 +4613,11 @@ func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *te
 		},
 	})
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"template_id": {Type: "string"}})
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"template_id": "application-basic-v1"})
 
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	event := findPublishedFlowActivationEvent(t, bus, "review/inst-1/repo.template.selected")
@@ -4630,11 +4629,11 @@ func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *te
 
 func TestActivateFlowInstancePublishesAutoEmitAfterNamedCommit(t *testing.T) {
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "task.started")
+	am, ctx := newFlowActivationManagerForSource(t, bus, &flowActivationTestInstanceStore{}, semanticview.Wrap(bundle))
 	const runID = "22222222-2222-2222-2222-222222222215"
 	const triggerEventID = "55555555-5555-5555-5555-555555555555"
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.TriggerEvent = testFlowActivationTriggerEvent(triggerEventID, runID)
 	parent := runtimeflowidentity.Stored(req.ContractBundle, semanticview.RootExecutionFlowID(req.ContractBundle), runID, runID, runID, "")
@@ -4666,11 +4665,11 @@ func TestActivateFlowInstanceFinalizesIdenticalReplayWithoutDuplicateCreationSid
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
 	store := &flowActivationTestStore{}
-	am := newFlowActivationManager(t, bus, instances, store)
 	bundle := testFlowBundle(t, "task.started")
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), store)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("first ActivateFlowInstance: %v", err)
 	}
 	firstCreates := len(instances.creates)
@@ -4679,7 +4678,7 @@ func TestActivateFlowInstanceFinalizesIdenticalReplayWithoutDuplicateCreationSid
 	firstAgents := len(store.upserts)
 
 	instances.replayConstruction = true
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("identical replay ActivateFlowInstance: %v", err)
 	}
 	if len(instances.creates) != firstCreates {
@@ -4699,7 +4698,6 @@ func TestActivateFlowInstanceFinalizesIdenticalReplayWithoutDuplicateCreationSid
 func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundleWithAutoEmitEntry(t, "task.started", runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{
 			Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -4708,8 +4706,9 @@ func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testin
 			Required: []string{"reason"},
 		},
 	})
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
+	err := activateFlowInstanceForTest(am, ctx, testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
 	if err == nil || !strings.Contains(err.Error(), "constructor task.started payload") || !strings.Contains(err.Error(), "reason is required") {
 		t.Fatalf("ActivateFlowInstance error = %v, want missing required auto-emit schema failure", err)
 	}
@@ -4733,11 +4732,11 @@ func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testin
 func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "task.started")
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"unexpected": {Type: "string"}})
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 1)
-	ctx := withFlowActivationPostCommit(testAuthorActivityContext(context.Background()), &postCommit)
+	ctx = withFlowActivationPostCommit(ctx, &postCommit)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"unexpected": "value"})
 
@@ -4768,13 +4767,13 @@ func TestActivateFlowInstanceQueuedAutoEmitFailsClosedOnUndeclaredConfigField(t 
 func TestActivateFlowInstanceAutoEmitFailsClosedOnUndeclaredEnvelopeLikeConfigField(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "task.started")
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"entity_id": {Type: "string"}})
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"entity_id": "business-value"})
 
-	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+	err := activateFlowInstanceForTest(am, ctx, req)
 	if err == nil || !strings.Contains(err.Error(), "auto-emit task.started") || !strings.Contains(err.Error(), "entity_id is not allowed") {
 		t.Fatalf("ActivateFlowInstance error = %v, want undeclared envelope-like config field failure", err)
 	}
