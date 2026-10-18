@@ -1796,6 +1796,58 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 			wantStderr: "heuristics is required",
 		},
 		{
+			name: "run diagnose missing instances",
+			args: []string{"run", "status", "run-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validDiagnosticRunDiagnosis("run-1", "running", "", "", []any{})
+				delete(result, "instances")
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "instances and attributions are required",
+		},
+		{
+			name: "run diagnose null instances",
+			args: []string{"run", "status", "run-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validDiagnosticRunDiagnosis("run-1", "running", "", "", []any{})
+				result["instances"] = nil
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "instances and attributions are required",
+		},
+		{
+			name: "run diagnose missing attributions",
+			args: []string{"run", "status", "run-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validDiagnosticRunDiagnosis("run-1", "running", "", "", []any{})
+				delete(result, "attributions")
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "instances and attributions are required",
+		},
+		{
+			name: "run diagnose null attributions",
+			args: []string{"run", "status", "run-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validDiagnosticRunDiagnosis("run-1", "running", "", "", []any{})
+				result["attributions"] = nil
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "instances and attributions are required",
+		},
+		{
 			name: "run diagnose missing test quiescence",
 			args: []string{"run", "status", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
