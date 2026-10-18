@@ -60,8 +60,16 @@ func newSelectedProviderCompletionFixtureWithProcess(t *testing.T, store selecte
 	if err != nil {
 		t.Fatal(err)
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.request.DeclarationPlan, err = agenttopology.NewSelectedDeclarationPlan(bundle.SourceArtifact.BundleHash(), []agenttopology.DesiredAgent{{
-		Identity: plan, ConfigRevision: revision, Source: agenttopology.SourceCoordinate{BundleHash: bundle.SourceArtifact.BundleHash()},
+		Identity: plan, ConfigRevision: revision, Source: coordinate,
 	}})
 	if err != nil {
 		t.Fatal(err)
