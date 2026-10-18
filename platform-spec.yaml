@@ -970,8 +970,10 @@ contract_formats:
         and remint generation-bearing event payloads, timer/join/accumulator
         identities, pending activity requests, journal evidence, and result IDs.
         No authored class, retry budget or fork-policy field selects re-execution.
-        The separately tracked unapproved-activity continuation remains unavailable;
-        this retirement does not enable it. An activity.approval proposal pending at the fork point mints a
+        Unapproved terminal activity evidence may continue only through its exact
+        producing request, original declaration, fixed-cut lineage and run/hash-bound
+        source artifact. Missing or non-terminal journal evidence cannot authorize
+        a child provider call. An activity.approval proposal pending at the fork point mints a
         fork-local card, request identity, effect hash, and continuation, clears source-run
         reply context authority, and requires a fresh decision. A revised or rejected proposal remains terminal evidence. An
         approved proposal may copy only an unambiguous succeeded or failed terminal
@@ -5329,7 +5331,7 @@ handler_specification:
             Duplicate terminal operations and reopened receipt reads preserve the original fact exactly, even when
             a later caller submits a different clock value; rollback persists neither the result nor its terminal time.
           dispatch: One physical attempt per admitted request; no authored retry, class or fork-policy field exists. Native attempt1 identity remains an internal atomic fence.
-          fork_evidence: Explicit proposed-effect/evidence disposition under runtime.run_fork.selected_contract_execution; never infer fork authorization from source approval. The separately tracked unapproved-activity continuation remains unavailable.
+          fork_evidence: Explicit original-declaration/proposed-effect and recorded-terminal-evidence disposition under runtime.run_fork.selected_contract_execution; never infer fork authorization from source approval or missing proposal rows. Exact unapproved terminal reuse conveys no child provider dispatch authority.
           interruption: After physical launch, timeout, transport failure, interrupted response or process death has an uncertain outcome and never authorizes automatic redispatch. Preparation/admission refusal before launch and complete known provider responses remain distinct. A retained started row alone cannot prove the predecessor has lost commit authority.
           retained_evidence: Historical packets remain immutable evidence; current request/result/card schemas omit retired class, retry and fork-policy fields. Copied terminal evidence conveys no child dispatch or recovery authority.
           admission: The retired effect_class tool key is refused on presence with the teaching error defined by tool_model.http_interruption_rule; there is no ignored declaration or method-based safety inference.

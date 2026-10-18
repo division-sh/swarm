@@ -240,18 +240,15 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			if err != nil {
 				t.Fatalf("count fork attempts: %v", err)
 			}
-			if tt.wantForkAttemptStatus == "" {
-				if forkAttemptCount != 0 {
-					t.Fatalf("read-only fork copied or journaled %d activity attempts, want 0", forkAttemptCount)
-				}
-			} else {
-				if forkAttemptCount != 1 {
-					t.Fatalf("fork activity attempts = %d, want 1", forkAttemptCount)
-				}
-				assertSelectedContractForkActivityAttempt(t, selected, forkRequestEventID, result.Materialization.ForkRunID, forkResultEventID, forkRequest.Generation, tt)
+			if forkAttemptCount != 1 {
+				t.Fatalf("fork activity attempts = %d, want 1", forkAttemptCount)
 			}
+			assertSelectedContractForkActivityAttempt(t, selected, forkRequestEventID, result.Materialization.ForkRunID, forkResultEventID, forkRequest.Generation, tt)
 
 			published := loadSelectedContractActivityResult(t, selected, result.Materialization.ForkRunID, forkResultEventID, tt.resultEventType)
+			if count, err := storetest.CountRunNamedEventStorage(ctx, selected, result.Materialization.ForkRunID, tt.resultEventType); err != nil || count != 1 {
+				t.Fatalf("child result publication count=%d want=1 err=%v", count, err)
+			}
 			if published["revision_id"] != forkRequest.Generation.RevisionID {
 				t.Fatalf("published revision_id = %#v, want %s", published["revision_id"], forkRequest.Generation.RevisionID)
 			}
