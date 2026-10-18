@@ -12629,7 +12629,8 @@ tool_model:
         authored admission kind/pin/auth/event/acknowledgement facts without claiming resolved pack identity, generation,
         request authentication, or readiness.
       inbound_validation_response: >
-        A canonical schema violation while admitting the submitted inbound event is a permanent HTTP 400 failure.
+        A canonical schema violation while admitting the submitted inbound event, including required/collection/undeclared
+        null refusals during wire-boundary normalization, is a permanent HTTP 400 failure.
         The gateway's one publication-error response owner uses typed admission evidence, never error-text matching.
         It returns a fixed validation phrase and the bounded, escaped failing path; caller-supplied property names are
         untrusted display data. Raw values, schema Detail/Actual, internal prefixes and wrapped errors are not disclosed.

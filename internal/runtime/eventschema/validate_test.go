@@ -93,9 +93,18 @@ func TestNormalizeOptionalFieldNullsRejectsRequiredAndCollectionNulls(t *testing
 			schema:  map[string]any{"type": "object", "additionalProperties": false},
 			payload: map[string]any{"extra": nil}, want: "null is not a declared optional field", path: "$.extra", constraint: "additionalProperties",
 		},
+		"nested required": {
+			schema:  map[string]any{"type": "object", "properties": map[string]any{"record": map[string]any{"type": "object", "required": []any{"value"}, "properties": map[string]any{"value": map[string]any{"type": "string"}}}}},
+			payload: map[string]any{"record": map[string]any{"value": nil}}, want: "required and cannot be null", path: "$.record.value", constraint: "required",
+		},
+		"nested collection": {
+			schema:  map[string]any{"type": "object", "properties": map[string]any{"records": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"values": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}}}}},
+			payload: map[string]any{"records": []any{map[string]any{"values": []any{nil}}}}, want: "cannot be null", path: "$.records[0].values[0]", constraint: "type",
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			before := cloneSchemaValue(tc.payload)
 			_, err := NormalizeOptionalFieldNulls(tc.schema, tc.payload)
 			if err == nil {
 				t.Fatalf("normalization accepted %s null", name)
@@ -108,8 +117,18 @@ func TestNormalizeOptionalFieldNullsRejectsRequiredAndCollectionNulls(t *testing
 			if !errors.As(err, &typed) || typed.Path != tc.path || typed.Constraint != tc.constraint || typed.Actual != "null" {
 				t.Fatalf("null refusal lost typed schema evidence: error=%v violation=%+v", err, typed)
 			}
+			if !reflect.DeepEqual(before, tc.payload) {
+				t.Fatal("null refusal mutated the caller payload")
+			}
 		})
 	}
+	t.Run("nested null boundary", func(t *testing.T) {
+		err := normalizeNestedOptionalNulls("$.nested", map[string]any{"type": "string"}, nil)
+		var typed *Violation
+		if !errors.As(err, &typed) || typed.Path != "$.nested" || typed.Constraint != "type" || typed.Actual != "null" {
+			t.Fatalf("nested null lost typed schema evidence: error=%v violation=%+v", err, typed)
+		}
+	})
 }
 
 func TestValidatePayloadAgainstSchemaReturnsStructuredViolation(t *testing.T) {

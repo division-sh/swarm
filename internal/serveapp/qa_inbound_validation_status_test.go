@@ -14,10 +14,19 @@ import (
 )
 
 func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
+	for _, fixture := range []struct {
+		backend, name string
+		optionalNull  bool
+	}{
+		{"sqlite", "sqlite", false},
+		{"postgres", "postgres", false},
+		{"sqlite", "sqlite_optional_null", true},
+		{"postgres", "postgres_optional_null", true},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			backend := fixture.backend
 			root := canonicalrouting.CopyKeyedRootRawIngress(t)
-			writeStandingCandidateFile(t, filepath.Join(root, "types.yaml"), "types:\n  AccountInput:\n    delivery_id: text\n    user_id: text\n")
+			writeStandingCandidateFile(t, filepath.Join(root, "types.yaml"), "types:\n  AccountInput:\n    delivery_id: text\n    user_id: text\n    labels: {type: '[text]?'}\n    attributes: 'map[text]text?'\n    nested: NullProbe?\n  NullProbe:\n    user_id: text\n")
 			writeStandingCandidateFile(t, filepath.Join(root, "events.yaml"), "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: AccountInput\n")
 			credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 			t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
@@ -49,17 +58,21 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 				t.Fatal(err)
 			}
 			endpoint := strings.TrimSuffix(served.Endpoint, "/v1/rpc") + "/webhooks/keyed-shop/partner"
-			for _, invalid := range []struct{ id, body string }{
-				{"missing-user", `{"delivery_id":"missing-user"}`},
-				{"wrong-user-type", `{"delivery_id":"wrong-user-type","user_id":7}`},
-				{"null-user", `{"delivery_id":"null-user","user_id":null}`},
+			for _, invalid := range []struct{ id, body, path string }{
+				{"missing-user", `{"delivery_id":"missing-user"}`, "$.data.user_id"},
+				{"wrong-user-type", `{"delivery_id":"wrong-user-type","user_id":7}`, "$.data.user_id"},
+				{"null-user", `{"delivery_id":"null-user","user_id":null}`, "$.data.user_id"},
+				{"null-array", `{"delivery_id":"null-array","user_id":"user-7","labels":[null]}`, "$.data.labels[0]"},
+				{"null-map", `{"delivery_id":"null-map","user_id":"user-7","attributes":{"entry":null}}`, "$.data.attributes.entry"},
+				{"null-undeclared", `{"delivery_id":"null-undeclared","user_id":"user-7","extra":null}`, "$.data.extra"},
+				{"null-nested", `{"delivery_id":"null-nested","user_id":"user-7","nested":{"user_id":null}}`, "$.data.nested.user_id"},
 			} {
 				code, response := a9PostSignedRawIngress(t, endpoint, secret, invalid.body)
 				t.Logf("typed invalid id=%s status=%d body=%s", invalid.id, code, response)
 				if code != http.StatusBadRequest && code != http.StatusUnprocessableEntity {
 					t.Errorf("typed validation is permanent, status=%d want400/422", code)
 				}
-				if !strings.Contains(string(response), "$.data.user_id") {
+				if !strings.Contains(string(response), invalid.path) {
 					t.Errorf("typed validation response lost failing path: %s", response)
 				}
 				if strings.Contains(string(response), "bus:") || strings.Contains(string(response), "publish inbound failed:") {
@@ -76,7 +89,11 @@ func TestQAInboundTypedValidationReturnsPermanentHTTPErrorBothStores(t *testing.
 					t.Fatalf("invalid input changed construction: before=%+v after=%+v err=%v", before, after, err)
 				}
 			}
-			code, accepted := a9PostSignedRawIngress(t, endpoint, secret, `{"delivery_id":"valid-user","user_id":"user-7"}`)
+			body := `{"delivery_id":"valid-user","user_id":"user-7"}`
+			if fixture.optionalNull {
+				body = `{"delivery_id":"valid-user","user_id":"user-7","labels":null,"attributes":null,"nested":null}`
+			}
+			code, accepted := a9PostSignedRawIngress(t, endpoint, secret, body)
 			if code != http.StatusAccepted {
 				t.Fatalf("valid typed input status=%d receipt=%s", code, accepted)
 			}
