@@ -676,7 +676,9 @@ func (g *liveGenerationGrant) SourceSetPlan(ctx context.Context) (runtimeagentto
 // requireCurrentSourceSetLocked is called while the process operation lock is
 // held, so the source-set head cannot change between this proof and a mutation.
 func (g *generationGrant) requireCurrentSourceSetLocked(ctx context.Context, evidence GrantEvidence) (runtimeagenttopology.SourceSetPlan, error) {
-	plan, exists, err := g.owner.session.LoadSourceSet(ctx)
+	// This closed process read checks the replacement's source plan; it does
+	// not borrow mutation authority from the caller's predecessor generation.
+	plan, exists, err := g.owner.session.LoadSourceSet(g.owner.processMutationContext(ctx))
 	if err != nil {
 		err = g.owner.retireOnPossessionFailure(err)
 		return runtimeagenttopology.SourceSetPlan{}, err

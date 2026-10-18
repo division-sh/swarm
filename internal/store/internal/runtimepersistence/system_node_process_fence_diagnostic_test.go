@@ -65,6 +65,11 @@ func proveOriginalSessionProofConfinement(t *testing.T, backend string) {
 	if (backend == "postgres") != (captureErr == nil) {
 		t.Fatalf("original construction capture: %v", captureErr)
 	}
+	if backend == "postgres" {
+		if _, err := CaptureOriginalProcessForTest(selected); err == nil {
+			t.Fatal("duplicate original construction observation admitted")
+		}
+	}
 	f, _ := constructWorkflowMutationFixture(t, backend, "original-session-proof", time.Now().UTC().Add(-time.Minute), selected)
 	if err := f.manager.Shutdown(); err != nil {
 		t.Fatal(err)
@@ -97,6 +102,9 @@ func proveOriginalSessionProofConfinement(t *testing.T, backend string) {
 		t.Fatal("one original session issued a second interruption handle")
 	}
 	foreign, _ := constructWorkflowMutationFixture(t, backend, "foreign-original-session-proof", time.Now().UTC().Add(-time.Minute))
+	if _, err := CaptureOriginalProcessForTest(foreign.store); err == nil {
+		t.Fatal("late observation acquired an already constructed process")
+	}
 	foreignOriginal, err := startupownership.CaptureMutationAuthority(foreign.ctx)
 	if err != nil {
 		t.Fatal(err)

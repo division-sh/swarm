@@ -46,6 +46,7 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 					t.Fatalf("NewEventBus: %v", err)
 				}
 				agentID := "standalone-convergence-agent"
+				fixtureOwner := t
 				for index, test := range tests {
 					test := test
 					t.Run(test.name, func(t *testing.T) {
@@ -62,7 +63,7 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 								Origin: semanticEventRunOriginForTest(t, event.ID(), string(event.Type())),
 								RunID:  event.RunID(), StartedAt: event.CreatedAt(),
 							})
-							seedStandaloneConvergenceAgent(t, fixture.store, ctx, agentIdentity)
+							seedStandaloneConvergenceAgent(fixtureOwner, fixture.store, ctx, agentIdentity)
 							delivery = runtimebustest.SubscribeForRun(t, eventBus, event.RunID(), agentID, event.Type())
 							if delivery == nil {
 								t.Fatal("Subscribe returned nil")
