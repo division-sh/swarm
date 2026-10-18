@@ -124,7 +124,7 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 	}
 	population, err := json.Marshal(restored)
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(population)) != packet.PopulationSHA256 || priorSuccessors != 12 || q10Compositions != 1 {
-		t.Fatal("embedded-spec successor overwrote historical evidence, prior chains or an unrelated row")
+		t.Fatalf("embedded-spec successor overwrote historical evidence, prior chains or an unrelated row: population=%x want=%s prior-successors=%d want=12 Q10-compositions=%d want=1 marshal=%v", sha256.Sum256(population), packet.PopulationSHA256, priorSuccessors, q10Compositions, err)
 	}
 }
 

@@ -37,7 +37,13 @@ func q10CurrentEndpointRecipes(t *testing.T) []recipe {
 		if index < 0 || matched[index] {
 			t.Fatal("missing, unlisted or duplicate Q10 endpoint")
 		}
-		current, err := q10CurrentEndpointRecipe(rows[index], pin)
+		var current recipe
+		var err error
+		if pin.Original.File == "internal/serveapp/receiver_restart_test.go" && pin.Original.Function == "TestReceiverCompositionRestartBothStores" {
+			current, err = q10EmbeddedSpecCurrentRecipe(rows[index], pin)
+		} else {
+			current, err = q10CurrentEndpointRecipe(rows[index], pin)
+		}
 		if err != nil {
 			t.Fatalf("%s: %v", pin.Original.Function, err)
 		}
@@ -160,7 +166,12 @@ func TestQ10CurrentEndpointsUseTheOriginalMigrationPreparationOwner(t *testing.T
 		}
 		crossed := pin.Original
 		crossed.Before = pin.Candidate
-		if got, err := q10CurrentRecipe(crossed); err != nil || !reflect.DeepEqual(got, crossed) {
+		got, err := q10CurrentRecipe(crossed)
+		if pin.Original.File == "internal/serveapp/receiver_restart_test.go" && pin.Original.Function == "TestReceiverCompositionRestartBothStores" {
+			if err == nil || err.Error() != "Q10 restart changed complete delivered row or history" {
+				t.Fatal("listed restart composition did not refuse crossed full-row history exactly")
+			}
+		} else if err != nil || !reflect.DeepEqual(got, crossed) {
 			t.Fatal("finite endpoint owner interpreted crossed historical input")
 		}
 	}
