@@ -1125,7 +1125,7 @@
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.bindRuntimeOperationContext",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "7fe39909c34f39755d1472e66084c82877a32d0ca4d278c34575f830920bcaaa"
+    "body_sha256": "1fcd8d6df47595fde4a969b2d80b0859f93f5c055daf60c59515df900473b309"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.buildAgent",
@@ -1239,7 +1239,7 @@
     "owner": "internal/runtime/manager/agent_manager.go::NewAgentManagerWithOptions",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "2510823a6615331108f16496a868769b795934f42b39cd306dde77b0e66cef71"
+    "body_sha256": "f1c19f080321756b67d075db660e95408893f591151bd6525cabb63d171602ee"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::ValidateAgentBuildConfiguration",
@@ -1704,16 +1704,22 @@
     "body_sha256": "9abfda8178662d07078966b6dbb7b56c80aa2dc40ee428bc95454339e210fb62"
   },
   {
+    "owner": "internal/runtime/runtime.go::*Runtime.mutationContext",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "e68e090d4b5bf0df24fe42d881900e3aa70c7ff143ded9d7674da39537c716d4"
+  },
+  {
     "owner": "internal/runtime/runtime.go::*Runtime.prepareStartLocked",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "01970884884e923386f45b9765f21af9e6c7c366a54fcadf250908700cc37c4f"
+    "body_sha256": "fe58bc8e5f537dbb25ab60c93d77b22cd64e76f08ac3d28d26ea0ade88479138"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.prepareStartupLifecycleLocked",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "ce6434771062b7b35be3efec39809e6687de0250787fe9c08aa3345c4797b95f"
+    "body_sha256": "c0c215c90bebaeb12d359f664e12c8b8f7b503294a09298d6e3e06e9d4302173"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.publishBootCompleted",
@@ -1764,10 +1770,16 @@
     "body_sha256": "da00f7d8993d4a3f1d11ff0a7e131714d86d9df0b3af57fa087c7b09e905662a"
   },
   {
+    "owner": "internal/runtime/runtime.go::*Runtime.stopWithGraceLocked",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "67601fca619436c475cf0137f4b166f2258f3a69f4ca55381266d42496947e3c"
+  },
+  {
     "owner": "internal/runtime/runtime.go::*Runtime.stopWithOptions",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "b0af245ed2f5426c5da6d7a26f3f4c27464accdc1c3d22646060585a7c46af00"
+    "body_sha256": "10ae9cab9c3e7bd5265b76eb112969b9762cba74160d8724f21213b9ea04aaf4"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.verifyBootPublished",
@@ -1869,7 +1881,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "96737500997020a514836cb9b1f96d0be26f2aafc249b83daaa9163e5a9eb346"
+    "body_sha256": "01f98ee20fdbd774105d764dfc6726b767a866e653b33308366459736e65c2c1"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
@@ -2856,6 +2868,12 @@
     "body_sha256": "4a931937f9481804f6465554909ba349d755d9d073dcf50e0ba9b6b34977762f"
   },
   {
+    "owner": "internal/serveapp/main.go::bindCompositionProcessCapability",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "7188d10fcc2f0d05546f3d57b523cc854448b4be5d1b912114353b19589bd07a"
+  },
+  {
     "owner": "internal/serveapp/main.go::buildForkChatSandboxLLMRuntimes",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
@@ -2865,7 +2883,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "7877f29de6095029847a5b0be52ce8eb6acc1c4c979ed6be10d1b2ee9c3142a8"
+    "body_sha256": "d56ef5dd59da5b03cff3c9cfa6df0a663bac629f9061d21f2e9eac182f17ef96"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
@@ -3486,6 +3504,24 @@
     "body_sha256": "cc43f947a6538fe8fb3d357a347deaaab28cb9f326e2db08db33511510366360"
   },
   {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.RunAdmittedTransaction",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "71e2c000e2b374343f5ccb0bafc3ca3a3210b598b5a2fb2775800f0a61a9f6b2"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.RunAdmittedTransactionOutcome",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "dddf0ebc7bf03cc3b682a9ac2bf40243825b936f109cd513f0142cc4b77b13be"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.RunAdmittedTransactionWithOptionsOutcome",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "edb42586c7172e7bc984b0dac04936d95428878965acbac90b9cb8816c5a9f65"
+  },
+  {
     "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.RunReadTransaction",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
@@ -3519,7 +3555,7 @@
     "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.runTransactionOutcome",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
-    "body_sha256": "bc613d74b96a85ec802eb1454f0c5d91e4011c74570fa4eb0b954bf162effd3c"
+    "body_sha256": "5ab0c8e80a534525373596123ec6c7800125b7845a1000a8d23e579a4cb33615"
   },
   {
     "owner": "internal/store/internal/backend/postgres/transaction.go::*rolledBackSerializationConflict.Error",
@@ -3540,6 +3576,12 @@
     "body_sha256": "79e1e66c3f167c6692dee5a2bc53db0c75749bccf66cce0119560504d949607e"
   },
   {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::admitOptionalMutationTx",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "c68734ea8821b9502ab84e11193375b59de45bd03337eec4c35d7bec2a4bc273"
+  },
+  {
     "owner": "internal/store/internal/backend/postgres/transaction.go::exactSerializationConflict",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
@@ -3550,6 +3592,12 @@
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
     "body_sha256": "353dcd9e2d2e69e8d3070f8cd28acd3dd4de74364c5e1ce1bb0093c1a15381e1"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::prepareOptionalMutationAdmission",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "530e2ea3f30204188ea3463c0c01403c40a7e3f5710023e6c62df566e455c3fa"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkPostgresOwner.ListSelectedForkRecoveryEntries",

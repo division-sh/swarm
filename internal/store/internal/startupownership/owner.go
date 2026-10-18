@@ -35,6 +35,7 @@ type StartupPostgresOwner struct {
 	constructionMu       sync.Mutex
 	constructionLease    *postgresbackend.AdvisoryLockLease
 	constructionCapacity func()
+	originalObservation  *OriginalProcessCaptureForTest
 	backend              *postgresbackend.Backend
 	schemaGuard          func() error
 	catalogEmpty         func(context.Context) (bool, error)
@@ -146,6 +147,7 @@ func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req
 	if err := contextError(ctx); err != nil {
 		return nil, errors.Join(err, capability.Release(context.WithoutCancel(ctx)))
 	}
+	s.observeConstructedProcess(session, capability)
 	s.bindProcess(capability)
 	return capability, nil
 }

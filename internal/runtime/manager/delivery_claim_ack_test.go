@@ -76,7 +76,7 @@ func ProveNativeManagerClaimPostcommitErrorConsumesOnlyAcknowledgedClaim(t *test
 			}}
 			manager := newTestAgentManagerWithOptions(t, bus, func(runtimeactors.AgentConfig) (Agent, error) {
 				return agent, nil
-			}, AgentManagerOptions{DeliveryStore: faulted, TestLifecycleProbe: probe.Raw()}, persistence)
+			}, AgentManagerOptions{DeliveryStore: faulted, TestLifecycleProbe: probe.Raw(), BaseContext: nativeDelivery.Context, MutationContext: nativeDelivery.MutationContext, CarryMutationContext: nativeDelivery.CarryMutationContext}, persistence)
 			if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.intervention"}})}, true); err != nil {
 				t.Fatalf("spawn agent: %v", err)
 			}

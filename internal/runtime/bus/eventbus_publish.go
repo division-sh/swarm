@@ -1601,8 +1601,8 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 	if err != nil {
 		return releaseOnFailure(fmt.Errorf("admit asynchronous event dispatch: %w", err))
 	}
-	acceptedCtx := bindWorkContext(dispatchCtx, lease, owner)
-	dispatchCtx, closeDispatchContext, err := acceptedWorkExecutionContext(acceptedCtx)
+	acceptedCtx := bindWorkContext(dispatchCtx, lease, owner, eb.carryMutationContext)
+	dispatchCtx, closeDispatchContext, err := acceptedWorkExecutionContext(acceptedCtx, eb.carryMutationContext)
 	if err != nil {
 		_ = lease.Done()
 		return releaseOnFailure(err)
@@ -2054,6 +2054,23 @@ func projectEventForDeliveryRoute(evt events.Event, route events.DeliveryRoute) 
 }
 
 func (eb *EventBus) admitSourceArtifactFact(ctx context.Context) (context.Context, error) {
+	if eb == nil {
+		return ctx, errors.New("event bus is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if eb.mutationContext != nil {
+		var err error
+		ctx, err = eb.mutationContext(ctx)
+		if err != nil {
+			return ctx, err
+		}
+	}
+	return eb.sourceArtifactContext(ctx)
+}
+
+func (eb *EventBus) sourceArtifactContext(ctx context.Context) (context.Context, error) {
 	if eb == nil {
 		return ctx, errors.New("event bus is required")
 	}
@@ -2608,7 +2625,7 @@ func (eb *EventBus) beginRuntimeWork(ctx context.Context) (context.Context, *wor
 	if err != nil {
 		return admittedCtx, nil, fmt.Errorf("admit event bus work: %w", err)
 	}
-	return bindWorkContext(admittedCtx, lease, owner), lease, nil
+	return bindWorkContext(admittedCtx, lease, owner, eb.carryMutationContext), lease, nil
 }
 
 func (eb *EventBus) workOwnerForContext(ctx context.Context) worklifetime.Occurrence {
@@ -2618,11 +2635,14 @@ func (eb *EventBus) workOwnerForContext(ctx context.Context) worklifetime.Occurr
 	return eb.workOwner
 }
 
-func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner worklifetime.Occurrence) context.Context {
+func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner worklifetime.Occurrence, carryOriginal func(context.Context, context.Context) context.Context) context.Context {
 	if lease == nil {
 		return ctx
 	}
 	workCtx := lease.Context()
+	if carryOriginal != nil {
+		workCtx = carryOriginal(workCtx, ctx)
+	}
 	if _, ok := worklifetime.OccurrenceFromContext(workCtx); !ok {
 		workCtx = worklifetime.WithOccurrence(workCtx, owner)
 	}
@@ -2670,12 +2690,15 @@ func runtimeWorkAdmissionFromContext(ctx context.Context) (runtimeWorkAdmission,
 // acceptedWorkExecutionContext keeps only the opaque work admission while
 // constructing the empty receiver value tree. The accepted lease, rather than
 // a second Begin inside spawned dispatch, remains the execution authority.
-func acceptedWorkExecutionContext(accepted context.Context) (context.Context, func(), error) {
+func acceptedWorkExecutionContext(accepted context.Context, carryOriginal func(context.Context, context.Context) context.Context) (context.Context, func(), error) {
 	admission, ok := runtimeWorkAdmissionFromContext(accepted)
 	if !ok {
 		return nil, nil, errors.New("accepted runtime work admission is required")
 	}
 	ctx, closeContext := eventreceiver.NewContext(accepted)
+	if carryOriginal != nil {
+		ctx = carryOriginal(ctx, accepted)
+	}
 	ctx = context.WithValue(ctx, runtimeWorkAdmissionContextKey{}, admission)
 	return ctx, closeContext, nil
 }

@@ -74,6 +74,7 @@ func seedBoundedInboundFlow(t *testing.T, ctx context.Context, selected interfac
 	CommitFlowInstanceActivation(context.Context, runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error)
 }, source semanticview.Source, runID, entityID, path, slug string) {
 	t.Helper()
+	ctx = originalRuntimeFixtureContext(t, ctx, selected)
 	now := time.Now().UTC()
 	ctx = runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), runtimeeffects.ExecutionModeLive)
 	child, err := runtimeflowidentity.KeylessChild(source,

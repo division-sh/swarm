@@ -1650,6 +1650,7 @@ func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, st
 			t.Fatalf("BootstrapSchema sqlite: %v", err)
 		}
 		registerTestAuthorActivityCatalog(t, store)
+		ctx = originalStoreFixtureContext(t, ctx, store)
 		if err := ensureEphemeralRunForTest(ctx, store, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 			t.Fatalf("create sqlite run through lifecycle owner: %v", err)
 		}
@@ -1658,6 +1659,7 @@ func decisionCardTestStore(t *testing.T, backend string) (decisioncard.Store, st
 		_, db, _ := testutil.StartPostgres(t)
 		store := newTestPostgresStore(t, db)
 		registerTestAuthorActivityCatalog(t, store)
+		ctx = originalStoreFixtureContext(t, ctx, store)
 		if err := ensureEphemeralRunForTest(ctx, store, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 			t.Fatalf("create postgres run through lifecycle owner: %v", err)
 		}

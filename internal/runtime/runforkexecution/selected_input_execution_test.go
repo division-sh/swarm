@@ -68,6 +68,11 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 					owner = selectedContractExecutionOwnerForTest(t, s)
 				}
 				ctx := runForkTestContext(t)
+				capability := selectedContractTestProcessCapability(t, ctx, capabilityStore)
+				ctx, bindErr := startupownership.WithProcessMutationAuthority(ctx, capability)
+				if bindErr != nil {
+					t.Fatal(bindErr)
+				}
 				root := runForkExecutionRepoRoot(t)
 				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: filepath.Join(root, "tests/tier1-primitives/test-emits-multiple")}
 				loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
@@ -140,7 +145,7 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 				result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 					SourceRunID: run, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: selectedContractTestProcessCapability(t, ctx, capabilityStore)},
+					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 				})
 				if !observed && !claimed {
 					t.Fatalf("did not reach evidence consumer: %v", err)

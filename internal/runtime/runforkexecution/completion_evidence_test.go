@@ -117,6 +117,11 @@ func TestSelectedCompletion2270EvidenceBothStores(t *testing.T) {
 				if !found || bundle.SourceArtifact == nil {
 					t.Fatal("missing admitted source artifact")
 				}
+				capability := selectedContractTestProcessCapability(t, ctx, selected)
+				ctx, bindErr := startupownership.WithProcessMutationAuthority(ctx, capability)
+				if bindErr != nil {
+					t.Fatal(bindErr)
+				}
 				storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 				rootInstance := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")
 				event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "task.assigned", "source-runtime", "", []byte(`{"entity_id":"`+runID+`"}`), 0, runID, events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, runID), runID), eventtest.RootRoutingSource(runID), at, executionmode.Live)
@@ -133,7 +138,7 @@ func TestSelectedCompletion2270EvidenceBothStores(t *testing.T) {
 					SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime: SelectedContractAgentRuntimeOptions{Config: selectedForkAPIProviderConfig(protocol.backend, "request-A", provider.URL), ProviderCredentials: credentialStore,
-						ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected), QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout},
+						ProcessCapability: capability, QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout},
 				})
 				if err != nil {
 					t.Fatal(err)
