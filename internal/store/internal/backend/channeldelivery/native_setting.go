@@ -170,20 +170,20 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 		compatible := stored.matches(admission, setting.EntryCommand, canonical, desired)
 		if unresolved && setting.State != "uncertain" {
 			setting, err = markNativeSettingUncertainTx(ctx, tx, setting, postgres)
-			if err != nil {
-				return channelnative.Setting{}, false, err
-			}
 			changed = true
+		}
+		if err != nil {
+			return channelnative.Setting{}, false, err
 		}
 		if !compatible || (setting.State == "retired" && !readbackHash.Valid) {
 			if unresolved || slices.Contains([]string{"uncertain", "unavailable"}, setting.State) {
 				return channelnative.Setting{}, false, fmt.Errorf("native inbox setting has unresolved or foreign provider state")
 			}
 			setting, err = advanceNativeSettingGenerationTx(ctx, tx, admission, setting, postgres)
-			if err != nil {
-				return channelnative.Setting{}, false, err
-			}
 			changed = true
+		}
+		if err != nil {
+			return channelnative.Setting{}, false, err
 		}
 	}
 	var consumerChanged bool
