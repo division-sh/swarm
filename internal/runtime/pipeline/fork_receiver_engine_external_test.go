@@ -428,6 +428,10 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	family, ok := selected.RunFork()
 	if !ok {
 		t.Fatal("fork engine proof requires selected fork owner")
