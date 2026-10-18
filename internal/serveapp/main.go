@@ -1670,7 +1670,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return err
 		}
 		current := supervisor.CurrentRuntime()
-		stop, err := startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), supervisor.resetContexts, current.Bus, current.ExecutionPosture)
+		stop, err := startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), current.Bus, current.ExecutionPosture)
 		if err != nil {
 			return err
 		}
@@ -1783,7 +1783,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		opts.TestRuntimeContextsReadyHook(runtimeContextManager)
 	}
 	if rt != nil {
-		supervisor.stopRunStalled, err = startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), runtimeContexts, rt.Bus, posture)
+		supervisor.stopRunStalled, err = startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), rt.Bus, posture)
 	}
 	if err != nil {
 		presenter.fail(22, "ready", err)
