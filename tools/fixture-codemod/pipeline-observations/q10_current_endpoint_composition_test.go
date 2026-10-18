@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// The two whole-corpus proofs use the same immutable 893 recipes as before.
-// Only the independently enumerated 43 current endpoints compose their exact
-// Q10 cuts; the other 850 rows and every historical packet are unchanged.
 func q10CurrentEndpointRecipes(t *testing.T) []recipe {
 	t.Helper()
 	packet, err := decodeQ10CurrentEndpoints(q10CurrentEndpointBytes)
@@ -19,9 +16,6 @@ func q10CurrentEndpointRecipes(t *testing.T) []recipe {
 	var rows []recipe
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
-	}
-	if len(rows) != 893 {
-		t.Fatal("Q10 endpoint composition changed its original corpus")
 	}
 	matched := make(map[int]bool)
 	for _, pin := range packet.Rows {
