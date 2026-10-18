@@ -3519,7 +3519,7 @@
     "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.runTransactionOutcome",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
-    "body_sha256": "bc613d74b96a85ec802eb1454f0c5d91e4011c74570fa4eb0b954bf162effd3c"
+    "body_sha256": "e452024e0019e4cb9eba29756b5ca758d6413ef5fac623c90a08efa13b6fd532"
   },
   {
     "owner": "internal/store/internal/backend/postgres/transaction.go::*rolledBackSerializationConflict.Error",
@@ -3550,6 +3550,30 @@
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
     "body_sha256": "353dcd9e2d2e69e8d3070f8cd28acd3dd4de74364c5e1ce1bb0093c1a15381e1"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction_cancellation.go::*cleanTransactionCancellation.Error",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "4d91f2d95714db893ab79940d533ab0cb4f0f4e610f5007a0a7baa899494feb4"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction_cancellation.go::*cleanTransactionCancellation.Unwrap",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "d8fbe254fbfbd6c6993afac152676f643a16c72fdbc6fb970300aec2ccd1b705"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction_cancellation.go::CleanCancellationBeforeCommit",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "2bde049d74f07fb2c5938a65f66d431013f4792b5e48ca79548a34f67e0972da"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction_cancellation.go::onlyCallerCancellation",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "6a88214e4e5e04c2e8f5537714f8c1ac0a552bb1d368b67af2cd260437202b38"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::*RunForkPostgresOwner.ListSelectedForkRecoveryEntries",
