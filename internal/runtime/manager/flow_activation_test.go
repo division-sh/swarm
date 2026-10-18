@@ -3563,9 +3563,12 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
 	am.mu.Lock()
 	am.startupAgentsHydrated = true
 	am.mu.Unlock()
@@ -3586,7 +3589,7 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 	}
 	leaderErr := make(chan error, 1)
 	go func() {
-		leaderErr <- activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req)
+		leaderErr <- activateFlowInstanceForTest(am, ctx, req)
 	}()
 	waitCtx, cancelWait := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelWait()
@@ -3595,9 +3598,9 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 	}
 
 	followerErrs := make(chan error, 3)
-	ensureCtx, cancelEnsure := context.WithCancel(testAuthorActivityContext(context.Background()))
-	pendingCtx, cancelPending := context.WithCancel(testAuthorActivityContext(context.Background()))
-	startupCtx, cancelStartup := context.WithCancel(testAuthorActivityContext(context.Background()))
+	ensureCtx, cancelEnsure := context.WithCancel(ctx)
+	pendingCtx, cancelPending := context.WithCancel(ctx)
+	startupCtx, cancelStartup := context.WithCancel(ctx)
 	go func() {
 		_, err := am.EnsureFlowInstance(ensureCtx, req)
 		followerErrs <- err
@@ -3606,7 +3609,7 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 		followerErrs <- am.reconcilePendingDynamicFlowRuntimeReadiness(pendingCtx)
 	}()
 	go func() {
-		followerErrs <- reconcileDynamicFlowRuntimeStartupForTest(am, startupCtx, authorActivityTestSourceArtifactFact, true)
+		followerErrs <- reconcileDynamicFlowRuntimeStartupForTest(am, startupCtx, fact, true)
 	}()
 	cancelEnsure()
 	cancelPending()
@@ -3620,7 +3623,7 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 	if err := receiveFlowActivationResult(t, leaderErr); err != nil {
 		t.Fatalf("coalesced leader: %v", err)
 	}
-	if len(instances.creates) != 1 || len(instances.armedEntries) != 1 || len(bus.published) != 1 || !flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+	if len(instances.creates) != 1 || len(instances.armedEntries) != 1 || len(bus.published) != 1 || !flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatalf(
 			"coalesced side effects: create=%d arm=%d publish=%d, want 1/1/1 with exact ready attachment",
 			len(instances.creates),
@@ -3816,10 +3819,13 @@ func TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *te
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{failAgentID: "writer"}
 	firstBus := &flowActivationTestBus{}
-	first := newFlowActivationManager(t, firstBus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
+	first, ctx := newFlowActivationManagerForSource(t, firstBus, instances, semanticview.Wrap(bundle), agents)
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 
 	if err := activateFlowInstanceForTest(first, ctx, req); err == nil {
 		t.Fatal("activation succeeded across injected partial agent failure")
@@ -3835,9 +3841,8 @@ func TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *te
 
 	agents.failAgentID = ""
 	restartBus := &flowActivationTestBus{}
-	restarted := newFlowActivationManager(t, restartBus, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestSourceArtifactFact, true); err != nil {
+	restarted, restartCtx := newFlowActivationManagerForSource(t, restartBus, instances, semanticview.Wrap(bundle), agents)
+	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, restartCtx, fact, true); err != nil {
 		t.Fatalf("ReconcileDynamicFlowRuntimeStartupReadiness: %v", err)
 	}
 	if _, ok := testFlowActivationAgentConfig(t, restarted, "reviewer", "review/inst-1"); !ok {
@@ -3852,7 +3857,7 @@ func TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *te
 	if len(restartBus.published) != 1 {
 		t.Fatalf("startup creation event count = %d, want one", len(restartBus.published))
 	}
-	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestSourceArtifactFact, true); err != nil {
+	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, restartCtx, fact, true); err != nil {
 		t.Fatalf("second ReconcileDynamicFlowRuntimeStartupReadiness: %v", err)
 	}
 	if len(restartBus.published) != 1 {
