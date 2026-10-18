@@ -1,0 +1,6 @@
+<!-- receipt v1 -->
+receipt: head=7dc9ac1eab1391d2371e4accb150ed635085d4d3 tree=0e92e69144156acd20f275655ff6cef8bdee21af parent=4df3fb82e3e9001d4511674f5a0fafaeb35cc4f2 branch=agent-d/2720-stall-attribution signed=G dirty_files=0
+preflight: test-results/preflight/20261018T184230.665123981-289cec15-4fe7-4f0a-9d69-039bc9c184b3/receipt.json sha256=af50bec2fec90fbfa1df4db34e724603c962c270efed4ee77c9bed5c9862d4c4 (STALE(head=95464fccbd) complete unstarted=0)
+tests: ./internal/cliapp:TestVerifyBootStartupPredicateCensus,TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal,TestAdmissionPredicateRatchetRejectsRemovedVerifyConsumer,TestAdmissionPredicateRatchetRejectsUncoveredProviderPrerequisite
+regenerated: not-claimed
+generated: 2026-10-18T21:15:16Z
