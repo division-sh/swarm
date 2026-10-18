@@ -335,6 +335,10 @@ func debtR04CatchUpInverse(row debtR04CatchUpSource, before, after []byte) ([]by
 		debtBaselineChecksum(before) != row.BeforeSHA256 || debtBaselineChecksum(after) != row.AfterSHA256 {
 		return nil, fmt.Errorf("R04 historical inverse lacks its exact signed source pair: %s", row.File)
 	}
+	return debtR04RestoreDeclarations(row, before, after)
+}
+
+func debtR04RestoreDeclarations(row debtR04CatchUpSource, before, after []byte) ([]byte, error) {
 	prior, err := debtR04CatchUpDeclarations(before)
 	if err != nil {
 		return nil, err
@@ -356,10 +360,17 @@ func debtR04CatchUpInverse(row debtR04CatchUpSource, before, after []byte) ([]by
 	}
 	for _, name := range row.Added {
 		next := append(bytes.Clone(current[name]), '\n', '\n')
+		if bytes.HasSuffix(reconstructed, append(bytes.Clone(current[name]), '\n')) {
+			next = next[:len(next)-1]
+		}
 		if len(prior[name]) != 0 || len(current[name]) == 0 || bytes.Count(reconstructed, next) != 1 {
 			return nil, fmt.Errorf("R04 historical inverse lost its unique added declaration: %s", name)
 		}
 		reconstructed = bytes.Replace(reconstructed, next, nil, 1)
+	}
+	reconstructed, err = format.Source(reconstructed)
+	if err != nil {
+		return nil, err
 	}
 	if !bytes.Equal(reconstructed, before) {
 		return nil, fmt.Errorf("R04 historical inverse changed outside its enumerated declarations: %s", row.File)
@@ -784,13 +795,19 @@ func debtCatchUpSignedBaseline(root, ref, collector string) (authorityDebtBaseli
 }
 
 func debtR04CollectorSource(root, actual string) (string, error) {
+	if actual == debtR04ExtractionCollectorTo {
+		if err := debtR04ExtractionSource(root); err != nil {
+			return "", err
+		}
+		actual = debtR04NativeCollectorTo
+	}
 	if actual == debtR04NativeCollectorTo {
 		if _, _, err := debtR04NativeRepairImages(root); err != nil {
 			return "", err
 		}
 		actual = debtR04JoinedCollectorTo
 	}
-	joined := actual == debtR04JoinedCollectorTo || actual == debtR04NativeCollectorTo
+	joined := actual == debtR04JoinedCollectorTo || actual == debtR04NativeCollectorTo || actual == debtR04ExtractionCollectorTo
 	if actual == debtR04CollectorTo || actual == debtR04HistoricalCollectorTo || joined {
 		if _, _, sourceErr := debtR04SourceImages(root); sourceErr != nil {
 			return "", sourceErr
@@ -812,7 +829,7 @@ func debtR04CollectorSource(root, actual string) (string, error) {
 
 func debtCatchUpCollectorSource(root string) error {
 	actual, err := debtCollectorDigest(root)
-	joined := actual == debtR04JoinedCollectorTo || actual == debtR04NativeCollectorTo
+	joined := actual == debtR04JoinedCollectorTo || actual == debtR04NativeCollectorTo || actual == debtR04ExtractionCollectorTo
 	if err != nil {
 		return fmt.Errorf("joined collector is not its exact enumerated source: %s: %v", actual, err)
 	}
@@ -1033,6 +1050,9 @@ func debtCatchUpNativeEntryOwnerSource(root string) error {
 	}
 	for path, want := range debtCatchUpNativeEntryNativePins {
 		raw, err := os.ReadFile(filepath.Join(root, path))
+		if err == nil && path == "internal/store/internal/backend/postgres/transaction.go" && debtBaselineChecksum(raw) != want {
+			raw, err = debtR04ExtractionPredecessor(root, path, raw)
+		}
 		if err == nil && path == debtR04CompositionPath && debtBaselineChecksum(raw) != want {
 			raw, err = debtR04CompositionPredecessor(root, raw)
 		}
@@ -1091,6 +1111,74 @@ func debtR04SourceImagesFor(root string, pins []debtRepair2698SourceFile) (map[s
 
 // #2700/6248118527: authenticate the exact native repair, including the two
 // source relocations. Only historical/custody comparisons consume this view.
+// The later complexity edge authenticates current bytes before recovering this
+// immutable endpoint. Neither inverse supplies input to the live census.
+func debtR04ExtractionImages(root string, row debtR04CatchUpSource) ([]byte, []byte, error) {
+	var exact *debtR04CatchUpSource
+	for i := range debtR04ExtractionPins {
+		if debtR04ExtractionPins[i].File == row.File {
+			exact = &debtR04ExtractionPins[i]
+		}
+	}
+	if exact == nil || row.BeforeSHA256 != exact.BeforeSHA256 || row.AfterSHA256 != exact.AfterSHA256 ||
+		strings.Join(row.Changed, "\n") != strings.Join(exact.Changed, "\n") || strings.Join(row.Added, "\n") != strings.Join(exact.Added, "\n") {
+		return nil, nil, fmt.Errorf("foreign R04 extraction source/member correspondence: %s", row.File)
+	}
+	before, err := debtRepair2698SignedSource(root, debtR04ExtractionBefore, row.File, row.BeforeSHA256)
+	if err != nil {
+		return nil, nil, err
+	}
+	after, err := debtRepair2698SignedSource(root, debtR04ExtractionAfter, row.File, row.AfterSHA256)
+	if err != nil {
+		return nil, nil, err
+	}
+	actual, err := os.ReadFile(filepath.Join(root, row.File))
+	if err != nil || !bytes.Equal(actual, after) {
+		return nil, nil, fmt.Errorf("R04 extraction does not match actual complete source: %s: %v", row.File, err)
+	}
+	if _, err := debtR04RestoreDeclarations(row, before, actual); err != nil {
+		return nil, nil, err
+	}
+	return before, after, nil
+}
+
+func debtR04ExtractionSource(root string) error {
+	if len(debtR04ExtractionPins) != 4 {
+		return fmt.Errorf("R04 extraction requires its four complete owner files")
+	}
+	seen := map[string]bool{}
+	for _, row := range debtR04ExtractionPins {
+		if seen[row.File] {
+			return fmt.Errorf("duplicate R04 extraction source: %s", row.File)
+		}
+		seen[row.File] = true
+		if _, _, err := debtR04ExtractionImages(root, row); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func debtR04ExtractionPredecessor(root, path string, actual []byte) ([]byte, error) {
+	for _, row := range debtR04ExtractionPins {
+		if path != row.File {
+			continue
+		}
+		before, after, err := debtR04ExtractionImages(root, row)
+		if err != nil {
+			return nil, err
+		}
+		if bytes.Equal(actual, before) {
+			return actual, nil // Once-only, still authenticated against current disk.
+		}
+		if !bytes.Equal(actual, after) {
+			return nil, fmt.Errorf("R04 extraction refuses foreign supplied source: %s", path)
+		}
+		return bytes.Clone(before), nil
+	}
+	return actual, nil
+}
+
 func debtR04NativeRepairImages(root string) (map[string][]byte, map[string][]byte, error) {
 	before, after := map[string][]byte{}, map[string][]byte{}
 	for _, file := range debtR04NativeRepairPins {
@@ -1103,6 +1191,9 @@ func debtR04NativeRepairImages(root string) (map[string][]byte, map[string][]byt
 			return nil, nil, err
 		}
 		actual, readErr := os.ReadFile(filepath.Join(root, file.File))
+		if readErr == nil && file.File == debtR04ExtractionPins[0].File {
+			actual, readErr = debtR04ExtractionPredecessor(root, file.File, actual)
+		}
 		if file.AfterSHA256 == "absent" {
 			if !os.IsNotExist(readErr) {
 				return nil, nil, fmt.Errorf("native R04 repair retained an old source: %s: %v", file.File, readErr)
@@ -1380,6 +1471,29 @@ func debtR04NativeCollectorTransition(base, current string, trusted, head author
 		intermediate := head
 		intermediate.Collector = debtR04JoinedCollectorTo
 		if !debtR04JoinedCollectorTransition(base, intermediate.Collector, trusted, intermediate, proofs...) {
+			return false
+		}
+	}
+	return len(authorityDebtRatchet(proofs[0].Actual, head.Sites, original.Sites, original.Sites, proofs[0])) == 0
+}
+
+func debtR04ExtractionCollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {
+	if current != debtR04ExtractionCollectorTo || head.Collector != current || trusted.Collector != base || len(proofs) != 1 ||
+		trusted.BootstrapSource != debtBootstrapSource || head.BootstrapSource != debtBootstrapSource || debtCatchUpCollectorSource(proofs[0].Root) != nil {
+		return false
+	}
+	original, _, err := debtCatchUpSignedBaseline(proofs[0].Root, debtR04ExtractionBefore, debtR04NativeCollectorTo)
+	if err != nil {
+		return false
+	}
+	if base == debtR04NativeCollectorTo {
+		if !debtSitesEqual(trusted.Sites, original.Sites) {
+			return false
+		}
+	} else {
+		intermediate := head
+		intermediate.Collector = debtR04NativeCollectorTo
+		if !debtR04NativeCollectorTransition(base, intermediate.Collector, trusted, intermediate, proofs...) {
 			return false
 		}
 	}

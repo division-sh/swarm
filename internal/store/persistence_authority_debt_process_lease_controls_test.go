@@ -28,6 +28,42 @@ const debtR04NativeRepairAfter = "a88c60be70f6923ef7a3960aa12dcbf2e124e06c"
 const debtR04NativeCustodyTo = "ec1fec1bdff3d92cf2de9f414fff6cc5c9a74feb8138313b8bb4e92e246ab3fa"
 const debtR04NativeCollectorTo = "c79af9700325a028f169ec3c2284828751f97be022233cfd6356f1c726e4ce3d"
 
+// #2700/6249776750: append the approved complexity extractions; old edges stay.
+const debtR04ExtractionBefore = "70fa4d34de038b16989570a200dd5b8bcdf34d2b"
+const debtR04ExtractionAfter = "5a225842dd670525185b066abea89eb86f99d1c6"
+const debtR04ExtractionCollectorTo = "41e687f6b2655593235acdfe08c19a02cda85c9ee13c5f4ff80eeebe83ff7dca"
+
+var debtR04ExtractionPins = [...]debtR04CatchUpSource{
+	{
+		File:         "internal/store/internal/backend/activityjournal/activity_execution_grant.go",
+		BeforeSHA256: "00e81af8c72afe78c7097610ca7ce5fde612091edb270edb4729185977220925",
+		AfterSHA256:  "b0922cbc825c3401dedd2322212bd598a6e43c8d0c6e504f3eccad5e7976a0a0",
+		Changed:      []string{"func:ReadActivityExecutionGrantTx"},
+		Added:        []string{"type:activityExecutionGrantRow", "func:decodeActivityExecutionGrantRow"},
+	},
+	{
+		File:         "internal/store/internal/backend/effectpersistence/provider_resume_admission.go",
+		BeforeSHA256: "9859da908a42a54d26cfa628e5bdb2e5885996076f445f8b8059c32cd813e3c8",
+		AfterSHA256:  "3b845e79dac06e96e9fd352c05780bbb5f04eadabc841a36af83226122644f66",
+		Changed:      []string{"func:authorizeProviderResumeTx"},
+		Added:        []string{"func:providerResumeEvidenceTx"},
+	},
+	{
+		File:         "internal/store/internal/backend/effectpersistence/completion_recovery.go",
+		BeforeSHA256: "0296d328ba4a1345eb86779d9975ecb75480ac564ebbcea81d199329d1e7b520",
+		AfterSHA256:  "46f0b975692b0ca804d889daed5191c184b6c36bda654fa2b50f1da89fdea4fb",
+		Changed:      []string{"func:completionRecoverySettlement"},
+		Added:        []string{"func:completionRecoveryExecutionAuthority", "func:completionRecoveryAgentTurn"},
+	},
+	{
+		File:         "internal/store/internal/backend/postgres/transaction.go",
+		BeforeSHA256: "604eab38ee4d7c4ad899a4b82662320ea3a7070be41a92da0277309de5d02197",
+		AfterSHA256:  "2270b20fcfe84f45402f7cd59a8b7364394bbc2e898a69dd9434697b242571e1",
+		Changed:      []string{"func:(*Backend).runTransactionOutcome"},
+		Added:        []string{"func:rollbackAndCloseTransactionConnection", "func:closeTransactionConnection"},
+	},
+}
+
 var debtR04NativeRepairPins = [...]debtRepair2698SourceFile{
 	{"internal/store/internal/backend/activityjournal/activity_execution_grant.go", "absent", "00e81af8c72afe78c7097610ca7ce5fde612091edb270edb4729185977220925"},
 	{"internal/store/internal/backend/activityjournal/displaced_recovery.go", "13a9f50ced01b7043756f79e81ea40be25e728a7cd6b849c2a43e22ffde6294f", "absent"},
@@ -428,6 +464,7 @@ func TestPersistenceAuthorityDebtProcessLeaseCustodyIsSourceBound(t *testing.T) 
 				{Kind: "raw-authority-export", File: dir + "/owner.go", Enclosing: "NewPostgres", Member: "result:#1", Resolved: "*" + typ, RawSQL: true},
 			}
 			debtClassifyProcessLeaseCustody(copy, findings)
+			proveR04JournalBindingCustody(t, copy, mutation == "actual")
 			for _, finding := range findings {
 				if allowed := debtRawSQLDispositionAllowed(finding, "fixture-2151"); allowed != (mutation == "actual") {
 					t.Fatalf("mutation=%s owned=%v finding=%+v", mutation, allowed, finding)
@@ -451,6 +488,30 @@ func TestPersistenceAuthorityDebtProcessLeaseCustodyIsSourceBound(t *testing.T) 
 				}
 			}
 		})
+	}
+}
+
+func proveR04JournalBindingCustody(t *testing.T, root string, accept bool) {
+	t.Helper()
+	for _, backend := range []string{"Postgres", "SQLite"} {
+		const prefix = "github.com/division-sh/swarm/internal/store/internal/"
+		binding := authorityFinding{Kind: "effective-method", RawSQL: true,
+			File: "internal/store/internal/startupownership/<effective-method-set>", Enclosing: prefix + "startupownership.Startup" + backend + "Owner",
+			Member: "method:BindActivityJournalRole", Resolved: "func(role *" + prefix + "backend/activityjournal.Activity" + backend + "Owner) error"}
+		if r04JournalBindingConstructionCustody(root, binding) != accept {
+			t.Fatal("original exported journal role lost exact source custody:", backend, accept)
+		}
+		if !accept {
+			continue
+		}
+		for _, field := range []string{"kind", "file", "owner", "member", "signature"} {
+			foreign := binding
+			parts := map[string]*string{"kind": &foreign.Kind, "file": &foreign.File, "owner": &foreign.Enclosing, "member": &foreign.Member, "signature": &foreign.Resolved}
+			*parts[field] += "foreign"
+			if r04JournalBindingConstructionCustody(root, foreign) {
+				t.Fatal("foreign journal custody admitted:", field)
+			}
+		}
 	}
 }
 

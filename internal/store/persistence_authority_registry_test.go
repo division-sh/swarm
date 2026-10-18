@@ -116,7 +116,8 @@ func indexAuthorityRegistryFindings(findings []authorityFinding) (map[string]aut
 }
 
 func TestPersistenceEffectiveMethodSetsDoNotExposeRawAuthority(t *testing.T) {
-	findings := loadPersistenceAuthorityFindings(t, persistenceAuthorityRepoRoot(t))
+	root := persistenceAuthorityRepoRoot(t)
+	findings := loadPersistenceAuthorityFindings(t, root)
 	var leaked []string
 	for _, finding := range findings {
 		if finding.Kind != "effective-method" || !finding.RawSQL {
@@ -124,7 +125,7 @@ func TestPersistenceEffectiveMethodSetsDoNotExposeRawAuthority(t *testing.T) {
 		}
 		publicFacade := finding.File == "internal/store/store.go"
 		semanticOwner := strings.Contains(finding.File, "internal/store/internal/") && finding.File != "internal/store/store.go"
-		if publicFacade || semanticOwner {
+		if (publicFacade || semanticOwner) && !r04JournalBindingConstructionCustody(root, finding) {
 			leaked = append(leaked, finding.registryLine())
 		}
 	}
@@ -132,6 +133,26 @@ func TestPersistenceEffectiveMethodSetsDoNotExposeRawAuthority(t *testing.T) {
 	if len(leaked) != 0 {
 		t.Fatalf("effective persistence method sets expose raw authority:\n%s", strings.Join(leaked, "\n"))
 	}
+}
+
+// #2700/6249776750: these two inputs transfer the already constructed native
+// journal into the startup owner once. They remain raw findings, not getters.
+func r04JournalBindingConstructionCustody(root string, finding authorityFinding) bool {
+	if !finding.RawSQL || finding.Kind != "effective-method" ||
+		finding.File != "internal/store/internal/startupownership/<effective-method-set>" || finding.Member != "method:BindActivityJournalRole" {
+		return false
+	}
+	const prefix = "github.com/division-sh/swarm/internal/store/internal/"
+	matched := false
+	for _, backend := range []string{"Postgres", "SQLite"} {
+		matched = matched || finding.Enclosing == prefix+"startupownership.Startup"+backend+"Owner" &&
+			finding.Resolved == "func(role *"+prefix+"backend/activityjournal.Activity"+backend+"Owner) error"
+	}
+	if !matched {
+		return false
+	}
+	digest, err := debtProcessLeaseCustodyDigest(root)
+	return err == nil && debtR04CustodySource(root, digest) == nil && debtR04ExtractionSource(root) == nil
 }
 
 func compoundEventFixtureAuthorityViolations(findings []authorityFinding) []string {
