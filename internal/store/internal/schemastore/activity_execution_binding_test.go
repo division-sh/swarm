@@ -59,7 +59,7 @@ func verifyActivityExecutionBindingColumn(t *testing.T, db *sql.DB, runID string
 	}
 }
 
-func verifyActivityReplyLiveParents(t *testing.T, db *sql.DB, runID, sourceEventID string) {
+func verifyActivityReplyLiveParents(t *testing.T, db *sql.DB, runID, otherRunID, sourceEventID string) {
 	t.Helper()
 	replies := []string{uuid.NewString(), uuid.NewString()}
 	for _, id := range replies {
@@ -120,7 +120,7 @@ func verifyActivityReplyLiveParents(t *testing.T, db *sql.DB, runID, sourceEvent
 				case "different_reply":
 					args[2] = replies[1]
 				case "different_run":
-					args[1] = uuid.NewString()
+					args[1] = otherRunID
 				}
 				if _, err := db.Exec(pair, args...); err == nil {
 					t.Fatalf("journal accepted contradictory live parents: attributed=%t reply=%t fault=%s", attributed, present, fault)
