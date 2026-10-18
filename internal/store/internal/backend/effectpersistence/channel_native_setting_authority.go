@@ -14,10 +14,22 @@ import (
 )
 
 func requireChannelNativeSettingAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, postgres bool) error {
+	query := `SELECT operation_id FROM channel_onboarding_operations
+		WHERE operation_id=(SELECT operation_id FROM connected_channel_activations WHERE activation_id=?)`
+	if postgres {
+		query = `SELECT operation_id::text FROM channel_onboarding_operations
+			WHERE operation_id=(SELECT operation_id FROM connected_channel_activations WHERE activation_id=$1::uuid) FOR UPDATE`
+	}
+	var parentID string
+	if err := tx.QueryRowContext(ctx, query, authority.ChannelNativeSetting.ActivationID).Scan(&parentID); errors.Is(err, sql.ErrNoRows) {
+		return invalidExternalAuthority(authority, "stale")
+	} else if err != nil {
+		return err
+	}
 	if err := channeldelivery.LockPrincipalTx(ctx, tx, authority.ChannelNativeSetting.PrincipalID, postgres); err != nil {
 		return invalidExternalAuthority(authority, "principal_not_current")
 	}
-	current, err := channelNativeSettingAuthorityCurrent(ctx, tx, authority, postgres, true)
+	current, err := channelNativeSettingAuthorityCurrent(ctx, tx, authority, postgres, true, parentID)
 	if err != nil {
 		return err
 	}
@@ -27,7 +39,7 @@ func requireChannelNativeSettingAuthorityTx(ctx context.Context, tx *sql.Tx, aut
 	return nil
 }
 
-func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority, postgres, lock bool) (bool, error) {
+func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority, postgres, lock bool, parentID string) (bool, error) {
 	if !authority.Valid() || authority.Kind != runtimeeffects.AuthorityChannelNativeSetting {
 		return false, nil
 	}
@@ -69,6 +81,11 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 			AND json_extract(prior.authority_evidence, '$.setting_id')=setting.setting_id
 			AND prior.operation_id<>setting.install_operation_id
 			AND prior.state IN ('launched','response_observed','outcome_uncertain'))`
+	args := []any{s.SettingID, s.ActivationID}
+	if lock {
+		query += ` AND onboarding.operation_id=?`
+		args = append(args, parentID)
+	}
 	if postgres {
 		query = `SELECT setting.setting_id::text, setting.provider, setting.resource_slot_id,
 			setting.conversation_reference, setting.scope_kind, setting.member_reference,
@@ -108,11 +125,11 @@ func channelNativeSettingAuthorityCurrent(ctx context.Context, q schemaQueryer, 
 				AND prior.operation_id<>setting.install_operation_id
 				AND prior.state IN ('launched','response_observed','outcome_uncertain'))`
 		if lock {
-			query += ` FOR UPDATE OF setting, consumer, activation, onboarding, binding`
+			query += ` AND onboarding.operation_id=$3::uuid FOR UPDATE OF setting, consumer, activation, onboarding, binding`
 		}
 	}
 	var snapshot nativeSettingAuthoritySnapshot
-	err := q.QueryRowContext(ctx, query, s.SettingID, s.ActivationID).Scan(
+	err := q.QueryRowContext(ctx, query, args...).Scan(
 		&snapshot.settingID, &snapshot.provider, &snapshot.slotID, &snapshot.conversation, &snapshot.scopeKind, &snapshot.memberReference, &snapshot.principalID, &snapshot.generation,
 		&snapshot.state, &snapshot.operationID, &snapshot.contract, &snapshot.entryCommand, &snapshot.packID, &snapshot.packVersion, &snapshot.packHash, &snapshot.desired,
 		&snapshot.consumerActivationRevision, &snapshot.consumerBindingRevision, &snapshot.consumerContextGeneration,
