@@ -181,22 +181,15 @@ func proveSystemNodeProcessCutover(t *testing.T, backend string, mode mutationpr
 		if _, err := HoldWorkflowMutationCommitForTest(claimContext, foreign.store, claimed.Claim); err == nil {
 			t.Fatal("foreign selected owner armed an original workflow observation")
 		}
-		observation, err := HoldWorkflowMutationCommitForTest(claimContext, f.store, claimed.Claim)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := observation.SuccessorWaiting(t.Context()); err == nil {
-			t.Fatal("unentered observation inspected native work")
-		}
-		observation.Close()
-		if _, err := observation.SuccessorWaiting(t.Context()); err == nil {
-			t.Fatal("ended observation inspected native work")
-		}
+		// This storage fixture's delivery authority is not the real serve's
+		// generation identity. Only the served cut may arm the positive probe.
 		if _, err := HoldWorkflowMutationCommitForTest(claimContext, f.store, claimed.Claim); err == nil {
-			t.Fatal("consumed original owner observation was rebound")
+			t.Fatal("different delivery execution and runtime generation armed an observation")
 		}
-		// Closing the optional observer must not intercept the actual command.
-		f.ctx = claimContext
+		var absent *WorkflowMutationCommitObservationForTest
+		if _, err := absent.SuccessorWaiting(t.Context()); err == nil {
+			t.Fatal("missing observation inspected native work")
+		}
 	}
 	before, found, err := f.workflows.Load(f.ctx, record.Identity)
 	if err != nil || !found {

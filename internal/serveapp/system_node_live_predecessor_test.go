@@ -52,6 +52,14 @@ func TestServeProcessTakeoverRejectsLivePredecessorMutationBothStores(t *testing
 					return errors.New("held workflow handler has no original claim")
 				}
 				observation, err := storetest.HoldWorkflowMutationCommit(ctx, latest.deps.EventStore, claim)
+				if err == nil {
+					if _, duplicateErr := storetest.HoldWorkflowMutationCommit(ctx, latest.deps.EventStore, claim); duplicateErr == nil {
+						err = errors.New("one original workflow owner armed a second observation")
+					}
+					if _, earlyErr := observation.SuccessorWaiting(ctx); earlyErr == nil {
+						err = errors.New("unentered workflow observation inspected native work")
+					}
+				}
 				mutationReady <- heldMutation{probe: observation, err: err}
 				return err
 			}
