@@ -8,8 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type activationFinalizerEvidenceStore struct {
@@ -427,20 +430,18 @@ func TestCompletedStandingPreRunHandoffRetainsReconstructionAuthority(t *testing
 			agents := &flowActivationTestStore{}
 			bundle := testFlowBundleWithTwoAgents(t, "")
 			req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-			ctx := testAuthorActivityContext(context.Background())
-			initial := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
+			initial, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle), agents)
 			if err := activateFlowInstanceForTest(initial, ctx, req); err != nil {
 				t.Fatal(err)
 			}
 			if err := initial.Shutdown(); err != nil {
 				t.Fatal(err)
 			}
-			restarted := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
-			setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
+			restarted, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle), agents)
 			if _, _, err := restarted.PrepareStandingFlowInstance(ctx, req); err != nil {
 				t.Fatal(err)
 			}
-			startup, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestSourceArtifactFact, replay)
+			startup, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact), replay)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -448,7 +449,14 @@ func TestCompletedStandingPreRunHandoffRetainsReconstructionAuthority(t *testing
 				t.Fatal(err)
 			}
 			runCtx, cancel := context.WithCancel(ctx)
-			if err := restarted.Run(managedExecutionTestContext(t, runCtx)); err != nil {
+			runCtx = managedExecutionTestContextForCapturedSource(t, runCtx)
+			execution, executionOK := managedexecution.FromContext(runCtx)
+			captured, capturedOK := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+			if !executionOK || !capturedOK || execution.BundleHash != captured.BundleHash() {
+				cancel()
+				t.Fatalf("startup managed execution source differs from captured source: execution=%t/%s captured=%t/%s", executionOK, execution.BundleHash, capturedOK, captured.BundleHash())
+			}
+			if err := restarted.Run(runCtx); err != nil {
 				cancel()
 				t.Fatal(err)
 			}
@@ -465,20 +473,18 @@ func TestInterruptedStandingPreRunRequiresExplicitRecovery(t *testing.T) {
 	agents := &flowActivationTestStore{}
 	bundle := testFlowBundleWithTwoAgents(t, "")
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
-	initial := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
+	initial, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle), agents)
 	if err := activateFlowInstanceForTest(initial, ctx, req); err != nil {
 		t.Fatal(err)
 	}
 	if err := initial.Shutdown(); err != nil {
 		t.Fatal(err)
 	}
-	interrupted := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
-	setFlowActivationManagerSemanticSource(interrupted, semanticview.Wrap(bundle))
+	interrupted, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle), agents)
 	if _, _, err := interrupted.PrepareStandingFlowInstance(ctx, req); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := interrupted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestSourceArtifactFact, false); err != nil {
+	if _, err := interrupted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact), false); err != nil {
 		t.Fatal(err)
 	}
 	if err := interrupted.PrepareAdmittedDynamicFlowAgentsForStart(ctx); err != nil {
@@ -487,8 +493,7 @@ func TestInterruptedStandingPreRunRequiresExplicitRecovery(t *testing.T) {
 	if err := interrupted.Shutdown(); err != nil {
 		t.Fatal(err)
 	}
-	restarted := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
+	restarted, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, semanticview.Wrap(bundle), agents)
 	if _, _, err := restarted.PrepareStandingFlowInstance(ctx, req); err != nil {
 		t.Fatal(err)
 	}
@@ -496,14 +501,14 @@ func TestInterruptedStandingPreRunRequiresExplicitRecovery(t *testing.T) {
 	if err != nil || !found || !before.Pending() || before.AttemptOrdinal != 2 {
 		t.Fatalf("interrupted successor did not retain incomplete evidence: readiness=%+v found=%v err=%v", before, found, err)
 	}
-	if _, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestSourceArtifactFact, false); err == nil || !strings.Contains(err.Error(), "requires recovery for incomplete source-owned instance") {
+	if _, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact), false); err == nil || !strings.Contains(err.Error(), "requires recovery for incomplete source-owned instance") {
 		t.Fatalf("interrupted reconstruction bypassed recovery admission: %v", err)
 	}
 	after, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
 	if err != nil || !found || !reflect.DeepEqual(before, after) {
 		t.Fatalf("recovery refusal changed durable readiness: before=%+v after=%+v found=%v err=%v", before, after, found, err)
 	}
-	if _, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestSourceArtifactFact, true); err != nil {
+	if _, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact), true); err != nil {
 		t.Fatalf("explicit recovery did not admit interrupted successor: %v", err)
 	}
 }
@@ -511,14 +516,13 @@ func TestInterruptedStandingPreRunRequiresExplicitRecovery(t *testing.T) {
 func TestStartupTopologyRefusesUnfinalizedPostSnapshotConstruction(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
-	ctx := testAuthorActivityContext(context.Background())
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle))
 	initial := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	if err := activateFlowInstanceForTest(am, ctx, initial); err != nil {
 		t.Fatal(err)
 	}
-	startup, err := am.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestSourceArtifactFact, true)
+	startup, err := am.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact), true)
 	if err != nil {
 		t.Fatal(err)
 	}
