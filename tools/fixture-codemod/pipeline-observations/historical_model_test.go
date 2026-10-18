@@ -198,7 +198,7 @@ func TestHistoricalMechanicalCurrentHandlerAssemblyIsSourcePinned(t *testing.T) 
 			if err != nil || !historicalCurrentSourcePinned(historical, pin.digest) {
 				t.Fatal("extracted native handler owner/cleanup/publication assembly changed")
 			}
-			prior := source
+			prior := historical
 			if pin.beforeJoin != "" {
 				var edits [][2]string
 				switch pin.function {

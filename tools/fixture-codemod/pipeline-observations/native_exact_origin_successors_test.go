@@ -11,8 +11,6 @@ import (
 	"testing"
 )
 
-type publicationSuccessorEdit struct{ before, after string }
-
 // Q2's diagnostic exclusion is settled in review 6183283144. This setup
 // amendment reverses before the older publication edits, preserving their pins.
 const rootForkPostCutBusinessSetup = `			if gate {
