@@ -102,10 +102,18 @@ func debtValidateProcessLeaseRelocationSource(root, baseRoot string, actual, sou
 // All methods, including new files, participate. Pinning only the carrier's
 // declaration would miss a newly added raw getter or custody-forwarding method.
 func debtProcessLeaseCustodyDigest(root string) (string, error) {
+	parts, err := debtProcessLeaseCustodyParts(root)
+	if err != nil {
+		return "", err
+	}
+	return debtProcessLeaseCustodyPartsDigest(parts), nil
+}
+
+func debtProcessLeaseCustodyParts(root string) ([]string, error) {
 	const dir = "internal/store/internal/startupownership"
 	entries, err := os.ReadDir(filepath.Join(root, dir))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	var parts []string
 	for _, entry := range entries {
@@ -115,7 +123,7 @@ func debtProcessLeaseCustodyDigest(root string) (string, error) {
 		path := dir + "/" + entry.Name()
 		file, err := parser.ParseFile(token.NewFileSet(), filepath.Join(root, path), nil, parser.AllErrors)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		for _, node := range file.Decls {
 			owned := false
@@ -143,15 +151,19 @@ func debtProcessLeaseCustodyDigest(root string) (string, error) {
 			if owned {
 				var canonical bytes.Buffer
 				if err := format.Node(&canonical, token.NewFileSet(), node); err != nil {
-					return "", err
+					return nil, err
 				}
 				parts = append(parts, path+"\x00"+canonical.String())
 			}
 		}
 	}
+	return parts, nil
+}
+
+func debtProcessLeaseCustodyPartsDigest(parts []string) string {
 	sort.Strings(parts)
 	digest := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
-	return hex.EncodeToString(digest[:]), nil
+	return hex.EncodeToString(digest[:])
 }
 
 func debtProcessLeaseCustodyFinding(finding authorityFinding) bool {
@@ -165,12 +177,12 @@ func debtProcessLeaseCustodyFinding(finding authorityFinding) bool {
 
 func debtClassifyProcessLeaseCustody(root string, findings []authorityFinding) {
 	digest, err := debtProcessLeaseCustodyDigest(root)
-	if err != nil || digest != debtProcessLeaseCustodyPin {
+	if err != nil || debtR04CustodySource(root, digest) != nil {
 		return // Unproven/changed custody remains visible, unclassified debt.
 	}
 	for i := range findings {
 		if debtProcessLeaseCustodyFinding(findings[i]) {
-			findings[i].Disposition = "native-process-lease-custody:" + digest
+			findings[i].Disposition = "native-process-lease-custody:" + debtProcessLeaseCustodyPin
 		}
 	}
 }

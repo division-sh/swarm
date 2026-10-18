@@ -140,6 +140,9 @@ func proveNativeEntryCompositionBindings(t *testing.T, root string) {
 		want = strings.Replace(want, anchor, anchor+addition, 1)
 	}
 	actual, err := os.ReadFile(filepath.Join(root, path))
+	if err == nil {
+		actual, err = debtR04CompositionPredecessor(root, actual)
+	}
 	if err != nil || string(actual) != want {
 		t.Fatal("assembly changed beyond the two exact accepted once-bound claim owners:", err)
 	}

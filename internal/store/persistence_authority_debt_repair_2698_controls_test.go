@@ -59,7 +59,7 @@ func TestPersistenceAuthorityDebtRepair2698DeclarationCacheUsesActualBytes(t *te
 
 func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	if actual, err := debtCollectorDigest(root); err != nil || actual != debtRepair2698ProofCostCollectorTo {
+	if actual, err := debtCollectorDigest(root); err != nil || actual != debtRepair2698ProofCostCollectorTo && actual != debtR04CollectorTo {
 		t.Fatalf("native repair collector=%s expected=%s: %v", actual, debtRepair2698ProofCostCollectorTo, err)
 	}
 	if err := debtCatchUpCollectorSource(root); err != nil {
@@ -79,6 +79,68 @@ func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testin
 		t.Fatal("exact forward source continuation refused")
 	}
 	assertDebtCatchUpForeignProvenance(t, trusted, head, proof)
+	proveR04CollectorContinuation(t, root)
+}
+
+func proveR04CollectorContinuation(t *testing.T, root string) {
+	t.Helper()
+	actual, err := debtCollectorDigest(root)
+	if err != nil || actual != debtR04CollectorTo {
+		t.Fatalf("R04 continuation must use its executing collector: %s: %v", actual, err)
+	}
+	before, _, err := debtCatchUpSignedBaseline(root, debtR04After, debtRepair2698ProofCostCollectorTo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := before
+	after.Collector = actual
+	proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(after.Sites)}
+	if !debtR04CollectorTransition(before.Collector, after.Collector, before, after, proof) {
+		t.Fatal("complete authenticated R04 continuation refused")
+	}
+	if debtR04CollectorTransition(after.Collector, before.Collector, after, before, proof) ||
+		debtRepair2698ProofCostCollectorTransition(before.Collector, after.Collector, before, after, proof) {
+		t.Fatal("R04 reverse edge or retargeted predecessor accepted")
+	}
+	assertDebtCatchUpForeignProvenance(t, before, after, proof)
+	proveR04SourceContinuation(t, root)
+}
+
+func proveR04SourceContinuation(t *testing.T, root string) {
+	t.Helper()
+	for _, mutation := range []string{"foreign-path", "missing-path", "duplicate-path", "stale-source", "reverse-source"} {
+		pins := append([]debtRepair2698SourceFile(nil), debtR04SourcePins[:]...)
+		switch mutation {
+		case "foreign-path":
+			pins[0].File += ".foreign"
+		case "missing-path":
+			pins = pins[:2]
+		case "duplicate-path":
+			pins[0] = pins[1]
+		case "stale-source":
+			pins[0].AfterSHA256 = pins[0].BeforeSHA256
+		case "reverse-source":
+			pins[0].BeforeSHA256, pins[0].AfterSHA256 = pins[0].AfterSHA256, pins[0].BeforeSHA256
+		}
+		if _, _, err := debtR04SourceImagesFor(root, pins); err == nil {
+			t.Error("R04 source certificate admitted", mutation)
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(root, debtR04CompositionPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := debtR04CompositionPredecessor(root, raw)
+	if err != nil || debtBaselineChecksum(previous) != debtCatchUpNativeEntryNativePins[debtR04CompositionPath] {
+		t.Fatal("R04 assembly did not reconstruct the exact predecessor:", err)
+	}
+	once, err := debtR04CompositionPredecessor(root, previous)
+	if err != nil || !bytes.Equal(once, previous) {
+		t.Fatal("R04 assembly inverse consumed its predecessor twice:", err)
+	}
+	if _, err := debtR04CompositionPredecessor(root, append(bytes.Clone(raw), '\n')); err == nil {
+		t.Fatal("R04 inverse accepted supplied bytes instead of the actual current image")
+	}
 }
 
 func TestPersistenceAuthorityDebtRepair2698ProofCostForwardEdgeKeepsOriginalFingerprintAndRefusesReverse(t *testing.T) {
@@ -222,6 +284,21 @@ func copyRepair2698CustodySources(t *testing.T, root, destination string) {
 		}
 		debtWriteModuleSource(t, destination, path, string(raw))
 	}
+	copyR04CompositionSource(t, root, destination)
+}
+
+func copyR04CompositionSource(t *testing.T, root, destination string) {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(root, debtR04CompositionPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	debtWriteModuleSource(t, destination, debtR04CompositionPath, string(raw))
+	gitdir, err := debtGit(root, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	debtWriteModuleSource(t, destination, ".git", "gitdir: "+strings.TrimSpace(string(gitdir))+"\n")
 }
 
 func TestPersistenceAuthorityDebtRepair2698FixtureNameCopiedWarmBoundary(t *testing.T) {

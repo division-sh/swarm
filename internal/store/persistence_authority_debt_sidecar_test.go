@@ -6,10 +6,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"go/ast"
 	"go/format"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const debtCollectorSidecarPath = "internal/store/testdata/persistence_authority_debt_baseline.collector.json"
@@ -458,6 +462,12 @@ func debtCatchUpSignedBaseline(root, ref, collector string) (authorityDebtBaseli
 
 func debtCatchUpCollectorSource(root string) error {
 	actual, err := debtCollectorDigest(root)
+	if actual == debtR04CollectorTo {
+		if _, _, sourceErr := debtR04SourceImages(root); sourceErr != nil {
+			return sourceErr
+		}
+		actual = debtRepair2698ProofCostCollectorTo
+	}
 	if err != nil || (actual != debtCatchUpCollectorTo && actual != debtCatchUpFreshnessCollectorTo && actual != debtCatchUpNativeEntryCollectorTo && actual != debtRepair2698CollectorTo && actual != debtRepair2698ProofCostCollectorTo) {
 		return fmt.Errorf("joined collector is not its exact enumerated source: %s: %v", actual, err)
 	}
@@ -605,7 +615,7 @@ func debtCatchUpFreshnessPredecessors(root string, actual, head map[string]autho
 }
 
 func debtCatchUpFreshnessOwnerSource(root string) error {
-	if digest, err := debtProcessLeaseCustodyDigest(root); err != nil || digest != debtProcessLeaseCustodyPin {
+	if digest, err := debtProcessLeaseCustodyDigest(root); err != nil || debtR04CustodySource(root, digest) != nil {
 		return fmt.Errorf("freshness custody lacks its reviewed native owner: %s: %v", digest, err)
 	}
 	for path, want := range debtCatchUpFreshnessNativePins {
@@ -659,16 +669,196 @@ func debtCatchUpNativeEntryPredecessors(root string, actual, head map[string]aut
 }
 
 func debtCatchUpNativeEntryOwnerSource(root string) error {
-	if digest, err := debtProcessLeaseCustodyDigest(root); err != nil || digest != debtProcessLeaseCustodyPin {
+	if digest, err := debtProcessLeaseCustodyDigest(root); err != nil || debtR04CustodySource(root, digest) != nil {
 		return fmt.Errorf("native-entry custody lacks its reviewed native owner: %s: %v", digest, err)
 	}
 	for path, want := range debtCatchUpNativeEntryNativePins {
 		raw, err := os.ReadFile(filepath.Join(root, path))
+		if err == nil && path == debtR04CompositionPath && debtBaselineChecksum(raw) != want {
+			raw, err = debtR04CompositionPredecessor(root, raw)
+		}
 		if err != nil || debtBaselineChecksum(raw) != want {
 			return fmt.Errorf("native-entry owner/assertion source changed: %s: %v", path, err)
 		}
 	}
 	return nil
+}
+
+// #2700/6245579332, owner map 6246445104. These complete current images
+// authenticate the finite inverse; the census always reads the original files.
+func debtR04SourceImages(root string) (map[string][]byte, map[string][]byte, error) {
+	return debtR04SourceImagesFor(root, debtR04SourcePins[:])
+}
+
+func debtR04SourceImagesFor(root string, pins []debtRepair2698SourceFile) (map[string][]byte, map[string][]byte, error) {
+	if len(pins) != 3 {
+		return nil, nil, fmt.Errorf("R04 continuation requires its three complete source images")
+	}
+	before, after := map[string][]byte{}, map[string][]byte{}
+	for _, file := range pins {
+		if _, duplicate := after[file.File]; duplicate || (file.File != debtR04OwnerPath && file.File != debtR04ActivityPath && file.File != debtR04CompositionPath) {
+			return nil, nil, fmt.Errorf("foreign or duplicate R04 source: %s", file.File)
+		}
+		current, err := os.ReadFile(filepath.Join(root, file.File))
+		if err != nil {
+			return nil, nil, err
+		}
+		approved, err := debtRepair2698SignedSource(root, debtR04After, file.File, file.AfterSHA256)
+		if err != nil || !bytes.Equal(current, approved) {
+			return nil, nil, fmt.Errorf("R04 current source differs from its complete approved image: %s: %v", file.File, err)
+		}
+		after[file.File] = current
+		if file.BeforeSHA256 == "absent" {
+			listed, err := debtGit(root, "ls-tree", debtR04Before, "--", file.File)
+			if err != nil || len(listed) != 0 {
+				return nil, nil, fmt.Errorf("R04 role file was not absent in its predecessor: %s: %v", file.File, err)
+			}
+			continue
+		}
+		previous, err := debtRepair2698SignedSource(root, debtR04Before, file.File, file.BeforeSHA256)
+		if err != nil {
+			return nil, nil, err
+		}
+		before[file.File] = previous
+	}
+	return before, after, nil
+}
+
+func debtR04CustodyDeclaration(path string, raw []byte, name string) (string, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), path, raw, parser.AllErrors)
+	if err != nil {
+		return "", err
+	}
+	var found ast.Node
+	for _, node := range file.Decls {
+		match := false
+		switch decl := node.(type) {
+		case *ast.GenDecl:
+			for _, spec := range decl.Specs {
+				if typ, ok := spec.(*ast.TypeSpec); ok && name == "StartupPostgresOwner" && typ.Name.Name == name {
+					match = true
+				}
+			}
+		case *ast.FuncDecl:
+			if decl.Name.Name == name && decl.Recv != nil && len(decl.Recv.List) == 1 {
+				pointer, ok := decl.Recv.List[0].Type.(*ast.StarExpr)
+				if ok {
+					typ, ok := pointer.X.(*ast.Ident)
+					match = ok && typ.Name == "StartupPostgresOwner"
+				}
+			}
+		}
+		if match {
+			if found != nil {
+				return "", fmt.Errorf("duplicate R04 custody declaration: %s:%s", path, name)
+			}
+			found = node
+		}
+	}
+	if found == nil {
+		return "", fmt.Errorf("missing R04 custody declaration: %s:%s", path, name)
+	}
+	var canonical bytes.Buffer
+	if err := format.Node(&canonical, token.NewFileSet(), found); err != nil {
+		return "", err
+	}
+	return path + "\x00" + canonical.String(), nil
+}
+
+func debtR04CustodySource(root, actual string) error {
+	if actual == debtProcessLeaseCustodyPin {
+		return nil
+	}
+	if actual != debtR04CustodyTo {
+		return fmt.Errorf("unreviewed R04 custody: %s", actual)
+	}
+	before, after, err := debtR04SourceImages(root)
+	if err != nil {
+		return err
+	}
+	parts, err := debtProcessLeaseCustodyParts(root)
+	if err != nil || debtProcessLeaseCustodyPartsDigest(parts) != actual {
+		return fmt.Errorf("R04 custody changed during authentication: %v", err)
+	}
+	for _, row := range [][2]string{{debtR04OwnerPath, "StartupPostgresOwner"}, {debtR04OwnerPath, "BindLifecycleCandidates"}, {debtR04ActivityPath, "BindActivityJournalRole"}} {
+		current, err := debtR04CustodyDeclaration(row[0], after[row[0]], row[1])
+		if err != nil {
+			return err
+		}
+		previous := ""
+		if row[1] == "StartupPostgresOwner" {
+			previous, err = debtR04CustodyDeclaration(row[0], before[row[0]], row[1])
+			if err != nil {
+				return err
+			}
+		}
+		count := 0
+		var normalized []string
+		for _, part := range parts {
+			if part != current {
+				normalized = append(normalized, part)
+				continue
+			}
+			count++
+			if previous != "" {
+				normalized = append(normalized, previous)
+			}
+		}
+		if count != 1 {
+			return fmt.Errorf("R04 custody inverse requires one complete fragment: %s:%s count=%d", row[0], row[1], count)
+		}
+		parts = normalized
+	}
+	if debtProcessLeaseCustodyPartsDigest(parts) != debtProcessLeaseCustodyPin {
+		return fmt.Errorf("R04 custody does not reconstruct its immutable predecessor")
+	}
+	return nil
+}
+
+func debtR04CompositionPredecessor(root string, current []byte) ([]byte, error) {
+	if debtBaselineChecksum(current) == debtCatchUpNativeEntryNativePins[debtR04CompositionPath] {
+		return current, nil // Once-only: an authenticated predecessor is unchanged.
+	}
+	before, after, err := debtR04SourceImages(root)
+	if err != nil || !bytes.Equal(current, after[debtR04CompositionPath]) {
+		return nil, fmt.Errorf("R04 assembly inverse does not describe actual source: %v", err)
+	}
+	want := string(before[debtR04CompositionPath])
+	addition := "\tif err := startupOwner.BindLifecycleCandidates(candidates); err != nil {\n\t\treturn nil, err\n\t}\n\tif err := startupOwner.BindActivityJournalRole(activityJournal); err != nil {\n\t\treturn nil, err\n\t}\n"
+	for _, backend := range []string{"Postgres", "SQLite"} {
+		anchor := "\tstore.startup" + backend + "Owner = startupOwner\n"
+		if strings.Count(want, anchor) != 1 {
+			return nil, fmt.Errorf("R04 assembly lacks its unique %s publication anchor", backend)
+		}
+		want = strings.Replace(want, anchor, addition+anchor, 1)
+	}
+	if string(current) != want {
+		return nil, fmt.Errorf("R04 assembly differs beyond its four original-owner bindings")
+	}
+	return bytes.Clone(before[debtR04CompositionPath]), nil
+}
+
+func debtR04CollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {
+	if current != debtR04CollectorTo || head.Collector != current || trusted.Collector != base || len(proofs) != 1 ||
+		trusted.BootstrapSource != debtBootstrapSource || head.BootstrapSource != debtBootstrapSource || debtCatchUpCollectorSource(proofs[0].Root) != nil {
+		return false
+	}
+	original, _, err := debtCatchUpSignedBaseline(proofs[0].Root, debtR04After, debtRepair2698ProofCostCollectorTo)
+	if err != nil {
+		return false
+	}
+	if base == debtRepair2698ProofCostCollectorTo {
+		if !debtSitesEqual(trusted.Sites, original.Sites) {
+			return false
+		}
+	} else {
+		intermediate := head
+		intermediate.Collector = debtRepair2698ProofCostCollectorTo
+		if !debtRepair2698ProofCostCollectorTransition(base, intermediate.Collector, trusted, intermediate, proofs...) {
+			return false
+		}
+	}
+	return len(authorityDebtRatchet(proofs[0].Actual, head.Sites, original.Sites, original.Sites, proofs[0])) == 0
 }
 
 func debtCatchUpNativeEntryUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, historical bool, prior error) (authorityDebtBaseline, error) {
