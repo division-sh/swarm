@@ -252,7 +252,11 @@ func TestFanOutPublicationGroupHistoryMaterializedForkBothStores(t *testing.T) {
 				t.Fatal("declared group did not settle in one revision")
 			}
 			store := f.raw.(runForkSelectedLifecycleStore)
-			request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.events[0].ID(), OriginalLoopCarriage: originalCarriageForRun(t, f.raw, f.runID)}
+			rooted, err := f.raw.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.events[0].ID(), RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, f.raw, f.runID)}
 			child, err := store.MaterializeRunFork(f.ctx, request)
 			if err != nil {
 				t.Fatal(err)
