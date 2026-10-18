@@ -96,4 +96,5 @@ func appendEffectiveProviderTriggerCapabilitySubjects(ctx context.Context, repor
 		return
 	}
 	report.addCapabilitySubjects(subjects)
+	report.CredentialSources = append(report.CredentialSources, owner.SourceFacts()...)
 }
