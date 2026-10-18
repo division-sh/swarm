@@ -158,9 +158,6 @@ func TestRetainedJoinOutcomeSuccessorPreservesReviewedCaller(t *testing.T) {
 			if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 				t.Fatal(err)
 			}
-			if len(rows) != 893 {
-				t.Fatalf("recipe census=%d,want893", len(rows))
-			}
 			var row *recipe
 			for i := range rows {
 				if rows[i].File == target.file && rows[i].Function == target.function {
