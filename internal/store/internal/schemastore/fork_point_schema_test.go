@@ -137,6 +137,9 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 				uuid.NewString(), eventRunID, sourceRunID, eventBindingID, eventID, fingerprint); err != nil {
 				t.Fatalf("event runtime execution refused: %v", err)
 			}
+			t.Run("exact_live_parent_pairs", func(t *testing.T) {
+				verifyForkLiveParentPairs(t, db, eventID)
+			})
 			insertRoute := func(forkRunID, kind string, revision int64, forkEventID any) error {
 				t.Helper()
 				_, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_route_recoveries
