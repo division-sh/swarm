@@ -100,7 +100,7 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxSettings(ctx contex
 }
 
 func (d *serveChannelDeliveryDispatcher) resolveInboxEntry(ctx context.Context, text operatorchannel.InboundText) (runtimechanneldelivery.ResolvedInboxEntry, runtimechanneldelivery.InboxEntryDisposition, error) {
-	if d == nil || d.store == nil || d.activations == nil || d.manager == nil || d.ingress == nil || d.credentials == nil || d.now == nil {
+	if d == nil || d.store == nil || d.activations == nil || d.manager == nil || d.credentials == nil || d.now == nil {
 		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, fmt.Errorf("native inbox entry owners are unavailable")
 	}
 	entry, found, err := d.store.ResolveCurrentInboxEntry(ctx, text)
@@ -136,14 +136,11 @@ func (d *serveChannelDeliveryDispatcher) resolveInboxEntry(ctx context.Context, 
 }
 
 func (d *serveChannelDeliveryDispatcher) qualifyResolvedNativeEntry(ctx context.Context, text operatorchannel.InboundText, entry runtimechanneldelivery.ResolvedInboxEntry, selected channelonboarding.ConnectedChannelActivation) (runtimechanneldelivery.ResolvedInboxEntry, runtimechanneldelivery.InboxEntryDisposition, error) {
-	registration, current := d.ingress.ChannelRegistrationCurrent(ctx, d.now().UTC(),
-		channelonboarding.LearnedBindingID(selected.SlotKey), selected.TargetSelector, selected.Provider)
-	if !current || !registration.Current {
-		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, nil
+	provider, disposition, err := d.admitInboxEntryTransport(ctx, selected, entry)
+	if err != nil || disposition != runtimechanneldelivery.InboxEntryAccepted {
+		return runtimechanneldelivery.ResolvedInboxEntry{}, disposition, err
 	}
-	if entry.Kind == runtimechanneldelivery.InboxEntryNative && registration.Registration.SlotID != entry.ResourceSlotID {
-		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryRejected, nil
-	}
+	defer provider.CloseExecution()
 	lease, current, err := d.manager.AcquireChannelActivationPublication(selected.Coordinate.BundleHash, selected.Coordinate.ContextPublicationGeneration)
 	if err != nil || !current {
 		return runtimechanneldelivery.ResolvedInboxEntry{}, runtimechanneldelivery.InboxEntryUnavailable, err
@@ -173,6 +170,37 @@ func (d *serveChannelDeliveryDispatcher) qualifyResolvedNativeEntry(ctx context.
 		return d.qualifyTextReplyInboxEntry(ctx, text, entry, selected, plan)
 	}
 	return d.qualifyInstalledInboxEntry(ctx, text, entry, selected, plan)
+}
+
+func (d *serveChannelDeliveryDispatcher) admitInboxEntryTransport(ctx context.Context, activation channelonboarding.ConnectedChannelActivation,
+	entry runtimechanneldelivery.ResolvedInboxEntry,
+) (operatorchannel.ProviderAuthority, runtimechanneldelivery.InboxEntryDisposition, error) {
+	if activation.Posture == channelonboarding.ActivationSessionConnection {
+		if entry.Kind != runtimechanneldelivery.InboxEntryTextReply {
+			return operatorchannel.ProviderAuthority{}, runtimechanneldelivery.InboxEntryRejected, nil
+		}
+		op, err := d.activations.GetChannelOnboarding(ctx, activation.OperationID)
+		if err != nil {
+			return operatorchannel.ProviderAuthority{}, runtimechanneldelivery.InboxEntryUnavailable, err
+		}
+		provider, _, current, err := observeServeChannelSession(ctx, d.sessions, op, activation)
+		if err != nil || !current {
+			return operatorchannel.ProviderAuthority{}, runtimechanneldelivery.InboxEntryUnavailable, err
+		}
+		return provider, runtimechanneldelivery.InboxEntryAccepted, nil
+	}
+	if activation.Posture != channelonboarding.ActivationWebhookRegistration || d.ingress == nil {
+		return operatorchannel.ProviderAuthority{}, runtimechanneldelivery.InboxEntryUnavailable, fmt.Errorf("webhook inbox requires its exact ingress owner")
+	}
+	registration, current := d.ingress.ChannelRegistrationCurrent(ctx, d.now().UTC(),
+		channelonboarding.LearnedBindingID(activation.SlotKey), activation.TargetSelector, activation.Provider)
+	if !current || !registration.Current {
+		return operatorchannel.ProviderAuthority{}, runtimechanneldelivery.InboxEntryUnavailable, nil
+	}
+	if entry.Kind == runtimechanneldelivery.InboxEntryNative && registration.Registration.SlotID != entry.ResourceSlotID {
+		return operatorchannel.ProviderAuthority{}, runtimechanneldelivery.InboxEntryRejected, nil
+	}
+	return operatorchannel.ProviderAuthority{}, runtimechanneldelivery.InboxEntryAccepted, nil
 }
 
 func (d *serveChannelDeliveryDispatcher) qualifyTextReplyInboxEntry(ctx context.Context, text operatorchannel.InboundText,

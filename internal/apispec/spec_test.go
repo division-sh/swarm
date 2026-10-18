@@ -19,11 +19,11 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 71 {
-		t.Fatalf("method count = %d, want 71", report.MethodCount)
+	if report.MethodCount != 73 {
+		t.Fatalf("method count = %d, want 73", report.MethodCount)
 	}
-	if report.SchemaCount != 252 {
-		t.Fatalf("schema count = %d, want 252 (including six completion-evidence contracts)", report.SchemaCount)
+	if report.SchemaCount != 254 {
+		t.Fatalf("schema count = %d, want 254 (including completion evidence, native channel logout and non-executing selection)", report.SchemaCount)
 	}
 	if _, ok := api.Components.Schemas["ChannelCapabilityVector"]; !ok {
 		t.Fatal("ChannelCapabilityVector missing from schema catalog")
@@ -34,8 +34,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if _, ok := api.Components.Errors["RUN_NEVER_COMPLETES"]; !ok || !slices.Contains(api.MethodCatalog["run.start"].Errors, "RUN_NEVER_COMPLETES") {
 		t.Fatal("finite-start refusal must be declared and bound to run.start")
 	}
-	if report.MutatingMethodCount != 30 {
-		t.Fatalf("mutating method count = %d, want 30", report.MutatingMethodCount)
+	if report.MutatingMethodCount != 31 {
+		t.Fatalf("mutating method count = %d, want 31", report.MutatingMethodCount)
 	}
 	if report.SubscriptionMethodCnt != 5 {
 		t.Fatalf("subscription method count = %d, want 5", report.SubscriptionMethodCnt)
@@ -137,11 +137,11 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 71 {
-		t.Fatalf("generated OpenRPC methods = %d, want 71", len(doc.Methods))
+	if len(doc.Methods) != 73 {
+		t.Fatalf("generated OpenRPC methods = %d, want 73", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 252 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 252", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 254 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 254", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 69 {
 		t.Fatalf("generated OpenRPC errors = %d, want 69", len(doc.Components.Errors))

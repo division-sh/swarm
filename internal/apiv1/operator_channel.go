@@ -35,6 +35,7 @@ type ConnectedChannelReadbackLifecycle interface {
 type ChannelDestructiveLifecycle interface {
 	Unbind(context.Context, string, int64, string, string) (operatorchannel.Operation, operatorchannel.Binding, error)
 	RevokeProof(context.Context, string, int64, string, string) (operatorchannel.VerifiedProof, error)
+	Logout(context.Context, string, int64, string, string) (channelonboarding.SessionLogoutReadback, error)
 }
 
 func OperatorChannelHandlers(opts OperatorChannelHandlerOptions) map[string]MethodHandler {
@@ -78,6 +79,7 @@ func OperatorChannelHandlers(opts OperatorChannelHandlerOptions) map[string]Meth
 		}
 	}
 	if opts.Destructive != nil {
+		handlers["channel.logout"] = operatorChannelLogoutHandler(opts, now)
 		handlers["channel.unbind"] = func(ctx context.Context, req Request) (any, error) {
 			if err := requireOperatorPrincipal(req, opts.Channels); err != nil {
 				return nil, err

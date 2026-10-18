@@ -20,16 +20,17 @@ import (
 )
 
 type standingBindingCredentials struct {
-	alias           string
-	plan            providertriggers.InboundAdmissionPlan
-	enabled         bool
-	blockReason     runtimerunlifecycle.StandingBindingBlockReason
-	operationID     string
-	recoveryCommand string
-	signingKey      string
-	credentialKeys  []string
-	admissions      []channelonboarding.CredentialAdmission
-	missing         []string
+	alias            string
+	plan             providertriggers.InboundAdmissionPlan
+	enabled          bool
+	blockReason      runtimerunlifecycle.StandingBindingBlockReason
+	operationID      string
+	recoveryCommand  string
+	signingKey       string
+	credentialKeys   []string
+	admissions       []channelonboarding.CredentialAdmission
+	missing          []string
+	sessionOperation *channelonboarding.Operation
 }
 
 type standingCredentialAdmission struct {
@@ -238,6 +239,9 @@ func (rt *Runtime) standingBindingCredentialRoles(selector string, binding Stand
 }
 
 func (rt *Runtime) observeStandingBindingCredentials(ctx context.Context, projection *runtimecredentials.SecretBindingProjection, declaration StandingTargetDeclaration, binding StandingIngressBinding, learned map[string]standingLearnedCredentials) (standingBindingCredentials, error) {
+	if binding.AdmissionPlan.Transport() == packs.ChannelTransportSession {
+		return rt.observeStandingSessionBinding(ctx, declaration, binding)
+	}
 	selector := standingIngressSelector(declaration.FlowPath, binding.Provider)
 	keys, signingRole, err := rt.standingBindingCredentialRoles(selector, binding)
 	if err != nil {
@@ -473,7 +477,10 @@ func (rt *Runtime) ValidateStandingIngressCredentials(ctx context.Context) error
 	if err != nil {
 		return err
 	}
-	return admission.projection.ValidateCurrent(ctx)
+	if err := admission.projection.ValidateCurrent(ctx); err != nil {
+		return err
+	}
+	return rt.validateStandingSessionBindings(ctx, admission.bindings, "")
 }
 
 // Request and readiness consume the same frozen binding; current presence is
@@ -499,8 +506,11 @@ func (rt *Runtime) standingIngressCredentialScope(target InboundTarget) (standin
 			return fmt.Errorf("standing ingress credential admission was withdrawn")
 		}
 		selected, found := current.bindings[standingIngressSelector(target.FlowPath, target.Provider)]
-		if !found || selected.enabled != credential.enabled || selected.signingKey != credential.signingKey || selected.alias != credential.alias || !selected.plan.Generation().Equal(credential.plan.Generation()) || selected.operationID != credential.operationID || !reflect.DeepEqual(selected.credentialKeys, credential.credentialKeys) || !reflect.DeepEqual(selected.admissions, credential.admissions) {
+		if !found || selected.enabled != credential.enabled || selected.signingKey != credential.signingKey || selected.alias != credential.alias || !selected.plan.Generation().Equal(credential.plan.Generation()) || selected.operationID != credential.operationID || !reflect.DeepEqual(selected.credentialKeys, credential.credentialKeys) || !reflect.DeepEqual(selected.admissions, credential.admissions) || !reflect.DeepEqual(selected.sessionOperation, credential.sessionOperation) {
 			return fmt.Errorf("selected standing ingress credential admission was replaced")
+		}
+		if err := rt.validateStandingSessionBinding(ctx, credential); err != nil {
+			return err
 		}
 		if err := admission.projection.ValidateCurrentKeys(ctx, credential.credentialKeys); err != nil {
 			return err
@@ -569,9 +579,9 @@ func (rt *Runtime) evaluateStandingIngressAdmission(ctx context.Context, target 
 	return current, validate, nil
 }
 
-// Explicit connect is the only in-process credential-producing activation
-// boundary. Ordinary planning and diagnostic reads retain the frozen decision.
-func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation channelonboarding.Operation, candidate channelonboarding.Candidate) ([]StandingTarget, []StandingActivation, error) {
+// Explicit onboarding promotes one standing responsibility. Native promotion
+// additionally borrows the original SDK admission; readback cannot create it.
+func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation channelonboarding.Operation, candidate channelonboarding.Candidate, session operatorchannel.ProviderAuthority) ([]StandingTarget, []StandingActivation, error) {
 	if rt == nil || rt.Options.ChannelOnboardingStore == nil || rt.Options.WorkflowModule == nil {
 		return nil, nil, fmt.Errorf("channel target promotion requires runtime and selected onboarding owner")
 	}
@@ -582,8 +592,8 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 	if err != nil {
 		return nil, nil, err
 	}
-	if current.Phase != channelonboarding.PhaseCredentialsAdmitted || current.Revision != operation.Revision || !current.Coordinate.MatchesDeclaration(candidate.Coordinate) || current.TargetSelector != candidate.Target.Selector || current.Coordinate.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
-		return nil, nil, fmt.Errorf("%w: channel target promotion has no exact admitted credential responsibility", channelonboarding.ErrRevisionConflict)
+	if err := rt.requireStandingChannelTargetAdmission(current, operation.Revision, candidate, session); err != nil {
+		return nil, nil, err
 	}
 	if err := rt.refreshStandingCredentialAdmission(ctx, candidate.Target.Selector); err != nil {
 		return nil, nil, err
@@ -618,6 +628,20 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 		return nil, nil, fmt.Errorf("channel target %s has no executable standing owner; inspect standing service %s", candidate.Target.Selector, candidate.Target.ServiceID)
 	}
 	return targets, activations, nil
+}
+
+func (rt *Runtime) requireStandingChannelTargetAdmission(current channelonboarding.Operation, revision int64, candidate channelonboarding.Candidate, session operatorchannel.ProviderAuthority) error {
+	admittedPhase := current.Phase == channelonboarding.PhaseCredentialsAdmitted && current.Posture == channelonboarding.ActivationWebhookRegistration ||
+		current.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation && current.Posture == channelonboarding.ActivationSessionConnection && current.BindingRevision > 0
+	if !admittedPhase || current.Revision != revision || current.Posture != candidate.Posture || current.Provider != candidate.Provider ||
+		current.Interface.Normalized() != candidate.Interface.Normalized() || current.Ceremony != candidate.Ceremony ||
+		!current.Coordinate.MatchesDeclaration(candidate.Coordinate) || current.TargetSelector != candidate.Target.Selector || current.Coordinate.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {
+		return fmt.Errorf("%w: channel target promotion has no exact admitted responsibility", channelonboarding.ErrRevisionConflict)
+	}
+	if current.Posture == channelonboarding.ActivationSessionConnection {
+		return channelonboarding.RequireSessionStandingAdmission(current, session)
+	}
+	return nil
 }
 
 func (rt *Runtime) projectCommittedStandingTargets(planned []StandingTarget, current runtimepipeline.StandingServiceReconciliation) ([]StandingTarget, []StandingActivation, error) {
@@ -660,6 +684,9 @@ func (rt *Runtime) refreshStandingCredentialAdmission(ctx context.Context, selec
 		if err := frozen.projection.ValidateCurrentKeys(ctx, siblingKeys); err != nil {
 			return fmt.Errorf("channel target admission cannot refresh sibling authority: %w", err)
 		}
+		if err := rt.validateStandingSessionBindings(ctx, frozen.bindings, selected); err != nil {
+			return fmt.Errorf("channel target admission cannot refresh sibling session authority: %w", err)
+		}
 	}
 	admission, err := rt.observeStandingCredentials(ctx)
 	if err == nil && frozen != nil {
@@ -669,6 +696,13 @@ func (rt *Runtime) refreshStandingCredentialAdmission(ctx context.Context, selec
 		err = fmt.Errorf("channel target %s remains credential-dormant", selected)
 	}
 	if err == nil {
+		if frozen != nil {
+			for selector, binding := range frozen.bindings {
+				if selector != selected && binding.plan.Transport() == packs.ChannelTransportSession {
+					admission.bindings[selector] = binding
+				}
+			}
+		}
 		rt.standingCredentialAdmission = admission
 	}
 	return err

@@ -92,10 +92,17 @@ func TestChannelDeliveryRealAnchorProducersPublicJourney(t *testing.T) {
 				Channels []channelonboarding.ConnectedChannelReadback `json:"channels"`
 			}
 			requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.list", map[string]any{}, &channels)
-			if len(channels.Channels) != 1 {
-				t.Fatalf("anchor journey requires one exact channel identity: %+v", channels)
+			var interfaceKey string
+			telegramIdentities := 0
+			for _, channel := range channels.Channels {
+				if channel.Identity.Interface.ChannelPackID == "provider.telegram.hitl_channel" {
+					telegramIdentities++
+					interfaceKey = channel.Identity.Interface.Key()
+				}
 			}
-			interfaceKey := channels.Channels[0].Identity.Interface.Key()
+			if telegramIdentities != 1 {
+				t.Fatalf("anchor journey requires one exact Telegram channel identity, got %d", telegramIdentities)
+			}
 			for _, kind := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
 				t.Run(string(kind), func(t *testing.T) {
 					flowInstance := "reviews"
