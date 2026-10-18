@@ -246,6 +246,9 @@ func beginBinding(ctx context.Context, runner transactionRunner, req domain.Begi
 				return err
 			}
 		}
+		if err := channeldelivery.LockPrincipalTx(txctx, tx, req.PrincipalID, runner.dialect() == dialectPostgres); err != nil {
+			return err
+		}
 		binding, bindingFound, err := loadBinding(txctx, tx, runner.dialect(), req.Interface.Key(), true)
 		if err != nil {
 			return err
