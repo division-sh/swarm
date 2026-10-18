@@ -3637,11 +3637,10 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceDoesNotArmOrEmit(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{failAgentID: "writer"}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err == nil {
+	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
 		t.Fatal("activation unexpectedly completed the readiness plan")
 	}
 	agents.failAgentID = ""
@@ -3661,7 +3660,7 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceDoesNotArmOrEmit(t *testing.T) {
 	reconciled := make(chan error, 1)
 	go func() {
 		reconciled <- am.reconcileDynamicFlowRuntimeReadiness(
-			testAuthorActivityContext(context.Background()),
+			ctx,
 			req.TriggerEvent.RunID(),
 			req.Instance.InstancePath,
 		)
@@ -3671,14 +3670,14 @@ func TestDynamicFlowRuntimeReadinessTerminalRaceDoesNotArmOrEmit(t *testing.T) {
 	if err := waitFlowActivationBoundary(waitCtx, stageEntered, reconciled); err != nil {
 		t.Fatal(err)
 	}
-	if err := instances.MarkTerminated(context.Background(), testActivationFlowIdentity(req), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
+	if err := instances.MarkTerminated(ctx, testActivationFlowIdentity(req), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
 		t.Fatalf("MarkTerminated: %v", err)
 	}
 	close(stageRelease)
 	if err := receiveFlowActivationResult(t, reconciled); err != nil {
 		t.Fatalf("terminal reconciliation: %v", err)
 	}
-	current, found, err := instances.LoadDynamicFlowRuntimeReadiness(context.Background(), req.TriggerEvent.RunID(), req.Instance.Route())
+	current, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
 	if err != nil || !found || !current.Terminal() {
 		t.Fatalf("terminal authority lost after admission race: found=%v row=%+v err=%v", found, current, err)
 	}
@@ -3691,11 +3690,9 @@ func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMateriali
 	instances := &flowActivationTestInstanceStore{creationMarkErr: errors.New("hold creation commit pending")}
 	agents := &flowActivationTestStore{}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 
 	if err := activateFlowInstanceForTest(am, ctx, req); err == nil {
 		t.Fatal("activation unexpectedly completed the creation occurrence")
@@ -3703,7 +3700,7 @@ func TestDynamicFlowRuntimeReadinessTerminalBeforeCreationCommitRetiresMateriali
 	instances.creationMarkErr = nil
 	instances.beforeCreation = func() {
 		instances.beforeCreation = nil
-		if err := instances.MarkTerminated(context.Background(), testActivationFlowIdentity(req), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
+		if err := instances.MarkTerminated(ctx, testActivationFlowIdentity(req), identity.NormalizeEntityID(req.Instance.EntityID), time.Now().UTC()); err != nil {
 			t.Fatalf("terminalize at creation boundary: %v", err)
 		}
 	}
