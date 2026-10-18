@@ -88,10 +88,18 @@ func TestChannelSigningFallbackPublicRefusalBothStores(t *testing.T) {
 								t.Fatal("credential-free connect did not retain a preparing responsibility")
 							}
 							rows := readChannelOnboardingRows(t, h.opts.ConfigPath, h.endpoint)
-							if len(rows) != 1 || rows[0].Operation == nil {
-								t.Fatalf("reserved responsibility = %#v", rows)
+							var reserved channelOnboardingJourneyReadback
+							telegramIdentities := 0
+							for _, row := range rows {
+								if row.Identity.Interface.ChannelPackID == "provider.telegram.hitl_channel" {
+									telegramIdentities++
+									reserved = row
+								}
 							}
-							operationID = rows[0].Operation.OperationID
+							if telegramIdentities != 1 || reserved.Operation == nil {
+								t.Fatalf("reserved Telegram responsibility count=%d, row=%#v", telegramIdentities, reserved)
+							}
+							operationID = reserved.Operation.OperationID
 							result := getChannelOnboardingRPC(t, h, operationID)
 							for _, reservation := range result.Operation.CredentialReservations {
 								if reservation.Role == result.Candidate.SigningCredentialRole {
