@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -141,16 +142,15 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	err = tx.QueryRowContext(ctx, query, admission.Provider, admission.ResourceSlotID, admission.ConversationReference, setting.ScopeKind, setting.MemberReference).
 		Scan(&setting.SettingID, &stored.principal, &stored.pack, &stored.version, &stored.manifest,
 			&stored.contract, &stored.command, &stored.commands, &setting.Generation, &setting.State, &setting.InstallOperationID, &readbackHash)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
+	if errors.Is(err, sql.ErrNoRows) {
 		setting, err = createNativeInboxSettingTx(ctx, tx, admission, setting, postgres)
 		if err != nil {
 			return channelnative.Setting{}, false, err
 		}
 		changed = true
-	case err != nil:
+	} else if err != nil {
 		return channelnative.Setting{}, false, err
-	default:
+	} else {
 		setting.EntryCommand, err = channelnative.EntryCommand(setting.SettingID, setting.Generation)
 		if err != nil {
 			return channelnative.Setting{}, false, err
@@ -176,11 +176,7 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 			changed = true
 		}
 		if !compatible || (setting.State == "retired" && !readbackHash.Valid) {
-			if unresolved {
-				return channelnative.Setting{}, false, fmt.Errorf("native inbox setting has unresolved or foreign provider state")
-			}
-			switch setting.State {
-			case "uncertain", "unavailable":
+			if unresolved || slices.Contains([]string{"uncertain", "unavailable"}, setting.State) {
 				return channelnative.Setting{}, false, fmt.Errorf("native inbox setting has unresolved or foreign provider state")
 			}
 			setting, err = advanceNativeSettingGenerationTx(ctx, tx, admission, setting, postgres)
