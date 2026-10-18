@@ -10,7 +10,9 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -19,6 +21,9 @@ func TestPreparedEventJointReadRejectsCorruptionAndReadsFreshFactsBothStores(t *
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "prepared.joint", "gateway", "", []byte(`{"version":1}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 			if err := commitSemanticEventFixture(ctx, fixture.store.(eventRecordContractStore), event); err != nil {
 				t.Fatal(err)
