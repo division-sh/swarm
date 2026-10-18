@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
@@ -109,7 +110,10 @@ func TestActivityResultEmitterAndLineageAgreeOnExactParent(t *testing.T) {
 						}
 						altered, err = events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{Facts: facts, Lineage: root})
 					} else {
-						altered, err = events.NewChildEvent(events.ChildEventInput{Facts: facts, Lineage: frame})
+						altered = eventtest.ChildForProducerWithRoutingSource(
+							facts.ID, facts.Type, eventtest.Producer(facts.Producer.Type, facts.Producer.ID), facts.TaskID,
+							facts.Payload, facts.ChainDepth, frame, facts.Envelope, facts.RoutingSource, facts.CreatedAt,
+						)
 					}
 					if err != nil {
 						t.Fatalf("invalid frame must reach lineage validator: %v", err)
