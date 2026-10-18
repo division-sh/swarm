@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -64,21 +65,22 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		".github/audit-artifacts/issue-2627-preimplementation.md": 1,
 		// Exact historical and current factory/producer-label snapshots, pinned by
 		// the finite codemod guards; these do not restore the retired product.
-		"tools/fixture-codemod/pipeline-observations/recipes.json":                          8,
-		"tools/fixture-codemod/pipeline-observations/family144-transitions.json":            4,
-		"internal/runtime/bootverify/workflow_transition_relation_test.go":                  1,
-		"internal/runtime/semanticview/lifecycle_emitter_ownership_guard_test.go":           1,
-		"internal/store/internal/runtimepersistence/dynamic_flow_creation_revision_test.go": 1,
-		"internal/events/construction_test.go":                                              3,
-		"internal/runtime/conformance/repo_validation_snapshot_test.go":                     1,
-		"internal/runtime/contracts/mock_performance_ownership_guard_test.go":               1,
-		"internal/runtime/llm/runtime_resolver.go":                                          1,
-		"internal/runtime/pythonmodule/artifact_manifest_generated.go":                      2,
-		"internal/store/internal/runtimepersistence/run_debug_read_surface_test.go":         5,
-		"internal/store/selected/boundary_test.go":                                          1,
-		"internal/store/testdata/persistence_authority_findings.tsv":                        1,
-		"internal/userfacing/human_code_projection_cli_test.go":                             5,
-		"scripts/rewrite-value-slots-2556/intent.json":                                      1,
+		"tools/fixture-codemod/pipeline-observations/recipes.json":                                8,
+		"tools/fixture-codemod/pipeline-observations/family144-transitions.json":                  4,
+		"tools/fixture-codemod/pipeline-observations/testdata/fixture_setup_successors_2617.json": 4,
+		"internal/runtime/bootverify/workflow_transition_relation_test.go":                        1,
+		"internal/runtime/semanticview/lifecycle_emitter_ownership_guard_test.go":                 1,
+		"internal/store/internal/runtimepersistence/dynamic_flow_creation_revision_test.go":       1,
+		"internal/events/construction_test.go":                                                    3,
+		"internal/runtime/conformance/repo_validation_snapshot_test.go":                           1,
+		"internal/runtime/contracts/mock_performance_ownership_guard_test.go":                     1,
+		"internal/runtime/llm/runtime_resolver.go":                                                1,
+		"internal/runtime/pythonmodule/artifact_manifest_generated.go":                            2,
+		"internal/store/internal/runtimepersistence/run_debug_read_surface_test.go":               5,
+		"internal/store/selected/boundary_test.go":                                                1,
+		"internal/store/testdata/persistence_authority_findings.tsv":                              1,
+		"internal/userfacing/human_code_projection_cli_test.go":                                   5,
+		"scripts/rewrite-value-slots-2556/intent.json":                                            1,
 	}
 	classificationDocuments := map[string]bool{
 		".github/audit-artifacts/issue-2550-preimplementation.md": true,
@@ -259,6 +261,42 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 			t.Fatalf("additional transition escaped exact four-reference inventory: %+v, %v", got, err)
 		}
 	}
+	const historicalPath = "tools/fixture-codemod/pipeline-observations/testdata/fixture_setup_successors_2617.json"
+	historical, err := os.ReadFile(filepath.Join(repoRootForTest(), historicalPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	historicalCandidates, err := retiredBuilderCandidates(historicalPath, historical)
+	if err != nil || len(historicalCandidates) != 4 {
+		t.Fatalf("exact historical buildErr field inventory changed: %+v, %v", historicalCandidates, err)
+	}
+	for _, candidate := range historicalCandidates {
+		if !isExplicitUnrelatedBuilderText(historicalPath, candidate.text) {
+			t.Fatal("exact historical buildErr field lost its disposition")
+		}
+		for _, changedPath := range []string{historicalPath + ".copy", "tools/fixture-codemod/pipeline-observations/testdata/foreign.json"} {
+			if isExplicitUnrelatedBuilderText(changedPath, candidate.text) {
+				t.Fatal("historical field classification accepted a changed path")
+			}
+		}
+		genuineReference := strings.Replace(candidate.text, `{\n`, `{\n\t_ = Builder{}\n`, 1)
+		for name, mutant := range map[string]string{
+			"additional_product_reference": genuineReference,
+			"foreign_declaration":          strings.Replace(candidate.text, "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority", "TestForeignArchivedConstruction", 1),
+			"foreign_field":                strings.Replace(candidate.text, `": "func `, `Foreign": "func `, 1),
+		} {
+			if mutant == candidate.text || isExplicitUnrelatedBuilderText(historicalPath, mutant) {
+				t.Fatalf("historical buildErr field accepted %s", name)
+			}
+		}
+		for _, extra := range []string{candidate.text, genuineReference} {
+			mutant := append(append([]byte(nil), historical...), []byte("\n"+extra+"\n")...)
+			got, err := retiredBuilderCandidates(historicalPath, mutant)
+			if err != nil || len(got) != 5 {
+				t.Fatalf("duplicate/additional historical field escaped exact four-line inventory: %+v, %v", got, err)
+			}
+		}
+	}
 	const path = "internal/store/persistence_authority_debt_test.go"
 	body, err := os.ReadFile(filepath.Join(repoRootForTest(), path))
 	if err != nil {
@@ -326,6 +364,22 @@ func retiredBuilderCandidateLines(body []byte, include func(start, end int) bool
 func isExplicitUnrelatedBuilderText(relative, line string) bool {
 	lower := strings.ToLower(line)
 	switch {
+	case relative == "tools/fixture-codemod/pipeline-observations/testdata/fixture_setup_successors_2617.json":
+		// Authenticate complete archived fields, not just their declaration prefix.
+		// A genuine Builder reference added inside the same string must refuse.
+		text := strings.TrimSpace(line)
+		for _, field := range []struct{ name, digest string }{
+			{"Before", "7d3833e1541526acd9cc515e3f66d69f498aeca5d32603c2daade127ab590b90"},
+			{"After", "f7869fe786638b3da62ae585a31b0dde000e0cebf3d13d8b9e2bbcdd95c548b7"},
+			{"Successor", "160395d42d5649b1c73a7532c79a21bf880261d714729ea693b0d792cd13a95d"},
+			{"Candidate", "c319942fd797ba400ef57336d5c978b4cc8aebcbe6609c13ce8ad600e9fc2ddb"},
+		} {
+			if strings.HasPrefix(text, `"`+field.name+`": "func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority(t *testing.T) {\n`) &&
+				fmt.Sprintf("%x", sha256.Sum256([]byte(text))) == field.digest {
+				return true
+			}
+		}
+		return false
 	case (relative == ".github/audit-artifacts/issue-2627-counterexamples.md" ||
 		relative == ".github/audit-artifacts/issue-2627-preimplementation.md") && strings.Contains(line, "TestIssue2627AuditBuilderCounterexamples"):
 		return true
