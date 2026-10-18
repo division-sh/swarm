@@ -42,40 +42,11 @@ func (b *WorkflowContractBundle) IntroductionLocation(file, slot string, declara
 	value := snapshot.Document(file).Root()
 	location := value.IntroductionLocation()
 	for slot != "" {
-		var key string
-		index := -1
-		if slot[0] == '[' {
-			if len(slot) > 1 && slot[1] == '"' {
-				quoted, err := strconv.QuotedPrefix(slot[1:])
-				if err != nil || len(slot) <= len(quoted)+1 || slot[len(quoted)+1] != ']' {
-					return yamlsource.Location{}, false
-				}
-				key, err = strconv.Unquote(quoted)
-				if err != nil {
-					return yamlsource.Location{}, false
-				}
-				slot = slot[len(quoted)+2:]
-			} else {
-				end := strings.IndexByte(slot, ']')
-				if end < 0 {
-					return yamlsource.Location{}, false
-				}
-				index, err = strconv.Atoi(slot[1:end])
-				if err != nil || index < 0 {
-					return yamlsource.Location{}, false
-				}
-				slot = slot[end+1:]
-			}
-		} else {
-			end := strings.IndexAny(slot, ".[")
-			if end < 0 {
-				end = len(slot)
-			}
-			if end == 0 {
-				return yamlsource.Location{}, false
-			}
-			key, slot = slot[:end], slot[end:]
+		key, index, rest, ok := introductionPathSegment(slot)
+		if !ok {
+			return yamlsource.Location{}, false
 		}
+		slot = rest
 		if index >= 0 {
 			items, err := value.Sequence()
 			if err != nil || index >= len(items) {
@@ -113,4 +84,30 @@ func (b *WorkflowContractBundle) IntroductionLocation(file, slot string, declara
 		}
 	}
 	return location, location.Line > 0 && location.Column > 0
+}
+
+// Decode the existing diagnostic slot spelling without normalizing map keys.
+func introductionPathSegment(slot string) (key string, index int, rest string, ok bool) {
+	if !strings.HasPrefix(slot, "[") {
+		end := strings.IndexAny(slot, ".[")
+		if end < 0 {
+			end = len(slot)
+		}
+		return slot[:end], -1, slot[end:], end > 0
+	}
+	if strings.HasPrefix(slot, `["`) {
+		quoted, err := strconv.QuotedPrefix(slot[1:])
+		end := len(quoted) + 1
+		if err != nil || len(slot) <= end || slot[end] != ']' {
+			return "", -1, "", false
+		}
+		key, err = strconv.Unquote(quoted)
+		return key, -1, slot[end+1:], err == nil
+	}
+	end := strings.IndexByte(slot, ']')
+	if end < 0 {
+		return "", -1, "", false
+	}
+	index, err := strconv.Atoi(slot[1:end])
+	return "", index, slot[end+1:], err == nil && index >= 0
 }
