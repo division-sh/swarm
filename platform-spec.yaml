@@ -19020,11 +19020,22 @@ platform_tables:
             CHECK ((cache_creation_5m_input_tokens IS NULL AND cache_creation_1h_input_tokens IS NULL) OR (cache_creation_input_tokens IS NOT NULL AND COALESCE(cache_creation_5m_input_tokens, 0) + COALESCE(cache_creation_1h_input_tokens, 0) <= cache_creation_input_tokens)),
             CHECK (input_tokens IS NULL OR COALESCE(cache_read_input_tokens, 0) + COALESCE(cache_creation_input_tokens, 0) <= input_tokens),
             CHECK (provider_reported_cost_usd IS NULL OR provider_reported_cost_usd >= 0),
+            UNIQUE (turn_id, run_id, completion_attempt_id, capability_surface_id),
             INDEX idx_agent_turns_run (run_id, created_at) WHERE run_id IS NOT NULL,
             INDEX idx_agent_turns_session (session_id, created_at),
             INDEX idx_agent_turns_agent (agent_id, created_at),
             INDEX idx_agent_turns_event (trigger_event_id) WHERE trigger_event_id IS NOT NULL,
             INDEX idx_agent_turns_completion_attempt (completion_attempt_id) WHERE completion_attempt_id IS NOT NULL
+        );
+    agent_turn_live_parents:
+      description: 'Exact live run association for one canonical completion audit. The immutable turn keeps its actual completion-attempt and capability-surface parents. Missing live association is not executable completion or continuation evidence.'
+      ddl: |
+        CREATE TABLE agent_turn_live_parents (
+            turn_id UUID PRIMARY KEY REFERENCES agent_turns(turn_id),
+            run_id UUID NOT NULL REFERENCES runs(run_id),
+            completion_attempt_id UUID NOT NULL,
+            capability_surface_id UUID NOT NULL,
+            FOREIGN KEY (turn_id, run_id, completion_attempt_id, capability_surface_id) REFERENCES agent_turns(turn_id, run_id, completion_attempt_id, capability_surface_id)
         );
     agent_conversation_audits:
       description: 'Invocation metadata for memory-false agents, linked by session_id to agent_turns.

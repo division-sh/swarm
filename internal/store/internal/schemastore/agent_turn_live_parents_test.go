@@ -14,7 +14,7 @@ func verifyTurnLiveParents(t *testing.T, db *sql.DB, bundle, run, otherRun strin
 		turns[i], attempts[i], surfaces[i] = uuid.NewString(), uuid.NewString(), uuid.NewString()
 		if _, err := db.Exec(`INSERT INTO managed_agent_capability_surfaces
 			(surface_id,integrity_hash,authority_kind,authority_id,execution_kind,execution_authority_id,run_id,actor_id,provider,transport,surface)
-			VALUES ($1,$1,'provider_turn',$2,'normal_agent','schema-owner',$3,'schema-actor','schema-provider','api','{}')`, surfaces[i], turns[i], run); err != nil {
+			VALUES ($1,$4,'provider_turn',$2,'normal_agent','schema-owner',$3,'schema-actor','schema-provider','api','{}')`, surfaces[i], turns[i], run, surfaces[i]); err != nil {
 			t.Fatal(err)
 		}
 		operation := uuid.NewString()

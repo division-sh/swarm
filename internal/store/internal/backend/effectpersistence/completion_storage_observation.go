@@ -102,9 +102,10 @@ func readCompletionAttemptStorageForTest(ctx context.Context, read func(context.
 }
 
 func readCompletionTargetsForTest(ctx context.Context, tx *sql.Tx, out *CompletionAttemptStorage) error {
-	rows, err := tx.QueryContext(ctx, `SELECT CAST(turn_id AS TEXT),CAST(turn_id AS TEXT),CAST(completion_attempt_id AS TEXT),0
-		FROM agent_turns WHERE completion_attempt_id=$1
-		UNION ALL SELECT CAST(completion_id AS TEXT),CAST(fork_turn_id AS TEXT),CAST(attempt_id AS TEXT),ordinal
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(t.turn_id AS TEXT),CAST(t.turn_id AS TEXT),CAST(t.completion_attempt_id AS TEXT),0,
+		EXISTS (SELECT 1 FROM agent_turn_live_parents p WHERE `+agentTurnLiveParentMatch+`)
+		FROM agent_turns t WHERE t.completion_attempt_id=$1
+		UNION ALL SELECT CAST(completion_id AS TEXT),CAST(fork_turn_id AS TEXT),CAST(attempt_id AS TEXT),ordinal,TRUE
 		FROM conversation_fork_turn_completions WHERE attempt_id=$1 ORDER BY 1`, out.AttemptID)
 	if err != nil {
 		return err
@@ -112,8 +113,12 @@ func readCompletionTargetsForTest(ctx context.Context, tx *sql.Tx, out *Completi
 	defer rows.Close()
 	for rows.Next() {
 		var row CompletionTargetStorage
-		if err := rows.Scan(&row.RowID, &row.TargetID, &row.AttemptID, &row.Ordinal); err != nil {
+		var liveParents bool
+		if err := rows.Scan(&row.RowID, &row.TargetID, &row.AttemptID, &row.Ordinal, &liveParents); err != nil {
 			return fmt.Errorf("completion target read: %w", err)
+		}
+		if !liveParents {
+			return fmt.Errorf("completion target lacks its exact live-parent association")
 		}
 		out.Targets = append(out.Targets, row)
 	}

@@ -674,7 +674,10 @@ func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkS
 			COALESCE(t.response_payload, '{}'),
 			COALESCE(t.tool_calls, '[]'),
 			c.surface,
-			t.created_at, CAST(t.completion_evidence AS TEXT), COALESCE(t.resolved_model,'')
+			t.created_at, CAST(t.completion_evidence AS TEXT), COALESCE(t.resolved_model,''),
+			EXISTS (SELECT 1 FROM agent_turn_live_parents p
+			 WHERE p.turn_id=t.turn_id AND p.run_id=t.run_id
+			 AND p.completion_attempt_id=t.completion_attempt_id AND p.capability_surface_id=t.capability_surface_id)
 		FROM agent_turns t
 		JOIN managed_agent_capability_surfaces c ON c.surface_id = t.capability_surface_id
 		WHERE t.session_id = ?
@@ -691,11 +694,15 @@ func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkS
 	var out runtimerunfork.ConversationForkSourceTurn
 	var requestRaw, responseRaw, toolCallsRaw, capabilitySurfaceRaw, completionRaw []byte
 	var createdAt conversationForkTimeValue
-	if err := row.Scan(&out.TurnID, &requestRaw, &responseRaw, &toolCallsRaw, &capabilitySurfaceRaw, &createdAt, &completionRaw, &out.ResolvedModel); err != nil {
+	var liveParents bool
+	if err := row.Scan(&out.TurnID, &requestRaw, &responseRaw, &toolCallsRaw, &capabilitySurfaceRaw, &createdAt, &completionRaw, &out.ResolvedModel, &liveParents); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return runtimerunfork.ConversationForkSourceTurn{}, &operatorread.EntityReadParamError{Field: "fork_id", Reason: "source turn is unavailable"}
 		}
 		return runtimerunfork.ConversationForkSourceTurn{}, fmt.Errorf("load conversation fork source turn: %w", err)
+	}
+	if !liveParents {
+		return runtimerunfork.ConversationForkSourceTurn{}, fmt.Errorf("conversation fork source turn lacks its exact live-parent association")
 	}
 	out.TurnIndex = fork.ForkPoint.TurnIndex
 	out.SelectedAt = fork.ForkPoint.SelectedAt

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -303,10 +304,28 @@ func proveCompletionResponseSuccessorCheckpointMatrix(t *testing.T, store comple
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := settled.ProjectCompletionConversation(ctx, runtimeeffects.CompletionConversationProjection{
+				projection := runtimeeffects.CompletionConversationProjection{
 					Payload: snapshot.Payload, SessionID: fixture.sessionID, Identity: settlement.AgentTurn.Identity,
 					Memory: settlement.AgentTurn.Memory, ExpectedTurnCount: 0, TurnCount: 1, Messages: projectionMessages,
-				}); err != nil {
+				}
+				// A real settled audit without its exact live association is not
+				// a missing response or permission to project the conversation.
+				if _, err := db.ExecContext(ctx, `DELETE FROM agent_turn_live_parents WHERE turn_id=$1`, settlement.AgentTurn.TurnID); err != nil {
+					t.Fatal(err)
+				}
+				beforeMissingPair := historicalContextDatabaseRows(t, db, !sqlite)
+				if _, found, err := controller.RecoverCompletionContinuation(recoveryCtx, fixture.sessionID, settlement.AgentTurn.Memory); err == nil || found || !strings.Contains(err.Error(), "lacks its exact live-parent association") {
+					t.Fatalf("unpaired audit became ordinary missing response or usable continuation: found=%t error=%v", found, err)
+				}
+				if err := settled.ProjectCompletionConversation(ctx, projection); err == nil || !strings.Contains(err.Error(), "lacks its exact live-parent association") {
+					t.Fatalf("unpaired audit did not refuse at the exact projection boundary: %v", err)
+				}
+				historicalContextRequireUnchanged(t, beforeMissingPair, historicalContextDatabaseRows(t, db, !sqlite))
+				if _, err := db.ExecContext(ctx, `INSERT INTO agent_turn_live_parents (turn_id,run_id,completion_attempt_id,capability_surface_id)
+					SELECT turn_id,run_id,completion_attempt_id,capability_surface_id FROM agent_turns WHERE turn_id=$1`, settlement.AgentTurn.TurnID); err != nil {
+					t.Fatal(err)
+				}
+				if err := settled.ProjectCompletionConversation(ctx, projection); err != nil {
 					t.Fatalf("project completion: %v", err)
 				}
 				projected, found, err := controller.RecoverCompletionContinuation(recoveryCtx, fixture.sessionID, settlement.AgentTurn.Memory)
@@ -323,6 +342,18 @@ func proveCompletionResponseSuccessorCheckpointMatrix(t *testing.T, store comple
 				}
 				successor, err := agentframe.NewToolContinuation(frameID, toolResult)
 				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.ExecContext(ctx, `DELETE FROM agent_turn_live_parents WHERE turn_id=$1`, settlement.AgentTurn.TurnID); err != nil {
+					t.Fatal(err)
+				}
+				beforeMissingPair = historicalContextDatabaseRows(t, db, !sqlite)
+				if err := projected.ConsumeCompletionResponse(ctx, &successor); err == nil || !strings.Contains(err.Error(), "lacks its exact live-parent association") {
+					t.Fatalf("unpaired audit did not refuse actual ready-to-consume response: %v", err)
+				}
+				historicalContextRequireUnchanged(t, beforeMissingPair, historicalContextDatabaseRows(t, db, !sqlite))
+				if _, err := db.ExecContext(ctx, `INSERT INTO agent_turn_live_parents (turn_id,run_id,completion_attempt_id,capability_surface_id)
+					SELECT turn_id,run_id,completion_attempt_id,capability_surface_id FROM agent_turns WHERE turn_id=$1`, settlement.AgentTurn.TurnID); err != nil {
 					t.Fatal(err)
 				}
 				if err := projected.ConsumeCompletionResponse(ctx, &successor); err != nil {
