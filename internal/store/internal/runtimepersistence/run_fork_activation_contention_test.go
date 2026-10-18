@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,7 +34,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	decisionstore "github.com/division-sh/swarm/internal/store/internal/backend/decisioncard"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
+	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	modernsqlite "modernc.org/sqlite"
 )
 
@@ -53,6 +57,20 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 			for _, outcome := range []string{"commit", "rollback", "cancel_winner", "cancel_loser"} {
 				t.Run(backend.name+"/"+first+"/"+outcome, func(t *testing.T) {
 					barrier := newForkContentionBarrier(t, backend.name, outcome == "rollback" || outcome == "cancel_loser")
+					if selected && backend.name == "postgres" {
+						backend.open = func(t *testing.T) authorActivityReceiptFixture {
+							name := barrier.name + "_driver"
+							sql.Register(name, &forkContentionDriver{Driver: &pq.Driver{}, barrier: barrier})
+							db, err := sql.Open(name, testutil.StartPostgresDSN(t))
+							if err != nil {
+								t.Fatal(err)
+							}
+							t.Cleanup(func() { _ = db.Close() })
+							store := admitTestPostgresStore(t, db)
+							registerTestAuthorActivityCatalog(t, store)
+							return authorActivityReceiptFixture{store: store, db: db, dialect: authoractivityfixture.DialectPostgres}
+						}
+					}
 					f := newForkActivationFrontierFixture(t, backend, selected)
 					staged, selectedRequest := stageForkContentionFixture(t, f, selected)
 					var err error
@@ -128,9 +146,14 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 						}
 					})
 					winnerPID := barrier.awaitWinner(t, ctx, observer, winner)
-					// PostgreSQL queues an observer lock ahead of the losing operation.
+					// PostgreSQL holds the contending native transaction before it ends.
 					// SQLite holds the loser after a real BUSY rollback, before retry.
-					gate := barrier.queueGate(t, ctx, observer, f.runID, first, winnerPID)
+					var gate *forkContentionGate
+					if selected && backend.name == "postgres" {
+						gate = &forkContentionGate{actual: barrier, done: loser}
+					} else {
+						gate = barrier.queueGate(t, ctx, observer, f.runID, first, winnerPID)
+					}
 					loserStarted = true
 					go func() { defer close(loserFinished); loser <- invoke(loserCtx, second) }()
 					barrier.awaitContender(t, ctx, observer, winnerPID, gate, loser)
@@ -155,8 +178,21 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 							t.Fatalf("winning transaction did not roll back at SQL barrier: %v", won.err)
 						}
 					}
-					barrier.awaitGate(t, ctx, gate)
+					if gate == nil || gate.actual == nil || outcome != "cancel_loser" {
+						barrier.awaitGate(t, ctx, gate)
+					}
 					winnerOnly := snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")
+					if gate != nil && gate.actual != nil && outcome != "cancel_loser" &&
+						(barrier.heldPID.Load() != int64(gate.pid) || len(loser) != 0) {
+						t.Fatal("losing native transaction escaped the winner-only snapshot hold")
+					}
+					if gate != nil && gate.actual != nil && outcome != "cancel_loser" {
+						select {
+						case <-barrier.resumed:
+							t.Fatal("native transaction hold was released before the winner-only snapshot ended")
+						default:
+						}
+					}
 					if outcome != "commit" && !reflect.DeepEqual(before, winnerOnly) {
 						for _, diagnostic := range forkContentionFailureDiagnostics(before, winnerOnly, won, loser) {
 							t.Log(diagnostic)
@@ -675,12 +711,15 @@ type forkContentionBarrier struct {
 	enterOnce, busyOnce, releaseOnce, resumeOnce sync.Once
 	control                                      *sql.Conn
 	key                                          int64
+	loserPID, heldPID                            atomic.Int64
+	armed                                        chan struct{}
 }
 
 func newForkContentionBarrier(t *testing.T, backend string, rollback bool) *forkContentionBarrier {
 	t.Helper()
 	b := &forkContentionBarrier{backend: backend, name: "h18_" + strings.ReplaceAll(uuid.NewString(), "-", ""), rollback: rollback,
 		entered: make(chan struct{}), busy: make(chan struct{}), released: make(chan struct{}), resumed: make(chan struct{})}
+	b.armed = make(chan struct{})
 	t.Cleanup(func() { b.release(); b.resume() })
 	if backend == "sqlite" {
 		if err := modernsqlite.RegisterScalarFunction(b.name, 0, func(*modernsqlite.FunctionContext, []driver.Value) (driver.Value, error) {
@@ -784,6 +823,8 @@ type forkContentionGate struct {
 	tx       *sql.Tx
 	pid      int
 	acquired chan error
+	actual   *forkContentionBarrier
+	done     <-chan forkContentionResult
 }
 
 func (b *forkContentionBarrier) queueGate(t *testing.T, ctx context.Context, db *sql.DB, run, first string, winnerPID int) *forkContentionGate {
@@ -832,7 +873,14 @@ func (b *forkContentionBarrier) awaitContender(t *testing.T, ctx context.Context
 	}
 	forkContentionPoll(t, ctx, func() bool {
 		var waiting bool
-		if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>$1 AND $2=ANY(pg_blocking_pids(pid)))`, gate.pid, winnerPID).Scan(&waiting); err != nil {
+		var err error
+		if gate.actual != nil {
+			gate.pid = int(b.loserPID.Load())
+			err = db.QueryRowContext(ctx, `SELECT $1=ANY(pg_blocking_pids($2))`, winnerPID, gate.pid).Scan(&waiting)
+		} else {
+			err = db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>$1 AND $2=ANY(pg_blocking_pids(pid)))`, gate.pid, winnerPID).Scan(&waiting)
+		}
+		if err != nil {
 			t.Fatal(err)
 		}
 		select {
@@ -842,11 +890,35 @@ func (b *forkContentionBarrier) awaitContender(t *testing.T, ctx context.Context
 		}
 		return waiting
 	})
+	if gate.actual != nil {
+		close(b.armed)
+	}
 }
 
 func (b *forkContentionBarrier) awaitGate(t *testing.T, ctx context.Context, gate *forkContentionGate) {
 	t.Helper()
 	if gate == nil {
+		return
+	}
+	if gate.actual != nil {
+		if b.backend == "sqlite" {
+			return
+		}
+		select {
+		case <-b.busy:
+			select {
+			case <-b.resumed:
+				t.Fatal("native transaction hold was released before the winner-only snapshot")
+			default:
+			}
+			if b.heldPID.Load() != int64(gate.pid) || len(gate.done) != 0 {
+				t.Fatal("actual losing transaction is not held before native settlement")
+			}
+		case got := <-gate.done:
+			t.Fatalf("loser completed before the native transaction hold: %v", got.err)
+		case <-ctx.Done():
+			t.Fatal("losing native transaction hold: ", ctx.Err())
+		}
 		return
 	}
 	select {
@@ -861,6 +933,10 @@ func (b *forkContentionBarrier) awaitGate(t *testing.T, ctx context.Context, gat
 func (b *forkContentionBarrier) openGate(t *testing.T, gate *forkContentionGate) {
 	t.Helper()
 	if gate != nil {
+		if gate.actual != nil {
+			b.resume()
+			return
+		}
 		if err := gate.tx.Rollback(); err != nil {
 			t.Fatal(err)
 		}
@@ -896,6 +972,8 @@ type forkContentionConn struct {
 type forkContentionTx struct {
 	driver.Tx
 	conn *forkContentionConn
+	ctx  context.Context
+	pid  int64
 }
 
 func (b *forkContentionBarrier) observeSQLiteStore(t *testing.T, path string) *SQLiteRuntimeStore {
@@ -932,15 +1010,51 @@ func (c *forkContentionConn) observe(ctx context.Context, err error) {
 		c.contended = true
 	}
 }
+func (c *forkContentionConn) IsValid() bool {
+	validator, ok := c.Conn.(driver.Validator)
+	return !ok || validator.IsValid()
+}
+func (c *forkContentionConn) ResetSession(ctx context.Context) error {
+	if resetter, ok := c.Conn.(driver.SessionResetter); ok {
+		return resetter.ResetSession(ctx)
+	}
+	return nil
+}
+func (c *forkContentionConn) CheckNamedValue(value *driver.NamedValue) error {
+	if checker, ok := c.Conn.(driver.NamedValueChecker); ok {
+		return checker.CheckNamedValue(value)
+	}
+	return driver.ErrSkip
+}
+func (c *forkContentionConn) Ping(ctx context.Context) error {
+	if pinger, ok := c.Conn.(driver.Pinger); ok {
+		return pinger.Ping(ctx)
+	}
+	return nil
+}
 func (c *forkContentionConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	c.contended = false
+	var pid int64
+	if c.barrier.backend == "postgres" && ctx.Value(forkContentionContextKey{}) == c.barrier {
+		rows, err := c.Conn.(driver.QueryerContext).QueryContext(ctx, `SELECT pg_backend_pid()`, nil)
+		if err != nil {
+			return nil, err
+		}
+		value := make([]driver.Value, 1)
+		err = rows.Next(value)
+		if err = errors.Join(err, rows.Close()); err != nil {
+			return nil, err
+		}
+		pid = value[0].(int64)
+		c.barrier.loserPID.Store(pid)
+	}
 	tx, err := c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
 	c.observe(ctx, err)
 	if err != nil {
 		c.pauseAfterRollback()
 		return nil, err
 	}
-	return &forkContentionTx{Tx: tx, conn: c}, nil
+	return &forkContentionTx{Tx: tx, conn: c, ctx: ctx, pid: pid}, nil
 }
 func (c *forkContentionConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
@@ -953,11 +1067,37 @@ func (c *forkContentionConn) QueryContext(ctx context.Context, query string, arg
 	return rows, err
 }
 func (tx *forkContentionTx) Rollback() error {
+	tx.holdBeforeEnd()
 	err := tx.Tx.Rollback()
 	if err == nil {
 		tx.conn.pauseAfterRollback()
 	}
 	return err
+}
+func (tx *forkContentionTx) Commit() error {
+	tx.holdBeforeEnd()
+	return tx.Tx.Commit()
+}
+
+// Arm only after this backend really waits on the winner. Keep its native
+// transaction open, including refusal/rollback paths, until the snapshot ends.
+func (tx *forkContentionTx) holdBeforeEnd() {
+	if tx.pid == 0 || tx.ctx.Err() != nil {
+		return
+	}
+	b := tx.conn.barrier
+	select {
+	case <-b.armed:
+	default:
+		return
+	}
+	b.heldPID.Store(tx.pid)
+	defer b.heldPID.Store(0)
+	b.busyOnce.Do(func() { close(b.busy) })
+	select {
+	case <-b.resumed:
+	case <-tx.ctx.Done():
+	}
 }
 func (c *forkContentionConn) pauseAfterRollback() {
 	if c.contended {
