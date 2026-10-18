@@ -343,8 +343,9 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			op.CredentialAdmissions = append([]domain.CredentialAdmission(nil), req.CredentialAdmissions...)
 		}
 		if req.SessionAccount != nil {
+			// Account replacement is permitted only from unset or identical evidence.
 			if op.Posture != domain.ActivationSessionConnection || req.SessionAccount.ConnectionID != op.SessionConnectionID ||
-				(op.SessionAccount != (operatorchannel.SessionAccountAdmission{}) && op.SessionAccount != *req.SessionAccount) {
+				!slices.Contains([]operatorchannel.SessionAccountAdmission{{}, *req.SessionAccount}, op.SessionAccount) {
 				return domain.ErrConflict
 			}
 			op.SessionAccount = *req.SessionAccount
