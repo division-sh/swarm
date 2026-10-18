@@ -22,6 +22,12 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if report.MethodCount != 73 {
 		t.Fatalf("method count = %d, want 73", report.MethodCount)
 	}
+	// #2720/6245827935 adds the per-instance status and frozen turn attribution.
+	for _, name := range []string{"RunInstanceOperationalStatus", "RunStallAttribution"} {
+		if _, ok := api.Components.Schemas[name]; !ok {
+			t.Fatalf("N19 schema %s missing from catalog", name)
+		}
+	}
 	if _, ok := api.Components.Schemas["ChannelCapabilityVector"]; !ok {
 		t.Fatal("ChannelCapabilityVector missing from schema catalog")
 	}
@@ -136,6 +142,11 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	}
 	if len(doc.Methods) != 73 {
 		t.Fatalf("generated OpenRPC methods = %d, want 73", len(doc.Methods))
+	}
+	for _, name := range []string{"RunInstanceOperationalStatus", "RunStallAttribution"} {
+		if _, ok := doc.Components.Schemas[name]; !ok {
+			t.Fatalf("generated OpenRPC missing N19 schema %s", name)
+		}
 	}
 	if len(doc.Components.Errors) != 69 {
 		t.Fatalf("generated OpenRPC errors = %d, want 69", len(doc.Components.Errors))
