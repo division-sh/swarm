@@ -1125,7 +1125,7 @@
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.bindRuntimeOperationContext",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "1f32bcc136af13704e40a2cce33481528a321fcf0649e18b8a9ae19f0b7d0568"
+    "body_sha256": "1fcd8d6df47595fde4a969b2d80b0859f93f5c055daf60c59515df900473b309"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.buildAgent",
@@ -1239,7 +1239,7 @@
     "owner": "internal/runtime/manager/agent_manager.go::NewAgentManagerWithOptions",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "2510823a6615331108f16496a868769b795934f42b39cd306dde77b0e66cef71"
+    "body_sha256": "f1c19f080321756b67d075db660e95408893f591151bd6525cabb63d171602ee"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::ValidateAgentBuildConfiguration",
@@ -1875,7 +1875,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "ba58785e1fb5315c3340c8437dbba0dfc79690ccd61db83abfa619c3c6048118"
+    "body_sha256": "01f98ee20fdbd774105d764dfc6726b767a866e653b33308366459736e65c2c1"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
