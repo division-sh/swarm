@@ -10,7 +10,7 @@ func TestManagerWatcherAndExplicitShutdownJoinOneTransition(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeManagerWatcherAndExplicitShutdownJoinOneTransition(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -20,7 +20,7 @@ func TestManagerResetSerializesAfterSharedShutdown(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeManagerResetSerializesAfterSharedShutdown(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -30,7 +30,7 @@ func TestManagerConcurrentResetsJoinOneResetTransition(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeManagerConcurrentResetsJoinOneResetTransition(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -40,7 +40,7 @@ func TestManagerSharedShutdownPreservesCallerGraceResults(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeManagerSharedShutdownPreservesCallerGraceResults(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
@@ -50,7 +50,7 @@ func TestManagerAuthBreakerAndExplicitShutdownJoinOneTransition(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeManagerAuthBreakerAndExplicitShutdownJoinOneTransition(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerProjectionDeliverySource(t))
 			})
 		})
 	}
