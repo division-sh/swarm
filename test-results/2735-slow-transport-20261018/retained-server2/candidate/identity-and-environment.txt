@@ -1,0 +1,18 @@
+hetzner1
+ARM_START_UTC=2026-10-18T13:46:23.423905287Z
+1.17 0.50 0.30 1/371 305081
+pid 301649's current affinity list: 0-15
+80b43c1a238ad360363c6217b2a269094a333258
+188419a252573ae08969bbe79f4091967c0e155b
+go version go1.26.8 linux/amd64
+ENV_HASH_EXCLUDING_ARM_PATHS=7e4cfff31cd7e1452bbd8d74f58186f197d77f1cb7f65b05cc4edf70ceadbbf9  -
+GOMAXPROCS=2
+GOTOOLCHAIN=go1.26.8
+GOFLAGS=-overlay=/home/youmew/dev/wt/agent-d/evidence-2735-slow-20261018/candidate-overlay.json
+TMPDIR=/home/youmew/dev/wt/agent-d/evidence-2735-slow-20261018/candidate/tmp
+IMAGE=sha256:0c09f37b09828ac8460ef68fccb8aea5891a9cbcdc1c73c91f6b1e13da8073b1
+2d2ef1b9e28fb4b7827cda28dcabb6b093d0f2e2a377dfeec4f9236c6b03ddb2  /home/youmew/dev/wt/agent-d/evidence-2735-slow-20261018/candidate/swarm
+e55a32e837e495c9470d06e675866733e6b9cd51a32f8e24b169ea6fccffd878  /home/youmew/dev/wt/agent-d/evidence-2735-slow-20261018/candidate/workspace-inspection.test
+600d5c8b5f73b4afcec070dbf0c4254deb8f437f9aeb807296bf735e243d6819  /home/youmew/dev/wt/agent-d/evidence-2735-slow-20261018/candidate/releasee2e.test
+COMMAND: taskset -c 0,1 go test ./internal/releasee2e -run '^TestWorkspaceMCPCompiledDockerConformance$/^disconnect=false$' -count=1 -timeout=4m -v
+pid 305096's current affinity list: 0,1

@@ -1,0 +1,934 @@
+package llm
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/google/uuid"
+)
+
+type completionDispatch struct {
+	handle        *runtimeeffects.Handle
+	state         runtimeeffects.State
+	mutationErr   error
+	callerCtx     context.Context
+	evidence      map[string]any
+	providerModel llmselection.ResolvedModel
+	invocation    completionProviderInvocation
+	request       []byte
+	projection    *completionProjection
+	continuation  json.RawMessage
+}
+
+type completionProviderInvocation uint8
+
+const (
+	completionProviderInvocationUnclassified completionProviderInvocation = iota
+	completionProviderInvocationNotStarted
+	completionProviderInvocationStarted
+)
+
+func newCompletionDispatch(handle *runtimeeffects.Handle, state runtimeeffects.State) *completionDispatch {
+	return &completionDispatch{
+		handle:     handle,
+		state:      state,
+		invocation: completionProviderInvocationNotStarted,
+	}
+}
+
+func (d *completionDispatch) markProviderInvocationStarted() {
+	if d != nil {
+		d.invocation = completionProviderInvocationStarted
+	}
+}
+
+func (d *completionDispatch) retainCommittedMutation(err error, phase runtimeeffects.MutationPhase) bool {
+	if err == nil {
+		return true
+	}
+	if d == nil || d.handle == nil || !committedCompletionCleanupPhase(err, d.handle.Attempt(), phase) {
+		return false
+	}
+	d.mutationErr = errors.Join(d.mutationErr, err)
+	return true
+}
+
+func (d *completionDispatch) noDispatchError(err error) error {
+	if d == nil {
+		return err
+	}
+	return errors.Join(err, d.mutationErr)
+}
+
+func completionInvocationGate(caller, heartbeat context.Context) error {
+	if caller != nil && caller.Err() != nil {
+		return caller.Err()
+	}
+	if heartbeat != nil && heartbeat.Err() != nil {
+		return errors.Join(heartbeat.Err(), context.Cause(heartbeat))
+	}
+	return nil
+}
+
+// Only the provider primitive follows the caller's cancellation. The
+// heartbeat context remains process-owned for observation and settlement.
+func completionProviderContext(caller, heartbeat context.Context) (context.Context, func()) {
+	provider, cancel := context.WithCancelCause(heartbeat)
+	done := make(chan struct{})
+	stop := context.AfterFunc(caller, func() {
+		defer close(done)
+		cancel(context.Cause(caller))
+	})
+	if caller.Err() != nil {
+		cancel(context.Cause(caller))
+	}
+	return provider, func() {
+		if !stop() {
+			<-done
+		}
+		cancel(nil)
+	}
+}
+
+const completionContinuationVersion = "provider-response-continuation.v1"
+
+type completionProjection struct {
+	SessionID         string               `json:"session_id"`
+	ExpectedTurnCount int                  `json:"expected_turn_count"`
+	TurnCount         int                  `json:"turn_count"`
+	Messages          []Message            `json:"messages"`
+	Identity          agentmemory.Identity `json:"identity"`
+	Memory            agentmemory.Plan     `json:"memory"`
+	FrameID           string               `json:"frame_id,omitempty"`
+}
+
+type completionContinuationEnvelope struct {
+	Version    string                         `json:"version"`
+	Adapter    string                         `json:"adapter"`
+	Response   Response                       `json:"response"`
+	Usage      runtimeeffects.CompletionUsage `json:"usage"`
+	Projection completionProjection           `json:"projection"`
+}
+
+func bindCompletionProjection(dispatch *completionDispatch, session *Session, input Message, managed *managedProviderCall) error {
+	if dispatch == nil || dispatch.handle == nil || session == nil {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_projection_input_missing", "llm-completion-authority", "bind_projection", nil)
+	}
+	frameID := ""
+	if managed != nil {
+		frameID = strings.TrimSpace(managed.frame.FrameID)
+	}
+	dispatch.projection = &completionProjection{
+		SessionID:         strings.TrimSpace(session.ID),
+		ExpectedTurnCount: session.TurnCount,
+		TurnCount:         session.TurnCount + 1,
+		Messages:          append(append([]Message(nil), session.Messages...), input),
+		Identity:          session.MemoryIdentity.Normalize(),
+		Memory:            session.Memory,
+		FrameID:           frameID,
+	}
+	return nil
+}
+
+func completionContinuationForHandle(handle *runtimeeffects.Handle, adapter string) (*completionContinuationEnvelope, error) {
+	if handle == nil {
+		return nil, nil
+	}
+	snapshot, ok := handle.CompletionContinuation()
+	if !ok {
+		return nil, nil
+	}
+	continuation, err := completionContinuationForPayload(snapshot.Payload, adapter)
+	if err != nil {
+		return nil, err
+	}
+	if continuation.Usage.Evidence.Request != handle.Attempt().Authority.CompletionRequest {
+		return nil, fmt.Errorf("completion continuation contradicts frozen request")
+	}
+	return continuation, nil
+}
+
+func completionContinuationForPayload(payload json.RawMessage, adapter string) (*completionContinuationEnvelope, error) {
+	var continuation completionContinuationEnvelope
+	if err := json.Unmarshal(payload, &continuation); err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_continuation_decode_failed", "llm-completion-authority", "recover_completion", nil, err)
+	}
+	if err := validateCompletionContinuation(continuation, adapter); err != nil {
+		return nil, err
+	}
+	continuation.Response.CapabilitySurface = nil
+	return &continuation, nil
+}
+
+func validateCompletionContinuation(continuation completionContinuationEnvelope, adapter string) error {
+	projection := continuation.Projection
+	if continuation.Version != completionContinuationVersion || continuation.Adapter != strings.TrimSpace(adapter) ||
+		strings.TrimSpace(continuation.Response.Message.Role) == "" || len(continuation.Response.Raw) == 0 ||
+		strings.TrimSpace(projection.SessionID) == "" || projection.ExpectedTurnCount < 0 ||
+		projection.TurnCount != projection.ExpectedTurnCount+1 || len(projection.Messages) < 2 {
+		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_continuation_payload_invalid", "llm-completion-authority", "recover_completion", map[string]any{"adapter": strings.TrimSpace(adapter), "version": continuation.Version})
+	}
+	if !reflect.DeepEqual(projection.Messages[len(projection.Messages)-1], continuation.Response.Message) {
+		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_continuation_projection_mismatch", "llm-completion-authority", "recover_completion", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
+	if err := continuation.Usage.ValidateEvidence(); err != nil {
+		return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_continuation_usage_invalid", "llm-completion-authority", "recover_completion", nil, err)
+	}
+	if continuation.Response.ToolOutputAuthority == nil || continuation.Response.ToolOutputAuthority.Validate() != nil {
+		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_continuation_tool_output_authority_invalid", "llm-completion-authority", "recover_completion", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
+
+	return nil
+}
+
+func ValidateCompletionToolContinuation(payload json.RawMessage, adapter string, successor agentframe.ToolContinuation) error {
+	continuation, err := completionContinuationForPayload(payload, adapter)
+	if err != nil {
+		return err
+	}
+	if continuation == nil || successor.Validate() != nil || strings.TrimSpace(continuation.Projection.FrameID) == "" ||
+		successor.ParentFrameID() != strings.TrimSpace(continuation.Projection.FrameID) {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_successor_frame_mismatch", "llm-completion-authority", "consume_completion", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
+	return nil
+}
+
+func recoverCompletionContinuation(ctx context.Context, controller *runtimeeffects.Controller, registry sessions.Registry, lockOwner string, session *Session, adapter string) (*Response, bool, error) {
+	if controller == nil || session == nil {
+		return nil, false, nil
+	}
+	handle, found, err := controller.RecoverCompletionContinuation(ctx, session.ID, session.Memory)
+	if err != nil || !found {
+		return nil, found, err
+	}
+	continuation, err := completionContinuationForHandle(handle, adapter)
+	if err != nil {
+		return nil, true, err
+	}
+	projection := continuation.Projection
+	if projection.Identity.Normalize() != session.MemoryIdentity.Normalize() || projection.Memory != session.Memory ||
+		(projection.Memory.Enabled && projection.SessionID != strings.TrimSpace(session.ID)) {
+		return nil, true, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_session_stale", "llm-completion-authority", "recover_completion", map[string]any{"session_id": strings.TrimSpace(session.ID)})
+	}
+	if !projection.Memory.Enabled {
+		projection.SessionID = strings.TrimSpace(session.ID)
+	}
+	messages, err := json.Marshal(projection.Messages)
+	if err != nil {
+		return nil, true, fmt.Errorf("marshal completion continuation projection: %w", err)
+	}
+	snapshot, _ := handle.CompletionContinuation()
+	var continuationLease *sessions.Lease
+	if projection.Memory.Enabled && snapshot.Phase == runtimeeffects.CompletionProjectionResponseSettled {
+		if registry == nil {
+			return nil, true, fmt.Errorf("recovered completion requires a session registry")
+		}
+		continuationLease, err = registry.Acquire(ctx, session.MemoryIdentity, lockOwner)
+		if err != nil {
+			if continuationLease != nil {
+				err = releasePreProviderSessionLease(ctx, registry, continuationLease, session.AgentID, nil, err)
+			}
+			return nil, true, err
+		}
+		if err := continuationLease.ValidateFor(session.MemoryIdentity, session.ID); err != nil {
+			return nil, true, releasePreProviderSessionLease(ctx, registry, continuationLease, session.AgentID, nil, err)
+		}
+		if err := handle.BindRecoveredContinuationGrant(runtimeeffects.SessionGrant{SessionID: continuationLease.SessionID, GrantID: continuationLease.GrantID, LockOwner: continuationLease.LockOwner}); err != nil {
+			return nil, true, releasePreProviderSessionLease(ctx, registry, continuationLease, session.AgentID, nil, err)
+		}
+	}
+	projectionErr := handle.ProjectCompletionConversation(ctx, runtimeeffects.CompletionConversationProjection{
+		Payload: snapshot.Payload, SessionID: projection.SessionID, Identity: projection.Identity,
+		Memory: projection.Memory, ExpectedTurnCount: projection.ExpectedTurnCount,
+		TurnCount: projection.TurnCount, Messages: messages,
+	})
+	if continuationLease != nil {
+		projectionErr = releaseCompletedSessionLease(ctx, registry, continuationLease, session.AgentID, nil, projectionErr)
+	}
+	response := continuation.Response
+	attempt := handle.Attempt()
+	response.completionAttempt = &attempt
+	if projectionErr != nil && (!committedCompletionCleanupPhase(projectionErr, attempt, runtimeeffects.MutationProjection) || !committedCompletionCleanup(&response, projectionErr)) {
+		return nil, true, projectionErr
+	}
+	session.Messages = append([]Message(nil), projection.Messages...)
+	session.TurnCount = projection.TurnCount
+	session.ParseFailures = 0
+	if providerSessionID := strings.TrimSpace(continuation.Response.SessionID); providerSessionID != "" {
+		session.ProviderSessionID = providerSessionID
+	}
+	response.CapabilitySurface = &snapshot.Surface
+	response.completionHandle = handle
+	response.completionFrameID = projection.FrameID
+	response.completionConsumed = snapshot.Phase == runtimeeffects.CompletionProjectionResponseConsumed
+	if successor, ok := snapshot.ToolContinuation(); ok {
+		response.completionSuccessor = &successor
+	}
+	return &response, true, projectionErr
+}
+
+func projectCompletionContinuation(ctx context.Context, dispatch *completionDispatch, session *Session, response *Response) (bool, error) {
+	if dispatch == nil || dispatch.handle == nil || session == nil || response == nil {
+		return false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_projection_input_missing", "llm-completion-authority", "project_completion", nil)
+	}
+	attempt := dispatch.handle.Attempt()
+	if attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent || attempt.Origin.Kind != runtimeeffects.CompletionOriginDelivery {
+		return false, nil
+	}
+	continuation, err := completionContinuationForPayload(dispatch.continuation, attempt.Adapter)
+	if err != nil {
+		return true, err
+	}
+	if continuation == nil {
+		return true, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_continuation_missing", "llm-completion-authority", "project_completion", nil)
+	}
+	projection := continuation.Projection
+	messages, err := json.Marshal(projection.Messages)
+	if err != nil {
+		return true, fmt.Errorf("marshal completion conversation projection: %w", err)
+	}
+	projectionErr := dispatch.handle.ProjectCompletionConversation(ctx, runtimeeffects.CompletionConversationProjection{
+		Payload: dispatch.continuation, SessionID: projection.SessionID, Identity: projection.Identity,
+		Memory: projection.Memory, ExpectedTurnCount: projection.ExpectedTurnCount,
+		TurnCount: projection.TurnCount, Messages: messages,
+	})
+	attempt = dispatch.handle.Attempt()
+	response.completionAttempt = &attempt
+	if projectionErr != nil && (!committedCompletionCleanupPhase(projectionErr, attempt, runtimeeffects.MutationProjection) || !committedCompletionCleanup(response, projectionErr)) {
+		return true, projectionErr
+	}
+	session.Messages = append([]Message(nil), projection.Messages...)
+	session.TurnCount = projection.TurnCount
+	session.ParseFailures = 0
+	response.completionHandle = dispatch.handle
+	response.completionFrameID = projection.FrameID
+	return true, projectionErr
+}
+
+func consumeCompletionContinuation(ctx context.Context, response *Response, successor *agentframe.ToolContinuation) error {
+	if response == nil || response.completionHandle == nil {
+		return nil
+	}
+	err := response.completionHandle.ConsumeCompletionResponse(ctx, successor)
+	if err != nil {
+		attempt := response.completionHandle.Attempt()
+		if response.completionAttempt == nil || response.completionAttempt.OperationID != attempt.OperationID || response.completionAttempt.AttemptID != attempt.AttemptID ||
+			!committedCompletionCleanupPhase(err, attempt, runtimeeffects.MutationProjection) || !committedCompletionCleanup(response, err) {
+			return err
+		}
+		recordCompletionCleanup(response, err)
+	}
+	return nil
+}
+
+const (
+	completionAttemptHeartbeatInterval = 30 * time.Second
+	completionAttemptHeartbeatLease    = 2 * time.Minute
+)
+
+type completionAttemptHeartbeat struct {
+	ctx          context.Context
+	cancel       context.CancelCauseFunc
+	done         chan struct{}
+	handle       *runtimeeffects.Handle
+	lease        time.Duration
+	claimHandoff *runtimedelivery.ClaimRenewalHandoff
+	renewMu      sync.Mutex
+	mu           sync.Mutex
+	err          error
+	diagnostic   error
+	stopped      bool
+}
+
+type completionAttemptHeartbeatContextKey struct{}
+
+func startCompletionAttemptHeartbeat(ctx context.Context, handle *runtimeeffects.Handle) (context.Context, *completionAttemptHeartbeat, error) {
+	return startCompletionAttemptHeartbeatWithTiming(ctx, handle, completionAttemptHeartbeatInterval, completionAttemptHeartbeatLease)
+}
+
+func startCompletionAttemptHeartbeatWithTiming(ctx context.Context, handle *runtimeeffects.Handle, interval, lease time.Duration) (context.Context, *completionAttemptHeartbeat, error) {
+	if handle == nil {
+		return ctx, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "heartbeat_attempt", nil)
+	}
+	if interval <= 0 || lease <= 0 {
+		return ctx, nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_heartbeat_timing_invalid", "llm-completion-authority", "heartbeat_attempt", nil)
+	}
+	var workLease *worklifetime.Lease
+	var err error
+	normalProviderAttempt := handle.Attempt().Kind == runtimeeffects.KindProviderTurn && handle.Attempt().Authority.Kind == runtimeeffects.AuthorityNormalAgent
+	owner, occurrenceOwned := worklifetime.OccurrenceFromContext(ctx)
+	if normalProviderAttempt {
+		process, processOwned := worklifetime.ProcessFromContext(ctx)
+		if !processOwned {
+			return ctx, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_process_work_owner_missing", "llm-completion-authority", "heartbeat_attempt", nil)
+		}
+		workLease, err = process.Begin(context.WithoutCancel(ctx))
+	} else if occurrenceOwned {
+		workLease, err = owner.Begin(ctx)
+	} else if process, processOwned := worklifetime.ProcessFromContext(ctx); processOwned {
+		workLease, err = process.Begin(ctx)
+	} else {
+		return ctx, nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_heartbeat_work_owner_missing", "llm-completion-authority", "heartbeat_attempt", nil)
+	}
+	if err != nil {
+		return ctx, nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_heartbeat_admission_failed", "llm-completion-authority", "heartbeat_attempt", nil, err)
+	}
+	heartbeatParent := workLease.Context()
+	if occurrenceOwned && !normalProviderAttempt {
+		heartbeatParent = worklifetime.WithOccurrence(heartbeatParent, owner)
+	}
+	var claimHandoff *runtimedelivery.ClaimRenewalHandoff
+	if normalProviderAttempt {
+		if claimHeartbeat, ok := runtimedelivery.ClaimHeartbeatFromContext(ctx); ok {
+			claimHandoff, err = claimHeartbeat.BeginRenewalHandoff()
+			if err != nil {
+				_ = workLease.Done()
+				return ctx, nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_renewal_handoff_failed", "llm-completion-authority", "heartbeat_attempt", map[string]any{"attempt_id": handle.Attempt().AttemptID}, err)
+			}
+		}
+	}
+	initialRenewalErr := handle.Heartbeat(heartbeatParent, lease)
+	if initialRenewalErr != nil && !committedCompletionCleanupPhase(initialRenewalErr, handle.Attempt(), runtimeeffects.MutationHeartbeat) {
+		claimHandoff.Finish()
+		_ = workLease.Done()
+		return ctx, nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_attempt_heartbeat_failed", "llm-completion-authority", "heartbeat_attempt", map[string]any{"stage": "prelaunch"}, initialRenewalErr)
+	}
+	heartbeatCtx, cancel := context.WithCancelCause(heartbeatParent)
+	heartbeat := &completionAttemptHeartbeat{
+		ctx: heartbeatCtx, cancel: cancel, done: make(chan struct{}), handle: handle, lease: lease,
+		claimHandoff: claimHandoff, diagnostic: initialRenewalErr,
+	}
+	go func() {
+		defer close(heartbeat.done)
+		defer func() { _ = workLease.Done() }()
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				if err := heartbeat.renew(); err != nil {
+					if heartbeat.retainCommittedRenewal(err) {
+						continue
+					}
+					if heartbeatCtx.Err() != nil {
+						return
+					}
+					heartbeat.mu.Lock()
+					heartbeat.err = err
+					heartbeat.mu.Unlock()
+					cancel(err)
+					return
+				}
+			}
+		}
+	}()
+	return context.WithValue(heartbeatCtx, completionAttemptHeartbeatContextKey{}, heartbeat), heartbeat, nil
+}
+
+func requireCompletionAttemptHeartbeat(ctx context.Context) error {
+	if ctx == nil {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_attempt_heartbeat_missing", "llm-completion-authority", "launch_attempt", nil)
+	}
+	heartbeat, ok := ctx.Value(completionAttemptHeartbeatContextKey{}).(*completionAttemptHeartbeat)
+	if !ok || heartbeat == nil {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_attempt_heartbeat_missing", "llm-completion-authority", "launch_attempt", nil)
+	}
+	return nil
+}
+
+func (h *completionAttemptHeartbeat) Stop() error {
+	if h == nil {
+		return nil
+	}
+	h.mu.Lock()
+	doStop := !h.stopped
+	if doStop {
+		h.stopped = true
+	}
+	h.mu.Unlock()
+	if doStop {
+		renewErr := h.renew()
+		h.mu.Lock()
+		if committedCompletionCleanupPhase(renewErr, h.handle.Attempt(), runtimeeffects.MutationHeartbeat) {
+			h.diagnostic = errors.Join(h.diagnostic, renewErr)
+		} else {
+			h.err = errors.Join(h.err, renewErr)
+		}
+		h.mu.Unlock()
+		h.cancel(nil)
+	}
+	<-h.done
+	h.claimHandoff.Finish()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.err
+}
+
+func (h *completionAttemptHeartbeat) retainCommittedRenewal(err error) bool {
+	if !committedCompletionCleanupPhase(err, h.handle.Attempt(), runtimeeffects.MutationHeartbeat) {
+		return false
+	}
+	h.mu.Lock()
+	h.diagnostic = errors.Join(h.diagnostic, err)
+	h.mu.Unlock()
+	return true
+}
+
+func (h *completionAttemptHeartbeat) committedDiagnostic() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.diagnostic
+}
+
+func (h *completionAttemptHeartbeat) renew() error {
+	if h == nil || h.handle == nil {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "heartbeat_attempt", nil)
+	}
+	h.renewMu.Lock()
+	defer h.renewMu.Unlock()
+	return h.handle.Heartbeat(h.ctx, h.lease)
+}
+
+func finishCompletionDispatchHeartbeat(dispatch *completionDispatch, heartbeat *completionAttemptHeartbeat, prior error) error {
+	if heartbeat == nil {
+		return prior
+	}
+	heartbeatErr := heartbeat.Stop()
+	if diagnostic := heartbeat.committedDiagnostic(); diagnostic != nil {
+		if dispatch != nil {
+			dispatch.mutationErr = errors.Join(dispatch.mutationErr, diagnostic)
+		} else {
+			prior = errors.Join(prior, diagnostic)
+		}
+	}
+	if heartbeatErr == nil {
+		return prior
+	}
+	if dispatch != nil && dispatch.invocation == completionProviderInvocationStarted {
+		dispatch.state = runtimeeffects.StateOutcomeUncertain
+	}
+	return errors.Join(prior, completionAttemptHeartbeatLoss(heartbeatErr))
+}
+
+func completionAttemptHeartbeatLoss(err error) error {
+	return runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "completion_attempt_heartbeat_lost", "llm-completion-authority", "heartbeat_attempt", map[string]any{"stage": "provider_execution"}, err)
+}
+
+func prepareCompletionContext(ctx context.Context, controller *runtimeeffects.Controller, cfg *config.Config, session *Session, lease *sessions.Lease, entityID string) (context.Context, string, error) {
+	if err := ctx.Err(); err != nil {
+		return ctx, "", err
+	}
+	if controller == nil || !controller.Enabled() {
+		return ctx, "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_execution_controller_missing", "llm-completion-authority", "prepare_completion", nil)
+	}
+	if session == nil {
+		return ctx, "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_session_missing", "llm-completion-authority", "prepare_completion", nil)
+	}
+	if session.Memory.Enabled {
+		if err := lease.ValidateFor(session.MemoryIdentity, session.ID); err != nil {
+			return ctx, "", runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_session_grant_missing", "llm-completion-authority", "prepare_completion", nil, err)
+		}
+		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{SessionID: lease.SessionID, GrantID: lease.GrantID, LockOwner: lease.LockOwner})
+	}
+	ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, fmt.Sprintf("completion:%d", session.TurnCount+1))
+	ctx = runtimeeffects.WithController(ctx, controller)
+	authority, ok := runtimeeffects.CompletionAuthorityFromContext(ctx)
+	if !ok {
+		return ctx, "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_execution_authority_missing", "llm-completion-authority", "prepare_completion", nil)
+	}
+	var target runtimeeffects.UsageTarget
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat {
+		ordinal := 1
+		if session != nil {
+			ordinal = session.TurnCount + 1
+		}
+		target = runtimeeffects.UsageTarget{
+			Kind: runtimeeffects.UsageTargetConversationForkCompletion, ID: authority.ForkChat.ForkTurnID,
+			Ordinal: ordinal, RunID: authority.ForkChat.SourceRunID,
+		}
+	} else {
+		actor, _ := runtimeactors.ActorFromContext(ctx)
+		effectiveEntityID := strings.TrimSpace(actor.EffectiveEntityID())
+		effectiveFlowInstance := session.MemoryIdentity.FlowInstance()
+		if effectiveEntityID == "" {
+			if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
+				effectiveEntityID = strings.TrimSpace(inbound.EntityID())
+			}
+		}
+		if effectiveEntityID == "" {
+			effectiveEntityID = strings.TrimSpace(entityID)
+		}
+		turnID := uuid.NewString()
+		if capabilityAuthority, ok := providerTurnAuthorityFromContext(ctx); ok {
+			turnID = capabilityAuthority.ID
+		}
+		target = runtimeeffects.UsageTarget{
+			Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID,
+			RunID: strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx)), AgentID: strings.TrimSpace(session.AgentID),
+			AgentIdentity: session.MemoryIdentity, SessionID: strings.TrimSpace(session.ID), Memory: session.Memory,
+			FlowInstance: effectiveFlowInstance, EntityID: effectiveEntityID,
+		}
+		if session.Memory.Enabled {
+			target.RunID = session.MemoryIdentity.RunID
+			target.FlowInstance = session.MemoryIdentity.FlowInstance()
+		}
+		entityID = effectiveEntityID
+	}
+	if surface, ok := managedcapabilities.FromContext(ctx); ok {
+		if !runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(target, surface) {
+			return ctx, "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_turn_identity_mismatch", "llm-completion-authority", "prepare_completion", map[string]any{"surface_id": surface.ID, "surface_authority_id": surface.Authority.ID, "target_id": target.ID})
+		}
+	}
+	ctx = runtimeeffects.WithUsageTarget(ctx, target)
+	if mode, found := runtimeeffects.ExecutionModeFromContext(ctx); !found || mode != runtimeeffects.ExecutionModeMock {
+		ctx = runtimeeffects.WithBudgetAdmissionScopes(ctx, completionBudgetScopes(cfg, entityID))
+	}
+	authority, ok = runtimeeffects.CompletionAuthorityFromContext(ctx)
+	if !ok || !authority.Target.Valid() {
+		return ctx, "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_usage_target_missing", "llm-completion-authority", "prepare_completion", nil)
+	}
+	return ctx, target.ID, nil
+}
+
+func completionBudgetScopes(cfg *config.Config, entityID string) []runtimeeffects.BudgetAdmissionScope {
+	if cfg == nil {
+		return nil
+	}
+	budget := cfg.Budget()
+	scopes := make([]runtimeeffects.BudgetAdmissionScope, 0, 2)
+	if budget.SystemMonthlyCap > 0 {
+		scopes = append(scopes, runtimeeffects.BudgetAdmissionScope{Kind: "system", CapUSD: float64(budget.SystemMonthlyCap)})
+	}
+	if entityID = strings.TrimSpace(entityID); entityID != "" && budget.PerEntityMonthlyCap > 0 {
+		scopes = append(scopes, runtimeeffects.BudgetAdmissionScope{Kind: "entity", Key: entityID, CapUSD: float64(budget.PerEntityMonthlyCap)})
+	} else if entityID == "" && budget.GlobalMonthlyCap > 0 {
+		scopes = append(scopes, runtimeeffects.BudgetAdmissionScope{Kind: "global", CapUSD: float64(budget.GlobalMonthlyCap)})
+	}
+	return scopes
+}
+
+func unacknowledgedCompletionError(err error) error {
+	if err != nil {
+		return err
+	}
+	return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_settlement_not_acknowledged", "llm-completion-authority", "settle_completion", nil)
+}
+
+func settleCompletionTurn(ctx context.Context, dispatch *completionDispatch, targetID string, turn AgentTurnRecord, response *Response, profile llmselection.Profile, usage runtimeeffects.CompletionUsage, state runtimeeffects.State, failure *runtimefailures.Envelope, evidence map[string]any) (runtimeeffects.CompletionSettlementResult, error) {
+	return settleCompletionTurnWithProviderHead(ctx, dispatch, targetID, turn, response, profile, usage, state, failure, evidence, nil)
+}
+
+func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *completionDispatch, targetID string, turn AgentTurnRecord, response *Response, profile llmselection.Profile, usage runtimeeffects.CompletionUsage, state runtimeeffects.State, failure *runtimefailures.Envelope, evidence map[string]any, providerHead *runtimeeffects.CompletionProviderHead) (_ runtimeeffects.CompletionSettlementResult, retErr error) {
+	defer func() {
+		if dispatch != nil {
+			retErr = errors.Join(retErr, dispatch.mutationErr)
+		}
+	}()
+	if dispatch == nil || dispatch.handle == nil {
+		return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "settle_completion", nil)
+	}
+	if dispatch.providerModel.ModelAlias == "" || dispatch.providerModel.ConcreteModel == "" ||
+		dispatch.providerModel.Backend != profile.ID || dispatch.providerModel.Provider != profile.Provider ||
+		dispatch.providerModel.Transport != profile.Transport || dispatch.providerModel.RuntimeMode != profile.RuntimeMode {
+		return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("completion dispatch provider selection is incomplete or does not match profile %q", profile.ID)
+	}
+	settledAt := time.Now().UTC().Truncate(time.Microsecond)
+	// The dispatch state can narrow a provider-call failure to a proven
+	// prelaunch failure. A successful transport does not make later response
+	// conversion, usage validation, or target persistence successful.
+	if dispatch.state != "" && dispatch.state != runtimeeffects.StateSettled {
+		state = dispatch.state
+	}
+	if len(dispatch.evidence) > 0 {
+		if evidence == nil {
+			evidence = map[string]any{}
+		}
+		for key, value := range dispatch.evidence {
+			evidence[key] = value
+		}
+	}
+	switch dispatch.invocation {
+	case completionProviderInvocationNotStarted:
+		if state == runtimeeffects.StateSettled || response != nil || providerHead != nil {
+			return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_provider_invocation_missing", "llm-completion-authority", "settle_completion", nil)
+		}
+		if failure == nil {
+			envelope := runtimefailures.FromError(fmt.Errorf("completion failed before provider invocation without failure detail"), "llm-completion-authority", "settle_completion")
+			failure = &envelope.Failure
+		}
+		return runtimeeffects.CompletionSettlementResult{}, dispatch.handle.Settle(ctx, runtimeeffects.StateTerminalFailure, failure, evidence)
+	case completionProviderInvocationStarted:
+		// Provider-visible outcomes may materialize the immutable turn below.
+	default:
+		return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_provider_invocation_unclassified", "llm-completion-authority", "settle_completion", nil)
+	}
+	if dispatch.providerModel.ModelAlias == "" || dispatch.providerModel.ConcreteModel == "" ||
+		dispatch.providerModel.Backend != profile.ID || dispatch.providerModel.Provider != profile.Provider ||
+		dispatch.providerModel.Transport != profile.Transport || dispatch.providerModel.RuntimeMode != profile.RuntimeMode {
+		return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("completion dispatch provider selection is incomplete or does not match profile %q", profile.ID)
+	}
+	turn = enrichTurnRecord(ctx, nil, turn, response)
+	turn = CanonicalizeTurnForPersistence(turn)
+	request := dispatch.handle.Attempt().Authority.CompletionRequest
+	if err := request.Validate(); err != nil {
+		return runtimeeffects.CompletionSettlementResult{}, err
+	}
+	usage = usage.Clone()
+	usage.Evidence.Request = request
+	usage.Evidence.ProviderReportedCostUSD = usage.ProviderReportedCostUSD
+	usage.ResolvedModel = usage.Evidence.ResolvedModel()
+	usage.Evidence.CostProvenance = usage.CostProvenance()
+	usage.Evidence = usage.Evidence.Canonical()
+	if state != runtimeeffects.StateSettled && failure == nil {
+		envelope := runtimefailures.FromError(fmt.Errorf("completion failed without provider failure detail"), "llm-completion-authority", "settle_completion")
+		failure = &envelope.Failure
+	}
+	if state == runtimeeffects.StateSettled && response != nil {
+		if evidence == nil {
+			evidence = map[string]any{}
+		}
+		authority := ToolOutputAuthority{ProviderOperationID: dispatch.handle.Attempt().OperationID, SettledAt: settledAt}
+		if err := authority.Validate(); err != nil {
+			return runtimeeffects.CompletionSettlementResult{}, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_tool_output_authority_invalid", "llm-completion-authority", "settle_completion", nil, err)
+		}
+		response.ToolOutputAuthority = &authority
+		attempt := dispatch.handle.Attempt()
+		if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent && attempt.Origin.Kind == runtimeeffects.CompletionOriginDelivery {
+			if dispatch.projection == nil || len(bytes.TrimSpace(dispatch.request)) == 0 {
+				return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_projection_input_missing", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": attempt.AttemptID})
+			}
+			projection := *dispatch.projection
+			projection.Messages = append(append([]Message(nil), projection.Messages...), response.Message)
+			continuationResponse := *response
+			continuationResponse.CapabilitySurface = nil
+			continuationResponse.completionHandle = nil
+			continuationResponse.completionFrameID = ""
+			raw, err := json.Marshal(completionContinuationEnvelope{
+				Version: completionContinuationVersion, Adapter: attempt.Adapter,
+				Response: continuationResponse, Usage: usage, Projection: projection,
+			})
+			if err != nil {
+				return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("marshal completion continuation evidence: %w", err)
+			}
+			if _, err := completionContinuationForPayload(raw, attempt.Adapter); err != nil {
+				return runtimeeffects.CompletionSettlementResult{}, err
+			}
+			if err := runtimeeffects.AttachCompletionContinuationEvidence(evidence, dispatch.request, raw); err != nil {
+				return runtimeeffects.CompletionSettlementResult{}, err
+			}
+			dispatch.continuation = raw
+		}
+	}
+	turn.Failure = failure
+	settlement := runtimeeffects.CompletionSettlement{
+		Settlement:   runtimeeffects.Settlement{State: state, Failure: failure, Evidence: evidence},
+		Usage:        usage,
+		Spend:        completionSpendForContext(ctx, profile, turn, usage, dispatch.providerModel),
+		ProviderHead: providerHead,
+		Now:          settledAt,
+	}
+	if authority := dispatch.handle.Attempt().Authority; authority.Target.Kind == runtimeeffects.UsageTargetAgentTurn {
+		settlement.AgentTurn = completionAgentTurn(targetID, turn)
+	}
+	result, err := dispatch.handle.SettleCompletion(ctx, settlement)
+	if response != nil && state == runtimeeffects.StateSettled && result.Committed && result.Disposition == runtimeeffects.CompletionSettlementCurrent {
+		attempt := dispatch.handle.Attempt()
+		response.completionAttempt = &attempt
+	}
+	if result.Committed && result.Disposition == runtimeeffects.CompletionSettlementCurrent && state == runtimeeffects.StateSettled && response != nil &&
+		dispatch.handle.Attempt().Authority.Kind == runtimeeffects.AuthorityNormalAgent &&
+		dispatch.handle.Attempt().Origin.Kind == runtimeeffects.CompletionOriginDelivery {
+		snapshot, ok := dispatch.handle.CompletionContinuation()
+		if !ok {
+			return result, errors.Join(err, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_commit_result_missing", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": dispatch.handle.Attempt().AttemptID}))
+		}
+		dispatch.continuation = snapshot.Payload
+	}
+	return result, err
+}
+
+func completionAgentTurn(targetID string, turn AgentTurnRecord) *runtimeeffects.CompletionAgentTurn {
+	latency := int(turn.Latency / time.Millisecond)
+	if latency < 0 {
+		latency = 0
+	}
+	capabilitySurfaceID := ""
+	capabilitySurface := json.RawMessage(nil)
+	if turn.CapabilitySurface != nil {
+		capabilitySurfaceID = turn.CapabilitySurface.ID
+		capabilitySurface = completionMarshal(turn.CapabilitySurface, `{}`)
+	}
+	return &runtimeeffects.CompletionAgentTurn{
+		TurnID:              targetID,
+		RunID:               strings.TrimSpace(turn.RunID),
+		AgentID:             strings.TrimSpace(turn.AgentID),
+		Identity:            turn.Identity.Normalize(),
+		SessionID:           strings.TrimSpace(turn.SessionID),
+		Memory:              turn.Memory,
+		FlowInstance:        strings.TrimSpace(turn.FlowInstance),
+		EntityID:            strings.TrimSpace(turn.EntityID),
+		TriggerEventID:      strings.TrimSpace(turn.TriggerEventID),
+		TriggerEventType:    strings.TrimSpace(turn.TriggerEventType),
+		TaskID:              strings.TrimSpace(turn.TaskID),
+		CapabilitySurfaceID: capabilitySurfaceID,
+		CapabilitySurface:   capabilitySurface,
+		ToolCalls:           completionMarshal(turn.ToolCalls, `[]`),
+		EmittedEvents:       completionMarshal(turn.EmittedEvents, `[]`),
+		RequestPayload:      completionRaw(turn.RequestPayload),
+		ResponsePayload:     completionRaw(turn.ResponseRaw),
+		TurnBlocks:          completionMarshal(turn.TurnBlocks, `[]`),
+		ParseOK:             turn.ParseOK,
+		LatencyMS:           latency,
+		RetryCount:          turn.RetryCount,
+		Failure:             turn.Failure,
+	}
+}
+
+func completionSpendForContext(ctx context.Context, profile llmselection.Profile, turn AgentTurnRecord, usage runtimeeffects.CompletionUsage, providerModel llmselection.ResolvedModel) runtimeeffects.CompletionSpend {
+	meta := usageMetadataForProvider(profile, providerModel)
+	actor, _ := runtimeactors.ActorFromContext(ctx)
+	flowInstance := strings.TrimSpace(turn.FlowInstance)
+	if !turn.Identity.IsZero() {
+		flowInstance = turn.Identity.FlowInstance()
+	}
+	if flowInstance == "" {
+		flowInstance = strings.TrimSpace(actor.CanonicalFlowPath())
+	}
+	if flowInstance == "" && turn.Identity.IsZero() {
+		flowInstance = "global"
+	}
+	input, output := int64(0), int64(0)
+	if usage.InputTokens != nil {
+		input = *usage.InputTokens
+	}
+	if usage.OutputTokens != nil {
+		output = *usage.OutputTokens
+	}
+	cost := estimateCompletionCostUSD(providerModel.ConcreteModel, input, output)
+	if usage.ProviderReportedCostUSD != nil {
+		cost = *usage.ProviderReportedCostUSD
+	}
+	return runtimeeffects.CompletionSpend{
+		EntityID:       strings.TrimSpace(turn.EntityID),
+		FlowInstance:   flowInstance,
+		AgentID:        strings.TrimSpace(turn.AgentID),
+		AgentIdentity:  turn.Identity,
+		Model:          providerModel.ConcreteModel,
+		ModelAlias:     mapString(meta, "model_alias"),
+		BackendProfile: coalesce(mapString(meta, "backend_profile"), profile.ID),
+		Provider:       coalesce(mapString(meta, "provider"), profile.Provider),
+		Transport:      coalesce(mapString(meta, "transport"), profile.Transport),
+		ResolvedModel:  usage.ResolvedModel,
+		CostUSD:        cost,
+		InvocationType: profile.ID,
+	}
+}
+
+func completionUsage(input, output int, exactness runtimeeffects.CompletionUsageExactness) runtimeeffects.CompletionUsage {
+	in, out := int64(input), int64(output)
+	return runtimeeffects.CompletionUsage{Exactness: exactness, InputTokens: &in, OutputTokens: &out}
+}
+
+func withCompletionRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel) context.Context {
+	return runtimeeffects.WithCompletionRequest(ctx, runtimeeffects.CompletionRequest{
+		ModelAlias: model.ModelAlias, RequestedModel: model.ConcreteModel,
+		BackendProfile: profile.ID, Provider: profile.Provider, Transport: profile.Transport,
+	})
+}
+
+func unavailableCompletionUsage() runtimeeffects.CompletionUsage {
+	return runtimeeffects.CompletionUsage{Exactness: runtimeeffects.CompletionUsageUnavailable}
+}
+
+func observeAPIModel(usage *runtimeeffects.CompletionUsage, model string) {
+	if model == "" {
+		return
+	}
+	if strings.TrimSpace(model) == "" {
+		completionObservationProblem(&usage.Evidence, runtimeeffects.CompletionModelResponse, "model", "invalid")
+		return
+	}
+	usage.Evidence.Models = []runtimeeffects.CompletionModelObservation{{Model: model, Source: runtimeeffects.CompletionModelResponse}}
+	usage.ResolvedModel = model
+}
+
+func completionRaw(raw []byte) json.RawMessage {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return nil
+	}
+	return append(json.RawMessage(nil), raw...)
+}
+
+func completionMarshal(value any, fallback string) json.RawMessage {
+	raw, err := json.Marshal(value)
+	if err != nil || !json.Valid(raw) {
+		return json.RawMessage(fallback)
+	}
+	return raw
+}
+
+func mapString(values map[string]any, key string) string {
+	value, _ := values[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func estimateCompletionCostUSD(model string, input, output int64) float64 {
+	inRate, outRate := 3.0, 15.0
+	lower := strings.ToLower(strings.TrimSpace(model))
+	if strings.Contains(lower, "haiku") {
+		inRate, outRate = 0.8, 4.0
+	} else if strings.Contains(lower, "opus") {
+		inRate, outRate = 15.0, 75.0
+	}
+	if input < 0 {
+		input = 0
+	}
+	if output < 0 {
+		output = 0
+	}
+	return float64(input)/1_000_000*inRate + float64(output)/1_000_000*outRate
+}
+
+func completionTurnBase(ctx context.Context, session *Session, request, response []byte, parseOK bool, latency time.Duration, failure *runtimefailures.Envelope) AgentTurnRecord {
+	actor, _ := runtimeactors.ActorFromContext(ctx)
+	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
+	flowInstance := session.MemoryIdentity.FlowInstance()
+	if session.Memory.Enabled {
+		runID = session.MemoryIdentity.RunID
+	}
+	return AgentTurnRecord{
+		AgentID:        session.AgentID,
+		SessionID:      session.ID,
+		Memory:         session.Memory,
+		RunID:          runID,
+		EntityID:       actor.EffectiveEntityID(),
+		FlowInstance:   flowInstance,
+		RequestPayload: request,
+		ResponseRaw:    response,
+		ParseOK:        parseOK,
+		Latency:        latency,
+		Failure:        failure,
+	}
+}

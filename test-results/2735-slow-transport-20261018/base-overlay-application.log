@@ -1,0 +1,56 @@
+Checking patch test-results/2735-slow-transport-20261018/base/cmd/swarm/main.go.txt...
+Checking patch test-results/2735-slow-transport-20261018/base/internal/cliapp/test_command.go.txt...
+Checking patch test-results/2735-slow-transport-20261018/base/internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go.txt...
+error: while searching for:
+}
+
+func (s *RunSQLite) LoadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
+	if s == nil || s.backend == nil {
+		return operatorread.RunDebugReport{}, fmt.Errorf("sqlite store is required")
+	}
+	var report operatorread.RunDebugReport
+	err := s.backend.InspectSnapshot(ctx, func(snapshot context.Context) (err error) {
+		report, err = s.loadRunDebugReport(snapshot, runID, opts)
+		return err
+	})
+
+error: patch failed: test-results/2735-slow-transport-20261018/base/internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go.txt:113
+Hunk #3 succeeded at 186 (offset -30 lines).
+Hunk #4 succeeded at 229 (offset -30 lines).
+Checking patch test-results/2735-slow-transport-20261018/base/internal/runtime/agents/agent_llm.go.txt...
+error: while searching for:
+	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
+	ctx = runtimebus.WithInboundEvent(ctx, evt)
+	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, a.cfg.Identity)
+	if recorder, found := runtimebus.EmittedEventsRecorderFromContext(ctx); !found || recorder == nil {
+		ctx = runtimebus.WithEmittedEventsRecorder(ctx, runtimebus.NewEmittedEventsRecorder())
+	}
+
+error: patch failed: test-results/2735-slow-transport-20261018/base/internal/runtime/agents/agent_llm.go.txt:151
+Hunk #4 succeeded at 174 (offset -3 lines).
+Checking patch test-results/2735-slow-transport-20261018/base/internal/runtime/manager/receipts.go.txt...
+Checking patch test-results/2735-slow-transport-20261018/base/internal/runtime/effects/effects.go.txt...
+Hunk #2 succeeded at 1372 (offset -18 lines).
+Hunk #3 succeeded at 1392 (offset -18 lines).
+Checking patch test-results/2735-slow-transport-20261018/base/internal/runtime/llm/completion_authority.go.txt...
+Checking patch test-results/2735-slow-transport-20261018/base/internal/runtime/bus/turn_context.go.txt...
+Checking patch test-results/2735-slow-transport-20261018/base/internal/runtime/tools/executor_emit.go.txt...
+Checking patch test-results/2735-slow-transport-20261018/base/internal/releasee2e/workspace_gateway_docker_test.go.txt...
+Applied patch test-results/2735-slow-transport-20261018/base/cmd/swarm/main.go.txt cleanly.
+Applied patch test-results/2735-slow-transport-20261018/base/internal/cliapp/test_command.go.txt cleanly.
+Applying patch test-results/2735-slow-transport-20261018/base/internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go.txt with 1 reject...
+Hunk #1 applied cleanly.
+Rejected hunk #2.
+Hunk #3 applied cleanly.
+Hunk #4 applied cleanly.
+Applying patch test-results/2735-slow-transport-20261018/base/internal/runtime/agents/agent_llm.go.txt with 1 reject...
+Hunk #1 applied cleanly.
+Hunk #2 applied cleanly.
+Rejected hunk #3.
+Hunk #4 applied cleanly.
+Applied patch test-results/2735-slow-transport-20261018/base/internal/runtime/manager/receipts.go.txt cleanly.
+Applied patch test-results/2735-slow-transport-20261018/base/internal/runtime/effects/effects.go.txt cleanly.
+Applied patch test-results/2735-slow-transport-20261018/base/internal/runtime/llm/completion_authority.go.txt cleanly.
+Applied patch test-results/2735-slow-transport-20261018/base/internal/runtime/bus/turn_context.go.txt cleanly.
+Applied patch test-results/2735-slow-transport-20261018/base/internal/runtime/tools/executor_emit.go.txt cleanly.
+Applied patch test-results/2735-slow-transport-20261018/base/internal/releasee2e/workspace_gateway_docker_test.go.txt cleanly.

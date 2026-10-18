@@ -1,0 +1,21 @@
+=== RUN   TestWorkspaceMCPCompiledDockerConformance
+=== RUN   TestWorkspaceMCPCompiledDockerConformance/disconnect=false
+    workspace_gateway_docker_test.go:471: release command swarm: wall=18.389772608s user=10.685277s system=840.038ms
+    workspace_gateway_docker_test.go:498: real Docker public read/emit/store assertion: exit status 3
+        selected-store observation={Observed:true Finished:true AgentDeliveries:1 Delivered:0 Emitted:0}
+        tests/transport.yaml: expected event work.completed was not observed in [work.requested work.ready platform.agent_started]
+        tests/transport.yaml: expected event work.completed was not observed in [work.requested work.ready platform.agent_started]
+        private test session failed (exit 1)
+    workspace_gateway_docker_test.go:467: failure evidence observations.jsonl (read error=<nil>):
+        {"started_at":"2026-10-18T13:46:40.177390379Z","finished_at":"2026-10-18T13:46:40.354294797Z","container":"5888db4403066490180c3cf8481a5691cd265d207112c00cd422db6b8bc5ca93","mode":"probe"}
+        {"started_at":"2026-10-18T13:46:40.772390526Z","finished_at":"2026-10-18T13:46:40.949048089Z","container":"39172197bc009b8a3c0575045cb5f8693a82339dd8f7b4f4ffad4cee4bf5bc59","mode":"probe"}
+        {"started_at":"2026-10-18T13:46:41.616213548Z","finished_at":"2026-10-18T13:46:41.786068602Z","container":"4952b67b809ce42fe0de78e521763c988a9e289725c5566b65fab6322163f89f","mode":"probe"}
+    workspace_gateway_docker_test.go:467: failure evidence workspace-observer-last-snapshot.json (read error=<nil>):
+        {"at":"2026-10-18T13:46:52.310835351Z","phases":{"Deliveries":[{"DeliveryID":"d9b39de9-ebdb-5245-a336-e7d2bac1915f","EventID":"d9ec5952-ad9f-599d-8bfa-cd2bf9ea33f3","RunID":"7db6994d-e967-4054-bd20-74c2bda3c11c","SubscriberType":"node","SubscriberID":"Lg.aW50YWtl","Status":"delivered","ClaimVersion":1,"CreatedAt":"2026-10-18 13:46:40.417 +0000 UTC","UpdatedAt":"2026-10-18 13:46:41.024 +0000 UTC","SettledAt":"2026-10-18 13:46:41.024 +0000 UTC","HandoffAt":"2026-10-18 13:46:40","AttemptStartedAt":"2026-10-18 13:46:41.005 +0000 UTC","AttemptExpiresAt":"2026-10-18 13:51:41.023 +0000 UTC","AttemptClosureKind":"settled","AttemptOutcome":"delivered","AttemptCompletedAt":"2026-10-18 13:46:41.024 +0000 UTC","AttemptOpenMarker":false},{"DeliveryID":"fd6a0192-7313-59be-a068-abad2752eeb1","EventID":"0e475d4b-dba3-46f9-836b-95f6ba8a118c","RunID":"7db6994d-e967-4054-bd20-74c2bda3c11c","SubscriberType":"agent","SubscriberID":"worker","Status":"dead_letter","ClaimVersion":1,"CreatedAt":"2026-10-18 13:46:41.022 +0000 UTC","UpdatedAt":"2026-10-18 13:46:41.866 +0000 UTC","SettledAt":"2026-10-18 13:46:41.866 +0000 UTC","HandoffAt":"2026-10-18 13:46:41","AttemptStartedAt":"2026-10-18 13:46:41.044 +0000 UTC","AttemptExpiresAt":"2026-10-18 13:51:41.861 +0000 UTC","AttemptClosureKind":"settled","AttemptOutcome":"dead_letter","AttemptCompletedAt":"2026-10-18 13:46:41.866 +0000 UTC","AttemptOpenMarker":false}],"Effects":[{"AttemptID":"3dba80e0-0e86-56fc-8b50-5039c88d6036","OperationID":"b392bfbe-f0d0-5f59-9291-b586a570ed9b","State":"outcome_uncertain","AuthorizedAt":"2026-10-18 13:46:41.819102174 +0000 UTC","LaunchedAt":"2026-10-18 13:46:41.824415289 +0000 UTC","ResponseObservedAt":null,"CompletedAt":"2026-10-18 13:46:41.855487 +0000 UTC"}]}}
+    workspace_gateway_docker_test.go:467: failure evidence workspace-observer-last-snapshot.json.timing.json (read error=<nil>):
+        {"samples":14,"total_nanos":15664292,"maximum_nanos":11514025,"unavailable":false}
+--- FAIL: TestWorkspaceMCPCompiledDockerConformance (27.88s)
+    --- FAIL: TestWorkspaceMCPCompiledDockerConformance/disconnect=false (18.42s)
+FAIL
+FAIL	github.com/division-sh/swarm/internal/releasee2e	27.891s
+FAIL

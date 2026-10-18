@@ -1,0 +1,53 @@
+e9a0e1bfcb75c0f3373becfe6f036684b49ae0e31d407b446f7cb1b425d32e94  /home/youmew/dev/wt/agent-d/evidence-2735-slow-20261018/base/swarm
+9e2d77c24b590cde5185e36f3731e332a40cc382df5b206b143a3bf37b039cce  /home/youmew/dev/wt/agent-d/evidence-2735-slow-20261018/base/workspace-inspection.test
+8c1adebf44860776d0ca75bb005f6f7980260a17d0556a1d9ee4e990f9bca0ba  /home/youmew/dev/wt/agent-d/evidence-2735-slow-20261018/base/releasee2e.test
+/home/youmew/dev/wt/agent-d/evidence-2735-slow-20261018/base/swarm: go1.26.8
+	path	github.com/division-sh/swarm/cmd/swarm
+	mod	github.com/division-sh/swarm	(devel)	
+	dep	cel.dev/expr	v0.25.1	h1:1KrZg61W6TWSxuNZ37Xy49ps13NUovb66QLprthtwi4=
+	dep	github.com/Masterminds/semver/v3	v3.3.1	h1:QtNSWtVZ3nBfk8mAOu/B6v7FMJ+NHTIgUPi7rj+4nv4=
+	dep	github.com/antlr4-go/antlr/v4	v4.13.1	h1:SqQKkuVZ+zWkMMNkjy5FZe5mr5WURWnlpmOuzYWrPrQ=
+	dep	github.com/aymanbagabas/go-osc52/v2	v2.0.1	h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
+	dep	github.com/bytecodealliance/wasmtime-go/v46	v46.0.1	h1:3jSQdjL+8V3iXYSZlhcd7iU9VAz88qcitTAen+8VzDM=
+	dep	github.com/charmbracelet/colorprofile	v0.2.3-0.20250311203215-f60798e515dc	h1:4pZI35227imm7yK2bGPcfpFEmuY1gc2YSTShr4iJBfs=
+	dep	github.com/charmbracelet/lipgloss	v1.1.0	h1:vYXsiLHVkK7fp74RkV7b2kq9+zDLoEU4MZoFqR/noCY=
+	dep	github.com/charmbracelet/x/ansi	v0.8.0	h1:9GTq3xq9caJW8ZrBTe0LIe2fvfLR/bYXKTx2llXn7xE=
+	dep	github.com/charmbracelet/x/cellbuf	v0.0.13-0.20250311204145-2c3ea96c31dd	h1:vy0GVL4jeHEwG5YOXDmi86oYw2yuYUGqz6a8sLwg0X8=
+	dep	github.com/charmbracelet/x/term	v0.2.1	h1:AQeHeLZ1OqSXhrAWpYUtZyX1T3zVxfpZuEQMIQaGIAQ=
+	dep	github.com/dustin/go-humanize	v1.0.1	h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
+	dep	github.com/google/cel-go	v0.27.0	h1:e7ih85+4qVrBuqQWTW4FKSqZYokVuc3HnhH5keboFTo=
+	dep	github.com/google/uuid	v1.6.0	h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+	dep	github.com/gorilla/websocket	v1.5.3	h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
+	dep	github.com/lib/pq	v1.11.2	h1:x6gxUeu39V0BHZiugWe8LXZYZ+Utk7hSJGThs8sdzfs=
+	dep	github.com/lucasb-eyer/go-colorful	v1.2.0	h1:1nnpGOrhyZZuNyfu1QjKiUICQ74+3FNCN69Aj6K7nkY=
+	dep	github.com/mattn/go-isatty	v0.0.24	h1:tGZZoVgT/KiqK1c8ocVLeDS8BSWMRd47J3Lbz7vsReI=
+	dep	github.com/mattn/go-runewidth	v0.0.16	h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6TULQc=
+	dep	github.com/muesli/termenv	v0.16.0	h1:S5AlUN9dENB57rsbnkPyfdGuWIlkmzJjbFf0Tf5FWUc=
+	dep	github.com/remyoudompheng/bigfft	v0.0.0-20230129092748-24d4a6f8daec	h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
+	dep	github.com/rivo/uniseg	v0.4.7	h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
+	dep	github.com/robfig/cron/v3	v3.0.1	h1:WdRxkvbJztn8LMz/QEvLN5sBU+xKpSqwwUO1Pjr4qDs=
+	dep	github.com/spf13/cobra	v1.10.1	h1:lJeBwCfmrnXthfAupyUTzJ/J4Nc1RsHC/mSRU2dll/s=
+	dep	github.com/spf13/pflag	v1.0.9	h1:9exaQaMOCwffKiiiYk6/BndUBv+iRViNW+4lEMi0PvY=
+	dep	github.com/xo/terminfo	v0.0.0-20220910002029-abceb7e1c41e	h1:JVG44RsyaB9T2KIHavMF/ppJZNG9ZpyihvCd0w101no=
+	dep	golang.org/x/exp	v0.0.0-20250620022241-b7579e27df2b	h1:M2rDM6z3Fhozi9O7NWsxAkg/yqS/lQJ6PmkyIV3YP+o=
+	dep	golang.org/x/sys	v0.48.0	h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=
+	dep	golang.org/x/term	v0.29.0	h1:L6pJp37ocefwRRtYPKSWOWzOtWSxVajvz2ldH/xi3iU=
+	dep	golang.org/x/text	v0.22.0	h1:bofq7m3/HAFvbF51jz3Q9wLg3jkvSPuiZu/pD1XwgtM=
+	dep	google.golang.org/genproto/googleapis/api	v0.0.0-20240826202546-f6391c0de4c7	h1:YcyjlL1PRr2Q17/I0dPk2JmYS5CDXfcdb2Z3YRioEbw=
+	dep	google.golang.org/genproto/googleapis/rpc	v0.0.0-20240826202546-f6391c0de4c7	h1:2035KHhUv+EpyB+hWgJnaWKJOdX1E95w2S8Rr4uWKTs=
+	dep	google.golang.org/protobuf	v1.36.10	h1:AYd7cD/uASjIL6Q9LiTjz8JLcrh/88q5UObnmY3aOOE=
+	dep	gopkg.in/yaml.v3	v3.0.1	h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
+	dep	modernc.org/libc	v1.75.7	h1:o3DTP9/0p9pKmY2WCKQaySW6wIiZhNM7wc2lUoyhfew=
+	dep	modernc.org/mathutil	v1.7.1	h1:GCZVGXdaN8gTqB1Mf/usp1Y/hSqgI2vAGGP4jZMCxOU=
+	dep	modernc.org/memory	v1.12.1	h1:nFMiWrpStgZczNl6XI9GnIk/rWhYIyHGUaR04pGbp9g=
+	dep	modernc.org/sqlite	v1.59.0	h1:X1es1GpqBlS/5T+vbM4HLUdaa8OtQx468DF2vrx+38A=
+	build	-buildmode=exe
+	build	-compiler=gc
+	build	CGO_ENABLED=1
+	build	CGO_CFLAGS=
+	build	CGO_CPPFLAGS=
+	build	CGO_CXXFLAGS=
+	build	CGO_LDFLAGS=
+	build	GOARCH=amd64
+	build	GOOS=linux
+	build	GOAMD64=v1

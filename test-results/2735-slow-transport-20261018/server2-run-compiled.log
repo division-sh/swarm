@@ -1,0 +1,39 @@
+Previous HEAD position was 47e0eee548 test: retain completion startup diagnostic timestamps
+HEAD is now at d092f96b46 fix(testplanning): compose core with the complete channel workload
+Previous HEAD position was 0b7f1188a6 fix(accounting): retain authenticated operation and comparison read cuts
+HEAD is now at 80b43c1a23 test(apispec): account for the two accepted N19 schemas
+go version go1.26.8 linux/amd64
+go1.26.8
+linux
+amd64
+1
+/home/youmew/.cache/go-build
+/home/youmew/go/pkg/mod
+62902e2474f215c2bd820f0da154d8977126956bb2a52b4da826c94b2c6453d4  /home/youmew/dev/wt/agent-d/main/Dockerfile.workspace
+62902e2474f215c2bd820f0da154d8977126956bb2a52b4da826c94b2c6453d4  /home/youmew/dev/wt/agent-d/scratch/Dockerfile.workspace
+b5af0197897057959a8d92975c16da58f9fce6d73e0f731d24a2db614547e6c9  /home/youmew/dev/wt/agent-d/evidence-2735-slow-20261018/base-overlay.json
+89116678fc8b4189ff84bcd8d5b893b85c7e1a459b11333a71d3e5db691f6ad2  /home/youmew/dev/wt/agent-d/evidence-2735-slow-20261018/candidate-overlay.json
+2b14defca99b613fd8adaca808063ed745c298981262ea14af50707ea038640e  /home/youmew/dev/wt/agent-d/evidence-2735-slow-20261018/run-pair.sh
+EXIT=1
+ARM_END_UTC=2026-10-18T13:46:23.293240574Z
+1.17 0.50 0.30 1/371 305046
+--- FAIL: TestWorkspaceMCPCompiledDockerConformance (27.02s)
+FAIL
+FAIL	github.com/division-sh/swarm/internal/releasee2e	27.025s
+FAIL
+EXIT=1
+ARM_END_UTC=2026-10-18T13:46:53.361394661Z
+1.26 0.59 0.34 1/376 306454
+--- FAIL: TestWorkspaceMCPCompiledDockerConformance (27.88s)
+FAIL
+FAIL	github.com/division-sh/swarm/internal/releasee2e	27.891s
+FAIL
+AUTHORIZED_DIAGNOSTIC_COMPLETE=2/2; no replacements
+Previous HEAD position was d092f96b46 fix(testplanning): compose core with the complete channel workload
+HEAD is now at 47e0eee548 test: retain completion startup diagnostic timestamps
+Previous HEAD position was 80b43c1a23 test(apispec): account for the two accepted N19 schemas
+HEAD is now at 0b7f1188a6 fix(accounting): retain authenticated operation and comparison read cuts
+RESTORED_MAIN=47e0eee548044504c79816144a6c0d8b2e3c8d31
+RESTORED_SCRATCH=0b7f1188a63cf375f4da11d03d1699edfbf5faf1
+UNMODIFIED_IMAGE=sha256:0c09f37b09828ac8460ef68fccb8aea5891a9cbcdc1c73c91f6b1e13da8073b1
+CLEANUP_UTC=2026-10-18T13:46:53.604761048Z

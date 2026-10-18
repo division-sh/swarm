@@ -1,0 +1,8 @@
+# github.com/division-sh/swarm/internal/cliapp
+../evidence-2735-slow-20261018/base/internal/cliapp/test_command.go.txt:23:2: runtime redeclared in this block
+	../evidence-2735-slow-20261018/base/internal/cliapp/test_command.go.txt:14:2: other declaration of runtime
+../evidence-2735-slow-20261018/base/internal/cliapp/test_command.go.txt:23:2: "github.com/division-sh/swarm/internal/runtime" imported and not used
+../evidence-2735-slow-20261018/base/internal/cliapp/test_command.go.txt:267:29: undefined: runtime.AdmitEffectiveSourceProjection
+../evidence-2735-slow-20261018/base/internal/cliapp/test_command.go.txt:267:68: undefined: runtime.EffectiveSourceProjectionRequest
+../evidence-2735-slow-20261018/base/internal/cliapp/test_command.go.txt:275:24: undefined: runtime.StructuralWorkflowContractValidationOptions
+../evidence-2735-slow-20261018/base/internal/cliapp/test_command.go.txt:278:23: undefined: runtime.ValidateWorkflowContractSurface

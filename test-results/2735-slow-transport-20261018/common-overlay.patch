@@ -1,0 +1,507 @@
+--- a/cmd/swarm/main.go.txt
++++ b/cmd/swarm/main.go.txt
+@@ -1,9 +1,15 @@
+ package main
+ 
+ import (
++	"bytes"
+ 	"context"
++	"encoding/json"
++	"fmt"
+ 	"os"
+ 	"os/signal"
++	"path/filepath"
++	"runtime"
++	"runtime/trace"
+ 	"sync"
+ 	"syscall"
+ 	"time"
+@@ -21,11 +27,13 @@
+ )
+ 
+ func main() {
++	finishDiagnostic := start2735Diagnostic()
+ 	worker.ConfigureBuildMetadata(binaryVersion, binaryCommit)
+ 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+ 	defer stop()
+ 	if len(os.Args) == 2 {
+ 		if code, handled := worker.RunArgument(ctx, os.Args[1], os.Stdin, os.Stdout); handled {
++			finishDiagnostic()
+ 			os.Exit(code)
+ 		}
+ 	}
+@@ -34,7 +42,49 @@
+ 		Commit:  binaryCommit,
+ 		Date:    binaryDate,
+ 	})
+-	os.Exit(cliapp.Execute(ctx, os.Args[1:], os.Stdout, os.Stderr, runServingProcess, serveapp.RunTestSession))
++	code := cliapp.Execute(ctx, os.Args[1:], os.Stdout, os.Stderr, runServingProcess, serveapp.RunTestSession)
++	finishDiagnostic()
++	os.Exit(code)
++}
++
++// Diagnostic-build only: bounded stdlib trace storage, with all file I/O
++// outside the observed command and after the runtime trace writer joins.
++type diagnostic2735Buffer struct {
++	bytes.Buffer
++	overflow bool
++}
++
++func (b *diagnostic2735Buffer) Write(p []byte) (int, error) {
++	if b.Len()+len(p) > 64<<20 {
++		b.overflow = true
++		return len(p), nil
++	}
++	return b.Buffer.Write(p)
++}
++
++func start2735Diagnostic() func() {
++	dir := os.Getenv("RELEASE_E2E_DIAG_DIR")
++	if dir == "" {
++		return func() {}
++	}
++	entry := time.Now()
++	buffer := &diagnostic2735Buffer{}
++	if err := trace.Start(buffer); err != nil {
++		panic(err)
++	}
++	trace.Logf(context.Background(), "2735-process", "entry_wall_ns=%d pid=%d gomaxprocs=%d inherited_gomaxprocs=%q go=%s", entry.UnixNano(), os.Getpid(), runtime.GOMAXPROCS(0), os.Getenv("GOMAXPROCS"), runtime.Version())
++	return sync.OnceFunc(func() {
++		trace.Logf(context.Background(), "2735-process", "exit_wall_ns=%d", time.Now().UnixNano())
++		trace.Stop()
++		prefix := filepath.Join(dir, fmt.Sprintf("process-%d", os.Getpid()))
++		metadata, _ := json.Marshal(map[string]any{"pid": os.Getpid(), "entry_wall_ns": entry.UnixNano(), "exit_wall_ns": time.Now().UnixNano(), "go": runtime.Version(), "gomaxprocs": runtime.GOMAXPROCS(0), "inherited_gomaxprocs": os.Getenv("GOMAXPROCS"), "trace_overflow": buffer.overflow, "trace_bytes": buffer.Len()})
++		if err := os.WriteFile(prefix+".trace", buffer.Bytes(), 0o600); err != nil {
++			fmt.Fprintln(os.Stderr, "2735 diagnostic trace retention:", err)
++		}
++		if err := os.WriteFile(prefix+".json", metadata, 0o600); err != nil {
++			fmt.Fprintln(os.Stderr, "2735 diagnostic metadata retention:", err)
++		}
++	})
+ }
+ 
+ func runServingProcess(ctx context.Context, root cliapp.InvocationRoot, opts cliapp.ServeOptions) int {
+--- a/internal/cliapp/test_command.go.txt
++++ b/internal/cliapp/test_command.go.txt
+@@ -11,6 +11,8 @@
+ 	"net/http"
+ 	"path"
+ 	"path/filepath"
++	"runtime"
++	"runtime/trace"
+ 	"sort"
+ 	"strings"
+ 	"time"
+@@ -1690,22 +1692,31 @@
+ 
+ func (r scenarioRunner) waitForQuiescence(ctx context.Context, runID string) error {
+ 	deadline := time.Now().Add(r.timeout)
++	trace.Logf(ctx, "2735-budget", "run=%s created_ns=%d deadline_ns=%d timeout=%s poll=%s", runID, deadline.Add(-r.timeout).UnixNano(), deadline.UnixNano(), r.timeout, r.pollInterval)
+ 	for {
+ 		quiescence, err := r.readTestQuiescence(ctx, runID)
+ 		if err != nil {
+ 			return err
+ 		}
+ 		if BoolPointerValue(quiescence.Ready) {
++			trace.Logf(ctx, "2735-budget", "ready_ns=%d run=%s", time.Now().UnixNano(), runID)
+ 			return nil
+ 		}
+ 		if time.Now().After(deadline) {
+-			return fmt.Errorf("test quiescence deadline reached for run %s with active_deliveries=%d unsettled_pipeline_events=%d due_timers=%d active_session_leases=%d",
++			failure := fmt.Errorf("test quiescence deadline reached for run %s with active_deliveries=%d unsettled_pipeline_events=%d due_timers=%d active_session_leases=%d",
+ 				runID,
+ 				IntPointerValue(quiescence.ActiveDeliveries),
+ 				IntPointerValue(quiescence.UnsettledPipelineEvents),
+ 				IntPointerValue(quiescence.DueTimers),
+ 				IntPointerValue(quiescence.ActiveSessionLeases),
+ 			)
++			trace.Logf(ctx, "2735-deadline", "failed_ns=%d run=%s error=%v", time.Now().UnixNano(), runID, failure)
++			stack := make([]byte, 32<<10)
++			n := runtime.Stack(stack, true)
++			for offset := 0; offset < n; offset += 500 {
++				trace.Logf(ctx, "2735-deadline-stack", "offset=%d truncated=%t %s", offset, n == len(stack), stack[offset:min(n, offset+500)])
++			}
++			return failure
+ 		}
+ 		timer := time.NewTimer(r.pollInterval)
+ 		select {
+@@ -1720,7 +1731,10 @@
+ func (r scenarioRunner) readTestQuiescence(ctx context.Context, runID string) (diagnosticRunTestQuiescence, error) {
+ 	params := map[string]any{"run_id": runID}
+ 	var result DiagnosticRunDiagnosisResult
+-	if err := r.client.call(ctx, "run.diagnose", params, &result); err != nil {
++	trace.Logf(ctx, "2735-diagnose", "call_ns=%d run=%s", time.Now().UnixNano(), runID)
++	callErr := r.client.call(ctx, "run.diagnose", params, &result)
++	trace.Logf(ctx, "2735-diagnose", "return_ns=%d run=%s error=%v counters=%+v", time.Now().UnixNano(), runID, callErr, result.TestQuiescence)
++	if err := callErr; err != nil {
+ 		return diagnosticRunTestQuiescence{}, err
+ 	}
+ 	if err := validateDiagnosticRunDiagnosis(result); err != nil {
+--- a/internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go.txt
++++ b/internal/store/internal/operatorsurface/sqlite_run_api_read_surface.go.txt
+@@ -6,6 +6,7 @@
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
++	"runtime/trace"
+ 	"strings"
+ 	"time"
+ 
+@@ -113,11 +114,17 @@
+ }
+ 
+ func (s *RunSQLite) LoadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
++	trace.Logf(ctx, "2735-report", "entry_ns=%d run=%s", time.Now().UnixNano(), runID)
++	defer func() { trace.Logf(ctx, "2735-report", "return_ns=%d run=%s", time.Now().UnixNano(), runID) }()
+ 	if s == nil || s.backend == nil {
+ 		return operatorread.RunDebugReport{}, fmt.Errorf("sqlite store is required")
+ 	}
+ 	var report operatorread.RunDebugReport
+ 	err := s.backend.InspectSnapshot(ctx, func(snapshot context.Context) (err error) {
++		trace.Logf(snapshot, "2735-report-snapshot", "entry_ns=%d run=%s", time.Now().UnixNano(), runID)
++		defer func() {
++			trace.Logf(snapshot, "2735-report-snapshot", "exit_ns=%d run=%s error=%v", time.Now().UnixNano(), runID, err)
++		}()
+ 		report, err = s.loadRunDebugReport(snapshot, runID, opts)
+ 		return err
+ 	})
+@@ -209,12 +216,15 @@
+ }
+ 
+ func (s *RunSQLite) LoadRunTestQuiescence(ctx context.Context, runID string, observedAt time.Time) (operatorread.RunTestQuiescence, error) {
++	trace.Logf(ctx, "2735-quiescence", "entry_ns=%d run=%s observed_at_ns=%d", time.Now().UnixNano(), runID, observedAt.UnixNano())
++	defer func() { trace.Logf(ctx, "2735-quiescence", "return_ns=%d run=%s", time.Now().UnixNano(), runID) }()
+ 	var out operatorread.RunTestQuiescence
+ 	summary, err := s.summarizeDeliveryRun(ctx, runID)
+ 	if err != nil {
+ 		return operatorread.RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence active deliveries: %w", err)
+ 	}
+ 	out.ActiveDeliveries = summary.Pending + summary.InProgress + summary.RetryScheduled
++	trace.Logf(ctx, "2735-delivery-sample", "sample_ns=%d run=%s pending=%d in_progress=%d retry=%d", time.Now().UnixNano(), runID, summary.Pending, summary.InProgress, summary.RetryScheduled)
+ 	if s.pipeline == nil || s.timers == nil {
+ 		return operatorread.RunTestQuiescence{}, fmt.Errorf("run debug runtime diagnostics source is required")
+ 	}
+@@ -249,6 +259,7 @@
+ 	}
+ 	out.ActiveSessionLeases = activeSessionLeases
+ 	out.Ready = runTestQuiescenceReady(out)
++	trace.Logf(ctx, "2735-quiescence-sample", "sample_ns=%d run=%s counters=%+v", time.Now().UnixNano(), runID, out)
+ 	return out, nil
+ }
+ 
+--- a/internal/runtime/agents/agent_llm.go.txt
++++ b/internal/runtime/agents/agent_llm.go.txt
+@@ -5,6 +5,7 @@
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
++	"runtime/trace"
+ 	"strings"
+ 	"sync"
+ 
+@@ -136,6 +137,10 @@
+ func (a *LLMAgent) Subscriptions() []events.EventType { return a.subscriptions }
+ 
+ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
++	trace.Logf(ctx, "2735-agent", "entry_ns=%d run=%s event=%s agent=%s", time.Now().UnixNano(), evt.RunID(), evt.ID(), a.ID())
++	defer func() {
++		trace.Logf(ctx, "2735-agent", "return_ns=%d run=%s event=%s agent=%s", time.Now().UnixNano(), evt.RunID(), evt.ID(), a.ID())
++	}()
+ 	a.mu.Lock()
+ 	defer a.mu.Unlock()
+ 
+@@ -151,6 +156,8 @@
+ 	ctx = runtimecorrelation.WithRunID(ctx, strings.TrimSpace(evt.RunID()))
+ 	ctx = runtimebus.WithInboundEvent(ctx, evt)
+ 	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, a.cfg.Identity)
++	diagnosticRecorder, diagnosticInherited := runtimebus.EmittedEventsRecorderFromContext(ctx)
++	trace.Logf(ctx, "2735-recorder", "entry_ns=%d run=%s event=%s inherited=%t recorder=%p", time.Now().UnixNano(), evt.RunID(), evt.ID(), diagnosticInherited, diagnosticRecorder)
+ 	if recorder, found := runtimebus.EmittedEventsRecorderFromContext(ctx); !found || recorder == nil {
+ 		ctx = runtimebus.WithEmittedEventsRecorder(ctx, runtimebus.NewEmittedEventsRecorder())
+ 	}
+@@ -170,6 +177,7 @@
+ 
+ 	turn := agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: evt}
+ 	resp, err := a.conversation.RunManaged(ctx, turn)
++	trace.Logf(ctx, "2735-agent", "managed_return_ns=%d run=%s event=%s error=%v", time.Now().UnixNano(), evt.RunID(), evt.ID(), err)
+ 	if err != nil && a.shouldRetryAfterTaskScopeReset(err) {
+ 		a.conversation.Reset()
+ 		scopeKey := strings.TrimSpace(taskScopeKeyForEvent(evt))
+--- a/internal/runtime/manager/receipts.go.txt
++++ b/internal/runtime/manager/receipts.go.txt
+@@ -4,6 +4,7 @@
+ 	"context"
+ 	"errors"
+ 	"fmt"
++	"runtime/trace"
+ 	"strings"
+ 	"time"
+ 
+@@ -184,8 +185,12 @@
+ 	if err := am.attachLogicalTurn(attemptCtx, turnOwner); err != nil {
+ 		return eventProcessResult{record: record, err: err}
+ 	}
++	trace.Logf(turnCtx, "2735-manager", "on_event_entry_ns=%d run=%s event=%s delivery=%s agent=%s claim=%+v", time.Now().UnixNano(), evt.RunID(), evt.ID(), claim.DeliveryID(), agent.ID(), claim)
+ 	out, err := agent.OnEvent(turnCtx, evt)
++	trace.Logf(turnCtx, "2735-manager", "on_event_return_ns=%d run=%s event=%s delivery=%s agent=%s error=%v outputs=%d claim=%+v", time.Now().UnixNano(), evt.RunID(), evt.ID(), claim.DeliveryID(), agent.ID(), err, len(out), claim)
++	trace.Logf(turnCtx, "2735-manager", "turn_finish_entry_ns=%d delivery=%s", time.Now().UnixNano(), claim.DeliveryID())
+ 	turn, finishErr := turnOwner.Finish()
++	trace.Logf(turnCtx, "2735-manager", "turn_finish_return_ns=%d delivery=%s error=%v", time.Now().UnixNano(), claim.DeliveryID(), finishErr)
+ 	err = errors.Join(err, finishErr)
+ 	if turn.Cancellation.Requested {
+ 		canceled, settleErr := am.settleCanceledDelivery(attemptCtx, evt, heartbeat, turn, completionSettlement())
+@@ -202,6 +207,7 @@
+ 		return eventProcessResult{record: record, err: errors.Join(err, settleErr)}
+ 	}
+ 	if observation := completionSettlement(); observation.OriginSettled {
++		trace.Logf(turnCtx, "2735-completion-observation", "at_ns=%d delivery=%s attempt=%s disposition=%v origin=%+v", time.Now().UnixNano(), claim.DeliveryID(), observation.AttemptID, observation.Disposition, observation.Origin)
+ 		if observation.Origin.Kind != runtimeeffects.CompletionOriginDelivery {
+ 			originErr := runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_consumer_mismatch", "agent-manager", "process_event", map[string]any{
+ 				"agent_id": agent.ID(), "delivery_id": claim.DeliveryID(), "attempt_id": observation.AttemptID, "origin_kind": observation.Origin.Kind,
+@@ -520,7 +526,9 @@
+ 		}
+ 		defer func() { _ = heartbeat.Stop() }()
+ 	}
++	trace.Logf(ctx, "2735-receipt", "guard_entry_ns=%d delivery=%s", time.Now().UnixNano(), claim.DeliveryID())
+ 	settlementGuard, err := heartbeat.BeginSettlement()
++	trace.Logf(ctx, "2735-receipt", "guard_entry_result_ns=%d run=%s event=%s delivery=%s status=%s error=%v", time.Now().UnixNano(), evt.RunID(), evt.ID(), claim.DeliveryID(), status, err)
+ 	if err != nil {
+ 		return runtimedelivery.Snapshot{}, err
+ 	}
+@@ -532,6 +540,7 @@
+ 		// terminal selected-execution outcome and let activation fail closed.
+ 		status = ReceiptStatusTerminal
+ 	}
++	trace.Logf(ctx, "2735-receipt", "native_entry_ns=%d delivery=%s status=%s", time.Now().UnixNano(), claim.DeliveryID(), status)
+ 	switch status {
+ 	case ReceiptStatusProcessed:
+ 		snapshot, err = am.deliveryStore.SettleSuccess(writeCtx, claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection())
+@@ -555,10 +564,12 @@
+ 		err = fmt.Errorf("delivery receipt status %q is invalid", status)
+ 	}
+ 	committed := snapshot.MatchesSettlementClaim(claim)
++	trace.Logf(ctx, "2735-receipt", "native_result_ns=%d run=%s event=%s delivery=%s status=%s acknowledged=%t error=%v", time.Now().UnixNano(), evt.RunID(), evt.ID(), claim.DeliveryID(), status, committed, err)
+ 	if !committed && err == nil {
+ 		err = fmt.Errorf("%w: delivery settlement returned no exact settled snapshot", runtimedelivery.ErrConflict)
+ 	}
+ 	finishErr := settlementGuard.Finish(committed)
++	trace.Logf(ctx, "2735-receipt", "guard_finish_ns=%d delivery=%s acknowledged=%t error=%v", time.Now().UnixNano(), claim.DeliveryID(), committed, finishErr)
+ 	err = errors.Join(err, finishErr)
+ 	if committed {
+ 		ownerProvider := am.roles.DeliveryRuntime
+--- a/internal/runtime/effects/effects.go.txt
++++ b/internal/runtime/effects/effects.go.txt
+@@ -7,6 +7,7 @@
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
++	"runtime/trace"
+ 	"strings"
+ 	"sync/atomic"
+ 	"time"
+@@ -1389,7 +1390,9 @@
+ 	if err := settlement.Validate(h.attempt); err != nil {
+ 		return CompletionSettlementResult{}, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_settlement_invalid", "llm-completion-authority", "settle_completion", map[string]any{"validation_error": err.Error()}, err)
+ 	}
++	trace.Logf(ctx, "2735-completion", "settlement_entry_ns=%d attempt=%s origin=%+v", time.Now().UnixNano(), h.attempt.AttemptID, h.attempt.Origin)
+ 	result, err := store.SettleCompletion(context.WithoutCancel(ctx), h.attempt, settlement)
++	trace.Logf(ctx, "2735-completion", "settlement_result_ns=%d attempt=%s committed=%t origin_settled=%t disposition=%v error=%v", time.Now().UnixNano(), h.attempt.AttemptID, result.Committed, result.OriginSettled, result.Disposition, err)
+ 	if result.Committed && !result.Disposition.Valid() {
+ 		return CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_settlement_disposition_invalid", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": h.attempt.AttemptID, "disposition": result.Disposition})
+ 	}
+@@ -1407,6 +1410,7 @@
+ 			AttemptID: result.AttemptID, Disposition: result.Disposition, Origin: result.Origin,
+ 			OriginSettled: result.OriginSettled, Cancellation: result.Cancellation, Finalization: result.Finalization,
+ 		})
++		trace.Logf(ctx, "2735-completion", "ack_observed_ns=%d attempt=%s origin_settled=%t disposition=%v origin=%+v", time.Now().UnixNano(), result.AttemptID, result.OriginSettled, result.Disposition, result.Origin)
+ 		if result.Cancellation != nil {
+ 			err = errors.Join(err, observeTurnCancellation(ctx, *result.Cancellation))
+ 		}
+--- a/internal/runtime/llm/completion_authority.go.txt
++++ b/internal/runtime/llm/completion_authority.go.txt
+@@ -7,6 +7,7 @@
+ 	"errors"
+ 	"fmt"
+ 	"reflect"
++	"runtime/trace"
+ 	"strings"
+ 	"sync"
+ 	"time"
+@@ -326,10 +327,13 @@
+ }
+ 
+ func consumeCompletionContinuation(ctx context.Context, response *Response, successor *agentframe.ToolContinuation) error {
++	trace.Logf(ctx, "2735-continuation", "entry_ns=%d", time.Now().UnixNano())
++	defer func() { trace.Logf(ctx, "2735-continuation", "return_ns=%d", time.Now().UnixNano()) }()
+ 	if response == nil || response.completionHandle == nil {
+ 		return nil
+ 	}
+ 	err := response.completionHandle.ConsumeCompletionResponse(ctx, successor)
++	trace.Logf(ctx, "2735-continuation", "consume_result_ns=%d attempt=%s error=%v", time.Now().UnixNano(), response.completionHandle.Attempt().AttemptID, err)
+ 	if err != nil {
+ 		attempt := response.completionHandle.Attempt()
+ 		if response.completionAttempt == nil || response.completionAttempt.OperationID != attempt.OperationID || response.completionAttempt.AttemptID != attempt.AttemptID ||
+--- a/internal/runtime/bus/turn_context.go.txt
++++ b/internal/runtime/bus/turn_context.go.txt
+@@ -3,8 +3,10 @@
+ import (
+ 	"context"
+ 	"encoding/json"
++	"runtime/trace"
+ 	"strings"
+ 	"sync"
++	"time"
+ 
+ 	"github.com/division-sh/swarm/internal/events"
+ 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+@@ -84,6 +86,7 @@
+ 	r.mu.Lock()
+ 	r.events = append(r.events, evt)
+ 	r.mu.Unlock()
++	trace.Logf(context.Background(), "2735-recorder", "append_ns=%d run=%s event=%s recorder=%p", time.Now().UnixNano(), evt.RunID(), evt.ID(), r)
+ }
+ 
+ func (r *EmittedEventsRecorder) Snapshot() []events.Event {
+--- a/internal/runtime/tools/executor_emit.go.txt
++++ b/internal/runtime/tools/executor_emit.go.txt
+@@ -3,6 +3,7 @@
+ import (
+ 	"context"
+ 	"fmt"
++	"runtime/trace"
+ 	"strings"
+ 	"time"
+ 
+@@ -218,6 +219,7 @@
+ 		instance.Route = flowidentity.Route{ScopeKey: ".", InstanceID: instance.RunID, InstancePath: instance.RunID}
+ 	}
+ 	emitResult, publishErr := e.bus.PublishEmit(ctx, emitted, pipeline.WorkflowPublicationStageRequest{Instance: instance, EntityID: entityID})
++	trace.Logf(ctx, "2735-emit", "publish_result_ns=%d run=%s event=%s accepted=%t feedback_committed=%t error=%v", time.Now().UnixNano(), instance.RunID, emitted.ID(), emitResult.Accepted, emitResult.FeedbackCommitted, publishErr)
+ 	if err := emitResult.Validate(); err != nil {
+ 		return nil, err
+ 	}
+--- a/internal/releasee2e/workspace_gateway_docker_test.go.txt
++++ b/internal/releasee2e/workspace_gateway_docker_test.go.txt
+@@ -10,6 +10,7 @@
+ 	"io"
+ 	"os"
+ 	"os/exec"
++	"os/signal"
+ 	"path/filepath"
+ 	"runtime"
+ 	"slices"
+@@ -48,8 +49,13 @@
+ 	var nativeReader *bufio.Reader
+ 	var rawRequest []byte
+ 	var request struct {
+-		Mode string `json:"mode"`
+-		Tool string `json:"tool"`
++		Mode   string `json:"mode"`
++		Tool   string `json:"tool"`
++		Module struct {
++			Input struct {
++				ToolResults []json.RawMessage `json:"tool_results"`
++			} `json:"input"`
++		} `json:"module"`
+ 	}
+ 	container := ""
+ 	for i, arg := range args {
+@@ -71,6 +77,25 @@
+ 		}
+ 	}
+ 	row := workspaceDockerObservation{StartedAt: started, Container: container, Mode: request.Mode, Tool: request.Tool}
++	var diagnostic *struct {
++		StartedAt          time.Time `json:"started_at"`
++		TransportDoneAt    time.Time `json:"transport_done_at"`
++		TargetAt           time.Time `json:"target_at"`
++		HoldReleasedAt     time.Time `json:"hold_released_at"`
++		ForwardCompletedAt time.Time `json:"forward_completed_at"`
++		Canceled           bool      `json:"canceled"`
++		Matched            bool      `json:"matched"`
++	}
++	defer func() {
++		if diagnostic == nil {
++			return
++		}
++		data, _ := json.Marshal(diagnostic)
++		path := filepath.Join(root, fmt.Sprintf("2735-proxy-%d.json", os.Getpid()))
++		if err := os.WriteFile(path, data, 0o600); err != nil {
++			fmt.Fprintln(os.Stderr, "2735 proxy retention:", err)
++		}
++	}()
+ 	if os.Getenv("RELEASE_E2E_FORBID_PROVIDER_LAUNCH") == "1" && slices.Contains(args, "--output-format") {
+ 		// A negative live-serve test may prove pre-model refusal, never buy a
+ 		// model turn if the implementation regresses. This is a failing sentinel,
+@@ -152,6 +177,31 @@
+ 		if result.Failure != nil {
+ 			row.Failure = result.Failure.Detail.Code
+ 		}
++		if os.Getenv("RELEASE_E2E_DIAG_DIR") != "" && request.Mode == "model" && result.ModelStarted && result.Failure == nil && result.Cancellation == "" && err == nil && len(request.Module.Input.ToolResults) == 0 {
++			diagnostic = &struct {
++				StartedAt          time.Time `json:"started_at"`
++				TransportDoneAt    time.Time `json:"transport_done_at"`
++				TargetAt           time.Time `json:"target_at"`
++				HoldReleasedAt     time.Time `json:"hold_released_at"`
++				ForwardCompletedAt time.Time `json:"forward_completed_at"`
++				Canceled           bool      `json:"canceled"`
++				Matched            bool      `json:"matched"`
++			}{StartedAt: started, TransportDoneAt: row.FinishedAt, TargetAt: started.Add(7090 * time.Millisecond)}
++			remaining := time.Until(diagnostic.TargetAt)
++			diagnostic.Matched = remaining > 0
++			if remaining > 0 {
++				stopCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
++				timer := time.NewTimer(remaining)
++				select {
++				case <-timer.C:
++				case <-stopCtx.Done():
++					diagnostic.Canceled = true
++				}
++				timer.Stop()
++				stopSignals()
++			}
++			diagnostic.HoldReleasedAt = time.Now().UTC()
++		}
+ 		if request.Mode == "call" && request.Tool == "read_flow_data" && result.Failure == nil {
+ 			var wire struct {
+ 				IsError bool `json:"isError"`
+@@ -176,6 +226,9 @@
+ 	if _, copyErr := io.Copy(os.Stdout, &output); copyErr != nil {
+ 		return 2
+ 	}
++	if diagnostic != nil {
++		diagnostic.ForwardCompletedAt = time.Now().UTC()
++	}
+ 	if exit, ok := err.(*exec.ExitError); ok {
+ 		return exit.ExitCode()
+ 	}
+@@ -394,6 +447,30 @@
+ 			args := []string{"test", source, "tests/transport.yaml", "--workspace-backend", "docker", "--timeout", "10s", "--poll-interval", "25ms"}
+ 			result := runReleaseCommand(t, time.Minute, root, env, "", binary, args...)
+ 			observed := stopInspection()
++			if diagnosticDir := os.Getenv("RELEASE_E2E_DIAG_DIR"); diagnosticDir != "" {
++				// Read the current path only after the existing observer join.
++				names := []string{"observations.jsonl", "workspace-observer-last-snapshot.json", "workspace-observer-last-snapshot.json.timing.json"}
++				entries, _ := os.ReadDir(owned)
++				for _, entry := range entries {
++					if strings.HasPrefix(entry.Name(), "2735-proxy-") {
++						names = append(names, entry.Name())
++					}
++				}
++				for _, name := range names {
++					path := filepath.Join(owned, name)
++					data, readErr := os.ReadFile(path)
++					info, statErr := os.Stat(path)
++					if readErr != nil || statErr != nil {
++						t.Logf("2735 final retention %s read=%v stat=%v", name, readErr, statErr)
++						continue
++					}
++					if err := os.WriteFile(filepath.Join(diagnosticDir, name), data, 0o600); err != nil {
++						t.Logf("2735 final retention %s: %v", name, err)
++					}
++					metadata, _ := json.Marshal(map[string]any{"observed_after_join_ns": time.Now().UnixNano(), "mtime_ns": info.ModTime().UnixNano(), "bytes": info.Size()})
++					_ = os.WriteFile(filepath.Join(diagnosticDir, name+".retention.json"), metadata, 0o600)
++				}
++			}
+ 			if !disconnect && (result.err != nil || !strings.Contains(result.output, "swarm test ok: scenarios=1")) {
+ 				t.Fatalf("real Docker public read/emit/store assertion: %v\nselected-store observation=%+v\n%s", result.err, observed, result.output)
+ 			}
