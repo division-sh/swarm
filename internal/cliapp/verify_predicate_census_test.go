@@ -42,6 +42,8 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/cliapp/local_preflight.go", "A15,A16,A17,A18,A27", "P13,P14,P15,P16"},
 	{"internal/cliapp/workspace_backend.go", "A15", "P13,P14"},
 	{"internal/cliapp/workspace_listener.go", "A15,A18", "P13,P15"},
+	// #2723's public listener composition preserves these startup obligations;
+	// testdata/issue_2723_admission_predicate_accounting.md pins its owners and proof.
 	{"internal/serveapp/main.go", "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27", "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22"},
 	// Drain helpers share this whole-file census, not verification authority.
 	// #2612's owner/caller and preserved-admission witnesses are recorded in
