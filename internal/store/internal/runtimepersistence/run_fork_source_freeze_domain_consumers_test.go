@@ -52,6 +52,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			} else {
 				surface = fixture.sqlite
 			}
+			ctx = originalStoreFixtureContext(t, ctx, surface)
 			owner, ok := surface.(interface {
 				runtimerunlifecycle.OperationOwner
 				sourceartifactfixture.Writer
