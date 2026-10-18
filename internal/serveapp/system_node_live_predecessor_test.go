@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -30,6 +32,29 @@ func TestServeProcessTakeoverRejectsLivePredecessorMutationBothStores(t *testing
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 			var latest serveRuntimePersistence
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { latest = p })
+			type heldMutation struct {
+				probe *storetest.WorkflowMutationCommitObservation
+				err   error
+			}
+			mutationReady := make(chan heldMutation, 1)
+			opts.TestWorkflowNodeHandlerStartHook = func(ctx context.Context, _ string, event events.Event) error {
+				if event.Type() != "item.received" {
+					return nil
+				}
+				var payload struct {
+					Item string `json:"item_id"`
+				}
+				if err := json.Unmarshal(event.Payload(), &payload); err != nil || payload.Item != "last-allowed" {
+					return err
+				}
+				claim, found := deliverylifecycle.ClaimFromContext(ctx)
+				if !found {
+					return errors.New("held workflow handler has no original claim")
+				}
+				observation, err := storetest.HoldWorkflowMutationCommit(ctx, latest.deps.EventStore, claim)
+				mutationReady <- heldMutation{probe: observation, err: err}
+				return err
+			}
 			probe := lifecycleprobe.New()
 			opts.TestLifecycleProbe = probe
 			contextsReady := make(chan *runtimepkg.RuntimeContextManager, 2)
@@ -52,16 +77,6 @@ func TestServeProcessTakeoverRejectsLivePredecessorMutationBothStores(t *testing
 			// The emitted event and its independent node delivery also settle
 			// before the final state-changing predecessor command is submitted.
 			fixture.waitDeliveries(t, seed.RunID)
-			last := requireServedEventPublishRPCResult(t, fixture.Endpoint, map[string]any{
-				"run_id": seed.RunID, "source_event_id": seed.EventID, "event_name": "item.received",
-				"payload": map[string]any{"item_id": "last-allowed"}, "idempotency_key": "takeover-final-predecessor",
-			})
-			if _, err := probe.WaitForDeliveryStatus(ctx, last.EventID, "node", node, "delivered"); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := probe.WaitForPostCommitDispatchCompleted(ctx, last.EventID); err != nil {
-				t.Fatal(err)
-			}
 			use, _, _, err := contexts.AcquireRun(ctx, seed.RunID)
 			if err != nil || use == nil {
 				t.Fatalf("acquire exact original run context: %v", err)
@@ -93,7 +108,32 @@ func TestServeProcessTakeoverRejectsLivePredecessorMutationBothStores(t *testing
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				}
-			} else {
+			}
+			last := requireServedEventPublishRPCResult(t, fixture.Endpoint, map[string]any{
+				"run_id": seed.RunID, "source_event_id": seed.EventID, "event_name": "item.received",
+				"payload": map[string]any{"item_id": "last-allowed"}, "idempotency_key": "takeover-final-predecessor",
+			})
+			var mutation *storetest.WorkflowMutationCommitObservation
+			select {
+			case held := <-mutationReady:
+				if held.err != nil {
+					t.Fatal(held.err)
+				}
+				mutation = held.probe
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			defer mutation.Close()
+			select {
+			case <-mutation.Entered():
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			if backend == "sqlite" {
+				mutation.Close()
+				if _, err := probe.WaitForDeliveryStatus(ctx, last.EventID, "node", node, "delivered"); err != nil {
+					t.Fatal(err)
+				}
 				if err := use.Done(); err != nil {
 					t.Fatal(err)
 				}
@@ -106,6 +146,32 @@ func TestServeProcessTakeoverRejectsLivePredecessorMutationBothStores(t *testing
 				if err := interruption.Interrupt(ctx, original); err != nil {
 					t.Fatal(err)
 				}
+				poll := time.NewTicker(5 * time.Millisecond)
+				defer poll.Stop()
+				for {
+					waiting, err := mutation.SuccessorWaiting(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if waiting {
+						break
+					}
+					select {
+					case <-poll.C:
+					case <-ctx.Done():
+						t.Fatal("successor never reached the exact original transaction's mutation-order wait")
+					}
+				}
+				mutation.Close()
+			}
+			if _, err := probe.WaitForDeliveryStatus(ctx, last.EventID, "node", node, "delivered"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := probe.WaitForPostCommitDispatchCompleted(ctx, last.EventID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := mutation.SuccessorWaiting(ctx); err == nil {
+				t.Fatal("ended observation retained native wait access")
 			}
 			second.waitForReadyLine()
 			secondContexts := <-contextsReady

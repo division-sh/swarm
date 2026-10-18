@@ -169,6 +169,35 @@ func proveSystemNodeProcessCutover(t *testing.T, backend string, mode mutationpr
 	if err := command.Validate(); err != nil {
 		t.Fatalf("validate the genuine predecessor command before the cut: %v", err)
 	}
+	if mode == 0 && cut == "current" {
+		if _, err := HoldWorkflowMutationCommitForTest(f.ctx, f.store, claimed.Claim); err == nil {
+			t.Fatal("missing original claim context armed a workflow observation")
+		}
+		claimContext := runtimedelivery.WithClaim(f.ctx, claimed.Claim)
+		if _, err := HoldWorkflowMutationCommitForTest(claimContext, f.store, runtimedelivery.Claim{}); err == nil {
+			t.Fatal("missing claim armed a workflow observation")
+		}
+		foreign, _ := constructWorkflowMutationFixture(t, backend, "foreign-observation-owner", at)
+		if _, err := HoldWorkflowMutationCommitForTest(claimContext, foreign.store, claimed.Claim); err == nil {
+			t.Fatal("foreign selected owner armed an original workflow observation")
+		}
+		observation, err := HoldWorkflowMutationCommitForTest(claimContext, f.store, claimed.Claim)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := observation.SuccessorWaiting(t.Context()); err == nil {
+			t.Fatal("unentered observation inspected native work")
+		}
+		observation.Close()
+		if _, err := observation.SuccessorWaiting(t.Context()); err == nil {
+			t.Fatal("ended observation inspected native work")
+		}
+		if _, err := HoldWorkflowMutationCommitForTest(claimContext, f.store, claimed.Claim); err == nil {
+			t.Fatal("consumed original owner observation was rebound")
+		}
+		// Closing the optional observer must not intercept the actual command.
+		f.ctx = claimContext
+	}
 	before, found, err := f.workflows.Load(f.ctx, record.Identity)
 	if err != nil || !found {
 		t.Fatalf("load predecessor state: found=%v err=%v", found, err)
@@ -370,5 +399,22 @@ func proveSystemNodeNativeContextConfinement(t *testing.T, backend string) {
 	})
 	if err == nil || ack || called {
 		t.Fatalf("ended transaction context admitted a new native write: ack=%v err=%v", ack, err)
+	}
+	command, cancelCommand := context.WithCancel(f.ctx)
+	cancelCommand()
+	work, cancelWork := context.WithCancel(context.Background())
+	defer cancelWork()
+	carried := startupownership.CarryMutationAuthority(work, command)
+	original, err := startupownership.CaptureMutationAuthority(f.ctx)
+	accepted, acceptedErr := startupownership.CaptureMutationAuthority(carried)
+	if err != nil || acceptedErr != nil || accepted.ProcessAuthority() != original.ProcessAuthority() || carried.Err() != nil {
+		t.Fatalf("accepted work lost original custody or borrowed caller cancellation: original=%v accepted=%v", err, acceptedErr)
+	}
+	foreign, _ := constructWorkflowMutationFixture(t, backend, "foreign-accepted-owner", time.Now().UTC().Add(-time.Minute))
+	if _, err := startupownership.CaptureMutationAuthority(startupownership.CarryMutationAuthority(foreign.ctx, f.ctx)); err == nil {
+		t.Fatal("accepted work replaced a foreign original owner")
+	}
+	if startupownership.HasMutationAuthority(startupownership.CarryMutationAuthority(work, context.Background())) {
+		t.Fatal("missing command custody was replaced by a current owner")
 	}
 }

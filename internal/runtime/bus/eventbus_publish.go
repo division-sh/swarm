@@ -1602,7 +1602,7 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 		return releaseOnFailure(fmt.Errorf("admit asynchronous event dispatch: %w", err))
 	}
 	acceptedCtx := bindWorkContext(dispatchCtx, lease, owner, eb.carryMutationContext)
-	dispatchCtx, closeDispatchContext, err := acceptedWorkExecutionContext(acceptedCtx)
+	dispatchCtx, closeDispatchContext, err := acceptedWorkExecutionContext(acceptedCtx, eb.carryMutationContext)
 	if err != nil {
 		_ = lease.Done()
 		return releaseOnFailure(err)
@@ -2680,12 +2680,15 @@ func runtimeWorkAdmissionFromContext(ctx context.Context) (runtimeWorkAdmission,
 // acceptedWorkExecutionContext keeps only the opaque work admission while
 // constructing the empty receiver value tree. The accepted lease, rather than
 // a second Begin inside spawned dispatch, remains the execution authority.
-func acceptedWorkExecutionContext(accepted context.Context) (context.Context, func(), error) {
+func acceptedWorkExecutionContext(accepted context.Context, carryOriginal func(context.Context, context.Context) context.Context) (context.Context, func(), error) {
 	admission, ok := runtimeWorkAdmissionFromContext(accepted)
 	if !ok {
 		return nil, nil, errors.New("accepted runtime work admission is required")
 	}
 	ctx, closeContext := eventreceiver.NewContext(accepted)
+	if carryOriginal != nil {
+		ctx = carryOriginal(ctx, accepted)
+	}
 	ctx = context.WithValue(ctx, runtimeWorkAdmissionContextKey{}, admission)
 	return ctx, closeContext, nil
 }

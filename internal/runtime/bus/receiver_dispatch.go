@@ -90,6 +90,9 @@ func (eb *EventBus) beginReceiverDispatch(parent context.Context, projection rec
 			return lease.Done()
 		}
 	}
+	if eb.carryMutationContext != nil {
+		ctx = eb.carryMutationContext(ctx, parent)
+	}
 	// Nested committed output remains part of this admitted dispatch. Keep its
 	// lifetime, not the caller value tree, when rebuilding the next receiver.
 	ctx = context.WithValue(ctx, runtimeWorkAdmissionContextKey{}, runtimeWorkAdmission{
@@ -138,6 +141,9 @@ func (eb *EventBus) receiverRouteContext(parent context.Context, evt events.Even
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(parent)
 	sourceArtifactFact, _ := runtimecorrelation.SourceArtifactFactFromContext(parent)
 	ctx, cleanup := eventreceiver.NewContext(context.Background())
+	if eb.carryMutationContext != nil {
+		ctx = eb.carryMutationContext(ctx, parent)
+	}
 	ctx = worklifetime.CarryAcceptedLease(ctx, parent)
 	if hasOwner {
 		ctx = worklifetime.WithOccurrence(ctx, owner)
