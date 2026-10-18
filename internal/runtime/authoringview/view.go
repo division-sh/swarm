@@ -16,20 +16,19 @@ import (
 )
 
 type View struct {
-	SourceLabel         string                                      `json:"source_label"`
-	WorkflowName        string                                      `json:"workflow_name,omitempty"`
-	WorkflowVersion     string                                      `json:"workflow_version,omitempty"`
-	SourceHash          string                                      `json:"source_hash"`
-	SourceAuthority     string                                      `json:"source_authority"`
-	Root                RootView                                    `json:"root"`
-	Flows               []FlowView                                  `json:"flows"`
-	ApprovalPoints      []ApprovalPointView                         `json:"approval_points,omitempty"`
-	ClockSchedules      []semanticview.ClockSchedule                `json:"clock_schedules,omitempty"`
-	StageGraphs         []StageGraphView                            `json:"stage_graphs,omitempty"`
-	RoutingTopology     RoutingTopologyView                         `json:"routing_topology"`
-	Diagnostics         []DiagnosticView                            `json:"diagnostics,omitempty"`
-	Equivalence         EquivalenceView                             `json:"equivalence"`
-	EffectiveProvenance []runtimecontracts.EffectiveProvenanceEntry `json:"effective_provenance,omitempty"`
+	SourceLabel     string                       `json:"source_label"`
+	WorkflowName    string                       `json:"workflow_name,omitempty"`
+	WorkflowVersion string                       `json:"workflow_version,omitempty"`
+	SourceHash      string                       `json:"source_hash"`
+	SourceAuthority string                       `json:"source_authority"`
+	Root            RootView                     `json:"root"`
+	Flows           []FlowView                   `json:"flows"`
+	ApprovalPoints  []ApprovalPointView          `json:"approval_points,omitempty"`
+	ClockSchedules  []semanticview.ClockSchedule `json:"clock_schedules,omitempty"`
+	StageGraphs     []StageGraphView             `json:"stage_graphs,omitempty"`
+	RoutingTopology RoutingTopologyView          `json:"routing_topology"`
+	Diagnostics     []DiagnosticView             `json:"diagnostics,omitempty"`
+	Equivalence     EquivalenceView              `json:"equivalence"`
 }
 
 type EquivalenceView struct {
@@ -367,18 +366,17 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		return View{}, err
 	}
 	view := View{
-		WorkflowName:        bundle.WorkflowName(),
-		WorkflowVersion:     bundle.WorkflowVersion(),
-		SourceHash:          bundle.SourceArtifact.BundleHash(),
-		SourceLabel:         bundle.SourceArtifact.HumanLabel(),
-		SourceAuthority:     "projection_only_existing_contract_owners",
-		Root:                root,
-		Flows:               flows,
-		ApprovalPoints:      approvalPoints,
-		ClockSchedules:      semanticview.ClockSchedules(source),
-		RoutingTopology:     BuildRoutingTopologyWithReport(source, bundle, opts.BootReport),
-		Diagnostics:         buildDiagnostics(bundle, opts.BootReport),
-		EffectiveProvenance: bundle.EffectiveProvenance().Entries(),
+		WorkflowName:    bundle.WorkflowName(),
+		WorkflowVersion: bundle.WorkflowVersion(),
+		SourceHash:      bundle.SourceArtifact.BundleHash(),
+		SourceLabel:     bundle.SourceArtifact.HumanLabel(),
+		SourceAuthority: "projection_only_existing_contract_owners",
+		Root:            root,
+		Flows:           flows,
+		ApprovalPoints:  approvalPoints,
+		ClockSchedules:  semanticview.ClockSchedules(source),
+		RoutingTopology: BuildRoutingTopologyWithReport(source, bundle, opts.BootReport),
+		Diagnostics:     buildDiagnostics(bundle, opts.BootReport),
 		Equivalence: EquivalenceView{
 			ProjectionOnly: true,
 			CanonicalOwners: []string{

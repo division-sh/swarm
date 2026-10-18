@@ -170,7 +170,7 @@ func describeProofScalar(value any, path, prefix, identity, repo, embedded strin
 func describePresentationField(path, topologyPrefix, key string) bool {
 	parent := strings.TrimSuffix(path, "."+key)
 	switch parent {
-	case "effective_provenance[].provenance", "flows[].input_pins[]", "flows[].output_pins[]":
+	case "flows[].input_pins[]", "flows[].output_pins[]":
 		return key == "source_file" || key == "source_line" || key == "source_column"
 	case "diagnostics[]":
 		return key == "location" || key == "authored_location"
@@ -189,7 +189,7 @@ func describePresentationField(path, topologyPrefix, key string) bool {
 
 func TestDescribeProofNormalization(t *testing.T) {
 	const identity = "bundle-v2:sha256:admitted"
-	const original = `{"source_hash":"bundle-v2:sha256:admitted","workflow_version":"bundle-v2:sha256:admitted","effective_provenance":[{"path":"flows.account","provenance":{"origin":"authored","source_file":"/cache/platform-spec-current.yaml","source_line":10,"source_column":3,"source_presence":"authored"}}],"routing_topology":{"edges":[{"id":"edge-unchanged","event":{"canonical":"account.ready"},"boundary":{"authored_location":"schema.yaml:10:3"},"producer_schema_digest":"sha256:producer","receiver_schema_digest":"sha256:receiver","derived_from":"instance.account_id + carries.account_id.from"}]},"policy":{"source_line":10,"source_file":"/cache/platform-spec-current.yaml"},"stages":{"active":{"initial":true},"complete":{"terminal":true}},"approvals":{"required":true},"rules":["account.amount > 10"],"diagnostics":[{"severity":"lint_evidence","message":"keep schema.yaml:10:3","location":"schema.yaml:10:3"}]}`
+	const original = `{"source_hash":"bundle-v2:sha256:admitted","workflow_version":"bundle-v2:sha256:admitted","flows":[{"input_pins":[{"event":"account.ready","source_file":"/cache/platform-spec-current.yaml","source_line":10,"source_column":3}]}],"routing_topology":{"edges":[{"id":"edge-unchanged","event":{"canonical":"account.ready"},"boundary":{"authored_location":"schema.yaml:10:3"},"producer_schema_digest":"sha256:producer","receiver_schema_digest":"sha256:receiver","derived_from":"instance.account_id + carries.account_id.from"}]},"policy":{"source_line":10,"source_file":"/cache/platform-spec-current.yaml"},"stages":{"active":{"initial":true},"complete":{"terminal":true}},"approvals":{"required":true},"rules":["account.amount > 10"],"diagnostics":[{"severity":"lint_evidence","message":"keep schema.yaml:10:3","location":"schema.yaml:10:3"}]}`
 	normalize := func(raw string) []byte {
 		t.Helper()
 		got, err := normalizeDescribeProof([]byte(raw), "describe-json", identity, "/repo", "/cache/platform-spec-current.yaml")
@@ -216,7 +216,7 @@ func TestDescribeProofNormalization(t *testing.T) {
 	for _, row := range []struct{ name, old, replacement string }{
 		{"line_presence", `"source_line":10,`, ``},
 		{"zero_line", `"source_line":10,`, `"source_line":0,`},
-		{"column_presence", `"source_column":3,`, ``},
+		{"column_presence", `,"source_column":3`, ``},
 		{"file_identity", `"source_file":"/cache/platform-spec-current.yaml"`, `"source_file":"/cache/foreign.yaml"`},
 		{"authored_file", `schema.yaml:10:3`, `other.yaml:10:3`},
 		{"coordinate_presence", `schema.yaml:10:3`, `schema.yaml:10`},
@@ -231,7 +231,6 @@ func TestDescribeProofNormalization(t *testing.T) {
 		{"rule", `account.amount > 10`, `account.amount > 20`},
 		{"severity", `"severity":"lint_evidence"`, `"severity":"error"`},
 		{"message_coordinate", `"message":"keep schema.yaml:10:3"`, `"message":"keep schema.yaml:90:7"`},
-		{"provenance", `"origin":"authored"`, `"origin":"platform_default"`},
 		{"policy_numeric_field", `"policy":{"source_line":10`, `"policy":{"source_line":200`},
 	} {
 		t.Run(row.name, func(t *testing.T) {

@@ -134,10 +134,6 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 	if err := projectNodeRulePolicyValue(value, fields, context, &out); err != nil {
 		return HandlerRuleEntry{}, err
 	}
-	out.admissionProvenance = make(map[string]EffectiveValueProvenance)
-	if err := collectNodeValueProvenance(value, "", out.admissionProvenance, nil); err != nil {
-		return HandlerRuleEntry{}, err
-	}
 	return out, nil
 }
 

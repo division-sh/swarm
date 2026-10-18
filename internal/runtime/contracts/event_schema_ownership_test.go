@@ -346,13 +346,6 @@ validation.requested:
 	if !ok || candidate["type"] != "string" {
 		t.Fatalf("receiver schema did not consume producer type catalog: schema=%#v ok=%t", schema.Schema, ok)
 	}
-	projectionPrefix := effectiveEventProjectionProvenancePrefix(".", "validator", "validation.requested")
-	for _, suffix := range []string{"fields.candidate.description", "fields.candidate.refinements.pattern"} {
-		provenance, found := bundle.EffectiveProvenance().Lookup(projectionPrefix + "." + suffix)
-		if !found || provenance.Origin != EffectiveValueOriginDerived || provenance.RuleID != eventConsumerProjectionRule || len(provenance.InputPaths) != 1 || !strings.Contains(provenance.InputPaths[0], suffix) {
-			t.Fatalf("complete projection provenance %s = %#v, found=%t", suffix, provenance, found)
-		}
-	}
 
 	node := identitytest.ExecutableNode(t, "validator", "validator-node")
 	nodeEntry, _, ok := bundle.ResolveExecutableNodeEventCatalogEntry(node, "validation.requested")
@@ -403,27 +396,31 @@ func TestEffectiveEventResolutionPreservesConnectedRenameOwnership(t *testing.T)
 			t.Fatalf("renamed producer field %s = %#v", field, entry.Payload.Properties[field])
 		}
 	}
-	provenance, ok := bundle.EffectiveProvenance().Lookup(effectiveEventProjectionProvenancePrefix(".", "worker", "work.assign") + ".declaration")
-	if !ok || provenance.Origin != EffectiveValueOriginDerived || provenance.RuleID != eventConsumerProjectionRule {
-		t.Fatalf("renamed projection provenance = %#v, found=%t", provenance, ok)
-	}
 }
 
 func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder(t *testing.T) {
-	owner := func(endpoint, fieldType string, line int) eventSchemaOwnershipRow {
-		entry := EventCatalogEntry{
-			Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"value": {Type: fieldType}}},
-			admissionProvenance: map[string]EffectiveValueProvenance{
-				"declaration": {SourceFile: endpoint + "/events.yaml", SourceLine: line, SourceColumn: 1},
-			},
+	root := t.TempDir()
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: ownership\n")
+	for endpoint, fieldType := range map[string]string{"producer-a": "text", "producer-b": "uuid"} {
+		writeFixtureFile(t, filepath.Join(root, endpoint, "events.yaml"), "work.ready:\n  value: "+fieldType+"\n")
+	}
+	repo := repoRootForContractsTest(t)
+	admitted, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := func(endpoint string) eventSchemaOwnershipRow {
+		entry, name, ok := admitted.ResolveFlowEventCatalogEntry(endpoint, "work.ready")
+		if !ok {
+			t.Fatalf("fixture producer %s was not admitted", endpoint)
 		}
 		return eventSchemaOwnershipRow{
 			ownerFlowPath: ".", producerEndpoint: endpoint, producerFlowID: endpoint,
-			producerEvent: "work.ready", producerName: "work.ready", producer: entry,
+			producerEvent: "work.ready", producerName: name, producer: entry,
 			receiverEndpoint: "consumer", receiverFlowID: "consumer", receiverEvent: "work.ready",
 		}
 	}
-	baseRows := []eventSchemaOwnershipRow{owner("producer-a", "text", 1), owner("producer-b", "uuid", 1)}
+	baseRows := []eventSchemaOwnershipRow{owner("producer-a"), owner("producer-b")}
 	for _, reverse := range []bool{false, true} {
 		name := "authored order"
 		if reverse {
@@ -435,19 +432,23 @@ func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConne
 				rows[0], rows[1] = rows[1], rows[0]
 			}
 			wrong := EventCatalogEntry{Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"wrong": {Type: "text"}}}}
-			bundle := &WorkflowContractBundle{
-				Events:         map[string]EventCatalogEntry{"work.ready": wrong},
-				eventOwnership: rows,
-				Semantics: WorkflowSemanticView{flowInputEventPins: map[string][]CompiledFlowInputPin{
-					"consumer": {mustCompileInputPinForTest(t, "consumer", "work.ready")},
-				}},
-				eventOwnersByFlow: map[string][]eventSchemaOwnershipRow{"consumer": rows},
-			}
-			errs := validateCompiledConnectEventSchemaOwnership(bundle)
+			bundle := *admitted
+			bundle.Events = map[string]EventCatalogEntry{"work.ready": wrong}
+			bundle.eventOwnership = rows
+			bundle.Semantics = WorkflowSemanticView{flowInputEventPins: map[string][]CompiledFlowInputPin{
+				"consumer": {mustCompileInputPinForTest(t, "consumer", "work.ready")},
+			}}
+			bundle.eventOwnersByFlow = map[string][]eventSchemaOwnershipRow{"consumer": rows}
+			errs := validateCompiledConnectEventSchemaOwnership(&bundle)
 			if len(errs) != 1 || !strings.Contains(errs[0].Error(), "multiple connected producer schema owners") || !strings.Contains(errs[0].Error(), "producer-a") || !strings.Contains(errs[0].Error(), "producer-b") {
 				t.Fatalf("ownership errors = %v, want deterministic distinct-producer rejection", errs)
 			}
-			entry, key, _, connected, ok := resolveEffectiveEventDeclarationForFlowEvent(bundle, "consumer", "work.ready")
+			for _, endpoint := range []string{"producer-a", "producer-b"} {
+				if !strings.Contains(errs[0].Error(), endpoint+"/events.yaml:1") {
+					t.Fatalf("producer declaration coordinate missing: %v", errs)
+				}
+			}
+			entry, key, _, connected, ok := resolveEffectiveEventDeclarationForFlowEvent(&bundle, "consumer", "work.ready")
 			if ok || !connected || key != "" || len(entry.Payload.Properties) != 0 {
 				t.Fatalf("ambiguous resolution = entry:%#v key:%q connected:%t ok:%t, want fail closed before generic fallback", entry, key, connected, ok)
 			}
@@ -493,44 +494,6 @@ func TestCompiledConnectEventConsumerRestatementFailsClosed(t *testing.T) {
 	_, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err == nil || !contractErrorContains(err, "restates producer-owned schema") || !contractErrorContains(err, "remove the consumer declaration") {
 		t.Fatalf("load error = %v, want compiled-connect restatement teaching error", err)
-	}
-}
-
-func TestCompiledConnectEventConsumerProjectionProvenance(t *testing.T) {
-	repo := repoRootForContractsTest(t)
-	root := filepath.Join(repo, "examples", "routing", "template-create-minted-key")
-	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
-	if err != nil {
-		t.Fatal(err)
-	}
-	prefix := effectiveEventProjectionProvenancePrefix(".", "validator", "validation.requested")
-	declaration, ok := bundle.EffectiveProvenance().Lookup(prefix + ".declaration")
-	if !ok || declaration.Origin != EffectiveValueOriginDerived || declaration.RuleID != eventConsumerProjectionRule || len(declaration.InputPaths) != 1 {
-		t.Fatalf("projection declaration provenance = %#v, found=%t", declaration, ok)
-	}
-	generated, ok := bundle.EffectiveProvenance().Lookup(prefix + ".fields.validation_case_id.type")
-	if !ok || generated.Origin != EffectiveValueOriginDerived || generated.RuleID != eventReceiverProjectionRule || len(generated.InputPaths) != 1 {
-		t.Fatalf("synthetic route projection provenance = %#v, found=%t", generated, ok)
-	}
-}
-
-func TestCompiledConnectEventConsumerProjectionUsesOnlyProducerProvenance(t *testing.T) {
-	repo := repoRootForContractsTest(t)
-	root := filepath.Join(repo, "examples", "routing", "template-select-existing")
-	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
-	if err != nil {
-		t.Fatal(err)
-	}
-	prefix := effectiveEventProjectionProvenancePrefix(".", "account", "account.setup")
-	for _, suffix := range []string{"declaration", "payload.required", "fields.account_id.type", "fields.account_id.is_optional"} {
-		provenance, ok := bundle.EffectiveProvenance().Lookup(prefix + "." + suffix)
-		if !ok || provenance.Origin != EffectiveValueOriginDerived {
-			t.Fatalf("projection provenance %s = %#v, found=%t", suffix, provenance, ok)
-		}
-	}
-	alias, ok := bundle.EffectiveProvenance().Lookup(prefix + ".fields.account_id.type")
-	if !ok || alias.RuleID != eventConsumerProjectionRule || len(alias.InputPaths) != 1 || !strings.Contains(alias.InputPaths[0], "fields.account_id.type") || strings.Contains(strings.Join(alias.InputPaths, " "), "carries") {
-		t.Fatalf("producer projection provenance = %#v, found=%t", alias, ok)
 	}
 }
 

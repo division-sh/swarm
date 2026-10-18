@@ -101,8 +101,7 @@ type toolSchemaEntryValue struct {
 // ToolSchemaEntry is the immutable admitted tool execution contract. Authored
 // syntax and caller-owned maps terminate at its constructors.
 type ToolSchemaEntry struct {
-	value               *toolSchemaEntryValue
-	admissionProvenance map[string]EffectiveValueProvenance
+	value *toolSchemaEntryValue
 }
 
 type toolSchemaEntryDraft struct {

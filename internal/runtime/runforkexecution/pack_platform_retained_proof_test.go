@@ -81,8 +81,8 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !bytes.Equal(before.SourceArtifact.LogicalBlob(), after.SourceArtifact.LogicalBlob()) || !reflect.DeepEqual(before.EffectiveProvenance().Entries(), after.EffectiveProvenance().Entries()) || !reflect.DeepEqual(beforeProjection.ChannelPlans, projection.ChannelPlans) || before.PackInventory.Digest() != after.PackInventory.Digest() {
-					t.Fatal("retained reload changed source/provenance/plan/hash")
+				if !bytes.Equal(before.SourceArtifact.LogicalBlob(), after.SourceArtifact.LogicalBlob()) || !reflect.DeepEqual(beforeProjection.ChannelPlans, projection.ChannelPlans) || before.PackInventory.Digest() != after.PackInventory.Digest() {
+					t.Fatal("retained reload changed source/plan/hash")
 				}
 				for _, entry := range before.PackInventory.Entries() {
 					other, ok := after.PackInventory.Lookup(entry.ID())
