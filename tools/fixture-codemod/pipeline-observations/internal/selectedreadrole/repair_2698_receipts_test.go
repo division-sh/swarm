@@ -13,6 +13,7 @@ import (
 
 func TestRepair2698SourceCompositionPreservesBothSignedCuts(t *testing.T) {
 	root := filepath.Clean("../../../../..")
+	assertCompletionRebase2698Inverse(t, root)
 	t.Run("schedule-original-reader", func(t *testing.T) { assertRepair2698ScheduleReaderInverse(t, root) })
 	pins, err := Repair2698Sources()
 	if err != nil {
@@ -61,6 +62,71 @@ func TestRepair2698SourceCompositionPreservesBothSignedCuts(t *testing.T) {
 				t.Fatal("foreign source path received an inverse:", err)
 			}
 		})
+	}
+}
+
+func assertCompletionRebase2698Inverse(t *testing.T, root string) {
+	t.Helper()
+	before, after, err := CompletionRebase2698Images(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := CompletionRebase2698HistoricalSource(root, CompletionRebase2698Path, after)
+	if err != nil || !bytes.Equal(previous, before) {
+		t.Fatal("completion inverse lost its complete predecessor:", err)
+	}
+	once, err := CompletionRebase2698HistoricalSource(root, CompletionRebase2698Path, previous)
+	if err != nil || !bytes.Equal(once, previous) {
+		t.Fatal("completion inverse applied twice:", err)
+	}
+	foreign, err := CompletionRebase2698HistoricalSource(root, CompletionRebase2698Path+".foreign", after)
+	if err != nil || !bytes.Equal(foreign, after) {
+		t.Fatal("foreign completion path acquired an inverse:", err)
+	}
+	copy := t.TempDir()
+	gitdir, err := exec.Command("git", "-C", root, "rev-parse", "--absolute-git-dir").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const packet = "tools/fixture-codemod/pipeline-observations/testdata/capability_completion_successor_2707.json"
+	for _, path := range []string{CompletionRebase2698Path, packet} {
+		raw, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeReadRoleSource(t, copy, path, string(raw))
+	}
+	writeReadRoleSource(t, copy, ".git", "gitdir: "+strings.TrimSpace(string(gitdir))+"\n")
+	if _, _, err := CompletionRebase2698Images(copy); err != nil {
+		t.Fatal("exact copied completion source refused:", err)
+	}
+	for _, changed := range [][]byte{before, append(bytes.Clone(after), '\n'), append(bytes.Clone(after), after...)} {
+		writeReadRoleSource(t, copy, CompletionRebase2698Path, string(changed))
+		if _, err := CompletionRebase2698HistoricalSource(copy, CompletionRebase2698Path, after); err == nil {
+			t.Fatal("warm completion inverse accepted stale/changed/duplicate/supplied source")
+		}
+	}
+	if err := os.Remove(filepath.Join(copy, CompletionRebase2698Path)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CompletionRebase2698HistoricalSource(copy, CompletionRebase2698Path, after); err == nil {
+		t.Fatal("pristine gitdir concealed missing completion source")
+	}
+	writeReadRoleSource(t, copy, CompletionRebase2698Path, string(after))
+	writeReadRoleSource(t, copy, packet, "{}\n")
+	if _, _, err := CompletionRebase2698Images(copy); err == nil {
+		t.Fatal("changed completion packet accepted")
+	}
+}
+
+func writeReadRoleSource(t *testing.T, root, path, source string) {
+	t.Helper()
+	full := filepath.Join(root, path)
+	if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte(source), 0600); err != nil {
+		t.Fatal(err)
 	}
 }
 

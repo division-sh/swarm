@@ -35,6 +35,13 @@ const debtRepair2698ScheduleBefore = "ff1ea5580af1ecf153490f5e71e9f2ea66da3616"
 const debtRepair2698ScheduleBeforeSHA = "746c7c357dad92054381626d95617e18d186d61e0a0142c23b2893ba86b08e5f"
 const debtRepair2698ScheduleAfterSHA = "8de80abaf8df0ecae4fb4fcb7c7a1d3bdbcfd5b80e157084410562af09552119"
 const debtRepair2698ScheduleCollectorTo = "d7f0674dc6481d92aef2af07f8a5eb3a349dddf5ec5c167f872e36a0cb7a3ec1"
+const debtCompletionRebase2698Path = "internal/serveapp/fork_receiver_ownership_test.go"
+const debtCompletionRebase2698Function = "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores"
+const debtCompletionRebase2698Before = "af47497e27bcc0cca593fb56f5767ff68f201ce1"
+const debtCompletionRebase2698After = "297b495eb876585c317e3ff59ce51e26b3bc02c3"
+const debtCompletionRebase2698BeforeSHA = "c22bdc13e1a0f3b4a3c8beb2f8ccfcc138439ca9c7f2eea7618f7b152d06129a"
+const debtCompletionRebase2698AfterSHA = "264fbaa1318ff6c6f9858489a714c319e91f8e70057ba5a6fa9e998ee7c567d4"
+const debtCompletionRebase2698CollectorTo = "014889cc9ffbe50f19da01626755139aeea3ec41e041b325cd2cad40ce1e4b65"
 
 func TestPersistenceAuthorityDebtRepair2698DeclarationCacheUsesActualBytes(t *testing.T) {
 	root := t.TempDir()
@@ -71,6 +78,39 @@ func TestPersistenceAuthorityDebtRepair2698DeclarationCacheUsesActualBytes(t *te
 	}
 }
 
+func proveCompletionRebase2698Source(t *testing.T, root string) {
+	t.Helper()
+	before, after, err := debtCompletionRebase2698Images(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := debtCompletionRebase2698HistoricalSource(root, debtCompletionRebase2698Path, after)
+	if err != nil || !bytes.Equal(previous, before) {
+		t.Fatal("completion rebase failed its exact predecessor:", err)
+	}
+	once, err := debtCompletionRebase2698HistoricalSource(root, debtCompletionRebase2698Path, previous)
+	if err != nil || !bytes.Equal(once, previous) {
+		t.Fatal("completion rebase consumed its predecessor twice:", err)
+	}
+	foreign, err := debtCompletionRebase2698HistoricalSource(root, debtCompletionRebase2698Path+".foreign", after)
+	if err != nil || !bytes.Equal(foreign, after) {
+		t.Fatal("foreign completion path acquired an inverse:", err)
+	}
+	original, _, err := debtCatchUpSignedBaseline(root, debtCompletionRebase2698Before, debtRepair2698ScheduleCollectorTo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := original
+	current.Collector = debtCompletionRebase2698CollectorTo
+	proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(current.Sites)}
+	if !debtCompletionRebase2698CollectorTransition(original.Collector, current.Collector, original, current, proof) ||
+		debtCompletionRebase2698CollectorTransition(current.Collector, original.Collector, current, original, proof) ||
+		debtRepair2698ScheduleCollectorTransition(original.Collector, current.Collector, original, current, proof) {
+		t.Fatal("completion edge refused forward or accepted reversed/retargeted provenance")
+	}
+	assertDebtCatchUpForeignProvenance(t, original, current, proof)
+}
+
 func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	if actual, err := debtCollectorDigest(root); err != nil || actual != debtActiveCollectorTo {
@@ -89,10 +129,11 @@ func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testin
 	}
 	head.Collector = debtActiveCollectorTo
 	proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(head.Sites)}
-	if !debtRepair2698ScheduleCollectorTransition(trusted.Collector, head.Collector, trusted, head, proof) {
+	if !debtCompletionRebase2698CollectorTransition(trusted.Collector, head.Collector, trusted, head, proof) {
 		t.Fatal("exact forward source continuation refused")
 	}
 	assertDebtCatchUpForeignProvenance(t, trusted, head, proof)
+	proveCompletionRebase2698Source(t, root)
 	t.Run("round2-forward-only", func(t *testing.T) {
 		original, _, err := debtCatchUpSignedBaseline(root, debtRepair2698Round2Before, debtRepair2698CleanupCollectorTo)
 		if err != nil {
@@ -246,6 +287,7 @@ func TestPersistenceAuthorityDebtRepair2698CopiedWarmSourceRefusesEscapes(t *tes
 	if err := debtCatchUpCollectorSource(copy); err != nil {
 		t.Fatal("exact copied source refused:", err)
 	}
+	assertCompletionRebase2698ActualMutants(t, copy)
 	for _, file := range packet.Files {
 		actual, err := os.ReadFile(filepath.Join(copy, file.File))
 		if err != nil {
@@ -375,6 +417,44 @@ func assertRepair2698CleanupActualMutants(t *testing.T, root string) {
 		t.Fatal("pristine gitdir concealed missing copied cleanup source")
 	}
 	debtWriteModuleSource(t, root, file.File, string(current))
+}
+
+func assertCompletionRebase2698ActualMutants(t *testing.T, root string) {
+	t.Helper()
+	before, current, err := debtCompletionRebase2698Images(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := []byte("\t\t\tcompletion := installReceiverCompletionBoundary(t)\n")
+	join := []byte("\t\t\trequireReceiverCompletionBoundary(t, ctx, completion, rt.BundleHash, seed.RunID)\n")
+	for _, changed := range [][]byte{
+		before,
+		append(bytes.Clone(current), '\n'),
+		bytes.Replace(current, observer, nil, 1),
+		bytes.Replace(current, observer, append(bytes.Clone(observer), observer...), 1),
+		bytes.Replace(current, join, nil, 1),
+		bytes.Replace(current, join, append(bytes.Clone(join), join...), 1),
+		bytes.Replace(current, join, bytes.Replace(join, []byte("seed.RunID"), []byte("seed.EventID"), 1), 1),
+		append(bytes.Clone(current), []byte("\nfunc extraRawCompletionCaller(db interface{ Exec(string, ...any) }) { db.Exec(\"DELETE FROM events\") }\n")...),
+	} {
+		debtWriteModuleSource(t, root, debtCompletionRebase2698Path, string(changed))
+		if err := debtCatchUpCollectorSource(root); err == nil {
+			t.Fatal("warm completion source accepted stale/changed/duplicate/foreign/raw caller source")
+		}
+		if _, err := debtCompletionRebase2698HistoricalSource(root, debtCompletionRebase2698Path, current); err == nil {
+			t.Fatal("supplied approved bytes concealed changed actual completion source")
+		}
+	}
+	if err := os.Remove(filepath.Join(root, debtCompletionRebase2698Path)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := debtCompletionRebase2698HistoricalSource(root, debtCompletionRebase2698Path, current); err == nil {
+		t.Fatal("pristine gitdir concealed missing actual completion source")
+	}
+	debtWriteModuleSource(t, root, debtCompletionRebase2698Path, string(current))
+	if err := debtCatchUpCollectorSource(root); err != nil {
+		t.Fatal("restored completion source failed:", err)
+	}
 }
 
 func copyRepair2698CustodySources(t *testing.T, root, destination string) {

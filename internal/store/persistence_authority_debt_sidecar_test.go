@@ -27,6 +27,49 @@ func debtBaselineChecksum(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// #2698/6247420399: the live collector never consumes this historical view.
+func debtCompletionRebase2698Images(root string) ([]byte, []byte, error) {
+	packet, err := os.ReadFile(filepath.Join(root, "tools/fixture-codemod/pipeline-observations/testdata/capability_completion_successor_2707.json"))
+	if err != nil || debtBaselineChecksum(packet) != "4b531e52419e81158f1faed4ad8c3c63f367d30d13a3ddb79fd62302a61bb9ff" {
+		return nil, nil, fmt.Errorf("completion rebase lost its immutable #2707 packet: %v", err)
+	}
+	before, err := debtRepair2698SignedSource(root, debtCompletionRebase2698Before, debtCompletionRebase2698Path, debtCompletionRebase2698BeforeSHA)
+	if err != nil {
+		return nil, nil, err
+	}
+	after, err := debtRepair2698SignedSource(root, debtCompletionRebase2698After, debtCompletionRebase2698Path, debtCompletionRebase2698AfterSHA)
+	if err != nil {
+		return nil, nil, err
+	}
+	actual, err := os.ReadFile(filepath.Join(root, debtCompletionRebase2698Path))
+	if err != nil || !bytes.Equal(actual, after) {
+		return nil, nil, fmt.Errorf("completion rebase actual source changed: %v", err)
+	}
+	declarations, err := debtServedSetupSourceDeclarations(after)
+	observer := []byte("\t\t\tcompletion := installReceiverCompletionBoundary(t)\n")
+	join := []byte("\t\t\tctx, cancel := context.WithTimeout(t.Context(), servedEventPublishLifecycleProbeWaitTimeout)\n\t\t\tdefer cancel()\n\t\t\trequireReceiverCompletionBoundary(t, ctx, completion, rt.BundleHash, seed.RunID)\n")
+	for _, cut := range [][]byte{observer, join} {
+		if err != nil || bytes.Count([]byte(declarations[debtCompletionRebase2698Function]), cut) != 1 || bytes.Count(after, cut) != 1 {
+			return nil, nil, fmt.Errorf("completion rebase lost a unique named-declaration cut: %v", err)
+		}
+	}
+	if !bytes.Equal(bytes.Replace(bytes.Replace(after, observer, nil, 1), join, nil, 1), before) {
+		return nil, nil, fmt.Errorf("completion rebase changed outside its two reviewed additions")
+	}
+	return before, after, nil
+}
+
+func debtCompletionRebase2698HistoricalSource(root, path string, current []byte) ([]byte, error) {
+	if path != debtCompletionRebase2698Path || debtBaselineChecksum(current) != debtCompletionRebase2698AfterSHA {
+		return current, nil
+	}
+	before, after, err := debtCompletionRebase2698Images(root)
+	if err != nil || !bytes.Equal(current, after) {
+		return nil, fmt.Errorf("completion inverse does not describe actual copied source: %v", err)
+	}
+	return bytes.Clone(before), nil
+}
+
 type debtRepair2698SourceFile struct{ File, BeforeSHA256, AfterSHA256 string }
 type debtRepair2698SourcePacket struct {
 	BeforeCommit, AfterCommit, Authorization string
@@ -166,6 +209,9 @@ func debtRepair2698CleanupHistoricalSource(root, path string, actual []byte) ([]
 }
 
 func debtRepair2698SuccessorHistoricalSource(root, path string, current []byte) ([]byte, error) {
+	if path == debtCompletionRebase2698Path {
+		return debtCompletionRebase2698HistoricalSource(root, path, current)
+	}
 	if path == debtRepair2698SchedulePath {
 		return debtRepair2698ScheduleHistoricalSource(root, path, current)
 	}
@@ -544,6 +590,29 @@ func debtRepair2698ScheduleUnrefreshedBaseline(root string, metadata, data []byt
 	return baseline, nil
 }
 
+func debtCompletionRebase2698CollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {
+	if current != debtCompletionRebase2698CollectorTo || head.Collector != current || trusted.Collector != base || len(proofs) != 1 ||
+		trusted.BootstrapSource != debtBootstrapSource || head.BootstrapSource != debtBootstrapSource || debtCatchUpCollectorSource(proofs[0].Root) != nil {
+		return false
+	}
+	original, _, err := debtCatchUpSignedBaseline(proofs[0].Root, debtCompletionRebase2698Before, debtRepair2698ScheduleCollectorTo)
+	if err != nil {
+		return false
+	}
+	if base == debtRepair2698ScheduleCollectorTo {
+		if !debtSitesEqual(trusted.Sites, original.Sites) {
+			return false
+		}
+	} else {
+		intermediate := head
+		intermediate.Collector = debtRepair2698ScheduleCollectorTo
+		if !debtRepair2698ScheduleCollectorTransition(base, intermediate.Collector, trusted, intermediate, proofs...) {
+			return false
+		}
+	}
+	return len(authorityDebtRatchet(proofs[0].Actual, head.Sites, original.Sites, original.Sites, proofs[0])) == 0
+}
+
 type debtCatchUpSourcePacket struct {
 	Base, Master, Lane string
 	Files              []debtCatchUpSourceFile
@@ -686,6 +755,7 @@ func debtCatchUpSignedBaseline(root, ref, collector string) (authorityDebtBaseli
 
 func debtCatchUpCollectorSource(root string) error {
 	actual, err := debtCollectorDigest(root)
+	actual, err = debtCompletionRebase2698SourceCollector(root, actual, err)
 	if err != nil || (actual != debtCatchUpCollectorTo && actual != debtCatchUpFreshnessCollectorTo && actual != debtCatchUpNativeEntryCollectorTo && actual != debtRepair2698CollectorTo && actual != debtRepair2698ProofCostCollectorTo && actual != debtRepair2698CleanupCollectorTo && actual != debtRepair2698Round2CollectorTo && actual != debtRepair2698ScheduleCollectorTo) {
 		return fmt.Errorf("joined collector is not its exact enumerated source: %s: %v", actual, err)
 	}
@@ -727,6 +797,16 @@ func debtCatchUpCollectorSource(root string) error {
 		}
 	}
 	return nil
+}
+
+func debtCompletionRebase2698SourceCollector(root, actual string, prior error) (string, error) {
+	if prior != nil || actual != debtCompletionRebase2698CollectorTo {
+		return actual, prior
+	}
+	if _, _, err := debtCompletionRebase2698Images(root); err != nil {
+		return "", err
+	}
+	return debtRepair2698ScheduleCollectorTo, nil
 }
 
 func debtCatchUpCollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {

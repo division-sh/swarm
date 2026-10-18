@@ -13,6 +13,58 @@ import (
 	"path/filepath"
 )
 
+// #2698/6247420399: this view is only for historical comparisons.
+const CompletionRebase2698Path = "internal/serveapp/fork_receiver_ownership_test.go"
+const CompletionRebase2698Function = "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores"
+const CompletionRebase2698Before = "af47497e27bcc0cca593fb56f5767ff68f201ce1"
+const CompletionRebase2698After = "297b495eb876585c317e3ff59ce51e26b3bc02c3"
+const CompletionRebase2698BeforeSHA = "c22bdc13e1a0f3b4a3c8beb2f8ccfcc138439ca9c7f2eea7618f7b152d06129a"
+const CompletionRebase2698AfterSHA = "264fbaa1318ff6c6f9858489a714c319e91f8e70057ba5a6fa9e998ee7c567d4"
+
+func CompletionRebase2698Images(root string) ([]byte, []byte, error) {
+	const packetPath = "tools/fixture-codemod/pipeline-observations/testdata/capability_completion_successor_2707.json"
+	packet, err := os.ReadFile(filepath.Join(root, packetPath))
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(packet)) != "4b531e52419e81158f1faed4ad8c3c63f367d30d13a3ddb79fd62302a61bb9ff" {
+		return nil, nil, fmt.Errorf("completion rebase lost its immutable #2707 packet: %v", err)
+	}
+	before, err := exec.Command("git", "-C", root, "show", CompletionRebase2698Before+":"+CompletionRebase2698Path).Output()
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(before)) != CompletionRebase2698BeforeSHA {
+		return nil, nil, fmt.Errorf("completion rebase lost its complete signed predecessor: %v", err)
+	}
+	after, err := exec.Command("git", "-C", root, "show", CompletionRebase2698After+":"+CompletionRebase2698Path).Output()
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(after)) != CompletionRebase2698AfterSHA {
+		return nil, nil, fmt.Errorf("completion rebase lost its complete signed endpoint: %v", err)
+	}
+	actual, err := os.ReadFile(filepath.Join(root, CompletionRebase2698Path))
+	if err != nil || !bytes.Equal(actual, after) {
+		return nil, nil, fmt.Errorf("completion rebase actual source changed: %v", err)
+	}
+	body, err := Body(after, CompletionRebase2698Function)
+	observer := []byte("\t\t\tcompletion := installReceiverCompletionBoundary(t)\n")
+	join := []byte("\t\t\tctx, cancel := context.WithTimeout(t.Context(), servedEventPublishLifecycleProbeWaitTimeout)\n\t\t\tdefer cancel()\n\t\t\trequireReceiverCompletionBoundary(t, ctx, completion, rt.BundleHash, seed.RunID)\n")
+	for _, cut := range [][]byte{observer, join} {
+		if err != nil || bytes.Count([]byte(body), cut) != 1 || bytes.Count(after, cut) != 1 {
+			return nil, nil, fmt.Errorf("completion rebase lost a unique named-declaration cut: %v", err)
+		}
+	}
+	restored := bytes.Replace(bytes.Replace(after, observer, nil, 1), join, nil, 1)
+	if !bytes.Equal(restored, before) {
+		return nil, nil, fmt.Errorf("completion rebase changed outside its two reviewed additions")
+	}
+	return before, after, nil
+}
+
+func CompletionRebase2698HistoricalSource(root, path string, current []byte) ([]byte, error) {
+	if path != CompletionRebase2698Path || fmt.Sprintf("%x", sha256.Sum256(current)) != CompletionRebase2698AfterSHA {
+		return current, nil
+	}
+	before, after, err := CompletionRebase2698Images(root)
+	if err != nil || !bytes.Equal(current, after) {
+		return nil, fmt.Errorf("completion inverse does not describe actual copied source: %v", err)
+	}
+	return bytes.Clone(before), nil
+}
+
 // The historical view is limited to the exact settled #2698 source repair.
 // Neither the recipes nor any prior source/history packet is rewritten.
 //
@@ -93,6 +145,9 @@ func repair2698CleanupHistoricalSource(root, path string, actual []byte) ([]byte
 }
 
 func Repair2698SuccessorHistoricalSource(root, path string, current []byte) ([]byte, error) {
+	if path == CompletionRebase2698Path {
+		return CompletionRebase2698HistoricalSource(root, path, current)
+	}
 	if path == repair2698SchedulePath {
 		return repair2698ScheduleHistoricalSource(root, path, current)
 	}
