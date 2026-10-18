@@ -66,7 +66,9 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		MutationContext: func(input context.Context) (context.Context, error) {
-			input = startupownership.CarryMutationAuthority(input, ctx)
+			if !startupownership.HasMutationAuthority(input) {
+				input = startupownership.CarryMutationAuthority(input, ctx)
+			}
 			_, err := startupownership.CaptureMutationAuthority(input)
 			return input, err
 		},

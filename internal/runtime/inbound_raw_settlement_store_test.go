@@ -79,7 +79,9 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 							bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
 								ContractBundle: source,
 								MutationContext: func(child context.Context) (context.Context, error) {
-									child = runtimestartupownership.CarryMutationAuthority(child, ctx)
+									if !runtimestartupownership.HasMutationAuthority(child) {
+										child = runtimestartupownership.CarryMutationAuthority(child, ctx)
+									}
 									_, err := runtimestartupownership.CaptureMutationAuthority(child)
 									return child, err
 								},

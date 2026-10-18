@@ -38,6 +38,13 @@ func originalPipelineFixtureContext(t testing.TB, ctx context.Context, selected 
 		}
 		return ctx
 	}
+	if _, present := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !present {
+		scope, found := runtimeauthoractivity.ScopeFromContext(ctx)
+		if !found || scope.RuntimeInstanceID == "" {
+			t.Fatal("pipeline fixture requires its declared runtime before process acquisition")
+		}
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, scope.RuntimeInstanceID)
+	}
 	process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +210,10 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 	}
 	opts.CarryMutationContext = startupownership.CarryMutationAuthority
 	if _, native := eventStore.(agentfixture.Store); native && opts.MutationContext == nil {
-		original := originalPipelineFixtureContext(t, testAuthorActivityContextForSource(t, context.Background(), opts.SourceArtifactFact), eventStore)
+		fixtureContext := testAuthorActivityContextForSource(t, context.Background(), opts.SourceArtifactFact)
+		fixtureContext = runtimecorrelation.WithRuntimeInstanceID(fixtureContext, opts.RuntimeInstanceID)
+		fixtureContext = runtimeauthoractivity.WithScope(fixtureContext, runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash()))
+		original := originalPipelineFixtureContext(t, fixtureContext, eventStore)
 		opts.MutationContext = func(ctx context.Context) (context.Context, error) {
 			if !startupownership.HasMutationAuthority(ctx) {
 				ctx = startupownership.CarryMutationAuthority(ctx, original)

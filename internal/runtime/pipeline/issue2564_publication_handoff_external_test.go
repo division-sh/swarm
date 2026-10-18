@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -70,6 +71,7 @@ type issue2564PublicationFixture struct {
 	reopen       func() timerReplaySelectedStore
 	backend      string
 	runID        string
+	runtimeID    string
 	source       semanticview.Source
 	fact         correlation.SourceArtifactFact
 	ctx          context.Context
@@ -116,10 +118,13 @@ child:
 `,
 	})
 	selected, _, reopen := openTimerReplayNativeStore(t, backend)
-	f := &issue2564PublicationFixture{store: selected, reopen: reopen, backend: backend, runID: uuid.NewString(),
+	f := &issue2564PublicationFixture{store: selected, reopen: reopen, backend: backend, runID: uuid.NewString(), runtimeID: uuid.NewString(),
 		source: semanticview.Wrap(bundle), fact: mustAuthorActivityTestSourceArtifactFactForHash(bundle.SourceArtifact.BundleHash()),
 		observer: observer, failures: make(chan error, 16)}
 	seedCtx := correlation.WithSourceArtifactFact(context.Background(), f.fact)
+	seedCtx = correlation.WithRuntimeInstanceID(seedCtx, f.runtimeID)
+	seedCtx = authoractivity.WithScope(seedCtx, authoractivity.BundleScope(f.runtimeID, f.fact.BundleHash()))
+	seedCtx = originalPipelineFixtureContext(t, seedCtx, selected)
 	storetest.RequireRun(t, seedCtx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
 		RunID: f.runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
 	})
@@ -135,9 +140,18 @@ func (f *issue2564PublicationFixture) selected() gateRecoveryStoreCase {
 
 func (f *issue2564PublicationFixture) start(t *testing.T, generation uint64, gate *issue2564PublicationDispatchGate) {
 	t.Helper()
-	runtimeID := uuid.NewString()
+	if generation > 1 {
+		f.runtimeID = uuid.NewString()
+	}
+	runtimeID := f.runtimeID
 	ctx := correlation.WithSourceArtifactFact(correlation.WithRunID(context.Background(), f.runID), f.fact)
+	ctx = correlation.WithRuntimeInstanceID(ctx, runtimeID)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, f.fact.BundleHash()))
+	ctx = originalPipelineFixtureContext(t, ctx, f.store)
+	original, err := agentfixture.ProcessCapability(t, ctx, f.store.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
 	process := worklifetime.NewProcess()
 	work, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: runtimeID, BundleHash: f.fact.BundleHash()})
 	if err != nil {
@@ -200,6 +214,9 @@ func (f *issue2564PublicationFixture) start(t *testing.T, generation uint64, gat
 			}
 			process.Retire()
 			if _, err := process.Join(ctx); err != nil {
+				t.Error(err)
+			}
+			if err := original.Release(ctx); err != nil {
 				t.Error(err)
 			}
 		})
