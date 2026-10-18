@@ -65,6 +65,9 @@ func (a *constructedInputAgent) OnEvent(ctx context.Context, event events.Event)
 func TestSelectedConstructedAgentInputExecutesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) { proveSelectedConstructedAgentInput(t, backend, false, false) })
+		t.Run(backend+"/parent_runtime", func(t *testing.T) {
+			proveSelectedConstructedAgentInput(t, backend, false, false, selectedConstructedInputProof{parentRuntime: true})
+		})
 	}
 }
 
@@ -98,6 +101,7 @@ func TestSelectedConstructedRecoveryKeepsCapturedVersionBothStores(t *testing.T)
 
 type selectedConstructedInputProof struct {
 	scan, changedVersionRecovery bool
+	parentRuntime                bool
 }
 
 type selectedHistoricalScanProbe struct {
@@ -165,6 +169,10 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 	}
 	runID, eventID := uuid.NewString(), uuid.NewString()
 	at := time.Unix(1700002200, 0).UTC()
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, selectedContractTestProcessCapability(t, ctx, selected))
+	if err != nil {
+		t.Fatal(err)
+	}
 	bundle, _ := semanticview.Bundle(loaded.Source)
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
@@ -319,6 +327,10 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		owner.ports.replay = selectedHistoricalScanProbe{SelectedContractReplayPersistence: owner.ports.replay, store: selected.(deliverylifecycle.Store)}
 	}
 	agents := map[agentidentity.Identity]*constructedInputAgent{}
+	var parentGrantID string
+	if proof.parentRuntime {
+		ctx, parentGrantID = selectedForkParentRuntimeContext(t, ctx, selected, loaded.SourceArtifactFact)
+	}
 	request := SelectedContractExecutionRequest{
 		SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
@@ -331,6 +343,16 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 					return nil, err
 				}
 				agent := &constructedInputAgent{observe: func(ctx context.Context, event events.Event) error {
+					if parentGrantID != "" {
+						original, err := startupownership.CaptureMutationAuthority(ctx)
+						if err != nil {
+							return err
+						}
+						grant := original.GrantEvidence()
+						if grant.GrantID == parentGrantID || grant.SelectedFork == nil || grant.SelectedFork.ForkRunID != event.RunID() {
+							return fmt.Errorf("selected handler did not consume its own exact child grant")
+						}
+					}
 					err := observeSelectedConstructedInput(ctx, selected, event)
 					if err != nil {
 						t.Logf("selected admission observation: %v", err)
