@@ -23217,16 +23217,6 @@
       }
     },
     {
-      "path": "platform.events[\"platform.run_stalled\"].payload.flow_instance",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "platform.events[\"platform.run_stalled\"].payload.last_progress_at",
       "provenance": {
         "origin": "authored",
@@ -23258,6 +23248,16 @@
     },
     {
       "path": "platform.events[\"platform.run_stalled\"].payload.stalled_for_seconds",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.events[\"platform.run_stalled\"].payload.stalled_instances",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",
