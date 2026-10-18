@@ -46,7 +46,7 @@ func (p *selectedStoreActivationBoundary) ActivateRunForkForSelectedContractExec
 
 // The decorator observes only the real native call after staged preparation and
 // attachment. It cannot supply an execution authority or a replacement child.
-func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selected any) func(runfork.RunForkSelectedContractExecutionActivateRequest, runfork.RunForkPoint, func(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)) (runfork.RunForkActivation, error) {
+func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selected any, observed ...runforkexecution.SelectedContractRuntimeExecutionLifecycle) func(runfork.RunForkSelectedContractExecutionActivateRequest, runfork.RunForkPoint, func(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)) (runfork.RunForkActivation, error) {
 	t.Helper()
 	storeTestWorkOwner(t)
 	value, _ := storeTestWorkFixtures.Load(t)
@@ -54,7 +54,7 @@ func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selec
 	ctx = worklifetime.WithProcess(ctx, work.process)
 	capability := selectedMaterializationProcessForTest(t, work, selected)
 	probe := &selectedStoreActivationBoundary{SelectedContractForkLifecycle: selected.(runforkexecution.SelectedContractForkLifecycle)}
-	owner := selectedStorePreparationOwnerWithForkForTest(t, selected, probe)
+	owner := selectedStorePreparationOwnerWithForkForTest(t, selected, probe, observed...)
 	if err := owner.BindSelectedProcess(ctx, work.process, capability); err != nil {
 		t.Fatal(err)
 	}

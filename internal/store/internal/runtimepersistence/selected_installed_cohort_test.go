@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 	"github.com/google/uuid"
@@ -71,6 +72,10 @@ func (r *selectedInstalledHistoryRows) Next(values []driver.Value) error {
 			return nil
 		}
 		switch r.fault {
+		case "copy_payload":
+			values[columns["result_payload"]] = []byte(`{"value":"changed-copy"}`)
+		case "copy_clock":
+			values[columns["updated_at"]] = time.Now().UTC().Add(time.Hour)
 		case "journal_read_error":
 			return errSelectedGrantHistoryRead
 		case "foreign_run":
@@ -202,7 +207,7 @@ func proveClosedSelectedInstalledJournalCohort(t *testing.T, fixture completionS
 				return err
 			}
 			var err error
-			captured, err = runforkpersistence.ReadClosedSelectedInstalledJournalCohortTx(txctx, tx, selected.forkRun, fixture.sqlite)
+			captured, err = runforkpersistence.ReadClosedSelectedInstalledJournalCohortTx(txctx, tx, selected.forkRun, fixture.sqlite, semanticview.OriginalLoopCarriage{})
 			return err
 		})
 		if err != nil {
@@ -237,7 +242,7 @@ func proveClosedSelectedInstalledJournalCohort(t *testing.T, fixture completionS
 			}
 			got, err := read(readCtx)
 			if scenario != "complete" {
-				if err == nil || got.Generations != nil || got.Journals != nil {
+				if err == nil || got.Generations != nil || got.Journals != nil || got.CopiedJournals != nil {
 					t.Fatalf("incomplete cohort returned evidence: %+v err=%v", got, err)
 				}
 				stages := map[string]string{
@@ -258,7 +263,7 @@ func proveClosedSelectedInstalledJournalCohort(t *testing.T, fixture completionS
 				}
 				return
 			}
-			if err != nil || len(got.Generations) != 2 || len(got.Journals) != 6 || len(want) != 6 {
+			if err != nil || len(got.Generations) != 2 || len(got.Journals) != 6 || len(want) != 6 || len(got.CopiedJournals) != 0 {
 				t.Fatalf("all generations and actual installed journals: %+v err=%v", got, err)
 			}
 			for i, fact := range got.Generations {

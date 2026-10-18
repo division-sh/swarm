@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
@@ -30,15 +31,16 @@ type ClosedSelectedGenerationHistory struct {
 	Grants                                                      []activityjournal.SelectedGrantFact
 }
 
-// ClosedSelectedInstalledJournalCohort is not the full reset manifest: NULL
-// lineage, permanent operation and the other retained fact families remain
-// separate required proofs. No canonical row is changed by this capture.
+// ClosedSelectedInstalledJournalCohort is not the full reset manifest. Copied
+// journals belong to the complete closed cohort, never a producing generation.
+// Other retained fact families remain separate required proofs.
 type ClosedSelectedInstalledJournalCohort struct {
-	Generations []ClosedSelectedGenerationHistory
-	Journals    []activityjournal.InstalledSelectedJournalHistory
+	Generations    []ClosedSelectedGenerationHistory
+	Journals       []activityjournal.InstalledSelectedJournalHistory
+	CopiedJournals []ClosedSelectedCopiedJournalHistory
 }
 
-func ReadClosedSelectedInstalledJournalCohortTx(ctx context.Context, tx *sql.Tx, forkRunID string, sqlite bool) (ClosedSelectedInstalledJournalCohort, error) {
+func ReadClosedSelectedInstalledJournalCohortTx(ctx context.Context, tx *sql.Tx, forkRunID string, sqlite bool, original semanticview.OriginalLoopCarriage) (ClosedSelectedInstalledJournalCohort, error) {
 	var absent ClosedSelectedInstalledJournalCohort
 	generations, err := ReadClosedSelectedGenerationHistoryTx(ctx, tx, forkRunID, sqlite)
 	if err != nil {
@@ -48,11 +50,28 @@ func ReadClosedSelectedInstalledJournalCohortTx(ctx context.Context, tx *sql.Tx,
 	for _, fact := range generations {
 		histories = append(histories, fact.Grants)
 	}
-	journals, err := activityjournal.ReadInstalledSelectedJournalHistoryTx(ctx, tx, forkRunID, histories, sqlite)
+	journals, candidates, err := activityjournal.ReadSelectedTerminalJournalHistoryTx(ctx, tx, forkRunID, histories, sqlite)
 	if err != nil {
 		return absent, err
 	}
-	return ClosedSelectedInstalledJournalCohort{Generations: generations, Journals: journals}, nil
+	var copied []ClosedSelectedCopiedJournalHistory
+	if len(candidates) != 0 {
+		permanent, err := readClosedSelectedPermanentForkCohortTx(ctx, tx, generations, sqlite)
+		if err != nil {
+			return absent, fmt.Errorf("copied journal requires its exact source-lineage membership owner: %w", err)
+		}
+		for _, candidate := range candidates {
+			fact, err := readClosedSelectedCopiedJournalTx(ctx, tx, permanent, candidate, sqlite, original)
+			if err != nil {
+				return absent, fmt.Errorf("copied journal requires its exact source-lineage membership owner: %w", err)
+			}
+			copied = append(copied, fact)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return absent, err
+	}
+	return ClosedSelectedInstalledJournalCohort{Generations: generations, Journals: journals, CopiedJournals: copied}, nil
 }
 
 // ReadClosedSelectedGenerationHistoryTx captures every generation after the

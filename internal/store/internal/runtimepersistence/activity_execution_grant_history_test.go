@@ -27,6 +27,7 @@ type activityGrantHistoryConnector struct {
 	cohortReads    int
 	installedFault string
 	permanentFault string
+	copiedFault    string
 }
 
 func (c *activityGrantHistoryConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -72,6 +73,12 @@ func (c *activityGrantHistoryConn) QueryContext(ctx context.Context, query strin
 	}
 	if permanent {
 		return &permanentForkEvidenceRows{Rows: rows, fault: c.control.permanentFault, query: query}, nil
+	}
+	if c.control.copiedFault != "" && strings.Contains(query, "COALESCE(source_obligation_event_id, source_event_id)") {
+		return &selectedCopiedInputRows{Rows: rows, fault: c.control.copiedFault}, nil
+	}
+	if installed && strings.HasPrefix(c.control.copiedFault, "copy_") {
+		return &selectedInstalledHistoryRows{Rows: rows, fault: c.control.copiedFault}, nil
 	}
 	if closed || installed {
 		return &selectedInstalledHistoryRows{Rows: rows, fault: c.control.installedFault, closed: closed}, nil
@@ -214,6 +221,7 @@ func TestActivityExecutionGrantReadUsesExactHistoricalVersionBothStores(t *testi
 			}
 			proveRetiredSelectedGrantHistory(t, fixture, process, control)
 			proveClosedSelectedPermanentForkCohort(t, backend)
+			proveClosedCopiedSelectedJournalCohort(t, backend)
 		})
 	}
 }

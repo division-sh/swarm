@@ -213,6 +213,12 @@ func SelectedForkReplay(id string, eventType events.EventType, producer events.P
 	return mustEvent(events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{Facts: facts, Lineage: lineage}))
 }
 
+// SelectedForkReplayWithRoutingSource retains the selected input's producer route.
+func SelectedForkReplayWithRoutingSource(id string, eventType events.EventType, producer events.ProducerIdentity, payload json.RawMessage, lineage events.SelectedForkLineage, envelope events.EventEnvelope, source events.RoutingSource, createdAt time.Time) events.Event {
+	facts := fixtureFactsWithRoutingSource(id, eventType, producer.Type(), producer.ID(), "", payload, 0, envelope, createdAt, lineage.ExecutionMode(), source)
+	return mustEvent(events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{Facts: facts, Lineage: lineage}))
+}
+
 // PersistedProjection builds a persisted projection/readback fixture from
 // authoritative event facts. Runtime producer fixtures should use the exact
 // class-specific construction helper instead.

@@ -723,6 +723,52 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 			return err
 		}
 	}
+	if err := confirmCopiedActivityEvidenceTx(ctx, tx, forkRunID, flowInstance, request, reference, evidence, replyID); err != nil {
+		return err
+	}
+	if !inserted {
+		return nil
+	}
+	var canonicalFailure *runtimefailures.Envelope
+	if raw := strings.TrimSpace(string(evidence.Failure)); raw != "" && raw != "null" {
+		var decoded runtimefailures.Envelope
+		if err := json.Unmarshal(evidence.Failure, &decoded); err != nil {
+			return fmt.Errorf("decode fork-local activity failure %s: %w", request.ActivityID, err)
+		}
+		canonicalFailure = &decoded
+	}
+	attempt := 1
+	return story.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindActivityLifecycle, Transition: evidence.Status,
+		SourceOwner: "activity_attempts", SourceIdentity: requestEventID + ":" + evidence.Status,
+		DedupKey:   "activity:" + requestEventID + ":" + evidence.Status,
+		OccurredAt: evidence.CompletedAt.UTC(), RunID: forkRunID, EntityID: request.EntityID, FlowID: strings.TrimSpace(flowInstance),
+		Projection: runtimeauthoractivity.Projection{
+			SubjectType: "activity", SubjectID: request.ActivityID, NodeID: request.NodeID, Activity: request.ActivityID,
+			Tool: request.Tool, Attempt: &attempt, EventType: evidence.ResultEventType, ExecutionMode: string(evidence.ExecutionMode),
+		},
+		Failure: canonicalFailure,
+	})
+}
+
+// The copier and closed-cohort reader share the exact native readback check;
+// the latter never inserts, records a story, or grants an execution binding.
+func confirmCopiedActivityEvidenceTx(ctx context.Context, tx *sql.Tx, forkRunID, flowInstance string, request runForkActivityRequestPayload, reference *loopruntime.ForkChildReference, evidence runForkActivityAttemptEvidence, replyID string) error {
+	fact, err := runForkActivityFact(request)
+	if err != nil {
+		return err
+	}
+	requestEventID := activityidentity.RequestEventID(fact)
+	resultEventID := activityidentity.ResultEventID(fact, evidence.ResultEventType)
+	generation := request.Generation
+	generationJSON, err := json.Marshal(generation)
+	if err != nil {
+		return err
+	}
+	resultPayload, err := projectForkRevisionPayload(evidence.ResultPayload, reference)
+	if err != nil {
+		return err
+	}
 	if err := activityjournal.RequireLiveAttemptParentsTx(ctx, tx, requestEventID); err != nil {
 		return err
 	}
@@ -784,29 +830,7 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 			return fmt.Errorf("fork-local activity evidence %s conflicts with canonical fork timestamps", request.ActivityID)
 		}
 	}
-	if !inserted {
-		return nil
-	}
-	var canonicalFailure *runtimefailures.Envelope
-	if raw := strings.TrimSpace(string(evidence.Failure)); raw != "" && raw != "null" {
-		var decoded runtimefailures.Envelope
-		if err := json.Unmarshal(evidence.Failure, &decoded); err != nil {
-			return fmt.Errorf("decode fork-local activity failure %s: %w", request.ActivityID, err)
-		}
-		canonicalFailure = &decoded
-	}
-	attempt := 1
-	return story.Record(ctx, runtimeauthoractivity.Draft{
-		Kind: runtimeauthoractivity.KindActivityLifecycle, Transition: evidence.Status,
-		SourceOwner: "activity_attempts", SourceIdentity: requestEventID + ":" + evidence.Status,
-		DedupKey:   "activity:" + requestEventID + ":" + evidence.Status,
-		OccurredAt: evidence.CompletedAt.UTC(), RunID: forkRunID, EntityID: request.EntityID, FlowID: strings.TrimSpace(flowInstance),
-		Projection: runtimeauthoractivity.Projection{
-			SubjectType: "activity", SubjectID: request.ActivityID, NodeID: request.NodeID, Activity: request.ActivityID,
-			Tool: request.Tool, Attempt: &attempt, EventType: evidence.ResultEventType, ExecutionMode: string(evidence.ExecutionMode),
-		},
-		Failure: canonicalFailure,
-	})
+	return nil
 }
 
 func nullableRunForkString(value string) any {

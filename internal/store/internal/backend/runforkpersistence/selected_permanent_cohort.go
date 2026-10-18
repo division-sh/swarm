@@ -32,7 +32,12 @@ func ReadClosedSelectedPermanentForkCohortTx(ctx context.Context, tx *sql.Tx, fo
 	if err != nil {
 		return absent, err
 	}
-	binding, err := loadRunForkSelectedContractBinding(ctx, tx, forkRunID)
+	return readClosedSelectedPermanentForkCohortTx(ctx, tx, generations, sqlite)
+}
+
+func readClosedSelectedPermanentForkCohortTx(ctx context.Context, tx *sql.Tx, generations []ClosedSelectedGenerationHistory, sqlite bool) (ClosedSelectedPermanentForkCohort, error) {
+	var absent ClosedSelectedPermanentForkCohort
+	binding, err := loadRunForkSelectedContractBinding(ctx, tx, generations[0].Execution.ForkRunID)
 	if err != nil {
 		return absent, fmt.Errorf("read permanent selected binding: %w", err)
 	}
