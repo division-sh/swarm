@@ -1,0 +1,1024 @@
+{
+  "head": "073a1183fedf55cac4c31d0e36c52c53126825a0",
+  "exit": 0,
+  "files": 81,
+  "rootCount": 257,
+  "packages": 11,
+  "passedRoots": [
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-complexity",
+      "root": "TestWorkflowUnconditionalGateAndExecutableAggregate"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingGuardChildrenUseFrozenSourceAndRetainTheirActualLogs"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingPreflightChildUsesFrozenSourceAndCannotFabricateCompletion"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "root": "TestCIExecutionSelectionConsumers"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "root": "TestCIExecutionFixtureCensusExcludesNestedCheckout"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "root": "TestShippedCISmokeUsesPositionalSourceRoot"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofSnapshotRetainsAuthenticatedReplayCuts"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofReadCutsRetainCanonicalPreflightPredecessor"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedSelectsChangedGoPackageAndReverseDependents"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedUsesXTestImportsForReverseDependents"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedMapsNonGoFilesInsidePackageDirectories"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedMapsTextFixturesInsidePackageDirectories"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedDeletedGoFileWithoutCurrentPackageFallsBackToFullSuite"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedGlobalFilesFallBackToFullSuite"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedRootDocsFallBackToFullSuite"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedNoChangesSelectsNoPackages"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedExecutableMarkdownFixtureFallsBackToFullSuite"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedUnownedFileFallsBackToFullSuite"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIArtifactTransportCensusIsCurrentAttemptAndLossless"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIArtifactNamespaceIgnoresStaleNeedsAndRetainedSuccess"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestAttemptQualifiedProofDownloadsPreserveNativeRefusals"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestPostgresCapacityAllocationGuard"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestCIPostgresJobsShareOwnedRunner"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestCanonicalTestRunnerHasNoRemovedBinaryAlias"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogFixturesUseCanonicalCreateFlowInstanceAuthoring"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogAuthoringExcludesNestedCheckout"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testplanning",
+      "root": "TestWorkspaceDockerProofsHaveProvisionedHostedOwner"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofReadCutsRefuseMissingForeignAndUnboundRequests"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofSnapshotIncludesRuntimeDataAndHistory"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofSnapshotChangeAndRestoreCannotReachGuardReads"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestPublisherAttemptEvidenceRefusalDoesNotMutateModel"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestPublisherNativeAttemptProcess"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestMergedRunPlanAcquiresObservedAttemptNotTimestamp"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestMergedRunPlanRefusesMissingDuplicateForeignExpiredAndIncomplete"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofManifestIndirectionIsFrozen"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogRequiredInventory"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogDiscoveryExcludesNestedCheckout"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogInventoryFailsClosed"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestMergedRunPlanRefusesForeignSelectionAndMalformedArchive"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogExternalProofsFailClosed"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestMergedRunPlanRefusesUnboundObservationAndArchiveAPIFailure"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestMergedObservationRevalidationRefusesAttemptAndSelectionChange"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestFailureLogTransportUsesAuthenticatedByteReader"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestFailureLogTransportRetainsExactRawDigest"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestProofBatchPreparesDockerFixtureOnlyForExactRequiredUnit"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogOwnershipHasNoLegacyClassifierOrSimulator"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogOwnershipCensusExcludesNestedCheckout"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestFailureLogCredentialsUseExplicitGitHubAuthority"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestFailureLogTransportCancellationAndPrivateErrors"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestFailurePresentationPreservesOnlineAndOfflineEvidence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestProofBatchCollectsLaterUnitAfterFailureWithFreshProcessesAndTemps"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIConditionStatusFunctions"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCITierIncreaseKeepsLateSummaryAndNewHeadEvent"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIManualDispatchFullSummaryHasOnlyFullAdmission"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestFailureLogTransportRefusesUnsuccessfulEvidence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestFailurePresentationEscapesEveryExternalField"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestFailureFatalPresentationUsesSameBoundary"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIDraftAdmissionAndReadyTransitions"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIDraftSkipsPlanAndProofExpansion"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testplanning",
+      "root": "TestWorkspaceImageCacheHostedContract"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-unused",
+      "root": "TestAttemptQualifiedNativeDownloadsUseRealUnionAndRefuseOldPartners"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelClientLocaleOwnsIndependentSelectedStoreRevision"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-unused",
+      "root": "TestWorkflowNativeUnionIsRequired"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofRealSourceManifestCoversRuntimeReaders"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestPostgresGuardClassifiesExactProductionConnectorsWithoutTestAuthority"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestPostgresGuardIgnoresNestedCheckoutAndRejectsCurrentSource"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestPostgresContributorGuideIsCanonicalAndQuarantined"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestPostgresContributorGuideGuardRejectsCapacityDrift"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIRequiredSummaryRefusesDraftQualification"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCISameSHARequiredContextTransition"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIConcurrencyNamespaceIsolation"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogRequiredCIProofSelection"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogRequiredCensusArtifacts"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogExternalProofPartitionsThroughInventory"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogFullLifecycleFixtureIsFiniteFilesystemFlowTree"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogFullLifecycleFixtureExcludesNestedCheckout"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestGeneratedPublisherUsesOnlyAutomaticPRQualification"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestPublisherCommandProcess"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIJobCollectionWaitsOnlyForTerminalEvidence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCICachesSeparateModulesAndNeverRestoreAnotherProofUnit"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIConsumesOnePlanAndCompletePlanBoundEvidence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofRefusesWrongOrMissingHistoryAndControls"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingExecutorArchiveCannotHideGitEntriesWithAttributes"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestFailureObservationRetainsNativeBoundaries"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofAdmissionDoesNotExecuteCallerCleanFilters"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofInputPathsKeepTheirCallerMeaning"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testplanning",
+      "root": "TestWorkspaceImageCacheExecutesActualHitMissAndRefusals"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testplanning",
+      "root": "TestWorkspaceImageCacheDockerfileInputsAreComplete"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofSnapshotRejectsWritesMissingAndReplacedInputs"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofGitIgnoresCallerConfigurationInjection"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingPinnedFetchRefusesLocalTransportRedirection"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofPathsRejectControlDirectoryAliases"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingRetainedPreflightSurvivesProofDisposal"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCommittedPolicyModelAndProjectionConsumersAreCanonical"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestCompletionFixtureJoinsEveryDescendantSlot"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelDeliveryCardActionAdmissionSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestCompletionFixtureEarlyCleanupPreservesReleaseEvidence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestCompletionWorkersBoundedAndJoined"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestCompletionMultiworkerSignals"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestCompletionParentDeathRetainsWorkerDescendants"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestCompletionPreflightAndOrdering"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestCompletionNativePreflightSelection"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightScheduleIsStableCompletePermutation"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightScheduleExecutorPreservesRefusals"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightScheduleFirstFailureMeasurement"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusPublishesOnlyCompletedExactHead"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestServeappPolicyPartitionRejectsLostProof"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCommandEvidenceJSONRejectsLegacyVersion"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCITierCheckRecordsSameRunSelectionAndOutcome"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestDebtAnalysisCIUsesExactReadOnlyRestoreAndProtectedProducer"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestDebtAnalysisCIPublisherPreservesArchiveContract"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestDebtAnalysisCIPublisherReplayAdmission"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestDebtAnalysisCIPublisherRejectsUnsuccessfulAuthorities"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestNightlyProofReusesExhaustiveOwnerWithoutRemovingPRProof"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusRefusesIncompleteOrChangedEvidence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCommandAdmissionRootManifestAndReceiptMatrix"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCommandAdmissionRootCellsPreserveDistinctExecutionScopes"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCommandAdmissionRetainsGovernedDeferralAndUntestedPackages"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCommandAdmissionRejectsOneRootlessUnitBesideValidPeer"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCommandIdentityRejectsChangedCompilerVersion"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestQualificationRejectsMissingCompilerOnEitherSide"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestPinnedReferenceCompilerRefreshPreservesEveryHistoricalByte"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestLocalPreflightCIReadsLatestStartedAttempt"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestMasterReplayCompilerVersionRefusalUsesNativeReader"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestEvidenceProducerRefusesForeignCompilerBeforePublication"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestLocalPreflightCIRefusesMalformedTransportAndIdentity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusRefusesFailedOrContradictoryAPI"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestLocalPreflightCIEventAndPaginationBoundaries"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestLocalPreflightCIHasNoExpensiveBypass"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestNativeUnusedCadenceConsumesActualWorkflowConditions"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusFailureAndInterruptedStartsNeverAttestSuccess"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusDiesAfterAcknowledgedStart"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusConcurrentFinishHasOneTerminalOwner"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusCannotImportOrRebindSuccessPlan"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusRejectsEarlyOverridesAndInvalidAttempts"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusWriterFeedsActualCIReader"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusCommandProcess"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestNativeUnusedRequiredSummaryCadenceAndStrictStatuses"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestNativeUnusedNightlyFailureCannotMintMasterMarker"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestNativeUnusedSkippedJobsCannotHideFailedPlanOrDraft"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestProofBatchFailFastRetainsFailedReceiptAndJoinsOwnedCleanup"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestProofBatchProvidesHistoricalCorpusInputsBeforeExecution"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestProofHistoryInputsMatchPinnedSourceConsumers"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestProofHistoryFetchesExactObjectsInDepthOneCheckout"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestProofHistoryRejectsInvalidOrMissingInputs"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestMandatorySoakCompleteDisjointPartitionAllProfiles"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestMandatorySoakWorkflowRequiredExactHeadAndBudgets"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestMandatorySoakWorkflowMatrixExecutionAndShellSyntax"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestMandatorySoakEvidenceRequiresBothFullBackendReceipts"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIVersionBoundToolsUsePlannedGoToolchain"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightCurrentSourceUsesAllFiniteOwners"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightFiniteCandidatesPreserveUnselectedNativePackageGrowth"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelDeliveryEffectCurrentnessSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingBoundHandoffObservationAndCleanupReplaySelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingBoundHandoffSelectedStoreFences"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingBoundHandoffProofResponsibilityFencesSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingRetainedReconnectFencesSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingBoundBeforeParentCheckpointSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelConfirmationRequiresActiveOwningOnboardingParentSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingSelectedStoreContractParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingCredentialStaleParentResetSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingCredentialStaleRecoverySelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestRetiredPreparingOnboardingReleasesUncheckpointedCredentialSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestFailedOnboardingFenceRejectsCredentialReadmissionSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelRebindPublicationRetiresEverySiblingActivationForInterface"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingConfirmedReconnectBeforeParentPhaseSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingStaleConfirmationBeforeParentPhaseSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingEarlyResetCleanupSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingEarlyResetSelectedStoreFences"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingEarlyResetPreservesInheritedAndObservedEvidence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingEffectReconciliationSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingPendingResetInterruptionSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingPendingResetSelectedStoreFences"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingPendingResetIdentityJoinSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingPendingResetLifecycleSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelOnboardingPendingResetBindingSnapshotComparison"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelActivityNativeAcknowledgementCutsBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelPostCommitActivityHintsBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelPostCommitCardCreationAndTerminalHintsBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelPostCommitBindingHintsBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestNormalRunCompletionRequiresExactDecisionOutcomeEventIDParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestDecisionCardRefusalReasonAcrossAnchorsAndOperationsBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestDecisionCompletionPreservesCommittedHandoffOutcome"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "Test2376ForkDecisionExecutionSourceBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "Test2376ForkRejectedEffectHistoricalBoundaryBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestInboundEvidencePersistsTypedNoSubscriberByDesign"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestInboundPublicationRefusesCredentialIneligibleStandingBeforeDurableCommitBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelSelectedStoreContractParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelDeliveryDefaultFollowsOnlyVerifiedSelectedBindingBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelConfirmationCurrentnessReadFailurePreservesPendingCeremonySelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelBeginReplayPrecedesCredentialCurrentnessSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelProofCurrentnessReadFailurePreservesPendingResponsibilitySelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestServedParityHarnessOperatorChannelLifecycle"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelProofResponsibilityRecoversAfterCommittedBindingSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelTerminalReplayAfterCredentialRotationSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelProviderCredentialRotationSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelProofResponsibilityReconcilesCommittedFileSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelUnresolvedProofResponsibilityFencesBindingMutationSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelUnbindDischargesUnresolvedProofResponsibilitySelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelUnresolvedProofResponsibilityConcurrentMutationSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelRetainedLifecycleProjectionSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOperatorChannelProofBootPreservesExactScopeSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestProposedEffectCardLifecycleParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestNormalRunCompletionRequiresSettledProposedEffectsParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestProposedEffectContractPinParticipatesInDuplicateIdentityOnBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestProposedEffectDecisionAndSupersessionWinnerParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestProposedEffectSupersessionScopesParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestProposedEffectCompletionUsesFrozenPublicationIdentityBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestReplyContextStore_ForkedSourceRejectsCreateAndClaimWithoutDestroyingLineage"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestReplyContextStore_ForkFreezeSerializesBothCreateAndClaimCommitOrders"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestRunForkActivityTimestampRecordedReuseBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestOrdinaryForkActivityReplayCardDependencyBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestSelectedForkRecordedActivityCardDependencyBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestRunForkActivityTimestampRejectsIncompleteReuseBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestMaterializeRunForkGateAuthoritiesSelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStoreParity"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestForkGenerationPreparationReconstructedOwnersBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestForkGenerationRepeatedActivityEvidenceBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestForkPendingGenerationCorrespondenceBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestForkRecordedActivityGenerationEvidenceBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestForkedSourceSessionTurnAndConversationConsumersRefuse"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestForkedSourceDirectiveReservationTransitionsAndRecoveryRefuse"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestForkedSourceManagedExternalEffectAdmissionTransitionsAndRecoveryRefuse"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestForkedRunSelectedContractExecutionRefusesAdmissionAndAllowsExactFinalization"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestForkedSourceCannotWriteSelectedContractRouteRecoveryEvidence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestRunForkSourceFreezeRollbackLeavesNoPartialOutcome"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestRunForkSourceFreezeRequiresConfirmationBeforeMutation"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestRunForkSourceFreezeRejectsCompletedSourceWithoutConfirmationCeremony"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "Test2376ChannelExactSelectionAndStoredPresentationBothStores"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestSelectedStoreAbstractionGuardMatrixCoversApprovedBoundary"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestSelectedStoreProofCensusRejectsForeignOnlyDeclaration"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestActivityAdmissionConsumesConstructedHeaderBothStores"
+    }
+  ],
+  "passedCells": 4132,
+  "failures": [],
+  "skipped": []
+}

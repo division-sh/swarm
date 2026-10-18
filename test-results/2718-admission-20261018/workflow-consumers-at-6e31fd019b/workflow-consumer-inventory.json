@@ -1,0 +1,228 @@
+{
+  "head": "6e31fd019bb56ecfd7e0b3ab5e1265f67c6b9dc2",
+  "files": 21,
+  "rootCount": 94,
+  "packages": {
+    "./cmd/swarm-complexity": [
+      {
+        "file": "cmd/swarm-complexity/workflow_test.go",
+        "roots": [
+          "TestWorkflowUnconditionalGateAndExecutableAggregate"
+        ]
+      }
+    ],
+    "./cmd/swarm-test-timing": [
+      {
+        "file": "cmd/swarm-test-timing/artifact_evidence_test.go",
+        "roots": [
+          "TestAttemptQualifiedProofDownloadsPreserveNativeRefusals",
+          "TestPublisherAttemptEvidenceRefusalDoesNotMutateModel",
+          "TestPublisherNativeAttemptProcess"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test-timing/artifact_plan_test.go",
+        "roots": [
+          "TestMergedRunPlanAcquiresObservedAttemptNotTimestamp",
+          "TestMergedRunPlanRefusesMissingDuplicateForeignExpiredAndIncomplete",
+          "TestMergedRunPlanRefusesForeignSelectionAndMalformedArchive",
+          "TestMergedRunPlanRefusesUnboundObservationAndArchiveAPIFailure",
+          "TestMergedObservationRevalidationRefusesAttemptAndSelectionChange"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test-timing/failure_observation_test.go",
+        "roots": [
+          "TestFailureObservationRetainsNativeBoundaries"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test-timing/goversion_test.go",
+        "roots": [
+          "TestMasterReplayCompilerVersionRefusalUsesNativeReader",
+          "TestEvidenceProducerRefusesForeignCompilerBeforePublication"
+        ]
+      }
+    ],
+    "./cmd/swarm-test": [
+      {
+        "file": "cmd/swarm-test/accounting_snapshot_test.go",
+        "roots": [
+          "TestAccountingProofSnapshotIncludesRuntimeDataAndHistory",
+          "TestAccountingProofSnapshotChangeAndRestoreCannotReachGuardReads",
+          "TestAccountingProofManifestIndirectionIsFrozen",
+          "TestAccountingProofRealSourceManifestCoversRuntimeReaders",
+          "TestAccountingProofRefusesWrongOrMissingHistoryAndControls",
+          "TestAccountingExecutorArchiveCannotHideGitEntriesWithAttributes",
+          "TestAccountingProofAdmissionDoesNotExecuteCallerCleanFilters",
+          "TestAccountingProofInputPathsKeepTheirCallerMeaning",
+          "TestAccountingProofSnapshotRejectsWritesMissingAndReplacedInputs",
+          "TestAccountingProofGitIgnoresCallerConfigurationInjection",
+          "TestAccountingPinnedFetchRefusesLocalTransportRedirection",
+          "TestAccountingProofPathsRejectControlDirectoryAliases"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test/preflight_status_unix_test.go",
+        "roots": [
+          "TestPreflightStatusPublishesOnlyCompletedExactHead",
+          "TestPreflightStatusRefusesIncompleteOrChangedEvidence",
+          "TestPreflightStatusRefusesFailedOrContradictoryAPI",
+          "TestPreflightStatusFailureAndInterruptedStartsNeverAttestSuccess",
+          "TestPreflightStatusDiesAfterAcknowledgedStart",
+          "TestPreflightStatusConcurrentFinishHasOneTerminalOwner",
+          "TestPreflightStatusCannotImportOrRebindSuccessPlan",
+          "TestPreflightStatusRejectsEarlyOverridesAndInvalidAttempts",
+          "TestPreflightStatusWriterFeedsActualCIReader",
+          "TestPreflightStatusCommandProcess"
+        ]
+      }
+    ],
+    "./cmd/swarm-unused": [
+      {
+        "file": "cmd/swarm-unused/artifact_attempt_test.go",
+        "roots": [
+          "TestAttemptQualifiedNativeDownloadsUseRealUnionAndRefuseOldPartners"
+        ]
+      },
+      {
+        "file": "cmd/swarm-unused/workflow_test.go",
+        "roots": [
+          "TestWorkflowNativeUnionIsRequired"
+        ]
+      }
+    ],
+    "./internal/cliapp": [
+      {
+        "file": "internal/cliapp/ci_execution_selection_test.go",
+        "roots": [
+          "TestCIExecutionSelectionConsumers",
+          "TestCIExecutionFixtureCensusExcludesNestedCheckout"
+        ]
+      },
+      {
+        "file": "internal/cliapp/source_root_ci_test.go",
+        "roots": [
+          "TestShippedCISmokeUsesPositionalSourceRoot"
+        ]
+      }
+    ],
+    "./internal/store/internal/runtimepersistence": [
+      {
+        "file": "internal/store/internal/runtimepersistence/store_abstraction_guard_matrix_test.go",
+        "roots": [
+          "TestSelectedStoreAbstractionGuardMatrixCoversApprovedBoundary",
+          "TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs",
+          "TestSelectedStoreProofCensusRejectsForeignOnlyDeclaration"
+        ]
+      }
+    ],
+    "./internal/testcatalog": [
+      {
+        "file": "internal/testcatalog/inventory_test.go",
+        "roots": [
+          "TestCatalogRequiredInventory",
+          "TestCatalogDiscoveryExcludesNestedCheckout",
+          "TestCatalogInventoryFailsClosed",
+          "TestCatalogExternalProofsFailClosed",
+          "TestCatalogOwnershipHasNoLegacyClassifierOrSimulator",
+          "TestCatalogOwnershipCensusExcludesNestedCheckout",
+          "TestCatalogRequiredCIProofSelection",
+          "TestCatalogRequiredCensusArtifacts"
+        ]
+      }
+    ],
+    "./internal/testchanged": [
+      {
+        "file": "internal/testchanged/plan_test.go",
+        "roots": [
+          "TestPlanChangedSelectsChangedGoPackageAndReverseDependents",
+          "TestPlanChangedUsesXTestImportsForReverseDependents",
+          "TestPlanChangedMapsNonGoFilesInsidePackageDirectories",
+          "TestPlanChangedMapsTextFixturesInsidePackageDirectories",
+          "TestPlanChangedDeletedGoFileWithoutCurrentPackageFallsBackToFullSuite",
+          "TestPlanChangedGlobalFilesFallBackToFullSuite",
+          "TestPlanChangedRootDocsFallBackToFullSuite",
+          "TestPlanChangedNoChangesSelectsNoPackages",
+          "TestPlanChangedExecutableMarkdownFixtureFallsBackToFullSuite",
+          "TestPlanChangedUnownedFileFallsBackToFullSuite"
+        ]
+      }
+    ],
+    "./internal/testplanning": [
+      {
+        "file": "internal/testplanning/workspace_docker_proof_test.go",
+        "roots": [
+          "TestWorkspaceDockerProofsHaveProvisionedHostedOwner"
+        ]
+      },
+      {
+        "file": "internal/testplanning/workspace_image_cache_test.go",
+        "roots": [
+          "TestWorkspaceImageCacheHostedContract",
+          "TestWorkspaceImageCacheExecutesActualHitMissAndRefusals",
+          "TestWorkspaceImageCacheDockerfileInputsAreComplete"
+        ]
+      }
+    ],
+    "./internal/testtiming": [
+      {
+        "file": "internal/testtiming/ci_admission_test.go",
+        "roots": [
+          "TestCIConditionStatusFunctions",
+          "TestCITierIncreaseKeepsLateSummaryAndNewHeadEvent",
+          "TestCIManualDispatchFullSummaryHasOnlyFullAdmission",
+          "TestCIDraftAdmissionAndReadyTransitions",
+          "TestCIDraftSkipsPlanAndProofExpansion",
+          "TestCIRequiredSummaryRefusesDraftQualification",
+          "TestCISameSHARequiredContextTransition",
+          "TestCIConcurrencyNamespaceIsolation",
+          "TestGeneratedPublisherUsesOnlyAutomaticPRQualification",
+          "TestPublisherCommandProcess"
+        ]
+      },
+      {
+        "file": "internal/testtiming/ci_contract_test.go",
+        "roots": [
+          "TestCIJobCollectionWaitsOnlyForTerminalEvidence",
+          "TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres",
+          "TestCICachesSeparateModulesAndNeverRestoreAnotherProofUnit",
+          "TestCIConsumesOnePlanAndCompletePlanBoundEvidence",
+          "TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired",
+          "TestCommittedPolicyModelAndProjectionConsumersAreCanonical",
+          "TestServeappPolicyPartitionRejectsLostProof",
+          "TestCommandEvidenceJSONRejectsLegacyVersion"
+        ]
+      },
+      {
+        "file": "internal/testtiming/soak_ci_test.go",
+        "roots": [
+          "TestMandatorySoakCompleteDisjointPartitionAllProfiles",
+          "TestMandatorySoakWorkflowRequiredExactHeadAndBudgets",
+          "TestMandatorySoakWorkflowMatrixExecutionAndShellSyntax",
+          "TestMandatorySoakEvidenceRequiresBothFullBackendReceipts"
+        ]
+      },
+      {
+        "file": "internal/testtiming/workflow_go_test.go",
+        "roots": [
+          "TestCIVersionBoundToolsUsePlannedGoToolchain"
+        ]
+      }
+    ],
+    "./internal/testutil": [
+      {
+        "file": "internal/testutil/postgres_ci_test.go",
+        "roots": [
+          "TestCIPostgresJobsShareOwnedRunner",
+          "TestCanonicalTestRunnerHasNoRemovedBinaryAlias",
+          "TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector",
+          "TestPostgresGuardClassifiesExactProductionConnectorsWithoutTestAuthority",
+          "TestPostgresGuardIgnoresNestedCheckoutAndRejectsCurrentSource",
+          "TestPostgresContributorGuideIsCanonicalAndQuarantined",
+          "TestPostgresContributorGuideGuardRejectsCapacityDrift"
+        ]
+      }
+    ]
+  }
+}

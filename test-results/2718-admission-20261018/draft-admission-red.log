@@ -1,0 +1,28 @@
+Precompile outside test slot: environment=0.003s build=0.212s cleanup=0.000s total=0.215s
+Test slot acquired after 9ms. Starting go test ./internal/testtiming -run ^TestCIDraftAdmissionAndReadyTransitions$ -count=1
+--- FAIL: TestCIDraftAdmissionAndReadyTransitions (0.00s)
+    --- FAIL: TestCIDraftAdmissionAndReadyTransitions/opened/draft=false (0.00s)
+        ci_admission_test.go:170: condition "(\"pull_request\" != \"workflow_dispatch\" || inputs.workspace_base_setup != true) && \"success\" == \"success\" && (\"pull_request\" != \"pull_request\" || !false)": eval:1:43: undefined: inputs
+    --- FAIL: TestCIDraftAdmissionAndReadyTransitions/opened/draft=true (0.00s)
+        ci_admission_test.go:170: condition "(\"pull_request\" != \"workflow_dispatch\" || inputs.workspace_base_setup != true) && \"success\" == \"success\" && (\"pull_request\" != \"pull_request\" || !true)": eval:1:43: undefined: inputs
+    --- FAIL: TestCIDraftAdmissionAndReadyTransitions/synchronize/draft=false (0.00s)
+        ci_admission_test.go:170: condition "(\"pull_request\" != \"workflow_dispatch\" || inputs.workspace_base_setup != true) && \"success\" == \"success\" && (\"pull_request\" != \"pull_request\" || !false)": eval:1:43: undefined: inputs
+    --- FAIL: TestCIDraftAdmissionAndReadyTransitions/synchronize/draft=true (0.00s)
+        ci_admission_test.go:170: condition "(\"pull_request\" != \"workflow_dispatch\" || inputs.workspace_base_setup != true) && \"success\" == \"success\" && (\"pull_request\" != \"pull_request\" || !true)": eval:1:43: undefined: inputs
+    --- FAIL: TestCIDraftAdmissionAndReadyTransitions/reopened/draft=false (0.00s)
+        ci_admission_test.go:170: condition "(\"pull_request\" != \"workflow_dispatch\" || inputs.workspace_base_setup != true) && \"success\" == \"success\" && (\"pull_request\" != \"pull_request\" || !false)": eval:1:43: undefined: inputs
+    --- FAIL: TestCIDraftAdmissionAndReadyTransitions/reopened/draft=true (0.00s)
+        ci_admission_test.go:170: condition "(\"pull_request\" != \"workflow_dispatch\" || inputs.workspace_base_setup != true) && \"success\" == \"success\" && (\"pull_request\" != \"pull_request\" || !true)": eval:1:43: undefined: inputs
+    --- FAIL: TestCIDraftAdmissionAndReadyTransitions/ready_for_review/draft=false (0.00s)
+        ci_admission_test.go:170: condition "(\"pull_request\" != \"workflow_dispatch\" || inputs.workspace_base_setup != true) && \"success\" == \"success\" && (\"pull_request\" != \"pull_request\" || !false)": eval:1:43: undefined: inputs
+    --- FAIL: TestCIDraftAdmissionAndReadyTransitions/ready_for_review/draft=true (0.00s)
+        ci_admission_test.go:170: condition "(\"pull_request\" != \"workflow_dispatch\" || inputs.workspace_base_setup != true) && \"success\" == \"success\" && (\"pull_request\" != \"pull_request\" || !true)": eval:1:43: undefined: inputs
+    --- FAIL: TestCIDraftAdmissionAndReadyTransitions/converted_to_draft/draft=false (0.00s)
+        ci_admission_test.go:170: condition "(\"pull_request\" != \"workflow_dispatch\" || inputs.workspace_base_setup != true) && \"success\" == \"success\" && (\"pull_request\" != \"pull_request\" || !false)": eval:1:43: undefined: inputs
+    --- FAIL: TestCIDraftAdmissionAndReadyTransitions/converted_to_draft/draft=true (0.00s)
+        ci_admission_test.go:170: condition "(\"pull_request\" != \"workflow_dispatch\" || inputs.workspace_base_setup != true) && \"success\" == \"success\" && (\"pull_request\" != \"pull_request\" || !true)": eval:1:43: undefined: inputs
+    ci_admission_test.go:185: condition "(\"push\" != \"workflow_dispatch\" || inputs.workspace_base_setup != true) && \"success\" == \"success\" && (\"push\" != \"pull_request\" || !true)": eval:1:35: undefined: inputs
+FAIL
+FAIL	github.com/division-sh/swarm/internal/testtiming	0.005s
+FAIL
+exit status 1

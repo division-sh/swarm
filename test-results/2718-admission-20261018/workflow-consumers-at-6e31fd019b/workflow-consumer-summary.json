@@ -1,0 +1,407 @@
+{
+  "head": "6e31fd019bb56ecfd7e0b3ab5e1265f67c6b9dc2",
+  "exit": 1,
+  "files": 21,
+  "rootCount": 94,
+  "packages": 11,
+  "passedRoots": [
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-complexity",
+      "root": "TestWorkflowUnconditionalGateAndExecutableAggregate"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofSnapshotIncludesRuntimeDataAndHistory"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofSnapshotChangeAndRestoreCannotReachGuardReads"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofManifestIndirectionIsFrozen"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "root": "TestCIExecutionSelectionConsumers"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "root": "TestCIExecutionFixtureCensusExcludesNestedCheckout"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "root": "TestShippedCISmokeUsesPositionalSourceRoot"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIConditionStatusFunctions"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedSelectsChangedGoPackageAndReverseDependents"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedUsesXTestImportsForReverseDependents"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedMapsNonGoFilesInsidePackageDirectories"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedMapsTextFixturesInsidePackageDirectories"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedDeletedGoFileWithoutCurrentPackageFallsBackToFullSuite"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedGlobalFilesFallBackToFullSuite"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedRootDocsFallBackToFullSuite"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedNoChangesSelectsNoPackages"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedExecutableMarkdownFixtureFallsBackToFullSuite"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testchanged",
+      "root": "TestPlanChangedUnownedFileFallsBackToFullSuite"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCITierIncreaseKeepsLateSummaryAndNewHeadEvent"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIManualDispatchFullSummaryHasOnlyFullAdmission"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestCIPostgresJobsShareOwnedRunner"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestCanonicalTestRunnerHasNoRemovedBinaryAlias"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofRealSourceManifestCoversRuntimeReaders"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testplanning",
+      "root": "TestWorkspaceDockerProofsHaveProvisionedHostedOwner"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIDraftAdmissionAndReadyTransitions"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIDraftSkipsPlanAndProofExpansion"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestAttemptQualifiedProofDownloadsPreserveNativeRefusals"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogRequiredInventory"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogDiscoveryExcludesNestedCheckout"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogInventoryFailsClosed"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogExternalProofsFailClosed"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIRequiredSummaryRefusesDraftQualification"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCISameSHARequiredContextTransition"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIConcurrencyNamespaceIsolation"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogOwnershipHasNoLegacyClassifierOrSimulator"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogOwnershipCensusExcludesNestedCheckout"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestPublisherAttemptEvidenceRefusalDoesNotMutateModel"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestPublisherNativeAttemptProcess"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestMergedRunPlanAcquiresObservedAttemptNotTimestamp"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestMergedRunPlanRefusesMissingDuplicateForeignExpiredAndIncomplete"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofRefusesWrongOrMissingHistoryAndControls"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestMergedRunPlanRefusesForeignSelectionAndMalformedArchive"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingExecutorArchiveCannotHideGitEntriesWithAttributes"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestMergedRunPlanRefusesUnboundObservationAndArchiveAPIFailure"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestMergedObservationRevalidationRefusesAttemptAndSelectionChange"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofAdmissionDoesNotExecuteCallerCleanFilters"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofInputPathsKeepTheirCallerMeaning"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestGeneratedPublisherUsesOnlyAutomaticPRQualification"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestPublisherCommandProcess"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIJobCollectionWaitsOnlyForTerminalEvidence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCICachesSeparateModulesAndNeverRestoreAnotherProofUnit"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIConsumesOnePlanAndCompletePlanBoundEvidence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testplanning",
+      "root": "TestWorkspaceImageCacheHostedContract"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogRequiredCIProofSelection"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testcatalog",
+      "root": "TestCatalogRequiredCensusArtifacts"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestPostgresGuardClassifiesExactProductionConnectorsWithoutTestAuthority"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestPostgresGuardIgnoresNestedCheckoutAndRejectsCurrentSource"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestPostgresContributorGuideIsCanonicalAndQuarantined"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testutil",
+      "root": "TestPostgresContributorGuideGuardRejectsCapacityDrift"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofSnapshotRejectsWritesMissingAndReplacedInputs"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofGitIgnoresCallerConfigurationInjection"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingPinnedFetchRefusesLocalTransportRedirection"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestAccountingProofPathsRejectControlDirectoryAliases"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusPublishesOnlyCompletedExactHead"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestSelectedStoreAbstractionGuardMatrixCoversApprovedBoundary"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestFailureObservationRetainsNativeBoundaries"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testplanning",
+      "root": "TestWorkspaceImageCacheExecutesActualHitMissAndRefusals"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCommittedPolicyModelAndProjectionConsumersAreCanonical"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testplanning",
+      "root": "TestWorkspaceImageCacheDockerfileInputsAreComplete"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusRefusesIncompleteOrChangedEvidence"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusRefusesFailedOrContradictoryAPI"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-unused",
+      "root": "TestAttemptQualifiedNativeDownloadsUseRealUnionAndRefuseOldPartners"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
+      "root": "TestSelectedStoreProofCensusRejectsForeignOnlyDeclaration"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusFailureAndInterruptedStartsNeverAttestSuccess"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusDiesAfterAcknowledgedStart"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusConcurrentFinishHasOneTerminalOwner"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusCannotImportOrRebindSuccessPlan"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusRejectsEarlyOverridesAndInvalidAttempts"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusWriterFeedsActualCIReader"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test",
+      "root": "TestPreflightStatusCommandProcess"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestServeappPolicyPartitionRejectsLostProof"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCommandEvidenceJSONRejectsLegacyVersion"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestMandatorySoakCompleteDisjointPartitionAllProfiles"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestMandatorySoakWorkflowMatrixExecutionAndShellSyntax"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestMandatorySoakEvidenceRequiresBothFullBackendReceipts"
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/testtiming",
+      "root": "TestCIVersionBoundToolsUsePlannedGoToolchain"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestMasterReplayCompilerVersionRefusalUsesNativeReader"
+    },
+    {
+      "package": "github.com/division-sh/swarm/cmd/swarm-test-timing",
+      "root": "TestEvidenceProducerRefusesForeignCompilerBeforePublication"
+    }
+  ],
+  "passedCells": 774,
+  "failures": [
+    {
+      "Time": "2026-10-18T14:40:12.656139329Z",
+      "Action": "fail",
+      "Package": "github.com/division-sh/swarm/cmd/swarm-unused",
+      "Test": "TestWorkflowNativeUnionIsRequired",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-18T14:40:12.657178023Z",
+      "Action": "fail",
+      "Package": "github.com/division-sh/swarm/cmd/swarm-unused",
+      "Elapsed": 7.733
+    },
+    {
+      "Time": "2026-10-18T14:40:22.55326407Z",
+      "Action": "fail",
+      "Package": "github.com/division-sh/swarm/internal/testtiming",
+      "Test": "TestMandatorySoakWorkflowRequiredExactHeadAndBudgets",
+      "Elapsed": 0
+    },
+    {
+      "Time": "2026-10-18T14:40:22.687491419Z",
+      "Action": "fail",
+      "Package": "github.com/division-sh/swarm/internal/testtiming",
+      "Elapsed": 15.934
+    }
+  ],
+  "skipped": []
+}

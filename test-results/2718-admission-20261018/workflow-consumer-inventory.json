@@ -1,0 +1,713 @@
+{
+  "head": "073a1183fedf55cac4c31d0e36c52c53126825a0",
+  "seedFiles": [
+    "cmd/swarm-complexity/workflow_test.go",
+    "cmd/swarm-test-timing/artifact_evidence_test.go",
+    "cmd/swarm-test-timing/artifact_plan_test.go",
+    "cmd/swarm-test-timing/failure_observation_test.go",
+    "cmd/swarm-test-timing/goversion_test.go",
+    "cmd/swarm-test/accounting_snapshot_test.go",
+    "cmd/swarm-test/preflight_status_unix_test.go",
+    "cmd/swarm-unused/artifact_attempt_test.go",
+    "cmd/swarm-unused/workflow_test.go",
+    "internal/cliapp/ci_execution_selection_test.go",
+    "internal/cliapp/source_root_ci_test.go",
+    "internal/store/internal/runtimepersistence/store_abstraction_guard_matrix_test.go",
+    "internal/testcatalog/inventory_test.go",
+    "internal/testchanged/plan_test.go",
+    "internal/testplanning/workspace_docker_proof_test.go",
+    "internal/testplanning/workspace_image_cache_test.go",
+    "internal/testtiming/ci_admission_test.go",
+    "internal/testtiming/ci_contract_test.go",
+    "internal/testtiming/soak_ci_test.go",
+    "internal/testtiming/workflow_go_test.go",
+    "internal/testutil/postgres_ci_test.go"
+  ],
+  "files": 81,
+  "rootCount": 257,
+  "packages": {
+    "./cmd/swarm-complexity": [
+      {
+        "file": "cmd/swarm-complexity/workflow_test.go",
+        "roots": [
+          "TestWorkflowUnconditionalGateAndExecutableAggregate"
+        ]
+      }
+    ],
+    "./cmd/swarm-test-timing": [
+      {
+        "file": "cmd/swarm-test-timing/artifact_evidence_test.go",
+        "roots": [
+          "TestAttemptQualifiedProofDownloadsPreserveNativeRefusals",
+          "TestPublisherAttemptEvidenceRefusalDoesNotMutateModel",
+          "TestPublisherNativeAttemptProcess"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test-timing/artifact_plan_test.go",
+        "roots": [
+          "TestMergedRunPlanAcquiresObservedAttemptNotTimestamp",
+          "TestMergedRunPlanRefusesMissingDuplicateForeignExpiredAndIncomplete",
+          "TestMergedRunPlanRefusesForeignSelectionAndMalformedArchive",
+          "TestMergedRunPlanRefusesUnboundObservationAndArchiveAPIFailure",
+          "TestMergedObservationRevalidationRefusesAttemptAndSelectionChange"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test-timing/failure_log_test.go",
+        "roots": [
+          "TestFailureLogTransportUsesAuthenticatedByteReader",
+          "TestFailureLogTransportRetainsExactRawDigest",
+          "TestFailureLogCredentialsUseExplicitGitHubAuthority",
+          "TestFailureLogTransportCancellationAndPrivateErrors",
+          "TestFailurePresentationPreservesOnlineAndOfflineEvidence",
+          "TestFailureLogTransportRefusesUnsuccessfulEvidence",
+          "TestFailurePresentationEscapesEveryExternalField",
+          "TestFailureFatalPresentationUsesSameBoundary"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test-timing/failure_observation_integrity_test.go",
+        "roots": []
+      },
+      {
+        "file": "cmd/swarm-test-timing/failure_observation_test.go",
+        "roots": [
+          "TestFailureObservationRetainsNativeBoundaries"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test-timing/goversion_test.go",
+        "roots": [
+          "TestMasterReplayCompilerVersionRefusalUsesNativeReader",
+          "TestEvidenceProducerRefusesForeignCompilerBeforePublication"
+        ]
+      }
+    ],
+    "./cmd/swarm-test": [
+      {
+        "file": "cmd/swarm-test/accounting_execution_test.go",
+        "roots": [
+          "TestFrozenData",
+          "TestAccountingGuardChildrenUseFrozenSourceAndRetainTheirActualLogs",
+          "TestAccountingPreflightChildUsesFrozenSourceAndCannotFabricateCompletion"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test/accounting_history_test.go",
+        "roots": [
+          "TestAccountingProofSnapshotRetainsAuthenticatedReplayCuts",
+          "TestAccountingProofReadCutsRetainCanonicalPreflightPredecessor",
+          "TestAccountingProofReadCutsRefuseMissingForeignAndUnboundRequests"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test/accounting_snapshot_test.go",
+        "roots": [
+          "TestAccountingProofSnapshotIncludesRuntimeDataAndHistory",
+          "TestAccountingProofSnapshotChangeAndRestoreCannotReachGuardReads",
+          "TestAccountingProofManifestIndirectionIsFrozen",
+          "TestAccountingProofRealSourceManifestCoversRuntimeReaders",
+          "TestAccountingProofRefusesWrongOrMissingHistoryAndControls",
+          "TestAccountingExecutorArchiveCannotHideGitEntriesWithAttributes",
+          "TestAccountingProofAdmissionDoesNotExecuteCallerCleanFilters",
+          "TestAccountingProofInputPathsKeepTheirCallerMeaning",
+          "TestAccountingProofSnapshotRejectsWritesMissingAndReplacedInputs",
+          "TestAccountingProofGitIgnoresCallerConfigurationInjection",
+          "TestAccountingPinnedFetchRefusesLocalTransportRedirection",
+          "TestAccountingProofPathsRejectControlDirectoryAliases"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test/accounting_snapshot_unix_test.go",
+        "roots": [
+          "TestAccountingRetainedPreflightSurvivesProofDisposal"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test/completion_descendants_test.go",
+        "roots": [
+          "TestCompletionFixtureJoinsEveryDescendantSlot",
+          "TestCompletionFixtureEarlyCleanupPreservesReleaseEvidence"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test/completion_workers_test.go",
+        "roots": [
+          "TestCompletionWorkersBoundedAndJoined",
+          "TestCompletionMultiworkerSignals",
+          "TestCompletionParentDeathRetainsWorkerDescendants",
+          "TestCompletionPreflightAndOrdering",
+          "TestCompletionNativePreflightSelection"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test/preflight_schedule_unix_test.go",
+        "roots": [
+          "TestPreflightScheduleIsStableCompletePermutation",
+          "TestGuard",
+          "TestPreflightScheduleExecutorPreservesRefusals",
+          "TestPreflightScheduleFirstFailureMeasurement"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test/preflight_status_unix_test.go",
+        "roots": [
+          "TestPreflightStatusPublishesOnlyCompletedExactHead",
+          "TestPreflightStatusRefusesIncompleteOrChangedEvidence",
+          "TestPreflightStatusRefusesFailedOrContradictoryAPI",
+          "TestPreflightStatusFailureAndInterruptedStartsNeverAttestSuccess",
+          "TestPreflightStatusDiesAfterAcknowledgedStart",
+          "TestPreflightStatusConcurrentFinishHasOneTerminalOwner",
+          "TestPreflightStatusCannotImportOrRebindSuccessPlan",
+          "TestPreflightStatusRejectsEarlyOverridesAndInvalidAttempts",
+          "TestPreflightStatusWriterFeedsActualCIReader",
+          "TestPreflightStatusCommandProcess"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test/preflight_unix_test.go",
+        "roots": [
+          "TestPreflightCurrentSourceUsesAllFiniteOwners",
+          "TestPreflightFiniteCandidatesPreserveUnselectedNativePackageGrowth",
+          "TestPreflightCommandJoinsCancellationAndRefusesIncompleteExecution",
+          "TestUnsupported"
+        ]
+      },
+      {
+        "file": "cmd/swarm-test/process_tree_windows_test.go",
+        "roots": [
+          "TestPrepareChildProcessTreeCreatesWindowsProcessGroup"
+        ]
+      }
+    ],
+    "./cmd/swarm-unused": [
+      {
+        "file": "cmd/swarm-unused/artifact_attempt_test.go",
+        "roots": [
+          "TestAttemptQualifiedNativeDownloadsUseRealUnionAndRefuseOldPartners"
+        ]
+      },
+      {
+        "file": "cmd/swarm-unused/workflow_test.go",
+        "roots": [
+          "TestWorkflowNativeUnionIsRequired"
+        ]
+      }
+    ],
+    "./internal/cliapp": [
+      {
+        "file": "internal/cliapp/ci_execution_selection_test.go",
+        "roots": [
+          "TestCIExecutionSelectionConsumers",
+          "TestCIExecutionFixtureCensusExcludesNestedCheckout"
+        ]
+      },
+      {
+        "file": "internal/cliapp/source_root_ci_test.go",
+        "roots": [
+          "TestShippedCISmokeUsesPositionalSourceRoot"
+        ]
+      }
+    ],
+    "./internal/store/internal/runtimepersistence": [
+      {
+        "file": "internal/store/internal/runtimepersistence/channel_client_locale_test.go",
+        "roots": [
+          "TestChannelClientLocaleOwnsIndependentSelectedStoreRevision"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/channel_delivery_card_contract_test.go",
+        "roots": [
+          "TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores",
+          "TestChannelDeliveryCardActionAdmissionSelectedStoreParity"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/channel_delivery_effect_authority_test.go",
+        "roots": [
+          "TestChannelDeliveryEffectCurrentnessSelectedStoreParity"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/channel_onboarding_bound_handoff_fences_test.go",
+        "roots": [
+          "TestChannelOnboardingBoundHandoffObservationAndCleanupReplaySelectedStoreParity",
+          "TestChannelOnboardingBoundHandoffSelectedStoreFences",
+          "TestChannelOnboardingBoundHandoffProofResponsibilityFencesSelectedStoreParity",
+          "TestChannelOnboardingRetainedReconnectFencesSelectedStoreParity"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/channel_onboarding_bound_handoff_test.go",
+        "roots": [
+          "TestChannelOnboardingBoundBeforeParentCheckpointSelectedStoreParity"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/channel_onboarding_confirmation_authority_test.go",
+        "roots": [
+          "TestOperatorChannelConfirmationRequiresActiveOwningOnboardingParentSelectedStoreParity"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/channel_onboarding_contract_test.go",
+        "roots": [
+          "TestChannelOnboardingSelectedStoreContractParity",
+          "TestChannelOnboardingCredentialStaleParentResetSelectedStoreParity",
+          "TestChannelOnboardingCredentialStaleRecoverySelectedStoreParity",
+          "TestRetiredPreparingOnboardingReleasesUncheckpointedCredentialSelectedStoreParity",
+          "TestFailedOnboardingFenceRejectsCredentialReadmissionSelectedStoreParity",
+          "TestChannelRebindPublicationRetiresEverySiblingActivationForInterface"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/channel_onboarding_early_confirmation_test.go",
+        "roots": [
+          "TestChannelOnboardingConfirmedReconnectBeforeParentPhaseSelectedStoreParity",
+          "TestChannelOnboardingStaleConfirmationBeforeParentPhaseSelectedStoreParity"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/channel_onboarding_early_reset_test.go",
+        "roots": [
+          "TestChannelOnboardingEarlyResetCleanupSelectedStoreParity",
+          "TestChannelOnboardingEarlyResetSelectedStoreFences",
+          "TestChannelOnboardingEarlyResetPreservesInheritedAndObservedEvidence"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/channel_onboarding_effect_reconciliation_test.go",
+        "roots": [
+          "TestChannelOnboardingEffectReconciliationSelectedStoreParity"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/channel_onboarding_pending_reset_fences_test.go",
+        "roots": [
+          "TestChannelOnboardingPendingResetInterruptionSelectedStoreParity",
+          "TestChannelOnboardingPendingResetSelectedStoreFences",
+          "TestChannelOnboardingPendingResetIdentityJoinSelectedStoreParity"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/channel_onboarding_pending_reset_test.go",
+        "roots": [
+          "TestChannelOnboardingPendingResetLifecycleSelectedStoreParity",
+          "TestChannelOnboardingPendingResetBindingSnapshotComparison"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/channel_reconciliation_test.go",
+        "roots": [
+          "TestChannelActivityNativeAcknowledgementCutsBothStores",
+          "TestChannelPostCommitActivityHintsBothStores",
+          "TestChannelPostCommitCardCreationAndTerminalHintsBothStores",
+          "TestChannelPostCommitBindingHintsBothStores"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/decision_card_completion_exact_event_test.go",
+        "roots": [
+          "TestNormalRunCompletionRequiresExactDecisionOutcomeEventIDParity"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/decision_card_refusal_test.go",
+        "roots": [
+          "TestDecisionCardRefusalReasonAcrossAnchorsAndOperationsBothStores"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/decision_handoff_outcome_test.go",
+        "roots": [
+          "TestDecisionCompletionPreservesCommittedHandoffOutcome"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/fork_decision_source_test.go",
+        "roots": [
+          "Test2376ForkDecisionExecutionSourceBothStores"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/fork_rejected_effect_source_test.go",
+        "roots": [
+          "Test2376ForkRejectedEffectHistoricalBoundaryBothStores"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/inbound_publication_test.go",
+        "roots": [
+          "TestInboundEvidencePersistsTypedNoSubscriberByDesign",
+          "TestInboundPublicationRefusesCredentialIneligibleStandingBeforeDurableCommitBothStores"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/operator_channel_contract_test.go",
+        "roots": [
+          "TestOperatorChannelSelectedStoreContractParity",
+          "TestChannelDeliveryDefaultFollowsOnlyVerifiedSelectedBindingBothStores",
+          "TestChannelDeliveryNoticeCutIsAtomicWithMailboxBothStores"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/operator_channel_supported_surface_test.go",
+        "roots": [
+          "TestOperatorChannelConfirmationCurrentnessReadFailurePreservesPendingCeremonySelectedStoreParity",
+          "TestOperatorChannelBeginReplayPrecedesCredentialCurrentnessSelectedStoreParity",
+          "TestOperatorChannelProofCurrentnessReadFailurePreservesPendingResponsibilitySelectedStoreParity",
+          "TestServedParityHarnessOperatorChannelLifecycle",
+          "TestOperatorChannelProofResponsibilityRecoversAfterCommittedBindingSelectedStoreParity",
+          "TestOperatorChannelTerminalReplayAfterCredentialRotationSelectedStoreParity",
+          "TestOperatorChannelProviderCredentialRotationSelectedStoreParity",
+          "TestOperatorChannelProofResponsibilityReconcilesCommittedFileSelectedStoreParity",
+          "TestOperatorChannelUnresolvedProofResponsibilityFencesBindingMutationSelectedStoreParity",
+          "TestOperatorChannelUnbindDischargesUnresolvedProofResponsibilitySelectedStoreParity",
+          "TestOperatorChannelUnresolvedProofResponsibilityConcurrentMutationSelectedStoreParity",
+          "TestOperatorChannelRetainedLifecycleProjectionSelectedStoreParity",
+          "TestOperatorChannelProofBootPreservesExactScopeSelectedStoreParity"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/proposed_effect_cards_test.go",
+        "roots": [
+          "TestProposedEffectCardLifecycleParity",
+          "TestNormalRunCompletionRequiresSettledProposedEffectsParity",
+          "TestProposedEffectContractPinParticipatesInDuplicateIdentityOnBothStores",
+          "TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothStores",
+          "TestProposedEffectDecisionAndSupersessionWinnerParity",
+          "TestProposedEffectSupersessionScopesParity"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/proposed_effect_publication_identity_test.go",
+        "roots": [
+          "TestProposedEffectCompletionUsesFrozenPublicationIdentityBothStores"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/reply_context_store_test.go",
+        "roots": [
+          "TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext",
+          "TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback",
+          "TestReplyContextStore_ForkedSourceRejectsCreateAndClaimWithoutDestroyingLineage",
+          "TestReplyContextStore_ForkFreezeSerializesBothCreateAndClaimCommitOrders"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/run_fork_activity_timestamp_reuse_test.go",
+        "roots": [
+          "TestRunForkActivityTimestampRecordedReuseBothStores",
+          "TestOrdinaryForkActivityReplayCardDependencyBothStores",
+          "TestSelectedForkRecordedActivityCardDependencyBothStores",
+          "TestRunForkActivityTimestampRejectsIncompleteReuseBothStores",
+          "TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/run_fork_gate_activation_test.go",
+        "roots": [
+          "TestMaterializeRunForkGateAuthoritiesSelectedStoreParity",
+          "TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStoreParity",
+          "TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority",
+          "TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields",
+          "TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority",
+          "TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/run_fork_generation_reconstruction_test.go",
+        "roots": [
+          "TestForkGenerationPreparationReconstructedOwnersBothStores"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/run_fork_generation_repeated_evidence_test.go",
+        "roots": [
+          "TestForkGenerationRepeatedActivityEvidenceBothStores"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/run_fork_pending_generation_test.go",
+        "roots": [
+          "TestForkPendingGenerationCorrespondenceBothStores"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/run_fork_source_activity_evidence_test.go",
+        "roots": [
+          "TestForkRecordedActivityGenerationEvidenceBothStores"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/run_fork_source_freeze_consumers_test.go",
+        "roots": [
+          "TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude",
+          "TestForkedSourceSessionTurnAndConversationConsumersRefuse"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/run_fork_source_freeze_decision_consumers_test.go",
+        "roots": [
+          "TestForkedSourceDecisionCardsContinuationsDraftsAndRoutesCannotAdvance"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/run_fork_source_freeze_domain_consumers_test.go",
+        "roots": [
+          "TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse",
+          "TestForkedSourceDirectiveReservationTransitionsAndRecoveryRefuse",
+          "TestForkedSourceManagedExternalEffectAdmissionTransitionsAndRecoveryRefuse"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/run_fork_source_freeze_selected_consumers_test.go",
+        "roots": [
+          "TestForkedRunSelectedContractExecutionRefusesAdmissionAndAllowsExactFinalization",
+          "TestForkedSourceCannotWriteSelectedContractRouteRecoveryEvidence"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/run_fork_source_freeze_test.go",
+        "roots": [
+          "TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter",
+          "TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome",
+          "TestRunForkSourceFreezeRollbackLeavesNoPartialOutcome",
+          "TestRunForkSourceFreezeRequiresConfirmationBeforeMutation",
+          "TestRunForkSourceFreezeRejectsCompletedSourceWithoutConfirmationCeremony",
+          "TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/source_presentation_channel_test.go",
+        "roots": [
+          "Test2376ChannelExactSelectionAndStoredPresentationBothStores"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/store_abstraction_guard_matrix_test.go",
+        "roots": [
+          "TestSelectedStoreAbstractionGuardMatrixCoversApprovedBoundary",
+          "TestSelectedStoreAbstractionGuardMatrixRejectsStaleProofRefs",
+          "TestSelectedStoreProofCensusRejectsForeignOnlyDeclaration"
+        ]
+      },
+      {
+        "file": "internal/store/internal/runtimepersistence/workflow_header_activity_admission_test.go",
+        "roots": [
+          "TestActivityAdmissionConsumesConstructedHeaderBothStores"
+        ]
+      }
+    ],
+    "./internal/testcatalog": [
+      {
+        "file": "internal/testcatalog/catalog_authoring_test.go",
+        "roots": [
+          "TestCatalogFixturesUseCanonicalCreateFlowInstanceAuthoring",
+          "TestCatalogAuthoringExcludesNestedCheckout"
+        ]
+      },
+      {
+        "file": "internal/testcatalog/inventory_test.go",
+        "roots": [
+          "TestCatalogRequiredInventory",
+          "TestCatalogDiscoveryExcludesNestedCheckout",
+          "TestCatalogInventoryFailsClosed",
+          "TestCatalogExternalProofsFailClosed",
+          "TestCatalogOwnershipHasNoLegacyClassifierOrSimulator",
+          "TestCatalogOwnershipCensusExcludesNestedCheckout",
+          "TestCatalogRequiredCIProofSelection",
+          "TestCatalogRequiredCensusArtifacts"
+        ]
+      },
+      {
+        "file": "internal/testcatalog/partition_test.go",
+        "roots": [
+          "TestCatalogExternalProofPartitionsThroughInventory"
+        ]
+      },
+      {
+        "file": "internal/testcatalog/release_fixture_inventory_test.go",
+        "roots": [
+          "TestCatalogFullLifecycleFixtureIsFiniteFilesystemFlowTree",
+          "TestCatalogFullLifecycleFixtureExcludesNestedCheckout"
+        ]
+      }
+    ],
+    "./internal/testchanged": [
+      {
+        "file": "internal/testchanged/plan_test.go",
+        "roots": [
+          "TestPlanChangedSelectsChangedGoPackageAndReverseDependents",
+          "TestPlanChangedUsesXTestImportsForReverseDependents",
+          "TestPlanChangedMapsNonGoFilesInsidePackageDirectories",
+          "TestPlanChangedMapsTextFixturesInsidePackageDirectories",
+          "TestPlanChangedDeletedGoFileWithoutCurrentPackageFallsBackToFullSuite",
+          "TestPlanChangedGlobalFilesFallBackToFullSuite",
+          "TestPlanChangedRootDocsFallBackToFullSuite",
+          "TestPlanChangedNoChangesSelectsNoPackages",
+          "TestPlanChangedExecutableMarkdownFixtureFallsBackToFullSuite",
+          "TestPlanChangedUnownedFileFallsBackToFullSuite"
+        ]
+      }
+    ],
+    "./internal/testplanning": [
+      {
+        "file": "internal/testplanning/workspace_docker_proof_test.go",
+        "roots": [
+          "TestWorkspaceDockerProofsHaveProvisionedHostedOwner"
+        ]
+      },
+      {
+        "file": "internal/testplanning/workspace_image_cache_test.go",
+        "roots": [
+          "TestWorkspaceImageCacheHostedContract",
+          "TestWorkspaceImageCacheExecutesActualHitMissAndRefusals",
+          "TestWorkspaceImageCacheDockerfileInputsAreComplete"
+        ]
+      }
+    ],
+    "./internal/testtiming": [
+      {
+        "file": "internal/testtiming/artifact_attempt_test.go",
+        "roots": [
+          "TestCIArtifactTransportCensusIsCurrentAttemptAndLossless",
+          "TestCIArtifactNamespaceIgnoresStaleNeedsAndRetainedSuccess"
+        ]
+      },
+      {
+        "file": "internal/testtiming/batch_process_test.go",
+        "roots": [
+          "TestProofBatchPreparesDockerFixtureOnlyForExactRequiredUnit",
+          "TestProofBatchCollectsLaterUnitAfterFailureWithFreshProcessesAndTemps"
+        ]
+      },
+      {
+        "file": "internal/testtiming/ci_admission_test.go",
+        "roots": [
+          "TestCIConditionStatusFunctions",
+          "TestCITierIncreaseKeepsLateSummaryAndNewHeadEvent",
+          "TestCIManualDispatchFullSummaryHasOnlyFullAdmission",
+          "TestCIDraftAdmissionAndReadyTransitions",
+          "TestCIDraftSkipsPlanAndProofExpansion",
+          "TestCIRequiredSummaryRefusesDraftQualification",
+          "TestCISameSHARequiredContextTransition",
+          "TestCIConcurrencyNamespaceIsolation",
+          "TestGeneratedPublisherUsesOnlyAutomaticPRQualification",
+          "TestPublisherCommandProcess"
+        ]
+      },
+      {
+        "file": "internal/testtiming/ci_contract_test.go",
+        "roots": [
+          "TestCIJobCollectionWaitsOnlyForTerminalEvidence",
+          "TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres",
+          "TestCICachesSeparateModulesAndNeverRestoreAnotherProofUnit",
+          "TestCIConsumesOnePlanAndCompletePlanBoundEvidence",
+          "TestPublisherIsMasterRestrictedGeneratedOnlyAndReviewRequired",
+          "TestCommittedPolicyModelAndProjectionConsumersAreCanonical",
+          "TestServeappPolicyPartitionRejectsLostProof",
+          "TestCommandEvidenceJSONRejectsLegacyVersion"
+        ]
+      },
+      {
+        "file": "internal/testtiming/ci_tier_cache_test.go",
+        "roots": [
+          "TestCITierCheckRecordsSameRunSelectionAndOutcome",
+          "TestDebtAnalysisCIUsesExactReadOnlyRestoreAndProtectedProducer",
+          "TestDebtAnalysisCIPublisherPreservesArchiveContract",
+          "TestDebtAnalysisCIPublisherReplayAdmission",
+          "TestDebtAnalysisCIPublisherRejectsUnsuccessfulAuthorities",
+          "TestNightlyProofReusesExhaustiveOwnerWithoutRemovingPRProof"
+        ]
+      },
+      {
+        "file": "internal/testtiming/command_plan_test.go",
+        "roots": [
+          "TestCommandAdmissionRootManifestAndReceiptMatrix",
+          "TestCommandAdmissionRootCellsPreserveDistinctExecutionScopes",
+          "TestCommandAdmissionRetainsGovernedDeferralAndUntestedPackages",
+          "TestCommandAdmissionRejectsOneRootlessUnitBesideValidPeer"
+        ]
+      },
+      {
+        "file": "internal/testtiming/goversion_test.go",
+        "roots": [
+          "TestCommandIdentityRejectsChangedCompilerVersion",
+          "TestQualificationRejectsMissingCompilerOnEitherSide",
+          "TestPinnedReferenceCompilerRefreshPreservesEveryHistoricalByte"
+        ]
+      },
+      {
+        "file": "internal/testtiming/local_preflight_ci_test.go",
+        "roots": [
+          "TestLocalPreflightCIReadsLatestStartedAttempt",
+          "TestLocalPreflightCIRefusesMalformedTransportAndIdentity",
+          "TestLocalPreflightCIEventAndPaginationBoundaries",
+          "TestLocalPreflightCIHasNoExpensiveBypass"
+        ]
+      },
+      {
+        "file": "internal/testtiming/native_unused_cadence_test.go",
+        "roots": [
+          "TestNativeUnusedCadenceConsumesActualWorkflowConditions",
+          "TestNativeUnusedRequiredSummaryCadenceAndStrictStatuses",
+          "TestNativeUnusedNightlyFailureCannotMintMasterMarker",
+          "TestNativeUnusedSkippedJobsCannotHideFailedPlanOrDraft"
+        ]
+      },
+      {
+        "file": "internal/testtiming/proof_batch_failfast_test.go",
+        "roots": [
+          "TestProofBatchFailFastRetainsFailedReceiptAndJoinsOwnedCleanup"
+        ]
+      },
+      {
+        "file": "internal/testtiming/proof_history_test.go",
+        "roots": [
+          "TestProofBatchProvidesHistoricalCorpusInputsBeforeExecution",
+          "TestProofHistoryInputsMatchPinnedSourceConsumers",
+          "TestProofHistoryFetchesExactObjectsInDepthOneCheckout",
+          "TestProofHistoryRejectsInvalidOrMissingInputs"
+        ]
+      },
+      {
+        "file": "internal/testtiming/soak_ci_test.go",
+        "roots": [
+          "TestMandatorySoakCompleteDisjointPartitionAllProfiles",
+          "TestMandatorySoakWorkflowRequiredExactHeadAndBudgets",
+          "TestMandatorySoakWorkflowMatrixExecutionAndShellSyntax",
+          "TestMandatorySoakEvidenceRequiresBothFullBackendReceipts"
+        ]
+      },
+      {
+        "file": "internal/testtiming/workflow_go_test.go",
+        "roots": [
+          "TestCIVersionBoundToolsUsePlannedGoToolchain"
+        ]
+      }
+    ],
+    "./internal/testutil": [
+      {
+        "file": "internal/testutil/postgres_capacity_guard_test.go",
+        "roots": [
+          "TestPostgresCapacityAllocationGuard"
+        ]
+      },
+      {
+        "file": "internal/testutil/postgres_ci_test.go",
+        "roots": [
+          "TestCIPostgresJobsShareOwnedRunner",
+          "TestCanonicalTestRunnerHasNoRemovedBinaryAlias",
+          "TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector",
+          "TestPostgresGuardClassifiesExactProductionConnectorsWithoutTestAuthority",
+          "TestPostgresGuardIgnoresNestedCheckoutAndRejectsCurrentSource",
+          "TestPostgresContributorGuideIsCanonicalAndQuarantined",
+          "TestPostgresContributorGuideGuardRejectsCapacityDrift"
+        ]
+      }
+    ]
+  }
+}

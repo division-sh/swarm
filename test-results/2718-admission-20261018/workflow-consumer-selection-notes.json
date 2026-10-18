@@ -1,0 +1,15 @@
+{
+  "head": "073a1183fedf55cac4c31d0e36c52c53126825a0",
+  "method": "Direct ci.yml readers plus a conservative same-package reverse helper-call/file closure; all native root outcomes retained by exact name and package in workflow-consumer-summary.json",
+  "textualCandidates": 257,
+  "passedNativeRoots": 253,
+  "passedCells": 4132,
+  "failures": 0,
+  "skips": 0,
+  "nonTopLevelTextMatches": [
+    {"name": "TestFrozenData", "reason": "Raw-string generated child guard in accounting_execution_test.go, executed by its parent accounting control"},
+    {"name": "TestGuard", "reason": "Raw-string generated child fixture in preflight_schedule_unix_test.go, executed by its parent scheduling control"},
+    {"name": "TestUnsupported", "reason": "Raw-string generated child fixture in preflight_unix_test.go, executed by its parent unsupported-platform control"},
+    {"name": "TestPrepareChildProcessTreeCreatesWindowsProcessGroup", "reason": "Windows-only file found by conservative helper closure; not a Linux workflow consumer or native Linux test"}
+  ]
+}
