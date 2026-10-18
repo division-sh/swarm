@@ -26,7 +26,7 @@ import (
 func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	s := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), s)
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now, s)
 
@@ -152,7 +152,7 @@ func activeConversationForkTestClock() time.Time {
 func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	s := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), s)
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now, s)
 
@@ -198,7 +198,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	_, db, _ := testutil.StartPostgres(t)
 	s := admitTestPostgresStore(t, db)
 	bundle := conversationForkConstructionBundle(t)
-	ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), s)
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now, s, bundle)
 	entityID := uuid.NewString()
@@ -424,7 +424,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	s := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), s)
 	now := activeConversationForkTestClock()
 	source := seedConversationForkSource(t, db, now, s)
 	fork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
