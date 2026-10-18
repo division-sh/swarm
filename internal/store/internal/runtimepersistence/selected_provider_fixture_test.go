@@ -81,6 +81,10 @@ func admitSelectedProviderFixture(t *testing.T, ctx context.Context, f selectedC
 	t.Helper()
 	grant := selectedFixtureGrantForAuthority(t, ctx, f, issued, authority)
 	ctx = testAuthorActivityContextForBundle(f.request.DeclarationPlan.BundleHash)
+	ctx, err := startupownership.WithProcessMutationAuthority(ctx, f.process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	actor := f.providerActor.Config.Identity
 	topology, err := agenttopology.SelectedDeclarationAdmission(f.forkRun, f.request.DeclarationPlan)
 	if err != nil {
@@ -125,6 +129,10 @@ func admitSelectedProviderFixture(t *testing.T, ctx context.Context, f selectedC
 
 func selectedProviderClaimContext(t *testing.T, ctx context.Context, f selectedCompletionFixture, authority effects.Authority) context.Context {
 	t.Helper()
+	ctx, err := startupownership.WithProcessMutationAuthority(ctx, f.process)
+	if err != nil {
+		t.Fatal(err)
+	}
 	actor := f.providerActor.Config.Identity
 	if actor != authority.Target.AgentIdentity || authority.SelectedFork.ForkRunID != f.forkRun {
 		t.Fatal("selected provider fixture changed its admitted actor or fork")
