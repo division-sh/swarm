@@ -1,6 +1,7 @@
 package operatorsurface
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -21,13 +22,45 @@ import (
 	privatedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 )
 
-func loadRunOperationalSource(ctx context.Context, sources sourceartifact.Reader, header operatorread.RunHeader) (semanticview.Source, error) {
+// One entry per store read owner. The compiler, empty repository root, embedded
+// platform/packs and canonical pack admission are fixed for this owner's lifetime.
+// Only the exact retained row varies; no ambient bundle or compiler options enter.
+type runOperationalSourceMemo struct {
+	gate   chan struct{}
+	stored sourceartifact.Persisted
+	source semanticview.Source
+}
+
+func newRunOperationalSourceMemo() *runOperationalSourceMemo {
+	return &runOperationalSourceMemo{gate: make(chan struct{}, 1)}
+}
+
+func (m *runOperationalSourceMemo) load(ctx context.Context, sources sourceartifact.Reader, header operatorread.RunHeader) (semanticview.Source, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Always read the current retained row inside the caller's coherent report
+	// snapshot. A warm memo cannot conceal deletion, corruption or reassociation.
 	stored, err := sources.GetSourceArtifact(ctx, header.BundleHash)
 	if err != nil {
 		return nil, err
 	}
 	if stored.BundleHash != header.BundleHash {
 		return nil, fmt.Errorf("operational source contradicts exact run bundle")
+	}
+	select {
+	case m.gate <- struct{}{}:
+		defer func() { <-m.gate }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if m.source != nil && stored.BundleHash == m.stored.BundleHash &&
+		stored.MemberCount == m.stored.MemberCount && stored.TotalBytes == m.stored.TotalBytes &&
+		stored.CreatedAt.Equal(m.stored.CreatedAt) && bytes.Equal(stored.SourceBlob, m.stored.SourceBlob) {
+		return m.source, nil
 	}
 	artifact, err := stored.Decode()
 	if err != nil {
@@ -37,10 +70,18 @@ func loadRunOperationalSource(ctx context.Context, sources sourceartifact.Reader
 	if err != nil {
 		return nil, err
 	}
-	return semanticview.Wrap(bundle), nil
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.stored = stored
+	m.stored.SourceBlob = bytes.Clone(stored.SourceBlob)
+	// This private source never escapes the read-only operational projection;
+	// neither live facts nor a mutable bundle are exposed to report consumers.
+	m.source = semanticview.Wrap(bundle)
+	return m.source, nil
 }
 
-func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter *privatedelivery.Adapter, sources sourceartifact.Reader, instances PipelineObligationSource, timers TimerObligationSource, header operatorread.RunHeader, work operatorread.RunTestQuiescence, observedAt time.Time) (*operatorread.RunOperationalFacts, error) {
+func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter *privatedelivery.Adapter, sources sourceartifact.Reader, sourceMemo *runOperationalSourceMemo, instances PipelineObligationSource, timers TimerObligationSource, header operatorread.RunHeader, work operatorread.RunTestQuiescence, observedAt time.Time) (*operatorread.RunOperationalFacts, error) {
 	facts := &operatorread.RunOperationalFacts{ObservedAt: observedAt}
 	// These existing summaries are run-scoped. Do not invent an instance owner
 	// for work whose canonical readback does not provide one.
@@ -56,7 +97,7 @@ func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter
 	if err != nil {
 		return nil, err
 	}
-	source, err := loadRunOperationalSource(ctx, sources, header)
+	source, err := sourceMemo.load(ctx, sources, header)
 	if errors.Is(err, sourceartifact.ErrNotFound) {
 		return facts, nil
 	}
