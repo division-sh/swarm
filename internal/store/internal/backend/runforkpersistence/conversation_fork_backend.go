@@ -163,7 +163,9 @@ func (s conversationForkStore) runForkPreparation(ctx context.Context, forkID st
 		// Only clean pre-domain fence conflicts may start a fresh transaction.
 		// The retained session, fork lease and original authority do not change.
 		result := mutationprotocol.RunRetainedPostgresWithOptions(ctx, session, &sql.TxOptions{Isolation: sql.LevelSerializable}, mutationprotocol.AuthorityFence, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-			return struct{}{}, attempt.WithSQL(ctx, fn)
+			return struct{}{}, attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				return fn(ctx, tx)
+			})
 		})
 		return result.Err()
 	})
