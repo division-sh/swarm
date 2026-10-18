@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 )
 
@@ -144,6 +145,31 @@ func (s conversationForkStore) runForkMutation(ctx context.Context, forkID strin
 }
 
 func (s conversationForkStore) runPostgresMutation(ctx context.Context, forkID *string, serializable bool, fn func(context.Context, *sql.Tx) error) (err error) {
+	return s.withPostgresMutationSession(ctx, forkID, func(ctx context.Context, session *postgresbackend.SessionAuthority) error {
+		opts := &sql.TxOptions{}
+		if serializable {
+			opts.Isolation = sql.LevelSerializable
+		}
+		_, err := postgresbackend.RunAuthorityTransactionOutcomeWithOptions(ctx, session, opts, fn)
+		return err
+	})
+}
+
+func (s conversationForkStore) runForkPreparation(ctx context.Context, forkID string, fn func(context.Context, *sql.Tx) error) error {
+	if s.dialect == conversationForkSQLite {
+		return s.sqlite.runRuntimeMutation(ctx, "sqlite conversation fork mutation", fn)
+	}
+	return s.withPostgresMutationSession(ctx, &forkID, func(ctx context.Context, session *postgresbackend.SessionAuthority) error {
+		// Only clean pre-domain fence conflicts may start a fresh transaction.
+		// The retained session, fork lease and original authority do not change.
+		result := mutationprotocol.RunRetainedPostgresWithOptions(ctx, session, &sql.TxOptions{Isolation: sql.LevelSerializable}, mutationprotocol.AuthorityFence, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+			return struct{}{}, attempt.WithSQL(ctx, fn)
+		})
+		return result.Err()
+	})
+}
+
+func (s conversationForkStore) withPostgresMutationSession(ctx context.Context, forkID *string, run func(context.Context, *postgresbackend.SessionAuthority) error) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -201,12 +227,7 @@ func (s conversationForkStore) runPostgresMutation(ctx context.Context, forkID *
 			}
 		}()
 	}
-	opts := &sql.TxOptions{}
-	if serializable {
-		opts.Isolation = sql.LevelSerializable
-	}
-	_, err = postgresbackend.RunAuthorityTransactionOutcomeWithOptions(ctx, session, opts, fn)
-	return err
+	return run(ctx, session)
 }
 
 func nullableConversationForkID(value string) any {
