@@ -61,3 +61,20 @@ canonical emitter into ordinary/selected-root validation, including exact-parent
 and wrong-frame boundary controls. It is the SAME C-owned name/path, not an
 additional mirror when C integrates. The control uses A's existing dispatcher
 without C's later publication-parent field; no new production port is added.
+
+## Parent Control Result On The Existing A Source
+
+The composed control at signed7d50172c77 PASSES, count1, package0.010s.
+This is non-reproduction on A, NOT an original RED or a repair credit despite
+the historical `original-red.log` suffix. A's ValidateResult already chooses
+firstNonEmptyString(intent.SourceEventID, intent.ParentEventID), exactly like
+A's emitter. The old direct-physical-parent comparison from C's failing base
+is not present here. C's later physical-parent override also is not present.
+Do NOT transplant the three-line C production delta independently of that
+different emitter contract. No production parent change was made.
+
+The one C-owned control retains both ordinary/selected-root positive frames
+and all24 wrong-parent/ID/run/route/mode/task/depth/producer/payload controls.
+Receipt: amendment2-c-owned-parent-control-original-red.log under the same
+local directory. Its actual EXIT=0 is retained, not relabelled RED-to-GREEN.
+The legacy terminal/policy integration question above remains the blocker.
