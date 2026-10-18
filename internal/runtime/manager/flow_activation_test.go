@@ -4256,10 +4256,10 @@ func TestEnsureFlowInstanceReconcilesRevisedSemanticSourceIntoReadinessOwner(t *
 func TestEnsureFlowInstanceVerifiesReadinessAfterNamedMutationCommit(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
-	first := newFlowActivationManager(t, &flowActivationTestBus{}, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	if err := activateFlowInstanceForTest(first, testAuthorActivityContext(context.Background()), req); err != nil {
+	first, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, instances, req.ContractBundle, agents)
+	if err := activateFlowInstanceForTest(first, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if err := first.Shutdown(); err != nil {
@@ -4267,9 +4267,7 @@ func TestEnsureFlowInstanceVerifiesReadinessAfterNamedMutationCommit(t *testing.
 	}
 
 	restartBus := &flowActivationTestBus{}
-	restarted := newFlowActivationManager(t, restartBus, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	ctx := testAuthorActivityContext(context.Background())
+	restarted, ctx := newFlowActivationManagerForSource(t, restartBus, instances, req.ContractBundle, agents)
 	ctx = worklifetime.WithOccurrence(ctx, restarted.workOwner)
 	if created, err := restarted.EnsureFlowInstance(ctx, req); err != nil {
 		t.Fatalf("EnsureFlowInstance: %v", err)
@@ -4289,7 +4287,6 @@ func TestEnsureFlowInstanceVerifiesReadinessAfterNamedMutationCommit(t *testing.
 func TestActivateFlowInstanceUsesStagedInitialState(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	store := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, store)
 	bundle := testFlowBundle(t, "")
 	schema := bundle.FlowSchemas["review"]
 	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{
@@ -4303,7 +4300,8 @@ func TestActivateFlowInstanceUsesStagedInitialState(t *testing.T) {
 	compileFlowActivationFixture(t, bundle)
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err != nil {
+	am, ctx := newFlowActivationManagerForSource(t, bus, store, req.ContractBundle)
+	if err := activateFlowInstanceForTest(am, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
 	}
 	if len(store.creates) != 1 {
@@ -4315,7 +4313,6 @@ func TestActivateFlowInstanceUsesStagedInitialState(t *testing.T) {
 }
 
 func TestFlowActivationUsesCompiledInitialOverRawSchemaAndRejectsRequestConflict(t *testing.T) {
-	am := newFlowActivationManager(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{})
 	bundle := testFlowBundle(t, "")
 	schema := bundle.FlowSchemas["review"]
 	schema.StageDeclarations = runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
@@ -4326,8 +4323,7 @@ func TestFlowActivationUsesCompiledInitialOverRawSchemaAndRejectsRequestConflict
 	schema.StageDeclarations.Entries[0], schema.StageDeclarations.Entries[1] = schema.StageDeclarations.Entries[1], schema.StageDeclarations.Entries[0]
 	bundle.FlowSchemas["review"] = schema
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	setFlowActivationManagerSemanticSource(am, req.ContractBundle)
-	ctx := testAuthorActivityContext(context.Background())
+	am, ctx := newFlowActivationManagerForSource(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{}, req.ContractBundle)
 	plan, err := am.PrepareFlowInstanceActivation(ctx, req)
 	if err != nil || plan.Instance.CurrentState != "queued" {
 		t.Fatalf("compiled initial plan = %q, %v, want queued", plan.Instance.CurrentState, err)
@@ -4341,14 +4337,12 @@ func TestFlowActivationUsesCompiledInitialOverRawSchemaAndRejectsRequestConflict
 func TestActivateFlowInstanceRouteMaterializationExcludesBusinessState(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	instances := &flowActivationTestInstanceStore{}
-	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	declareSuppliedFields(t, bundle, map[string]runtimecontracts.EventFieldSpec{"vertical_id": {Type: "string"}})
 
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	setSuppliedFields(t, &req, map[string]any{"vertical_id": "11111111-1111-4111-8111-111111111111"})
-	ctx := testAuthorActivityContext(context.Background())
-	setFlowActivationManagerSemanticSource(am, req.ContractBundle)
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, req.ContractBundle)
 	plan, err := am.PrepareFlowInstanceActivation(ctx, req)
 	if err != nil {
 		t.Fatalf("PrepareFlowInstanceActivation: %v", err)
