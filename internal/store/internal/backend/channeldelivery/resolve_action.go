@@ -17,7 +17,7 @@ import (
 // joins must be rechecked in the card/notice mutation transaction before
 // replay and before the domain write.
 func ResolveActionFactTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.ActionFact, postgres bool) (render.ResolvedAction, bool, error) {
-	return resolveActionFactTx(ctx, tx, fact, postgres, false)
+	return resolveActionFactTx(ctx, tx, fact, postgres, false, nil)
 }
 
 // ResolveActionFact reads the same admission projection outside a write
@@ -27,11 +27,7 @@ func ResolveActionFact(ctx context.Context, q interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, fact operatorchannel.ActionFact, postgres bool) (render.ResolvedAction, bool, error) {
-	return resolveActionFactTx(ctx, q, fact, postgres, false)
-}
-
-func ResolveActionFactForMutationTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.ActionFact, postgres bool) (render.ResolvedAction, bool, error) {
-	return resolveActionFactTx(ctx, tx, fact, postgres, true)
+	return resolveActionFactTx(ctx, q, fact, postgres, false, nil)
 }
 
 // RequireCardActionTx is the channel-owned pre-mutation projection. Call it
@@ -59,10 +55,14 @@ func RequireCardActionTx(ctx context.Context, tx *sql.Tx, fact operatorchannel.A
 	var found bool
 	var err error
 	if lock {
+		parent, parentErr := lockActionParentTx(ctx, tx, fact, postgres)
+		if parentErr != nil {
+			return fmt.Errorf("channel action is not current card authority: %w", parentErr)
+		}
 		if err := LockPrincipalTx(ctx, tx, demand.PrincipalID, postgres); err != nil {
 			return err
 		}
-		resolved, found, err = ResolveActionFactForMutationTx(ctx, tx, fact, postgres)
+		resolved, found, err = parent.resolve(ctx, tx, fact, postgres)
 	} else {
 		resolved, found, err = ResolveActionFactTx(ctx, tx, fact, postgres)
 	}
@@ -87,6 +87,10 @@ func RequireNoticeActionTx(ctx context.Context, tx *sql.Tx, action operatorchann
 	if uuid.Validate(principalID) != nil || uuid.Validate(noticeID) != nil {
 		return "", fmt.Errorf("channel notice acknowledgment identity is incomplete")
 	}
+	parent, err := lockActionParentTx(ctx, tx, action.ActionFact, postgres)
+	if err != nil {
+		return "", fmt.Errorf("channel action is not current notice authority: %w", err)
+	}
 	if err := LockPrincipalTx(ctx, tx, principalID, postgres); err != nil {
 		return "", err
 	}
@@ -94,7 +98,7 @@ func RequireNoticeActionTx(ctx context.Context, tx *sql.Tx, action operatorchann
 	if err != nil {
 		return "", err
 	}
-	resolved, found, err := ResolveActionFactForMutationTx(ctx, tx, action.ActionFact, postgres)
+	resolved, found, err := parent.resolve(ctx, tx, action.ActionFact, postgres)
 	if err != nil {
 		return "", err
 	}
@@ -148,7 +152,7 @@ func hydrateFrozenChannelAction(action render.Action, renderRaw []byte, renderHa
 func resolveActionFactTx(ctx context.Context, tx interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, fact operatorchannel.ActionFact, postgres, mutation bool) (render.ResolvedAction, bool, error) {
+}, fact operatorchannel.ActionFact, postgres, mutation bool, parent *actionParent) (render.ResolvedAction, bool, error) {
 	if tx == nil {
 		return render.ResolvedAction{}, false, fmt.Errorf("channel action requires a selected transaction")
 	}
@@ -157,6 +161,9 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 	}
 	if uuid.Validate(fact.Token) != nil {
 		return render.ResolvedAction{}, false, nil
+	}
+	if mutation && (parent == nil || parent.operationID == "" || parent.activationID == "" || parent.activationRevision < 1 || parent.bindingRevision < 1) {
+		return render.ResolvedAction{}, false, fmt.Errorf("channel action requires its established parent")
 	}
 	query := `SELECT action.action_token, action.action_kind, action.verdict, action.label, action.action_position,
 		plan.delivery_id, render.render_id, render.render_hash, render.render_input, receipt.effect_operation_id,
@@ -191,8 +198,7 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 		AND activation.binding_revision=binding.binding_revision
 		AND activation.conversation_reference=plan.conversation_reference
 		AND receipt.state='sent' AND receipt.delivery_id=plan.delivery_id
-		AND receipt.render_id=render.render_id
-		LIMIT 2`
+		AND receipt.render_id=render.render_id`
 	if postgres {
 		query = `SELECT action.action_token::text, action.action_kind, action.verdict, action.label, action.action_position,
 			plan.delivery_id::text, render.render_id::text, render.render_hash, render.render_input, receipt.effect_operation_id::text,
@@ -227,14 +233,22 @@ func resolveActionFactTx(ctx context.Context, tx interface {
 			AND activation.binding_revision=binding.binding_revision
 			AND activation.conversation_reference=plan.conversation_reference
 			AND receipt.state='sent' AND receipt.delivery_id=plan.delivery_id
-			AND receipt.render_id=render.render_id
-			LIMIT 2`
-		if mutation {
-			query += ` FOR UPDATE OF action, render, plan, receipt, selected, binding, onboarding, activation`
-		}
+			AND receipt.render_id=render.render_id`
 	}
-	rows, err := tx.QueryContext(ctx, query, fact.Token, fact.Interface.Key(), fact.ExternalAccountRef,
-		fact.ConversationRef, string(fact.ConversationScope))
+	args := []any{fact.Token, fact.Interface.Key(), fact.ExternalAccountRef, fact.ConversationRef, string(fact.ConversationScope)}
+	if mutation {
+		if postgres {
+			query += ` AND onboarding.operation_id=$6::uuid AND activation.activation_id=$7::uuid AND activation.activation_revision=$8 AND binding.binding_revision=$9`
+		} else {
+			query += ` AND onboarding.operation_id=? AND activation.activation_id=? AND activation.activation_revision=? AND binding.binding_revision=?`
+		}
+		args = append(args, parent.operationID, parent.activationID, parent.activationRevision, parent.bindingRevision)
+	}
+	query += ` LIMIT 2`
+	if postgres && mutation {
+		query += ` FOR UPDATE OF action, render, plan, receipt, selected, binding, onboarding, activation`
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return render.ResolvedAction{}, false, err
 	}
