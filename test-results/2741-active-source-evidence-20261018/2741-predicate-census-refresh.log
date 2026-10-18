@@ -1,0 +1,15 @@
+Precompile outside test slot: environment=0.003s build=3.305s cleanup=0.000s total=3.308s
+Test capacity is busy.
+Queue position: 1
+Active slots: 3/3
+Estimated start: unknown
+Estimated completion: unknown
+Waiting for a test slot... updates every 30s
+Test capacity is busy.
+Queue position: 1
+Active slots: 3/3
+Estimated start: unknown
+Estimated completion: unknown
+Waiting for a test slot... updates every 30s
+Test slot acquired after 36s. Starting go test ./internal/cliapp -run ^TestVerifyBootStartupPredicateCensus$ -count=1
+ok  	github.com/division-sh/swarm/internal/cliapp	0.095s

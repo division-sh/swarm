@@ -1,0 +1,56 @@
+diff --git a/internal/cliapp/verify_predicate_census_test.go b/internal/cliapp/verify_predicate_census_test.go
+index 78fa530ede..e6c9dc0da9 100644
+--- a/internal/cliapp/verify_predicate_census_test.go
++++ b/internal/cliapp/verify_predicate_census_test.go
+@@ -44,6 +44,8 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
+ 	{"internal/cliapp/local_preflight.go", "A15,A16,A17,A18,A27", "P13,P14,P15,P16"},
+ 	{"internal/cliapp/workspace_backend.go", "A15", "P13,P14"},
+ 	{"internal/cliapp/workspace_listener.go", "A15,A18", "P13,P15"},
++	// #2723's public listener composition preserves these startup obligations;
++	// testdata/issue_2723_admission_predicate_accounting.md pins its owners and proof.
+ 	{"internal/serveapp/main.go", "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27", "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22"},
+ 	// Drain helpers share this whole-file census, not verification authority.
+ 	// #2612's owner/caller and preserved-admission witnesses are recorded in
+diff --git a/internal/serveapp/main.go b/internal/serveapp/main.go
+index c34dbefe5a..75bc719898 100644
+--- a/internal/serveapp/main.go
++++ b/internal/serveapp/main.go
+@@ -1618,7 +1618,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
+ 		}
+ 		publicHandler := http.NotFoundHandler()
+ 		if inboundHandler != nil {
+-			publicHandler = registrationController.Handler(inboundHandler)
++			publicHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager, publicRegistration: registrationController}
+ 		}
+ 		publicExposure, controllerErr = runtimepublicingress.NewController(runtimepublicingress.Options{
+ 			Mode: publicIngressMode, PublicOrigin: opts.PublicWebhookBaseURL, ListenAddress: opts.PublicWebhookListen,
+diff --git a/platform-spec.yaml b/platform-spec.yaml
+index 886862fa27..ca988b62e5 100644
+--- a/platform-spec.yaml
++++ b/platform-spec.yaml
+@@ -12448,11 +12448,22 @@ tool_model:
+         and output. The exact currently admitted runtime-generation grant fences execution and handler/readiness use but is
+         deliberately excluded from semantic request identity, so an unchanged startup handoff performs no provider apply.
+       callback: >
+-        `https-origin/webhooks/<alias>/<provider>?swarm_callback_generation=<random-token>`; the public listener admits
+-        only a pair selected in the same immutable registration snapshot, with the exact verified token. Admission consumes
++        `https-origin/webhooks/<alias>/<provider>?swarm_callback_generation=<random-token>`; for managed callbacks the public listener admits
++        only a pair selected in the same immutable registration snapshot, with the exact verified token. Managed admission consumes
+         the same Snapshot(now) currentness predicate as readiness, including current exposure generation and nonce evidence,
+         explicit exposure revocation, evidence expiry, startup authority, effect authority, credential observations, selected pair,
+-        and token. Unregistered, stale-generation, expired, observation-failed, and revoked routes return not found.
++        and token. Unregistered, stale-generation, expired, observation-failed, and revoked managed routes return not found.
++        The managed callback/token fence runs before public target-availability responses. A request containing
++        swarm_callback_generation, including an empty value, never falls back to author admission after reset or withdrawal.
++        Author-only declared routes use their declared request authentication on that same public listener without a synthetic
++        registration token. One acquired ingress runtime context supplies complete declared binding evidence and frozen learned
++        credential ownership before selecting this arm; absence from the registration snapshot is never sufficient. Explicit
++        declared registrations, operator-onboarded and prebinding registrations, and unresolved withdrawn registrations retain
++        the managed callback fence. Classification and publication use the same acquired context, source and target.
++        Credential replacement is checked at the existing gateway validation and pre-publication boundaries.
++        Author exposure checks share readiness's exposure/startup currentness owner without evaluating managed registrations
++        or depending on unrelated registration revisions; exposure replacement and revocation during evaluation still refuse.
++        The public listener exposes no API, MCP, tools or health routes.
+       apply: >
+         Provider registration apply is the only durable operation. It uses the managed external-effect journal with closed
+         serve-registration authority, revalidates the currently admitted runtime-generation grant and all credential snapshots, commits the launched

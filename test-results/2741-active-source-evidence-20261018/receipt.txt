@@ -1,0 +1,6 @@
+<!-- receipt v1 -->
+receipt: head=50e3a8f275f9c323d0940e58b81b5bc3bf99726d tree=7d0170af95ffe704399437686c92db6294f0cb65 parent=a3356ce26aec02b8b2502192d2ad7fc0eea3b9f2 branch=agent-d/2729-credential-source signed=G dirty_files=0
+preflight: test-results/preflight/20261018T192735.201020022-10ff70e6-765c-439b-b4d8-f204c993447c/receipt.json sha256=d9afabbe75b1b04d8ecf9a7299c15dea069f4b687f840f09a07fd1ce10b9b720 (exact-head complete unstarted=0)
+tests: ./internal/runtime:active-provider-boundary,mock/missing/no-agent,native-hydration-order-both-stores,runtime-owner-guards (race x3, unchanged runtime blobs after rebase); ./internal/cliapp:provider-source/currentness/source-free/predicate-census; ./internal/serveapp:required-source-readback-both-stores/concise+verbose,presenter; ./internal/runtime/credentials:currentness/ownership; ./internal/runtime/llm:provider-precedence/refusal (final focused 52 roots/79 cases)
+regenerated: not-claimed
+generated: 2026-10-18T19:36:05Z

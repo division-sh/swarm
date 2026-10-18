@@ -1,0 +1,135 @@
+diff --git a/internal/runtime/runtime.go b/internal/runtime/runtime.go
+index 777db87c14..ed67ddcae0 100644
+--- a/internal/runtime/runtime.go
++++ b/internal/runtime/runtime.go
+@@ -1751,7 +1751,7 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
+ 	}
+ 	source := rt.Options.WorkflowModule.SemanticSource()
+ 	if rt.Options.LLMRuntime == nil {
+-		if err := validateSelectedBackendCredentialForActiveAgents(ctx, rt.Config, rt.Options, source, rt.Manager); err != nil {
++		if _, err := validateSelectedBackendCredentialForActiveAgents(ctx, rt.Config, rt.Options, source, rt.Manager); err != nil {
+ 			rt.emitBootProgress(14, "workspace_validation_and_system_containers", "FAILED", err.Error())
+ 			return nil, fmt.Errorf("llm backend credential validation failed: %w", err)
+ 		}
+diff --git a/internal/runtime/runtime_claude_startup.go b/internal/runtime/runtime_claude_startup.go
+index e0a9f2b013..5191e0cb71 100644
+--- a/internal/runtime/runtime_claude_startup.go
++++ b/internal/runtime/runtime_claude_startup.go
+@@ -126,19 +126,19 @@ func ValidateDeclaredAgentModelAdmission(posture executionposture.Posture, cfg *
+ 	return nil
+ }
+ 
+-func validateSelectedBackendCredentialForActiveAgents(ctx context.Context, cfg *config.Config, opts RuntimeOptions, source semanticview.Source, manager *runtimemanager.AgentManager) error {
++func validateSelectedBackendCredentialForActiveAgents(ctx context.Context, cfg *config.Config, opts RuntimeOptions, source semanticview.Source, manager *runtimemanager.AgentManager) (runtimecredentials.SourceFact, error) {
+ 	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
+ 	if err != nil {
+-		return err
++		return runtimecredentials.SourceFact{}, err
+ 	}
+ 	if !hasAgents {
+-		return nil
++		return runtimecredentials.SourceFact{}, nil
+ 	}
+ 	if opts.ExecutionPosture == executionposture.MockOnly {
+-		return validateActiveMockDescriptors(cfg, manager)
++		return runtimecredentials.SourceFact{}, validateActiveMockDescriptors(cfg, manager)
+ 	}
+ 	_, err = validateSelectedBackendCredential(ctx, cfg, providerCredentialResolverForRuntimeOptions(opts))
+-	return err
++	return runtimecredentials.SourceFact{}, err
+ }
+ 
+ func validateSelectedBackendCredential(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver) (runtimecredentials.SourceFact, error) {
+diff --git a/internal/runtime/runtime_claude_startup_test.go b/internal/runtime/runtime_claude_startup_test.go
+index 142178a966..44bb6c12b1 100644
+--- a/internal/runtime/runtime_claude_startup_test.go
++++ b/internal/runtime/runtime_claude_startup_test.go
+@@ -223,6 +223,54 @@ func TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBindingForRec
+ 	if !ok || failure.Failure.Class != runtimefailures.ClassAuthenticationNeeded || failure.Failure.Detail.Code != "provider_credential_missing" {
+ 		t.Fatalf("expected oauth token error, got %v", err)
+ 	}
++
++	t.Run("active_provider_source_boundary", func(t *testing.T) {
++		// This proves the manager-only validation boundary, not a recovered boot.
++		ctx := testAuthorActivityContext(context.Background())
++		source := claudeStartupAgentFreeSource()
++		if semanticview.SourceDeclaresAgents(source) || len(manager.ListAgentConfigs()) != 1 {
++			t.Fatal("boundary fixture must have one manager agent and no source declarations")
++		}
++		path := filepath.Join(t.TempDir(), "credentials.json")
++		store, err := runtimecredentials.NewFileStore(path)
++		if err != nil {
++			t.Fatal(err)
++		}
++		activeOpts := RuntimeOptions{ExecutionPosture: executionposture.Live, ProviderCredentials: store}
++		t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "environment-must-not-satisfy-provider")
++		fact, err := validateSelectedBackendCredentialForActiveAgents(ctx, cfg, activeOpts, source, manager)
++		failure, ok := runtimefailures.As(err)
++		if !ok || failure.Failure.Detail.Code != "provider_credential_missing" || fact != (runtimecredentials.SourceFact{}) {
++			t.Fatalf("missing file provider = %+v, %v; want missing-provider refusal without a fact", fact, err)
++		}
++		if _, err := store.AdmitWithReceipt(ctx, "CLAUDE_CODE_OAUTH_TOKEN", "provider-value-must-not-be-presented", "provider-receipt-must-not-be-presented"); err != nil {
++			t.Fatal(err)
++		}
++		fact, err = validateSelectedBackendCredentialForActiveAgents(ctx, cfg, activeOpts, source, manager)
++		want := runtimecredentials.SourceFact{Key: "CLAUDE_CODE_OAUTH_TOKEN", Reference: "file:" + path}
++		if err != nil || fact != want {
++			t.Fatalf("active provider source = %+v, %v; want %+v", fact, err, want)
++		}
++		declaredFact, err := validateSelectedBackendCredentialForDeclaredAgents(ctx, cfg, activeOpts, claudeStartupAgentSource("recovered-agent"))
++		if err != nil || declaredFact != fact {
++			t.Fatalf("declared and active observations must supply the identical presenter fact: %+v, %v", declaredFact, err)
++		}
++		encoded, err := json.Marshal(fact)
++		if err != nil {
++			t.Fatal(err)
++		}
++		for _, private := range []string{"provider-value-must-not-be-presented", "provider-receipt-must-not-be-presented", "seal"} {
++			if strings.Contains(string(encoded), private) {
++				t.Fatalf("source fact disclosed private credential evidence: %s", encoded)
++			}
++		}
++		for _, posture := range []executionposture.Posture{executionposture.Live, executionposture.MockOnly} {
++			fact, err := validateSelectedBackendCredentialForActiveAgents(ctx, cfg, RuntimeOptions{ExecutionPosture: posture}, source, nil)
++			if err != nil || fact != (runtimecredentials.SourceFact{}) {
++				t.Fatalf("agent-free %v validation = %+v, %v; want no observation", posture, fact, err)
++			}
++		}
++	})
+ }
+ 
+ func TestValidateClaudeManagedAgentWorkspaces_RequiresResolvedContainerTargets(t *testing.T) {
+diff --git a/internal/runtime/runtime_mock_boot_waiver_test.go b/internal/runtime/runtime_mock_boot_waiver_test.go
+index 292d7275b8..88f4976cd7 100644
+--- a/internal/runtime/runtime_mock_boot_waiver_test.go
++++ b/internal/runtime/runtime_mock_boot_waiver_test.go
+@@ -85,10 +85,13 @@ func TestCommandMockStartupRejectsRestoredLiveDescriptor(t *testing.T) {
+ 		t.Fatalf("SpawnAgent: %v", err)
+ 	}
+ 
+-	err := validateSelectedBackendCredentialForActiveAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{ExecutionPosture: executionposture.MockOnly}, fullyMockedRuntimeAgentMemorySource(t), manager)
++	fact, err := validateSelectedBackendCredentialForActiveAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{ExecutionPosture: executionposture.MockOnly}, fullyMockedRuntimeAgentMemorySource(t), manager)
+ 	if err == nil || !strings.Contains(err.Error(), "mock execution rejects live active agent") || !strings.Contains(err.Error(), "recovered-agent") {
+ 		t.Fatalf("error = %v, want causal-mode refusal naming the active agent", err)
+ 	}
++	if fact.Reference != "" {
++		t.Fatalf("mock refusal returned a credential source: %+v", fact)
++	}
+ }
+ 
+ func TestCommandMockStartupAcceptsEmptyActiveSet(t *testing.T) {
+@@ -100,10 +103,13 @@ func TestCommandMockStartupAcceptsEmptyActiveSet(t *testing.T) {
+ 		ReceiverExecution: eventreceiver.NormalExecution(),
+ 	})
+ 
+-	err := validateSelectedBackendCredentialForActiveAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{ExecutionPosture: executionposture.MockOnly}, fullyMockedRuntimeAgentMemorySource(t), manager)
++	fact, err := validateSelectedBackendCredentialForActiveAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{ExecutionPosture: executionposture.MockOnly}, fullyMockedRuntimeAgentMemorySource(t), manager)
+ 	if err != nil {
+ 		t.Fatalf("empty active set must not require a live credential in mock execution, got %v", err)
+ 	}
++	if fact.Reference != "" {
++		t.Fatalf("mock validation returned a credential source: %+v", fact)
++	}
+ }
+ 
+ func TestCommandPurposeControlsClaudeStartupRequirements(t *testing.T) {

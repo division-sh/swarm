@@ -1,0 +1,9 @@
+Precompile outside test slot: environment=0.004s build=12.073s cleanup=0.000s total=12.077s
+Test slot acquired after 1ms. Starting go test ./internal/runtime -run ^TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBindingForRecoveredManagerAgent$/active_provider_source_boundary$ -count=1
+--- FAIL: TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBindingForRecoveredManagerAgent (0.00s)
+    --- FAIL: TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBindingForRecoveredManagerAgent/active_provider_source_boundary (0.00s)
+        runtime_claude_startup_test.go:252: active provider source = {Key: Reference:}, <nil>; want {Key:CLAUDE_CODE_OAUTH_TOKEN Reference:file:/tmp/TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBi2697049628/001/credentials.json}
+FAIL
+FAIL	github.com/division-sh/swarm/internal/runtime	0.009s
+FAIL
+exit status 1

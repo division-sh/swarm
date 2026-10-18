@@ -1,0 +1,3 @@
+Precompile outside test slot: environment=0.003s build=13.276s cleanup=0.000s total=13.279s
+Test slot acquired after 22ms. Starting go test ./internal/cliapp -run ^TestVerifyBootStartupPredicateCensus$ -count=1
+ok  	github.com/division-sh/swarm/internal/cliapp	0.096s

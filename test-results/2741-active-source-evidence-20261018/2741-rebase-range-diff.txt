@@ -1,0 +1,14 @@
+1:  5919825fcf ! 1:  2b98a9a647 feat(cli): retain credential source provenance for boot readback
+    @@ internal/cliapp/testdata/verify_admission_predicate_census.json
+          "owner": "internal/serveapp/main.go::buildRuntimeComposition",
+          "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+          "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    --    "body_sha256": "7877f29de6095029847a5b0be52ce8eb6acc1c4c979ed6be10d1b2ee9c3142a8"
+    -+    "body_sha256": "ce8428ad2fd89ec33cab40aaa9cbd12f918a371172ea0174fa1522f101e3db29"
+    +-    "body_sha256": "99e72376a378ec61d5ddba641d23feecefabcc005663f18824005e268cc6a2ec"
+    ++    "body_sha256": "8c08d353f298f0725cc7bb0bb4f5118e29395b41e71f391ffdbb996cebf1d3c7"
+        },
+        {
+          "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
+2:  ab2d930575 = 2:  a3356ce26a fix(credentials): refresh retained source facts without rotating authority
+3:  9c39a2ad63 = 3:  50e3a8f275 fix(runtime): retain the active provider credential source

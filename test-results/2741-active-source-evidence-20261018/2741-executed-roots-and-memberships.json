@@ -1,0 +1,374 @@
+{
+  "head": "50e3a8f275f9c323d0940e58b81b5bc3bf99726d",
+  "profile": "lifecycle",
+  "root_count": 52,
+  "case_passes": 79,
+  "failures": [],
+  "skips": [],
+  "roots": [
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "root": "TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces",
+      "units": [
+        "catalog-required-verify"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "root": "TestProviderIngressCredentialTierDoesNotAdoptToolEnvironment",
+      "units": [
+        "catalog-required-verify"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "root": "TestDoctorIsSourceFreeAcrossHostileInvocationTrees",
+      "units": [
+        "catalog-required-verify"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/llm",
+      "root": "TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles",
+      "units": [
+        "api-llm-bus-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/llm",
+      "root": "TestProviderCredentialResolverMissingPortIsUnavailableNotMissingSecret",
+      "units": [
+        "api-llm-bus-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/llm",
+      "root": "TestProviderCredentialResolverReadFailurePreservesCauseWithoutSecretDisclosure",
+      "units": [
+        "api-llm-bus-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/llm",
+      "root": "TestProviderCredentialResolver_EnvOnlyFailsClosed",
+      "units": [
+        "api-llm-bus-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/llm",
+      "root": "TestProviderCredentialResolver_ActiveCredentiallessProfileNeedsNoSyntheticKey",
+      "units": [
+        "api-llm-bus-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "root": "TestVerifyBootStartupPredicateCensus",
+      "units": [
+        "catalog-required-verify"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "root": "TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal",
+      "units": [
+        "catalog-required-verify"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "root": "TestAdmissionPredicateRatchetRejectsRemovedVerifyConsumer",
+      "units": [
+        "catalog-required-verify"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/cliapp",
+      "root": "TestAdmissionPredicateRatchetRejectsUncoveredProviderPrerequisite",
+      "units": [
+        "catalog-required-verify"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/credentials",
+      "root": "TestCredentialValueCurrentnessHasOneProductionOwnerAndNoEpochSurvivors",
+      "units": [
+        "broad-10"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/credentials",
+      "root": "TestIngressSigningUsabilityHasNoSecondProductionInterpreter",
+      "units": [
+        "broad-10"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/credentials",
+      "root": "TestSecretBindingProjectionFrozenReadNeverObservesOrAddsAuthority",
+      "units": [
+        "broad-10"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime/credentials",
+      "root": "TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically",
+      "units": [
+        "broad-10"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestChannelActivationExecutableReaderCensus",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestChannelActivationExecutionConsumersUseCanonicalOwner",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestValidateClaudeStartupConfig_RequiresWorkspaceAndGateway",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestValidateClaudeStartupConfig_SkipsClaudeEnvForAgentFreeSource",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestValidateClaudeStartupConfigForActiveAgents_RequiresFullCLIBindingForRecoveredManagerAgent",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestCommandMockStartupDoesNotRequireLiveCredential",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestCommandLiveStartupRequiresCredentialDespiteSourceDoubles",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestValidateSelectedBackendCredentialForDeclaredAgents_UnmockedAgentWithCredentialPasses",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestCommandMockStartupRejectsRestoredLiveDescriptor",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestCommandMockStartupAcceptsEmptyActiveSet",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestCommandPurposeControlsClaudeStartupRequirements",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestWorkflowAdmissionAccountsForPostRegistryClauses",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestRuntimeDepsValidateOwnsRequiredBootInputs",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestRuntimeDepsValidatedDerivesCanonicalBootGraph",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeRequiredCredentialSourceReadbackBothStores",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterProjectsBootFactsByMode",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterMasksProofReuseFallbackPresentation",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterConciseReadinessUsesTypedFacts",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterStylesOnlyWaitingToken",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterVerbosePreservesExactlyCanonicalBootSequence",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterFailureNeverPrintsReadiness",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterUnhandledDiagnosticFallsBackToGenericFailure",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterRendersZeroIngressAndShutdownFailure",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterDoesNotContradictRuntimeFailureWithCleanShutdown",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterPreReadyRuntimeFailureSuppressesCommit",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterPublishesAdmissionBeforeVisibleReadiness",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterUsesAuthorSafeMultiContextWorkspaceProjection",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterProjectsRecoveryOutcomesWithoutBookkeeping",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterDoesNotTreatRecoveryAdmissionAsRestoration",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterFailureUsesDiagnosticChannel",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterJoinsEarlyFailureAndCleanupOnce",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterVerboseFailureCoalescesCanonicalSequence",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterPreservesWarningsOnLateStartupFailure",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/serveapp",
+      "root": "TestServeLifecyclePresenterUsesResolvedStoreSelectionVerbatim",
+      "units": [
+        "serveapp-journeys-first"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity",
+      "units": [
+        "runtime-full"
+      ]
+    },
+    {
+      "package": "github.com/division-sh/swarm/internal/runtime",
+      "root": "TestSemanticOwnershipProducerConsumerLedgerIsClosed",
+      "units": [
+        "runtime-full"
+      ]
+    }
+  ]
+}
