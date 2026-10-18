@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -118,6 +120,56 @@ func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthori
 	}
 	if got := len(plan.CommitCommands()); got != 2 {
 		t.Fatalf("CommitCommands = %d, want 2", got)
+	}
+	if err := bus.AbandonInboundDeliveryPlan(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, cleanupFails := range []bool{false, true} {
+		name := "submitted_validation_only"
+		if cleanupFails {
+			name = "submitted_validation_with_independent_release_failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
+			owner := newTerminalReleasePipelineOwner()
+			cleanup := errors.New("independent publication claim release")
+			if cleanupFails {
+				owner.releaseError[batch.Events[0].Event.ID()] = func(int) error { return cleanup }
+			}
+			violation := &eventschema.Violation{Path: "$.data.user_id", Detail: "required field"}
+			bus, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{
+				ContractBundle: source, ProviderOutputVerifier: catalog, PipelineObligations: owner,
+				Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+				PayloadAdmitter: func(_ context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
+					if event.ID() == batch.Events[1].Event.ID() {
+						return events.PayloadAdmission{}, violation
+					}
+					return eventtest.PayloadAdmission(event, flow, string(event.Type()))
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = bus.PrepareInboundDeliveryBatch(context.Background(), batch)
+			var typed *eventschema.Violation
+			if !errors.Is(err, ErrPayloadValidation) || !errors.As(err, &typed) || typed != violation || owner.releaseCalls[batch.Events[0].Event.ID()] != 1 {
+				t.Fatalf("validation/actual preparation release not reached: error=%v releases=%v", err, owner.releaseCalls)
+			}
+			path, permanent := SubmittedInboundValidationPath(err)
+			if permanent == cleanupFails || permanent && path != violation.Path || cleanupFails && !errors.Is(err, cleanup) {
+				t.Fatalf("input/independent release disposition: path=%q permanent=%t error=%v", path, permanent, err)
+			}
+			if !cleanupFails {
+				for _, joined := range []error{errors.Join(err, cleanup), errors.Join(cleanup, err), errors.Join(fmt.Errorf("outer: %w", errors.Join(cleanup, err)), err)} {
+					if _, permanent := SubmittedInboundValidationPath(joined); permanent {
+						t.Fatalf("nested/ordered independent release was hidden: %v", joined)
+					}
+				}
+				if _, permanent := SubmittedInboundValidationPath(fmt.Errorf("validation wrapper: %w", errors.Join(err, err))); !permanent {
+					t.Fatal("validation-only nested wrapping lost its input provenance")
+				}
+			}
+		})
 	}
 }
 

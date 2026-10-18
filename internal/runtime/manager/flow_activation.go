@@ -755,11 +755,11 @@ func validateAutoEmitPayload(source semanticview.Source, flowID, eventType strin
 		return nil
 	}
 	if err := resolution.UnresolvedTypeError(); err != nil {
-		return fmt.Errorf("%w for %s: %v", runtimebus.ErrPayloadValidation, proof.EventKey(), err)
+		return fmt.Errorf("%w for %s: %w", runtimebus.ErrPayloadValidation, proof.EventKey(), err)
 	}
 	schema := resolution.Schema
 	if err := runtimeeventschema.ValidatePayloadAgainstSchema(schema.Schema, payload); err != nil {
-		return fmt.Errorf("%w for %s: %v", runtimebus.ErrPayloadValidation, proof.EventKey(), err)
+		return fmt.Errorf("%w for %s: %w", runtimebus.ErrPayloadValidation, proof.EventKey(), err)
 	}
 	return nil
 }
