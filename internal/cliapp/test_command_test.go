@@ -1608,6 +1608,8 @@ func scenarioRunDiagnoseTestResult(runID string, ready bool) map[string]any {
 		"blocking_reason":   "",
 		"heuristics":        []string{},
 		"failed_deliveries": []any{},
+		"instances":         []any{},
+		"attributions":      []any{},
 		"fan_out":           validDiagnosticFanOutSummary(runID),
 		"test_quiescence": map[string]any{
 			"ready":                     ready,
