@@ -588,8 +588,12 @@ func stageForkContentionFixture(t *testing.T, f forkContentionFixture, selected 
 
 func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selected bool, selector string, withOperation bool, pins ...durabledata.ExplicitPin) (runfork.RunForkMaterialization, runfork.RunForkSelectedContractExecutionActivateRequest) {
 	t.Helper()
+	rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !selected {
-		staged, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+		staged, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -615,13 +619,14 @@ func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selecte
 			}
 		})
 	}
-	request := prepareSelectedStoreMaterializationForTest(t, f.ctx, f.store, f.runID, selector, selection)
+	targetCtx := runtimecorrelation.WithRootAdmission(f.ctx, rooted.Admission())
+	request := prepareSelectedStoreMaterializationForTest(t, targetCtx, f.store, f.runID, selector, selection, rooted.Admission().BundleHash())
 	request.DataPinOverrides = pins
 	if withOperation {
 		request.ForkOperation = &runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: "bearer:branch-point-proof", IdempotencyKey: uuid.NewString(),
 			TransportHash: "sha256:branch-point-proof", SourceRunID: f.runID, ForkEventID: selector,
-			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection, AllowSourceFreeze: true,
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: rooted.Admission().Reference(), ContractSelection: selection, AllowSourceFreeze: true,
 			DataPinOverrides: pins,
 		}
 	}
