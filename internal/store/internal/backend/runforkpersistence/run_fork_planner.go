@@ -185,16 +185,9 @@ func planRunForkSnapshotWithActivityOrigins(
 		return runfork.RunForkPlan{}, err
 	}
 	activityAdmission := runForkSourceStateAdmission{snapshot: snapshot, sourceAt: sourceAt, postgres: postgres}
-	origins := make([]semanticview.ActivityRequestOrigin, 0)
-	for _, event := range snapshot.Events {
-		if sourceAt == nil || event.EventName != runForkActivityRequestEvent {
-			continue
-		}
-		origin, err := activityAdmission.activityRequestOriginAtCut(ctx, tx, event.EventID, make(map[string]bool))
-		if err != nil {
-			return runfork.RunForkPlan{}, fmt.Errorf("admit original activity request %s: %w", event.EventID, err)
-		}
-		origins = append(origins, origin)
+	origins, err := activityAdmission.activityRequestOriginsAtCut(ctx, tx)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
 	}
 	plan, err = plan.WithActivityRequestOrigins(snapshot.Revision, origins)
 	if err != nil {
@@ -256,6 +249,21 @@ func planRunForkSnapshotWithActivityOrigins(
 	plan.UnsupportedBlockerCount = len(plan.UnsupportedBlockers)
 	plan.ExecutionReady = plan.ReplayResumeAdmission.StateOnlyExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady
 	return plan, nil
+}
+
+func (a runForkSourceStateAdmission) activityRequestOriginsAtCut(ctx context.Context, tx *sql.Tx) ([]semanticview.ActivityRequestOrigin, error) {
+	origins := make([]semanticview.ActivityRequestOrigin, 0)
+	for _, event := range a.snapshot.Events {
+		if a.sourceAt == nil || event.EventName != runForkActivityRequestEvent {
+			continue
+		}
+		origin, err := a.activityRequestOriginAtCut(ctx, tx, event.EventID, make(map[string]bool))
+		if err != nil {
+			return nil, fmt.Errorf("admit original activity request %s: %w", event.EventID, err)
+		}
+		origins = append(origins, origin)
+	}
+	return origins, nil
 }
 
 func resolveFixedRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID string, point runfork.RunForkPoint, resolve runForkRevisionPointResolver) (runForkEventCursor, error) {

@@ -4927,28 +4927,6 @@ func prepareSelectedExecutionSourceAgent(t *testing.T, ctx context.Context, sele
 	return ctx, capability
 }
 
-func seedSelectedExecutionTestAgent(
-	t testing.TB,
-	ctx context.Context,
-	selected storetest.AgentFixtureStore,
-	identity agentidentity.Identity,
-	at time.Time,
-	source runtimecorrelation.SourceArtifactFact,
-) runtimestartupownership.ProcessCapability {
-	t.Helper()
-	config := selectedExecutionFixtureAgentConfig(t, identity)
-	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, selected, runtimemanager.PersistedAgent{
-		Config: config, Status: "active", HiredBy: "test", StartedAt: at,
-	}, source); err != nil {
-		t.Fatalf("seed selected-execution test agent: %v", err)
-	}
-	capability, err := agentfixture.ProcessCapability(t, ctx, selected)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return capability
-}
-
 func selectedExecutionFixtureAgentConfig(t testing.TB, identity agentidentity.Identity) runtimeactors.AgentConfig {
 	t.Helper()
 	return selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{

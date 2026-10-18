@@ -5,6 +5,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
 // ValidateRecordedActivityProposal checks the released request with the same
@@ -28,16 +29,7 @@ func ValidateRecordedActivityProposal(request events.Event, card decisioncard.Ca
 	if err != nil {
 		return err
 	}
-	if actual.ActivityID != expected.ActivityID || actual.Tool != expected.Tool || actual.BundleHash != expected.BundleHash ||
-		actual.WorkflowVersion != expected.WorkflowVersion || !actual.Input.Equal(expected.Input) ||
-		actual.SuccessEvent != expected.SuccessEvent || actual.FailureEvent != expected.FailureEvent ||
-		actual.RevisionEvent != expected.RevisionEvent || actual.RejectedEvent != expected.RejectedEvent ||
-		actual.EntityID != expected.EntityID || actual.Owner != expected.Owner || actual.ExecutionFlowID != expected.ExecutionFlowID ||
-		actual.FlowInstance != expected.FlowInstance || actual.HandlerEventKey != expected.HandlerEventKey ||
-		actual.SourceEventID != expected.SourceEventID || actual.SourceRunID != expected.SourceRunID ||
-		actual.SourceTaskID != expected.SourceTaskID || actual.ParentEventID != expected.ParentEventID ||
-		actual.ChainDepth != expected.ChainDepth || actual.Generation != expected.Generation || actual.LoopStage != expected.LoopStage ||
-		actual.ExecutionMode != expected.ExecutionMode || actual.Context.ReplyContextID() != expected.Context.ReplyContextID() {
+	if !recordedActivityRequestMatches(actual, expected) {
 		return fmt.Errorf("recorded activity proposal changed its exact released request")
 	}
 	if card.Status != decisioncard.StatusDecided || card.Verdict != "approve" ||
@@ -46,4 +38,17 @@ func ValidateRecordedActivityProposal(request events.Event, card decisioncard.Ca
 		return fmt.Errorf("recorded activity proposal is not settled approved evidence")
 	}
 	return nil
+}
+
+func recordedActivityRequestMatches(actual, expected runtimeengine.ActivityIntent) bool {
+	return actual.ActivityID == expected.ActivityID && actual.Tool == expected.Tool && actual.BundleHash == expected.BundleHash &&
+		actual.WorkflowVersion == expected.WorkflowVersion && actual.Input.Equal(expected.Input) &&
+		actual.SuccessEvent == expected.SuccessEvent && actual.FailureEvent == expected.FailureEvent &&
+		actual.RevisionEvent == expected.RevisionEvent && actual.RejectedEvent == expected.RejectedEvent &&
+		actual.EntityID == expected.EntityID && actual.Owner == expected.Owner && actual.ExecutionFlowID == expected.ExecutionFlowID &&
+		actual.FlowInstance == expected.FlowInstance && actual.HandlerEventKey == expected.HandlerEventKey &&
+		actual.SourceEventID == expected.SourceEventID && actual.SourceRunID == expected.SourceRunID &&
+		actual.SourceTaskID == expected.SourceTaskID && actual.ParentEventID == expected.ParentEventID &&
+		actual.ChainDepth == expected.ChainDepth && actual.Generation == expected.Generation && actual.LoopStage == expected.LoopStage &&
+		actual.ExecutionMode == expected.ExecutionMode && actual.Context.ReplyContextID() == expected.Context.ReplyContextID()
 }

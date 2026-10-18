@@ -68,6 +68,10 @@ func (a runForkSourceStateAdmission) activityRequestOriginAtCut(ctx context.Cont
 		origin := semanticview.ActivityRequestOrigin{Request: request, Cuts: []semanticview.ActivityRequestCut{step}}
 		return origin, origin.Validate()
 	}
+	return a.inheritedActivityRequestOriginAtCut(ctx, tx, request, step, visiting)
+}
+
+func (a runForkSourceStateAdmission) inheritedActivityRequestOriginAtCut(ctx context.Context, tx *sql.Tx, request events.Event, step semanticview.ActivityRequestCut, visiting map[string]bool) (semanticview.ActivityRequestOrigin, error) {
 	if _, err := pipeline.SelectedActivityRequestLineage(request); err != nil {
 		return semanticview.ActivityRequestOrigin{}, err
 	}
@@ -75,11 +79,11 @@ func (a runForkSourceStateAdmission) activityRequestOriginAtCut(ctx context.Cont
 	if !inherited {
 		return semanticview.ActivityRequestOrigin{}, fmt.Errorf("activity origin lacks exact retained request lineage")
 	}
-	binding, err := loadRunForkSelectedContractBinding(ctx, tx, cut.runID)
+	binding, err := loadRunForkSelectedContractBinding(ctx, tx, step.RunID)
 	if err != nil {
 		return semanticview.ActivityRequestOrigin{}, err
 	}
-	if binding.SourceRunID != selected.SourceRunID() || binding.ForkRunID != cut.runID {
+	if binding.SourceRunID != selected.SourceRunID() || binding.ForkRunID != step.RunID {
 		return semanticview.ActivityRequestOrigin{}, fmt.Errorf("activity request origin has crossed retained binding")
 	}
 	// This target supports event/deployment revision cuts, not D1's run-start
