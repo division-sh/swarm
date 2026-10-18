@@ -416,7 +416,7 @@ func TestServeSessionBootstrapInstallsIncomingOwnersBothStores(t *testing.T) {
 				fact, _ := correlation.SourceArtifactFactFromContext(f.owned)
 				owner := f.owner
 				if mode == "foreign_bus" {
-					fact = mustServeTestEphemeralSourceArtifactFact(serveRuntimeTestBundleHash)
+					fact = mustServeTestEphemeralSourceArtifactFact("bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
 					owner = newSupervisorTestRuntimeOccurrence(t, fact.BundleHash())
 				}
 				bus, err := runtimebus.NewEphemeralEventBusWithOptions(&processIngressEventStore{}, runtimebus.EventBusOptions{

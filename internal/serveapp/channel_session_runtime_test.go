@@ -163,7 +163,9 @@ func TestServeSessionIncomingSelectionConsumesExactCompiledOwners(t *testing.T) 
 		{"target generation", func(c *channelonboarding.Candidate) { c.Target.Generation = 1; c.Target.PublicationSequence = 1 }},
 		{"signing", func(c *channelonboarding.Candidate) { c.Target.SigningCredentialKey = "secret" }},
 		{"trigger generation", func(c *channelonboarding.Candidate) { c.Target.AdmissionGeneration = triggergeneration.Generation{} }},
-		{"source", func(c *channelonboarding.Candidate) { c.Coordinate.BundleHash = serveRuntimeTestBundleHash }},
+		{"source", func(c *channelonboarding.Candidate) {
+			c.Coordinate.BundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+		}},
 		{"runtime", func(c *channelonboarding.Candidate) { c.Coordinate.RuntimeInstanceID = uuid.NewString() }},
 		{"publication", func(c *channelonboarding.Candidate) { c.Coordinate.ContextPublicationGeneration++ }},
 		{"inventory", func(c *channelonboarding.Candidate) { c.Coordinate.PackInventoryGeneration = "foreign" }},
