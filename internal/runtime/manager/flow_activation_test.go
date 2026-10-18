@@ -4062,10 +4062,9 @@ func TestMockOnlyPostureRejectsLiveDynamicReadinessBeforeTopologyMutation(t *tes
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{failAgentID: "writer"}
 	firstBus := &flowActivationTestBus{}
-	first := newFlowActivationManager(t, firstBus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
+	first, ctx := newFlowActivationManagerForSource(t, firstBus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 	if err := activateFlowInstanceForTest(first, ctx, req); err == nil {
 		t.Fatal("activation succeeded across injected partial agent failure")
 	}
@@ -4073,16 +4072,15 @@ func TestMockOnlyPostureRejectsLiveDynamicReadinessBeforeTopologyMutation(t *tes
 
 	agents.failAgentID = ""
 	restartBus := &flowActivationTestBus{}
-	restarted := newFlowActivationManager(t, restartBus, instances, agents)
+	restarted, restartCtx := newFlowActivationManagerForSource(t, restartBus, instances, semanticview.Wrap(bundle), agents)
 	restarted.executionPosture = executionposture.MockOnly
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	if err := restarted.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
+	if err := restarted.reconcilePendingDynamicFlowRuntimeReadiness(restartCtx); err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
 		t.Fatalf("readiness reconciliation error = %v, want live-plan rejection", err)
 	}
 	if len(agents.upserts) != baselineAgents || len(restarted.lifecycle.executionIdentities()) != 0 || len(restartBus.published) != 0 || len(instances.armedEntries) != 0 {
 		t.Fatalf("readiness mutations agents=%d/%d executions=%d events=%d timers=%d", len(agents.upserts), baselineAgents, len(restarted.lifecycle.executionIdentities()), len(restartBus.published), len(instances.armedEntries))
 	}
-	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+	readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(restartCtx, req.TriggerEvent.RunID(), req.Instance.Route())
 	if err != nil || !found || !readiness.Pending() || readiness.Plan.ExecutionMode != executionmode.Live {
 		t.Fatalf("readiness after rejection = %#v found=%v err=%v", readiness, found, err)
 	}
@@ -4091,7 +4089,11 @@ func TestMockOnlyPostureRejectsLiveDynamicReadinessBeforeTopologyMutation(t *tes
 func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 	bundle := testFlowBundle(t, "")
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	bundleHash := authorActivityTestSourceArtifactFact.BundleHash()
+	bundleHash := bundle.SourceArtifact.BundleHash()
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan, err := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 		Identity: req.Instance,
 		RunID:    req.TriggerEvent.RunID(), BundleHash: bundleHash,
@@ -4129,7 +4131,7 @@ func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 		readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{
 			flowActivationReadinessKey(plan.RunID, req.Instance.InstancePath): {
 				InstancePath: req.Instance.InstancePath, Plan: plan,
-				OwningRunSource: authorActivityTestSourceArtifactFact,
+				OwningRunSource: fact,
 				RunStatus:       "cancelled", InstanceStatus: "terminated", InstanceTerminatedAt: terminatedAt,
 			},
 		},
@@ -4143,15 +4145,14 @@ func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 		Status: "active",
 	}}}
 	bus := &flowActivationTestBus{}
-	am := newFlowActivationManager(t, bus, instances, agents)
-	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
-	if err := reconcileDynamicFlowRuntimeStartupForTest(am, testAuthorActivityContext(context.Background()), authorActivityTestSourceArtifactFact, false); err != nil {
+	am, ctx := newFlowActivationManagerForSource(t, bus, instances, semanticview.Wrap(bundle), agents)
+	if err := reconcileDynamicFlowRuntimeStartupForTest(am, ctx, fact, false); err != nil {
 		t.Fatalf("ReconstructDynamicFlowRuntimeStartupTopology: %v", err)
 	}
 	if _, ok := testFlowActivationAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("terminal readiness retained a process agent")
 	}
-	if flowActivationAttemptReadyForTest(am, testAuthorActivityContext(context.Background()), req) {
+	if flowActivationAttemptReadyForTest(am, ctx, req) {
 		t.Fatal("terminal readiness retained or restored an executable activation receipt")
 	}
 	if len(instances.armedEntries) != 0 || len(bus.published) != 0 {
@@ -4163,10 +4164,9 @@ func TestEnsureFlowInstanceRebindsPersistedDeclaredAgentsToNewActivationAttempt(
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
 	firstBus := &flowActivationTestBus{}
-	first := newFlowActivationManager(t, firstBus, instances, agents)
 	bundle := testFlowBundleWithTwoAgents(t, "task.started")
+	first, ctx := newFlowActivationManagerForSource(t, firstBus, instances, semanticview.Wrap(bundle), agents)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
-	ctx := testAuthorActivityContext(context.Background())
 
 	if err := activateFlowInstanceForTest(first, ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance: %v", err)
@@ -4180,9 +4180,8 @@ func TestEnsureFlowInstanceRebindsPersistedDeclaredAgentsToNewActivationAttempt(
 	}
 
 	restartBus := &flowActivationTestBus{}
-	restarted := newFlowActivationManager(t, restartBus, instances, agents)
-	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	if created, err := restarted.EnsureFlowInstance(ctx, req); err != nil {
+	restarted, restartCtx := newFlowActivationManagerForSource(t, restartBus, instances, semanticview.Wrap(bundle), agents)
+	if created, err := restarted.EnsureFlowInstance(restartCtx, req); err != nil {
 		t.Fatalf("EnsureFlowInstance: %v", err)
 	} else if created {
 		t.Fatal("EnsureFlowInstance reported a new instance")
