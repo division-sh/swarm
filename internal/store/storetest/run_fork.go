@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
+	"github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 )
 
 type SelectedForkStorageTableSnapshot = private.SelectedForkStorageTableSnapshot
@@ -50,4 +51,29 @@ func RequireRunForkReplayResumeBlocker(t testing.TB, err error, code, fact strin
 	if !ok || blocker.Code != code || gotFact != fact {
 		t.Fatalf("fork refusal: blocker=%+v fact=%q typed=%t err=%v; want %s/%s", blocker, gotFact, ok, err, code, fact)
 	}
+}
+
+func ReadRunStatusStorage(ctx context.Context, selected any, runID string) (string, error) {
+	return private.ReadRunStatusStorageForTest(ctx, selected, runID)
+}
+
+func ReadSelectedSourceRefusalStorage(ctx context.Context, selected any, sourceRunID, sourceEventID string) (map[string]int, error) {
+	return private.ReadSelectedSourceRefusalStorageForTest(ctx, selected, sourceRunID, sourceEventID)
+}
+
+func CountRunNamedEventStorage(ctx context.Context, selected any, runID, eventName string) (int, error) {
+	return private.CountRunNamedEventStorageForTest(ctx, selected, runID, eventName)
+}
+
+func ReadSelectedForkExecutableCardinality(ctx context.Context, selected any, runID string) (map[string]string, error) {
+	return private.ReadSelectedForkExecutableCardinalityForTest(ctx, selected, runID)
+}
+
+func CaptureSelectedRunForkRevision(t testing.TB, ctx context.Context, selected any, runID string, families ...runforkrevisionfixture.Family) int64 {
+	t.Helper()
+	revision, err := private.CaptureSelectedRunForkRevisionForTest(ctx, selected, runID, families...)
+	if err != nil {
+		t.Fatalf("capture selected run-fork revision: %v", err)
+	}
+	return revision
 }
