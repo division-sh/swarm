@@ -863,7 +863,7 @@ func objectChannelPackBodies(t *testing.T) map[string][]byte {
 			required = append(required, name)
 		}
 		sort.Strings(required)
-		tools["mock."+name] = map[string]any{"category": "provider_connector", "description": "object channel " + name, "handler_type": "http", "effect_class": effect,
+		tools["mock."+name] = map[string]any{"category": "provider_connector", "description": "object channel " + name, "handler_type": "http",
 			"credentials": []string{"mock_api_key"}, "input_schema": obj(fields, required...), "output_schema": output,
 			"http":             map[string]any{"method": "POST", "url": "https://mock.example.test/v2/" + name, "headers": map[string]any{"X-Mock-Key": "{{credentials.mock_api_key}}"}, "body": body},
 			"response_success": map[string]any{"kind": "http_status_2xx"},
