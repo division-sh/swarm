@@ -90,6 +90,9 @@ func (e sessionChannelExecutor) requireNativeActivityBinding(ctx context.Context
 	if err != nil {
 		return err
 	}
+	if op.AccountConnection() {
+		return permit.ValidateBusinessTarget(ctx, op, activation, operatorchannel.Binding{})
+	}
 	bindings, ok := e.owner.store.(interface {
 		ListOperatorChannelBindings(context.Context, string) ([]operatorchannel.Binding, error)
 	})
@@ -102,7 +105,7 @@ func (e sessionChannelExecutor) requireNativeActivityBinding(ctx context.Context
 	}
 	matched := 0
 	for _, binding := range rows {
-		if permit.ValidateBusinessBinding(ctx, op, activation, binding) == nil {
+		if permit.ValidateBusinessTarget(ctx, op, activation, binding) == nil {
 			matched++
 		}
 	}

@@ -38,6 +38,7 @@ type Scope struct {
 	TargetSelector      string
 	PrincipalID         string
 	BindingRevision     int64
+	AccountOnly         bool `json:",omitempty"`
 }
 
 func (s Scope) Validate() error {
@@ -49,14 +50,14 @@ func (s Scope) Validate() error {
 	}
 	switch s.Kind {
 	case channelonboarding.SessionInputOnboarding:
-		if s.PublicationBinding != (runtimeinbound.BindingGeneration{}) || s.ActivationRevision != 0 || s.ActivationID != "" {
+		if s.AccountOnly || s.PublicationBinding != (runtimeinbound.BindingGeneration{}) || s.ActivationRevision != 0 || s.ActivationID != "" {
 			return fmt.Errorf("WhatsApp onboarding capture cannot carry business publication authority")
 		}
 	case channelonboarding.SessionInputBusiness:
 		if err := s.PublicationBinding.Validate(); err != nil {
 			return err
 		}
-		if s.BindingRevision < 1 || s.ActivationRevision < 1 || uuid.Validate(s.ActivationID) != nil {
+		if s.BindingRevision < 1 && !s.AccountOnly || s.AccountOnly && s.BindingRevision != 0 || s.ActivationRevision < 1 || uuid.Validate(s.ActivationID) != nil {
 			return fmt.Errorf("WhatsApp business capture requires its confirmed binding")
 		}
 	default:
@@ -172,12 +173,14 @@ type publicationAuthority struct {
 	BindingRevision     int64
 	OperationRevision   int64
 	ActivationRevision  int64
+	AccountOnly         bool `json:",omitempty"`
 }
 
 func (s Scope) publicationAuthority() publicationAuthority {
 	result := publicationAuthority{Kind: s.Kind, Session: s.Session, PublicationBinding: s.PublicationBinding,
 		Source: s.Source, OnboardingOperation: s.OnboardingOperation, ActivationID: s.ActivationID,
 		TargetSelector: s.TargetSelector, PrincipalID: s.PrincipalID, BindingRevision: s.BindingRevision}
+	result.AccountOnly = s.AccountOnly
 	if s.Kind != channelonboarding.SessionInputBusiness {
 		result.OperationRevision, result.ActivationRevision = s.OperationRevision, s.ActivationRevision
 	}

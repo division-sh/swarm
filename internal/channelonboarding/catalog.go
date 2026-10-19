@@ -109,7 +109,7 @@ func (c Candidate) ValidateDeclaration() error {
 	if err := c.Coordinate.ValidateContext(); err != nil {
 		return err
 	}
-	if !c.Posture.Valid() || !c.Ceremony.Valid() {
+	if !c.Posture.Valid() || !c.Ceremony.Valid() || c.Ceremony == CeremonyAccountLink && c.Posture != ActivationSessionConnection {
 		return fmt.Errorf("channel onboarding candidate posture and ceremony are invalid")
 	}
 	switch c.Posture {

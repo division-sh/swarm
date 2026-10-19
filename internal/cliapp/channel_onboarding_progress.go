@@ -114,7 +114,11 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 			fmt.Fprintf(w, "Connecting to %s...\n", strings.TrimSpace(result.Operation.Provider))
 			return
 		}
-		fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)
+		if result.Operation.Provider == "whatsapp" {
+			fmt.Fprintln(w, "WhatsApp: READY")
+		} else {
+			fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)
+		}
 		writeChannelNativeQualification(w, result)
 	}, func() ([]string, error) { return []string{result.Operation.OperationID}, nil })
 }

@@ -221,6 +221,7 @@ type RetryInput struct {
 	ProviderCredential     string
 	ClientLanguage         string
 	ExpectedLocaleRevision int64
+	CheckpointOnly         bool
 }
 
 type Result struct {
@@ -228,9 +229,17 @@ type Result struct {
 	Candidate         *Candidate                 `json:"candidate,omitempty"`
 	IdentityOperation *operatorchannel.Operation `json:"identity_operation,omitempty"`
 	Binding           *operatorchannel.Binding   `json:"binding,omitempty"`
+	Connection        *SessionConnectionReadback `json:"connection,omitempty"`
 	Readiness         *ConnectedChannelReadiness `json:"readiness,omitempty"`
 	Pairing           *PairingReadback           `json:"pairing,omitempty"`
 	Logout            *SessionLogoutReadback     `json:"logout,omitempty"`
+}
+
+type SessionConnectionReadback struct {
+	State               string `json:"state"`
+	Linked              bool   `json:"linked"`
+	AccountPresentation string `json:"account_presentation,omitempty"`
+	AccountName         string `json:"account_name,omitempty"`
 }
 
 func NewService(opts ServiceOptions) (*Service, error) {
@@ -309,7 +318,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if state == SlotOperationPending && input.Verb == VerbConnect && input.IdempotencyKey == "" && input.ProviderCredential == "" {
+	if (state == SlotOperationPending || (state == SlotReady || state == SlotActivationStale) && candidate.Posture == ActivationSessionConnection) && input.Verb == VerbConnect && input.IdempotencyKey == "" && input.ProviderCredential == "" {
 		return s.attachOpenConnection(ctx, start, candidate)
 	}
 	decision := AdmitVerb(input.Verb, state)
@@ -332,8 +341,17 @@ func (s *Service) attachOpenConnection(ctx context.Context, requested StartReque
 		return Result{}, err
 	}
 	for _, current := range operations {
-		if current.SlotKey != requested.SlotKey() || current.Phase.Terminal() {
+		if current.SlotKey != requested.SlotKey() || current.Phase == PhaseFailed || current.Phase == PhaseRetired {
 			continue
+		}
+		if current.Phase == PhaseSucceeded {
+			activation, err := s.store.GetConnectedChannelActivation(ctx, current.SlotKey)
+			if err != nil {
+				return Result{}, err
+			}
+			if activation.Status != ActivationCurrent || activation.OperationID != current.OperationID {
+				continue
+			}
 		}
 		if current.PrincipalID != requested.PrincipalID || current.Provider != candidate.Provider ||
 			current.Posture != candidate.Posture || current.Ceremony != candidate.Ceremony || current.SaveProof != requested.SaveProof ||
@@ -343,6 +361,11 @@ func (s *Service) attachOpenConnection(ctx context.Context, requested StartReque
 		current, candidate, err = s.bindCurrentCandidate(ctx, current)
 		if err != nil {
 			return Result{}, err
+		}
+		if current.Phase == PhaseSucceeded && current.Posture == ActivationSessionConnection {
+			if err := s.resumeSession(ctx, current, candidate); err != nil && !errors.Is(err, ErrSessionPending) {
+				return Result{}, err
+			}
 		}
 		return s.drive(ctx, current, candidate, "")
 	}
@@ -412,6 +435,10 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 		}
 		identityKey := operation.Interface.Normalized().Key()
 		identity, found := identityByKey[identityKey]
+		if !found && operation.AccountConnection() {
+			identity = operatorchannel.Readback{PrincipalID: operation.PrincipalID, Interface: operation.Interface, Status: operatorchannel.BindingUnbound}
+			found = true
+		}
 		if !found {
 			return nil, fmt.Errorf("%w: onboarding operation %s has no retained channel identity", ErrConflict, operation.OperationID)
 		}
@@ -419,7 +446,7 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 		if err != nil {
 			return nil, err
 		}
-		row := ConnectedChannelReadback{Identity: identity, Operation: &result.Operation, Activation: &activation, Readiness: result.Readiness}
+		row := ConnectedChannelReadback{Identity: identity, Operation: &result.Operation, Activation: &activation, Readiness: result.Readiness, Connection: result.Connection}
 		rows = append(rows, row)
 		representedIdentity[identityKey] = struct{}{}
 		representedOperation[operation.OperationID] = struct{}{}
@@ -434,6 +461,10 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 		}
 		identityKey := operation.Interface.Normalized().Key()
 		identity, found := identityByKey[identityKey]
+		if !found && operation.Posture == ActivationSessionConnection && operation.Ceremony == CeremonyAccountLink {
+			identity = operatorchannel.Readback{PrincipalID: operation.PrincipalID, Interface: operation.Interface, Status: operatorchannel.BindingUnbound}
+			found = true
+		}
 		if !found {
 			continue
 		}
@@ -446,7 +477,8 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 		}
 		rows = append(rows, ConnectedChannelReadback{
 			Identity: identity, Operation: &result.Operation, Readiness: result.Readiness,
-			Recovery: activeOperationRecovery(result.Operation),
+			Connection: result.Connection,
+			Recovery:   activeOperationRecovery(result.Operation),
 		})
 		representedIdentity[identityKey] = struct{}{}
 	}
@@ -557,6 +589,10 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if input.CheckpointOnly && (op.Posture != ActivationSessionConnection || op.Phase != PhaseActivatingProvider ||
+		input.ProviderCredential != "" || input.ClientLanguage != "" || input.ExpectedLocaleRevision != 0) {
+		return Result{}, ErrInvalidRequest
+	}
 	if op.Phase == PhaseFailed || op.Phase == PhaseRetired {
 		if input.ClientLanguage != "" || input.ExpectedLocaleRevision != 0 {
 			return Result{Operation: op}, fmt.Errorf("%w: terminal onboarding cannot acquire a client qualification", ErrConflict)
@@ -595,6 +631,13 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 			return s.result(ctx, rebound, &candidate)
 		}
 		return Result{Operation: rebound, Candidate: &candidate}, fmt.Errorf("restore onboarding session: %w", err)
+	}
+	if input.CheckpointOnly {
+		paired, _, err := s.sessions.CheckpointSessionPairing(ctx, rebound)
+		if err != nil {
+			return Result{}, err
+		}
+		return s.result(ctx, paired, &candidate)
 	}
 	result, err := s.driveLocked(ctx, rebound, candidate, input.ProviderCredential)
 	if err != nil {
@@ -1078,6 +1121,14 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return Result{}, err
 			}
 		case PhaseAwaitingExternalIdentity:
+			if op.AccountConnection() {
+				op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
+					Phase: PhaseAwaitingOperatorConfirmation, Now: s.now().UTC()})
+				if err != nil {
+					return Result{}, err
+				}
+				continue
+			}
 			next, blocked, err := s.advanceIdentity(ctx, op, candidate)
 			if err != nil {
 				var required *CredentialRequiredError
@@ -1228,6 +1279,14 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return Result{}, err
 			}
 		case PhaseDeliveringConfirmation:
+			if op.AccountConnection() {
+				op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
+					Phase: PhaseSucceeded, Now: s.now().UTC()})
+				if err != nil {
+					return Result{}, err
+				}
+				continue
+			}
 			if strings.TrimSpace(op.ConfirmationOperationID) == "" {
 				confirmationOperationID, err := ConfirmationOperationID(op.OperationID, op.ActivationRevision)
 				if err != nil {
@@ -1276,7 +1335,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 }
 
 func (s *Service) admitConfirmedTarget(ctx context.Context, op Operation, candidate Candidate) (Operation, Candidate, error) {
-	if op.Posture == ActivationSessionConnection && (op.Phase != PhaseAwaitingOperatorConfirmation || op.BindingRevision < 1 || op.ValidateSessionAccount() != nil) {
+	if op.Posture == ActivationSessionConnection && (op.Phase != PhaseAwaitingOperatorConfirmation || !op.AccountConnection() && op.BindingRevision < 1 || op.ValidateSessionAccount() != nil) {
 		return op, candidate, fmt.Errorf("%w: native target requires checkpointed operator confirmation", ErrRevisionConflict)
 	}
 	promoted, err := s.activations.AdmitChannelTarget(ctx, op, candidate)
@@ -1901,6 +1960,9 @@ type confirmedBindingDecision struct {
 
 func (s *Service) reconcileConfirmedBinding(ctx context.Context, op Operation) (confirmedBindingDecision, error) {
 	decision := confirmedBindingDecision{operation: op}
+	if op.AccountConnection() {
+		return decision, nil
+	}
 	var identityOp operatorchannel.Operation
 	if op.IdentityOperationID != "" {
 		var err error
@@ -1993,6 +2055,22 @@ func (s *Service) slotState(ctx context.Context, req StartRequest) (SlotState, o
 	activationCurrent := activationErr == nil && activation.Status == ActivationCurrent
 	if activationErr != nil && !errors.Is(activationErr, ErrNotFound) {
 		return "", empty, activationErr
+	}
+	if activationCurrent && req.Ceremony == CeremonyAccountLink && req.Posture == ActivationSessionConnection {
+		op, err := s.store.GetChannelOnboarding(ctx, activation.OperationID)
+		if err != nil {
+			return "", empty, err
+		}
+		responsibility := AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
+			ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
+			Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
+		if op.PrincipalID != req.PrincipalID || !responsibility.MatchesAccountConnection(op, activation) {
+			return SlotUncertain, fence, nil
+		}
+		if !activation.Coordinate.Matches(req.Coordinate) {
+			return SlotActivationStale, fence, nil
+		}
+		return SlotReady, fence, nil
 	}
 	if !bindingCurrent && !activationCurrent {
 		if bindingStale {
@@ -2094,6 +2172,15 @@ func historicalCandidate(op Operation) Candidate {
 
 func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate) (Result, error) {
 	result := Result{Operation: op, Candidate: candidate}
+	if reader, ok := s.sessions.(interface {
+		ReadSessionConnection(context.Context, Operation) (SessionConnectionReadback, error)
+	}); ok && op.Posture == ActivationSessionConnection {
+		view, err := reader.ReadSessionConnection(ctx, op)
+		if err != nil {
+			return result, err
+		}
+		result.Connection = &view
+	}
 	if op.Posture == ActivationSessionConnection {
 		logout, err := s.sessionLogoutReadback(ctx, op)
 		if err != nil {
@@ -2112,6 +2199,9 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 		}
 		if err == nil {
 			result.Pairing = &pairing
+			if result.Connection != nil && pairing.Status == "awaiting_qr" {
+				result.Connection.State = "pairing"
+			}
 		} else {
 			result.Pairing = &PairingReadback{Status: PairingStatusPreparing}
 		}

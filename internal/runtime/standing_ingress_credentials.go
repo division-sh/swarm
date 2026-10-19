@@ -632,7 +632,7 @@ func (rt *Runtime) AdmitChannelStandingTarget(ctx context.Context, operation cha
 
 func (rt *Runtime) requireStandingChannelTargetAdmission(current channelonboarding.Operation, revision int64, candidate channelonboarding.Candidate, session operatorchannel.ProviderAuthority) error {
 	admittedPhase := current.Phase == channelonboarding.PhaseCredentialsAdmitted && current.Posture == channelonboarding.ActivationWebhookRegistration ||
-		current.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation && current.Posture == channelonboarding.ActivationSessionConnection && current.BindingRevision > 0
+		current.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation && current.Posture == channelonboarding.ActivationSessionConnection && (current.BindingRevision > 0 || current.AccountConnection())
 	if !admittedPhase || current.Revision != revision || current.Posture != candidate.Posture || current.Provider != candidate.Provider ||
 		current.Interface.Normalized() != candidate.Interface.Normalized() || current.Ceremony != candidate.Ceremony ||
 		!current.Coordinate.MatchesDeclaration(candidate.Coordinate) || current.TargetSelector != candidate.Target.Selector || current.Coordinate.BundleHash != rt.Options.SourceArtifactFact.BundleHash() {

@@ -37,10 +37,11 @@ type IdentityCeremony string
 
 const (
 	CeremonyAuthenticatedTextChallenge IdentityCeremony = "authenticated_text_challenge"
+	CeremonyAccountLink                IdentityCeremony = "account_link"
 )
 
 func (c IdentityCeremony) Valid() bool {
-	return c == CeremonyAuthenticatedTextChallenge
+	return c == CeremonyAuthenticatedTextChallenge || c == CeremonyAccountLink
 }
 
 type Verb string
@@ -391,6 +392,7 @@ type ConnectedChannelReadback struct {
 	Activation  *ConnectedChannelActivation `json:"activation,omitempty"`
 	Readiness   *ConnectedChannelReadiness  `json:"readiness,omitempty"`
 	Recovery    *ConnectedChannelRecovery   `json:"recovery,omitempty"`
+	Connection  *SessionConnectionReadback  `json:"connection,omitempty"`
 }
 
 type ConnectedChannelRecovery struct {
@@ -545,7 +547,7 @@ func (r StartRequest) Validate() error {
 	if err := r.Coordinate.ValidateContext(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidRequest, err)
 	}
-	if !r.Posture.Valid() || !r.Ceremony.Valid() {
+	if !r.Posture.Valid() || !r.Ceremony.Valid() || r.Ceremony == CeremonyAccountLink && r.Posture != ActivationSessionConnection {
 		return fmt.Errorf("%w: activation posture and identity ceremony are required", ErrInvalidRequest)
 	}
 	if len(r.CredentialReservations) == 0 && r.Posture != ActivationSessionConnection {
@@ -621,15 +623,20 @@ const PairingStatusPreparing = "preparing"
 // PairingReadback is authenticated control-plane material, never READY or a
 // principal/account admission. QR contents must not enter logs or durable DTOs.
 type PairingReadback struct {
-	Status    string    `json:"status"`
-	Code      string    `json:"code,omitempty"`
-	ExpiresAt time.Time `json:"expires_at,omitzero"`
-	Paired    bool      `json:"paired"`
-	Connected bool      `json:"connected"`
+	Status              string    `json:"status"`
+	Code                string    `json:"code,omitempty"`
+	ExpiresAt           time.Time `json:"expires_at,omitzero"`
+	Paired              bool      `json:"paired"`
+	Connected           bool      `json:"connected"`
+	AccountPresentation string    `json:"account_presentation,omitempty"`
+	AccountName         string    `json:"account_name,omitempty"`
 }
 
 // ValidateSessionAccount checks retained provenance, not executable authority.
 func (o Operation) ValidateSessionAccount() error {
+	if o.Ceremony == CeremonyAccountLink && o.Posture != ActivationSessionConnection {
+		return fmt.Errorf("%w: account-only linkage requires a native session", ErrInvalidRequest)
+	}
 	if !o.Phase.Valid() {
 		return fmt.Errorf("%w: session provenance requires an exact posture and phase", ErrInvalidRequest)
 	}
@@ -648,6 +655,12 @@ func (o Operation) ValidateSessionAccount() error {
 	required := o.Posture == ActivationSessionConnection && o.Phase != PhasePreparing && o.Phase != PhaseCredentialsAdmitted &&
 		o.Phase != PhaseActivatingProvider && o.Phase != PhaseFailed && o.Phase != PhaseRetired
 	return validateSessionAccount(o.Posture, o.Provider, o.SessionAccount, required)
+}
+
+// Account-only linkage admits customer traffic, never an operator identity.
+func (o Operation) AccountConnection() bool {
+	return o.Posture == ActivationSessionConnection && o.Ceremony == CeremonyAccountLink &&
+		o.IdentityOperationID == "" && o.BindingRevision == 0 && o.SessionAccount.Validate() == nil && o.ValidateSessionAccount() == nil
 }
 
 func validateSessionAccount(posture ActivationPosture, provider string, account operatorchannel.SessionAccountAdmission, required bool) error {

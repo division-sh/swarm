@@ -251,6 +251,19 @@ func (d *serveChannelDeliveryDispatcher) qualifyInstalledInboxEntry(ctx context.
 }
 
 func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxActivation(ctx context.Context, activation channelonboarding.ConnectedChannelActivation) error {
+	if activation.Posture == channelonboarding.ActivationSessionConnection && activation.BindingRevision == 0 {
+		op, err := d.activations.GetChannelOnboarding(ctx, activation.OperationID)
+		if err != nil {
+			return err
+		}
+		responsibility := channelonboarding.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
+			ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
+			Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
+		if responsibility.MatchesAccountConnection(op, activation) {
+			return nil // Customer transport has no operator Inbox to provision.
+		}
+		return channelonboarding.ErrRevisionConflict
+	}
 	if activation.Coordinate.ContextPublicationGeneration > math.MaxInt64 {
 		return fmt.Errorf("native inbox publication generation exceeds selected-store range")
 	}

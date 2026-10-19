@@ -136,6 +136,9 @@ func (i *runtimeIncoming) businessScope(ctx context.Context) (captureScope, capt
 		return scope, source, err
 	}
 	matched := 0
+	if responsibility.MatchesAccountConnection(op, activation) {
+		matched = 1
+	}
 	for _, binding := range bindings {
 		if responsibility.MatchesBusinessBinding(op, activation, binding, op.BindingRevision) {
 			matched++
@@ -160,6 +163,7 @@ func (i *runtimeIncoming) businessScope(ctx context.Context) (captureScope, capt
 		return scope, source, errCaptureScopeChanged
 	}
 	scope = captureScope{Kind: channelonboarding.SessionInputBusiness, Session: op.SessionAccount,
+		AccountOnly:        op.AccountConnection(),
 		PublicationBinding: inbound.BindingGeneration{ServiceID: standing.ServiceID, RunID: standing.RunID, Generation: standing.Generation},
 		Source:             op.Coordinate.DurableIdentity(), OnboardingOperation: op.OperationID,
 		OperationRevision: responsibility.OperationRevision, ActivationID: activation.ActivationID,

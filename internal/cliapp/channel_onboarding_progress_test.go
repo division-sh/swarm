@@ -177,7 +177,7 @@ func TestChannelCLIPendingResumeCanReachGenuineReady(t *testing.T) {
 		return sessionProgressCLIResult("whatsapp", "", "succeeded", true)
 	})
 	out, errOut, code := runChannelProgressCLI(t, server, &channelCredentialInput{}, "channel", "resume", operatorChannelCLIOperation)
-	if code != 0 || errOut != "" || !strings.Contains(out, "Connected whatsapp channel READY") {
+	if code != 0 || errOut != "" || !strings.Contains(out, "WhatsApp: READY") {
 		t.Fatal("genuine READY was not preserved", code, out, errOut)
 	}
 }

@@ -245,7 +245,7 @@ func (p NativeChannelActivityPermit) MessageID() string {
 	return strings.ReplaceAll(p.launch.requestID, "-", "")
 }
 
-func (p NativeChannelActivityPermit) ValidateBusinessBinding(ctx context.Context, op channelonboarding.Operation,
+func (p NativeChannelActivityPermit) ValidateBusinessTarget(ctx context.Context, op channelonboarding.Operation,
 	activation channelonboarding.ConnectedChannelActivation, binding operatorchannel.Binding,
 ) error {
 	if err := p.Validate(ctx); err != nil {
@@ -257,6 +257,9 @@ func (p NativeChannelActivityPermit) ValidateBusinessBinding(ctx context.Context
 	expected, err := p.launch.activation.AdmissionResponsibility()
 	if err != nil {
 		return err
+	}
+	if p.launch.activation.Plan.ActivitiesOnly() && expected.MatchesAccountConnection(op, activation) {
+		return nil
 	}
 	if !expected.MatchesBusinessBinding(op, activation, binding, activation.BindingRevision) {
 		return fmt.Errorf("native activity lost its original selected business binding")

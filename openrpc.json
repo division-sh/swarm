@@ -2679,6 +2679,14 @@
           }
         },
         {
+          "name": "checkpoint_only",
+          "required": false,
+          "description": "Freeze a genuinely paired account for rejection/logout without beginning identity",
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
           "name": "idempotency_key",
           "required": false,
           "schema": {
@@ -15508,7 +15516,8 @@
           },
           "identity_ceremony": {
             "enum": [
-              "authenticated_text_challenge"
+              "authenticated_text_challenge",
+              "account_link"
             ],
             "type": "string"
           },
@@ -15651,7 +15660,8 @@
           },
           "identity_ceremony": {
             "enum": [
-              "authenticated_text_challenge"
+              "authenticated_text_challenge",
+              "account_link"
             ],
             "type": "string"
           },
@@ -15745,6 +15755,9 @@
           "candidate": {
             "$ref": "#/components/schemas/ChannelOnboardingCandidate"
           },
+          "connection": {
+            "$ref": "#/components/schemas/ChannelSessionConnection"
+          },
           "identity_operation": {
             "$ref": "#/components/schemas/OperatorChannelOperation"
           },
@@ -15757,6 +15770,12 @@
           "pairing": {
             "additionalProperties": false,
             "properties": {
+              "account_name": {
+                "type": "string"
+              },
+              "account_presentation": {
+                "type": "string"
+              },
               "code": {
                 "maxLength": 4096,
                 "minLength": 1,
@@ -15860,6 +15879,35 @@
           "context_publication_generation",
           "plan_generation",
           "target_generation"
+        ],
+        "type": "object"
+      },
+      "ChannelSessionConnection": {
+        "additionalProperties": false,
+        "properties": {
+          "account_name": {
+            "type": "string"
+          },
+          "account_presentation": {
+            "type": "string"
+          },
+          "linked": {
+            "description": "Retained paired account exists; not operator identity or execution authority.",
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "pairing",
+              "connecting",
+              "connected",
+              "disconnected"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "linked"
         ],
         "type": "object"
       },
@@ -16290,6 +16338,9 @@
         "properties": {
           "activation": {
             "$ref": "#/components/schemas/ConnectedChannelActivation"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/ChannelSessionConnection"
           },
           "identity": {
             "$ref": "#/components/schemas/OperatorChannelReadback"

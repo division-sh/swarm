@@ -71,7 +71,7 @@ func TestRunServeWhatsAppUnpairedDeclarationBothStores(t *testing.T) {
 					t.Fatal("ordinary unpaired shutdown failed", code, process.outputString())
 				}
 				output := process.outputString()
-				if !strings.Contains(output, "session admission required") || !strings.Contains(output, "swarm channel connect") {
+				if !strings.Contains(output, "Not linked: run swarm channel connect whatsapp") {
 					t.Fatal("dormant native source lacks actionable onboarding guidance", output)
 				}
 				if strings.Contains(output, "whatsapp webhook") || strings.Contains(output, "declared ingress is local only") {

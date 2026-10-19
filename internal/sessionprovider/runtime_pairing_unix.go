@@ -108,6 +108,44 @@ func (c *RuntimeConnection) PairingReadback(ctx context.Context, principal opera
 	if err != nil {
 		return result, err
 	}
-	return channelonboarding.PairingReadback{Status: string(view.Status), Code: view.Code,
-		ExpiresAt: view.ExpiresAt, Paired: view.Paired, Connected: view.Connected}, nil
+	result = channelonboarding.PairingReadback{Status: string(view.Status), Code: view.Code,
+		ExpiresAt: view.ExpiresAt, Paired: view.Paired, Connected: view.Connected}
+	if view.Paired && view.Connected {
+		device, err := c.state.device(work.Context())
+		if err != nil {
+			return result, err
+		}
+		if device.ID != nil {
+			result.AccountPresentation = "+" + device.ID.User
+			if device.Contacts != nil {
+				if contact, err := device.Contacts.GetContact(work.Context(), device.ID.ToNonAD()); err == nil {
+					result.AccountName = contact.PushName
+				}
+			}
+		}
+	}
+	return result, nil
+}
+
+func (c *RuntimeConnection) AccountPresentation(ctx context.Context) (phone, name string, err error) {
+	work, err := c.begin(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	defer func() { err = errors.Join(err, work.Done()) }()
+	op, err := c.currentOperation(work.Context())
+	if err != nil {
+		return "", "", err
+	}
+	device, err := c.state.device(work.Context())
+	if err != nil || device.ID == nil || op.SessionAccount.AccountRef != device.ID.ToNonAD().String() {
+		return "", "", errSessionAccount
+	}
+	name = ""
+	if device.Contacts != nil {
+		if contact, err := device.Contacts.GetContact(work.Context(), device.ID.ToNonAD()); err == nil {
+			name = contact.PushName
+		}
+	}
+	return "+" + device.ID.User, name, nil
 }

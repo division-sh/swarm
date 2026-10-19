@@ -34,6 +34,16 @@ func RequireSessionBusinessInputTx(ctx context.Context, tx *sql.Tx, postgres boo
 	if err := channeldelivery.LockPrincipalTx(ctx, tx, op.PrincipalID, postgres); err != nil {
 		return err
 	}
+	if op.AccountConnection() {
+		activation, found, err := loadActivationBySlot(ctx, tx, d, op.SlotKey, true)
+		if err != nil {
+			return err
+		}
+		if !found || input.BindingRevision() != 0 || !expected.MatchesAccountConnection(op, activation) || !input.LifetimeCurrent(ctx) {
+			return domain.ErrRevisionConflict
+		}
+		return nil
+	}
 	binding, found, err := identityowner.LockBindingTx(ctx, tx, postgres, op.Interface)
 	if err != nil {
 		return err
