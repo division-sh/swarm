@@ -115,8 +115,8 @@ func requireChannelPendingCLIOutput(t *testing.T, out, errOut string, code int, 
 			t.Fatal("quiet pending output does not identify the retained operation", out)
 		}
 	default:
-		if !strings.Contains(out, "pending (not READY)") || !strings.Contains(out, "swarm channel resume "+operatorChannelCLIOperation) {
-			t.Fatal("human output lost pending disposition or exact continuation", out)
+		if !strings.Contains(out, "Connecting to whatsapp") || strings.Contains(out, operatorChannelCLIOperation) {
+			t.Fatal("human output lost connection progress or exposed an operation ID", out)
 		}
 	}
 }
@@ -131,6 +131,9 @@ func TestChannelCLIExplicitSessionPreparationProgress(t *testing.T) {
 					if req.Params["provider_credential"] != nil || req.Method == "channel.onboarding_retry" && req.Params["operation_id"] != operatorChannelCLIOperation {
 						t.Fatal("pending request submitted a secret or changed responsibility", req)
 					}
+					if verb == "connect" && mode == "human" && req.Method == "channel.onboarding_get" {
+						return sessionProgressCLIResult("whatsapp", "", "succeeded", true)
+					}
 					return sessionProgressCLIResult("whatsapp", "", "activating_provider", false)
 				})
 				in := &channelCredentialInput{}
@@ -142,10 +145,18 @@ func TestChannelCLIExplicitSessionPreparationProgress(t *testing.T) {
 					args = append(args, mode)
 				}
 				out, errOut, code := runChannelProgressCLI(t, server, in, args...)
-				requireChannelPendingCLIOutput(t, out, errOut, code, mode)
+				if verb == "connect" && mode == "human" {
+					if code != 0 || errOut != "" || !strings.Contains(out, "READY") || strings.Contains(out, operatorChannelCLIOperation) {
+						t.Fatal("connect did not wait for READY without exposing an operation ID", code, out, errOut)
+					}
+				} else {
+					requireChannelPendingCLIOutput(t, out, errOut, code, mode)
+				}
 				want := "channel.onboarding_start"
 				if verb == "resume" {
 					want = "channel.onboarding_get,channel.onboarding_retry"
+				} else if mode == "human" {
+					want += ",channel.onboarding_get"
 				}
 				if in.reads != 0 || strings.Join(methods, ",") != want {
 					t.Fatal("pending CLI read stdin or expanded the retry policy", in.reads, methods)

@@ -404,7 +404,7 @@ func writeChannelNativeQualification(out io.Writer, result channelOnboardingResu
 	if qualification.Reason != "" {
 		fmt.Fprintln(out, qualification.Reason)
 	}
-	if result.Operation.ClientLanguage == "" {
+	if result.Operation.Provider == "telegram" && result.Operation.ClientLanguage == "" {
 		fmt.Fprintf(out, "Declare the Telegram language used on this device: swarm channel resume %s --client-language <language>.\n", result.Operation.OperationID)
 	}
 }
@@ -412,14 +412,22 @@ func writeChannelNativeQualification(out io.Writer, result channelOnboardingResu
 func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer) (channelOnboardingResult, error) {
 	identityAnnounced := false
 	sharedAudienceAnnounced := false
+	waitForPairing := opts.verb == "connect" && !opts.output.asJSON && !opts.output.asYAML && !opts.output.quiet
 	advancePending := opts.verb == "resume"
 	for {
 		pending, err := validateCLIChannelProgress(result)
 		if err != nil {
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
 		}
-		if pending && !advancePending && opts.resumeCredential == "" {
-			return result, nil
+		if pending {
+			if waitForPairing {
+				result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, progressOut, errOut)
+				if err != nil {
+					return channelOnboardingResult{}, err
+				}
+			} else if !advancePending && opts.resumeCredential == "" {
+				return result, nil
+			}
 		}
 		advancePending = false
 		switch result.Operation.Phase {
@@ -473,10 +481,59 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 		if pendingErr != nil {
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, pendingErr)
 		}
-		if pending {
+		if pending && !waitForPairing {
 			return next, nil
 		}
 		result = next
+	}
+}
+
+func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer) (channelOnboardingResult, error) {
+	poll := opts.apiOptions.channelConnectPoll
+	if poll <= 0 {
+		poll = 500 * time.Millisecond
+	}
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+	lastQR, lastStatus := "", ""
+	for {
+		pending, err := validateCLIChannelProgress(current)
+		if err != nil {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
+		}
+		if !pending {
+			if current.Pairing != nil && current.Pairing.Status == "qr_expired" {
+				fmt.Fprintln(out, "QR expired, getting a new QR...")
+			}
+			return current, nil
+		}
+		if current.Pairing.Code != lastQR || current.Pairing.Status != lastStatus {
+			if lastQR != "" && current.Pairing.Code != "" {
+				fmt.Fprintln(out, "QR expired, new QR:")
+			}
+			if err := renderChannelOnboardingResult(out, errOut, opts.output, current); err != nil {
+				return channelOnboardingResult{}, err
+			}
+			lastQR, lastStatus = current.Pairing.Code, current.Pairing.Status
+		}
+		select {
+		case <-ctx.Done():
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel connection stopped"))
+		case <-ticker.C:
+		}
+		// Only the existing checkpoint owner can turn a connected session into
+		// executable admission. A scan alone is not that milestone.
+		if current.Pairing.Connected && (current.Pairing.Status == "paired" || current.Pairing.Status == "connected") {
+			return current, nil
+		}
+		var next channelOnboardingResult
+		if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": current.Operation.OperationID}, &next); err != nil {
+			return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+		}
+		if next.Operation.OperationID != current.Operation.OperationID || next.Operation.Revision < current.Operation.Revision {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel progress changed the retained operation"))
+		}
+		current = next
 	}
 }
 
@@ -543,9 +600,9 @@ func waitForChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, be
 		}
 		select {
 		case <-ctx.Done():
-			return channelOnboardingResult{}, fmt.Errorf("%w: channel claim wait stopped; resume operation %s with `swarm channel resume %s`", ctx.Err(), begun.Operation.OperationID, begun.Operation.OperationID)
+			return channelOnboardingResult{}, fmt.Errorf("%w: stopped waiting for the operator's code", ctx.Err())
 		case <-deadline.C:
-			return channelOnboardingResult{}, fmt.Errorf("timed out waiting for channel claim; resume operation %s with `swarm channel resume %s`", begun.Operation.OperationID, begun.Operation.OperationID)
+			return channelOnboardingResult{}, errors.New("timed out waiting for the operator's code")
 		case <-ticker.C:
 		}
 	}

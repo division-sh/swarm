@@ -105,13 +105,13 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 	return renderCLIOutput(out, errOut, output, result, func(w io.Writer) {
 		if pending {
 			if result.Pairing.Status != channelonboarding.PairingStatusPreparing {
-				fmt.Fprintf(w, "Channel %s pairing: %s (not READY). Resume with `swarm channel resume %s`.\n", result.Operation.Provider, result.Pairing.Status, result.Operation.OperationID)
+				fmt.Fprintf(w, "Waiting for %s pairing...\n", result.Operation.Provider)
 				if result.Pairing.Code != "" {
-					fmt.Fprintf(w, "Scan this QR in WhatsApp > Linked Devices > Link a device (expires %s):\n%s\n", result.Pairing.ExpiresAt.UTC().Format(time.RFC3339), pairingQR)
+					fmt.Fprintf(w, "Open WhatsApp > Linked Devices > Link a device, then scan (expires %s):\n%s\n", result.Pairing.ExpiresAt.UTC().Format(time.RFC3339), pairingQR)
 				}
 				return
 			}
-			fmt.Fprintf(w, "Channel %s preparation is pending (not READY). Resume with `swarm channel resume %s`.\n", strings.TrimSpace(result.Operation.Provider), result.Operation.OperationID)
+			fmt.Fprintf(w, "Connecting to %s...\n", strings.TrimSpace(result.Operation.Provider))
 			return
 		}
 		fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)

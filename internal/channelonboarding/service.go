@@ -309,6 +309,27 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if state == SlotOperationPending && input.Verb == VerbConnect && input.IdempotencyKey == "" && input.ProviderCredential == "" {
+		operations, err := s.store.ListChannelOnboardingOperations(ctx)
+		if err != nil {
+			return Result{}, err
+		}
+		for _, current := range operations {
+			if current.SlotKey != start.SlotKey() || current.Phase.Terminal() {
+				continue
+			}
+			if current.PrincipalID != principal.ID || current.Provider != candidate.Provider ||
+				current.Posture != candidate.Posture || current.Ceremony != candidate.Ceremony || current.SaveProof != input.SaveProof ||
+				input.ClientLanguage != "" && current.ClientLanguage != input.ClientLanguage {
+				return Result{}, fmt.Errorf("%w: the open channel connection has different requested settings", ErrConflict)
+			}
+			current, candidate, err = s.bindCurrentCandidate(ctx, current)
+			if err != nil {
+				return Result{}, err
+			}
+			return s.drive(ctx, current, candidate, "")
+		}
+	}
 	decision := AdmitVerb(input.Verb, state)
 	if decision != AdmissionStart && decision != AdmissionStartPreservingIdentity && decision != AdmissionStartReplacingIdentity {
 		return Result{}, admissionError(input.Verb, state, decision)
