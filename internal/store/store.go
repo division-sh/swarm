@@ -15,12 +15,14 @@ type SchemaCompatibilityError = private.SchemaCompatibilityError
 type SchemaDialect = private.SchemaDialect
 type SchemaTableDDL = private.SchemaTableDDL
 type ReadOnlyInspection = construction.ReadOnlyInspection
+type ChannelLockOrder = construction.ChannelLockOrder
 
 var DSNFromConfig = private.DSNFromConfig
 var FlattenSchemaTableDDLs = private.FlattenSchemaTableDDLs
 var GenerateNodeStateTableDDLs = private.GenerateNodeStateTableDDLs
 var GeneratePlatformTableDDLs = private.GeneratePlatformTableDDLs
 var NewPostgresStore = construction.NewPostgres
+var NewChannelLockOrder = construction.NewChannelLockOrder
 var NewSQLiteRuntimeStore = construction.NewSQLiteRuntime
 var OpenReadOnlyInspection = construction.OpenReadOnlyInspection
 var NodeStateFieldTypeToDDL = private.NodeStateFieldTypeToDDL

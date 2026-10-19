@@ -18,10 +18,11 @@ import (
 	"github.com/lib/pq"
 )
 
-func OpenPostgres(dsn string, lockOrder ...*ChannelLockOrder) (*private.PostgresStore, *sql.DB, error) {
-	if len(lockOrder) > 1 {
-		return nil, nil, fmt.Errorf("postgres construction accepts one fixed lock-order observer")
-	}
+func OpenPostgres(dsn string) (*private.PostgresStore, *sql.DB, error) {
+	return openPostgres(dsn, nil)
+}
+
+func openPostgres(dsn string, lockOrder *ChannelLockOrder) (*private.PostgresStore, *sql.DB, error) {
 	cfg, err := pq.NewConfig(dsn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
@@ -31,12 +32,15 @@ func OpenPostgres(dsn string, lockOrder ...*ChannelLockOrder) (*private.Postgres
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
 	}
 	var transport driver.Connector = connector
-	if len(lockOrder) == 1 {
-		if lockOrder[0] == nil || lockOrder[0].native != nil {
+	if lockOrder != nil {
+		lockOrder.mu.Lock()
+		if lockOrder.attached {
+			lockOrder.mu.Unlock()
 			return nil, nil, fmt.Errorf("lock-order observer must belong to one original fixture")
 		}
-		lockOrder[0].native = connector
-		transport = lockOrder[0]
+		lockOrder.attached = true
+		lockOrder.mu.Unlock()
+		transport = &channelLockOrderConnector{native: connector, probe: lockOrder}
 	}
 	db := sql.OpenDB(transport)
 	db.SetMaxOpenConns(25)
@@ -142,7 +146,14 @@ func OpenPostgresReadOnly(dsn string) (*private.PostgresStore, error) {
 }
 
 func NewPostgres(dsn string, lockOrder ...*ChannelLockOrder) (*private.PostgresStore, error) {
-	store, _, err := OpenPostgres(dsn, lockOrder...)
+	if len(lockOrder) > 1 || (len(lockOrder) == 1 && lockOrder[0] == nil) {
+		return nil, fmt.Errorf("postgres construction accepts at most one nonnil fixed lock-order observer")
+	}
+	var observer *ChannelLockOrder
+	if len(lockOrder) == 1 {
+		observer = lockOrder[0]
+	}
+	store, _, err := openPostgres(dsn, observer)
 	return store, err
 }
 

@@ -1,7 +1,7 @@
 package storetest
 
-import "github.com/division-sh/swarm/internal/store/construction"
+import "github.com/division-sh/swarm/internal/store"
 
-type ChannelLockOrder = construction.ChannelLockOrder
+type ChannelLockOrder = store.ChannelLockOrder
 
-var NewChannelLockOrder = construction.NewChannelLockOrder
+var NewChannelLockOrder = store.NewChannelLockOrder
