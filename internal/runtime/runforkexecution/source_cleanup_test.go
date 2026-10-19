@@ -8,10 +8,14 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -195,7 +199,13 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				runID, eventID := uuid.NewString(), uuid.NewString()
-				seedSelectedOperationSource(t, ctx, selected, loaded, runID, eventID)
+				input := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, runID,
+					events.EventEnvelope{}, events.NoRoutingSource(), time.Unix(1700002200, 0).UTC(), executionmode.Mock)
+				input, err = eventtest.AdmitPayload(input, ".", "item.received")
+				if err != nil {
+					t.Fatal(err)
+				}
+				seedSelectedOperationSource(t, ctx, selected, loaded, runID, eventID, input)
 				base := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)}
 				sibling, err := base.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: OriginalRunSource(runID), Selection: runforkadmission.SelectedContractSelection(loaded.Source)})
 				if err != nil {
