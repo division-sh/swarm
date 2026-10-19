@@ -856,13 +856,13 @@ func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidS
 	_, err = db.ExecContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings (
 			fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id,
-			mode, bundle_hash
+			mode, bundle_hash, target_bundle_hash, source_root_directory
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'event', 1, $3::uuid,
-			'selected_contracts', NULL
+			'selected_contracts', NULL, $4, $5
 		)
-	`, materialized.ForkRunID, sourceRunID, eventID)
+	`, materialized.ForkRunID, sourceRunID, eventID, rooted.Admission().BundleHash(), rooted.Admission().RootDirectory())
 	var pqErr *pq.Error
 	if !errors.As(err, &pqErr) || string(pqErr.Code) != "23505" {
 		t.Fatalf("duplicate selected contract binding error = %v, want unique failure", err)
@@ -1246,7 +1246,8 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	pg := newTestPostgresStore(t, db)
 
 	sourceRunID := uuid.NewString()
-	ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: pg}, sourceRunID, selectedActivityProducerSource(t))
+	source := selectedActivityProducerSource(t)
+	ctx := seedSelectedActivitySourceRun(t, authorActivityReceiptFixture{db: db, store: pg}, sourceRunID, source)
 	entityID := uuid.NewString()
 	rootEventID := uuid.NewString()
 	at := time.Unix(1700000850, 0).UTC()
@@ -1483,7 +1484,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	if !ok {
 		t.Fatal("replay fixture requires its admitted source fact")
 	}
-	eb, err := newStoreTestEventBus(t, pg, runtimebus.EventBusOptions{SourceArtifactFact: fact})
+	eb, err := newStoreTestEventBus(t, pg, runtimebus.EventBusOptions{SourceArtifactFact: fact, ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
