@@ -28,8 +28,8 @@ func TestRuntimePayloadAdmissionPreservesExecutionNumberKinds(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := loadRootPayloadBundle(t, tc.schema, "")
-			event := eventtest.RuntimeControl("numeric-kind-proof", "numeric.completed", "numeric-proof", "", []byte(tc.payload), 0, "", "", events.EventEnvelope{}, time.Time{})
-			admitted, err := testRuntimePayloadAdmitter(t, bundle)(context.Background(), event, events.AuthoredPayloadProducer(""))
+			event := eventtest.RunCreatingRootIngress("numeric-kind-proof", "numeric.completed", "numeric-proof", "", []byte(tc.payload), 0, "", "", events.EventEnvelope{}, time.Time{})
+			admitted, err := testRuntimePayloadAdmitter(t, bundle)(context.Background(), event, events.AuthoredPayloadProducer("."))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -59,8 +59,8 @@ func TestRuntimePayloadAdmissionPreservesNestedExecutionKindsAndImmutability(t *
 		map[string]any{"integer": int64(8), "double": float64(8), "exponent": float64(8), "fraction": 8.25},
 		[]any{int64(-8), float64(-8), int64(0), float64(0)},
 	}}}
-	event := eventtest.RuntimeControl("nested-kinds", "numeric.completed", "numeric-proof", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{})
-	admission, err := testRuntimePayloadAdmitter(t, bundle)(context.Background(), event, events.AuthoredPayloadProducer(""))
+	event := eventtest.RunCreatingRootIngress("nested-kinds", "numeric.completed", "numeric-proof", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{})
+	admission, err := testRuntimePayloadAdmitter(t, bundle)(context.Background(), event, events.AuthoredPayloadProducer("."))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestRuntimePayloadAdmissionStrictOriginalBytes(t *testing.T) {
 				}
 			}()
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "numeric.completed", "numeric-proof", "", []byte(raw), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
-			if _, err := admitter(context.Background(), event, events.AuthoredPayloadProducer("")); err == nil {
+			if _, err := admitter(context.Background(), event, events.AuthoredPayloadProducer(".")); err == nil {
 				t.Fatalf("accepted hostile original bytes %q", raw)
 			}
 		})
@@ -153,7 +153,7 @@ func TestRuntimePayloadAdmissionSelectedForkPreservesNumericBytes(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	admission, err := testRuntimePayloadAdmitter(t, bundle)(context.Background(), event, events.AuthoredPayloadProducer(""))
+	admission, err := testRuntimePayloadAdmitter(t, bundle)(context.Background(), event, events.AuthoredPayloadProducer("."))
 	if err != nil || !bytes.Equal(admission.Payload(), payload) {
 		t.Fatalf("selected-fork bytes changed: %q err=%v", admission.Payload(), err)
 	}

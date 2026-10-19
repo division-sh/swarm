@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -58,7 +59,8 @@ func TestS1TriggerEventProofPreservesRawFlowCoordinates(t *testing.T) {
 			}
 		})
 	}
-	if !semanticview.ResolveEventSchema(source, "", "inbound.team_bot.text_message").HasCompiled {
+	metadata, found := source.SemanticCapabilities().ProviderTriggerSchemaReadback("inbound.team_bot.text_message")
+	if !found || metadata.Classification() != runtimecontracts.CompiledEventSchemaImported {
 		t.Fatal("target-free imported schema inspection was lost")
 	}
 }

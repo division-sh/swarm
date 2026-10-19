@@ -220,9 +220,10 @@ func TestProviderCompiledSchemaReadbackDoesNotGrantReceiverOwnership(t *testing.
 			t.Fatalf("undeclaring flow %q borrowed imported receiver authority: %#v", flow, admission)
 		}
 	}
-	// #2667 review6224839305: target-free inspection is not explicit-root ownership.
-	readbackSchema := semanticview.ResolveEventSchema(wrapped, "", eventName)
-	if !readbackSchema.HasCompiled || !readbackSchema.HasStructural || readbackSchema.Classification != runtimecontracts.CompiledEventSchemaImported {
+	// Target-free catalog metadata is not execution-coordinate admission.
+	readbackSchema, readbackFound := wrapped.SemanticCapabilities().ProviderTriggerSchemaReadback(eventName)
+	_, structural := readbackSchema.StructuralType()
+	if !readbackFound || !structural || readbackSchema.Classification() != runtimecontracts.CompiledEventSchemaImported {
 		t.Fatalf("target-free provider catalog readback lost compiled evidence: %#v", readbackSchema)
 	}
 	rootSchema := semanticview.ResolveEventSchema(wrapped, ".", eventName)
