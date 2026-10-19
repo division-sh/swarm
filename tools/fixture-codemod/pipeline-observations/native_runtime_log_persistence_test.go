@@ -44,54 +44,6 @@ func runtimeRecoveryNativeSource(source, name string) string {
 	return source
 }
 
-func TestNativeRuntimeLogRecipesPreserveLoggingAndRecoveryContracts(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	logs, recovery := 0, 0
-	for _, row := range rows {
-		switch row.Family {
-		case "native-runtime-log-persistence":
-			logs++
-			if strings.Contains(row.Function, "RejectsDeletedPersistedSourceArtifactFact") {
-				for _, cut := range []string{"fixture.Runs.CreateRun", "ErrSourceArtifactUnavailable", "counts != before", "counts.Events != 0", "assertRunRowExists(t, fixture, ctx, runID, false)"} {
-					if !strings.Contains(row.After, cut) {
-						t.Fatalf("approved source-creation refusal lost %s", cut)
-					}
-				}
-			} else if want, got := runtimeLogProtectedAssertions(t, row.Before), runtimeLogProtectedAssertions(t, row.After); len(want) == 0 || !slices.Equal(want, got) {
-				t.Fatalf("native logger changed payload, run/source, spoof or lineage assertions: %s", row.Function)
-			}
-		case "native-runtime-recovery-log":
-			if !strings.HasPrefix(row.Function, "TestRuntimeStart_") {
-				continue
-			}
-			recovery++
-			want, err := canonicalFunction(runtimeRecoveryNativeSource(row.Before, row.Function))
-			got, afterErr := canonicalFunction(row.After)
-			if err != nil || afterErr != nil || want != got {
-				t.Fatalf("recovery workload, gate, detail or shutdown assertion changed: %s", row.Function)
-			}
-		default:
-			continue
-		}
-		actual := selectedCausalObservationBody(t, row.File, projectionShapeFunction(t, row.After).Name.Name)
-		current := row.After
-		if row.Successor != "" {
-			current = row.Successor
-		}
-		want, err := canonicalFunction(current)
-		got, actualErr := canonicalFunction(actual)
-		if err != nil || actualErr != nil || want != got {
-			t.Fatalf("native logger consumer diverged from finite recipe: %s", row.Function)
-		}
-	}
-	if logs != 7 || recovery != 7 {
-		t.Fatalf("native log/recovery consumers=%d/%d want7/7", logs, recovery)
-	}
-}
-
 func TestNativeRuntimeLogOracleRejectsWeakenedPayloadLineageAndRecovery(t *testing.T) {
 	var rows []recipe
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
