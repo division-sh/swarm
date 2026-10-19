@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -247,6 +248,7 @@ func proveSelectedWorkspacePreparation(t *testing.T, backend, mode string, real 
 	}
 	sourceRun, eventID := uuid.NewString(), uuid.NewString()
 	seedSelectedClaudeExecutionSource(t, ctx, selected, loaded, sourceRun, eventID, time.Unix(1700002303, 0).UTC())
+	ctx = correlation.WithRootAdmission(ctx, loaded.RootedSource.Admission())
 	trace := &workspacePreparationTrace{mode: mode, real: real, started: make(chan struct{}), cancelled: make(chan struct{}), finish: make(chan struct{})}
 	t.Cleanup(func() {
 		trace.mu.Lock()
@@ -347,9 +349,10 @@ func proveSelectedWorkspacePreparation(t *testing.T, backend, mode string, real 
 		cfg.LLM.Models = selection.ModelAliases{selection.ModelAliasRegular: {selection.BackendAnthropic: "test-model"}}
 	}
 	request := SelectedContractExecutionRequest{Owner: owner, SourceRunID: sourceRun, At: eventID,
-		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-		SourceLoader:      SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)},
-		AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, Config: cfg, ProcessCapability: capability, Workspace: &preparationWorkspace{Lifecycle: lifecycle, trace: trace}}}
+		SourceArtifactFact: loaded.SourceArtifactFact,
+		ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+		SourceLoader:       SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)},
+		AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, Config: cfg, ProcessCapability: capability, Workspace: &preparationWorkspace{Lifecycle: lifecycle, trace: trace}}}
 	before := selectedPreparationDatabaseSnapshot(t, db, backend)
 	var sequence int64
 	if err := db.QueryRow(`SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&sequence); err != nil {
