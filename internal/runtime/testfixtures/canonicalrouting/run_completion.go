@@ -28,7 +28,7 @@ root-completion:
     flow.started:
       advances_to: done
 `)
-	writeClosedVariantFile(t, root, "discovery/schema.yaml", `name: discovery
+	writeClosedVariantFile(t, root, "discovery/schema.yaml", `# fixture: discovery
 stages:
   active: {}
   done: {final: true}

@@ -1,4 +1,4 @@
-name: test-non-agent-replay-fail-closed
+# fixture: test-non-agent-replay-fail-closed
 stages:
   pending: {}
   done: {final: true}

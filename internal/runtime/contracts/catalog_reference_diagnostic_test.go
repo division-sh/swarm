@@ -10,10 +10,13 @@ func TestCatalogReferenceDiagnosticNamesAuthoredEvent(t *testing.T) {
 	for _, flow := range []string{".", "support", "support/worker"} {
 		t.Run(flow, func(t *testing.T) {
 			root := t.TempDir()
-			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: diagnostic\nstages: {done: {final: true}}\n")
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture: diagnostic\nstages: {done: {final: true}}\n")
 			if flow != "." {
-				writeFixtureFile(t, filepath.Join(root, "support/schema.yaml"), "name: support\nstages: {done: {final: true}}\n")
-				writeFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), "name: child\nstages: {done: {final: true}}\n")
+				writeFixtureFile(t, filepath.Join(root, "support/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeFixtureFile(t, filepath.Join(root, "support/schema.yaml"), "# fixture: support\nstages: {done: {final: true}}\n")
+				writeFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), "# fixture: child\nstages: {done: {final: true}}\n")
 			}
 			writeFixtureFile(t, filepath.Join(root, flow, "events.yaml"), "local.done:\n  unsupported: NotDeclared\n")
 			repo := repoRootForContractsTest(t)

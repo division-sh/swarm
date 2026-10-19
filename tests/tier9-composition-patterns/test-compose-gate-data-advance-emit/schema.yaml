@@ -1,4 +1,4 @@
-name: test-compose-gate-data-advance-emit
+# fixture: test-compose-gate-data-advance-emit
 stages:
   stage_one: {}
   stage_two: {}

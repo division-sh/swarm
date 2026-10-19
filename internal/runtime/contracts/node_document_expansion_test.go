@@ -74,7 +74,10 @@ func TestReviewer2492WholeDocumentExpansion(t *testing.T) {
 			if err := os.WriteFile(path, []byte(source.String()), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(directory, "schema.yaml"), []byte("name: test\n"), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(directory, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(directory, "schema.yaml"), []byte("stages: []\n# fixture: test\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			artifact, err := sourceartifact.AdmitDirectory(directory)

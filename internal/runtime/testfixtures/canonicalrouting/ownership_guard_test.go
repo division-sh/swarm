@@ -121,7 +121,7 @@ func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
 		"agent-subscription":  "worker:\n  subscriptions: [work.requested]\n",
 		"producer":            "worker:\n  produces: [work.ready]\n",
 		"handler-derived":     "worker:\n  event_handlers:\n    work.requested: {}\n",
-		"second-document":     "name: inert\n---\nworker:\n  subscribes_to: [work.requested]\n",
+		"second-document":     "stages: []\n# fixture: inert\n---\nworker:\n  subscribes_to: [work.requested]\n",
 	}
 	for name, routing := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -401,7 +401,7 @@ func TestCanonicalRoutingOverlaysRejectRoutingAuthority(t *testing.T) {
 		"package-flows":    "flows: [{id: child, flow: child, mode: template}]\n",
 		"package-bind":     "bind: {inputs: {work.ready: parent.work_ready}}\n",
 		"package-requires": "requires: {inputs: [work.ready]}\n",
-		"template-mode":    "name: child\nmode: template\n",
+		"template-mode":    "# fixture: child\nmode: template\n",
 		"event-source":     "work.ready: {swarm: {source: external}}\n",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -522,6 +522,8 @@ func TestCanonicalRoutingD01DocumentsPreserveReviewedBytes(t *testing.T) {
 	// Pins come from the two off-owner maps at d528702fd before their extraction.
 	// These are complete Documents factories, not exempt non-bundle SourceIDs.
 	activityHashes := map[string]string{
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"research/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "eae6005ef74636c90683c2273fa0cd3f7aac7c2150f9ee3956e22be6064ddfb4",
 		"events.yaml":            "6d51a124fd856efb5376c0fda402f36fe30267c4e0896422134cb52978eaf0f7",
 		"research/schema.yaml":   "82b3bb8edb04b8d5e0cecbb8f22ff670f847c7be1d7f4f14d3131a1c8e3f4323",

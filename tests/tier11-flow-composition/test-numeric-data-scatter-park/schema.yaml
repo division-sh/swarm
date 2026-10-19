@@ -1,4 +1,4 @@
-name: numeric-data-scatter-park
+# fixture: numeric-data-scatter-park
 stages: {done: {final: true}}
 pins:
   outputs:

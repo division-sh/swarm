@@ -74,7 +74,7 @@ func writeStateOnlyAcquisitionFlow(t testing.TB, root, workflowName, rootSchema,
 	parentConstructor := mode == "template" && strings.HasPrefix(targetFlow, path+"/")
 	schema := fmt.Sprintf("name: %s\nstages:\n  active: {}\n  done: {final: true}\n", filepath.Base(path))
 	if path == "." {
-		schema = strings.Replace(schema, "name: .", "name: "+workflowName, 1) + strings.TrimPrefix(rootSchema, "name: "+workflowName+"\n")
+		schema = strings.Replace(schema, "# fixture: .", "name: "+workflowName, 1) + strings.TrimPrefix(rootSchema, "name: "+workflowName+"\n")
 	} else {
 		if mode == "template" {
 			schema += "instance: instance_key\n"

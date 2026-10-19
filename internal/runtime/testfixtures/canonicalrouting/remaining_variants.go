@@ -41,7 +41,7 @@ func CopyStaticMultiEntityRetirement(t testing.TB, handler StaticRetirementHandl
 
 	writeClosedVariantFile(t, root, "schema.yaml", "pins:\n  inputs:\n    - opco.spend_requested\n  outputs:\n    - opco.spend_requested\nconnect:\n  - {event: opco.spend_requested, from: ., to: treasury}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "opco.spend_requested:\n  entity_id: uuid\n  vertical_id: text\n  amount_usd: number\n")
-	writeClosedVariantFile(t, root, "treasury/schema.yaml", `name: treasury
+	writeClosedVariantFile(t, root, "treasury/schema.yaml", `# fixture: treasury
 stages:
   active: {}
   archived: {final: true}
@@ -93,7 +93,7 @@ func CopyRootDefaultStaticInput(t testing.TB, handler RootStaticHandler, entityI
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", `name: root-default-static-fixture
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: root-default-static-fixture
 stages:
   active: {}
 pins:
@@ -155,8 +155,9 @@ func CopyServedJoinProof(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "entities.yaml")
 	files := map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 
-		"schema.yaml": `name: served-join-proof
+		"schema.yaml": `# fixture: served-join-proof
 stages:
   new: {}
   dispatching: {}
@@ -245,15 +246,18 @@ func CopyTestSetupValidation(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	files := map[string]string{
+		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"secondary/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 
-		"schema.yaml": `name: review
+		"schema.yaml": `# fixture: review
 stages:
   new: {}
   done: {final: true}
 `,
 		"events.yaml": "scan.requested:\n  topic: text\n",
 		"nodes.yaml":  "scan-orchestrator:\n  execution_type: system_node\n  subscribes_to: [scan.requested]\n",
-		"operating/schema.yaml": `name: operating
+		"operating/schema.yaml": `# fixture: operating
 stages:
   initializing: {}
   waiting: {}
@@ -279,7 +283,7 @@ stages:
       sets_gate: review_ready
       advances_to: ready
 `,
-		"secondary/schema.yaml":   "name: secondary\nstages:\n  open: {}\n  closed: {final: true}\n",
+		"secondary/schema.yaml":   "# fixture: secondary\nstages:\n  open: {}\n  closed: {final: true}\n",
 		"secondary/entities.yaml": "ticket:\n  ticket_id: text\n",
 	}
 	for name, source := range files {
@@ -295,15 +299,18 @@ func CopyTemplateConnectRollback(t testing.TB) string {
 	// This variant replaces the account edge with the faulted consumer edge.
 	removeClosedVariantFiles(t, root, "account/nodes.yaml", "account/entities.yaml", "account/schema.yaml", "account")
 	files := map[string]string{
+		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 
-		"schema.yaml": "name: test\nconnect:\n  - {event: deploy.done, from: producer, to: consumer, resolution: select-or-create}\n",
-		"producer/schema.yaml": `name: producer
+		"schema.yaml": "# fixture: test\nconnect:\n  - {event: deploy.done, from: producer, to: consumer, resolution: select-or-create}\n",
+		"producer/schema.yaml": `# fixture: producer
 pins:
   outputs:
     - deploy.done
 `,
 		"producer/events.yaml": "deploy.done:\n  key: vertical_id\n  vertical_id: string\n",
-		"consumer/schema.yaml": `name: consumer
+		"consumer/schema.yaml": `# fixture: consumer
 instance: vertical_id
 pins:
   inputs:
@@ -325,7 +332,9 @@ func CopyTemplateInstanceEmpireOutbox(t testing.TB) string {
 		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer",
 		"account/entities.yaml", "account/nodes.yaml", "account/schema.yaml", "account")
 	files := map[string]string{
-		"schema.yaml": "name: empire-outbox\npins:\n  outputs:\n    - opco.create_requested\nconnect:\n  - {event: opco.create_requested, from: ., to: operating, resolution: create}\n",
+		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":             "# fixture: empire-outbox\npins:\n  outputs:\n    - opco.create_requested\nconnect:\n  - {event: opco.create_requested, from: ., to: operating, resolution: create}\n",
 
 		"events.yaml": `approval.completed:
   entity_id: string?
@@ -362,7 +371,7 @@ portfolio-node:
           instance_id: payload.instance_id
           product_id: payload.product_id
 `,
-		"operating/schema.yaml": `name: operating
+		"operating/schema.yaml": `# fixture: operating
 instance: instance_id
 stages:
   initializing: {}
@@ -408,11 +417,12 @@ func CopyProviderRollback(t testing.TB, withHandler bool) string {
 		nodes = "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    inbound.telegram.text_message: {}\n"
 	}
 	files := map[string]string{
+		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"manifest.yaml": `name: provider-rollback-proof
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `,
-		"schema.yaml": `name: provider-rollback-proof
+		"schema.yaml": `# fixture: provider-rollback-proof
 pins:
   inputs:
     - inbound.telegram
@@ -425,7 +435,7 @@ connect:
     resolution: select-or-create
 `,
 		"events.yaml": "inbound.telegram:\n  raw: boolean\ninbound.telegram.text_message:\n  chat_id: text\n",
-		"consumer/schema.yaml": `name: consumer
+		"consumer/schema.yaml": `# fixture: consumer
 instance: chat_id
 pins:
   inputs:

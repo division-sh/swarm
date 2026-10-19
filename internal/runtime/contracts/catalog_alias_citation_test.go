@@ -36,8 +36,11 @@ func TestCriteriaCitationAliasesLoadedFlow(t *testing.T) {
 	}{{"Label", true}, {"[Label]", true}, {"ID", false}, {"Time", false}, {"Status", false}} {
 		t.Run(tc.ref, func(t *testing.T) {
 			root := t.TempDir()
-			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: citation\nstages: {done: {final: true}}\n")
-			writeFixtureFile(t, filepath.Join(root, "child/schema.yaml"), "name: child\nstages: {done: {final: true}}\n")
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture: citation\nstages: {done: {final: true}}\n")
+			writeFixtureFile(t, filepath.Join(root, "child/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "child/schema.yaml"), "# fixture: child\nstages: {done: {final: true}}\n")
 			writeFixtureFile(t, filepath.Join(root, "child/types.yaml"), "scalars: {Label: text, ID: uuid, Time: timestamp}\nenums:\n  Status: {values: [hard], default: hard}\n")
 			writeFixtureFile(t, filepath.Join(root, "child/rules.yaml"), "review:\n  classes: {hard: {disposition: vetoed}}\n  rules: [{id: R1, class: hard, text: Requires review.}]\n")
 			writeFixtureFile(t, filepath.Join(root, "child/events.yaml"), "vetoed:\n  cites: {type: '"+tc.ref+"', citation: {criteria: review, allowed_classes: [hard]}}\n")

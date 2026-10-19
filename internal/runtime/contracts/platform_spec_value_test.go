@@ -191,7 +191,7 @@ platform_events:
 }
 
 func TestPackPlatformProvenanceComposesWithoutOverwrite(t *testing.T) {
-	bundle, err := loadSchemaFragment(t, "name: provenance\nstages: []\n")
+	bundle, err := loadSchemaFragment(t, "# fixture: provenance\nstages: []\n")
 	if err != nil {
 		t.Fatal(err)
 	}

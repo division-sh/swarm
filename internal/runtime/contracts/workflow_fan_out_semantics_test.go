@@ -383,7 +383,7 @@ func fanOutPlanRegistryTestBundle(t *testing.T, handler SystemNodeEventHandler) 
 	root := t.TempDir()
 	schemaFile := filepath.Join(root, "schema.yaml")
 	platformFile := filepath.Join(root, "platform-spec.yaml")
-	if err := os.WriteFile(schemaFile, []byte("name: fan-out-plan-registry-test\n"), 0o644); err != nil {
+	if err := os.WriteFile(schemaFile, []byte("stages: []\n# fixture: fan-out-plan-registry-test\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(platformFile, []byte("version: 1\n"), 0o644); err != nil {

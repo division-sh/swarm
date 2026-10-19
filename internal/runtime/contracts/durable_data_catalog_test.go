@@ -112,7 +112,8 @@ func TestStaticDataCatalogRejectsInvalidUTF8OnlyWhenReferenced(t *testing.T) {
 func writeStaticDataCatalogFixture(t *testing.T, alpha, beta []byte, alphaAccess bool) string {
 	t.Helper()
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: static-catalog-test\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: static-catalog-test\n")
 	writeStaticDataCatalogFlow(t, root, "alpha", alpha, alphaAccess)
 	writeStaticDataCatalogFlow(t, root, "beta", beta, true)
 	return root
@@ -121,6 +122,7 @@ func writeStaticDataCatalogFixture(t *testing.T, alpha, beta []byte, alphaAccess
 func writeStaticDataCatalogFlow(t *testing.T, root, flowID string, content []byte, access bool) {
 	t.Helper()
 	flowRoot := filepath.Join(root, flowID)
+	writeFixtureFile(t, filepath.Join(flowRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: "+flowID+"\n")
 	agent := "worker:\n  role: worker\n  intent: {inline: \"Read admitted static data.\"}\n"
 	if access {

@@ -8,7 +8,7 @@ func CopyHandlerRuleSelectionProof(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "entities.yaml")
-	writeClosedVariantFile(t, root, "schema.yaml", `name: handler-rule-selection-proof
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: handler-rule-selection-proof
 pins:
   inputs:
     - rules.selected
@@ -63,7 +63,7 @@ func CopyExactJoinEventBusProofWithTimeout(t testing.TB, flowID, timeout string)
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	joinSchema := `name: join-eventbus-proof
+	joinSchema := `# fixture: join-eventbus-proof
 stages:
   awaiting: {}
   ready:
@@ -109,7 +109,7 @@ pins:
 		writeClosedVariantFile(t, root, "types.yaml", joinTypes)
 		writeClosedVariantFile(t, root, "nodes.yaml", joinNodes)
 	case "orders":
-		writeClosedVariantFile(t, root, "schema.yaml", "name: join-eventbus-proof\n")
+		writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n# fixture: join-eventbus-proof\n")
 		removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
 		writeLegacyInstanceFlow(t, root, "orders", "instance: order_id\n"+joinSchema,
 			joinEvents, joinEntities+"  order_id: {type: text, _unused_reason: receiver instance identity}\n", joinNodes)
@@ -126,7 +126,7 @@ func CopyRecurringTimerCancellation(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	writeClosedVariantFile(t, root, "schema.yaml", `name: timer-proof
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: timer-proof
 stages:
   waiting: {}
   done:
@@ -156,7 +156,7 @@ func CopyTemplateOutputRootConnect(t testing.TB) string {
 	// This variant replaces the example's child consumer with the root receiver.
 	removeClosedVariantFiles(t, root, "consumer/nodes.yaml", "consumer/schema.yaml", "consumer")
 
-	writeClosedVariantFile(t, root, "schema.yaml", `name: root
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: root
 pins:
   inputs:
     - deploy.done
@@ -176,7 +176,7 @@ connect:
         check: _entity.id != ""
 `)
 	removeClosedVariantFiles(t, root, "producer/nodes.yaml", "producer/agents.yaml")
-	writeLegacyInstanceFlow(t, root, "producer", `name: producer
+	writeLegacyInstanceFlow(t, root, "producer", `# fixture: producer
 instance: producer_id
 pins:
   outputs:

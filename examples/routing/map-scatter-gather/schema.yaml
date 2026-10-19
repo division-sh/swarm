@@ -1,4 +1,4 @@
-name: map-scatter-gather
+# fixture: map-scatter-gather
 stages:
   waiting: {}
   collecting: {}

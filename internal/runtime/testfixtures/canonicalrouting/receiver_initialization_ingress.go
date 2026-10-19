@@ -8,7 +8,7 @@ func CopyProviderReceiverInitialization(t testing.TB) string {
 	t.Helper()
 	root := CopyTelegramChatWithoutIngress(t)
 	removeClosedVariantFiles(t, root, "telegram-chat/agents.yaml", "telegram-chat/tools.yaml")
-	writeClosedVariantFile(t, root, "telegram-chat/schema.yaml", `name: telegram-chat
+	writeClosedVariantFile(t, root, "telegram-chat/schema.yaml", `# fixture: telegram-chat
 imports:
   provider_trigger_events:
     - {provider: telegram, event: inbound.telegram.text_message}

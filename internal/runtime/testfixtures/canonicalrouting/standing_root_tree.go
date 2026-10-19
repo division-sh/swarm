@@ -15,11 +15,15 @@ func CopyStandingRootTreePublic(t testing.TB) string {
 	const outputs = "  outputs: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"
 	const nodes = "observer:\n  execution_type: system_node\n  subscribes_to: [inbound.telegram, inbound.telegram.text_message, inbound.telegram.callback_action]\n  event_handlers:\n    inbound.telegram:\n      guard: {id: admit, check: true}\n    inbound.telegram.text_message:\n      guard: {id: admit, check: true}\n    inbound.telegram.callback_action:\n      guard: {id: admit, check: true}\n"
 	files := map[string]string{
-		"schema.yaml":                       "name: standing-root-tree\nstages: []\n" + imports + pins + outputs + "ingress:\n  alias: alpha\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing.alpha}\nconnect:\n    - {event: inbound.telegram.text_message, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.callback_action, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.text_message, from: beta, to: beta-receiver}\n    - {event: inbound.telegram.callback_action, from: beta, to: beta-receiver}\n",
-		"nodes.yaml":                        nodes,
-		"beta/schema.yaml":                  "name: beta\nstages: []\n" + imports + pins + outputs + "ingress:\n  alias: beta\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing.beta}\n",
-		"beta/nodes.yaml":                   nodes,
-		"alpha-receiver/detail/schema.yaml": "name: detail\n",
+		"alpha-receiver/detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"alpha-receiver/manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
+		"beta/manifest.yaml":                  "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":                       "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":                         "# fixture: standing-root-tree\nstages: []\n" + imports + pins + outputs + "ingress:\n  alias: alpha\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing.alpha}\nconnect:\n    - {event: inbound.telegram.text_message, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.callback_action, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.text_message, from: beta, to: beta-receiver}\n    - {event: inbound.telegram.callback_action, from: beta, to: beta-receiver}\n",
+		"nodes.yaml":                          nodes,
+		"beta/schema.yaml":                    "# fixture: beta\nstages: []\n" + imports + pins + outputs + "ingress:\n  alias: beta\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing.beta}\n",
+		"beta/nodes.yaml":                     nodes,
+		"alpha-receiver/detail/schema.yaml":   "stages: []\n# fixture: detail\n",
 	}
 	for _, alias := range []string{"alpha", "beta"} {
 		files[alias+"-receiver/schema.yaml"] = "name: " + alias + "-receiver\n" + imports + "pins:\n  inputs: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"

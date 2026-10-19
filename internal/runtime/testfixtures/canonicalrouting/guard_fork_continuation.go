@@ -31,7 +31,7 @@ connect:
   event_handlers:
     flow.finished: {advances_to: done}
 `)
-	writeClosedVariantFile(t, root, "guarded/schema.yaml", `name: guarded
+	writeClosedVariantFile(t, root, "guarded/schema.yaml", `# fixture: guarded
 stages:
   ready: {}
   killed: {final: true}

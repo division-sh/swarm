@@ -247,7 +247,8 @@ func TestR3RuleAliasMergeClosedFields(t *testing.T) {
 func TestR3PolicyRulesDiskArtifactCatalogRetainedParity(t *testing.T) {
 	for _, rulesBody := range []string{r3AgentRules, r3MachineRules, r3AgentRules + "      unknown: null\n"} {
 		root := t.TempDir()
-		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: policy-rules-parity\n")
+		writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: policy-rules-parity\n")
 		writeFixtureFile(t, filepath.Join(root, "rules.yaml"), rulesBody)
 		writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "user: {value: 1, description: data, override: false}\n\"\": null\n")
 		disk, diskErr := loadOptionalRulesDeclarations(filepath.Join(root, "rules.yaml"))
@@ -295,8 +296,10 @@ func TestR3PolicyRulesDiskArtifactCatalogRetainedParity(t *testing.T) {
 func TestR3PolicyRulesProvenanceComposition(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: r3-provenance\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: r3-provenance\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "task.ready:\ntask.done:\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  event_handlers:\n    task.ready:\n      emit: task.done\n")
 	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: business intent}\n  criteria: [review]\n  model: regular\n")
 	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "\" spaced \": &literal {value: 1, description: data, override: false}\nalias: *literal\n")

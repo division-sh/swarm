@@ -9,6 +9,8 @@ import (
 
 func TestS1RootAdmissionExactWhitespaceSibling(t *testing.T) {
 	parent := filepath.Join(t.TempDir(), "parent with spaces ")
+	writeTestFile(t, parent, "shop-a/manifest.yaml", manifest2376)
+	writeTestFile(t, parent, "manifest.yaml", manifest2376)
 	writeTestFile(t, parent, "shop-a/nodes.yaml", "original: {type: procedure}\n")
 	t.Chdir(parent)
 	for _, name := range []string{" shop-a", "\tshop-a", "\nshop-a", "shop-a ", "shop-a\t", "shop-a\n", " "} {
@@ -45,7 +47,12 @@ func TestS1RootAdmissionExactWhitespaceSibling(t *testing.T) {
 
 func TestS1RootAdmissionPreservesParentTraversalBeforeOpen(t *testing.T) {
 	parent := t.TempDir()
+	writeTestFile(t, parent, "shop-a/manifest.yaml", manifest2376)
+	writeTestFile(t, parent, "manifest.yaml", manifest2376)
 	writeTestFile(t, parent, "shop-a/nodes.yaml", "wrong: {type: procedure}\n")
+	writeTestFile(t, parent, "outside/shop-a/manifest.yaml", manifest2376)
+	writeTestFile(t, parent, "outside/manifest.yaml", manifest2376)
+	writeTestFile(t, parent, "manifest.yaml", manifest2376)
 	writeTestFile(t, parent, "outside/shop-a/nodes.yaml", "selected: {type: procedure}\n")
 	if err := os.Mkdir(filepath.Join(parent, "outside", "nested"), 0o700); err != nil {
 		t.Fatal(err)

@@ -11,8 +11,12 @@ import (
 
 func TestS1ProviderScopeSelectsNearestWholeDirectory(t *testing.T) {
 	root := t.TempDir()
+	writeTestFile(t, root, "manifest.yaml", manifest2376)
 	writeTestFile(t, root, "schema.yaml", "stages: []\n")
+	writeTestFile(t, root, "child/deep/manifest.yaml", manifest2376)
+	writeTestFile(t, root, "child/manifest.yaml", manifest2376)
 	writeTestFile(t, root, "child/deep/schema.yaml", "stages: []\n")
+	writeTestFile(t, root, "sibling/manifest.yaml", manifest2376)
 	writeTestFile(t, root, "sibling/schema.yaml", "stages: []\n")
 	for _, directory := range []string{"zeta", "team", "child/team", "sibling/other", "child/deep/local"} {
 		writeTestFile(t, root, directory+"/manifest.yaml", s1ProviderManifest)

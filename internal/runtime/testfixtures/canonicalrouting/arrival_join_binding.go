@@ -38,7 +38,7 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
           member_id: payload.member_id
           result: payload.result
 `
-			files["observer/schema.yaml"] = strings.Replace(files["requester/schema.yaml"], "name: requester", "name: observer", 1)
+			files["observer/schema.yaml"] = strings.Replace(files["requester/schema.yaml"], "# fixture: requester", "# fixture: observer", 1)
 			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "  outputs:\n    - provider.requested\n", "", 1)
 			files["observer/schema.yaml"] += "    - provider.notified\n"
 			files["observer/entities.yaml"] = files["requester/entities.yaml"] + "  ordinary_result: JoinResult\n"
@@ -62,7 +62,7 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 		if variant == ArrivalJoinPayloadDirectedMultipleRecipients {
 			files["schema.yaml"] += "  - {event: item.completed, from: ., to: mirror, resolution: select}\n"
 			for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "nodes.yaml"} {
-				files["mirror/"+name] = strings.Replace(files["orders/"+name], "name: orders", "name: mirror", 1)
+				files["mirror/"+name] = strings.Replace(files["orders/"+name], "# fixture: orders", "# fixture: mirror", 1)
 			}
 		}
 		return files
@@ -76,10 +76,12 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 
 func arrivalJoinPayloadDirectedFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml":   "name: a2-publication-binding\nstages:\n  active: {}\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - item.completed\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n",
-		"entities.yaml": "root_state:\n  work_count: {type: integer, initial: 0}\n",
-		"events.yaml":   "work.requested:\n  prefix: text\n  suffix: text\nitem.completed:\n  order_id: text\n  member_id: text\n  result: JoinResult\n",
-		"types.yaml":    "types:\n  JoinResult:\n    value: text\n",
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
+		"orders/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":          "# fixture: a2-publication-binding\nstages:\n  active: {}\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - item.completed\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n",
+		"entities.yaml":        "root_state:\n  work_count: {type: integer, initial: 0}\n",
+		"events.yaml":          "work.requested:\n  prefix: text\n  suffix: text\nitem.completed:\n  order_id: text\n  member_id: text\n  result: JoinResult\n",
+		"types.yaml":           "types:\n  JoinResult:\n    value: text\n",
 		"nodes.yaml": `worker:
   execution_type: system_node
   event_handlers:
@@ -94,7 +96,7 @@ func arrivalJoinPayloadDirectedFiles() map[string]string {
           member_id: "a"
           result: {value: "computed-by-worker"}
 `,
-		"orders/schema.yaml": `name: orders
+		"orders/schema.yaml": `# fixture: orders
 instance: order_id
 stages:
   awaiting: {}
@@ -129,9 +131,12 @@ dispatcher:
 
 func arrivalJoinBoundReplyFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml": "name: a2-bound-reply\nconnect:\n  - {event: provider.requested, from: requester, to: provider}\n  - {event: provider.replied, from: provider, to: requester, replies_to: provider.requested}\n",
-		"types.yaml":  "types:\n  JoinResult:\n    value: text\n",
-		"requester/schema.yaml": `name: requester
+		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+		"provider/manifest.yaml":  "version: 1.0.0\nplatform_version: '*'\n",
+		"requester/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":             "# fixture: a2-bound-reply\nconnect:\n  - {event: provider.requested, from: requester, to: provider}\n  - {event: provider.replied, from: provider, to: requester, replies_to: provider.requested}\n",
+		"types.yaml":              "types:\n  JoinResult:\n    value: text\n",
+		"requester/schema.yaml": `# fixture: requester
 instance: order_id
 stages:
   awaiting: {}
@@ -170,7 +175,7 @@ dispatcher:
     manual.abort: {advances_to: dispatching}
     dispatch.completed: {advances_to: awaiting}
 `,
-		"provider/schema.yaml": "name: provider\npins:\n  inputs:\n    - provider.requested\n  outputs:\n    - provider.replied\n",
+		"provider/schema.yaml": "# fixture: provider\npins:\n  inputs:\n    - provider.requested\n  outputs:\n    - provider.replied\n",
 		"provider/events.yaml": "provider.replied:\n  order_id: text\n  member_id: text\n  result: JoinResult\n",
 		"provider/nodes.yaml": `provider:
   execution_type: system_node
@@ -188,8 +193,11 @@ dispatcher:
 
 func arrivalJoinFieldlessReplyFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml": "name: a2-fieldless-reply\nconnect:\n  - {event: provider.requested, from: requester, to: provider}\n  - {event: provider.replied, from: provider, to: requester, replies_to: provider.requested}\n",
-		"requester/schema.yaml": `name: requester
+		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+		"provider/manifest.yaml":  "version: 1.0.0\nplatform_version: '*'\n",
+		"requester/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":             "# fixture: a2-fieldless-reply\nconnect:\n  - {event: provider.requested, from: requester, to: provider}\n  - {event: provider.replied, from: provider, to: requester, replies_to: provider.requested}\n",
+		"requester/schema.yaml": `# fixture: requester
 pins:
   inputs:
     - request.send
@@ -213,7 +221,7 @@ receiver:
         event: reply.observed
         fields: {token: payload.token, value: payload.value}
 `,
-		"provider/schema.yaml": "name: provider\npins:\n  inputs:\n    - provider.requested\n  outputs:\n    - provider.replied\n",
+		"provider/schema.yaml": "# fixture: provider\npins:\n  inputs:\n    - provider.requested\n  outputs:\n    - provider.replied\n",
 		"provider/events.yaml": "provider.replied:\n  token: text\n  value: text\n",
 		"provider/nodes.yaml": `provider:
   execution_type: system_node
@@ -228,7 +236,7 @@ receiver:
 
 func arrivalJoinMultiUntilFiles() map[string]string {
 	files := arrivalJoinPayloadDirectedFiles()
-	files["schema.yaml"] = `name: a2-multi-until-binding
+	files["schema.yaml"] = `# fixture: a2-multi-until-binding
 stages:
   active: {}
 pins:

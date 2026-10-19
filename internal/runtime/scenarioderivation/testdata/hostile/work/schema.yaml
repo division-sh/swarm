@@ -1,4 +1,4 @@
-name: work
+# fixture: work
 stages:
   ready: {}
 pins:

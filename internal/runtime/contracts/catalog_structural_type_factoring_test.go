@@ -638,13 +638,15 @@ func catalogFactoringScopedBundle(t *testing.T) *WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
 	for file, body := range map[string]string{
-		"schema.yaml":       "name: catalog-factoring\nstages: {done: {final: true}}\n",
-		"types.yaml":        "scalars: {Label: text}\ntypes:\n  Box:\n    value: Label\n",
-		"events.yaml":       "record.ready:\n  item: Box\n  items: [Box]\n",
-		"child/schema.yaml": "name: child\nstages: {done: {final: true}}\n",
-		"child/types.yaml":  "scalars: {Label: integer}\n",
-		"child/events.yaml": "record.ready:\n  item: Box\n  items: [Box]\n",
-		"child/nodes.yaml":  "consumer:\n  execution_type: system_node\n  event_handlers:\n    record.ready: {}\n",
+		"child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":         "# fixture: catalog-factoring\nstages: {done: {final: true}}\n",
+		"types.yaml":          "scalars: {Label: text}\ntypes:\n  Box:\n    value: Label\n",
+		"events.yaml":         "record.ready:\n  item: Box\n  items: [Box]\n",
+		"child/schema.yaml":   "# fixture: child\nstages: {done: {final: true}}\n",
+		"child/types.yaml":    "scalars: {Label: integer}\n",
+		"child/events.yaml":   "record.ready:\n  item: Box\n  items: [Box]\n",
+		"child/nodes.yaml":    "consumer:\n  execution_type: system_node\n  event_handlers:\n    record.ready: {}\n",
 	} {
 		writeFixtureFile(t, filepath.Join(root, file), body)
 	}

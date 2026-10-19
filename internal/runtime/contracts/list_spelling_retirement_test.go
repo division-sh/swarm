@@ -138,7 +138,8 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 			t.Run(surface+"/"+form.name, func(t *testing.T) {
 				root := t.TempDir()
 				files := map[string]string{
-					"schema.yaml":   "name: list-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
+					"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+					"schema.yaml":   "# fixture: list-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
 					"types.yaml":    "types:\n  ProbeItem:\n    value: text\n",
 					"entities.yaml": "probe:\n  item: text\n",
 				}
@@ -306,9 +307,9 @@ func TestListSpellingRetirementCombinedNestedBundle(t *testing.T) {
 			} {
 				t.Run(scope+surface+"/"+test.retired, func(t *testing.T) {
 					root := t.TempDir()
-					writeFixtureFile(t, root+"/schema.yaml", "name: nested-proof\nstages: {done: {final: true}}\n")
+					writeFixtureFile(t, root+"/schema.yaml", "# fixture: nested-proof\nstages: {done: {final: true}}\n")
 					if scope != "" {
-						writeFixtureFile(t, root+"/child/schema.yaml", "name: child\nstages: {done: {final: true}}\n")
+						writeFixtureFile(t, root+"/child/schema.yaml", "# fixture: child\nstages: {done: {final: true}}\n")
 					}
 					file := scope + surface + ".yaml"
 					prefix := ""
@@ -357,7 +358,8 @@ func TestListSpellingRetirementPreservesNamedTypeCase(t *testing.T) {
 			}
 			root := t.TempDir()
 			for file, source := range map[string]string{
-				"schema.yaml":   "name: case-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
+				"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+				"schema.yaml":   "# fixture: case-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
 				"types.yaml":    "types:\n  " + name + ":\n    value: text\n  Holder:\n    item: " + name + "\n",
 				"entities.yaml": "probe:\n  item: " + name + "\n",
 				"events.yaml":   "proof.received:\n  item: " + name + "\n",

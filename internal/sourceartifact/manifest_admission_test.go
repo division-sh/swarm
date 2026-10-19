@@ -27,7 +27,9 @@ func assert2376ManifestAdmission(t *testing.T, body, field string, valid bool) {
 		t.Run(label, func(t *testing.T) {
 			entries := []Entry{{label: "schema.yaml", disposition: DispositionDeclaration, body: []byte("description: root\n")}, {label: label, disposition: DispositionManifest, body: []byte(body)}}
 			if strings.Contains(label, "/") {
-				entries = append(entries, Entry{label: "child/schema.yaml", disposition: DispositionDeclaration, body: []byte("description: child\n")})
+				entries = append(entries,
+					Entry{label: "manifest.yaml", disposition: DispositionManifest, body: []byte(manifest2376)},
+					Entry{label: "child/schema.yaml", disposition: DispositionDeclaration, body: []byte("description: child\n")})
 			}
 			sort.Slice(entries, func(i, j int) bool { return entries[i].label < entries[j].label })
 			blob, err := encodeLogical(entries)
@@ -63,8 +65,40 @@ func assert2376ManifestAdmission(t *testing.T, body, field string, valid bool) {
 
 func Test2376ManifestOptionalStrictPresence(t *testing.T) {
 	t.Run("absent", func(t *testing.T) {
-		if _, err := newArtifact([]Entry{{label: "schema.yaml", body: []byte("description: root\n")}}); err != nil {
-			t.Fatal(err)
+		for _, row := range []struct {
+			name, missing string
+			entries       []Entry
+		}{
+			{"root", "manifest.yaml", []Entry{{label: "schema.yaml", body: []byte("stages: []\n")}}},
+			{"child", "child/manifest.yaml", []Entry{{label: "manifest.yaml", body: []byte(manifest2376)}, {label: "child/schema.yaml", body: []byte("stages: []\n")}}},
+			{"resource-established", "child/manifest.yaml", []Entry{{label: "manifest.yaml", body: []byte(manifest2376)}, {label: "child/data/value.txt", body: []byte("value")}}},
+			{"intermediate", "group/manifest.yaml", []Entry{{label: "manifest.yaml", body: []byte(manifest2376)}, {label: "group/leaf/manifest.yaml", body: []byte(manifest2376)}, {label: "group/leaf/schema.yaml", body: []byte("stages: []\n")}}},
+		} {
+			t.Run(row.name, func(t *testing.T) {
+				for i := range row.entries {
+					switch filepath.Base(row.entries[i].label) {
+					case "manifest.yaml":
+						row.entries[i].disposition = DispositionManifest
+					case "schema.yaml":
+						row.entries[i].disposition = DispositionDeclaration
+					default:
+						row.entries[i].disposition = DispositionResource
+					}
+				}
+				sort.Slice(row.entries, func(i, j int) bool { return row.entries[i].label < row.entries[j].label })
+				blob, err := encodeLogical(row.entries)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, load := range []func() (*AdmittedSourceArtifact, error){
+					func() (*AdmittedSourceArtifact, error) { return newArtifact(row.entries) },
+					func() (*AdmittedSourceArtifact, error) { return DecodeLogical(blob) },
+				} {
+					if _, err := load(); err == nil || !strings.Contains(err.Error(), row.missing) {
+						t.Fatalf("missing flow manifest admitted or misclassified: %v", err)
+					}
+				}
+			})
 		}
 	})
 	fields := []string{"version: 1.2.3\n", "platform_version: '>=0.7.0 <1.0.0'\n"}
@@ -191,46 +225,37 @@ func Test2376ManifestDispositionAndSelectedRootCompatibility(t *testing.T) {
 }
 
 func Test2376StoredSourcePresentationHasNoInventedRoot(t *testing.T) {
-	for _, named := range []bool{false, true} {
-		t.Run(fmt.Sprint(named), func(t *testing.T) {
-			root := filepath.Join(t.TempDir(), "reception")
-			if err := os.Mkdir(root, 0700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("description: root\n"), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if named {
-				if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte(manifest2376), 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			artifact, err := AdmitDirectory(root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			short := strings.TrimPrefix(artifact.BundleHash(), HashPrefix)[:7]
-			want := "reception@" + short
-			if named {
-				want = "reception@1.2.3"
-			}
-			if artifact.HumanLabel() != want {
-				t.Fatalf("local label %q, want %q", artifact.HumanLabel(), want)
-			}
-			if err := os.RemoveAll(root); err != nil {
-				t.Fatal(err)
-			}
-			stored, err := DecodeLogical(artifact.LogicalBlob())
-			if err != nil {
-				t.Fatal(err)
-			}
-			want = short
-			if stored.HumanLabel() != want {
-				t.Fatalf("stored label %q, want %q", stored.HumanLabel(), want)
-			}
-			if artifact.BundleHash() != stored.BundleHash() {
-				t.Fatal("presentation changed exact identity")
-			}
-		})
+	root := filepath.Join(t.TempDir(), "reception")
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("description: root\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte(manifest2376), 0600); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	short := strings.TrimPrefix(artifact.BundleHash(), HashPrefix)[:7]
+	want := "reception@1.2.3"
+	if artifact.HumanLabel() != want {
+		t.Fatalf("local label %q, want %q", artifact.HumanLabel(), want)
+	}
+	if err := os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := DecodeLogical(artifact.LogicalBlob())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = short
+	if stored.HumanLabel() != want {
+		t.Fatalf("stored label %q, want %q", stored.HumanLabel(), want)
+	}
+	if artifact.BundleHash() != stored.BundleHash() {
+		t.Fatal("presentation changed exact identity")
 	}
 }

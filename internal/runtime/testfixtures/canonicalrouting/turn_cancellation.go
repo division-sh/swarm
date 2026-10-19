@@ -7,7 +7,7 @@ import "testing"
 func CopyTurnCancellationRecovery(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "schema.yaml", "name: turn-cancellation-recovery\npins:\n  inputs: [work.requested]\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: turn-cancellation-recovery\npins:\n  inputs: [work.requested]\n")
 	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  case_id: text\nwork.started:\n  case_id: text\nwork.timed_out:\nwork.timeout_recorded:\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `start:
   execution_type: system_node

@@ -193,7 +193,7 @@ func TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments(t *testing.
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/schema.yaml", "name: wave1-bundle\n")
+	writeFixtureFile(t, root+"/schema.yaml", "stages: []\n# fixture: wave1-bundle\n")
 	writeFixtureFile(t, root+"/types.yaml", `
 scalars:
   URL: text
@@ -206,7 +206,7 @@ root.ready:
   # root event
   entity_id: uuid
 `)
-	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `# fixture: scoring
 stages:
   discovered: {}
   shortlisted: {final: true}
@@ -598,8 +598,8 @@ func TestLoadWorkflowContractBundle_RejectsMultipleFlowEntityTypes(t *testing.T)
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/schema.yaml", "name: invalid-flow-entities\n")
-	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
+	writeFixtureFile(t, root+"/schema.yaml", "stages: []\n# fixture: invalid-flow-entities\n")
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `# fixture: scoring
 stages:
   pending: {}
   done: {final: true}
@@ -621,7 +621,7 @@ func TestLoadWorkflowContractBundle_RejectsMultipleRootEntityTypes(t *testing.T)
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/schema.yaml", `name: invalid-root-entities
+	writeFixtureFile(t, root+"/schema.yaml", `# fixture: invalid-root-entities
 stages:
   pending: {}
   done: {final: true}
@@ -643,8 +643,8 @@ func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelector(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/schema.yaml", "name: schema-entity-selector\n")
-	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
+	writeFixtureFile(t, root+"/schema.yaml", "stages: []\n# fixture: schema-entity-selector\n")
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `# fixture: scoring
 entity: vertical
 stages:
   pending: {}
@@ -665,7 +665,7 @@ func TestLoadWorkflowContractBundle_RejectsRootSchemaEntitySelector(t *testing.T
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/schema.yaml", `name: root-schema-entity-selector
+	writeFixtureFile(t, root+"/schema.yaml", `# fixture: root-schema-entity-selector
 entity: vertical
 stages:
   pending: {}
@@ -686,8 +686,8 @@ func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelectorForMissingEntity(
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/schema.yaml", "name: schema-entity-selector-missing\n")
-	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
+	writeFixtureFile(t, root+"/schema.yaml", "stages: []\n# fixture: schema-entity-selector-missing\n")
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `# fixture: scoring
 entity: missing
 stages:
   pending: {}

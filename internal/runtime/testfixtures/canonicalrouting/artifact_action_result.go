@@ -34,8 +34,10 @@ func CopyArtifactActionResultDelivery(t testing.TB, mode string, childRequest bo
 
 func artifactActionResultDeliveryFixtureFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml": "name: artifact-action-result-delivery\n",
-		"repo-scaffold/schema.yaml": `name: repo-scaffold
+		"manifest.yaml":               "version: 1.0.0\nplatform_version: '*'\n",
+		"repo-scaffold/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":                 "stages: []\n# fixture: artifact-action-result-delivery\n",
+		"repo-scaffold/schema.yaml": `# fixture: repo-scaffold
 instance: request_id
 stages:
   ready: {}
@@ -102,7 +104,7 @@ func addArtifactActionResultChildRequest(files map[string]string) {
 connect:
   - {event: repo_scaffold.repo_commit_requested, from: child-1, to: .}
 `
-	files["repo-scaffold/child-1/schema.yaml"] = `name: child-requester
+	files["repo-scaffold/child-1/schema.yaml"] = `# fixture: child-requester
 pins:
   inputs:
     - start.requested

@@ -1,4 +1,4 @@
-name: verify-run-jobflow-registry
+# fixture: verify-run-jobflow-registry
 stages:
   done: {final: true}
 pins:

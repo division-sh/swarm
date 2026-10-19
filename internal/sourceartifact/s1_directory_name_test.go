@@ -13,6 +13,7 @@ func TestS1CopiedProviderNeedsNoBodyOrManifestEdits(t *testing.T) {
 	manifest := []byte("version: 1.2.3\nplatform_version: '*'\ncapabilities: {can: {emit_events: [text_message]}, cannot: [execute arbitrary code]}\n")
 	body := []byte("event_name: {literal: raw}\n")
 	root := filepath.Join(t.TempDir(), "shop")
+	writeTestFile(t, root, "manifest.yaml", manifest2376)
 	writeTestFile(t, root, "schema.yaml", "description: root\n")
 	for _, directory := range []string{"telegram", "telegram-sales", "telegram_sales"} {
 		writeTestFile(t, root, directory+"/manifest.yaml", string(manifest))
@@ -47,6 +48,7 @@ func TestS1CopiedProviderNeedsNoBodyOrManifestEdits(t *testing.T) {
 
 func TestS1RootedPresentationDoesNotInventContentName(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "shop")
+	writeTestFile(t, root, "manifest.yaml", manifest2376)
 	writeTestFile(t, root, "schema.yaml", "description: root\n")
 	writeTestFile(t, root, "manifest.yaml", "version: 1.2.3\nplatform_version: '*'\n")
 	artifact, err := AdmitDirectory(root)

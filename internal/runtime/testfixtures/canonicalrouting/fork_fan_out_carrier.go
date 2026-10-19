@@ -13,8 +13,8 @@ func CopyForkFanOutCompletionConsumer(t testing.TB) string {
 	t.Helper()
 	root := CopyForkFanOutConsumer(t, true, true)
 	for path, replacement := range map[string][2]string{
-		"events.yaml": {"batch.completed:\n  total: integer\n  revision_id: text", "batch.completed:\n  total: integer\n  revision_id: text\n  loop_id: text\n  activation_id: text\n  attempt: integer\n  max_attempts: integer"},
-		"nodes.yaml":  {"              revision_id: loop.revision_id\n", "              revision_id: loop.revision_id\n              loop_id: loop.id\n              activation_id: loop.activation_id\n              attempt: loop.attempt\n              max_attempts: loop.max_attempts\n"},
+		"events.yaml":   {"batch.completed:\n  total: integer\n  revision_id: text", "batch.completed:\n  total: integer\n  revision_id: text\n  loop_id: text\n  activation_id: text\n  attempt: integer\n  max_attempts: integer"},
+		"nodes.yaml":    {"              revision_id: loop.revision_id\n", "              revision_id: loop.revision_id\n              loop_id: loop.id\n              activation_id: loop.activation_id\n              attempt: loop.attempt\n              max_attempts: loop.max_attempts\n"},
 	} {
 		body, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
@@ -60,7 +60,7 @@ func CopyForkFanOutConsumer(t testing.TB, loop, barrier bool) string {
 func CopyForkFanOutCarrier(t testing.TB, loop, barrier bool) string {
 	t.Helper()
 	root := t.TempDir()
-	schema := `name: fork-fan-out-carrier
+	schema := `# fixture: fork-fan-out-carrier
 stages:
   pending: {}
   review: {}
@@ -129,7 +129,8 @@ pins:
       advances_to: done
 `
 	}
-	for path, body := range map[string]string{"schema.yaml": schema, "events.yaml": events, "nodes.yaml": nodes, "entities.yaml": "root: {}\n"} {
+	for path, body := range map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "schema.yaml": schema, "events.yaml": events, "nodes.yaml": nodes, "entities.yaml": "root: {}\n"} {
 		writeClosedVariantFile(t, root, path, body)
 	}
 	return root

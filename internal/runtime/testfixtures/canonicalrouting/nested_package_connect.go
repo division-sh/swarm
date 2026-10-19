@@ -9,10 +9,13 @@ func CopyNestedFlowConnect(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
+		"child/grandchild/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"child/manifest.yaml":            "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":                  "version: 1.0.0\nplatform_version: '*'\n",
 
-		"schema.yaml": "name: nested-flow-connect\n",
+		"schema.yaml": "stages: []\n# fixture: nested-flow-connect\n",
 
-		"child/schema.yaml": `name: child
+		"child/schema.yaml": `# fixture: child
 pins:
   inputs:
     - micro.done
@@ -28,7 +31,7 @@ connect:
     micro.done: {}
 `,
 
-		"child/grandchild/schema.yaml": `name: grandchild
+		"child/grandchild/schema.yaml": `# fixture: grandchild
 pins:
   outputs:
     - micro.done

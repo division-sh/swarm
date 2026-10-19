@@ -208,8 +208,10 @@ func TestW5ToolsDocumentExpansionBudget(t *testing.T) {
 func TestW5ToolProvenanceComposesAndIsIdempotent(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: provenance\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: provenance\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "task.ready:\ntask.done:\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  event_handlers:\n    task.ready:\n      emit: task.done\n")
 	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: intent}\n")
 	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), "first: &tool\n  description: intent\n  input_schema: {type: string, minLength: 0}\nsecond:\n  <<: *tool\n")

@@ -12,6 +12,7 @@ func TestS1FlowSourcesExcludeProviderDirectories(t *testing.T) {
 	root := t.TempDir()
 	manifest := "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [inbound.team], persist_dedupe_markers: true}, cannot: [execute code]}\n"
 	files := map[string]string{
+		"manifest.yaml":                "version: 1.0.0\nplatform_version: '*'\n",
 		"nodes.yaml":                   "coordinator: {type: procedure}\n",
 		"team-bot/manifest.yaml":       manifest,
 		"team-bot/trigger.yaml":        "event_name: {literal: inbound.team}\n",

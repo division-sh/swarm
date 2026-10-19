@@ -15,10 +15,12 @@ const s1ProviderManifest = "version: 1.2.3\nplatform_version: '*'\ncapabilities:
 func TestS1ProviderMembershipDiskLogicalParity(t *testing.T) {
 	root := t.TempDir()
 	for label, body := range map[string]string{
+		"manifest.yaml":          manifest2376,
 		"nodes.yaml":             "coordinator: {type: procedure}\n",
 		"team-bot/manifest.yaml": s1ProviderManifest,
 		"team-bot/trigger.yaml":  "event_name: {literal: inbound.team}\n",
 		"child/data/value.txt":   "resource-established child\n",
+		"child/manifest.yaml":    manifest2376,
 	} {
 		writeTestFile(t, root, label, body)
 	}
@@ -57,6 +59,7 @@ func TestS1ManifestRetiredFieldsTeachCanonicalOwners(t *testing.T) {
 	} {
 		t.Run(row.field+row.value, func(t *testing.T) {
 			root := t.TempDir()
+			writeTestFile(t, root, "manifest.yaml", manifest2376)
 			writeTestFile(t, root, "schema.yaml", "description: flow\n")
 			writeTestFile(t, root, "manifest.yaml", manifest2376+row.field+": "+row.value+"\n")
 			_, err := AdmitDirectory(root)
@@ -78,6 +81,7 @@ func TestS1ProviderMembershipRefusesMixedOrContradictoryDirectory(t *testing.T) 
 		t.Run(row.name, func(t *testing.T) {
 			root := t.TempDir()
 			files := map[string]string{
+				"manifest.yaml":                 manifest2376,
 				"schema.yaml":                   "description: root\n",
 				row.directory + "/trigger.yaml": "event_name: {literal: inbound.team}\n",
 			}
@@ -122,6 +126,7 @@ func TestS1ProviderMembershipRefusesMixedOrContradictoryDirectory(t *testing.T) 
 
 func TestS1ProviderNamesDoNotCollapseAndSnapshotsStayOwned(t *testing.T) {
 	root := t.TempDir()
+	writeTestFile(t, root, "manifest.yaml", manifest2376)
 	writeTestFile(t, root, "schema.yaml", "description: root\n")
 	for _, name := range []string{"team-bot", "team_bot"} {
 		writeTestFile(t, root, name+"/manifest.yaml", s1ProviderManifest)
@@ -157,6 +162,7 @@ func TestS1ProviderMembershipEmptyMixedAndRetiredHeaders(t *testing.T) {
 		for _, malformed := range []string{"provider: team-bot\n", "<<: {provider: team-bot}\n", "null\n", "[]\n", "false\n"} {
 			t.Run(role+"/"+malformed, func(t *testing.T) {
 				root := t.TempDir()
+				writeTestFile(t, root, "manifest.yaml", manifest2376)
 				writeTestFile(t, root, "schema.yaml", "description: root\n")
 				writeTestFile(t, root, "team-bot/manifest.yaml", s1ProviderManifest)
 				writeTestFile(t, root, "team-bot/"+role+".yaml", malformed)
@@ -175,6 +181,7 @@ func TestS1ProviderMembershipEmptyMixedAndRetiredHeaders(t *testing.T) {
 			root := t.TempDir()
 			directory := "."
 			if !rootManifest {
+				writeTestFile(t, root, "manifest.yaml", manifest2376)
 				writeTestFile(t, root, "schema.yaml", "description: root\n")
 				directory = "team-bot"
 			}
@@ -217,6 +224,7 @@ func TestS1ProviderCannotOwnNestedProviderDirectories(t *testing.T) {
 			if selectedProvider {
 				prefix = ""
 			} else {
+				writeTestFile(t, root, "manifest.yaml", manifest2376)
 				writeTestFile(t, root, "schema.yaml", "description: root\n")
 			}
 			for _, directory := range []string{prefix, prefix + "nested/"} {
@@ -236,6 +244,7 @@ func TestS1ProviderBodyLookalikesRemainResources(t *testing.T) {
 		for _, body := range []string{"trigger.yaml", "connector.yaml", "channel.yaml"} {
 			t.Run(fmt.Sprintf("%s/%s", branch, body), func(t *testing.T) {
 				root := t.TempDir()
+				writeTestFile(t, root, "manifest.yaml", manifest2376)
 				writeTestFile(t, root, filepath.Join(branch, body), "provider: inert\n")
 				writeTestFile(t, root, filepath.Join(branch, "manifest.yaml"), "type: inert\n")
 				artifact, err := AdmitDirectory(root)

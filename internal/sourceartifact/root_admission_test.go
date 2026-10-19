@@ -14,6 +14,7 @@ func TestS1RootAdmissionSeparatesEqualContent(t *testing.T) {
 	var original RootAdmission
 	for _, directory := range []string{"shop-a", "shop-b"} {
 		root := filepath.Join(t.TempDir(), directory)
+		writeTestFile(t, root, "manifest.yaml", manifest2376)
 		writeTestFile(t, root, "nodes.yaml", "worker: {type: procedure}\n")
 		artifact, err := AdmitDirectory(root)
 		if err != nil {
@@ -42,6 +43,7 @@ func TestS1RootAdmissionSeparatesEqualContent(t *testing.T) {
 func TestS1RootAdmissionRelativeSelection(t *testing.T) {
 	parent := t.TempDir()
 	root := filepath.Join(parent, "shop-a")
+	writeTestFile(t, root, "manifest.yaml", manifest2376)
 	writeTestFile(t, root, "nodes.yaml", "worker: {type: procedure}\n")
 	t.Chdir(parent)
 	for _, selected := range []string{"shop-a", "./shop-a", "shop-a/../shop-a"} {
@@ -58,6 +60,7 @@ func TestS1RootAdmissionRelativeSelection(t *testing.T) {
 
 func TestS1RootAdmissionContentDecodeCannotMintRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "shop-a")
+	writeTestFile(t, root, "manifest.yaml", manifest2376)
 	writeTestFile(t, root, "nodes.yaml", "worker: {type: procedure}\n")
 	artifact, err := AdmitDirectory(root)
 	if err != nil {
@@ -74,7 +77,7 @@ func TestS1RootAdmissionContentDecodeCannotMintRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	members, err := AdmitMembers(map[string][]byte{"nodes.yaml": []byte("worker: {type: procedure}\n")})
+	members, err := AdmitMembers(map[string][]byte{"manifest.yaml": []byte(manifest2376), "nodes.yaml": []byte("worker: {type: procedure}\n")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +95,7 @@ func TestS1RootAdmissionValidatesSelectedDirectory(t *testing.T) {
 	for _, directory := range []string{"My Shop", "shop.root", "SHOP", "-shop", "con"} {
 		t.Run(directory, func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), directory)
+			writeTestFile(t, root, "manifest.yaml", manifest2376)
 			writeTestFile(t, root, "nodes.yaml", "worker: {type: procedure}\n")
 			if _, err := AdmitDirectory(root); err == nil || !strings.Contains(err.Error(), "rename it") {
 				t.Fatalf("invalid selected root gained admission: %v", err)
@@ -108,6 +112,7 @@ func TestS1RootAdmissionRejectsContradictoryOrZeroValues(t *testing.T) {
 		t.Fatalf("zero rooted source: %v", err)
 	}
 	root := filepath.Join(t.TempDir(), "shop-a")
+	writeTestFile(t, root, "manifest.yaml", manifest2376)
 	writeTestFile(t, root, "nodes.yaml", "worker: {type: procedure}\n")
 	artifact, err := AdmitDirectory(root)
 	if err != nil {
@@ -127,6 +132,7 @@ func TestS1RootAdmissionRejectsContradictoryOrZeroValues(t *testing.T) {
 
 func TestS1RootAdmissionRetainedDecoderBindsContentWithoutMutatingIt(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "shop-a")
+	writeTestFile(t, root, "manifest.yaml", manifest2376)
 	writeTestFile(t, root, "nodes.yaml", "worker: {type: procedure}\n")
 	artifact, err := AdmitDirectory(root)
 	if err != nil {

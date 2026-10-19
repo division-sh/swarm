@@ -1,1 +1,2 @@
-name: test-boot-state-machine-unreachable
+stages: []
+# fixture: test-boot-state-machine-unreachable

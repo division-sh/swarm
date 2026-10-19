@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/testcatalog"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -35,8 +34,8 @@ func TestRemovedClosedFieldsUseCurrentVocabularyAcrossPresenceAndMerges(t *testi
 		{"query", "nodes.yaml", fmt.Sprintf(handler, "query: {%s}"), []string{"operation"}, admitNodes},
 		{"compute", "nodes.yaml", fmt.Sprintf(handler, "compute: {%s}"), []string{"params", "value_field", "weight_field"}, admitNodes},
 		{"clear", "nodes.yaml", fmt.Sprintf(handler, "clear: {%s}"), []string{"target", "pending_dedup", "entity_fields"}, admitNodes},
-		{"schema", "schema.yaml", "name: supported\n%s\n", []string{"mode", "initial_state", "states", "terminal_states", "tool_surface", "entity", "namespace_prefix", "namespace_rule"}, admitSchema},
-		{"connect", "schema.yaml", "name: supported\nconnect: [{%s}]\n", []string{"adapter", "delivery", "reply", "map", "using"}, admitSchema},
+		{"schema", "schema.yaml", "stages: []\n%s\n", []string{"mode", "initial_state", "states", "terminal_states", "tool_surface", "entity", "namespace_prefix", "namespace_rule"}, admitSchema},
+		{"connect", "schema.yaml", "connect: [{%s}]\n", []string{"adapter", "delivery", "reply", "map", "using"}, admitSchema},
 		{"agent", "agents.yaml", "worker: {%s}\n", []string{"model_tier", "mode", "conversation_mode", "session_scope", "session_scope_authority", "tools_tier2", "subscriptions_bootstrap", "subscribes_to", "prompt_ref", "prompt_inputs", "profile", "agent_defaults", "agent_profiles", "runtime_id_template"}, func(d yamlsource.Document) error { _, err := projectAgentDeclarationsValue(d.Root()); return err }},
 		{"tool", "tools.yaml", "worker: {%s}\n", []string{"parameters", "returns", "endpoint", "type", "required_permission", "kind"}, func(d yamlsource.Document) error { _, err := projectToolDeclarationsValue(d.Root()); return err }},
 	} {
@@ -111,7 +110,7 @@ func TestCurrentVocabularyDiagnosticsAcrossDeclarationFamilies(t *testing.T) {
 		admit                    func(yamlsource.Document) error
 	}{
 		{"nodes.yaml", "worker: {descriptoin: typo}\n", "descriptoin", "description", func(d yamlsource.Document) error { _, err := projectNodeDeclarationsValue(d.Root()); return err }},
-		{"schema.yaml", "name: sample\nnaem: typo\n", "naem", "name", func(d yamlsource.Document) error { _, err := AdmitFlowSchemaValue(d.Root()); return err }},
+		{"schema.yaml", "stages: []\nscheduls: []\n", "scheduls", "schedules", func(d yamlsource.Document) error { _, err := AdmitFlowSchemaValue(d.Root()); return err }},
 		{"agents.yaml", "worker: {intent: {inline: business intent}, modle: typo}\n", "modle", "model", func(d yamlsource.Document) error { _, err := projectAgentDeclarationsValue(d.Root()); return err }},
 		{"tools.yaml", "worker: {descriptoin: typo}\n", "descriptoin", "description", func(d yamlsource.Document) error { _, err := projectToolDeclarationsValue(d.Root()); return err }},
 		{"types.yaml", "enmus: {}\n", "enmus", "enums", func(d yamlsource.Document) error { _, err := projectTypeCatalogDocument(d.Root()); return err }},
@@ -187,27 +186,4 @@ func TestCurrentVocabularyKeepsOpenNameReservations(t *testing.T) {
 	if _, err := admitEventCatalogDocument(snapshot.Document("events.yaml")); err != nil {
 		t.Fatalf("open payload names narrowed to a finite vocabulary: %v", err)
 	}
-}
-
-func TestCurrentVocabularyPreservesAdmittedCatalog(t *testing.T) {
-	repo := repoRootForContractsTest(t)
-	inventory, err := testcatalog.Load(repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	loaded := 0
-	for _, fixture := range inventory.Fixtures {
-		if fixture.Metadata.Disposition == testcatalog.DispositionRetired || fixture.Metadata.Verify == testcatalog.VerifyReject {
-			continue
-		}
-		if _, err := LoadWorkflowContractBundleWithOverrides(repo, fixture.Root, DefaultPlatformSpecFile(repo)); err != nil {
-			t.Errorf("supported fixture %s changed admission: %v", fixture.RelativePath, err)
-		} else {
-			loaded++
-		}
-	}
-	if loaded == 0 {
-		t.Fatal("empty preservation corpus")
-	}
-	t.Logf("unchanged source corpus: %d admitted positive roots", loaded)
 }

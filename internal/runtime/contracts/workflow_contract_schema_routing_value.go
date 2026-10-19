@@ -105,48 +105,6 @@ func ordinaryInstanceResolution(mode FlowInputResolutionMode) bool {
 	return mode == FlowInputResolutionModeCreate || mode == FlowInputResolutionModeSelect || mode == FlowInputResolutionModeSelectOrCreate
 }
 
-func projectSchemaImportsValue(value yamlsource.Value) (FlowSchemaImports, error) {
-	fields, err := schemaValueFields(value, "imports", map[string]struct{}{"connector_packs": {}, "provider_trigger_events": {}}, true)
-	var out FlowSchemaImports
-	if err != nil {
-		return out, err
-	}
-	for _, family := range sortedContractKeys(fields) {
-		items, err := schemaValueSequence(fields[family], true)
-		if err != nil {
-			return out, err
-		}
-		for _, item := range items {
-			key := "tool"
-			if family == "provider_trigger_events" {
-				key = "event"
-			}
-			row, err := schemaValueFields(item, family+" import", map[string]struct{}{"provider": {}, key: {}}, true)
-			if err != nil {
-				return out, err
-			}
-			var provider, name string
-			if err := schemaValueRequiredTexts(item, row, map[string]*string{"provider": &provider, key: &name}); err != nil {
-				return out, err
-			}
-			if family == "connector_packs" {
-				entry := ConnectorPackImport{Provider: provider, Tool: name}
-				if normalized := entry.normalized(); normalized != entry {
-					return out, nodeValueError(item, fmt.Errorf("connector import must use exact canonical tokens"))
-				}
-				out.ConnectorPacks = append(out.ConnectorPacks, entry)
-			} else {
-				entry := ProviderTriggerEventImport{Provider: provider, Event: name}
-				if normalized := entry.normalized(); normalized != entry {
-					return out, nodeValueError(item, fmt.Errorf("provider trigger import must use exact canonical tokens"))
-				}
-				out.ProviderTriggerEvents = append(out.ProviderTriggerEvents, entry)
-			}
-		}
-	}
-	return out, nil
-}
-
 func projectSchemaPinsValue(value yamlsource.Value) (FlowPins, error) {
 	fields, err := schemaValueFields(value, "pins", map[string]struct{}{"inputs": {}, "outputs": {}}, true)
 	var out FlowPins

@@ -1,4 +1,4 @@
-name: golden-agent-candidate
+# fixture: golden-agent-candidate
 instance: candidate_id
 stages:
   pending: {}

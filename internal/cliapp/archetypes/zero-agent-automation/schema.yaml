@@ -1,4 +1,4 @@
-name: automation
+# fixture: automation
 imports:
   connector_packs:
     - {provider: telegram, tool: telegram.send_message}

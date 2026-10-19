@@ -15,7 +15,7 @@ connect:
   - {event: work.ready, from: producer, to: observer, resolution: select}
   - {event: other.ready, from: other, to: observer, resolution: select}
 `)
-	writeLegacyInstanceFlow(t, root, "producer", `name: producer
+	writeLegacyInstanceFlow(t, root, "producer", `# fixture: producer
 instance: item_id
 stages:
   active: {}
@@ -24,7 +24,7 @@ pins:
   outputs:
     - work.ready
 `, "work.ready:\n  item_id: text\n", "producer_state:\n  item_id: {type: text}\n", "")
-	writeLegacyInstanceFlow(t, root, "other", `name: other
+	writeLegacyInstanceFlow(t, root, "other", `# fixture: other
 instance: item_id
 stages:
   active: {}
@@ -33,7 +33,7 @@ pins:
   outputs:
     - other.ready
 `, "other.ready:\n  item_id: text\n", "other_state:\n  item_id: {type: text}\n", "")
-	writeLegacyInstanceFlow(t, root, "observer", `name: observer
+	writeLegacyInstanceFlow(t, root, "observer", `# fixture: observer
 instance: item_id
 stages:
   active: {}

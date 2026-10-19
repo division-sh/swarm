@@ -10,7 +10,9 @@ func CopyKeyedRootRawIngress(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for label, body := range map[string]string{
-		"schema.yaml": `name: keyed-shop
+		"audit/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `# fixture: keyed-shop
 instance: provider_event_id
 stages: []
 pins:
@@ -38,7 +40,7 @@ ingress:
         writes:
           - {target_field: processed_count, value: entity.processed_count + 1}
 `,
-		"audit/schema.yaml": "name: audit\n",
+		"audit/schema.yaml": "stages: []\n# fixture: audit\n",
 	} {
 		writeClosedVariantFile(t, root, label, body)
 	}
@@ -65,7 +67,7 @@ func CopyKeyedRootRawIngressCreationEvent(t testing.TB) string {
 func CopyKeyedRootTelegramIngress(t testing.TB) string {
 	t.Helper()
 	root := CopyKeyedRootRawIngress(t)
-	writeClosedVariantFile(t, root, "schema.yaml", `name: keyed-chat
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: keyed-chat
 instance: conversation_reference
 stages: []
 pins: {inputs: [inbound.telegram, inbound.telegram.text_message]}
@@ -104,18 +106,22 @@ func CopyNestedKeyedConnectionSelection(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for label, body := range map[string]string{
-		"schema.yaml": `name: nested-construction
+		"manifest.yaml":                    "version: 1.0.0\nplatform_version: '*'\n",
+		"parent/manifest.yaml":             "version: 1.0.0\nplatform_version: '*'\n",
+		"parent/middle/leaf/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"parent/middle/manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `# fixture: nested-construction
 pins: {inputs: [start]}
 connect:
   - {event: start, from: ., to: parent, resolution: select-or-create, key_from: payload.parent_key}
   - {event: start, from: ., to: parent/middle/leaf, resolution: select-or-create, key_from: payload.leaf_key}
 `,
 		"events.yaml":                      "start:\n  parent_key: text\n  leaf_key: text\n",
-		"parent/schema.yaml":               "name: parent\ninstance: id\npins: {inputs: [start]}\n",
+		"parent/schema.yaml":               "# fixture: parent\ninstance: id\npins: {inputs: [start]}\n",
 		"parent/entities.yaml":             "parent_state:\n  id: text\n",
 		"parent/nodes.yaml":                "receiver:\n  execution_type: system_node\n  subscribes_to: [start]\n  event_handlers:\n    start:\n      guard: {check: payload.parent_key != ''}\n",
-		"parent/middle/schema.yaml":        "name: middle\n",
-		"parent/middle/leaf/schema.yaml":   "name: leaf\ninstance: id\npins: {inputs: [start]}\n",
+		"parent/middle/schema.yaml":        "stages: []\n# fixture: middle\n",
+		"parent/middle/leaf/schema.yaml":   "# fixture: leaf\ninstance: id\npins: {inputs: [start]}\n",
 		"parent/middle/leaf/entities.yaml": "leaf_state:\n  id: text\n",
 		"parent/middle/leaf/nodes.yaml":    "receiver:\n  execution_type: system_node\n  subscribes_to: [start]\n  event_handlers:\n    start:\n      guard: {check: payload.leaf_key != ''}\n",
 	} {
@@ -138,7 +144,7 @@ func CopyConnectionAncestorCandidates(t testing.TB, dependentEvent string, compe
 `
 	if competing {
 		edges += "  - {event: start, from: ., to: parent, rename: alternate, resolution: select-or-create, key_from: payload.leaf_key}\n"
-		writeClosedVariantFile(t, root, "parent/schema.yaml", "name: parent\ninstance: id\npins: {inputs: [start, alternate]}\n")
+		writeClosedVariantFile(t, root, "parent/schema.yaml", "# fixture: parent\ninstance: id\npins: {inputs: [start, alternate]}\n")
 		writeClosedVariantFile(t, root, "parent/nodes.yaml", "receiver:\n  execution_type: system_node\n  event_handlers:\n    start:\n      guard: {check: payload.parent_key != ''}\n    alternate:\n      guard: {check: payload.leaf_key != ''}\n")
 	}
 	rename := ""
@@ -147,9 +153,11 @@ func CopyConnectionAncestorCandidates(t testing.TB, dependentEvent string, compe
 	}
 	edges += "  - {event: " + dependentEvent + ", from: ., to: parent/middle/leaf, " + rename + "resolution: select-or-create, key_from: payload.leaf_key}\n"
 	for label, body := range map[string]string{
-		"schema.yaml":          "name: construction-candidates\npins: {inputs: [start, other]}\nconnect:\n" + edges,
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
+		"worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":          "# fixture: construction-candidates\npins: {inputs: [start, other]}\nconnect:\n" + edges,
 		"events.yaml":          "start:\n  parent_key: text\n  leaf_key: text\nother:\n  parent_key: text\n  leaf_key: text\n",
-		"worker/schema.yaml":   "name: worker\ninstance: id\npins: {inputs: [start]}\n",
+		"worker/schema.yaml":   "# fixture: worker\ninstance: id\npins: {inputs: [start]}\n",
 		"worker/entities.yaml": "worker_state:\n  id: text\n",
 		"worker/nodes.yaml":    "receiver:\n  execution_type: system_node\n  event_handlers:\n    start:\n      guard: {check: payload.leaf_key != ''}\n",
 	} {
@@ -164,7 +172,11 @@ func CopyNestedKeyedRawIngress(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for label, body := range map[string]string{
-		"schema.yaml": `name: nested-shop
+		"manifest.yaml":                    "version: 1.0.0\nplatform_version: '*'\n",
+		"parent/manifest.yaml":             "version: 1.0.0\nplatform_version: '*'\n",
+		"parent/middle/leaf/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"parent/middle/manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `# fixture: nested-shop
 stages: []
 pins: {inputs: [account.opened]}
 ingress:
@@ -182,11 +194,11 @@ connect:
   - {event: account.opened, from: ., to: parent/middle/leaf, resolution: select-or-create, key_from: payload.provider}
 `,
 		"events.yaml":                      "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n",
-		"parent/schema.yaml":               "name: parent\ninstance: id\nstages: []\npins: {inputs: [account.opened]}\n",
+		"parent/schema.yaml":               "# fixture: parent\ninstance: id\nstages: []\npins: {inputs: [account.opened]}\n",
 		"parent/entities.yaml":             "parent_state:\n  id: text\n  seen: {type: integer, initial: 0}\n",
 		"parent/nodes.yaml":                "receiver:\n  execution_type: system_node\n  subscribes_to: [account.opened]\n  event_handlers:\n    account.opened:\n      data_accumulation:\n        source_event: account.opened\n        writes: [{target_field: seen, value: entity.seen + 1}]\n",
-		"parent/middle/schema.yaml":        "name: middle\n",
-		"parent/middle/leaf/schema.yaml":   "name: leaf\ninstance: id\nstages: []\npins: {inputs: [account.opened]}\n",
+		"parent/middle/schema.yaml":        "stages: []\n# fixture: middle\n",
+		"parent/middle/leaf/schema.yaml":   "# fixture: leaf\ninstance: id\nstages: []\npins: {inputs: [account.opened]}\n",
 		"parent/middle/leaf/entities.yaml": "leaf_state:\n  id: text\n  seen: {type: integer, initial: 0}\n",
 		"parent/middle/leaf/nodes.yaml":    "receiver:\n  execution_type: system_node\n  subscribes_to: [account.opened]\n  event_handlers:\n    account.opened:\n      data_accumulation:\n        source_event: account.opened\n        writes: [{target_field: seen, value: entity.seen + 1}]\n",
 	} {
@@ -206,8 +218,8 @@ func CopyNestedDeclarationLocalRawIngress(t testing.TB) string {
 			t.Fatal(err)
 		}
 	}
-	applyClosedReplacement(t, filepath.Join(root, "branch/schema.yaml"), "name: nested-shop", "name: branch")
-	writeClosedVariantFile(t, root, "schema.yaml", "name: nested-shop\nstages: []\n")
+	applyClosedReplacement(t, filepath.Join(root, "branch/schema.yaml"), "# fixture: nested-shop", "# fixture: branch")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: nested-shop\nstages: []\n")
 	return root
 }
 

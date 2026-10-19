@@ -118,7 +118,7 @@ func CopyReceiverMaterializationSourceLocalObserver(t testing.TB) string {
 func CopyReceiverMaterializationIntoRoot(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "schema.yaml", `name: receiver-root-materialization
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: receiver-root-materialization
 stages:
   waiting: {}
   active: {}
@@ -155,7 +155,7 @@ connect:
   emit_events: []
 `)
 	writeClosedVariantFile(t, root, "prompts/observer.md", "Observe the receiving root entity.\n")
-	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - child.ready\n")
+	writeClosedVariantFile(t, root, "child/schema.yaml", "# fixture: child\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - child.ready\n")
 	writeClosedVariantFile(t, root, "child/events.yaml", "child.ready:\n  token: text\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `producer:
   execution_type: system_node
@@ -203,7 +203,7 @@ func CopyForkReceiverNestedOwnership(t testing.TB, receivers []ForkReceiver) str
 	applyClosedReplacement(t, filepath.Join(inner, "nodes.yaml"), "  event_handlers:\n    start.seeded:", "  event_handlers:\n    receiver.close.requested:\n      emit: {event: receiver.closed}\n    start.seeded:")
 	root := t.TempDir()
 	copyTree(t, inner, filepath.Join(root, "branch"))
-	writeClosedVariantFile(t, root, "schema.yaml", `name: fork-receiver-outer
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: fork-receiver-outer
 stages:
   waiting: {}
   active: {}
@@ -350,7 +350,7 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
 		outputs += ", receiver.seeded"
 		seedEmit = "      emit:\n        event: receiver.seeded\n        fields: {token: payload.token}\n"
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", `name: fork-receiver-ownership
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: fork-receiver-ownership
 stages:
   waiting: {}
   active: {}
@@ -392,7 +392,7 @@ connect:
 		producerBody = "      advances_to: active\n      data_accumulation:\n        writes:\n          - target_field: marker\n            value: \"producer-owned\"\n"
 		writeClosedVariantFile(t, root, "producer/entities.yaml", "work:\n  marker: text\n")
 	}
-	writeClosedVariantFile(t, root, "producer/schema.yaml", "name: producer\n"+producerStages+"pins:\n  inputs: [work.requested]\n  outputs: [work.ready]\n")
+	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\n"+producerStages+"pins:\n  inputs: [work.requested]\n  outputs: [work.ready]\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.ready:\n  token: text\n")
 	writeClosedVariantFile(t, root, "producer/nodes.yaml", `producer:
   execution_type: system_node

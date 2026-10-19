@@ -395,7 +395,7 @@ func TestW4RetiredNodeFieldPresence(t *testing.T) {
 	}{
 		{"handler.from", "description: ready\n", "from", func(body []byte) error { var out SystemNodeEventHandler; return decodeNodeTestYAML(body, &out) }},
 		{"handler.dedup_by", "description: ready\n", "dedup_by", func(body []byte) error { var out SystemNodeEventHandler; return decodeNodeTestYAML(body, &out) }},
-		{"sets_gate.value", "name: ready\n", "value", func(body []byte) error { var out GateSpec; return decodeNodeTestYAML(body, &out) }},
+		{"sets_gate.value", "stages: []\n# fixture: ready\n", "value", func(body []byte) error { var out GateSpec; return decodeNodeTestYAML(body, &out) }},
 		{"compute.params", "operation: pick_or_average\n", "params", func(body []byte) error { var out ComputeSpec; return decodeNodeTestYAML(body, &out) }},
 		{"query.operation", "source: payload.items\nstore_as: computed.items\n", "operation", func(body []byte) error { var out QuerySpec; return decodeNodeTestYAML(body, &out) }},
 		{"filter.predicate", "items_from: payload.items\ncondition: item.ready\n", "predicate", func(body []byte) error { var out FilterSpec; return decodeNodeTestYAML(body, &out) }},

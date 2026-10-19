@@ -11,12 +11,12 @@ func CopyRootIngressServedFollowUp(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `# fixture: routing-root-ingress
 stages:
   pending: {}
   processed: {}
   done: {final: true}
-`, `name: served-event-publish-followup
+`, `# fixture: served-event-publish-followup
 stages:
   new: {}
   waiting: {}
@@ -101,7 +101,7 @@ func CopyRootIngressServedConversationFork(t testing.TB) string {
 	t.Helper()
 	root := CopyRootIngressServedExternalEvent(t)
 
-	writeClosedVariantFile(t, root, "fork-source/schema.yaml", `name: fork-source
+	writeClosedVariantFile(t, root, "fork-source/schema.yaml", `# fixture: fork-source
 stages:
   waiting: {}
   active: {}
@@ -143,7 +143,7 @@ func CopyRootIngressServedSessionCleanup(t testing.TB) string {
 	t.Helper()
 	root := CopyRootIngressServedFollowUp(t)
 
-	writeClosedVariantFile(t, root, "hold/schema.yaml", `name: hold
+	writeClosedVariantFile(t, root, "hold/schema.yaml", `# fixture: hold
 stages:
   waiting: {}
   active: {}
@@ -196,7 +196,7 @@ func CopyRootIngressLegacyTemplateTargetRoute(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	addLegacyTemplateRoot(t, root)
-	writeClosedVariantFile(t, root, "operating/schema.yaml", `name: operating
+	writeClosedVariantFile(t, root, "operating/schema.yaml", `# fixture: operating
 instance: instance_id
 stages:
   initializing: {}
@@ -269,7 +269,7 @@ func CopyRootIngressLegacyTemplateAutoEmit(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	addLegacyTemplateRoot(t, root)
-	writeClosedVariantFile(t, root, "operating/schema.yaml", `name: operating
+	writeClosedVariantFile(t, root, "operating/schema.yaml", `# fixture: operating
 instance: instance_id
 stages:
   initializing: {}
@@ -324,7 +324,7 @@ component-scaffold:
 func addLegacyTemplateRoot(t testing.TB, root string) {
 	t.Helper()
 
-	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `name: routing-root-ingress
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), `# fixture: routing-root-ingress
 stages:
   pending: {}
   processed: {}
@@ -332,7 +332,7 @@ stages:
 pins:
   inputs:
     - item.received
-`, `name: routing-root-ingress
+`, `# fixture: routing-root-ingress
 stages:
   new: {}
   waiting: {}

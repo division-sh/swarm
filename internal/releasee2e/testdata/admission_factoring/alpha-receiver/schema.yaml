@@ -1,4 +1,4 @@
-name: alpha-receiver
+# fixture: alpha-receiver
 imports:
   provider_trigger_events:
     - {provider: telegram, event: inbound.telegram.text_message}

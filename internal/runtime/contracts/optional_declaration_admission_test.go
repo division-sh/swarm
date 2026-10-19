@@ -364,8 +364,9 @@ func TestOptionalDeclarationAdmissionIsConsumedAtSupportedScopes(t *testing.T) {
 				document := document
 				t.Run(scope.name+"/"+role.name+"/"+document.name, func(t *testing.T) {
 					root := t.TempDir()
-					writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: optional-declaration-scope\n")
-					writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nstages:\n  active: {}\n")
+					writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+					writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: optional-declaration-scope\n")
+					writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "# fixture: child\nstages:\n  active: {}\n")
 					targetRoot := scope.targetRoot(root)
 					target := filepath.Join(targetRoot, role.fileName)
 					writeFixtureFile(t, target, document.body)
@@ -423,7 +424,8 @@ func TestPositiveMergedDeclarationsPublishRealRootIdentities(t *testing.T) {
 		role := role
 		t.Run(role.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: merge-publication\n")
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: merge-publication\n")
 			writeFixtureFile(t, filepath.Join(root, role.fileName), role.merged)
 
 			bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
@@ -438,8 +440,9 @@ func TestPositiveMergedDeclarationsPublishRealRootIdentities(t *testing.T) {
 func writeMergeProjectionBundleSkeleton(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: merge-projection\n")
-	writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\nstages:\n  active: {}\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: merge-projection\n")
+	writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "# fixture: child\nstages:\n  active: {}\n")
 	return root
 }
 

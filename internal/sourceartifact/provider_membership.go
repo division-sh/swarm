@@ -75,7 +75,26 @@ func admitDirectoryMembership(entries []Entry, snapshots map[string]yamlsource.S
 		}
 		providers[directory] = provider
 	}
+	if err := requireFlowManifests(root, manifests); err != nil {
+		return sourceMembership{}, err
+	}
 	return sourceMembership{providers: providers, manifests: manifests, root: root}, nil
+}
+
+func requireFlowManifests(flow *FlowNode, manifests map[string]Manifest) error {
+	if flow == nil {
+		return nil
+	}
+	label := path.Join(flow.flowPath, packmodel.ManifestFileName)
+	if _, present := manifests[label]; !present {
+		return fmt.Errorf("flow directory %s requires %s with version and platform_version", flow.flowPath, label)
+	}
+	for _, child := range flow.children {
+		if err := requireFlowManifests(child, manifests); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateProviderNesting(providers map[string]ProviderDirectory) error {

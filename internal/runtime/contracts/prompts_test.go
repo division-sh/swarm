@@ -309,7 +309,10 @@ func TestResolvedAgentIntentLocalFile_IsRelativeToExactDeclaringAgentsYAML(t *te
 	if err := os.WriteFile(filepath.Join(root, "prompts", "child.md"), []byte("Wrong root intent.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(flowDir, "schema.yaml"), []byte("name: child\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(flowDir, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(flowDir, "schema.yaml"), []byte("stages: []\n# fixture: child\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))

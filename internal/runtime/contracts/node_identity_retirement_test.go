@@ -109,7 +109,7 @@ func TestNodeIdentityAdmissionAndArtifactReconstruction(t *testing.T) {
 			t.Run(scope+"/"+value, func(t *testing.T) {
 				root := t.TempDir()
 				for _, path := range []string{".", "left", "right", "left/nested"} {
-					writeFixtureFile(t, filepath.Join(root, path, "schema.yaml"), "name: worker-flow\n")
+					writeFixtureFile(t, filepath.Join(root, path, "schema.yaml"), "stages: []\n# fixture: worker-flow\n")
 				}
 				file := filepath.Join(root, scope, "nodes.yaml")
 				writeFixtureFile(t, file, "worker:\n  id: "+value+"\n  event_handlers: {}\n")
@@ -139,7 +139,7 @@ func TestNodeIdentityAdmissionAndArtifactReconstruction(t *testing.T) {
 	t.Run("map identities survive source deletion", func(t *testing.T) {
 		root := t.TempDir()
 		for _, path := range []string{".", "left", "right", "left/nested"} {
-			writeFixtureFile(t, filepath.Join(root, path, "schema.yaml"), "name: worker-flow\n")
+			writeFixtureFile(t, filepath.Join(root, path, "schema.yaml"), "stages: []\n# fixture: worker-flow\n")
 			writeFixtureFile(t, filepath.Join(root, path, "nodes.yaml"), "worker:\n  event_handlers: {}\n")
 		}
 		artifact, err := sourceartifact.AdmitDirectory(root)

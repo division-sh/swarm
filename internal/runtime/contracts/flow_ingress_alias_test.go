@@ -17,7 +17,10 @@ func TestA9RootedAliasCompilation(t *testing.T) {
 		if err := os.MkdirAll(path, 0700); err != nil {
 			t.Fatal(err)
 		}
-		body := "name: shop\ningress:\n  providers: [{provider: partner}]\n"
+		body := "# fixture: shop\ningress:\n  providers: [{provider: partner}]\n"
+		if err := os.WriteFile(filepath.Join(path, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(path, "schema.yaml"), []byte(body), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -65,7 +68,7 @@ func TestA9RootedAliasCompilation(t *testing.T) {
 func TestA9AliasPresenceAdmission(t *testing.T) {
 	for _, alias := range []string{"null", "''", "false", "{}", "[]", "' chat'", "'chat '", "chat/support", "chat%2Fsupport", ".chat", "-chat", "'caf\u00e9'"} {
 		t.Run(alias, func(t *testing.T) {
-			_, err := loadSchemaFragment(t, "name: shop\ningress:\n  alias: "+alias+"\n  providers: [{provider: partner}]\n")
+			_, err := loadSchemaFragment(t, "# fixture: shop\ningress:\n  alias: "+alias+"\n  providers: [{provider: partner}]\n")
 			if err == nil {
 				t.Fatal("invalid explicit alias became a default")
 			}
@@ -87,7 +90,7 @@ func TestA9AliasPresenceAdmission(t *testing.T) {
 	} else if alias, _ := explicit.FlowIngressAlias("."); alias != "independent" {
 		t.Fatalf("explicit alias requires an unrelated root name: %q", alias)
 	}
-	bundle, err := loadSchemaFragment(t, "name: shop.v2\ningress:\n  alias: independent\n  providers: [{provider: partner}]\n")
+	bundle, err := loadSchemaFragment(t, "# fixture: shop.v2\ningress:\n  alias: independent\n  providers: [{provider: partner}]\n")
 	if err != nil {
 		t.Fatal(err)
 	}

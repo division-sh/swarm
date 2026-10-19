@@ -26,6 +26,9 @@ func admitSchemaFragment(source string) (FlowSchemaDocument, error) {
 func loadSchemaFragment(t *testing.T, source string) (*WorkflowContractBundle, error) {
 	t.Helper()
 	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, "schema.yaml"), []byte(source), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +41,7 @@ func TestSchemaAdmissionOwnsCompleteRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if schema.Instance.Empty() || schema.Ingress == nil || len(schema.Imports.ConnectorPacks) != 1 || len(schema.Imports.ProviderTriggerEvents) != 1 || len(schema.Connect) != 1 || len(schema.Pins.Inputs.EventPins) != 1 || !schema.RequiredAgentsDeclared || len(schema.RequiredAgents) != 1 || len(schema.StageDeclarations.Entries) != 2 || len(schema.LoopDeclarations.Entries) != 1 {
+	if schema.Instance.Empty() || len(schema.Connect) != 1 || len(schema.Pins.Inputs.EventPins) != 1 || !schema.RequiredAgentsDeclared || len(schema.RequiredAgents) != 1 || len(schema.StageDeclarations.Entries) != 2 || len(schema.LoopDeclarations.Entries) != 1 {
 		t.Fatalf("nested family lost: %#v", schema)
 	}
 	gate := schema.StageDeclarations.Entries[0].Gate
@@ -51,11 +54,20 @@ func TestSchemaAdmissionOwnsCompleteRoot(t *testing.T) {
 }
 
 func TestSchemaAdmissionRetiredPresence(t *testing.T) {
-	for _, key := range []string{"activation", "initial_state", "states", "terminal_states", "tool_surface", "entity", "namespace_prefix", "namespace_rule", "instance_variables"} {
+	for _, key := range []string{"activation", "initial_state", "states", "terminal_states", "tool_surface", "entity", "namespace_prefix", "namespace_rule", "instance_variables", "name", "imports", "ingress"} {
 		for _, value := range []string{"null", "''", "false", "x", "{}", "{a: b}", "[]", "[x]"} {
 			t.Run(key+"/"+value, func(t *testing.T) {
-				_, err := loadSchemaFragment(t, "name: retired\n"+key+": "+value+"\n")
-				if err == nil || !strings.Contains(err.Error(), "is not supported") || !strings.Contains(err.Error(), "schema.yaml:") {
+				_, err := loadSchemaFragment(t, "stages: []\n"+key+": "+value+"\n")
+				teaching := "is not supported"
+				switch key {
+				case "name":
+					teaching = "the directory is the flow name"
+				case "imports":
+					teaching = "provider directories"
+				case "ingress":
+					teaching = "root folder"
+				}
+				if err == nil || !strings.Contains(err.Error(), teaching) || !strings.Contains(err.Error(), "schema.yaml:") {
 					t.Fatalf("expected source-located retirement: %v", err)
 				}
 			})
@@ -64,7 +76,7 @@ func TestSchemaAdmissionRetiredPresence(t *testing.T) {
 }
 
 func TestSchemaAdmissionRootAndMarkerlessPosture(t *testing.T) {
-	for _, source := range []string{"name: markerless\n", "stages: []\n", "stages: []\nrequired_agents: []\n"} {
+	for _, source := range []string{"required_agents: []\n", "stages: []\n", "stages: []\nrequired_agents: []\n"} {
 		bundle, err := loadSchemaFragment(t, source)
 		if err != nil {
 			t.Fatal(err)
@@ -132,7 +144,7 @@ func TestSchemaAdmissionDiskCatalogRetainedParity(t *testing.T) {
 func TestSchemaAdmissionInvalidSourceParity(t *testing.T) {
 	for _, source := range []string{
 		"mode: static\n", "mode: template\n", "mode: singleton\n", "mode: null\n", "mode: ''\n", "mode: {}\n", "mode: []\n",
-		"mode: static\nmode: template\n", "name: &shape static\nmode: *shape\n",
+		"mode: static\nmode: template\n", "auto_emit_on_create: {event: &shape static}\nmode: *shape\n",
 		"tool_surface: null\n",
 		"stages: {waiting: {final: 'true'}}\n",
 		"instance_variables: {variables: {note: {type: text, length: {min: -0.5}}}}\n",
@@ -140,6 +152,9 @@ func TestSchemaAdmissionInvalidSourceParity(t *testing.T) {
 	} {
 		t.Run(source, func(t *testing.T) {
 			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(filepath.Join(dir, "schema.yaml"), []byte(source), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -153,17 +168,23 @@ func TestA9RetiredActivationPresenceAdmission(t *testing.T) {
 		for _, fragment := range []string{
 			"activation: standing\n", "activation: null\n", "activation: ''\n", "activation: false\n",
 			"activation: {}\n", "activation: []\n", "activation: {kind: standing}\n",
-			"name: &value standing\nactivation: *value\n", "<<: {activation: standing}\n",
-			"&key activation: standing\n", "name: &key activation\n*key: standing\n",
+			"auto_emit_on_create: {event: &value standing}\nactivation: *value\n", "<<: {activation: standing}\n",
+			"&key activation: standing\n", "auto_emit_on_create: {event: &key activation}\n*key: standing\n",
 			"activation: standing\nactivation: standing\n",
 		} {
 			t.Run(scope+"/"+fragment, func(t *testing.T) {
 				dir := t.TempDir()
+				if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
 				if scope != "." {
-					if err := os.WriteFile(filepath.Join(dir, "schema.yaml"), []byte("name: root\n"), 0600); err != nil {
+					if err := os.WriteFile(filepath.Join(dir, "schema.yaml"), []byte("stages: []\n"), 0600); err != nil {
 						t.Fatal(err)
 					}
 					if err := os.Mkdir(filepath.Join(dir, scope), 0700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(filepath.Join(dir, scope, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -176,49 +197,6 @@ func TestA9RetiredActivationPresenceAdmission(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestA9StandingCorpusMigrationCoverage(t *testing.T) {
-	repo := repoRootForContractsTest(t)
-	for _, tc := range []struct {
-		name     string
-		root     string
-		bindings int
-	}{
-		{"telegram example", filepath.Join(repo, "examples/integrations/telegram-agent"), 1},
-		{"lifecycle telegram", filepath.Join(repo, "internal/releasee2e/testdata/full_lifecycle/standing_telegram"), 1},
-		{"channel onboarding", filepath.Join(repo, "internal/releasee2e/testdata/channel_onboarding_release"), 1},
-		{"standing root and beta", filepath.Join(repo, "internal/releasee2e/testdata/standing_root_tree"), 2},
-		{"generated root and beta", canonicalrouting.CopyStandingRootTreePublic(t), 2},
-		{"generated admission matrix", canonicalrouting.CopyInboundAdmissionPolicyMatrix(t), 1},
-		{"generated channel journey", canonicalrouting.CopyChannelLearnedObjectJourney(t), 1},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, tc.root, DefaultPlatformSpecFile(repo))
-			if err != nil {
-				t.Fatal(err)
-			}
-			retained, err := sourceartifact.DecodeLogical(bundle.SourceArtifact.LogicalBlob())
-			if err != nil {
-				t.Fatal(err)
-			}
-			rebuilt, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, bundle.SourceArtifact, retained), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, candidate := range []*WorkflowContractBundle{bundle, rebuilt} {
-				bindings := 0
-				for _, flow := range candidate.FlowViews() {
-					if flow.Schema.Ingress != nil {
-						bindings++
-					}
-				}
-				if bindings != tc.bindings {
-					t.Fatalf("marker migration changed genuine bindings: got %d, want %d", bindings, tc.bindings)
-				}
-			}
-		})
 	}
 }
 

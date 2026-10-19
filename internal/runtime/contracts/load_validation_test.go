@@ -372,8 +372,10 @@ worker:
 
 func writeFieldReconciliationBundle(t *testing.T, root, schemaExtra, nodes string) {
 	t.Helper()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: field-reconciliation\n"+schemaExtra)
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: field-reconciliation\n"+schemaExtra)
 	if strings.TrimSpace(nodes) != "" {
+		writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), nodes)
 	}
 }
@@ -941,8 +943,9 @@ func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalAuthoritativeOwners(t *
 func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalWildcardAuthoritativeOwners(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wildcard-owner-test\n")
-	writeFixtureFile(t, filepath.Join(root, "flow-a", "schema.yaml"), `name: flow-a
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: wildcard-owner-test\n")
+	writeFixtureFile(t, filepath.Join(root, "flow-a", "schema.yaml"), `# fixture: flow-a
 stages:
   active: {}
   done: {final: true}
@@ -962,7 +965,7 @@ flow-a-wildcard:
     task.*:
       advances_to: done
 `)
-	writeFixtureFile(t, filepath.Join(root, "flow-b", "schema.yaml"), `name: flow-b
+	writeFixtureFile(t, filepath.Join(root, "flow-b", "schema.yaml"), `# fixture: flow-b
 stages:
   active: {}
   done: {final: true}

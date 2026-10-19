@@ -29,7 +29,7 @@ func CopyRootReplyBoundary(t testing.TB, rootRequester, explicitCorrelation bool
 	if !rootRequester {
 		connect += "  - {event: request.finished, from: requester, to: .}\n"
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: root-reply-boundary\nstages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs: [request.started, request.stop]\n  outputs: [request.finished]\nconnect:\n"+connect)
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: root-reply-boundary\nstages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs: [request.started, request.stop]\n  outputs: [request.finished]\nconnect:\n"+connect)
 	startSchema := "request.started:\n  account_id: text\n  request_id: text\nrequest.stop:\n"
 	requestSchema := "provider.requested:\n  account_id: text\n  request_id: text\n"
 	responseSchema := "provider.replied:\n  account_id: text\n  request_id: text\n  result: text\n"
@@ -77,7 +77,7 @@ func CopyRootReplyBoundary(t testing.TB, rootRequester, explicitCorrelation bool
   event_handlers:
     request.finished: {}
 `)
-		writeClosedVariantFile(t, root, "provider/schema.yaml", "name: provider\npins:\n  inputs: [provider.requested]\n  outputs: [provider.replied]\n")
+		writeClosedVariantFile(t, root, "provider/schema.yaml", "# fixture: provider\npins:\n  inputs: [provider.requested]\n  outputs: [provider.replied]\n")
 		writeClosedVariantFile(t, root, "provider/events.yaml", responseSchema)
 		writeClosedVariantFile(t, root, "provider/nodes.yaml", providerNode)
 	} else {
@@ -88,7 +88,7 @@ func CopyRootReplyBoundary(t testing.TB, rootRequester, explicitCorrelation bool
   event_handlers:
     request.finished: {}
 `)
-		writeClosedVariantFile(t, root, "requester/schema.yaml", "name: requester\npins:\n  inputs: [request.started, provider.replied]\n  outputs: [provider.requested, request.finished]\n")
+		writeClosedVariantFile(t, root, "requester/schema.yaml", "# fixture: requester\npins:\n  inputs: [request.started, provider.replied]\n  outputs: [provider.requested, request.finished]\n")
 		writeClosedVariantFile(t, root, "requester/events.yaml", requestSchema+finishedSchema)
 		writeClosedVariantFile(t, root, "requester/nodes.yaml", requesterNode)
 	}
@@ -198,7 +198,7 @@ func CopyRootReplyConsumerBoundary(t testing.TB, rootRequester, reply, nested, a
 		root = t.TempDir()
 		copyTree(t, owner, filepath.Join(root, "branch"))
 		owner = filepath.Join(root, "branch")
-		writeClosedVariantFile(t, root, "schema.yaml", "name: nested-reply-boundary\n")
+		writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n# fixture: nested-reply-boundary\n")
 	}
 	return root, owner
 }

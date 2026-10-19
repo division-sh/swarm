@@ -1,4 +1,4 @@
-name: golden-agent-workload
+# fixture: golden-agent-workload
 stages:
   pending: {}
   scouting: {}

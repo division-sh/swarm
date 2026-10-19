@@ -13,7 +13,10 @@ import (
 
 func TestS1ProviderKeyUsesExactCapturedDirectory(t *testing.T) {
 	keys := []string{"team-bot", "team_bot", "9-team", strings.Repeat("a", 100), "a-" + strings.Repeat("b", 98)}
-	members := map[string][]byte{"schema.yaml": []byte("description: root\n")}
+	members := map[string][]byte{
+		"manifest.yaml": []byte(manifest2376), "schema.yaml": []byte("description: root\n"),
+		"child/manifest.yaml": []byte(manifest2376),
+	}
 	for _, key := range keys {
 		members["child/"+key+"/manifest.yaml"] = []byte(s1ProviderManifest)
 		members["child/"+key+"/trigger.yaml"] = []byte("event_name: {literal: raw}\n")
@@ -103,6 +106,7 @@ func TestS1ProviderRootKeyUsesFrozenPairWithoutChangingContent(t *testing.T) {
 
 func TestS1ProviderKeyRefusesInvalidRootedEvidenceBeforeNestedLookup(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "shop")
+	writeTestFile(t, root, "manifest.yaml", manifest2376)
 	writeTestFile(t, root, "schema.yaml", "description: root\n")
 	writeTestFile(t, root, "team-bot/manifest.yaml", s1ProviderManifest)
 	writeTestFile(t, root, "team-bot/trigger.yaml", "{}\n")
@@ -132,8 +136,10 @@ func TestS1ProviderKeyRefusesInvalidRootedEvidenceBeforeNestedLookup(t *testing.
 
 func TestS1ProviderScopeKeepsDistinctDirectoryKeys(t *testing.T) {
 	members := map[string][]byte{
-		"schema.yaml":       []byte("description: root\n"),
-		"child/schema.yaml": []byte("description: child\n"),
+		"manifest.yaml":       []byte(manifest2376),
+		"child/manifest.yaml": []byte(manifest2376),
+		"schema.yaml":         []byte("description: root\n"),
+		"child/schema.yaml":   []byte("description: child\n"),
 	}
 	for _, directory := range []string{"team-bot", "team_bot", "child/team-bot"} {
 		members[directory+"/manifest.yaml"] = []byte(s1ProviderManifest)

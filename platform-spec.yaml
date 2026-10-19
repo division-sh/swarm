@@ -11261,7 +11261,7 @@ tool_model:
       BODY membership, namespace projection or readback alone does not grant installation or execution authority.
     canonical_owners:
       declaration: "ToolSchemaEntry with `category: provider_connector`, authored in tools.yaml or imported from a verified connector pack."
-      pack_import: schema.yaml imports.connector_packs owns explicit connector tool enablement; selected-root packs/manifest.yaml owns project pack inventory.
+      provider_scope: Captured provider directories in the declaring flow or its enclosing flows own connector visibility; the nearest whole directory with the exact provider key wins.
       pack_envelope: "internal/packs universal envelope plus internal/providerconnectors connector body verifier."
       execution: "handler `activity` lowering to `platform.activity_requested`."
       non_idempotent_journal: "`activity_attempts`."
@@ -11291,7 +11291,7 @@ tool_model:
     connector_pack_profile:
       status: "first slices: Telegram static connector pack proof, Slack managed-credential connector pack proof, Notion Basic+JSON workspace-grant connector proof, Microsoft Graph client_credentials `.default` connector proof, and GitHub App installation-token issue/comment multi-action connector proof"
       body_file: connector.yaml
-      import_syntax: schema.yaml imports.connector_packs entries name provider and tool; omitted imports expose nothing.
+      directory_syntax: Place connector.yaml beside a provider manifest.yaml in a subfolder of the flow that uses it. Authored tool names are short; the directory qualifies them to <provider>.<tool>. There is no schema imports list.
       body_rule: >
         The connector body wraps/carries real `ToolSchemaEntry` values. The body MUST NOT define a second connector DSL,
         second validator, second execution model, or provider-specific Go adapter path.
@@ -12921,7 +12921,7 @@ tool_model:
           malformed, foreign, terminated, or ordinary target failure. Consumerless settlement has no recipient target;
           its source owner is not relabeled as a recipient. Duplicate and acknowledgment-loss reconciliation reuse the
           exact committed settlement and complete recipients without replanning or redispatching.
-        source_composition: Before boot verification, schema.yaml imports.provider_trigger_events imports normalized schemas from the effective pack inventory.
+        source_composition: Before boot verification, the exact captured provider directories supply normalized schemas through the declaring flow's scoped BODY compiler. There is no schema imports list or global catalog loan.
         capability_surface: >
           Installed and effective trigger subjects carry structured event descriptors with event, raw|normalized kind,
           field names/types/requiredness, carry eligibility, and pack provenance. Singular event-name or prose-only
@@ -13950,7 +13950,7 @@ flow_model:
     standing_activation_model:
       status: merge_bearing_contract_runtime_behavior
       implementation_tracker: '#2438'
-      declaration_surface: 'schema.yaml ingress or compiled schedules; retention derives from an enabled binding or an active deployment clock'
+      declaration_surface: 'provider directories held by a flow with their events in schema.yaml pins.inputs, or compiled schedules; retention derives from an enabled binding or an active deployment clock'
       canonical_owners:
         declaration: internal/runtime.ResolveStandingTargetDeclarations over the admitted ingress and compiled clock declarations
         alias: internal/runtime/contracts.WorkflowContractBundle.FlowIngressAlias compiled with the immutable workflow semantics and effective provenance
@@ -13968,14 +13968,13 @@ flow_model:
         routing_projection: internal/runtime/routingtopology.Build root_input_sources
       authoring_shape:
         example:
-          name: telegram-chat
-          pins:
-            inputs: [inbound.telegram]
-          ingress:
-            alias: chat
-            providers:
-            - provider: telegram
-              signing_secret: webhook_signing.telegram
+          flow_directory: telegram-ingress
+          manifest.yaml: {version: 1.0.0, platform_version: '*'}
+          schema.yaml:
+            pins:
+              inputs: [inbound.telegram]
+          provider_body: telegram/trigger.yaml
+          raw_admission_owner: The captured trigger BODY owns authentication, acknowledgement, delivery identity and raw payload policy.
         rules:
         - 'activation is not an authored schema key; every presence is rejected by ordinary strict unknown-key admission, including retained source artifacts. Ingress and compiled clock declarations supply declaration identity; no producer means no service candidate, execution, or retention'
         - 'Keyless standing construction consumes the declaring flow and every ancestor, including the root, through the eligible canonical no-argument constructor. Runtime declaration, reconstructed-source admission, and boot verification consume that constructor contract, not contained-flow singleton resolution'
@@ -13985,9 +13984,8 @@ flow_model:
         - 'A deployment clock may retain its declaring service without ingress. Connect edges remain delivery authority, not independent service-retention declarations. An ingress binding retains its service only when the binding is admitted and enabled; dormant declarations grant no retention'
         - 'Provider publications carry the exact pinned declaring flow, not a concrete source instance or entity. InboundAdmissionPlan authenticates the request and transfers its exact ordered output names, kinds, payloads and pack authorization through PublicationAdmission before planning. An ingress source enum, schema import, endpoint alias or capability subject ID cannot grant that admission. Concrete execution still requires the shared constructor, explicit connection where crossing a boundary, selected-run receiver ownership and actual attachment'
         - 'The inbound receipt identity is exactly service/run/generation/provider/provider-delivery. Alias and concrete receiver coordinates are projections, never deduplication identity. Exact retries return the immutable committed batch before current output projection or construction; changed semantic content at the same identity refuses before mutation. Current binding source, generation, publication sequence and run fences remain mandatory for fresh publication'
-        - 'Omitted ingress.alias is derived once from the selected root flow name and declaration path: root shop becomes shop, child shop becomes shop.shop, and nested shop/leaf becomes shop.shop.leaf. The root name must be an exact single-segment addressable name; an absent or invalid name cannot be repaired from a host directory, execution hash or label. An explicit valid override does not require a derivable root name'
-        - 'Explicit alias presence is exact non-empty text and a valid URL segment; empty, null, malformed and normalized-equivalent spellings refuse rather than becoming omission. Provider composition, runtime declaration/lookup, describe/topology and registration consume the same compiled alias and its provenance, never raw-override reconstruction'
-        - 'ingress alias is exactly one URL path segment matching [A-Za-z0-9][A-Za-z0-9._-]* so every verified alias is addressable as /webhooks/{alias}/{provider}'
+        - 'The flow holding the provider directory is its ingress. The webhook alias is that flow path; the root alias is the exact captured root folder, not the literal dot flow coordinate. No authored alias override remains'
+        - 'Provider composition, runtime declaration/lookup, describe/topology and registration consume that one directory-owned identity. Empty or normalized-equivalent flow selectors cannot acquire authority through an alias, a display label or a hash'
         - 'Declaration inventory and dormant discovery preserve equal aliases with distinct source/flow/provider identity. An enabled alias can have only one declaring flow owner in the process; providers on that same declaration share its alias and retain their provider path segment. Complete-set startup admission and later channel promotion reject a collision naming both owners before durable mutation or publication, preserving incumbent state and readback'
         - ingress providers are a list so duplicate provider declarations remain visible to strict verification
         - admission omission is always pack-required; raw admission requires explicit kind plus its complete closed policy
@@ -15519,7 +15517,7 @@ versioning:
   description: Platform and products version independently.
   platform_versioning:
     scheme: semver (major.minor.patch)
-    author_facing_version: platform.version is the runtime platform version; optional strict root manifest.yaml metadata declares the authored version and required platform range, never source identity or topology.
+    author_facing_version: platform.version is the runtime platform version; each admitted flow and provider directory requires manifest.yaml metadata declaring its authored version and required platform range, never source identity or topology.
     active_train_policy: Semantic PRs land on the active platform train without repeatedly editing platform.version.
       Release validation confirms the train version and tags the binary as v<platform.version>.
     major: Breaking changes to flow model, handler fields, boot validation, or contract formats
@@ -15531,7 +15529,7 @@ versioning:
     minor: New agents, new events, new tools, threshold adjustments
     patch: Agent-intent content improvements, policy tuning, bug fixes
   compatibility:
-    declaration: 'Optional manifest.yaml contains exactly name, version, and platform_version; all three are required when present. The root platform_version uses the existing Masterminds SemVer constraint grammar.'
+    declaration: 'Every admitted flow directory requires manifest.yaml with exactly version and platform_version. Provider manifests additionally declare capabilities. The directory is the name and the files beside the manifest determine kind; neither name nor type is authored. The root platform_version uses the existing Masterminds SemVer constraint grammar.'
     enforcement: All flow manifests are grammar-validated during immutable construction and stored decode. Only the selected root range is checked against the running platform before executable admission or local identity selection; nested metadata never resets scope or compatibility.
     forward_compatible: Platform minor/patch releases do not break existing products
     example: 'Product v3.0.0 declares platform_version: ">=0.7.0 <0.8.0". Works on platform 0.7.x after re-verification.
@@ -42968,13 +42966,14 @@ filesystem_source_model:
       Human output with exact rooted evidence uses directory@version when root manifest metadata is present, otherwise directory@hash7. Content-only artifacts with no rooted evidence use hash7 alone even when their manifest has a version. hash7 means seven digest hex characters, never a selector. Stored decoding must not invent a basename from synthetic sourceRoot dot, borrow cwd or an unrelated serving tree, or persist display metadata. RootedSource readback consumes its separately retained root pair without mutating the shared content artifact. JSON/API and existing explicit YAML retain exact full machine identities. Equality, candidate ordering, deduplication, fences, idempotency, workspace keys and historical channel BundleIdentity strings never consume human labels. Equal names or abbreviated-prefix collisions must remain distinct.
       HumanLabel replaces Unicode control and format (Cf) characters and line/paragraph separators with spaces for display only; admitted metadata, authored member bytes, logical framing, full hashes, and machine authority are never sanitized or rewritten.
     consumers: [verify, describe, serve, health, version_server_quiet, run_fork, agent_frame_effective, channel_list, channel_status, channel_candidates, test_diagnostics]
-    verify_evidence: swarm verify --json returns the full bundle_hash and ASCII-sorted member table of label, canonical disposition and exact body byte count, plus optional root manifest metadata, from the already-admitted artifact without a second filesystem pass.
+    verify_evidence: swarm verify --json returns the full bundle_hash and ASCII-sorted member table of label, canonical disposition and exact body byte count, plus root manifest metadata, from the already-admitted artifact without a second filesystem pass.
   flow_tree:
     root_path: .
     derivation: |
       Every non-reserved directory segment above a classified declaration, typed resource, or live descendant is a FlowNode. Child identity is its exact slash-relative path from the selected root. The selected root is spelled exactly `.`; an empty path, backslash spelling, or any other normalized-equivalent spelling is invalid rather than repaired. A non-root node must have local semantic/resource content or a live descendant; dead directories fail. The selected root must contain at least one semantic declaration, typed resource, or live descendant.
+      Every such admitted FlowNode requires an explicitly authored manifest.yaml with version and platform_version, including selected-root, intermediate and resource-established nodes. The existing tree, not an independent filesystem scan, owns that requirement. Provider directories require their own provider manifest but do not become flows. Reserved resource folders and organizational parents outside the selected tree acquire no manifest requirement. Capture and retained decoding never synthesize metadata or schema files.
     schema_owner: |
-      schema.yaml owns instance shape, ingress, schedules, imports, event pins, and the exact least-common-ancestor connect declarations lowered into the compiled pin/edge owner. Mode is derived from the instance declaration, never authored. Deployment retention derives from enabled ingress bindings and active declared clocks, never an activation marker. There is no connect.yaml or manifest-owned routing surface.
+      schema.yaml owns instance shape, schedules, event pins, and the exact least-common-ancestor connect declarations lowered into the compiled pin/edge owner. Mode is derived from the instance declaration, never authored. The retired name, imports and ingress keys refuse on presence, including empty and null, with teaching that the directory is the name, providers live in directories, and provider events belong in pins.inputs on their holding flow with raw policy in trigger.yaml. There is no alias period or rewrite tool before 1.0. Deployment retention derives from enabled directory-owned ingress bindings and active declared clocks, never an activation marker. There is no connect.yaml or manifest-owned routing surface.
       Effective shape and the compiled stage catalog exist for every admitted FlowNode, including the selected root and schema-omitted intermediate/resource-established nodes. Such nodes are keyless and stateless unless their actual declarations supply those facts; no synthetic schema file, field, pin, activation or authored provenance is created. Constructor compilation, structural identity validation and lexical ancestry selection consume that same admitted node owner. Missing, dead, reserved-resource and outside-tree coordinates do not acquire an effective schema or constructor.
       Stage compilation consumes the admitted-tree effective schema projection, not only authored schema files. A genuinely stageless node has a valid empty catalog, with no invented stage or transition. A missing or invalid catalog remains an admission error; assignment checks never synthesize a runtime fallback.
     discovery_output: |

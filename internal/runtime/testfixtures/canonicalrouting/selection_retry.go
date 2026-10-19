@@ -6,7 +6,7 @@ import "testing"
 func CopySelectionRetry(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "schema.yaml", `name: selection-retry
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: selection-retry
 stages:
   queued: {}
   done: {final: true}
