@@ -7,6 +7,9 @@ import "testing"
 func CopyRetiredSiblingAutowire(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "discovery/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "producer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: retired-sibling-autowire
 pins:
   outputs: [scan.requested]

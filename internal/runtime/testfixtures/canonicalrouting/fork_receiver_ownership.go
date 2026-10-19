@@ -118,6 +118,8 @@ func CopyReceiverMaterializationSourceLocalObserver(t testing.TB) string {
 func CopyReceiverMaterializationIntoRoot(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "child/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: receiver-root-materialization
 stages:
   waiting: {}
@@ -202,6 +204,7 @@ func CopyForkReceiverNestedOwnership(t testing.TB, receivers []ForkReceiver) str
 	applyClosedReplacement(t, filepath.Join(inner, "nodes.yaml"), "    - start.closed\n  event_handlers:\n", "    - start.closed\n    - receiver.close.requested\n  event_handlers:\n")
 	applyClosedReplacement(t, filepath.Join(inner, "nodes.yaml"), "  event_handlers:\n    start.seeded:", "  event_handlers:\n    receiver.close.requested:\n      emit: {event: receiver.closed}\n    start.seeded:")
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	copyTree(t, inner, filepath.Join(root, "branch"))
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: fork-receiver-outer
 stages:
@@ -262,6 +265,8 @@ connect:
 func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entitylessProducer bool) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "producer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	rootEdges := "  - {event: work.requested, from: ., to: producer}\n"
 	seedEdges := ""
 	closeEdges := ""
@@ -320,7 +325,8 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
           owner: "%s"
           token: payload.token
 `, receiver.Path)
-		writeClosedVariantFile(t, root, receiver.Path+"/schema.yaml", fmt.Sprintf(`name: %s
+		writeClosedVariantFile(t, root, receiver.Path+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, receiver.Path+"/schema.yaml", fmt.Sprintf(`# fixture: %s
 %spins:
   inputs:
 %s  outputs:

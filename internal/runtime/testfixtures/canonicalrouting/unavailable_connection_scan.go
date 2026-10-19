@@ -16,6 +16,8 @@ func CopyUnavailableConnectionScan(t testing.TB, variant string) string {
 		t.Fatalf("unsupported unavailable-connection scan variant %q", variant)
 	}
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "producer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	producerFields := ""
 	if variant == "missing_key" || variant == "create" {
 		producerFields = "  instance_key: text\n"

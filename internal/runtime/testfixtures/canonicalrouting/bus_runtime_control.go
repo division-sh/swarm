@@ -5,6 +5,7 @@ import "testing"
 func CopyBusRuntimeControl(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: bus-runtime-control
 pins:
   inputs: [scan.requested, custom.paused]

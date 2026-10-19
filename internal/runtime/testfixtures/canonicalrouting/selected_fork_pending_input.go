@@ -36,6 +36,8 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 		t.Fatalf("unsupported selected pending-input variant %d", variant)
 	}
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "a_finished/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "on_demand/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	scopes := []string{"", "child"}
 	if variant == PendingInputConnectedSiblings {
 		scopes = append(scopes, "sibling")

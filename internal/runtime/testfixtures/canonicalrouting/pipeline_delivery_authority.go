@@ -7,6 +7,7 @@ import "testing"
 func CopyPipelineDeliveryAuthority(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: delivery-authority\nstages:\n  queued: {}\n  done: {final: true}\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "test_entity: {}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "source.evt:\n")
@@ -19,6 +20,9 @@ func CopyPipelineDeliveryAuthority(t testing.TB) string {
 func CopyPipelineConnectedDeliveryCollision(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "producer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "receiver/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: connected-collision\nconnect:\n  - {event: deploy.done, from: producer, to: receiver, rename: deploy.accepted}\n  - {event: deploy.done, from: producer, to: receiver, rename: deploy.audited}\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "test_entity: {}\n")
 	writeClosedVariantFile(t, root, "producer/schema.yaml", "# fixture: producer\npins:\n  outputs: [deploy.done]\n")
@@ -33,6 +37,7 @@ func CopyPipelineConnectedDeliveryCollision(t testing.TB) string {
 func CopyPipelineDeliveryRetry(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: delivery-retry\nstages:\n  queued: {}\n  done: {final: true}\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "test_entity: {}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "source.evt:\nnode.completed:\n")

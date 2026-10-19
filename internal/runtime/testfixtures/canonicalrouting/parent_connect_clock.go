@@ -10,6 +10,7 @@ import (
 func CopyClockDeployment(t testing.TB, nested bool) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	if !nested {
 		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: clock-export\nstages: []\nschedules:\n  poll: {every: 250ms, emit: poll.tick}\npins:\n  outputs: [poll.tick]\n")
 		writeClosedVariantFile(t, root, "events.yaml", "poll.tick:\n")

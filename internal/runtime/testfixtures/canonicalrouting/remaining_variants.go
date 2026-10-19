@@ -418,8 +418,7 @@ func CopyProviderRollback(t testing.TB, withHandler bool) string {
 	}
 	files := map[string]string{
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"manifest.yaml": `name: provider-rollback-proof
-version: "1.0.0"
+		"manifest.yaml": `version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `,
 		"schema.yaml": `# fixture: provider-rollback-proof

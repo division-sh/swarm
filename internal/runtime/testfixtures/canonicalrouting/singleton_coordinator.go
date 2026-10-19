@@ -28,6 +28,7 @@ const (
 func CopySingletonCoordinatorPilot(t testing.TB, variant SingletonCoordinatorPilotVariant) string {
 	t.Helper()
 	root := t.TempDir()
+	writeSingletonCoordinatorFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeSingletonCoordinatorFile(t, root, "schema.yaml", "stages: []\n# fixture: singleton-coordinator-pilot\n")
 	writeSingletonCoordinatorFlow(t, root, variant)
 	return root
@@ -39,10 +40,12 @@ func CopySingletonCoordinatorPilot(t testing.TB, variant SingletonCoordinatorPil
 func CopyDuplicateScopedSingletonDemand(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeSingletonCoordinatorFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeSingletonCoordinatorFile(t, root, "schema.yaml", "stages: []\n# fixture: duplicate-scoped-singleton-demand\n")
 	for _, flowID := range []string{"a", "b"} {
+		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "schema.yaml"), `
-name: `+flowID+`
+# fixture: `+flowID+`
 pins:
   inputs:
     - item.received
@@ -77,6 +80,7 @@ shared-node:
 
 func writeSingletonCoordinatorFlow(t testing.TB, root string, variant SingletonCoordinatorPilotVariant) {
 	t.Helper()
+	writeSingletonCoordinatorFile(t, root, "coordinator/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	if variant == SingletonCoordinatorPilotRetiredFanIn {
 		writeRetiredFanInSingletonCoordinatorFlow(t, root)
 		return

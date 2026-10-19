@@ -18,6 +18,9 @@ func CopySelectedStoreExecutionTarget(t testing.TB) string {
 func CopySelectedStoreExecution(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "flow-a/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "selected-state-flow/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: selected-store-execution
 pins:
   inputs:

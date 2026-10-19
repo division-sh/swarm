@@ -258,7 +258,8 @@ connect:
         fields: {order_id: payload.order_id}
 `
 	for _, flow := range []string{"orders", "mirror"} {
-		files[flow+"/schema.yaml"] = fmt.Sprintf(`name: %s
+		files[flow+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
+		files[flow+"/schema.yaml"] = fmt.Sprintf(`# fixture: %s
 instance: order_id
 stages:
   awaiting: {}

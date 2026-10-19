@@ -13,8 +13,8 @@ func CopyForkFanOutCompletionConsumer(t testing.TB) string {
 	t.Helper()
 	root := CopyForkFanOutConsumer(t, true, true)
 	for path, replacement := range map[string][2]string{
-		"events.yaml":   {"batch.completed:\n  total: integer\n  revision_id: text", "batch.completed:\n  total: integer\n  revision_id: text\n  loop_id: text\n  activation_id: text\n  attempt: integer\n  max_attempts: integer"},
-		"nodes.yaml":    {"              revision_id: loop.revision_id\n", "              revision_id: loop.revision_id\n              loop_id: loop.id\n              activation_id: loop.activation_id\n              attempt: loop.attempt\n              max_attempts: loop.max_attempts\n"},
+		"events.yaml": {"batch.completed:\n  total: integer\n  revision_id: text", "batch.completed:\n  total: integer\n  revision_id: text\n  loop_id: text\n  activation_id: text\n  attempt: integer\n  max_attempts: integer"},
+		"nodes.yaml":  {"              revision_id: loop.revision_id\n", "              revision_id: loop.revision_id\n              loop_id: loop.id\n              activation_id: loop.activation_id\n              attempt: loop.attempt\n              max_attempts: loop.max_attempts\n"},
 	} {
 		body, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {

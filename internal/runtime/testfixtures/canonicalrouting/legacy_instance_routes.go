@@ -179,6 +179,7 @@ deploy.done:
 func writeLegacyInstanceFlow(t testing.TB, root, id, schema, events, entities, nodes string) {
 	t.Helper()
 	base := filepath.ToSlash(filepath.Join(id))
+	writeClosedVariantFile(t, root, base+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, base+"/schema.yaml", schema)
 	if strings.TrimSpace(events) != "" {
 		writeClosedVariantFile(t, root, base+"/events.yaml", events)

@@ -59,6 +59,7 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 		t.Fatal("registration UUID field requires numeric registration rows")
 	}
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	copyTree(t, filepath.Join(RepoRoot(t), "examples", "routing", "notify-all-children"), root)
 	manifestFile := filepath.Join(root, "manifest.yaml")
 	connectFile := filepath.Join(root, "schema.yaml")

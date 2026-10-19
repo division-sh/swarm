@@ -113,7 +113,8 @@ func CopyReceiverMixedPolicies(t testing.TB, optionalFirst bool) string {
 		edges = optional + creating
 	}
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), creating, edges)
-	writeClosedVariantFile(t, root, optionalScope+"/schema.yaml", "name: "+optionalScope+"\npins:\n  inputs: [work.completed]\n")
+	writeClosedVariantFile(t, root, optionalScope+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, optionalScope+"/schema.yaml", "# fixture: "+optionalScope+"\npins:\n  inputs: [work.completed]\n")
 	writeClosedVariantFile(t, root, optionalScope+"/entities.yaml", "receipt: {}\n")
 	writeClosedVariantFile(t, root, optionalScope+"/nodes.yaml", "collector:\n  execution_type: system_node\n  subscribes_to: [work.completed]\n  event_handlers:\n    work.completed: {}\n")
 	return root
@@ -256,6 +257,7 @@ local:
 func CopyReceiverEntitylessRootExport(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: root-export\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - child.finished\n")
 	writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  seed: boolean\nchild.finished:\n  result: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:

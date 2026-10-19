@@ -48,6 +48,7 @@ func CopyIntegerConnectionPolicies(t testing.TB) string {
 func CopyInstanceDeclarations(t testing.TB, flows ...string) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "stages: []\n# fixture: instance-declarations\n")
 	for _, flow := range flows {
 		writeClosedVariantFile(t, root, flow+"/schema.yaml", "instance: instance_key\n")

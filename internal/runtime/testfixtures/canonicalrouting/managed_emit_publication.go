@@ -12,6 +12,8 @@ import (
 func CopyManagedEmitPublication(t testing.TB, mode string) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	scope := "."
 	switch mode {
 	case "root":

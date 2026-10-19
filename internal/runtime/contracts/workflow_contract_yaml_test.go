@@ -336,7 +336,7 @@ func TestFlowSchemaDocumentDecodeStageTimersRejectSupersededFields(t *testing.T)
 		t.Run(field, func(t *testing.T) {
 			var doc FlowSchemaDocument
 			err := decodeNodeTestYAML([]byte(fmt.Sprintf(`
-name: validation
+# fixture: validation
 stages:
   awaiting_review:
     timers:

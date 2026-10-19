@@ -32,6 +32,10 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		t.Fatalf("unsupported publication topology %q", mode)
 	}
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "sibling/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "source/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	valueType, valueExpr := "integer", `payload.choice`
 	if textValues {
 		valueType, valueExpr = "text", `string(payload.choice)`

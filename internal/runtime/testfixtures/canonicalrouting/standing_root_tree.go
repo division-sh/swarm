@@ -26,7 +26,7 @@ func CopyStandingRootTreePublic(t testing.TB) string {
 		"alpha-receiver/detail/schema.yaml":   "stages: []\n# fixture: detail\n",
 	}
 	for _, alias := range []string{"alpha", "beta"} {
-		files[alias+"-receiver/schema.yaml"] = "name: " + alias + "-receiver\n" + imports + "pins:\n  inputs: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"
+		files[alias+"-receiver/schema.yaml"] = "# fixture: " + alias + "-receiver\n" + imports + "pins:\n  inputs: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"
 		files[alias+"-receiver/nodes.yaml"] = strings.Replace(strings.Replace(nodes, "subscribes_to: [inbound.telegram, ", "subscribes_to: [", 1), "    inbound.telegram:\n      guard: {id: admit, check: true}\n", "", 1)
 	}
 	for name, body := range files {

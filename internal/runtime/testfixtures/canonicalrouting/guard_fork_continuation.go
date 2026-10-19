@@ -10,6 +10,8 @@ import (
 func CopyGuardForkContinuation(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "guarded/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	copyTree(t, filepath.Join(RepoRoot(t), "tests/tier12-runtime-fork/test-selected-contract-fork-execution"), root)
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
   ready: {}

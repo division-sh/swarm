@@ -420,6 +420,8 @@ func CopyLifecycleEmitterRuleActivityOutcomes(t testing.TB, nested bool) string 
 func CopyLifecycleEmitterImportedApprovalReferences(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "telegram-chat/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	copyTree(t, filepath.Join(RepoRoot(t), "internal/releasee2e/testdata/full_lifecycle/standing_telegram"), root)
 	nodes := lifecycleStaticRead(t, root, "telegram-chat/nodes.yaml")
 	nodes += "telegram-rejected:\n  execution_type: system_node\n  subscribes_to: [telegram_send_message.rejected]\n  event_handlers:\n    telegram_send_message.rejected: {}\n"

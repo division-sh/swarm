@@ -12,6 +12,7 @@ import (
 func CopyMaterializingSenderExistingReceiver(t testing.TB, requiresExisting bool) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: materializing-sender\npins:\n  inputs:\n    - start\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "work:\n  case_id: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", "start:\n  case_id: text\nwork.ready:\n  case_id: text\n")

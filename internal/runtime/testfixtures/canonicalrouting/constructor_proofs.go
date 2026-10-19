@@ -75,7 +75,7 @@ func CopyFlowConstructorCandidates(t testing.TB, mode TemplateInstanceRouteMode,
 	writeClosedVariantFile(t, root, "consumer/schema.yaml", "# fixture: consumer\ninstance: vertical_id\n"+stages+"pins:\n  inputs: [deploy.done, deploy.empty]\n")
 	writeClosedVariantFile(t, root, "consumer/entities.yaml", "deployment:\n  vertical_id: text\n  brief: text\n")
 	writeClosedVariantFile(t, root, "consumer/nodes.yaml", "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.done:\n      guard: {check: entity.brief != ''}\n    deploy.empty:\n      guard: {check: entity.brief != ''}\n")
-	writeClosedVariantFile(t, root, "schema.yaml", "name: constructor-connection-policy\nconnect:\n  - {event: deploy.done, from: producer, to: consumer, resolution: create}\n  - {event: deploy.empty, from: producer, to: consumer, resolution: "+policy+"}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: constructor-connection-policy\nconnect:\n  - {event: deploy.done, from: producer, to: consumer, resolution: create}\n  - {event: deploy.empty, from: producer, to: consumer, resolution: "+policy+"}\n")
 	return root
 }
 

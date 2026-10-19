@@ -308,7 +308,7 @@ func copyTimerStateCancelReachability(t testing.TB, settings timerStateCancelSet
 	for _, event := range inputs {
 		connections += "  - {event: " + event + ", from: ., to: support}\n"
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: timer-state-cancel-reachability\npins:\n  inputs: ["+pinList+"]\n  outputs: ["+pinList+"]\nconnect:\n"+connections)
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: timer-state-cancel-reachability\npins:\n  inputs: ["+pinList+"]\n  outputs: ["+pinList+"]\nconnect:\n"+connections)
 	writeClosedVariantFile(t, root, "events.yaml", "ticket.opened:\nticket.closed:\n  entity_id: string\n")
 	reviewMetadata := "{}"
 	if settings.treatReviewAsTerminalActivation {

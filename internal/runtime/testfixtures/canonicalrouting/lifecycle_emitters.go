@@ -13,6 +13,7 @@ import (
 func CopyGateCompletionDiagnostic(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: gate-completion-diagnostic
 stages:
   waiting: {}
@@ -70,6 +71,7 @@ collector:
 func CopyLifecycleSelectedCarriers(t testing.TB, reordered bool) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	flows := []string{"", "child/", "sibling/", "child/nested/"}
 	if reordered {
 		flows = []string{"child/nested/", "sibling/", "child/", ""}
@@ -188,6 +190,8 @@ func CopyLifecycleGateAdvanceOnly(t testing.TB) string {
 func CopyLifecycleNestedCascade(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	rootInputs, rootOutputs, rootEvents, rootConnects := "", "", "", ""
 	writeClosedVariantFile(t, root, "outer/schema.yaml", "stages: []\n# fixture: outer\n")
 	for _, side := range []string{"left", "right"} {
@@ -424,6 +428,9 @@ const (
 func CopyLifecycleEmitter(t testing.TB, variant LifecycleEmitterVariant) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "ordinary/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	schema := `# fixture: lifecycle-emitter
 stages:
   waiting: {}

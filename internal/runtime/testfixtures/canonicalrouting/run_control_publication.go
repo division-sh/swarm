@@ -5,6 +5,7 @@ import "testing"
 func CopyRunControlPublication(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: run-control-publication
 pins:
   inputs: [custom.run_control, custom.run_control.acked, custom.run_control.intercepted, custom.run_control.deferred, custom.run_control.postcommit, custom.run_control.postcommit.deferred]

@@ -134,7 +134,7 @@ func CopyCompositionConnectAmbiguity(t testing.TB) string {
 		"consumer/agents.yaml", "consumer/entities.yaml", "consumer/events.yaml", "consumer/nodes.yaml",
 	)
 	for _, flowID := range []string{"producer_a", "producer_b"} {
-		writeLegacyInstanceFlow(t, root, flowID, "name: "+flowID+"\npins:\n  outputs:\n    - ticket.ready\n", "ticket.ready:\n  key: entity_id\n  entity_id: string\n", "", "")
+		writeLegacyInstanceFlow(t, root, flowID, "# fixture: "+flowID+"\npins:\n  outputs:\n    - ticket.ready\n", "ticket.ready:\n  key: entity_id\n  entity_id: string\n", "", "")
 	}
 	writeLegacyInstanceFlow(t, root, "consumer", "# fixture: consumer\npins:\n  inputs:\n    - ticket.ready\n", "", "", "")
 	return root

@@ -22,6 +22,10 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 	}
 	template := mode == "template" || mode == "nested_template"
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "sibling/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	prefix := flow + "/"
 	if flow == "." {
 		prefix = ""
