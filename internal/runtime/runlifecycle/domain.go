@@ -308,17 +308,6 @@ func ValidateStateFailure(state State, failure *runtimefailures.Envelope) error 
 	return nil
 }
 
-func ValidatePersistedState(raw string, failure *runtimefailures.Envelope) (State, error) {
-	state, err := ParseState(raw)
-	if err != nil {
-		return "", err
-	}
-	if err := ValidateStateFailure(state, failure); err != nil {
-		return "", err
-	}
-	return state, nil
-}
-
 func ParseTerminalState(raw string) (State, error) {
 	state, err := ParseState(raw)
 	if err != nil {

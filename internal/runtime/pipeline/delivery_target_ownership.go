@@ -307,17 +307,6 @@ func selectedRunRootTargetBlueprint(source semanticview.Source, evt events.Event
 	return blueprint.Normalized(), nil
 }
 
-func ValidateDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest, owner events.DeliveryTargetOwnership) error {
-	want, err := ClassifyDeliveryTargetOwnership(req)
-	if err != nil {
-		return err
-	}
-	if want != owner {
-		return fmt.Errorf("stamped delivery target ownership disagrees with exact handler: stamped=%s %#v expected=%s %#v", owner.Code(), owner.Route(), want.Code(), want.Route())
-	}
-	return nil
-}
-
 // ValidateStampedDeliveryTargetOwnership checks immutable route authority
 // against the already-resolved executing handler without consulting mutable
 // entity rows or rediscovering declarations from a concrete recipient ID.

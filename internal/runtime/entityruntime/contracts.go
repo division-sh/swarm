@@ -120,19 +120,6 @@ func ReadTargetContracts(source semanticview.Source) []Contract {
 	return out
 }
 
-func ReadTargetNames(source semanticview.Source) []string {
-	contracts := ReadTargetContracts(source)
-	names := make([]string, 0, len(contracts))
-	for _, contract := range contracts {
-		name := CanonicalReadTargetName(contract)
-		if name != "" {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
-}
-
 func CanonicalReadTargetName(contract Contract) string {
 	entityType := strings.TrimSpace(contract.EntityType)
 	flowID := strings.TrimSpace(contract.FlowID)
@@ -143,10 +130,6 @@ func CanonicalReadTargetName(contract Contract) string {
 		return entityType
 	}
 	return flowID + "." + entityType
-}
-
-func ResolveForFlowInstance(source semanticview.Source, flowInstance string) (Contract, bool) {
-	return ResolveForFlow(source, ResolveFlowIDForInstance(source, flowInstance))
 }
 
 // ResolveFlowIDForRuntimeInstance binds the root run instance through its
