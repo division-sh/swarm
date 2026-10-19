@@ -289,6 +289,7 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 		candidate.Interface.Key(), candidate.Target.Selector, string(candidate.Posture), string(candidate.Ceremony),
 		candidate.ProviderCredentialRole, candidate.SigningCredentialRole, candidate.ConfirmationOperation,
 		candidate.ConnectionHealth, fmt.Sprint(input.SaveProof), input.ClientLanguage,
+		fmt.Sprint(candidate.OperatorRequired),
 	)
 	requestKey := operatorchannel.Hash("channel-onboarding-key-v1", principal.ID, strings.TrimSpace(input.IdempotencyKey))
 	if strings.TrimSpace(input.IdempotencyKey) == "" {
@@ -807,6 +808,12 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 					step = 5
 				}
 			case PhaseAwaitingOperatorConfirmation, PhasePublishingActivation:
+				if op.Phase == PhaseAwaitingOperatorConfirmation && op.AccountConnection() && op.IdentityOperationID == "" && candidate.Target.Generation == 0 {
+					// Startup restores transport before admitting the execution grant.
+					// Recover performs the new source's target admission afterward.
+					step = 5
+					continue
+				}
 				if op.IdentityOperationID != "" {
 					identityOp, err := s.currentIdentityOperation(ctx, op.IdentityOperationID)
 					if err != nil {
@@ -926,7 +933,8 @@ func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly b
 	if err := s.restoreSessionProgress(ctx, op, candidate); err != nil {
 		return err
 	}
-	if restoreOnly || recoveryNeedsFreshTargetAdmission(op, candidate) {
+	accountTargetPending := op.AccountConnection() && op.IdentityOperationID == "" && op.Phase == PhaseAwaitingOperatorConfirmation
+	if restoreOnly || recoveryNeedsFreshTargetAdmission(op, candidate) && !accountTargetPending {
 		// Restoring paired control work does not admit a replacement target or
 		// execute the retained declaration's historical business generation.
 		return nil
@@ -1114,7 +1122,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return Result{}, err
 			}
 		case PhaseAwaitingExternalIdentity:
-			if op.AccountConnection() {
+			if op.AccountConnection() && !candidate.OperatorRequired && op.IdentityOperationID == "" {
 				op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
 					Phase: PhaseAwaitingOperatorConfirmation, Now: s.now().UTC()})
 				if err != nil {
@@ -1319,7 +1327,17 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			if err != nil {
 				return Result{}, err
 			}
-		case PhaseSucceeded, PhaseFailed, PhaseRetired:
+		case PhaseSucceeded:
+			if candidate.OperatorRequired && op.AccountConnection() && op.IdentityOperationID == "" {
+				op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
+					Phase: PhaseAwaitingExternalIdentity, BeginOperatorEnrollment: true, Now: s.now().UTC()})
+				if err != nil {
+					return Result{}, err
+				}
+				continue
+			}
+			return s.result(readback, op, &candidate)
+		case PhaseFailed, PhaseRetired:
 			return s.result(readback, op, &candidate)
 		default:
 			return Result{}, fmt.Errorf("%w: unsupported onboarding phase %q", ErrConflict, op.Phase)
@@ -1953,7 +1971,7 @@ type confirmedBindingDecision struct {
 
 func (s *Service) reconcileConfirmedBinding(ctx context.Context, op Operation) (confirmedBindingDecision, error) {
 	decision := confirmedBindingDecision{operation: op}
-	if op.AccountConnection() {
+	if op.AccountConnection() && op.IdentityOperationID == "" {
 		return decision, nil
 	}
 	var identityOp operatorchannel.Operation

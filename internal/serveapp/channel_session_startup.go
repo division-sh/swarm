@@ -79,6 +79,9 @@ func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context
 func restoreServeChannelStartup(ctx context.Context, manager *runtime.RuntimeContextManager, store channelonboarding.Store,
 	teardown *channelonboarding.DestructiveService, onboarding *channelonboarding.Service, identities *operatorchannel.Service, now time.Time,
 ) ([]operatorchannel.Binding, error) {
+	if err := onboarding.RollSessionSources(ctx); err != nil {
+		return nil, err
+	}
 	if err := reconcileRetiredConnectedChannelContexts(ctx, manager, store, teardown); err != nil {
 		return nil, err
 	}

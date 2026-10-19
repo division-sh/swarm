@@ -15,6 +15,7 @@ import (
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
@@ -292,6 +293,9 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		}
 		req.RebindCoordinate = &coordinate
 	}
+	if req.SourceRollover != nil && (req.RebindCoordinate != nil || req.BeginOperatorEnrollment || req.SourceRollover.ValidateContext() != nil) {
+		return domain.Operation{}, domain.ErrInvalidRequest
+	}
 	var out domain.Operation
 	var changed render.ReconcileDemand
 	acknowledged, err := r.mutateOutcome(ctx, "advance channel onboarding", func(txctx context.Context, tx *sql.Tx) error {
@@ -307,8 +311,19 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			return domain.ErrRevisionConflict
 		}
 		coordinateOnlyTerminalRebind := req.RebindCoordinate != nil && op.Phase == domain.PhaseSucceeded && req.Phase == op.Phase
-		if !validTransition(op.Phase, req.Phase) && !coordinateOnlyTerminalRebind {
+		beginEnrollment := req.BeginOperatorEnrollment && op.Phase == domain.PhaseSucceeded && op.AccountConnection() &&
+			op.IdentityOperationID == "" && op.ActivationRevision > 0 && req.Phase == domain.PhaseAwaitingExternalIdentity
+		if req.BeginOperatorEnrollment && !beginEnrollment {
 			return domain.ErrConflict
+		}
+		if !validTransition(op.Phase, req.Phase) && !coordinateOnlyTerminalRebind && !beginEnrollment && req.SourceRollover == nil {
+			return domain.ErrConflict
+		}
+		if req.SourceRollover != nil {
+			if err := rollSessionSourceTx(txctx, tx, r.dialect(), &op, req); err != nil {
+				return err
+			}
+			changed = render.ReconcileOrdinary | render.ReconcileNative
 		}
 		var reboundActivation *domain.ConnectedChannelActivation
 		if req.RebindCoordinate != nil && !op.Coordinate.Matches(*req.RebindCoordinate) {
@@ -360,6 +375,9 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			op.ConfirmationOperationID = strings.TrimSpace(req.ConfirmationOperationID)
 		}
 		wasTerminal := op.Phase.Terminal()
+		if beginEnrollment {
+			op.CompletedAt = time.Time{}
+		}
 		completed := op.Phase != domain.PhaseSucceeded && req.Phase == domain.PhaseSucceeded
 		op.Phase, op.Revision, op.UpdatedAt = req.Phase, op.Revision+1, canonicalTime(req.Now)
 		if err := op.ValidateSessionAccount(); err != nil {
@@ -1030,11 +1048,53 @@ func updateOperation(ctx context.Context, tx *sql.Tx, d dialect, op domain.Opera
 	c := op.Coordinate.Normalized()
 	_, err = tx.ExecContext(ctx, d.bind(`UPDATE channel_onboarding_operations SET
 		bundle_hash=?,bundle_identity=?,pack_inventory_generation=?,runtime_instance_id=?,context_publication_generation=?,plan_generation=?,target_generation=?,
-		phase=?,operation_revision=?,credential_admissions=?,session_account_admission=?,identity_operation_id=?,binding_revision=?,activation_revision=?,confirmation_operation_id=?,failure_code=?,failure_message=?,updated_at=?,completed_at=?
+		slot_key=?,phase=?,operation_revision=?,credential_admissions=?,session_account_admission=?,identity_operation_id=?,binding_revision=?,activation_revision=?,confirmation_operation_id=?,failure_code=?,failure_message=?,updated_at=?,completed_at=?
 		WHERE operation_id=?`),
 		c.BundleHash, c.BundleIdentity, c.PackInventoryGeneration, c.RuntimeInstanceID, c.ContextPublicationGeneration, c.PlanGeneration.Diagnostic(), c.TargetGeneration,
-		string(op.Phase), op.Revision, string(admissions), session, nullable(op.IdentityOperationID), nullableInt(op.BindingRevision), nullableInt(op.ActivationRevision), nullable(op.ConfirmationOperationID), nullable(op.FailureCode), nullable(op.FailureMessage), op.UpdatedAt, nullableTime(op.CompletedAt), op.OperationID)
+		op.SlotKey, string(op.Phase), op.Revision, string(admissions), session, nullable(op.IdentityOperationID), nullableInt(op.BindingRevision), nullableInt(op.ActivationRevision), nullable(op.ConfirmationOperationID), nullable(op.FailureCode), nullable(op.FailureMessage), op.UpdatedAt, nullableTime(op.CompletedAt), op.OperationID)
 	return err
+}
+
+// Source rollover is explicit fresh admission, never a durable-identity match.
+func rollSessionSourceTx(ctx context.Context, tx *sql.Tx, d dialect, op *domain.Operation, req domain.AdvanceRequest) error {
+	source, admitted := correlation.SourceArtifactFactFromContext(ctx)
+	coordinate := req.SourceRollover.Normalized()
+	if !admitted || source.Validate() != nil || source.BundleHash() != coordinate.BundleHash ||
+		op.Phase != domain.PhaseSucceeded || !op.AccountConnection() || op.IdentityOperationID != "" ||
+		op.Coordinate.BundleHash == coordinate.BundleHash || req.Phase != domain.PhaseAwaitingOperatorConfirmation ||
+		coordinate.TargetGeneration != 0 {
+		return domain.ErrRevisionConflict
+	}
+	if err := channeldelivery.LockPrincipalTx(ctx, tx, op.PrincipalID, d == dialectPostgres); err != nil {
+		return err
+	}
+	nextSlot := (domain.StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: coordinate, TargetSelector: op.TargetSelector}).SlotKey()
+	var occupied int
+	if err := tx.QueryRowContext(ctx, d.bind(`SELECT COUNT(*) FROM channel_onboarding_operations
+		WHERE slot_key=? AND phase NOT IN ('failed','retired') AND operation_id<>?`), nextSlot, op.OperationID).Scan(&occupied); err != nil {
+		return err
+	}
+	if occupied != 0 {
+		return domain.ErrConflict
+	}
+	activation, found, err := loadActivationBySlot(ctx, tx, d, op.SlotKey, true)
+	if err != nil {
+		return err
+	}
+	expected := domain.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
+		ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
+		Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
+	if !found || !expected.MatchesAccountBusiness(*op, activation) {
+		return domain.ErrRevisionConflict
+	}
+	if _, err := tx.ExecContext(ctx, d.bind(`UPDATE connected_channel_activations SET status='retired',
+		activation_revision=activation_revision+1,retirement_reason='source_rollover',retired_at=?,updated_at=? WHERE activation_id=? AND status='current'`),
+		canonicalTime(req.Now), canonicalTime(req.Now), activation.ActivationID); err != nil {
+		return err
+	}
+	op.Coordinate, op.ActivationRevision, op.CompletedAt = coordinate, 0, time.Time{}
+	op.SlotKey = nextSlot
+	return nil
 }
 
 const activationSelect = `SELECT activation_id,slot_key,operation_id,operation_revision,principal_id,provider,

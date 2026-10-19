@@ -83,5 +83,6 @@ func selectedStartRequirement(principal operatorchannel.Principal, candidate Can
 	return StartSelection{Candidate: candidate, SelectionFence: operatorchannel.Hash(
 		"channel-onboarding-start-selection-v1", principal.ID, string(input.Verb), string(declaration),
 		fmt.Sprint(input.SaveProof), input.ClientLanguage,
+		fmt.Sprint(candidate.OperatorRequired),
 	)}, nil
 }

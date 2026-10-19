@@ -61,6 +61,7 @@ type Candidate struct {
 	SigningCredentialRole  string                            `json:"signing_credential_role,omitempty"`
 	ConfirmationOperation  string                            `json:"confirmation_operation"`
 	ConnectionHealth       string                            `json:"connection_health,omitempty"`
+	OperatorRequired       bool                              `json:"-"`
 	Plan                   packs.SatisfactionPlan            `json:"-"`
 }
 

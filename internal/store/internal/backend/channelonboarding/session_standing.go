@@ -74,7 +74,8 @@ func sessionStandingBindingCurrent(ctx context.Context, r runner, expected domai
 }
 
 func sessionStandingActivationCurrent(ctx context.Context, tx *sql.Tx, d dialect, op domain.Operation, binding operatorchannel.Binding) (bool, error) {
-	if !op.Phase.RequiresExecutableTarget(op.Posture) || op.Phase == domain.PhasePublishingActivation {
+	activeAccount := op.AccountConnection() && op.ActivationRevision > 0
+	if !op.Phase.RequiresExecutableTarget(op.Posture) && !activeAccount || op.Phase == domain.PhasePublishingActivation {
 		return true, nil
 	}
 	activation, found, err := loadActivationBySlot(ctx, tx, d, op.SlotKey, true)
@@ -91,14 +92,15 @@ func sessionStandingActivationCurrent(ctx context.Context, tx *sql.Tx, d dialect
 }
 
 func sessionStandingOperationMatches(expected, op domain.Operation) bool {
+	activeAccount := expected.AccountConnection() && op.AccountConnection() && op.ActivationRevision > 0
 	if op.Phase == domain.PhaseFailed || op.Phase == domain.PhaseRetired ||
-		op.Phase != domain.PhaseAwaitingOperatorConfirmation && !op.Phase.RequiresExecutableTarget(op.Posture) {
+		op.Phase != domain.PhaseAwaitingOperatorConfirmation && !op.Phase.RequiresExecutableTarget(op.Posture) && !(activeAccount && op.Phase == domain.PhaseAwaitingExternalIdentity) {
 		return false
 	}
 	return op.Posture == domain.ActivationSessionConnection && op.ValidateSessionAccount() == nil && op.SlotKey == expected.SlotKey &&
 		op.Revision >= expected.Revision && op.PrincipalID == expected.PrincipalID && op.Provider == expected.Provider &&
 		op.Interface.Normalized() == expected.Interface.Normalized() && op.Coordinate.MatchesDurableIdentity(expected.Coordinate) &&
 		op.TargetSelector == expected.TargetSelector && op.Ceremony == expected.Ceremony && op.BindingRevision == expected.BindingRevision &&
-		op.IdentityOperationID == expected.IdentityOperationID && op.SessionConnectionID == expected.SessionConnectionID &&
+		(op.IdentityOperationID == expected.IdentityOperationID || activeAccount) && op.SessionConnectionID == expected.SessionConnectionID &&
 		op.SessionAccount == expected.SessionAccount && slices.Equal(op.CredentialAdmissions, expected.CredentialAdmissions)
 }

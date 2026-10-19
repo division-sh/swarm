@@ -100,7 +100,9 @@ func (expected AdmissionResponsibility) MatchesOperation(op Operation) bool {
 }
 
 func (expected AdmissionResponsibility) MatchesActivation(op Operation, activation ConnectedChannelActivation) bool {
-	return expected.MatchesOperation(op) && expected.ActivationRevision > 0 && op.Phase.RequiresExecutableTarget(op.Posture) &&
+	activeAccount := op.AccountConnection() && op.ActivationRevision > 0 &&
+		(op.Phase == PhaseAwaitingExternalIdentity || op.Phase == PhaseAwaitingOperatorConfirmation)
+	return expected.MatchesOperation(op) && expected.ActivationRevision > 0 && (op.Phase.RequiresExecutableTarget(op.Posture) || activeAccount) &&
 		activation.Status == ActivationCurrent && activation.OperationID == expected.OperationID &&
 		activation.Revision == expected.ActivationRevision && activation.OperationRevision == expected.OperationRevision &&
 		activation.Coordinate.Matches(expected.Coordinate) && activation.TargetSelector == expected.TargetSelector &&
@@ -121,7 +123,7 @@ func (expected AdmissionResponsibility) MatchesAccountConnection(op Operation, a
 }
 
 func (expected AdmissionResponsibility) MatchesAccountBusiness(op Operation, activation ConnectedChannelActivation) bool {
-	return op.Phase == PhaseSucceeded && expected.MatchesAccountConnection(op, activation)
+	return (op.Phase == PhaseSucceeded || op.Phase == PhaseAwaitingExternalIdentity || op.Phase == PhaseAwaitingOperatorConfirmation) && expected.MatchesAccountConnection(op, activation)
 }
 
 // ResumeSessionBusiness projects only an existing activation's process-coordinate
