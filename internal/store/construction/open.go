@@ -6,6 +6,7 @@ package construction
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"time"
@@ -17,7 +18,10 @@ import (
 	"github.com/lib/pq"
 )
 
-func OpenPostgres(dsn string) (*private.PostgresStore, *sql.DB, error) {
+func OpenPostgres(dsn string, lockOrder ...*ChannelLockOrder) (*private.PostgresStore, *sql.DB, error) {
+	if len(lockOrder) > 1 {
+		return nil, nil, fmt.Errorf("postgres construction accepts one fixed lock-order observer")
+	}
 	cfg, err := pq.NewConfig(dsn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
@@ -26,7 +30,15 @@ func OpenPostgres(dsn string) (*private.PostgresStore, *sql.DB, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
 	}
-	db := sql.OpenDB(connector)
+	var transport driver.Connector = connector
+	if len(lockOrder) == 1 {
+		if lockOrder[0] == nil || lockOrder[0].native != nil {
+			return nil, nil, fmt.Errorf("lock-order observer must belong to one original fixture")
+		}
+		lockOrder[0].native = connector
+		transport = lockOrder[0]
+	}
+	db := sql.OpenDB(transport)
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxIdleTime(5 * time.Minute)
@@ -129,8 +141,8 @@ func OpenPostgresReadOnly(dsn string) (*private.PostgresStore, error) {
 	return store, nil
 }
 
-func NewPostgres(dsn string) (*private.PostgresStore, error) {
-	store, _, err := OpenPostgres(dsn)
+func NewPostgres(dsn string, lockOrder ...*ChannelLockOrder) (*private.PostgresStore, error) {
+	store, _, err := OpenPostgres(dsn, lockOrder...)
 	return store, err
 }
 
