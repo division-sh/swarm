@@ -913,7 +913,7 @@ jobs:
           # An attempt-scoped jobs list can lag the completed needs result.
           # Refresh evidence only; never rerun a proof or replace the evaluator's
           # exact run/attempt/head, success, timestamp, and missing-job checks.
-          for check in $(seq 1 12); do
+          for check in $(seq 1 60); do
             gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > test-results/jobs.json
             if jq -e --slurpfile plan test-results/plan/proof-plan.json '
               ([$plan[0].batches[].id | "Go proof " + .]) as $expected
@@ -924,7 +924,11 @@ jobs:
             ' test-results/jobs.json >/dev/null; then
               break
             fi
-            if [ "$check" -lt 12 ]; then sleep 5; fi
+            if [ "$check" -eq 60 ]; then
+              echo "::error::Timed out waiting for complete attempt-scoped proof-job metadata" >&2
+              exit 1
+            fi
+            sleep 5
           done
           go run ./cmd/swarm-test-timing -evaluate-budget \
             -event "$GITHUB_EVENT_NAME" \
