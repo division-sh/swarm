@@ -1,0 +1,31 @@
+{
+  "source": "378df08141bb97463c4bf88a47749ed3965071a2",
+  "master": "d282de4ddb5e690c60e30c0534c8db4c9e33fcf5",
+  "files": [
+    {
+      "file": "tools/fixture-codemod/pipeline-observations/embedded_spec_successors_1801_test.go",
+      "sha256": "2bd1932cb4aedf34812048205ee0da7dfac7a93ad12a0c47295ad57d2c2e354c",
+      "equal": true
+    },
+    {
+      "file": "tools/fixture-codemod/pipeline-observations/main_test.go",
+      "sha256": "8ffed4f606c0212a957952160a231dbdacfbe62b44cf7512e48f9ac28e746fec",
+      "equal": true
+    },
+    {
+      "file": "tools/fixture-codemod/pipeline-observations/native_completion_evidence_successor_test.go",
+      "sha256": "42ac7dbf3d07a8cc529c019ac38efa1959899f859f1db912fe511eb67f42a9ba",
+      "equal": true
+    },
+    {
+      "file": "tools/fixture-codemod/pipeline-observations/native_retained_join_outcome_successor_test.go",
+      "sha256": "28eb7d79a9b641dcb4e7e055bc227fcca7b2175c554f30ca1abbcf4d95229b45",
+      "equal": true
+    },
+    {
+      "file": "tools/fixture-codemod/pipeline-observations/q10_current_endpoint_composition_test.go",
+      "sha256": "30644a2c0de06ee0509bd429565f72ec462578c0714c455695f1d32cef41df76",
+      "equal": true
+    }
+  ]
+}
