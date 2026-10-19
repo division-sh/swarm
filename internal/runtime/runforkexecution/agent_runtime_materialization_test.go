@@ -36,7 +36,6 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -435,8 +434,7 @@ func TestSelectedContractAgentRuntimeBindRunProducesForkLocalIdentityWithoutMuta
 }
 
 func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	selected := storetest.StartPostgresRuntimeStore(t)
 	owner := testGatewayWorkOwner(t)
 	root := t.TempDir()
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
@@ -454,7 +452,6 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	forkRunID := uuid.NewString()
 	wantScope := runtimeauthoractivity.BundleScope("00000000-0000-0000-0000-000000000313", sourceFact.BundleHash())
 	initiatingCtx, cancel := context.WithCancel(runForkTestContext(t))
 	ctx := runtimecorrelation.WithSourceArtifactFact(initiatingCtx, sourceFact)
@@ -477,10 +474,6 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 	if err != nil {
 		t.Fatalf("resolve selected-contract declaration blueprint: %v", err)
 	}
-	record, err := blueprint.Materialize(forkRunID)
-	if err != nil {
-		t.Fatalf("materialize selected-contract declaration: %v", err)
-	}
 	revision, err := runtimemanager.AgentConfigPlanRevision(blueprint.Config, declaration)
 	if err != nil {
 		t.Fatalf("selected-contract declaration revision: %v", err)
@@ -493,13 +486,8 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 	}
 	processCapability := &selectedFailOnceGrantCapability{ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected)}
 	executionOwner := selectedContractExecutionOwnerForTest(t, selected)
-	topology, err := runtimeagenttopology.SelectedDeclarationAdmission(forkRunID, declarations)
-	if err != nil {
-		t.Fatalf("construct selected-contract static topology: %v", err)
-	}
 	agents := selectedContractAgentRuntimePlan{
 		Declarations: declarations, Blueprints: []runtimemanager.AgentMaterializationBlueprint{blueprint},
-		Records: []runtimemanager.PersistedAgent{{Config: record.Config, Topology: topology, Status: record.Status, HiredBy: record.HiredBy}},
 		Options: SelectedContractAgentRuntimeOptions{
 			ExecutionPosture: executionposture.Live, ProcessCapability: processCapability,
 			Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},
@@ -508,7 +496,7 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 			},
 		},
 	}
-	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, loaded.RootedSource.Artifact(), forkRunID, agents)
+	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, selected, loaded, &agents)
 	ctx = selectedForkExecutionTestContext(t, ctx, authority)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)

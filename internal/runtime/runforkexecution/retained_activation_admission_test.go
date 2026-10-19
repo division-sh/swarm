@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -22,7 +21,6 @@ import (
 // Reach: native PostgreSQL state-only activation, with permanent operation evidence.
 func TestSelectedForkActivationConsumesRuntimeAdmission(t *testing.T) {
 	selected := storetest.StartPostgresRuntimeStore(t)
-	db := storetest.DatabaseForTest(selected)
 	owner := selectedContractExecutionOwnerForTest(t, selected)
 	ctx := runForkTestContext(t)
 	repo := runForkExecutionRepoRoot(t)
@@ -40,13 +38,13 @@ func TestSelectedForkActivationConsumesRuntimeAdmission(t *testing.T) {
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: loaded.RootedSource.Artifact(), RootAdmission: loaded.RootedSource.Admission(),
 	})
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
-		eventID, runID, "fork.cli.activate", eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{}, at)
+	event := eventtest.ExistingRunRootIngress(eventID, "fork.cli.activate", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, at)
+	storetest.CommitSemanticEvent(t, ctx, selected, event)
 	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
 	storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
 	forkPointEventID := uuid.NewString()
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
-		forkPointEventID, runID, "fork.cli.checkpoint", eventtest.Producer(events.EventProducerExternal, "test"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at.Add(time.Millisecond))
+	checkpoint := eventtest.ExistingRunRootIngress(forkPointEventID, "fork.cli.checkpoint", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{Scope: events.EventScopeGlobal}, at.Add(time.Millisecond))
+	storetest.CommitSemanticForkFrontier(t, ctx, selected, checkpoint, nil, nil)
 	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected}
 	operation := selectedForkFixtureOperation(t, loaded, runID, forkPointEventID)
 	operation.AllowSourceFreeze = false

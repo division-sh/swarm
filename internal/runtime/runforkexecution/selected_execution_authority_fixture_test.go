@@ -2,61 +2,71 @@ package runforkexecution
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
 // Component tests bind a real retained execution before constructing a runtime;
 // fabricated effect evidence alone can no longer pass generation admission.
-func selectedContractTestRuntimeAuthority(t testing.TB, ctx context.Context, db *sql.DB, selected *store.PostgresStore, loaded LoadedSelectedContractSource, artifact *sourceartifact.AdmittedSourceArtifact, runID string, agents selectedContractAgentRuntimePlan) (effects.Authority, *PreparedSelectedFork, runfork.RunForkSelectedContractExecutionAdmission) {
+func selectedContractTestRuntimeAuthority(t *testing.T, ctx context.Context, selected *store.PostgresStore, loaded LoadedSelectedContractSource, agents *selectedContractAgentRuntimePlan) (effects.Authority, *PreparedSelectedFork, runfork.RunForkSelectedContractExecutionAdmission) {
 	t.Helper()
 	source := loaded.SourceArtifactFact
 	root := loaded.RootedSource.Admission()
-	sourceRun, eventID, bindingID := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	sourceRun, eventID := uuid.NewString(), uuid.NewString()
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRun, BundleHash: source.BundleHash(), Artifact: artifact, RootAdmission: root,
+		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRun, BundleHash: source.BundleHash(), Artifact: loaded.RootedSource.Artifact(), RootAdmission: root,
 	})
 	now := time.Now().UTC()
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, sourceRun, "selected.proof",
-		eventtest.Producer(events.EventProducerExternal, "selected-proof"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
-	revision := captureSelectedExecutionSourceRevision(t, db, sourceRun)
-	forkOrigin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRun, runtimerunlifecycle.ForkOriginPointEvent, revision, eventID)
+	event := eventtest.ExistingRunRootIngress(eventID, "selected.proof", "selected-proof", "", []byte(`{}`), 0, sourceRun, events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
+	storetest.CommitSemanticForkFrontier(t, ctx, selected, event, nil, nil)
+	owner := selectedContractExecutionOwnerForTest(t, selected)
+	operationRequest := selectedForkFixtureOperation(t, loaded, sourceRun, eventID)
+	operationRequest.AllowSourceFreeze = false
+	repo := runForkExecutionRepoRoot(t)
+	materialized := materializeSelectedRuntimeOutcomeFork(t, ctx, owner, SelectedContractExecutionRequest{
+		SourceRunID: sourceRun, At: eventID, SourceArtifactFact: source, ContractSelection: operationRequest.ContractSelection, ForkOperation: operationRequest,
+		SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected},
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: agents.Options.ProcessCapability, ExecutionPosture: executionposture.Live,
+			Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}}},
+	})
+	runID := materialized.ForkRunID
+	topology, err := agenttopology.SelectedDeclarationAdmission(runID, agents.Declarations)
 	if err != nil {
 		t.Fatal(err)
 	}
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		RunID: runID, State: runtimerunlifecycle.StatePaused, Origin: forkOrigin,
-		Artifact: artifact, RootAdmission: root, StartedAt: now,
-	})
-	if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings
-		(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at,target_bundle_hash,source_root_directory)
-		VALUES ($1,$2,$3,'event',$4,$5,'selected_contracts',$6,$7,$8)`, bindingID, runID, sourceRun, revision, eventID, now, root.BundleHash(), root.RootDirectory()); err != nil {
-		t.Fatal(err)
+	agents.Records = nil
+	for _, blueprint := range agents.Blueprints {
+		record, err := blueprint.Materialize(runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		agents.Records = append(agents.Records, manager.PersistedAgent{Config: record.Config, Topology: topology, Status: record.Status, HiredBy: record.HiredBy})
 	}
 	plan, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: eventID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	operation := selectedContractOperationForTest(t, ctx)
-	owner := selectedContractExecutionOwnerForTest(t, selected)
-	prepared, err := prepareSelectedFork(ctx, operation, owner.ports, loaded, plan, runfork.RunForkContractFrontierAdmission{}, runfork.RunForkSelectedContractRecipientPlanning{}, agents)
+	prepared, err := prepareSelectedFork(ctx, operation, owner.ports, loaded, plan, runfork.RunForkContractFrontierAdmission{}, runfork.RunForkSelectedContractRecipientPlanning{}, *agents)
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding, err := prepared.bind(ctx, runID, loaded, agents)
+	binding, err := prepared.bind(ctx, runID, loaded, *agents)
 	if err != nil {
 		t.Fatal(err)
 	}

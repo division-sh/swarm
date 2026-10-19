@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -25,8 +24,7 @@ func TestS1RootedRecipientPreviewPublicCreationAndReplayBothStores(t *testing.T)
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 			} else {
-				_, db, _ := testutil.StartPostgres(t)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			bundle := eventPublishTargetRouteTestBundle(t)
 			rooted, err := bundle.RootedSource()
@@ -100,8 +98,7 @@ func TestS1RootedRunStartRecipientPreviewPublicCreationAndReplayBothStores(t *te
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 			} else {
-				_, db, _ := testutil.StartPostgres(t)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			root := canonicalrouting.WriteFinitePublicTemplateInputRoute(t)
 			repo := runCompletionRepoRoot(t)
