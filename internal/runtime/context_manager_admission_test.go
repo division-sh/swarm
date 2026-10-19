@@ -195,8 +195,10 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 			t.Errorf("Shutdown: %v", shutdownErr)
 		}
 	})
+	var retained *startupRecoveryFanOutSession
 	capability, grant, err := newRuntimeTestProcessCapabilityWithSession(t, rt.Manager, module.source, fact, authorActivityTestRuntimeInstanceID, selected, func(session *runtimeTestRetainedSession) runtimestartupownership.RetainedSession {
-		return &startupRecoveryFanOutSession{runtimeTestRetainedSession: session, capacity: runtimestartupownership.SQLiteFanOutCapacity()}
+		retained = &startupRecoveryFanOutSession{runtimeTestRetainedSession: session, capacity: runtimestartupownership.SQLiteFanOutCapacity()}
+		return retained
 	})
 	if err != nil {
 		t.Fatalf("new process capability: %v", err)
@@ -207,6 +209,7 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	retained.requireActivityGrant(t, grant)
 	plan, err := grant.SourceSetPlan(ctx)
 	if err != nil {
 		t.Fatalf("SourceSetPlan: %v", err)
