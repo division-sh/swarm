@@ -97,14 +97,14 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "a09d56e2ee95ee8b5e8b4b6bbf2a29f02b88275f1904b0fae63713375841c0ff" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "81ef61021364745f473c86a62eaab8790ae95d12b8c6c01205ac95dc17a14992" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 113 {
+	if len(pins) != 114 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -132,7 +132,7 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 			return recipe{}, fmt.Errorf("fixture comparator failed exact reversal")
 		}
 		current = pin.Candidate
-		exactOriginalSetup = exactOriginalSetup || index >= 46
+		exactOriginalSetup = exactOriginalSetup || index >= 47
 	}
 	history := row
 	history.Successor = original.Successor

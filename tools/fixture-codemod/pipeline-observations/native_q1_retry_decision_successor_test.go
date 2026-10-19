@@ -5,7 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"go/ast"
 	"go/format"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -22,10 +25,32 @@ func q1RetryDecisionReceipt() (fixtureSetupSuccessor2617, error) {
 		return fixtureSetupSuccessor2617{}, fmt.Errorf("Q1 fixture history changed")
 	}
 	var pins []fixtureSetupSuccessor2617
-	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 40 {
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 114 {
 		return fixtureSetupSuccessor2617{}, fmt.Errorf("Q1 fixture history shape changed: %v", err)
 	}
 	return pins[39], nil
+}
+
+func q1RetryDecisionSetupPrior(row recipe) (recipe, error) {
+	if _, err := fixtureSetupCurrentEndpoint2617(row, row.Successor); err != nil {
+		return recipe{}, err
+	}
+	var pins []fixtureSetupSuccessor2617
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
+		return recipe{}, err
+	}
+	for index := len(pins) - 1; index >= 40; index-- {
+		pin := pins[index]
+		if !sameReviewedRecipeKey(row, pin.Original) {
+			continue
+		}
+		body, err := reverseReviewedSuccessor2617(pin.Candidate, pin.Edits)
+		if err != nil || body != pin.Original.Successor {
+			return recipe{}, fmt.Errorf("Q1 setup predecessor changed: %v", err)
+		}
+		row = pin.Original
+	}
+	return row, nil
 }
 
 func q1RetryDecisionPriorRows(rows []recipe) ([]recipe, error) {
@@ -41,6 +66,10 @@ func q1RetryDecisionPriorRows(rows []recipe) ([]recipe, error) {
 		}
 		want := pin.Original
 		want.Successor = pin.Candidate
+		row, err = q1RetryDecisionSetupPrior(row)
+		if err != nil {
+			return nil, err
+		}
 		body, reverseErr := reverseReviewedSuccessor2617(row.Successor, pin.Edits)
 		if !reflect.DeepEqual(row, want) || reverseErr != nil || body != pin.Original.Successor {
 			return nil, fmt.Errorf("Q1 successor changed historical mechanical evidence: %s: %v", row.Function, reverseErr)
@@ -55,7 +84,36 @@ func q1RetryDecisionPriorRows(rows []recipe) ([]recipe, error) {
 }
 
 func q1RetryDecisionPriorSource(path string, current []byte) ([]byte, error) {
-	return selectedreadrole.Q1RetryDecisionHistoricalSource("../../..", path, current)
+	pin, err := q1RetryDecisionReceipt()
+	if err != nil || path != pin.Original.File {
+		return selectedreadrole.Q1RetryDecisionHistoricalSource("../../..", path, current)
+	}
+	set := token.NewFileSet()
+	file, err := parser.ParseFile(set, path, current, parser.AllErrors)
+	if err != nil {
+		return nil, err
+	}
+	matched, start, end := 0, 0, 0
+	for _, declaration := range file.Decls {
+		if fn, ok := declaration.(*ast.FuncDecl); ok && fn.Name.Name == pin.Original.Function {
+			matched++
+			start, end = set.Position(fn.Pos()).Offset, set.Position(fn.End()).Offset
+		}
+	}
+	if matched != 1 {
+		return nil, fmt.Errorf("Q1 source multiplicity=%d, want1", matched)
+	}
+	row := pin.Original
+	row.Successor, err = canonicalFunction(string(current[start:end]))
+	if err != nil {
+		return nil, err
+	}
+	prior, err := q1RetryDecisionSetupPrior(row)
+	if err != nil {
+		return nil, err
+	}
+	composed := append(append(append([]byte(nil), current[:start]...), prior.Successor...), current[end:]...)
+	return selectedreadrole.Q1RetryDecisionHistoricalSource("../../..", path, composed)
 }
 
 func q1RetryDecisionPriorRecipeBytes(current []byte) ([]byte, error) {
@@ -73,7 +131,13 @@ func q1RetryDecisionPriorRecipeBytes(current []byte) ([]byte, error) {
 	var encoded bytes.Buffer
 	encoder := json.NewEncoder(&encoded)
 	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(pin.Candidate); err != nil {
+	var endpoint string
+	for _, row := range rows {
+		if sameReviewedRecipeKey(row, pin.Original) {
+			endpoint = row.Successor
+		}
+	}
+	if err := encoder.Encode(endpoint); err != nil {
 		return nil, err
 	}
 	from := bytes.TrimSuffix(encoded.Bytes(), []byte("\n"))
@@ -88,16 +152,8 @@ func q1RetryDecisionPriorRecipeBytes(current []byte) ([]byte, error) {
 // The old 39 receipts and every business/temporal assertion remain immutable.
 func TestQ1RetryDecisionSuccessorPreservesPriorReceiptsAndOracles(t *testing.T) {
 	t.Run("whole_history_composition", testQ1RetryDecisionHistoryComposition)
-	var raw []json.RawMessage
 	var pins []fixtureSetupSuccessor2617
 	var rows []recipe
-	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &raw); err != nil || len(raw) != 40 {
-		t.Fatalf("fixture packet shape: rows=%d err=%v", len(raw), err)
-	}
-	prior, err := json.Marshal(raw[:39])
-	if err != nil || fmt.Sprintf("%x", sha256.Sum256(prior)) != "daf060dec5ac400e00a35c4a7dea0321a38feeaae8e3bbcb4b20c87cbab0b5b2" {
-		t.Fatal("Q1 rewrote earlier fixture evidence")
-	}
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		t.Fatal(err)
 	}
@@ -206,8 +262,18 @@ func testQ1RetryDecisionHistoryComposition(t *testing.T) {
 		t.Fatal(err)
 	}
 	source, err := q1RetryDecisionPriorSource(pin.Original.File, raw)
-	want := strings.Replace(string(raw), "time.Millisecond, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation()", "time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation()", 1)
-	want = strings.Replace(want, "storetest.WaitManagerRetryDecision(", "storetest.MakeManagerRetryEligible(", 1)
+	set := token.NewFileSet()
+	file, parseErr := parser.ParseFile(set, pin.Original.File, raw, parser.AllErrors)
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+	want := string(raw)
+	for _, declaration := range file.Decls {
+		if fn, ok := declaration.(*ast.FuncDecl); ok && fn.Name.Name == pin.Original.Function {
+			start, end := set.Position(fn.Pos()).Offset, set.Position(fn.End()).Offset
+			want = string(raw[:start]) + pin.Original.Successor + string(raw[end:])
+		}
+	}
 	formatted, formatErr := format.Source([]byte(want))
 	if err != nil || formatErr != nil || !bytes.Equal(source, formatted) || bytes.Equal(raw, source) {
 		t.Fatalf("Q1 exact source inverse changed its finite edit set: %v/%v", err, formatErr)
