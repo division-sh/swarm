@@ -14,16 +14,6 @@ func AsFloat64(v any) (float64, bool) {
 	return number, err == nil
 }
 
-func SchemaAdditionalProps(raw any) bool {
-	if raw == nil {
-		return true
-	}
-	if b, ok := raw.(bool); ok {
-		return b
-	}
-	return true
-}
-
 func IsNumeric(v any) bool {
 	_, ok := AsFloat64(v)
 	return ok
@@ -90,17 +80,6 @@ func AsString(v any) string {
 	default:
 		return fmt.Sprint(v)
 	}
-}
-
-func ParsePayloadMap(raw []byte) map[string]any {
-	if len(raw) == 0 {
-		return map[string]any{}
-	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil || payload == nil {
-		return map[string]any{}
-	}
-	return payload
 }
 
 func MustJSON(v any) []byte {
