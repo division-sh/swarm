@@ -2047,7 +2047,7 @@ type RunOperationalFact struct {
 }
 
 // RunOperationalEvidence uses the caller's retained snapshot and keeps native
-// claim-token matching within the canonical delivery owner.
+// claim-token and historical selected-binding matching within the delivery owner.
 func (a *Adapter) RunOperationalEvidence(ctx context.Context, q queryer, runID string) ([]RunOperationalFact, error) {
 	if id, err := uuid.Parse(runID); err != nil || id.String() != runID {
 		return nil, fmt.Errorf("delivery operational evidence requires exact run identity")
@@ -2097,7 +2097,20 @@ func (a *Adapter) RunOperationalEvidence(ctx context.Context, q queryer, runID s
 	rows, err = q.QueryContext(ctx, `SELECT CAST(d.delivery_id AS TEXT),CAST(a.attempt_id AS TEXT)
 		FROM event_delivery_attempts d JOIN runtime_external_effect_attempts a
 		ON d.delivery_id=a.origin_delivery_id AND d.claim_version=a.origin_claim_version AND d.claim_token=a.origin_claim_token
-		WHERE a.origin_kind='delivery' AND a.origin_run_id=$1`, runID)
+		LEFT JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
+		WHERE a.origin_kind='delivery' AND a.origin_run_id=$1
+		AND (COALESCE(o.authority_kind,'')<>'selected_contract_fork' OR EXISTS(
+			SELECT 1 FROM event_deliveries selected
+			JOIN run_fork_selected_contract_runtime_executions e ON e.execution_id=selected.selected_execution_id
+			JOIN run_fork_selected_contract_bindings b ON b.binding_id=e.binding_id AND b.fork_run_id=e.fork_run_id
+			JOIN runs r ON r.run_id=e.fork_run_id
+			WHERE selected.delivery_id=a.origin_delivery_id AND selected.run_id=a.origin_run_id
+			AND selected.execution_authority_kind='selected_contract_fork'
+			AND selected.execution_authority_id=CAST(e.execution_id AS TEXT) AND selected.execution_authority_generation=e.generation
+			AND selected.selected_fork_run_id=e.fork_run_id AND selected.selected_execution_generation=e.generation
+			AND o.selected_execution_id=e.execution_id AND o.authority_id=CAST(e.execution_id AS TEXT) AND o.generation=e.generation AND a.generation=e.generation
+			AND o.bundle_hash=selected.authority_bundle_hash AND o.bundle_hash=r.bundle_hash
+			AND (b.mode='selected_contracts' OR (b.mode='bundle_hash' AND b.bundle_hash=r.bundle_hash))))`, runID)
 	if err != nil {
 		return nil, err
 	}

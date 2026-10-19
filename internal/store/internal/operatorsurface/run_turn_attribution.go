@@ -162,18 +162,7 @@ func loadDeliveryCompletionEvidence(ctx context.Context, q eventReadQueryer, del
 		COALESCE((o.authority_kind='selected_contract_fork' AND o.effect_kind='provider_turn'
 		AND a.usage_target_kind='agent_turn' AND a.usage_target_id=t.turn_id AND COALESCE(a.target_ordinal,0)=0
 		AND a.origin_run_id=t.run_id AND a.origin_route_identity=$2 AND a.origin_subscriber_type='agent' AND a.origin_subscriber_id=t.agent_id
-		AND a.capability_surface_id=t.capability_surface_id
-		AND EXISTS(SELECT 1 FROM event_deliveries d
-			JOIN run_fork_selected_contract_runtime_executions e ON e.execution_id=d.selected_execution_id
-			JOIN run_fork_selected_contract_bindings b ON b.binding_id=e.binding_id AND b.fork_run_id=e.fork_run_id
-			JOIN runs r ON r.run_id=e.fork_run_id
-			WHERE d.delivery_id=a.origin_delivery_id AND d.run_id=t.run_id
-			AND d.execution_authority_kind='selected_contract_fork'
-			AND d.execution_authority_id=CAST(e.execution_id AS TEXT) AND d.execution_authority_generation=e.generation
-			AND d.selected_fork_run_id=e.fork_run_id AND d.selected_execution_generation=e.generation
-			AND o.selected_execution_id=e.execution_id AND o.authority_id=CAST(e.execution_id AS TEXT) AND o.generation=e.generation AND a.generation=e.generation
-			AND o.bundle_hash=d.authority_bundle_hash AND o.bundle_hash=r.bundle_hash
-			AND (b.mode='selected_contracts' OR (b.mode='bundle_hash' AND b.bundle_hash=r.bundle_hash)))),FALSE),
+		AND a.capability_surface_id=t.capability_surface_id),FALSE),
 		EXISTS(SELECT 1 FROM runtime_provider_attempt_drains d WHERE d.attempt_id=a.attempt_id)
 		FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 		JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id
