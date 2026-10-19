@@ -13,8 +13,34 @@ import (
 
 // StartPostgresRuntimeStore constructs one admitted native owner without
 // exposing its pool to the caller.
-func StartPostgresRuntimeStore(t *testing.T) *store.PostgresStore {
+func StartPostgresRuntimeStore(t *testing.T, lockOrder ...*ChannelLockOrder) *store.PostgresStore {
 	t.Helper()
+	if len(lockOrder) != 0 {
+		selected, err := store.NewPostgresStore(testutil.StartPostgresDSN(t), lockOrder...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			lockOrder[0].Release()
+			if err := selected.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		BootstrapPostgresRuntimeStore(t, selected)
+		// The schema owner checks the actual constraints, including the original
+		// nondeferrable principal FK, instead of adding a parallel catalog reader.
+		spec, plans := canonicalPlatformPlans(t)
+		inspection, err := selected.InspectSchema(context.Background(), store.SchemaBootstrapRequest{
+			PlatformPlans: plans, Origin: store.RuntimeStoreOrigin{
+				SwarmVersion: "storetest", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC(),
+			},
+		})
+		if err != nil || inspection.Fresh {
+			t.Fatalf("inspect native lock-order fixture schema: fresh=%t err=%v", inspection.Fresh, err)
+		}
+		bindTestPayloadAdmitter(selected)
+		return selected
+	}
 	selected, _ := StartPostgresRuntimeStoreWithReopen(t)
 	return selected
 }
