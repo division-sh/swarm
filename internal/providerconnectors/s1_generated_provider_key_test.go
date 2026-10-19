@@ -71,12 +71,12 @@ func TestS1ConnectorGenerationUsesExactPortableKeys(t *testing.T) {
 				if _, ok := artifact.Manifest.Generation.OperationForTool(" " + toolID); ok {
 					t.Fatal("generation readback repaired a tool identity")
 				}
-				pack := LoadedPack{Envelope: artifact.PackEnvelope, Manifest: artifact.Manifest}
-				if _, ok := GenerationSurfaceForPackTool(pack, toolID); !ok {
+				if _, ok := GenerationSurfaceForConnectorTool(artifact.Manifest, sha256String(artifact.ConnectorBody), toolID); !ok {
 					t.Fatal("exact generation readback lost its surface")
 				}
-				pack.Manifest.Provider = strings.ToUpper(key)
-				if _, ok := GenerationSurfaceForPackTool(pack, toolID); ok {
+				foreign := artifact.Manifest
+				foreign.Provider = strings.ToUpper(key)
+				if _, ok := GenerationSurfaceForConnectorTool(foreign, sha256String(artifact.ConnectorBody), toolID); ok {
 					t.Fatal("generation surface borrowed another provider key")
 				}
 			}
@@ -91,7 +91,7 @@ func TestS1ConnectorGeneratedAndConformanceBindingsRefuseProviderAliases(t *test
 		t.Fatal(err)
 	}
 	for _, artifact := range artifacts {
-		pack := LoadedPack{Envelope: artifact.PackEnvelope, Manifest: artifact.Manifest}
+		pack := LoadedPack{Manifest: artifact.Manifest}
 		for _, alias := range []string{strings.ToUpper(artifact.Manifest.Provider), " " + artifact.Manifest.Provider, artifact.Manifest.Provider + " "} {
 			indexed := artifact.IndexEntry
 			indexed.Provider = alias

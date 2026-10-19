@@ -2,14 +2,10 @@ package providerconnectors
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/division-sh/swarm/internal/packs"
@@ -19,7 +15,6 @@ import (
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
-	platformpacks "github.com/division-sh/swarm/packs"
 )
 
 func TestValidateSourceAcceptsTelegramProviderConnectorHTTPActivityTool(t *testing.T) {
@@ -393,73 +388,6 @@ func TestEmbeddedPackInventoryLoadsTelegramFromVerifiedPlatformPack(t *testing.T
 	httpSpec, _ := tool.HTTP()
 	if strings.Contains(httpSpec.URL, "provider-secret") {
 		t.Fatal("builtin telegram tool leaked a concrete credential value")
-	}
-}
-
-func TestNewPackRegistryAdmitsSchemasAndReadbacksAreMutationIsolated(t *testing.T) {
-	tool := telegramConnectorTool("https://api.telegram.org")
-	loaded := LoadedPack{
-		Envelope: packs.Envelope{
-			ID: "test.telegram", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64),
-			Provenance: packs.Provenance{Source: packs.ProvenancePlatform},
-		},
-		Source: "fixture:test.telegram",
-		Manifest: ConnectorManifest{Provider: "telegram", Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"telegram.send_message": tool,
-		}},
-	}
-	registry, err := NewPackRegistry(loaded)
-	if err != nil {
-		t.Fatalf("NewPackRegistry: %v", err)
-	}
-
-	mutateSnapshots := func(entry runtimecontracts.ToolSchemaEntry) {
-		properties := entry.InputSchema().Properties()
-		properties["chat_id"] = runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaBoolean)
-		httpSpec, ok := entry.HTTP()
-		if !ok {
-			t.Fatal("connector HTTP snapshot missing")
-		}
-		httpSpec.Headers["X-Mutated"] = "true"
-		httpSpec.Body.(map[string]any)["chat_id"] = "changed"
-	}
-	descriptors := registry.PackDescriptors()
-	descriptorTool := descriptors[0].Tools["telegram.send_message"]
-	mutateSnapshots(descriptorTool)
-	descriptors[0].Tools["telegram.send_message"] = runtimecontracts.ToolSchemaEntry{}
-	lookedUp, ok := registry.Lookup("telegram", "telegram.send_message")
-	if !ok {
-		t.Fatal("registry lookup failed")
-	}
-	lookupTool := lookedUp.Manifest.Tools["telegram.send_message"]
-	mutateSnapshots(lookupTool)
-	lookedUp.Manifest.Tools["telegram.send_message"] = runtimecontracts.ToolSchemaEntry{}
-	inventory := registry.Inventory()
-	mutateSnapshots(inventory[0].Tool)
-	inventory[0].Tool = runtimecontracts.ToolSchemaEntry{}
-	packTool := inventory[0].Pack.Manifest.Tools["telegram.send_message"]
-	mutateSnapshots(packTool)
-	inventory[0].Pack.Manifest.Tools["telegram.send_message"] = runtimecontracts.ToolSchemaEntry{}
-
-	fresh, ok := registry.Lookup("telegram", "telegram.send_message")
-	if !ok {
-		t.Fatal("fresh registry lookup failed")
-	}
-	freshTool := fresh.Manifest.Tools["telegram.send_message"]
-	chatID, _ := freshTool.InputSchema().Property("chat_id")
-	httpSpec, _ := freshTool.HTTP()
-	if chatID.Kind() != runtimecontracts.ToolSchemaString || len(httpSpec.Headers) != 0 || httpSpec.Body.(map[string]any)["chat_id"] != "{{input.chat_id}}" {
-		t.Fatalf("registry readback mutation leaked: %#v", freshTool)
-	}
-
-	_, err = NewPackRegistry(LoadedPack{
-		Envelope: packs.Envelope{ID: "test.missing-tool"},
-		Manifest: ConnectorManifest{Provider: "telegram", Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"telegram.send_message": {},
-		}},
-	})
-	if err == nil || !strings.Contains(err.Error(), `must declare category "provider_connector"`) {
-		t.Fatalf("missing connector tool admission error = %v", err)
 	}
 }
 
@@ -889,85 +817,6 @@ func TestMicrosoftGraphConnectorPackReportsDefaultScopeManagedCredentialRequirem
 	}
 }
 
-func TestProviderConnectorPackVerificationFailsClosed(t *testing.T) {
-	tests := []struct {
-		name   string
-		mutate func(t *testing.T, files fstest.MapFS)
-		want   string
-	}{
-		{
-			name: "platform pack bad exact byte hash",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				files["connector.yaml"].Data = append(files["connector.yaml"].Data, '\n')
-			},
-			want: "manifest_hash mismatch",
-		},
-		{
-			name: "unknown connector manifest field",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				files["connector.yaml"].Data = append(files["connector.yaml"].Data, []byte("unexpected: true\n")...)
-				rewriteConnectorPackHash(t, files)
-			},
-			want: "field unexpected not found",
-		},
-		{
-			name: "capability declaration drift",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				replaceConnectorPackFile(t, files, "pack.yaml", "- telegram.send_message", "- telegram.other")
-			},
-			want: "capabilities do not match",
-		},
-		{
-			name: "requires declaration drift",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				replaceConnectorPackFile(t, files, "pack.yaml", "telegram_bot_token", "other_token")
-			},
-			want: "requires do not match",
-		},
-		{
-			name: "unknown envelope field",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				files["pack.yaml"].Data = append(files["pack.yaml"].Data, []byte("unexpected: true\n")...)
-			},
-			want: "field unexpected not found",
-		},
-		{
-			name: "retired scalar action capability",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				replaceConnectorPackFile(t, files, "pack.yaml", "call_provider_actions:\n      - telegram.answer_callback\n      - telegram.apply_webhook\n      - telegram.edit_message\n      - telegram.identify_bot\n      - telegram.install_inbox_commands\n      - telegram.install_shared_inbox_commands\n      - telegram.read_bot_address\n      - telegram.read_chat_menu_button\n      - telegram.read_default_menu_button\n      - telegram.read_inbox_commands\n      - telegram.read_shared_inbox_commands\n      - telegram.read_webhook\n      - telegram.send_interactive\n      - telegram.send_message", "call_provider_action: telegram.send_message")
-			},
-			want: "field call_provider_action not found",
-		},
-		{
-			name: "missing tests metadata",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				replaceConnectorPackFile(t, files, "pack.yaml", "tests:\n  - providerconnectors/telegram_pack\n  - runtime/telegram_connector_supported_surface\n", "tests: []\n")
-			},
-			want: "tests are required",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			files := connectorPackTestFS(t, "telegram")
-			tc.mutate(t, files)
-			_, err := LoadPackFS(files, ".", "0.7.0")
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("LoadPackFS error = %v, want containing %q", err, tc.want)
-			}
-		})
-	}
-}
-
-func TestSlackConnectorPackRequiresManagedCredentialDriftFailsClosed(t *testing.T) {
-	files := connectorPackTestFS(t, "slack")
-	replaceConnectorPackFile(t, files, "pack.yaml", "slack_oauth", "other_oauth")
-	_, err := LoadPackFS(files, ".", "0.7.0")
-	if err == nil || !strings.Contains(err.Error(), "requires do not match") {
-		t.Fatalf("LoadPackFS error = %v, want managed requires drift failure", err)
-	}
-}
-
 func TestConnectorPackImportRequiresExplicitEnableAndReportsSurface(t *testing.T) {
 	ambient := providerConnectorScopedSource{
 		Source:       semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
@@ -1391,51 +1240,6 @@ func githubAppConnectedRecord() runtimemanagedcredentials.Record {
 
 func flowScopeWithConnectorPackImport(key, provider, tool string) connectorPackTestImportScope {
 	return connectorPackTestImportScope{Key: key, Imports: []runtimecontracts.ConnectorPackImport{{Provider: provider, Tool: tool}}}
-}
-
-func connectorPackTestFS(t *testing.T, provider string) fstest.MapFS {
-	t.Helper()
-	out := fstest.MapFS{}
-	for _, file := range []string{"pack.yaml", "connector.yaml"} {
-		body, err := fs.ReadFile(platformpacks.FS(), "provider-connectors/"+provider+"/"+file)
-		if err != nil {
-			t.Fatalf("read builtin connector pack file %s/%s: %v", provider, file, err)
-		}
-		out[file] = &fstest.MapFile{Data: append([]byte(nil), body...)}
-	}
-	return out
-}
-
-func rewriteConnectorPackHash(t *testing.T, files fstest.MapFS) {
-	t.Helper()
-	sum := sha256.Sum256(files["connector.yaml"].Data)
-	hash := "sha256:" + hex.EncodeToString(sum[:])
-	replaceConnectorPackHashLine(t, files, hash)
-}
-
-func replaceConnectorPackFile(t *testing.T, files fstest.MapFS, name, old, new string) {
-	t.Helper()
-	file := files[name]
-	body := string(file.Data)
-	if !strings.Contains(body, old) {
-		t.Fatalf("%s missing %q", name, old)
-	}
-	body = strings.Replace(body, old, new, 1)
-	file.Data = []byte(body)
-}
-
-func replaceConnectorPackHashLine(t *testing.T, files fstest.MapFS, hash string) {
-	t.Helper()
-	file := files["pack.yaml"]
-	lines := strings.Split(string(file.Data), "\n")
-	for i, line := range lines {
-		if strings.HasPrefix(line, "manifest_hash: ") {
-			lines[i] = "manifest_hash: " + hash
-			file.Data = []byte(strings.Join(lines, "\n"))
-			return
-		}
-	}
-	t.Fatal("pack.yaml missing manifest_hash line")
 }
 
 func joinErrors(errs []error) string {

@@ -4,21 +4,21 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/packs"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 )
 
 func s1ConnectorPack(key string) LoadedPack {
-	return LoadedPack{
-		Envelope: packs.Envelope{
-			ID: key + ".connector", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64),
-			Provenance: packs.Provenance{Source: packs.ProvenancePlatform},
-		},
-		Source: "fixture:" + key,
-		Manifest: ConnectorManifest{Provider: key, Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			key + ".send_message": telegramConnectorTool("https://api.telegram.org"),
-		}},
+	provider, err := packartifact.AdmitProviderMembers(key, s1ConnectorDirectoryMembers())
+	if err != nil {
+		return LoadedPack{}
 	}
+	body, _ := provider.Body(packmodel.BodyConnector)
+	pack, err := loadPackBody(body)
+	if err != nil {
+		panic(err)
+	}
+	return pack
 }
 
 func TestS1ConnectorRegistryKeepsExactPortableProviderKeys(t *testing.T) {

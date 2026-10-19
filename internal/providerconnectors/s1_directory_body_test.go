@@ -201,14 +201,10 @@ func TestS1ConnectorBodyLogicalReadbackAndRegistryKeepSeparateKeys(t *testing.T)
 			t.Fatal(err)
 		}
 		body, _ := provider.Body(packmodel.BodyConnector)
-		manifest, err := AdmitBody(body)
+		pack, err := loadPackBody(body)
 		if err != nil {
 			t.Fatal(err)
 		}
-		pack := s1ConnectorPack(key)
-		pack.Manifest = manifest
-		pack.ManifestBody = body.Bytes()
-		pack.Envelope.ManifestHash = body.Hash()
 		loaded = append(loaded, pack)
 	}
 	registry, err := NewPackRegistry(loaded...)
@@ -252,9 +248,10 @@ func TestS1ConnectorBodyGenerationReferencesDeclaredShortTools(t *testing.T) {
 		if manifest.Generation == nil || len(manifest.Generation.Operations) != 1 || manifest.Generation.Operations[0].ToolID != key+".send_message" {
 			t.Fatalf("generation operation escaped directory tool owner: %+v", manifest.Generation)
 		}
-		pack := s1ConnectorPack(key)
-		pack.Manifest = manifest
-		pack.Envelope.ManifestHash = body.Hash()
+		pack, err := loadPackBody(body)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if _, present := GenerationSurfaceForPackTool(pack, key+".send_message"); !present {
 			t.Fatal("compiled generation surface lost exact qualified tool")
 		}

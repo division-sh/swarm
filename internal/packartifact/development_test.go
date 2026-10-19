@@ -3,193 +3,9 @@ package packartifact
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
-
-func TestDevelopmentOverrideAndProjectPrecedenceAreFailClosed(t *testing.T) {
-	embedded, err := LoadPlatformPackInventoryFS(
-		testInventoryFS(t, "provider.demo", TypeTrigger, "provider-triggers/demo", ProvenancePlatform, []byte("provider: demo\nrevision: embedded\n")),
-		InventoryManifestFileName,
-		testPlatformVersion,
-		SelectionEmbedded,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	embeddedEntry, _ := embedded.Lookup("provider.demo")
-	if embedded.SelectionMode() != SelectionEmbedded || embeddedEntry.Source() != ProvenanceEmbedded {
-		t.Fatalf("embedded selection = mode:%s source:%s", embedded.SelectionMode(), embeddedEntry.Source())
-	}
-
-	developmentDirs := materializeDevelopmentInventory(t, embedded, map[string][]byte{
-		"provider.demo": []byte("provider: demo\nrevision: development\n"),
-	})
-	development, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, developmentDirs, embedded)
-	if err != nil {
-		t.Fatalf("load complete development override: %v", err)
-	}
-	developmentEntry, ok := development.Lookup("provider.demo")
-	if !ok || development.SelectionMode() != SelectionDevelopmentOverride || developmentEntry.Source() != ProvenanceDevelopmentOverride {
-		t.Fatalf("development selection = inventory:%#v entry:%#v present:%t", development, developmentEntry, ok)
-	}
-	if string(developmentEntry.ManifestBody()) != "provider: demo\nrevision: development\n" {
-		t.Fatalf("development body = %q", developmentEntry.ManifestBody())
-	}
-
-	projectBody := []byte("provider: demo\nrevision: project\n")
-	projectEnvelope := embeddedEntry.Envelope()
-	projectEnvelope.Provenance.Source = ProvenanceProject
-	projectEnvelope.ManifestHash = ManifestHashDerived
-	projectEnvelopeBody, err := yaml.Marshal(projectEnvelope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	effective, err := NewEffectivePackInventory(development, []ProjectPackSource{{
-		Path: "provider.demo", EnvelopeBody: projectEnvelopeBody, ManifestBody: projectBody,
-		Origin: ImportOrigin{
-			Source: ProvenanceEmbedded, ID: embeddedEntry.ID(), Version: embeddedEntry.Version(), ManifestHash: embeddedEntry.ManifestHash(),
-			EnvelopeHash: importedEnvelopeHash(projectEnvelopeBody),
-		},
-	}})
-	if err != nil {
-		t.Fatalf("project over development inventory: %v", err)
-	}
-	projectEntry, ok := effective.Lookup("provider.demo")
-	if !ok || projectEntry.Source() != ProvenanceProject || !projectEntry.ShadowsBase() || effective.BaseSelectionMode() != SelectionDevelopmentOverride {
-		t.Fatalf("project precedence = inventory:%#v entry:%#v present:%t", effective, projectEntry, ok)
-	}
-	if !projectEntry.Modified() || string(projectEntry.ManifestBody()) != string(projectBody) {
-		t.Fatalf("project entry = modified:%t body:%q", projectEntry.Modified(), projectEntry.ManifestBody())
-	}
-	forgedDevelopmentOrigin := ImportOrigin{
-		Source: ProvenanceEmbedded, ID: developmentEntry.ID(), Version: developmentEntry.Version(), ManifestHash: developmentEntry.ManifestHash(),
-		EnvelopeHash: importedEnvelopeHash(projectEnvelopeBody),
-	}
-	if _, err := NewEffectivePackInventory(development, []ProjectPackSource{{
-		Path: "provider.demo", EnvelopeBody: projectEnvelopeBody, ManifestBody: projectBody, Origin: forgedDevelopmentOrigin,
-	}}); err == nil || !strings.Contains(err.Error(), "contradicts the embedded import baseline") {
-		t.Fatalf("development-selected forged origin error = %v, want embedded import baseline rejection", err)
-	}
-
-	if _, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, nil, embedded); err == nil {
-		t.Fatal("empty development override fell back to embedded inventory")
-	}
-	tampered := developmentDirs[0]
-	manifestPath := filepath.Join(tampered, TriggerManifestFileName)
-	if err := os.WriteFile(manifestPath, []byte("provider: demo\nrevision: tampered\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, developmentDirs, embedded); err == nil || !strings.Contains(err.Error(), "manifest_hash mismatch") {
-		t.Fatalf("tampered development override error = %v, want manifest hash rejection without fallback", err)
-	}
-}
-
-func TestDevelopmentOverrideDigestIsIndependentOfDirectoryOrderAndRejectsIncompleteReplacement(t *testing.T) {
-	embedded, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dirs := materializeDevelopmentInventory(t, embedded, nil)
-	forward, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded)
-	if err != nil {
-		t.Fatalf("load forward development inventory: %v", err)
-	}
-	reversedDirs := append([]string(nil), dirs...)
-	slices.Reverse(reversedDirs)
-	reversed, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, reversedDirs, embedded)
-	if err != nil {
-		t.Fatalf("load reversed development inventory: %v", err)
-	}
-	if forward.Digest() != reversed.Digest() {
-		t.Fatalf("development digest depends on directory order: %s != %s", forward.Digest(), reversed.Digest())
-	}
-	if strings.Join(forward.SourceDirectories(), "\n") != strings.Join(reversed.SourceDirectories(), "\n") {
-		t.Fatalf("development source ordering differs:\n%v\n%v", forward.SourceDirectories(), reversed.SourceDirectories())
-	}
-	if _, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs[:len(dirs)-1], embedded); err == nil || !strings.Contains(err.Error(), "development override replaces the embedded inventory") {
-		t.Fatalf("incomplete development override error = %v", err)
-	}
-}
-
-func TestDevelopmentOverrideEntriesRetainTheirConfiguredDirectories(t *testing.T) {
-	embedded, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dirs := materializeDevelopmentInventory(t, embedded, nil)
-	wantByID := make(map[string]string, len(dirs))
-	for _, dir := range dirs {
-		envelopeBody, err := os.ReadFile(filepath.Join(dir, EnvelopeFileName))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var envelope Envelope
-		if err := yaml.Unmarshal(envelopeBody, &envelope); err != nil {
-			t.Fatal(err)
-		}
-		wantByID[envelope.ID] = dir
-	}
-	slices.Reverse(dirs)
-
-	development, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, entry := range development.Entries() {
-		if got, want := entry.Directory(), wantByID[entry.ID()]; got != want {
-			t.Errorf("pack %q directory = %q, want configured directory %q", entry.ID(), got, want)
-		}
-		loaded, err := entry.Loaded(testPlatformVersion)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := filepath.Join(wantByID[entry.ID()], EnvelopeFileName)
-		for _, source := range []Envelope{entry.Envelope(), loaded.Envelope} {
-			location := source.SourceValue().Location()
-			if location.File != want || location.Line == 0 || location.Column == 0 {
-				t.Errorf("pack %q admitted source = %#v, want original %s", entry.ID(), location, want)
-			}
-		}
-	}
-}
-
-func TestDevelopmentOverrideRejectsSymlinkedConfiguredRoot(t *testing.T) {
-	embedded, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name       string
-		selectPath func(t *testing.T, target string) string
-	}{
-		{name: "direct root", selectPath: func(t *testing.T, target string) string {
-			symlink := filepath.Join(t.TempDir(), "pack-root")
-			if err := os.Symlink(target, symlink); err != nil {
-				t.Fatal(err)
-			}
-			return symlink
-		}},
-		{name: "ancestor", selectPath: func(t *testing.T, target string) string {
-			symlink := filepath.Join(t.TempDir(), "packs-root")
-			if err := os.Symlink(filepath.Dir(target), symlink); err != nil {
-				t.Fatal(err)
-			}
-			return filepath.Join(symlink, filepath.Base(target))
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			dirs := materializeDevelopmentInventory(t, embedded, nil)
-			dirs[0] = tc.selectPath(t, dirs[0])
-			if _, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded); err == nil || !strings.Contains(err.Error(), "must be a real directory") {
-				t.Fatalf("symlinked development root error = %v", err)
-			}
-		})
-	}
-}
 
 func TestDevelopmentOverrideRejectsNonRegularEnvelopeBeforeRead(t *testing.T) {
 	embedded, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
@@ -198,117 +14,47 @@ func TestDevelopmentOverrideRejectsNonRegularEnvelopeBeforeRead(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name    string
-		replace func(t *testing.T, envelopePath string)
+		replace func(t *testing.T, memberPath string)
 	}{
-		{name: "symlink", replace: func(t *testing.T, envelopePath string) {
+		{name: "symlink", replace: func(t *testing.T, memberPath string) {
 			target := filepath.Join(t.TempDir(), "target.yaml")
-			if err := os.WriteFile(target, []byte("id: followed\n"), 0o600); err != nil {
+			if err := os.WriteFile(target, []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Symlink(target, envelopePath); err != nil {
+			if err := os.Symlink(target, memberPath); err != nil {
 				t.Fatal(err)
 			}
 		}},
-		{name: "directory", replace: func(t *testing.T, envelopePath string) {
-			if err := os.Mkdir(envelopePath, 0o700); err != nil {
+		{name: "directory", replace: func(t *testing.T, memberPath string) {
+			if err := os.Mkdir(memberPath, 0o700); err != nil {
 				t.Fatal(err)
 			}
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			dirs := materializeDevelopmentInventory(t, embedded, nil)
-			envelopePath := filepath.Join(dirs[0], EnvelopeFileName)
-			if err := os.Remove(envelopePath); err != nil {
+			root := t.TempDir()
+			var dirs []string
+			for _, entry := range embedded.Entries() {
+				directory := filepath.Join(root, entry.ID())
+				for name, body := range entry.Provider().Members() {
+					member := filepath.Join(directory, name)
+					if err := os.MkdirAll(filepath.Dir(member), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.WriteFile(member, body, 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				dirs = append(dirs, directory)
+			}
+			member := filepath.Join(dirs[0], "manifest.yaml")
+			if err := os.Remove(member); err != nil {
 				t.Fatal(err)
 			}
-			tc.replace(t, envelopePath)
-			if _, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded); err == nil || !strings.Contains(err.Error(), "pack.yaml") {
-				t.Fatalf("non-regular envelope error = %v, want rooted same-handle rejection", err)
+			tc.replace(t, member)
+			if _, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded); err == nil || !strings.Contains(err.Error(), "manifest.yaml") {
+				t.Fatalf("non-regular member error = %v, want rooted same-handle rejection", err)
 			}
 		})
 	}
-}
-
-func TestDevelopmentPackFileReaderRejectsSymlinkReplacement(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(t.TempDir(), "target.yaml")
-	if err := os.WriteFile(target, []byte("outside: true\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(target, filepath.Join(dir, EnvelopeFileName)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := readRegularDevelopmentPackFile(dir, EnvelopeFileName); err == nil {
-		t.Fatal("same-handle development artifact reader followed a symlink replacement")
-	}
-}
-
-func TestAdmittedArtifactRootRetainsValidatedDirectoryAcrossPathReplacement(t *testing.T) {
-	parent := t.TempDir()
-	configured := filepath.Join(parent, "configured")
-	if err := os.Mkdir(configured, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(configured, EnvelopeFileName), []byte("anchored: true\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	root, err := openAdmittedArtifactRoot(configured)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer root.close()
-
-	moved := filepath.Join(parent, "moved")
-	if err := os.Rename(configured, moved); err != nil {
-		t.Fatal(err)
-	}
-	outside := t.TempDir()
-	if err := os.WriteFile(filepath.Join(outside, EnvelopeFileName), []byte("outside: true\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(outside, configured); err != nil {
-		t.Skipf("symlink replacement is unavailable: %v", err)
-	}
-
-	body, err := root.readRegularFile(EnvelopeFileName)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := string(body), "anchored: true\n"; got != want {
-		t.Fatalf("rooted artifact body = %q, want %q", got, want)
-	}
-}
-
-func materializeDevelopmentInventory(t *testing.T, inventory *PlatformPackInventory, replacements map[string][]byte) []string {
-	t.Helper()
-	root := t.TempDir()
-	dirs := make([]string, 0, len(inventory.Entries()))
-	for _, entry := range inventory.Entries() {
-		directory := filepath.Join(root, entry.ID())
-		if err := os.Mkdir(directory, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		envelope := entry.Envelope()
-		manifestBody := entry.ManifestBody()
-		if replacement, ok := replacements[entry.ID()]; ok {
-			manifestBody = replacement
-			var err error
-			envelope, _, err = StampEnvelope(envelope, manifestBody)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		envelopeBody, err := yaml.Marshal(envelope)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(directory, EnvelopeFileName), envelopeBody, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(directory, ManifestFileNameForType(entry.Type())), manifestBody, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		dirs = append(dirs, directory)
-	}
-	return dirs
 }

@@ -10,7 +10,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	platformpacks "github.com/division-sh/swarm/packs"
 	"gopkg.in/yaml.v3"
@@ -189,11 +188,10 @@ func TestGeneratedBuiltinIdentityCannotBeDowngradedOrAliased(t *testing.T) {
 			name: "generation removed with repaired manifest hash",
 			mutate: func(t *testing.T, files fstest.MapFS) {
 				var manifest ConnectorManifest
-				mustYAMLUnmarshal(t, files["provider-connectors/github/connector.yaml"].Data, &manifest)
+				mustYAMLUnmarshal(t, files["providers/github/connector.yaml"].Data, &manifest)
 				manifest.Generation = nil
 				body := mustYAMLMarshal(t, manifest)
-				files["provider-connectors/github/connector.yaml"].Data = body
-				rewritePackManifestHash(t, files, "provider-connectors/github/pack.yaml", body)
+				files["providers/github/connector.yaml"].Data = body
 			},
 			want: "indexed as generated but generation evidence is missing",
 		},
@@ -203,7 +201,7 @@ func TestGeneratedBuiltinIdentityCannotBeDowngradedOrAliased(t *testing.T) {
 				var index GeneratedPackIndex
 				mustYAMLUnmarshal(t, files[generatedPackIndexFile].Data, &index)
 				files["catalog/generator-profiles/unknown.yaml"] = &fstest.MapFile{Data: append([]byte(nil), files["catalog/generator-profiles/acme.yaml"].Data...)}
-				index.Packs = append(index.Packs, GeneratedPackIndexEntry{ID: "provider.unknown.connector", Provider: "unknown", Profile: "catalog/generator-profiles/unknown.yaml", Kind: GeneratedPackKindBuiltin, Output: "provider-connectors/unknown"})
+				index.Packs = append(index.Packs, GeneratedPackIndexEntry{ID: "unknown", Provider: "unknown", Profile: "catalog/generator-profiles/unknown.yaml", Kind: GeneratedPackKindBuiltin, Output: "providers/unknown"})
 				files[generatedPackIndexFile].Data = mustYAMLMarshal(t, index)
 			},
 			want: "references unknown builtin pack id",
@@ -215,7 +213,7 @@ func TestGeneratedBuiltinIdentityCannotBeDowngradedOrAliased(t *testing.T) {
 				mustYAMLUnmarshal(t, files[generatedPackIndexFile].Data, &index)
 				duplicate := index.Packs[0]
 				duplicate.Profile = "catalog/generator-profiles/duplicate.yaml"
-				duplicate.Output = "provider-connectors/duplicate"
+				duplicate.Output = "providers/duplicate"
 				files[duplicate.Profile] = &fstest.MapFile{Data: append([]byte(nil), files[index.Packs[0].Profile].Data...)}
 				index.Packs = append(index.Packs, duplicate)
 				files[generatedPackIndexFile].Data = mustYAMLMarshal(t, index)
@@ -229,7 +227,7 @@ func TestGeneratedBuiltinIdentityCannotBeDowngradedOrAliased(t *testing.T) {
 				mustYAMLUnmarshal(t, files[generatedPackIndexFile].Data, &index)
 				duplicate := index.Packs[0]
 				duplicate.ID = "provider.alias.connector"
-				duplicate.Output = "provider-connectors/alias"
+				duplicate.Output = "providers/alias"
 				index.Packs = append(index.Packs, duplicate)
 				files[generatedPackIndexFile].Data = mustYAMLMarshal(t, index)
 			},
@@ -432,7 +430,7 @@ func TestGeneratedConformanceRejectsManagedCredentialHeaderDriftAfterFreshnessRe
 					t.Fatalf("ParseCatalogConformanceFixture: %v", err)
 				}
 				fixture.ProfileSHA256 = github.ProfileHash
-				fixture.ManifestSHA256 = github.PackEnvelope.ManifestHash
+				fixture.ManifestSHA256 = sha256String(github.ConnectorBody)
 				files[fixturePath].Data = mustYAMLMarshal(t, fixture)
 			}
 			if err := ValidateCatalogConformance(files, artifacts); err == nil || !strings.Contains(err.Error(), "expected resolved headers") {
@@ -613,22 +611,13 @@ func replaceMapFile(t *testing.T, files fstest.MapFS, name, old, replacement str
 	file.Data = bytes.Replace(file.Data, []byte(old), []byte(replacement), 1)
 }
 
-func rewritePackManifestHash(t *testing.T, files fstest.MapFS, name string, manifestBody []byte) {
-	t.Helper()
-	var envelope packs.Envelope
-	mustYAMLUnmarshal(t, files[name].Data, &envelope)
-	envelope.ManifestHash = sha256String(manifestBody)
-	files[name].Data = mustYAMLMarshal(t, envelope)
-}
-
 func mutateGeneratedGitHubManifest(t *testing.T, files fstest.MapFS, mutate func(*ConnectorManifest)) {
 	t.Helper()
 	var manifest ConnectorManifest
-	mustYAMLUnmarshal(t, files["provider-connectors/github/connector.yaml"].Data, &manifest)
+	mustYAMLUnmarshal(t, files["providers/github/connector.yaml"].Data, &manifest)
 	mutate(&manifest)
 	body := mustYAMLMarshal(t, manifest)
-	files["provider-connectors/github/connector.yaml"].Data = body
-	rewritePackManifestHash(t, files, "provider-connectors/github/pack.yaml", body)
+	files["providers/github/connector.yaml"].Data = body
 }
 
 func mustYAMLUnmarshal(t *testing.T, body []byte, target any) {
