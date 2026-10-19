@@ -36,7 +36,7 @@ func TestExecutableEventCommitRequiresCurrentPublicationClaimOnSQLiteAndPostgres
 			fixture := backend.open(t)
 			selected := fixture.store.(pipelineObligationParityStore)
 			owner := selected.PipelineObligations()
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
