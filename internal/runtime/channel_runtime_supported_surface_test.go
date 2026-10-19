@@ -208,7 +208,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			}
 			privateToolID := privateIdentity.ToolID()
 			activationOwner := testAdmittedChannelActivationOwner(t, credentialStore, binding)
-			coordinator = newExternalRuntimeTestPipelineCoordinator(t, bus, eventStore, runtimepipeline.PipelineCoordinatorOptions{
+			coordinator = newExternalRuntimeTestActivityCoordinator(t, bus, eventStore, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              telegramConnectorSupportedSurfaceModule{source: source},
 				Persistence:         workflowPersistence,
@@ -350,7 +350,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				t.Fatal("replacement plan reused the prior private target generation")
 			}
 			replacementOwner := testAdmittedChannelActivationOwner(t, credentialStore, replacementBinding)
-			mismatchedCoordinator := newExternalRuntimeTestPipelineCoordinator(t, bus, eventStore, runtimepipeline.PipelineCoordinatorOptions{
+			mismatchedCoordinator := newExternalRuntimeTestActivityCoordinator(t, bus, eventStore, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              telegramConnectorSupportedSurfaceModule{source: source},
 				Persistence:         workflowPersistence,
@@ -373,7 +373,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			if calls.Load() != 2 {
 				t.Fatalf("mismatched plan generation reached provider: calls=%d", calls.Load())
 			}
-			reloadedCoordinator := newExternalRuntimeTestPipelineCoordinator(t, bus, eventStore, runtimepipeline.PipelineCoordinatorOptions{
+			reloadedCoordinator := newExternalRuntimeTestActivityCoordinator(t, bus, eventStore, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              telegramConnectorSupportedSurfaceModule{source: source},
 				Persistence:         workflowPersistence,
@@ -398,7 +398,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			}
 
 			fencedOwner := testAdmittedChannelActivationOwner(t, credentialStore, binding)
-			fencedCoordinator := newExternalRuntimeTestPipelineCoordinator(t, bus, eventStore, runtimepipeline.PipelineCoordinatorOptions{
+			fencedCoordinator := newExternalRuntimeTestActivityCoordinator(t, bus, eventStore, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              telegramConnectorSupportedSurfaceModule{source: source},
 				Persistence:         workflowPersistence,
