@@ -187,18 +187,24 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}
 		return result, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, forkOperation, err)
 	}
-	activation, err := ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-		ForkOperation:         forkOperation,
-		ExecutedEventCount:    len(published),
-		DataPins:              materialization.DataPins,
-		ExecutionSource:       loadedSource.Source,
-		ForkRunID:             materialization.ForkRunID,
-		AllowSourceFreeze:     req.AllowSourceFreeze,
-		AllowedSourceEventIDs: sourceEventIDs,
-		FrontierAdmission:     frontier,
-		RouteTopology:         routeTopology,
-		RecipientPlanning:     *model.RecipientPlanning,
-	})
+	process, err := prepared.agentRuntime.Options.ProcessCapability.Evidence()
+	var activation runfork.RunForkActivation
+	if err == nil {
+		activation, err = ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
+			OriginalRootAdmission: prepared.originalSource.RootedSource.Admission(),
+			Process:               process.LeaseStamp(),
+			ForkOperation:         forkOperation,
+			ExecutedEventCount:    len(published),
+			DataPins:              materialization.DataPins,
+			ExecutionSource:       loadedSource.Source,
+			ForkRunID:             materialization.ForkRunID,
+			AllowSourceFreeze:     req.AllowSourceFreeze,
+			AllowedSourceEventIDs: sourceEventIDs,
+			FrontierAdmission:     frontier,
+			RouteTopology:         routeTopology,
+			RecipientPlanning:     *model.RecipientPlanning,
+		})
+	}
 	result.Activation = activation
 	closeErr := container.Close(ctx)
 	err = errors.Join(err, closeErr)

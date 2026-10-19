@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -186,6 +187,10 @@ func (s *RunForkSQLiteOwner) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(
 func (s *RunForkSQLiteOwner) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (result runfork.RunForkActivation, err error) {
 	if s == nil || s.backend == nil {
 		return runfork.RunForkActivation{}, fmt.Errorf("sqlite store is required")
+	}
+	if !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkSelectedActivate, s) {
+		err := runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkSelectedActivateOperation(s, req, &result))
+		return result, err
 	}
 	return activateRunForkForSelectedContractExecution(ctx, req, sqliteRunForkSelectedContractActivationPort(s))
 }

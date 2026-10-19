@@ -563,6 +563,11 @@ func (s *RunForkPostgresOwner) ActivateRunForkForSelectedContractExecution(ctx c
 	if s == nil || s.backend == nil {
 		return runfork.RunForkActivation{}, fmt.Errorf("postgres store is required")
 	}
+	if !runtimeownership.PreparedOperationEntered(ctx, runtimeownership.PreparedForkSelectedActivate, s) {
+		var result runfork.RunForkActivation
+		err := runPreparedForkOperation(ctx, s.processOperations, runtimeownership.PreparedForkSelectedActivateOperation(s, req, &result))
+		return result, err
+	}
 	return activateRunForkForSelectedContractExecution(ctx, req, postgresRunForkSelectedContractActivationPort(s))
 }
 

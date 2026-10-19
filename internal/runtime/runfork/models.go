@@ -16,6 +16,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -59,6 +60,8 @@ const (
 )
 
 type RunForkActivateRequest struct {
+	OriginalRootAdmission             sourceartifact.RootAdmission      `json:"-"`
+	Process                           processbinding.LeaseStamp         `json:"-"`
 	OriginalLoopCarriage              semanticview.OriginalLoopCarriage `json:"-"`
 	ForkRunID                         string
 	AllowSourceFreeze                 bool
@@ -1174,6 +1177,8 @@ type RunForkSelectedContractAgentTopology struct {
 }
 
 type RunForkSelectedContractExecutionActivateRequest struct {
+	OriginalRootAdmission sourceartifact.RootAdmission
+	Process               processbinding.LeaseStamp
 	ForkOperation         *ForkOperationRequest
 	ExecutedEventCount    int
 	DataPins              []durabledata.Pin

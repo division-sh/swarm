@@ -9,13 +9,18 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
+	storestartup "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	"github.com/google/uuid"
 )
 
@@ -33,7 +38,7 @@ type runForkSelectedContractActivationPort struct {
 	ensureState           func(context.Context, *sql.Tx, string, []string, semanticview.Source) error
 	transition            func(context.Context, *mutationprotocol.Attempt, runtimerunlifecycle.ActiveTransitionRequest) error
 	diverge               func(context.Context, *sql.Tx, runfork.RunForkSelectedContractBranchDivergence) error
-	freeze                func(context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool, *privaterunlifecycle.ChannelCardChanges) error
+	freeze                func(context.Context, context.Context, *sql.Tx, *mutationprotocol.Attempt, runForkActivationLineage, time.Time, bool, *privaterunlifecycle.ChannelCardChanges) error
 	publishChannelChanges func(bool, bool) error
 	now                   func() time.Time
 }
@@ -59,6 +64,9 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 	committed, err := port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) error {
 		changes = privaterunlifecycle.ChannelCardChanges{}
 		divergence = nil
+		if err := requireForkActivationProcessTx(txctx, tx, req.Process, !port.postgres); err != nil {
+			return err
+		}
 		lineage, err := port.loadLineage(txctx, tx, forkRunID)
 		if err != nil {
 			return err
@@ -150,6 +158,19 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		if err := port.ensureState(txctx, tx, lineage.ForkRunID, req.AllowedSourceEventIDs, req.ExecutionSource); err != nil {
 			return addRunForkActivationBlocker(&result, err)
 		}
+		if req.ForkOperation != nil {
+			operation, err := resolvedForkOperationForActivationTx(txctx, tx, *req.ForkOperation, lineage, port.postgres)
+			if err != nil {
+				return err
+			}
+			if operation.AllowSourceFreeze != req.AllowSourceFreeze {
+				return fmt.Errorf("activation consent differs from immutable fork operation")
+			}
+		}
+		sourceCtx, err := admitSelectedForkActivationRootsTx(txctx, tx, lineage, req.OriginalRootAdmission, port.postgres)
+		if err != nil {
+			return err
+		}
 
 		now := port.now().UTC()
 		if len(sourceAdvancedFacts) > 0 {
@@ -185,7 +206,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			}
 			return nil
 		}
-		if err := port.freeze(txctx, tx, attempt, lineage, now, req.AllowSourceFreeze, &changes); err != nil {
+		if err := port.freeze(txctx, sourceCtx, tx, attempt, lineage, now, req.AllowSourceFreeze, &changes); err != nil {
 			return err
 		}
 		return completeSelectedForkOperationAtActivation(txctx, tx, req, lineage, runfork.RunForkSourceFrozenStatus, true, port.postgres)
@@ -207,6 +228,45 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 		err = errors.Join(err, port.publishChannelChanges(committed, changes.Changed))
 	}
 	return result, err
+}
+
+func requireForkActivationProcessTx(ctx context.Context, tx *sql.Tx, process processbinding.LeaseStamp, sqlite bool) error {
+	current, err := storestartup.ProcessAuthorityCurrent(ctx, tx, process, sqlite, true)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return runtimeownership.ErrProcessNotCurrent
+	}
+	return nil
+}
+
+// Only the admitted activation coordinator calls this before delegating A's
+// complete freeze subtree; possessing an original root alone is not admission.
+func admitSelectedForkActivationRootsTx(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage, original sourceartifact.RootAdmission, postgres bool) (context.Context, error) {
+	if err := original.Validate(); err != nil {
+		return nil, err
+	}
+	target, supplied, err := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !supplied || target.Reference() != lineage.ForkRootReference || original.Reference() != lineage.SourceRootReference {
+		return nil, fmt.Errorf("activation requires the exact original and fork roots")
+	}
+	if postgres {
+		err = requirePostgresRunActive(ctx, tx, lineage.ForkRunID)
+	} else {
+		err = requireSQLiteRunActive(ctx, tx, lineage.ForkRunID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	fact, err := runtimecorrelation.NewSourceArtifactFact(original.BundleHash())
+	if err != nil {
+		return nil, err
+	}
+	return runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, fact), original), nil
 }
 
 func completeSelectedForkOperationAtActivation(ctx context.Context, tx *sql.Tx, req runfork.RunForkSelectedContractExecutionActivateRequest, lineage runForkActivationLineage, sourceStatus string, frozen, postgres bool) error {

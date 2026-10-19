@@ -20665,6 +20665,15 @@ run_model:
         activates the paused child, and records both lifecycle author activities. Ordinary activation and selected-contract
         unadvanced activation consume this owner. Generic terminal mutation rejects forked. Rollback leaves every coupled
         source, child, decision, pointer, and activity fact unchanged.
+      selected_write_authority: >
+        The admitted fork-activation operation, together with its explicit current source-freeze consent and the
+        current native process generation admitted in that same transaction attempt, authorizes the original run's
+        complete freeze subtree. Exact original-root admission identifies that source but does not grant writes by
+        itself. The existing fork coordinator delegates source lifecycle, card, draft, gate and activity mutations to
+        canonical RunLifecycle under the original source's exact admission. Fork activation, result and cleanup retain
+        the selected target's admission. Neither the selected root nor its context nor a standing cross-run grant
+        authorizes source writes. A retained explicit activation has its own consent; a supplied permanent operation's
+        immutable consent must agree with that activation and must not be upgraded or discarded on mismatch.
       preserved_lineage: >
         Freeze preserves source events, deliveries, receipts, dead letters, timers, sessions, turns, audits, reply contexts,
         state history, decision/effect/directive evidence, and fork facts as immutable history. It does not dead-letter,

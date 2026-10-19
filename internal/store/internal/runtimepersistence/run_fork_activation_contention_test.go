@@ -479,6 +479,11 @@ func newConstructedGateFixtureWithOrigin(t *testing.T, backend eventRecordContra
 	runID := uuid.NewString()
 	f := forkContentionFixture{snapshotOwnershipFixture: snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, runID: runID, entityID: runID, eventID: uuid.NewString()}, gateOwned: true, source: semanticview.Wrap(bundle)}
 	f.ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), f.runID)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ctx = runtimecorrelation.WithRootAdmission(f.ctx, rooted.Admission())
 	f.ctx, err = eventreceiver.NormalExecution().Bind(f.ctx, executionmode.Live)
 	if err != nil {
 		t.Fatal(err)
@@ -678,7 +683,12 @@ func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selecte
 	if err != nil {
 		t.Fatal(err)
 	}
-	return staged, runfork.RunForkSelectedContractExecutionActivateRequest{ForkOperation: request.ForkOperation, ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, DataPins: staged.DataPins, ExecutionSource: loaded.Source, AllowedSourceEventIDs: ids,
+	value, _ := storeTestWorkFixtures.Load(t)
+	process, err := selectedMaterializationProcessForTest(t, value.(*storeTestWorkFixture), f.store).Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return staged, runfork.RunForkSelectedContractExecutionActivateRequest{OriginalRootAdmission: rooted.Admission(), Process: process.LeaseStamp(), ForkOperation: request.ForkOperation, ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, DataPins: staged.DataPins, ExecutionSource: loaded.Source, AllowedSourceEventIDs: ids,
 		FrontierAdmission: request.FrontierAdmission, RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning}
 }
 
