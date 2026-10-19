@@ -15,6 +15,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -206,10 +207,10 @@ func publicIngressRegistrationRuntime(t *testing.T, mode string) (*Runtime, *run
 		})
 	}
 	projection, err := packadmission.FromBundle(bundle)
-	if err != nil || len(projection.ChannelPlans) != 1 {
+	if err != nil {
 		t.Fatalf("exact channel plan=%+v err=%v", projection, err)
 	}
-	plan := projection.ChannelPlans[0]
+	plan := packfixture.ChannelPlanByID(t, projection.ChannelPlans, "provider.telegram.hitl_channel")
 	registration, ok := plan.Registration()
 	if !ok {
 		t.Fatal("missing compiled registration")
