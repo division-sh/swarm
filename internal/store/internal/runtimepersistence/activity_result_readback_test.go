@@ -24,22 +24,25 @@ func TestActivityResultPublicationEvidenceBothStores(t *testing.T) {
 			ctx = testAuthorActivityContext()
 			sibling := uuid.NewString()
 			requireRunningRunForTest(t, ctx, selected, sibling, time.Now().UTC())
-			journal := selected.(pipeline.ActivityAttemptJournal)
+			journal := captureActivityFixtureJournal(t, ctx, selected)
 			fault := errors.New("post-acknowledgment cleanup")
 			for _, invalid := range []any{nil, db, (*PostgresStore)(nil), (*SQLiteRuntimeStore)(nil)} {
 				if got, err := ObserveActivityResultPublicationStorageForTest(ctx, invalid); err == nil || got != (ActivityResultPublicationStorage{}) {
 					t.Fatalf("evidence accepted raw/nil authority %T", invalid)
 				}
-				if p, count, err := ActivityJournalCleanupPersistenceFaultForTest(invalid, fault); err == nil || p.Configured() || count != nil {
+				if p, count, err := ActivityJournalCleanupBoundFaultForTest(invalid, journal, fault); err == nil || p != nil || count != nil {
 					t.Fatalf("cleanup fault accepted raw/nil authority %T", invalid)
 				}
 			}
-			if p, count, err := ActivityJournalCleanupPersistenceFaultForTest(selected, nil); err == nil || p.Configured() || count != nil {
+			if p, count, err := ActivityJournalCleanupBoundFaultForTest(selected, journal, nil); err == nil || p != nil || count != nil {
 				t.Fatal("absent cleanup fault accepted")
+			}
+			if p, count, err := ActivityJournalCleanupBoundFaultForTest(selected, nil, fault); err == nil || p != nil || count != nil {
+				t.Fatal("absent original journal accepted")
 			}
 			start := pipeline.ActivityAttemptRecord{
 				RequestEventID: uuid.NewString(), RunID: sibling, ExecutionMode: executionmode.Live,
-				ActivityID: "publication-evidence", Tool: "provider_write", EffectClass: "non_idempotent_write",
+				ActivityID: "publication-evidence", Tool: "provider_write",
 				Attempt: 1, SuccessEvent: "fixture.succeeded", FailureEvent: "fixture.failed", InputHash: "exact",
 			}
 			started, inserted, err := journal.StartActivityAttempt(ctx, start)
@@ -53,6 +56,7 @@ func TestActivityResultPublicationEvidenceBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			journalWithFault.original = journal
 			// The exact selected journal owns the actual commit verdict. The
 			// wrapper can add an error only after that acknowledgment.
 			canceled, cancel := context.WithCancel(ctx)

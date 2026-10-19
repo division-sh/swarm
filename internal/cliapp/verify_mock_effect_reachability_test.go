@@ -69,7 +69,6 @@ provider.send:
   category: provider_connector
   description: send a provider message
   handler_type: http
-  effect_class: non_idempotent_write
   credentials:
     - provider_credential
   response_success:

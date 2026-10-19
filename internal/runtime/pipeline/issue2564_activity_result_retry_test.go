@@ -377,7 +377,6 @@ consumer:
 `, activity, success, success),
 		"tools.yaml": fmt.Sprintf(`source_scrape:
   handler_type: http
-  effect_class: non_idempotent_write
   http:
     method: POST
     url: %q

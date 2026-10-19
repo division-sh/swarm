@@ -10,7 +10,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -173,11 +172,9 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 	if err != nil {
 		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "channel_activity_plan_generation_invalid", "channel-runtime", "build_activity", map[string]any{"tool": strings.TrimSpace(toolID)}, err)
 	}
-	effectClass, err := operation.binding.OperationEffectClass(operation.operation)
-	if err != nil {
+	if _, err := operation.binding.OperationEffectClass(operation.operation); err != nil {
 		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "channel_operation_plan_invalid", "channel-runtime", "build_activity", map[string]any{"tool": strings.TrimSpace(toolID)}, err)
 	}
-	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
 	routingSource, err := e.agentExecutionRoutingSource(ctx, actor)
 	if err != nil {
 		return nil, fmt.Errorf("admit channel activity producer source: %w", err)
@@ -191,25 +188,23 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 		BundleHash:                  bundleHash,
 		WorkflowVersion:             workflowVersion,
 		Input:                       semanticInput,
-		EffectClass:                 effectClass,
-		SuccessEvent:                strings.TrimSpace(toolID) + ".succeeded",
-		FailureEvent:                strings.TrimSpace(toolID) + ".failed",
-		RetryMaxAttempts:            defaults.MaxAttempts,
-		RetryBackoff:                defaults.Backoff,
-		ForkPolicy:                  runtimecontracts.ActivityForkPolicyForEffectClass(effectClass),
-		EntityID:                    identity.NormalizeEntityID(entityID),
-		Owner:                       activityidentity.MustAgentOwner(actor.ID),
-		ExecutionFlowID:             identity.NormalizeFlowID(flowID),
-		FlowInstance:                flowInstance,
-		HandlerEventKey:             strings.TrimSpace(toolID),
-		SourceEventID:               inbound.ID(),
-		SourceRunID:                 inbound.RunID(),
-		SourceTaskID:                inbound.TaskID(),
-		ParentEventID:               inbound.ID(),
-		ChainDepth:                  inbound.ChainDepth(),
-		Attempt:                     1,
-		ExecutionMode:               actor.ExecutionMode,
-		RoutingSource:               routingSource,
+
+		SuccessEvent: strings.TrimSpace(toolID) + ".succeeded",
+		FailureEvent: strings.TrimSpace(toolID) + ".failed",
+
+		EntityID:        identity.NormalizeEntityID(entityID),
+		Owner:           activityidentity.MustAgentOwner(actor.ID),
+		ExecutionFlowID: identity.NormalizeFlowID(flowID),
+		FlowInstance:    flowInstance,
+		HandlerEventKey: strings.TrimSpace(toolID),
+		SourceEventID:   inbound.ID(),
+		SourceRunID:     inbound.RunID(),
+		SourceTaskID:    inbound.TaskID(),
+		ParentEventID:   inbound.ID(),
+		ChainDepth:      inbound.ChainDepth(),
+
+		ExecutionMode: actor.ExecutionMode,
+		RoutingSource: routingSource,
 	}.Normalized()
 	record, err := e.activityExecutor.ExecuteDurableActivity(ctx, intent)
 	if err != nil {
