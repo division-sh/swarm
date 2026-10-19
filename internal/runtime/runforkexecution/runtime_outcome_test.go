@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
@@ -521,18 +522,35 @@ func TestSelectedForkActivationGateRetainsDirectActivationOutcome(t *testing.T) 
 		t.Run(name, func(t *testing.T) {
 			forkID := uuid.NewString()
 			binding := testSelectedContractBinding(forkID)
+			repo, targetRoot := runForkExecutionRepoRoot(t), t.TempDir()
+			writeSelectedContractFixtureFile(t, filepath.Join(targetRoot, "schema.yaml"), "stages: []\n")
+			var sources [2]LoadedSelectedContractSource
+			for i, root := range []string{targetRoot, canonicalrouting.CopyForkFanOutCarrier(t, false, false)} {
+				loaded, err := (admittedFixtureSelectedContractSourceLoader{
+					RepoRoot: repo, SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
+				}).LoadRunForkSelectedContractSource(context.Background(), binding.ContractSelection)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sources[i] = loaded
+			}
+			binding.TargetRootReference = sources[0].RootedSource.Admission().Reference()
+			availability := testSelectedContractBundleAvailability(forkID)
+			availability.BundleHash = sources[0].SourceArtifactFact.BundleHash()
+			availability.RootReference = binding.TargetRootReference
+			availability.RootAdmissionPresent = true
 			cause := errors.New("acknowledged activation cleanup")
 			activation := runfork.RunForkActivation{SourceRunID: binding.SourceRunID, ForkRunID: forkID, Activated: true, SourceFrozen: true}
 			store := &selectedActivationOutcomeStore{fakeSelectedContractActivationStore: fakeSelectedContractActivationStore{
 				originalRunID: activation.SourceRunID,
-				binding:       binding, bindingOK: selected, bundleAvailability: testSelectedContractBundleAvailability(forkID),
+				binding:       binding, bindingOK: selected, bundleAvailability: availability,
 				plan: testSelectedContractStateOnlyPlan(binding), activation: activation, activationErr: cause,
 			}}
 			owner := selectedContractGateOwnerForTest(t)
 			result, err := activateLiveSelectedContractRunFork(runForkTestContext(t), SelectedContractActivationGateRequest{
 				ForkRunID: forkID, Store: store, ExecutionOwner: owner,
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: owner.ports.contexts.capability},
-				SourceLoader: &fakeSelectedContractSourceLoader{loaded: testLoadedSelectedSource(binding.ContractSelection), original: originalActivationSourceFixture(t)},
+				SourceLoader: &fakeSelectedContractSourceLoader{loaded: sources[0], original: &sources[1]},
 			})
 			if !errors.Is(err, cause) || store.calls != 1 || !reflect.DeepEqual(result.RunForkActivation, activation) {
 				t.Fatalf("activation result=%#v err=%v calls=%d", result, err, store.calls)

@@ -987,7 +987,17 @@ func TestLoadRunForkSelectedContractSourceRejectsExpectedIdentityMismatch(t *tes
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cleaned := false
-			loaded := testLoadedSelectedSource(selection)
+			repo, root := runForkExecutionRepoRoot(t), t.TempDir()
+			writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+			loaded, loadErr := (admittedFixtureSelectedContractSourceLoader{
+				RepoRoot: repo, SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
+			}).LoadRunForkSelectedContractSource(context.Background(), selection)
+			if loadErr != nil {
+				t.Fatal(loadErr)
+			}
+			if loaded.SourceArtifactFact.BundleHash() == tc.expectedFact.BundleHash() {
+				t.Fatal("captured source and foreign expected fact must differ")
+			}
 			loaded.Cleanup = func() error {
 				cleaned = true
 				return nil
