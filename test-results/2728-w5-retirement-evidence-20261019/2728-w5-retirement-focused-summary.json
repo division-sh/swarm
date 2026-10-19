@@ -1,0 +1,27 @@
+{
+  "head": "62ad7f67d631d12068f14657c790daba91b8a2fc",
+  "passed_roots": 12,
+  "roots": [
+    "TestW5AgentsVerifyAndDescribeSupportedSurface",
+    "TestDescribeProofCorpusAdmission",
+    "TestReadProofFactoringCompiledDescribe",
+    "TestW5ToolsVerifyAndDescribeSupportedSurface",
+    "TestW5ToolSchemaNestedDiagnosticsAndAliasCoordinates",
+    "TestW5ToolFieldPresenceMatrix",
+    "TestW5ToolNestedClosedBranchesAndRetirement",
+    "TestW5ToolLiteralHTTPPresenceAndSerialization",
+    "TestW5ToolAdmissionDiskCatalogRetainedParity",
+    "TestW5ModuleScopedResolutionAndSerialization",
+    "TestW5ToolsGoverningSpecParses",
+    "TestW5ModuleProgrammaticAdmissionRetainsCanonicalSchema"
+  ],
+  "failures": [],
+  "skips": [],
+  "w5_negative_children": [
+    "TestW5ToolsVerifyAndDescribeSupportedSurface/input_schema:_{type:_string,_minLength:_1.5}",
+    "TestW5ToolsVerifyAndDescribeSupportedSurface/<<:_{parameters:_null}",
+    "TestW5ToolsVerifyAndDescribeSupportedSurface/handler_type:_wasm",
+    "TestW5ToolsVerifyAndDescribeSupportedSurface/input_schema:_{type:_object}"
+  ],
+  "describe_cells": 45
+}

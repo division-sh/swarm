@@ -1,0 +1,8 @@
+{"Time":"2026-10-19T07:16:53.179642647Z","Action":"start","Package":"github.com/division-sh/swarm/internal/runtime/manager"}
+{"Time":"2026-10-19T07:16:53.186324742Z","Action":"run","Package":"github.com/division-sh/swarm/internal/runtime/manager","Test":"TestDynamicFlowRuntimeReadinessProductionConsumersStatic"}
+{"Time":"2026-10-19T07:16:53.186373052Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/manager","Test":"TestDynamicFlowRuntimeReadinessProductionConsumersStatic","Output":"=== RUN   TestDynamicFlowRuntimeReadinessProductionConsumersStatic\n"}
+{"Time":"2026-10-19T07:16:53.213523703Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/manager","Test":"TestDynamicFlowRuntimeReadinessProductionConsumersStatic","Output":"--- PASS: TestDynamicFlowRuntimeReadinessProductionConsumersStatic (0.03s)\n"}
+{"Time":"2026-10-19T07:16:53.213560753Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/runtime/manager","Test":"TestDynamicFlowRuntimeReadinessProductionConsumersStatic","Elapsed":0.03}
+{"Time":"2026-10-19T07:16:53.213573534Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/manager","Output":"PASS\n"}
+{"Time":"2026-10-19T07:16:53.215519194Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/manager","Output":"ok  \tgithub.com/division-sh/swarm/internal/runtime/manager\t0.036s\n"}
+{"Time":"2026-10-19T07:16:53.215555164Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/runtime/manager","Elapsed":0.036}

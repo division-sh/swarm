@@ -1,0 +1,30 @@
+preflight format: passed=true 1.725s
+api spec valid: methods=71 schemas=252 errors=69 mutating=30 subscriptions=5
+preflight openrpc: passed=true 0.273s
+preflight github.com/division-sh/swarm/internal/runtime/core/worklifetime: passed=true 0.737s
+preflight github.com/division-sh/swarm/internal/runtime/effects: passed=true 0.719s
+preflight github.com/division-sh/swarm/internal/runtime/deliverycontinuation: passed=true 1.367s
+preflight github.com/division-sh/swarm/internal/runtime/manager: passed=true 15.495s
+preflight github.com/division-sh/swarm/internal/testutil: passed=true 3.516s
+preflight github.com/division-sh/swarm/scripts/rewrite-stages-2566: passed=true 2.742s
+preflight github.com/division-sh/swarm/internal/store/internal/backend/authoractivity: passed=true 2.486s
+preflight github.com/division-sh/swarm/cmd/swarm-test-timing: passed=true 1.454s
+preflight github.com/division-sh/swarm/internal/testtiming: passed=true 1.023s
+preflight complexity: passed=true 11.008s
+preflight github.com/division-sh/swarm/cmd/swarm-test: passed=true 19.066s
+preflight github.com/division-sh/swarm/internal/cliapp: passed=true 3.775s
+preflight github.com/division-sh/swarm/internal/releasee2e: passed=true 2.497s
+preflight github.com/division-sh/swarm/internal/runtime: passed=true 24.407s
+preflight github.com/division-sh/swarm/internal/runtime/conformance: passed=true 236.648s
+preflight github.com/division-sh/swarm/internal/runtime/runforkexecution: passed=true 7.292s
+preflight github.com/division-sh/swarm/internal/runtime/runforkreadiness: passed=true 5.686s
+preflight github.com/division-sh/swarm/internal/serveapp: passed=true 20.005s
+preflight github.com/division-sh/swarm/internal/store: passed=true 148.833s
+preflight github.com/division-sh/swarm/internal/store/internal/runtimepersistence: passed=true 45.473s
+preflight github.com/division-sh/swarm/internal/testplanning: passed=true 9.099s
+preflight github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations: passed=true 5.883s
+preflight vet: passed=true 61.228s
+preflight soft target exceeded: review/re-rank membership; no test deadline or selector changed
+preflight: complete=true end-to-end=638.295s queue=0.000s setup/validation=7.069s execution=631.224s cleanup=0.002s; source=62ad7f67d631d12068f14657c790daba91b8a2fc go=go1.26.8 selection=23608ad864b3638495f7196a7734f0acbd0b84cc557f76a833721334fb7e2808 receipts=test-results/preflight/20261019T071628.090880067-369aa522-28a6-4f37-807f-f8920bd0867f
+preflight comparison: debt-required=true origin/master=a1b901ebb3ca387084c8e7a1c7e176d7a90aebb2 native-source=a1b901ebb3ca387084c8e7a1c7e176d7a90aebb2 diff=ae419b9a388533ed71021717e6a845dd8eba8fe3b2b17a7315ea8814b310b918
+preflight status: context=preflight/local repository=division-sh/swarm head=62ad7f67d631d12068f14657c790daba91b8a2fc attempt=369aa522-28a6-4f37-807f-f8920bd0867f receipt=20261019T071628.090880067-369aa522-28a6-4f37-807f-f8920bd0867f id=56667208562 publication=1.105s

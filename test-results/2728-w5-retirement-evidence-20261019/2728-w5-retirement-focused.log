@@ -1,0 +1,522 @@
+Precompile outside test slot: environment=0.003s build=26.657s cleanup=0.000s total=26.660s
+Test capacity is busy.
+Queue position: 6
+Active slots: 3/3
+Estimated start: 44s
+Estimated completion: unknown
+Waiting for a test slot... updates every 30s
+Test capacity is busy.
+Queue position: 2
+Active slots: 3/3
+Estimated start: 13s
+Estimated completion: unknown
+Waiting for a test slot... updates every 30s
+Test slot acquired after 45s. Starting go test ./internal/cliapp ./internal/runtime/contracts -run ^(TestW5ToolsVerifyAndDescribeSupportedSurface|TestW5AgentsVerifyAndDescribeSupportedSurface|TestReadProofFactoringCompiledDescribe|TestDescribeProofCorpusAdmission|TestW5ToolFieldPresenceMatrix|TestW5ToolNestedClosedBranchesAndRetirement|TestW5ToolLiteralHTTPPresenceAndSerialization|TestW5ToolAdmissionDiskCatalogRetainedParity|TestW5ModuleScopedResolutionAndSerialization|TestW5ToolsGoverningSpecParses|TestW5ModuleProgrammaticAdmissionRetainsCanonicalSchema|TestW5ToolSchemaNestedDiagnosticsAndAliasCoordinates)$ -count=1 -v
+=== RUN   TestW5AgentsVerifyAndDescribeSupportedSurface
+=== RUN   TestW5AgentsVerifyAndDescribeSupportedSurface/memory:_false
+=== RUN   TestW5AgentsVerifyAndDescribeSupportedSurface/entity_writes:_{Item:_{save:_null}}
+=== RUN   TestW5AgentsVerifyAndDescribeSupportedSurface/native_tools:_{unknown:_null}
+=== RUN   TestW5AgentsVerifyAndDescribeSupportedSurface/tools_tier2:_[]
+=== RUN   TestW5AgentsVerifyAndDescribeSupportedSurface/max_turns_per_task:_1.5
+--- PASS: TestW5AgentsVerifyAndDescribeSupportedSurface (0.29s)
+    --- PASS: TestW5AgentsVerifyAndDescribeSupportedSurface/memory:_false (0.01s)
+    --- PASS: TestW5AgentsVerifyAndDescribeSupportedSurface/entity_writes:_{Item:_{save:_null}} (0.01s)
+    --- PASS: TestW5AgentsVerifyAndDescribeSupportedSurface/native_tools:_{unknown:_null} (0.01s)
+    --- PASS: TestW5AgentsVerifyAndDescribeSupportedSurface/tools_tier2:_[] (0.01s)
+    --- PASS: TestW5AgentsVerifyAndDescribeSupportedSurface/max_turns_per_task:_1.5 (0.01s)
+=== RUN   TestDescribeProofCorpusAdmission
+=== RUN   TestDescribeProofCorpusAdmission/none
+=== RUN   TestDescribeProofCorpusAdmission/missing
+=== RUN   TestDescribeProofCorpusAdmission/extra
+=== RUN   TestDescribeProofCorpusAdmission/extra_directory
+=== RUN   TestDescribeProofCorpusAdmission/symlink
+--- PASS: TestDescribeProofCorpusAdmission (0.01s)
+    --- PASS: TestDescribeProofCorpusAdmission/none (0.00s)
+    --- PASS: TestDescribeProofCorpusAdmission/missing (0.00s)
+    --- PASS: TestDescribeProofCorpusAdmission/extra (0.00s)
+    --- PASS: TestDescribeProofCorpusAdmission/extra_directory (0.00s)
+    --- PASS: TestDescribeProofCorpusAdmission/symlink (0.00s)
+=== RUN   TestReadProofFactoringCompiledDescribe
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/describe-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/describe-text
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/describe-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/describe-json
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/describe-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/describe-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/describe-no-color
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/describe-no-color
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-text
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-json
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/routes-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/routes-text
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/routes-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/routes-json
+=== RUN   TestReadProofFactoringCompiledDescribe/select-or-create/routes-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/select-or-create/routes-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/describe-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/describe-text
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/describe-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/describe-json
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/describe-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/describe-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/describe-no-color
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/describe-no-color
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-text
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-json
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/routes-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/routes-text
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/routes-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/routes-json
+=== RUN   TestReadProofFactoringCompiledDescribe/create-minted-key/routes-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/create-minted-key/routes-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/describe-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/describe-text
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/describe-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/describe-json
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/describe-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/describe-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/describe-no-color
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/describe-no-color
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-text
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-json
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/routes-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/routes-text
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/routes-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/routes-json
+=== RUN   TestReadProofFactoringCompiledDescribe/telegram-agent/routes-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/telegram-agent/routes-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/describe-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/describe-text
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/describe-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/describe-json
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/describe-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/describe-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/describe-no-color
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/describe-no-color
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/describe-graph-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/describe-graph-text
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/describe-graph-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/describe-graph-json
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/routes-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/routes-text
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/routes-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/routes-json
+=== RUN   TestReadProofFactoringCompiledDescribe/barrier/routes-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/barrier/routes-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/describe-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/describe-text
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/describe-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/describe-json
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/describe-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/describe-quiet
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/describe-no-color
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/describe-no-color
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-text
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-json
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/routes-text
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/routes-text
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/routes-json
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/routes-json
+=== RUN   TestReadProofFactoringCompiledDescribe/golden-workload/routes-quiet
+=== PAUSE TestReadProofFactoringCompiledDescribe/golden-workload/routes-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/describe-text
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-json
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/describe-no-color
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-text
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/describe-no-color
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/describe-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/describe-json
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/describe-text
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/routes-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/routes-json
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/routes-text
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-json
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-text
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/routes-json
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/routes-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/routes-json
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/routes-text
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-json
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-text
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/describe-no-color
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/describe-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/describe-json
+=== CONT  TestReadProofFactoringCompiledDescribe/golden-workload/describe-text
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/routes-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/routes-text
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/describe-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/describe-json
+=== CONT  TestReadProofFactoringCompiledDescribe/create-minted-key/describe-text
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/routes-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/routes-json
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/describe-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/routes-text
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/describe-graph-json
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/describe-graph-text
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/describe-no-color
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/describe-no-color
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-json
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-text
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/routes-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/describe-json
+=== CONT  TestReadProofFactoringCompiledDescribe/barrier/describe-text
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/routes-json
+=== CONT  TestReadProofFactoringCompiledDescribe/telegram-agent/routes-text
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/describe-quiet
+=== CONT  TestReadProofFactoringCompiledDescribe/select-or-create/describe-json
+--- PASS: TestReadProofFactoringCompiledDescribe (11.94s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/describe-text (0.73s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/describe-no-color (1.93s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-json (5.74s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/describe-graph-text (8.31s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/describe-no-color (10.40s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/describe-quiet (12.92s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/describe-json (15.17s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/routes-quiet (15.50s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/routes-json (15.91s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/routes-text (16.29s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/describe-text (16.50s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-json (16.67s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/describe-graph-text (16.08s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/routes-json (15.28s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/routes-quiet (15.85s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/routes-json (13.51s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/routes-text (15.90s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-json (13.53s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/describe-graph-text (15.62s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/describe-no-color (15.50s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/describe-quiet (19.38s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/describe-json (19.25s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/routes-quiet (19.59s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/routes-text (20.24s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/describe-quiet (20.17s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/describe-json (16.15s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/create-minted-key/describe-text (16.25s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/routes-quiet (12.07s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/routes-json (12.23s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/golden-workload/describe-text (22.64s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/describe-quiet (8.43s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/routes-text (8.63s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/describe-graph-json (4.50s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/describe-graph-text (4.64s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/describe-no-color (4.08s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/describe-no-color (3.44s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-json (3.26s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/describe-graph-text (3.06s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/describe-json (3.22s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/barrier/describe-text (3.98s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/routes-quiet (6.33s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/routes-json (7.30s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/describe-quiet (7.08s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/select-or-create/describe-json (7.23s)
+    --- PASS: TestReadProofFactoringCompiledDescribe/telegram-agent/routes-text (8.33s)
+=== RUN   TestW5ToolsVerifyAndDescribeSupportedSurface
+=== RUN   TestW5ToolsVerifyAndDescribeSupportedSurface/input_schema:_{type:_string,_minLength:_1.5}
+=== RUN   TestW5ToolsVerifyAndDescribeSupportedSurface/<<:_{parameters:_null}
+=== RUN   TestW5ToolsVerifyAndDescribeSupportedSurface/handler_type:_wasm
+=== RUN   TestW5ToolsVerifyAndDescribeSupportedSurface/input_schema:_{type:_object}
+--- PASS: TestW5ToolsVerifyAndDescribeSupportedSurface (0.32s)
+    --- PASS: TestW5ToolsVerifyAndDescribeSupportedSurface/input_schema:_{type:_string,_minLength:_1.5} (0.01s)
+    --- PASS: TestW5ToolsVerifyAndDescribeSupportedSurface/<<:_{parameters:_null} (0.01s)
+    --- PASS: TestW5ToolsVerifyAndDescribeSupportedSurface/handler_type:_wasm (0.01s)
+    --- PASS: TestW5ToolsVerifyAndDescribeSupportedSurface/input_schema:_{type:_object} (0.01s)
+PASS
+ok  	github.com/division-sh/swarm/internal/cliapp	60.151s
+=== RUN   TestW5ToolSchemaNestedDiagnosticsAndAliasCoordinates
+--- PASS: TestW5ToolSchemaNestedDiagnosticsAndAliasCoordinates (0.00s)
+=== RUN   TestW5ToolFieldPresenceMatrix
+=== RUN   TestW5ToolFieldPresenceMatrix/description/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/description/null
+=== RUN   TestW5ToolFieldPresenceMatrix/description/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/description/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/description/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/description/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/description/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/description/mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/category/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/category/null
+=== RUN   TestW5ToolFieldPresenceMatrix/category/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/category/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/category/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/category/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/category/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/category/mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/handler_type/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/handler_type/null
+=== RUN   TestW5ToolFieldPresenceMatrix/handler_type/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/handler_type/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/handler_type/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/handler_type/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/handler_type/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/handler_type/mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/effect_class/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/effect_class/null
+=== RUN   TestW5ToolFieldPresenceMatrix/effect_class/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/effect_class/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/effect_class/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/effect_class/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/effect_class/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/effect_class/mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/permission/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/permission/null
+=== RUN   TestW5ToolFieldPresenceMatrix/permission/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/permission/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/permission/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/permission/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/permission/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/permission/mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/input_schema/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/input_schema/null
+=== RUN   TestW5ToolFieldPresenceMatrix/input_schema/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/input_schema/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/input_schema/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/input_schema/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/input_schema/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/input_schema/mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/output_schema/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/output_schema/null
+=== RUN   TestW5ToolFieldPresenceMatrix/output_schema/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/output_schema/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/output_schema/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/output_schema/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/output_schema/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/output_schema/mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/credentials/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/credentials/null
+=== RUN   TestW5ToolFieldPresenceMatrix/credentials/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/credentials/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/credentials/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/credentials/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/credentials/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/credentials/mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/http/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/http/null
+=== RUN   TestW5ToolFieldPresenceMatrix/http/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/http/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/http/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/http/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/http/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/http/mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/response_mapping/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/response_mapping/null
+=== RUN   TestW5ToolFieldPresenceMatrix/response_mapping/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/response_mapping/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/response_mapping/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/response_mapping/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/response_mapping/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/response_mapping/mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/response_success/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/response_success/null
+=== RUN   TestW5ToolFieldPresenceMatrix/response_success/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/response_success/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/response_success/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/response_success/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/response_success/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/response_success/mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/managed_credential/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/managed_credential/null
+=== RUN   TestW5ToolFieldPresenceMatrix/managed_credential/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/managed_credential/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/managed_credential/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/managed_credential/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/managed_credential/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/managed_credential/mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit/null
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit/mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/missing
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/null
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/empty
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/scalar
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/empty_sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/sequence
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/empty_mapping
+=== RUN   TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/mapping
+--- PASS: TestW5ToolFieldPresenceMatrix (0.01s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/description/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/description/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/description/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/description/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/description/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/description/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/description/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/description/mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/category/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/category/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/category/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/category/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/category/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/category/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/category/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/category/mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/handler_type/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/handler_type/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/handler_type/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/handler_type/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/handler_type/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/handler_type/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/handler_type/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/handler_type/mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/effect_class/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/effect_class/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/effect_class/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/effect_class/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/effect_class/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/effect_class/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/effect_class/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/effect_class/mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/permission/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/permission/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/permission/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/permission/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/permission/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/permission/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/permission/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/permission/mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/input_schema/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/input_schema/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/input_schema/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/input_schema/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/input_schema/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/input_schema/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/input_schema/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/input_schema/mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/output_schema/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/output_schema/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/output_schema/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/output_schema/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/output_schema/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/output_schema/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/output_schema/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/output_schema/mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/credentials/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/credentials/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/credentials/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/credentials/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/credentials/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/credentials/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/credentials/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/credentials/mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/http/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/http/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/http/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/http/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/http/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/http/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/http/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/http/mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_mapping/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_mapping/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_mapping/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_mapping/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_mapping/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_mapping/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_mapping/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_mapping/mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_success/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_success/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_success/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_success/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_success/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_success/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_success/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/response_success/mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/managed_credential/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/managed_credential/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/managed_credential/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/managed_credential/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/managed_credential/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/managed_credential/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/managed_credential/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/managed_credential/mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit/mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/missing (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/null (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/empty (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/scalar (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/empty_sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/sequence (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/empty_mapping (0.00s)
+    --- PASS: TestW5ToolFieldPresenceMatrix/rate_limit_max_wait/mapping (0.00s)
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/<<:_{parameters:_null}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/returns:_{}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/endpoint:_''
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/type:_null
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/required_permission:_[]
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/kind:_wasm
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/unknown:_null
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/input_schema:_{type:_object}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/output_schema:_{type:_object}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/http:_{method:_GET,_url:_'https://example.invalid',_extra:_null}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/http:_{method:_7,_url:_'https://example.invalid'}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/http:_{method:_GET,_url:_'https://example.invalid',_headers:_{x:_7}}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/http:_{method:_GET,_url:_'https://example.invalid',_timeout_seconds:_1.5}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/managed_credential:_{key:_token,_extra:_null}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/managed_credential:_{key:_token,_scopes:_[7]}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/managed_credential:_{key:_token,_token_request:_{body:_form,_extra:_null}}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/managed_credential:_{key:_token,_token_request:_{static_headers:_{x:_7}}}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/response_success:_{kind:_http_status_2xx,_path:_''}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/response_success:_{kind:_http_status_2xx,_equals:_null}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/response_success:_{kind:_json_field_equals,_path:_response.body.ok}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/response_success:_{kind:_json_field_equals,_path:_response.body.ok,_equals:_null}
+=== RUN   TestW5ToolNestedClosedBranchesAndRetirement/response_success:_{kind:_http_status_2xx,_extra:_null}
+--- PASS: TestW5ToolNestedClosedBranchesAndRetirement (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/<<:_{parameters:_null} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/returns:_{} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/endpoint:_'' (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/type:_null (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/required_permission:_[] (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/kind:_wasm (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/unknown:_null (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/input_schema:_{type:_object} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/output_schema:_{type:_object} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/http:_{method:_GET,_url:_'https://example.invalid',_extra:_null} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/http:_{method:_7,_url:_'https://example.invalid'} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/http:_{method:_GET,_url:_'https://example.invalid',_headers:_{x:_7}} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/http:_{method:_GET,_url:_'https://example.invalid',_timeout_seconds:_1.5} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/managed_credential:_{key:_token,_extra:_null} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/managed_credential:_{key:_token,_scopes:_[7]} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/managed_credential:_{key:_token,_token_request:_{body:_form,_extra:_null}} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/managed_credential:_{key:_token,_token_request:_{static_headers:_{x:_7}}} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/response_success:_{kind:_http_status_2xx,_path:_''} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/response_success:_{kind:_http_status_2xx,_equals:_null} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/response_success:_{kind:_json_field_equals,_path:_response.body.ok} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/response_success:_{kind:_json_field_equals,_path:_response.body.ok,_equals:_null} (0.00s)
+    --- PASS: TestW5ToolNestedClosedBranchesAndRetirement/response_success:_{kind:_http_status_2xx,_extra:_null} (0.00s)
+=== RUN   TestW5ToolLiteralHTTPPresenceAndSerialization
+--- PASS: TestW5ToolLiteralHTTPPresenceAndSerialization (0.00s)
+=== RUN   TestW5ToolAdmissionDiskCatalogRetainedParity
+--- PASS: TestW5ToolAdmissionDiskCatalogRetainedParity (0.00s)
+=== RUN   TestW5ModuleScopedResolutionAndSerialization
+--- PASS: TestW5ModuleScopedResolutionAndSerialization (0.00s)
+=== RUN   TestW5ToolsGoverningSpecParses
+--- PASS: TestW5ToolsGoverningSpecParses (0.10s)
+=== RUN   TestW5ModuleProgrammaticAdmissionRetainsCanonicalSchema
+=== RUN   TestW5ModuleProgrammaticAdmissionRetainsCanonicalSchema/true
+=== RUN   TestW5ModuleProgrammaticAdmissionRetainsCanonicalSchema/false
+--- PASS: TestW5ModuleProgrammaticAdmissionRetainsCanonicalSchema (0.00s)
+    --- PASS: TestW5ModuleProgrammaticAdmissionRetainsCanonicalSchema/true (0.00s)
+    --- PASS: TestW5ModuleProgrammaticAdmissionRetainsCanonicalSchema/false (0.00s)
+PASS
+ok  	github.com/division-sh/swarm/internal/runtime/contracts	0.121s

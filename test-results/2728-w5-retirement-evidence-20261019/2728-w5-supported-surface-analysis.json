@@ -1,0 +1,23 @@
+{
+  "root": "TestW5ToolsVerifyAndDescribeSupportedSurface",
+  "source_label": "template-select-or-create@1.0.0",
+  "valid_json": true,
+  "effective_provenance_present": false,
+  "tools_slot_present": false,
+  "input_schema_present": false,
+  "source_authority": "projection_only_existing_contract_owners",
+  "top_level_keys": [
+    "diagnostics",
+    "equivalence",
+    "flows",
+    "live_readiness",
+    "root",
+    "routing_topology",
+    "source_authority",
+    "source_hash",
+    "source_label",
+    "validation_scope",
+    "workflow_name",
+    "workflow_version"
+  ]
+}
