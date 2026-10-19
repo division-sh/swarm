@@ -34,4 +34,11 @@ head attribution. No hosted qualification is claimed by this packet.
 
 Affected codemod package: all 374 roots PASS, no failures/skips, 401.992 seconds.
 Full log and the machine-extracted root list are retained. Fresh exact-head
-preflight is running; no stale or incomplete receipt is claimed for this head.
+preflight was running at the original request; its terminal receipt follows.
+
+FINAL exact-head preflight PASS: 514.209 seconds, all 25 phases passed,
+complete=true, zero unstarted. Published preflight/local at the source above.
+No generated-row refresh was required. Canonical receipt and all phase logs
+are under preflight/; final stdout and fresh machine footer are retained.
+Earlier request-machine-receipt remains historical and explicitly stale, not
+credited for this source. This is not a second LIGHT request or hosted run.
