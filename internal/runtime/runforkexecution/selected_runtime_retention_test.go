@@ -113,33 +113,6 @@ func TestSelectedRetainedManagerCleanupDrainsBoundOccurrence(t *testing.T) {
 	}
 }
 
-type selectedFailOnceGrantCapability struct {
-	runtimestartupownership.ProcessCapability
-	issued *selectedFailOnceGrant
-}
-
-func (p *selectedFailOnceGrantCapability) IssueSelectedForkGenerationGrant(ctx context.Context, req runtimestartupownership.SelectedForkGrantRequest) (runtimestartupownership.GenerationGrant, error) {
-	grant, err := p.ProcessCapability.IssueSelectedForkGenerationGrant(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	p.issued = &selectedFailOnceGrant{GenerationGrant: grant, failNext: true}
-	return p.issued, nil
-}
-
-type selectedFailOnceGrant struct {
-	runtimestartupownership.GenerationGrant
-	failNext bool
-}
-
-func (g *selectedFailOnceGrant) Retire(ctx context.Context) error {
-	if g.failNext {
-		g.failNext = false
-		return errors.New("injected selected grant retirement failure")
-	}
-	return g.GenerationGrant.Retire(ctx)
-}
-
 func (p *selectedRuntimeRetirementProbe) Retire(context.Context) error {
 	p.retireCalls++
 	return nil
