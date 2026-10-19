@@ -638,7 +638,11 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 		owner := fixture.store.(interface {
 			MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 		})
-		child, err = owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: event.ID()})
+		rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		child, err = owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: event.ID(), RootAdmission: rooted.Admission()})
 		if err != nil {
 			t.Fatal(err)
 		}

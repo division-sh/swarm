@@ -774,7 +774,12 @@ func selectedSourceMaterializationRequest(t *testing.T, ctx context.Context, sto
 	if !ok {
 		t.Fatal("activity fixture has no admitted source artifact")
 	}
-	if _, err := store.(selectedSourceArtifactStore).EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())), rooted.Admission())
+	if _, err := store.(selectedSourceArtifactStore).EnsureRootedSource(ctx, rooted); err != nil {
 		t.Fatal(err)
 	}
 	return prepareSelectedStoreMaterializationForTest(t, ctx, store, sourceRunID, eventID,
