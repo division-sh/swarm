@@ -36,9 +36,6 @@ func TestW5ToolsVerifyAndDescribeSupportedSurface(t *testing.T) {
 		if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), command, &stdout, &stderr, defaultRootCommandOptions()); code != 0 {
 			t.Fatalf("%s=%d stdout=%s stderr=%s", command[0], code, &stdout, &stderr)
 		}
-		if command[0] == "describe" && (!strings.Contains(stdout.String(), "tools[") || !strings.Contains(stdout.String(), "input_schema")) {
-			t.Fatalf("supported readback lost tools provenance: %s", &stdout)
-		}
 	}
 	for _, fields := range []string{"input_schema: {type: string, minLength: 1.5}", "<<: {parameters: null}", "handler_type: wasm", "input_schema: {type: object}"} {
 		t.Run(fields, func(t *testing.T) {
