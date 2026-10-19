@@ -117,27 +117,6 @@ func ListRequirementDescriptors(ctx context.Context, store Store, source semanti
 	return out, nil
 }
 
-func MissingOrUnusableRequired(ctx context.Context, store Store, source semanticview.Source) ([]RequirementDescriptor, error) {
-	descriptors, err := ListRequirementDescriptors(ctx, store, source)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]RequirementDescriptor, 0)
-	for _, desc := range descriptors {
-		if len(desc.RequiredBy) == 0 {
-			continue
-		}
-		for _, req := range desc.RequiredBy {
-			evaluation := EvaluateRequirement(desc, req)
-			if !evaluation.Satisfied {
-				out = append(out, evaluation.Descriptor)
-				break
-			}
-		}
-	}
-	return out, nil
-}
-
 func EvaluateRequirement(desc RequirementDescriptor, req Requirement) RequirementEvaluation {
 	if !desc.Present || desc.Status != StatusConnected {
 		return RequirementEvaluation{Descriptor: desc}

@@ -38,17 +38,6 @@ const (
 	CodeReplay           Code = "compute_module_replay_divergence"
 )
 
-type ModuleImport struct {
-	Module string
-	Name   string
-	Kind   string
-}
-
-type Inspection struct {
-	Imports []ModuleImport
-	Exports map[string]string
-}
-
 type Request struct {
 	ModuleID    string
 	RowID       string
@@ -109,30 +98,6 @@ func (e *Error) Unwrap() error {
 		return nil
 	}
 	return e.Err
-}
-
-func Inspect(wasm []byte) (Inspection, error) {
-	engine := newEngine()
-	module, err := wasmtime.NewModule(engine, wasm)
-	if err != nil {
-		return Inspection{}, &Error{Code: CodeCompile, Err: err}
-	}
-	inspection := Inspection{Exports: map[string]string{}}
-	for _, imp := range module.Imports() {
-		name := ""
-		if imp.Name() != nil {
-			name = *imp.Name()
-		}
-		inspection.Imports = append(inspection.Imports, ModuleImport{
-			Module: strings.TrimSpace(imp.Module()),
-			Name:   strings.TrimSpace(name),
-			Kind:   externKind(imp.Type()),
-		})
-	}
-	for _, exp := range module.Exports() {
-		inspection.Exports[strings.TrimSpace(exp.Name())] = externKind(exp.Type())
-	}
-	return inspection, nil
 }
 
 func ValidateCoreJSONModule(wasm []byte, entry string, memoryPages uint32) error {
@@ -277,23 +242,6 @@ func normalizeEntry(entry string) string {
 		return DefaultEntry
 	}
 	return entry
-}
-
-func externKind(ty *wasmtime.ExternType) string {
-	switch {
-	case ty == nil:
-		return ""
-	case ty.FuncType() != nil:
-		return "func"
-	case ty.MemoryType() != nil:
-		return "memory"
-	case ty.TableType() != nil:
-		return "table"
-	case ty.GlobalType() != nil:
-		return "global"
-	default:
-		return "unknown"
-	}
 }
 
 func ValidateDigest(wasm []byte, digest string) error {
