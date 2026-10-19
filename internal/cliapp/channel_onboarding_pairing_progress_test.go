@@ -163,6 +163,9 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					result["identity_operation"].(map[string]any)["expires_at"] = time.Now().Add(time.Minute)
 				case 5:
 					result = sessionProgressCLIResult("whatsapp", "", "succeeded", true)
+					if mode != "human-receptionist" {
+						result["readiness"].(map[string]any)["native_inbox"] = map[string]any{"state": "qualified"}
+					}
 				}
 				return result
 			}
@@ -221,6 +224,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 				code := executeRootCommandWithOptions(context.Background(), project, []string{"channel", "connect", "whatsapp"}, &out, &errOut, opts)
 				if code != 0 || !strings.Contains(out.String(), "READY") || !strings.Contains(out.String(), "QR expired, new QR:") ||
 					!strings.Contains(out.String(), "Linked Devices") ||
+					strings.Contains(out.String(), "Native inbox") ||
 					!strings.Contains(errOut.String(), "[y/N]") || strings.Contains(out.String()+errOut.String(), operatorChannelCLIOperation) ||
 					strings.Contains(out.String(), "journey-material") || strings.Contains(out.String(), "replacement-material") {
 					t.Fatal("single public connect lost pairing, refresh, claimant confirmation or config targeting", code, out.String(), errOut.String())

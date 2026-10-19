@@ -128,8 +128,8 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 			writeWhatsAppConnection(w, result.Connection, true)
 		} else {
 			fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)
+			writeChannelNativeQualification(w, result)
 		}
-		writeChannelNativeQualification(w, result)
 	}, func() ([]string, error) { return []string{result.Operation.OperationID}, nil })
 }
 
