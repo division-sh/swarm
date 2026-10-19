@@ -809,7 +809,9 @@ func (eb *EventBus) ResetInMemoryState() (resetErr error) {
 	for _, operation := range pendingOperations {
 		if err := operation.publicationClaim.Release(cleanupCtx); err != nil {
 			releaseErr = errors.Join(releaseErr, err)
-			continue
+			if !operation.publicationClaim.released.Load() && !operation.publicationClaim.retired.Load() {
+				continue
+			}
 		}
 		eb.removePendingOutboxOperation(operation.intent.Event.ID(), operation.sequence)
 	}

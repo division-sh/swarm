@@ -666,6 +666,9 @@ func TestEventBusResetAttemptsEveryTerminalPendingReleaseAndAggregatesEvidence(t
 		!strings.Contains(resetErr.Error(), "persistent reset cleanup failure") {
 		t.Fatalf("reset cleanup error = %v, want all terminal evidence", resetErr)
 	}
+	if err := bus.ResetInMemoryState(); err != nil {
+		t.Fatalf("repeat reset after terminal cleanup: %v", err)
+	}
 	for _, eventID := range eventIDs {
 		if got := owner.releaseCalls[eventID]; got != 1 {
 			t.Fatalf("release calls for %s = %d, want one terminal attempt", eventID, got)

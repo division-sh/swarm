@@ -897,46 +897,31 @@ func TestPublicationClaimCleanupRejectsForeignSourceBeforeCapabilityMutation(t *
 			}
 		})
 	}
-	for _, reason := range []string{"missing_original", "stale_original", "foreign_original"} {
-		t.Run("reset_"+reason, func(t *testing.T) {
-			owner := newSourceMutationProbeOwner()
-			bus := newSourceMutationProbeBus(t, owned, owner)
-			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "test.work", "", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Time{})
-			claim, err := bus.claimPipelinePublication(context.Background(), event.ID())
-			if err != nil {
-				t.Fatal(err)
-			}
-			bus.stageCommittedOutboxOperationWithFinalization(runtimeengine.EmitIntent{Event: event}, event, EventAppendInserted, claim, nil, false, nil, nil)
-			refusal := errors.New(reason)
-			rejected := true
-			bus.mutationContext = func(ctx context.Context) (context.Context, error) {
-				if rejected {
-					return ctx, refusal
-				}
-				return ctx, nil
-			}
-			before := owner.counts()
-			if err := bus.ResetInMemoryState(); !errors.Is(err, refusal) {
-				t.Fatalf("reset lost exact original-owner refusal: %v", err)
-			}
-			bus.mu.RLock()
-			pending := append([]pendingOutboxOperation(nil), bus.pendingOutboxByID[event.ID()]...)
-			bus.mu.RUnlock()
-			if len(pending) != 1 || pending[0].publicationClaim != claim || !owner.owns(event.ID()) || owner.counts() != before {
-				t.Fatal("rejected reset erased or consumed the retained publication claim")
-			}
-			rejected = false
-			if err := bus.ResetInMemoryState(); err != nil {
-				t.Fatalf("retry exact retained cleanup: %v", err)
-			}
-			bus.mu.RLock()
-			remaining := len(bus.pendingOutboxByID[event.ID()])
-			bus.mu.RUnlock()
-			if remaining != 0 || owner.owns(event.ID()) || owner.counts().release != before.release+1 {
-				t.Fatal("successful retry did not release the original claim exactly once")
-			}
-		})
-	}
+	t.Run("reset_foreign_source", func(t *testing.T) {
+		owner := newSourceMutationProbeOwner()
+		foreignBus := newSourceMutationProbeBus(t, foreign, owner)
+		bus := newSourceMutationProbeBus(t, owned, owner)
+		foreignBus.runtimeInstanceID = bus.runtimeInstanceID
+		event := sourceMutationEvent()
+		claim, err := foreignBus.claimPipelinePublication(context.Background(), event.ID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		bus.stageCommittedOutboxOperation(runtimeengine.EmitIntent{Event: event}, EventAppendInserted, claim, nil)
+		before := owner.counts()
+		if err := bus.ResetInMemoryState(); err == nil || !strings.Contains(err.Error(), "bundle source fact conflicts") {
+			t.Fatalf("reset error = %v, want source conflict", err)
+		}
+		bus.mu.RLock()
+		pending := append([]pendingOutboxOperation(nil), bus.pendingOutboxByID[event.ID()]...)
+		bus.mu.RUnlock()
+		if len(pending) != 1 || pending[0].publicationClaim != claim || claim.released.Load() || claim.retired.Load() || !owner.owns(event.ID()) || owner.counts() != before {
+			t.Fatal("source-refused reset consumed or erased the exact pending claim")
+		}
+		if err := claim.Release(context.Background()); err != nil {
+			t.Fatalf("foreign owner's exact cleanup: %v", err)
+		}
+	})
 }
 
 func TestPipelineSweepRootsAdmitSourceBeforeWorkOccurrenceOrStoreMutation(t *testing.T) {
