@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
@@ -23,6 +24,33 @@ func installActivityReplayJournal(t *testing.T, ctx context.Context, selected ga
 		t.Fatal(err)
 	}
 	return journal, release
+}
+
+func activityBoringDeliveryNativeFixture(t *testing.T, backend string, source semanticview.Source) *pipeline.PipelineDeliveryNativeFixtureForTest {
+	t.Helper()
+	return bindActivityBoringDeliveryJournal(t, pipelineDeliveryNativeFixture(t, backend, source))
+}
+
+func bindActivityBoringDeliveryJournal(t *testing.T, fixture *pipeline.PipelineDeliveryNativeFixtureForTest) *pipeline.PipelineDeliveryNativeFixtureForTest {
+	t.Helper()
+	construct, reopen := fixture.NewCoordinator, fixture.ReopenExecution
+	var release func()
+	fixture.NewCoordinator = func(options pipeline.PipelineCoordinatorOptions) *pipeline.PipelineCoordinator {
+		pc := construct(options)
+		journal, join := captureActivityReplayJournal(t, fixture.Context, fixture.Store.(startupownership.Store), activityFixtureJoin(fixture.JoinExecution))
+		release = join
+		if err := pc.InstallActivityJournal(journal); err != nil {
+			t.Fatal(err)
+		}
+		return pc
+	}
+	fixture.ReopenExecution = func() *pipeline.PipelineDeliveryNativeFixtureForTest {
+		if release != nil {
+			release()
+		}
+		return bindActivityBoringDeliveryJournal(t, reopen())
+	}
+	return fixture
 }
 
 func captureActivityReplayJournal(t *testing.T, ctx context.Context, selected startupownership.Store, bus interface{ WaitForQuiescence(context.Context) error }) (pipeline.ActivityAttemptJournal, func()) {
@@ -57,7 +85,15 @@ func captureActivityReplayJournal(t *testing.T, ctx context.Context, selected st
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := process.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: set}); err != nil {
+	current, installed, err := process.CurrentSourceSet(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if installed {
+		if current.Revision != set.Revision {
+			t.Fatal("activity proof reopened a different complete source set")
+		}
+	} else if _, err := process.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: set}); err != nil {
 		t.Fatal(err)
 	}
 	grant, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{
