@@ -464,7 +464,11 @@ func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend
 	}
 	envelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: runID, EntityID: runID})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", payload, 0, runID,
-		envelope, events.NoRoutingSource(), at, executionmode.Mock)
+		envelope, eventtest.RootRoutingSource(runID), at, executionmode.Mock)
+	event, err = eventtest.AdmitPayload(event, ".", "item.received")
+	if err != nil {
+		t.Fatal(err)
+	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
 	if backend == "postgres" {
