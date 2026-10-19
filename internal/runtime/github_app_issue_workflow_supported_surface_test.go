@@ -13,17 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -446,171 +442,6 @@ func publishGitHubIssueOpenedWithSignature(t *testing.T, backend slackManagedCon
 
 func githubIssueOpenedPayload(installationID string, issueNumber int, title string) []byte {
 	return []byte(fmt.Sprintf(`{"action":"opened","installation":{"id":%s},"repository":{"name":"octo-repo","owner":{"login":"octo-org"}},"issue":{"number":%d,"title":%q},"sender":{"login":"octocat","type":"User"}}`, installationID, issueNumber, title))
-}
-
-func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
-	t.Helper()
-	commentHandler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{
-			Check:  `_entity.id != "" && payload.comment_author_type != "Bot" && payload.sender_type != "Bot"`,
-			OnFail: "discard",
-		},
-		Activity: runtimecontracts.ActivitySpec{
-			ID:   "github_create_issue_comment",
-			Tool: "github.create_issue_comment",
-			Input: map[string]runtimecontracts.ExpressionValue{
-				"installation_id": runtimecontracts.CELExpression("payload.installation_id"),
-				"owner":           runtimecontracts.CELExpression("payload.repository_owner"),
-				"repo":            runtimecontracts.CELExpression("payload.repository_name"),
-				"issue_number":    runtimecontracts.CELExpression("payload.issue_number"),
-				"body":            runtimecontracts.CELExpression("payload.body"),
-			},
-		},
-	}
-	createIssueHandler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`, OnFail: "discard"},
-		Activity: runtimecontracts.ActivitySpec{
-			ID:   "github_create_issue",
-			Tool: "github.create_issue",
-			Input: map[string]runtimecontracts.ExpressionValue{
-				"installation_id": runtimecontracts.CELExpression("payload.installation_id"),
-				"owner":           runtimecontracts.CELExpression("payload.repository_owner"),
-				"repo":            runtimecontracts.CELExpression("payload.repository_name"),
-				"title":           runtimecontracts.CELExpression("payload.title"),
-				"body":            runtimecontracts.LiteralExpression("Created by Swarm follow-up"),
-			},
-		},
-	}
-	addLabelsHandler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`, OnFail: "discard"},
-		Activity: runtimecontracts.ActivitySpec{
-			ID:   "github_add_labels_to_issue",
-			Tool: "github.add_labels_to_issue",
-			Input: map[string]runtimecontracts.ExpressionValue{
-				"installation_id": runtimecontracts.CELExpression("payload.installation_id"),
-				"owner":           runtimecontracts.CELExpression("payload.repository_owner"),
-				"repo":            runtimecontracts.CELExpression("payload.repository_name"),
-				"issue_number":    runtimecontracts.CELExpression("payload.issue_number"),
-				"labels":          runtimecontracts.LiteralExpression([]any{"triage", "swarm"}),
-			},
-		},
-	}
-	const (
-		commentNodeID = "github-issue-comment-responder"
-		createNodeID  = "github-issue-creator"
-		labelNodeID   = "github-issue-labeler"
-	)
-	nodes := map[string]runtimecontracts.SystemNodeContract{
-		commentNodeID: {
-			ExecutionType: runtimecontracts.SystemNodeExecutionType,
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.github.issue_comment_created": commentHandler},
-		},
-		createNodeID: {
-			ExecutionType: runtimecontracts.SystemNodeExecutionType,
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.github.issue_opened": createIssueHandler},
-		},
-		labelNodeID: {
-			ExecutionType: runtimecontracts.SystemNodeExecutionType,
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"inbound.github.issue_opened": addLabelsHandler},
-		},
-	}
-	bundle := boundedStandingConnectorBundle(t, &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Imports: runtimecontracts.FlowSchemaImports{ConnectorPacks: []runtimecontracts.ConnectorPackImport{
-				{Provider: "github", Tool: "github.add_labels_to_issue"},
-				{Provider: "github", Tool: "github.create_issue"},
-				{Provider: "github", Tool: "github.create_issue_comment"},
-			}},
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{
-					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.github.issue_comment_created"}, {Event: "inbound.github.issue_opened"}},
-				},
-			},
-		},
-		Nodes: nodes,
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:    "github_app_issue_workflow_supported_surface",
-			Version: "1.0.0",
-			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
-				commentNodeID: {
-					ID:                   commentNodeID,
-					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"inbound.github.issue_comment_created"},
-				},
-				createNodeID: {
-					ID:                   createNodeID,
-					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"inbound.github.issue_opened"},
-				},
-				labelNodeID: {
-					ID:                   labelNodeID,
-					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"inbound.github.issue_opened"},
-				},
-			},
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				commentNodeID: {"inbound.github.issue_comment_created": commentHandler},
-				createNodeID:  {"inbound.github.issue_opened": createIssueHandler},
-				labelNodeID:   {"inbound.github.issue_opened": addLabelsHandler},
-			},
-			EventOwners: map[string][]string{
-				"inbound.github.issue_comment_created": {commentNodeID},
-				"inbound.github.issue_opened":          {createNodeID, labelNodeID},
-			},
-		},
-	})
-	declareGitHubProviderImports(t, bundle, "inbound.github.issue_comment_created", "inbound.github.issue_opened")
-	base := semanticview.Wrap(bundle)
-	source, err := providerconnectors.SourceWithConnectorPackImports(base, githubAppIssueWorkflowPackRegistry(t, baseURL))
-	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImports: %v", err)
-	}
-	return withGitHubProviderSchemas(t, source, "inbound.github.issue_comment_created", "inbound.github.issue_opened")
-}
-
-func githubAppIssueWorkflowPackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
-	t.Helper()
-	tools := map[string]runtimecontracts.ToolSchemaEntry{}
-	for _, toolID := range []string{"github.add_labels_to_issue", "github.create_issue", "github.create_issue_comment"} {
-		tool, ok := embeddedConnectorTool(t, "github", toolID)
-		if !ok {
-			t.Fatalf("provider connector pack %s not found", toolID)
-		}
-		httpSpec, ok := tool.HTTP()
-		if !ok {
-			t.Fatalf("provider connector pack %s missing http block", toolID)
-		}
-		switch toolID {
-		case "github.add_labels_to_issue":
-			httpSpec.URL = strings.TrimRight(baseURL, "/") + "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/labels"
-		case "github.create_issue":
-			httpSpec.URL = strings.TrimRight(baseURL, "/") + "/repos/{{input.owner}}/{{input.repo}}/issues"
-		case "github.create_issue_comment":
-			httpSpec.URL = strings.TrimRight(baseURL, "/") + "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments"
-		}
-		tool, err := tool.WithHTTP(httpSpec)
-		if err != nil {
-			t.Fatalf("replace provider connector %s HTTP endpoint: %v", toolID, err)
-		}
-		tools[toolID] = tool
-	}
-	registry, err := providerconnectors.NewPackRegistry(providerconnectors.LoadedPack{
-		Envelope: packs.Envelope{
-			ID: "provider.github.connector",
-			Provenance: packs.Provenance{
-				Source: packs.ProvenancePlatform,
-			},
-		},
-		Manifest: providerconnectors.ConnectorManifest{
-			Provider: "github",
-			Tools:    tools,
-		},
-		Source: "test:provider.github.connector",
-	})
-	if err != nil {
-		t.Fatalf("NewPackRegistry: %v", err)
-	}
-	return registry
 }
 
 func assertGitHubAppIssueWorkflowManagedCredentialFailureBeforeDispatch(t *testing.T, backend slackManagedConnectorBackend, fake *fakeGitHubAppIssueWorkflowServer, label, deliveryID, installationID string, managedStore runtimemanagedcredentials.Store) {

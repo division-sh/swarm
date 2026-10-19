@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -304,13 +305,17 @@ func compileEmbeddedTelegramOperatorChannelPlan(t *testing.T) packs.Satisfaction
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := packs.NewInterfaceRegistry(spec)
+	entry, ok := packfixture.EmbeddedInventory(t).Lookup("telegram")
+	if !ok {
+		t.Fatal("embedded Telegram provider is missing")
+	}
+	definition, err := packadmission.AdmitProviderDirectory(entry.Provider(), spec)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plans, err := packs.CompileChannelInventory(registry, packfixture.ChannelPacks(t), packfixture.TriggerCatalog(t).PackDescriptors(), packfixture.ConnectorRegistry(t).PackDescriptors())
-	if err != nil || len(plans) != 1 {
-		t.Fatalf("compile embedded channel inventory = %#v, %v", plans, err)
+	plan, ok := definition.ChannelPlan()
+	if !ok {
+		t.Fatal("embedded Telegram channel plan is missing")
 	}
-	return plans[0]
+	return plan
 }

@@ -12,15 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providerconnectors"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -334,107 +330,6 @@ func microsoftGraphClientCredentialsRecord(baseURL, accessToken string, expiresA
 		Status:       runtimemanagedcredentials.StatusConnected,
 		ExpiresAt:    expiresAt,
 	}
-}
-
-func microsoftGraphConnectorSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
-	t.Helper()
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`},
-		Activity: runtimecontracts.ActivitySpec{
-			ID:   "microsoft_graph_send_mail",
-			Tool: "microsoft_graph.send_mail",
-			Input: map[string]runtimecontracts.ExpressionValue{
-				"user_id": runtimecontracts.LiteralExpression("user@example.com"),
-				"to_recipients": runtimecontracts.LiteralExpression([]map[string]any{
-					{
-						"emailAddress": map[string]any{
-							"address": "recipient@example.com",
-						},
-					},
-				}),
-				"subject": runtimecontracts.CELExpression("payload.text"),
-				"content": runtimecontracts.CELExpression("payload.text"),
-			},
-		},
-	}
-	const nodeID = "microsoft-graph-responder"
-	node := runtimecontracts.SystemNodeContract{
-		ExecutionType: runtimecontracts.SystemNodeExecutionType,
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"inbound.telegram.text_message": handler,
-		},
-	}
-	bundle := boundedStandingConnectorBundle(t, &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Imports: runtimecontracts.FlowSchemaImports{ConnectorPacks: []runtimecontracts.ConnectorPackImport{{Provider: "microsoft_graph", Tool: "microsoft_graph.send_mail"}}},
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{
-					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram.text_message"}},
-				},
-			},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{nodeID: node},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:    "microsoft_graph_connector_client_credentials_supported_surface",
-			Version: "1.0.0",
-			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
-				nodeID: {
-					ID:                   nodeID,
-					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"inbound.telegram.text_message"},
-				},
-			},
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				nodeID: {"inbound.telegram.text_message": handler},
-			},
-			EventOwners: map[string][]string{
-				"inbound.telegram.text_message": {nodeID},
-			},
-		},
-	})
-	declareTelegramTextMessageProviderImport(t, bundle)
-	base := semanticview.Wrap(bundle)
-	source, err := providerconnectors.SourceWithConnectorPackImports(base, microsoftGraphConnectorPackRegistry(t, baseURL))
-	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImports: %v", err)
-	}
-	return withTelegramTextMessageProviderSchema(t, source)
-}
-
-func microsoftGraphConnectorPackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
-	t.Helper()
-	tool, ok := embeddedConnectorTool(t, "microsoft_graph", "microsoft_graph.send_mail")
-	if !ok {
-		t.Fatal("provider connector pack microsoft_graph.send_mail not found")
-	}
-	httpSpec, ok := tool.HTTP()
-	if !ok {
-		t.Fatal("provider connector pack microsoft_graph.send_mail missing http block")
-	}
-	httpSpec.URL = strings.TrimRight(baseURL, "/") + "/v1.0/users/{{input.user_id}}/sendMail"
-	tool, err := tool.WithHTTP(httpSpec)
-	if err != nil {
-		t.Fatalf("replace Microsoft Graph connector HTTP endpoint: %v", err)
-	}
-	registry, err := providerconnectors.NewPackRegistry(providerconnectors.LoadedPack{
-		Envelope: packs.Envelope{
-			ID: "provider.microsoft_graph.connector",
-			Provenance: packs.Provenance{
-				Source: packs.ProvenancePlatform,
-			},
-		},
-		Manifest: providerconnectors.ConnectorManifest{
-			Provider: "microsoft_graph",
-			Tools: map[string]runtimecontracts.ToolSchemaEntry{
-				"microsoft_graph.send_mail": tool,
-			},
-		},
-		Source: "test:provider.microsoft_graph.connector",
-	})
-	if err != nil {
-		t.Fatalf("NewPackRegistry: %v", err)
-	}
-	return registry
 }
 
 func assertMicrosoftGraphManagedCredentialFailureBeforeDispatch(t *testing.T, backend slackManagedConnectorBackend, fake *fakeMicrosoftGraphConnectorServer, label, updateID string, managedStore runtimemanagedcredentials.Store) {

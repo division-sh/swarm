@@ -8,18 +8,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -30,7 +26,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *testing.T) {
@@ -333,126 +328,6 @@ func publishTelegramMessageToSlack(t *testing.T, backend slackManagedConnectorBa
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("%s gateway status for update %s = %d, want 202 body=%s", backend.name, updateID, rec.Code, rec.Body.String())
 	}
-}
-
-func slackManagedConnectorSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
-	t.Helper()
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`},
-		Activity: runtimecontracts.ActivitySpec{
-			ID:   "slack_post_message",
-			Tool: "slack.post_message",
-			Input: map[string]runtimecontracts.ExpressionValue{
-				"channel": runtimecontracts.CELExpression(`"C123"`),
-				"text":    runtimecontracts.CELExpression("payload.text"),
-			},
-		},
-	}
-	const nodeID = "slack-responder"
-	node := runtimecontracts.SystemNodeContract{
-		ExecutionType: runtimecontracts.SystemNodeExecutionType,
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"inbound.telegram.text_message": handler,
-		},
-	}
-	bundle := boundedStandingConnectorBundle(t, &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Imports: runtimecontracts.FlowSchemaImports{ConnectorPacks: []runtimecontracts.ConnectorPackImport{{Provider: "slack", Tool: "slack.post_message"}}},
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{
-					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram.text_message"}},
-				},
-			},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{nodeID: node},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:    "slack_connector_managed_credential_supported_surface",
-			Version: "1.0.0",
-			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
-				nodeID: {
-					ID:                   nodeID,
-					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"inbound.telegram.text_message"},
-				},
-			},
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				nodeID: {"inbound.telegram.text_message": handler},
-			},
-			EventOwners: map[string][]string{
-				"inbound.telegram.text_message": {nodeID},
-			},
-		},
-	})
-	declareTelegramTextMessageProviderImport(t, bundle)
-	base := semanticview.Wrap(bundle)
-	source, err := providerconnectors.SourceWithConnectorPackImports(base, slackManagedConnectorPackRegistry(t, baseURL))
-	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImports: %v", err)
-	}
-	return withTelegramTextMessageProviderSchema(t, source)
-}
-
-func declareTelegramTextMessageProviderImport(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) {
-	t.Helper()
-	if bundle == nil {
-		t.Fatal("bounded Telegram bundle is required")
-	}
-	flow, ok := bundle.FlowViewByID(boundedProviderFlowID)
-	if !ok {
-		t.Fatal("bounded Telegram flow is required")
-	}
-	flow.Schema.Imports.ProviderTriggerEvents = []runtimecontracts.ProviderTriggerEventImport{{
-		Provider: "telegram", Event: "inbound.telegram.text_message",
-	}}
-	bundle.FlowSchemas[boundedProviderFlowID] = flow.Schema
-}
-
-func withTelegramTextMessageProviderSchema(t testing.TB, source semanticview.Source) semanticview.Source {
-	t.Helper()
-	composed, err := runtimepkg.SourceWithProviderTriggerEvents(source, packfixture.TriggerCatalog(t))
-	if err != nil {
-		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
-	}
-	if resolved := semanticview.ResolveEventSchema(composed, boundedProviderFlowID, "inbound.telegram.text_message"); !resolved.HasStructural {
-		t.Fatalf("normalized Telegram event is missing its structural provider schema: %#v", resolved)
-	}
-	return composed
-}
-
-func slackManagedConnectorPackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
-	t.Helper()
-	tool, ok := embeddedConnectorTool(t, "slack", "slack.post_message")
-	if !ok {
-		t.Fatal("provider connector pack slack.post_message not found")
-	}
-	httpSpec, ok := tool.HTTP()
-	if !ok {
-		t.Fatal("provider connector pack slack.post_message missing http block")
-	}
-	httpSpec.URL = strings.TrimRight(baseURL, "/") + "/api/chat.postMessage"
-	tool, err := tool.WithHTTP(httpSpec)
-	if err != nil {
-		t.Fatalf("replace Slack connector HTTP endpoint: %v", err)
-	}
-	registry, err := providerconnectors.NewPackRegistry(providerconnectors.LoadedPack{
-		Envelope: packs.Envelope{
-			ID: "provider.slack.connector",
-			Provenance: packs.Provenance{
-				Source: packs.ProvenancePlatform,
-			},
-		},
-		Manifest: providerconnectors.ConnectorManifest{
-			Provider: "slack",
-			Tools: map[string]runtimecontracts.ToolSchemaEntry{
-				"slack.post_message": tool,
-			},
-		},
-		Source: "test:provider.slack.connector",
-	})
-	if err != nil {
-		t.Fatalf("NewPackRegistry: %v", err)
-	}
-	return registry
 }
 
 type slackManagedConnectorModule struct {

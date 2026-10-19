@@ -15,11 +15,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -282,102 +279,6 @@ const telegramConnectorSupportedSurfaceNodeID = "telegram-responder"
 func telegramConnectorSupportedSurfaceNodeKey(t testing.TB) string {
 	t.Helper()
 	return identitytest.FlowNode(t, boundedProviderFlowID, telegramConnectorSupportedSurfaceNodeID).Key()
-}
-
-func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance string) semanticview.Source {
-	t.Helper()
-	handler := runtimecontracts.SystemNodeEventHandler{
-		Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`},
-		Activity: runtimecontracts.ActivitySpec{
-			ID:   "telegram_send_message",
-			Tool: "telegram.send_message",
-			Input: map[string]runtimecontracts.ExpressionValue{
-				"chat_id": runtimecontracts.CELExpression("payload.conversation_reference"),
-				"text":    runtimecontracts.CELExpression("payload.text"),
-			},
-		},
-	}
-	node := runtimecontracts.SystemNodeContract{
-		ExecutionType: runtimecontracts.SystemNodeExecutionType,
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"inbound.telegram.text_message": handler,
-		},
-	}
-	bundle := boundedStandingConnectorBundle(t, &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Imports: runtimecontracts.FlowSchemaImports{ConnectorPacks: []runtimecontracts.ConnectorPackImport{{Provider: "telegram", Tool: "telegram.send_message"}}},
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{
-					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram.text_message"}},
-				},
-			},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			telegramConnectorSupportedSurfaceNodeID: node,
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:    "telegram_connector_supported_surface",
-			Version: "1.0.0",
-			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
-				telegramConnectorSupportedSurfaceNodeID: {
-					ID:                   telegramConnectorSupportedSurfaceNodeID,
-					ExecutionType:        runtimecontracts.SystemNodeExecutionType,
-					RuntimeSubscriptions: []string{"inbound.telegram.text_message"},
-				},
-			},
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				telegramConnectorSupportedSurfaceNodeID: {
-					"inbound.telegram.text_message": handler,
-				},
-			},
-			EventOwners: map[string][]string{
-				"inbound.telegram.text_message": {telegramConnectorSupportedSurfaceNodeID},
-			},
-		},
-	})
-	declareTelegramTextMessageProviderImport(t, bundle)
-	base := semanticview.Wrap(bundle)
-	source, err := providerconnectors.SourceWithConnectorPackImports(base, telegramConnectorSupportedSurfacePackRegistry(t, baseURL))
-	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImports: %v", err)
-	}
-	return withTelegramTextMessageProviderSchema(t, source)
-}
-
-func telegramConnectorSupportedSurfacePackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
-	t.Helper()
-	tool, ok := embeddedConnectorTool(t, "telegram", "telegram.send_message")
-	if !ok {
-		t.Fatal("provider connector pack telegram.send_message not found")
-	}
-	httpSpec, ok := tool.HTTP()
-	if !ok {
-		t.Fatal("provider connector pack telegram.send_message missing http block")
-	}
-	httpSpec.URL = strings.TrimRight(baseURL, "/") + "/bot{{credentials.telegram_bot_token}}/sendMessage"
-	tool, err := tool.WithHTTP(httpSpec)
-	if err != nil {
-		t.Fatalf("replace Telegram connector HTTP endpoint: %v", err)
-	}
-	registry, err := providerconnectors.NewPackRegistry(providerconnectors.LoadedPack{
-		Envelope: packs.Envelope{
-			ID: "provider.telegram.connector",
-			Provenance: packs.Provenance{
-				Source: packs.ProvenancePlatform,
-			},
-		},
-		Manifest: providerconnectors.ConnectorManifest{
-			Provider: "telegram",
-			Tools: map[string]runtimecontracts.ToolSchemaEntry{
-				"telegram.send_message": tool,
-			},
-		},
-		Source: "test:provider.telegram.connector",
-	})
-	if err != nil {
-		t.Fatalf("NewPackRegistry: %v", err)
-	}
-	return registry
 }
 
 type telegramConnectorSupportedSurfaceModule struct {
