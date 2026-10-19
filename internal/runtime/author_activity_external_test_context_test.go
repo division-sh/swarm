@@ -54,6 +54,11 @@ type externalRuntimeTestEventBusOwner struct {
 	retireAndWait func(context.Context) error
 	once          sync.Once
 	err           error
+	runtimeID     string
+	bundleHash    string
+	activityMu    sync.Mutex
+	activity      runtimepipeline.ActivityAttemptJournal
+	capability    runtimestartupownership.ProcessCapability
 }
 
 func (o *externalRuntimeTestEventBusOwner) close(ctx context.Context) error {
@@ -68,6 +73,12 @@ func (o *externalRuntimeTestEventBusOwner) close(ctx context.Context) error {
 		o.process.Retire()
 		if _, err := o.process.Join(ctx); err != nil {
 			o.err = fmt.Errorf("join external runtime test process: %w", err)
+			return
+		}
+		if o.capability != nil {
+			if err := o.capability.Release(ctx); err != nil {
+				o.err = fmt.Errorf("release external runtime test activity capability: %w", err)
+			}
 		}
 	})
 	return o.err
@@ -227,6 +238,93 @@ func newExternalRuntimeTestPipelineCoordinator(
 		t.Fatal("construct durable pipeline coordinator with complete workflow owners")
 	}
 	return coordinator
+}
+
+func newExternalRuntimeTestActivityCoordinator(t *testing.T, bus *runtimebus.EventBus, selected any, opts runtimepipeline.PipelineCoordinatorOptions) *runtimepipeline.PipelineCoordinator {
+	t.Helper()
+	source := opts.Module.SemanticSource()
+	fact := runtimeTestSourceArtifactFact(t, source)
+	if opts.SourceArtifactFact.Validate() != nil {
+		opts.SourceArtifactFact = fact
+	}
+	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, selected, opts)
+	value, found := externalRuntimeTestEventBusOwners.Load(bus)
+	if !found {
+		t.Fatal("activity coordinator requires its original event-bus owner")
+	}
+	owner := value.(*externalRuntimeTestEventBusOwner)
+	owner.activityMu.Lock()
+	defer owner.activityMu.Unlock()
+	if owner.process == nil || owner.bundleHash != fact.BundleHash() || opts.SourceArtifactFact != fact {
+		t.Fatal("activity coordinator differs from its original admitted source and process")
+	}
+	if owner.activity == nil {
+		store, ok := selected.(runtimestartupownership.Store)
+		writer, writable := selected.(sourceartifactfixture.Writer)
+		if !ok || !writable {
+			t.Fatal("activity coordinator requires its original native source and process owners")
+		}
+		ctx := runtimecorrelation.WithSourceArtifactFact(t.Context(), fact)
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(owner.runtimeID, fact.BundleHash()))
+		bundle, _ := semanticview.Bundle(source)
+		if err := sourceartifactfixture.EnsureArtifact(ctx, writer, bundle.SourceArtifact); err != nil {
+			t.Fatal(err)
+		}
+		capability, err := store.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+			OwnerID: "external-activity-coordinator", BootID: uuid.NewString(), RuntimeInstanceID: owner.runtimeID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner.capability = capability
+		current, installed, err := capability.CurrentSourceSet(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources := append([]runtimeagenttopology.SourceCoordinate(nil), current.Sources...)
+		present := false
+		for _, coordinate := range sources {
+			present = present || coordinate.BundleHash == fact.BundleHash()
+		}
+		if !present {
+			sources = append(sources, runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()})
+		}
+		plan, err := runtimeagenttopology.NewSourceSetPlan(sources, current.Agents)
+		if err != nil {
+			t.Fatal(err)
+		}
+		commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
+		if !installed {
+			_, err = capability.InstallCompleteSourceSet(ctx, commit)
+		} else if current.Revision != plan.Revision {
+			commit.ExpectedRevision = current.Revision
+			_, err = capability.RestoreSourceSet(ctx, commit)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+			BundleHash: fact.BundleHash(), RuntimeInstanceID: owner.runtimeID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+			t.Fatal(err)
+		}
+		evidence, err := grant.AdmitExecution(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner.activity, err = runtimestartupownership.CaptureActivityJournal(ctx, grant, evidence)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := pc.InstallActivityJournal(owner.activity); err != nil {
+		t.Fatal(err)
+	}
+	return pc
 }
 
 func completeExternalRuntimeTestWorkflowDeps(t testing.TB, selected any, deps runtimepkg.RuntimeDeps) runtimepkg.RuntimeDeps {
@@ -607,6 +705,7 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	if lifetimeOwner != nil {
 		owner = lifetimeOwner
 	}
+	owner.runtimeID, owner.bundleHash = opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash()
 	externalRuntimeTestEventBusOwners.Store(bus, owner)
 	t.Cleanup(func() {
 		defer externalRuntimeTestEventBusOwners.Delete(bus)
