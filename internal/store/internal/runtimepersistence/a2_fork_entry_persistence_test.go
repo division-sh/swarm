@@ -206,7 +206,11 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 						t.Fatalf("missing fixed entity identities: seen=%v expected=%v", seen, expected)
 					}
 					source := readSnapshotOwnershipEntity(t, f, f.runID)
-					request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}
+					rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()}
 					result, err := f.store.MaterializeRunFork(f.ctx, request)
 					if err != nil {
 						t.Fatal(err)
