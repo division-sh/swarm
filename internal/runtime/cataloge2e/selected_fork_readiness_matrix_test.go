@@ -454,9 +454,6 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							if err != nil {
 								t.Fatal(err)
 							}
-							if strings.HasPrefix(frontier, "activity_write") {
-								tools = []byte(strings.ReplaceAll(string(tools), "read_only", "non_idempotent_write"))
-							}
 							if err := os.WriteFile(filepath.Join(root, "tools.yaml"), []byte(strings.ReplaceAll(string(tools), "http://terminal-proof.invalid", server.URL)), 0600); err != nil {
 								t.Fatal(err)
 							}
