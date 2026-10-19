@@ -72,7 +72,6 @@ type activeInputFixture struct {
 	handled    chan capturedEvent
 	basePath   string
 	location   string
-	lockOrder  *storetest.ChannelLockOrder
 	senderJID  types.JID
 }
 
@@ -87,19 +86,16 @@ func newActiveInputFixtureWithOutput(t *testing.T, backend string, outbound bool
 	return newActiveInputFixtureWithProof(t, backend, outbound, false)
 }
 
-func newActiveInputFixtureWithProof(t *testing.T, backend string, outbound, saveProof bool, lockOrder ...*storetest.ChannelLockOrder) *activeInputFixture {
-	return newActiveInputFixtureWithTarget(t, backend, outbound, saveProof, 1, lockOrder...)
+func newActiveInputFixtureWithProof(t *testing.T, backend string, outbound, saveProof bool) *activeInputFixture {
+	return newActiveInputFixtureWithTarget(t, backend, outbound, saveProof, 1)
 }
 
-func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, saveProof bool, targetGeneration uint64, lockOrder ...*storetest.ChannelLockOrder) *activeInputFixture {
+func newActiveInputFixtureWithTarget(t *testing.T, backend string, outbound, saveProof bool, targetGeneration uint64) *activeInputFixture {
 	t.Helper()
 	f := &activeInputFixture{handled: make(chan capturedEvent, 1)}
 	if backend == "sqlite" {
 		f.location = filepath.Join(t.TempDir(), "runtime.db")
 		f.selected, _ = storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background(), f.location)
-	} else if len(lockOrder) != 0 {
-		f.lockOrder = lockOrder[0]
-		f.selected = storetest.StartPostgresRuntimeStore(t, lockOrder...)
 	} else {
 		f.location = testutil.StartPostgresDSN(t)
 		f.selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, f.location)
