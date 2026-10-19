@@ -70,9 +70,18 @@ func CopyRootIngressServedDecisionControl(t testing.TB) string {
   awaiting_review:
     gate:
       decision: launch_review
+      title: Launch review
+      context:
+        environment: "'staging'"
       outcomes:
-        approve: {advances_to: done}
-        reject: {advances_to: rework}
+        approve:
+          advances_to: done
+          input:
+            score: {type: integer, required: true}
+        reject:
+          advances_to: rework
+          input:
+            feedback: {type: text, required: true}
   waiting: {}
   rework: {}
   done: {final: true}
