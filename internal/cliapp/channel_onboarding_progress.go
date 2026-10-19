@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 func startCLIChannelOnboarding(ctx context.Context, client *cliAPIClient, params map[string]any, opts channelConnectOptions, errOut io.Writer) (channelOnboardingResult, error) {
@@ -93,12 +94,20 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 	if !pending && (result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Readiness == nil || !result.Readiness.Ready) {
 		return returnCLIValidationError(errOut, errors.New("channel result has neither current READY evidence nor owned pending preparation"))
 	}
+	var pairingQR string
+	if pending && result.Pairing.Code != "" && !output.asJSON && !output.asYAML && !output.quiet {
+		code, err := qrcode.New(result.Pairing.Code, qrcode.Medium)
+		if err != nil {
+			return returnCLIValidationError(errOut, errors.New("cannot render the current channel pairing QR"))
+		}
+		pairingQR = "\x1b[37;40m" + code.ToSmallString(false) + "\x1b[0m"
+	}
 	return renderCLIOutput(out, errOut, output, result, func(w io.Writer) {
 		if pending {
 			if result.Pairing.Status != channelonboarding.PairingStatusPreparing {
 				fmt.Fprintf(w, "Channel %s pairing: %s (not READY). Resume with `swarm channel resume %s`.\n", result.Operation.Provider, result.Pairing.Status, result.Operation.OperationID)
 				if result.Pairing.Code != "" {
-					fmt.Fprintf(w, "Pairing material (expires %s):\n%s\n", result.Pairing.ExpiresAt.UTC().Format(time.RFC3339), result.Pairing.Code)
+					fmt.Fprintf(w, "Scan this QR in WhatsApp > Linked Devices > Link a device (expires %s):\n%s\n", result.Pairing.ExpiresAt.UTC().Format(time.RFC3339), pairingQR)
 				}
 				return
 			}

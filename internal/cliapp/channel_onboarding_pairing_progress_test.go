@@ -40,7 +40,7 @@ func TestChannelCLIExplicitReplacementPrecedesStartEffects(t *testing.T) {
 }
 
 func TestChannelCLIPendingResumeReachesQRWithoutRevisionChange(t *testing.T) {
-	for _, mode := range []string{"human", "--json", "--quiet"} {
+	for _, mode := range []string{"human", "--no-color", "--json", "--quiet"} {
 		t.Run(mode, func(t *testing.T) {
 			calls := 0
 			server := newOperatorChannelCLIServer(t, func(t *testing.T, req jsonRPCRequest, call int) map[string]any {
@@ -71,8 +71,14 @@ func TestChannelCLIPendingResumeReachesQRWithoutRevisionChange(t *testing.T) {
 				if strings.TrimSpace(out) != operatorChannelCLIOperation || strings.Contains(out, "test-qr-material") {
 					t.Fatal("quiet mode disclosed QR instead of operation identity", out)
 				}
-			} else if !strings.Contains(out, "test-qr-material") {
-				t.Fatal("actionable QR was not presented", out)
+			} else if mode == "--json" {
+				if !strings.Contains(out, "test-qr-material") {
+					t.Fatal("JSON lost the current QR material", out)
+				}
+			} else if !strings.Contains(out, "Linked Devices") || !strings.Contains(out, "\u2588") || strings.Contains(out, "test-qr-material") {
+				t.Fatal("public command did not render a QR without exposing raw pairing text", out)
+			} else if mode == "--no-color" && strings.Contains(out, "\x1b[") {
+				t.Fatal("plain QR output contained ANSI styling", out)
 			}
 		})
 	}
