@@ -169,7 +169,11 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			child, err := owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), OriginalLoopCarriage: original})
+			rooted, err := fixture.store.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			child, err := owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), RootAdmission: rooted.Admission(), OriginalLoopCarriage: original})
 			if err != nil {
 				t.Fatal(err)
 			}
