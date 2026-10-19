@@ -325,6 +325,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		ctx = operation.Context()
 		container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
 			OriginalLoopCarriage:  original,
+			OriginalRootAdmission: preparation.originalSource.RootedSource.Admission(),
 			Prepared:              preparation,
 			Operation:             operation,
 			Owner:                 req.ExecutionOwner,

@@ -31,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -44,7 +45,7 @@ func TestSelectedContractSourceRejectsRehomedChildStateBothStores(t *testing.T) 
 						ctx := testAuthorActivityContext()
 						sourceRun, child, event := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", owner == "root", true, false, json.RawMessage(`{"value":"unchanged"}`))
 						store := fixture.store.(selectedActivityProjectionStore)
-						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, sourceRun))
+						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, sourceRun), originalRootAdmissionForRun(t, store, sourceRun))
 						if err != nil || len(loaded) != 1 {
 							t.Fatalf("valid materialized child: count=%d err=%v", len(loaded), err)
 						}
@@ -66,7 +67,7 @@ func TestSelectedContractSourceRejectsRehomedChildStateBothStores(t *testing.T) 
 							t.Fatalf("corrupt exact child row: rows=%d err=%v", rows, err)
 						}
 						before := selectedActivityPersistedSourceEvidence(t, fixture.db, event.ID())
-						loaded, err = store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, sourceRun))
+						loaded, err = store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, sourceRun), originalRootAdmissionForRun(t, store, sourceRun))
 						if err == nil || !strings.Contains(err.Error(), "exact child route/type") {
 							t.Fatalf("rehomed child supplied source generations: events=%#v err=%v", loaded, err)
 						}
@@ -92,7 +93,7 @@ func TestSelectedContractAbsentSourcePersistenceRejectsContradictoryEnvelopeBoth
 			sourceRun, child, event := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", true, true, false, json.RawMessage(`{"value":"unchanged"}`))
 			owner := fixture.store.(selectedActivityProjectionStore)
 			original := originalCarriageForRun(t, owner, sourceRun)
-			if _, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, original); err != nil {
+			if _, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, original, originalRootAdmissionForRun(t, owner, sourceRun)); err != nil {
 				t.Fatalf("typed source control: %v", err)
 			}
 			// Corrupt only the discriminant. The nonempty persisted envelope Source
@@ -104,7 +105,7 @@ func TestSelectedContractAbsentSourcePersistenceRejectsContradictoryEnvelopeBoth
 			if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
 				t.Fatal("invalid source rejection mutated durable state")
 			}
-			if _, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, original); err != nil {
+			if _, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, original, originalRootAdmissionForRun(t, owner, sourceRun)); err != nil {
 				t.Fatalf("rejected corruption damaged the valid source: %v", err)
 			}
 		})
@@ -150,7 +151,7 @@ func TestSelectedContractOrdinarySourceStatePresenceBothStores(t *testing.T) {
 					}
 					before := selectedActivityPersistedSourceEvidence(t, fixture.db, event.ID())
 					beforeAll := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, sourceRun))
+					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, sourceRun), originalRootAdmissionForRun(t, fixture.store.(selectedActivityProjectionStore), sourceRun))
 					if after := selectedActivityPersistedSourceEvidence(t, fixture.db, event.ID()); !reflect.DeepEqual(before, after) {
 						t.Fatal("ordinary preparation changed source evidence")
 					}
@@ -199,7 +200,7 @@ func TestSelectedContractOrdinarySourceStatePresenceBothStores(t *testing.T) {
 							t.Fatalf("replacement fixture is not actual selected S: %v", err)
 						}
 						beforeWrongSource := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-						if _, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, selected); err == nil {
+						if _, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, selected, originalRootAdmissionForRun(t, fixture.store.(selectedActivityProjectionStore), sourceRun)); err == nil {
 							t.Fatal("selected S reinterpreted original event lineage")
 						}
 						if !reflect.DeepEqual(beforeWrongSource, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
@@ -344,7 +345,7 @@ func TestSelectedContractActivitySourceProjectionBothStores(t *testing.T) {
 					sourceRun, child, original := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", cell.root, cell.independentTarget, cell.wrongFlow, json.RawMessage(`{"value":"unchanged"}`))
 					before := selectedActivityPersistedSourceEvidence(t, fixture.db, original.ID())
 					store := fixture.store.(selectedActivityProjectionStore)
-					loaded, err := store.LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), sourceRun, child.ForkRunID, []string{original.ID()}, originalCarriageForRun(t, store, sourceRun))
+					loaded, err := store.LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), sourceRun, child.ForkRunID, []string{original.ID()}, originalCarriageForRun(t, store, sourceRun), originalRootAdmissionForRun(t, store, sourceRun))
 					if after := selectedActivityPersistedSourceEvidence(t, fixture.db, original.ID()); !reflect.DeepEqual(before, after) {
 						t.Fatal("activity preparation mutated persisted source routing/payload evidence")
 					}
@@ -401,7 +402,7 @@ func TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStor
 					input := json.RawMessage(`{"large":9007199254740993,"decimal":1.2300e+09,"negative_zero":-0,"nested":[18446744073709551615]}`)
 					sourceRun, child, original := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", owner == "root", true, false, input)
 					before := selectedActivityPersistedSourceEvidence(t, fixture.db, original.ID())
-					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), sourceRun, child.ForkRunID, []string{original.ID()}, originalCarriageForRun(t, fixture.store, sourceRun))
+					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), sourceRun, child.ForkRunID, []string{original.ID()}, originalCarriageForRun(t, fixture.store, sourceRun), originalRootAdmissionForRun(t, fixture.store.(selectedActivityProjectionStore), sourceRun))
 					if err != nil || len(loaded) != 1 {
 						t.Fatalf("load numeric activity: events=%#v err=%v", loaded, err)
 					}
@@ -573,7 +574,7 @@ func selectedActivityPersistedSourceEvidence(t *testing.T, db *sql.DB, eventID s
 type selectedActivityProjectionStore interface {
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	MaterializeRunForkForSelectedContractExecution(context.Context, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
-	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error)
+	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage, sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error)
 	LoadRunForkSelectedContractSourceEventModes(context.Context, string, []string) ([]executionmode.Mode, error)
 }
 
@@ -727,6 +728,19 @@ func seedSelectedActivitySourceRun(t *testing.T, fixture authorActivityReceiptFi
 		StartedAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
 	})
 	return ctx
+}
+
+func originalRootAdmissionForRun(t testing.TB, selected any, runID string) sourceartifact.RootAdmission {
+	t.Helper()
+	store, ok := selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)
+	if !ok {
+		t.Fatal("fixture requires the actual rooted source reader")
+	}
+	rooted, err := store.LoadRunRootedSource(context.Background(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rooted.Admission()
 }
 
 func originalCarriageForRun(t testing.TB, selected any, runID string) semanticview.OriginalLoopCarriage {

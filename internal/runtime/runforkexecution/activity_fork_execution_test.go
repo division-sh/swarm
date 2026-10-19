@@ -232,7 +232,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			if err != nil {
 				t.Fatal(err)
 			}
-			reloaded, err := fixture.owner.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, result.Materialization.ForkRunID, []string{sourceRequestEventID}, original)
+			reloaded, err := fixture.owner.ports.replay.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, result.Materialization.ForkRunID, []string{sourceRequestEventID}, original, loaded.RootedSource.Admission())
 			// Preparation is not a public read: activation froze the source run.
 			// The old source may not grant another preparation after execution.
 			if err == nil || !strings.Contains(err.Error(), "source event preparation state forked is unsupported") || len(reloaded) != 0 {

@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -40,8 +41,8 @@ func (p selectedInputClaimProbe) ClaimRunForkSelectedContractRuntimeExecution(ct
 	return authority, err
 }
 
-func (p selectedInputExecutionProbe) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRun, forkRun string, ids []string, carriage semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	events, err := p.SelectedContractReplayPersistence.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, forkRun, ids, carriage)
+func (p selectedInputExecutionProbe) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRun, forkRun string, ids []string, carriage semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	events, err := p.SelectedContractReplayPersistence.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, forkRun, ids, carriage, originalRoot)
 	if err == nil {
 		p.mutate(ctx, events)
 	}

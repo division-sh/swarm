@@ -23,6 +23,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
@@ -594,7 +595,7 @@ func loadSQLiteRunForkSelectedContractEvents(ctx context.Context, q eventrecords
 	return out, nil
 }
 
-func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
@@ -609,6 +610,13 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 	ids := uniqueNonEmptyStrings(sourceEventIDs)
 	if len(ids) == 0 {
 		return nil, nil
+	}
+	if err := originalRoot.Validate(); err != nil {
+		return nil, fmt.Errorf("original source root admission: %w", err)
+	}
+	originalFact, err := runtimecorrelation.NewSourceArtifactFact(originalRoot.BundleHash())
+	if err != nil {
+		return nil, err
 	}
 	var out []runfork.RunForkSelectedContractSourceEvent
 	result := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
@@ -638,7 +646,8 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 			if stateAdmission.snapshot.RunID != sourceRunID {
 				return fmt.Errorf("source event preparation run disagrees with selected fork binding")
 			}
-			fact, err := s.RunLifecyclePostgresOwner.RequirePresentSourceTx(ctx, tx, sourceRunID)
+			sourceCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, originalFact), originalRoot)
+			fact, err := s.RunLifecyclePostgresOwner.RequirePresentSourceTx(sourceCtx, tx, sourceRunID)
 			if err != nil {
 				return err
 			}

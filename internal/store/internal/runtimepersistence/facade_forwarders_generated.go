@@ -55,6 +55,7 @@ import (
 	timerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	tools "github.com/division-sh/swarm/internal/runtime/tools"
 	workflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
+	sourceartifact "github.com/division-sh/swarm/internal/sourceartifact"
 	runhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	time "time"
 )
@@ -795,8 +796,8 @@ func (s *PostgresStore) LoadRunForkSelectedContractSourceEventModes(ctx context.
 	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, sourceEventIDs)
 }
 
-func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, original)
+func (s *PostgresStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	return s.runForkPostgresOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, original, originalRoot)
 }
 
 func (s *PostgresStore) LoadRunForkSourceRunID(ctx context.Context, forkRunID string) (string, error) {
@@ -2007,8 +2008,8 @@ func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEventModes(ctx con
 	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEventModes(ctx, sourceRunID, sourceEventIDs)
 }
 
-func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error) {
-	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, original)
+func (s *SQLiteRuntimeStore) LoadRunForkSelectedContractSourceEvents(ctx context.Context, sourceRunID string, forkRunID string, sourceEventIDs []string, original semanticview.OriginalLoopCarriage, originalRoot sourceartifact.RootAdmission) ([]runfork.RunForkSelectedContractSourceEvent, error) {
+	return s.runForkSQLiteOwner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, sourceEventIDs, original, originalRoot)
 }
 
 func (s *SQLiteRuntimeStore) LoadRunForkSourceRunID(ctx context.Context, forkRunID string) (string, error) {

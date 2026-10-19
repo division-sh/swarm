@@ -56,7 +56,7 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 							SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 						}))
 						before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID()))
+						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID()), originalRootAdmissionForRun(t, store, event.RunID()))
 						hints.expect(t, 0)
 						wantErr := ""
 						if status == "started" {
@@ -116,7 +116,7 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 							t.Fatalf("source journal changed: found=%v err=%v", found, err)
 						}
 						afterFirst := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-						again, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID()))
+						again, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID()), originalRootAdmissionForRun(t, store, event.RunID()))
 						if err != nil || !reflect.DeepEqual(loaded, again) {
 							t.Fatalf("repeat changed prepared event: err=%v", err)
 						}
@@ -320,7 +320,7 @@ func TestSelectedForkRecordedActivityCardDependencyBothStores(t *testing.T) {
 						SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 					}))
 					store := fixture.store.(selectedActivityProjectionStore)
-					loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, event.RunID()))
+					loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, event.RunID()), originalRootAdmissionForRun(t, store, event.RunID()))
 					if err != nil || len(loaded) != 1 {
 						t.Fatalf("selected recorded preparation: %+v error=%v", loaded, err)
 					}
@@ -374,7 +374,7 @@ func TestRunForkActivityTimestampRejectsIncompleteReuseBothStores(t *testing.T) 
 						t.Fatal(err)
 					}
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-					_, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, event.RunID()))
+					_, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, event.RunID()), originalRootAdmissionForRun(t, fixture.store.(selectedActivityProjectionStore), event.RunID()))
 					if err == nil || !strings.Contains(err.Error(), column+" is required") {
 						t.Fatalf("incomplete recorded timestamp: got %v, want %s is required", err, column)
 					}
@@ -412,7 +412,7 @@ func TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores(t *testi
 				t.Fatalf("source precision fixture: %#v err=%v", original, err)
 			}
 			store := fixture.store.(selectedActivityProjectionStore)
-			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID())); err != nil {
+			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID()), originalRootAdmissionForRun(t, store, event.RunID())); err != nil {
 				t.Fatal(err)
 			}
 			var copiedID string
@@ -433,7 +433,7 @@ func TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores(t *testi
 				}
 			}
 			before := snapshotForkHistoricalExecutionTables(t, fixture.db, postgres)
-			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID())); err != nil {
+			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID()), originalRootAdmissionForRun(t, store, event.RunID())); err != nil {
 				t.Fatal(err)
 			}
 			if _, inserted, err := journal.StartActivityAttempt(ctx, copied); err != nil || inserted {

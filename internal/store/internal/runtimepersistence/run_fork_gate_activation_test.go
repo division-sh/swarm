@@ -928,7 +928,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				forkRunID := child.ForkRunID
 				var prepared runfork.RunForkSelectedContractSourceEvent
 				beforePrepare := historicalContextDatabaseRows(t, db, backend.name == "postgres")
-				loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, originalCarriageForRun(t, cards, sourceRunID))
+				loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, originalCarriageForRun(t, cards, sourceRunID), originalRootAdmissionForRun(t, cards, sourceRunID))
 				if err == nil {
 					if len(loaded) != 1 {
 						t.Fatalf("prepared count=%d", len(loaded))
