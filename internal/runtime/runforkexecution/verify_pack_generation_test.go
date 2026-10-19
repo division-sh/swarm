@@ -47,8 +47,9 @@ func TestRetainedSelectedAndOriginalSourceUseConfiguredPackGeneration(t *testing
 	}
 	sourceID := uuid.NewString()
 	reader := &fakeSourceArtifactSelectedContractSourceStore{
-		record:       record,
-		availability: runbundle.Availability{RunID: sourceID, Status: "running", BundleHash: record.BundleHash, SourceArtifactPresent: true},
+		record: record,
+		availability: runbundle.Availability{RunID: sourceID, Status: "running", BundleHash: record.BundleHash,
+			RootReference: record.rooted.Admission().Reference(), RootAdmissionPresent: true, SourceArtifactPresent: true},
 	}
 	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: reader, PlatformPackBases: bases}
 	for _, request := range []SelectedContractSourceLoadRequest{

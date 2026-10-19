@@ -248,7 +248,7 @@ func proveSelectedWorkspacePreparation(t *testing.T, backend, mode string, real 
 	}
 	sourceRun, eventID := uuid.NewString(), uuid.NewString()
 	seedSelectedClaudeExecutionSource(t, ctx, selected, loaded, sourceRun, eventID, time.Unix(1700002303, 0).UTC())
-	ctx = correlation.WithRootAdmission(ctx, loaded.RootedSource.Admission())
+	ctx = correlation.WithRootAdmission(correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), loaded.RootedSource.Admission())
 	trace := &workspacePreparationTrace{mode: mode, real: real, started: make(chan struct{}), cancelled: make(chan struct{}), finish: make(chan struct{})}
 	t.Cleanup(func() {
 		trace.mu.Lock()
