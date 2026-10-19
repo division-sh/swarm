@@ -1,0 +1,7 @@
+Precompile outside test slot: environment=0.007s build=24.519s cleanup=0.000s total=24.526s
+Test slot acquired after 17ms. Starting go test ./internal/store -run ^TestPersistenceAuthorityFindingRegistry$ -count=1 -v
+=== RUN   TestPersistenceAuthorityFindingRegistry
+    persistence_authority_registry_test.go:99: verified 14889 exact resolved authority findings
+--- PASS: TestPersistenceAuthorityFindingRegistry (6.61s)
+PASS
+ok  	github.com/division-sh/swarm/internal/store	6.629s

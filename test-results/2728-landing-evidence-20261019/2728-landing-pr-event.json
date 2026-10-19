@@ -1,0 +1,9 @@
+{
+  "repository": {"full_name": "division-sh/swarm"},
+  "pull_request": {
+    "draft": false,
+    "body": "CI-Tier: lifecycle\nCI-Units: catalog-replay-2-3\nLocal-Tier: focused\n",
+    "head": {"sha": "fca3652b94470037515a4d2b5f1d6f4f2686cfc3"},
+    "base": {"sha": "d282de4ddb5e690c60e30c0534c8db4c9e33fcf5"}
+  }
+}

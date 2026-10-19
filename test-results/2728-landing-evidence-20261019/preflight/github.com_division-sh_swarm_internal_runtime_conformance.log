@@ -1,0 +1,8 @@
+{"Time":"2026-10-19T05:06:17.911261103Z","Action":"start","Package":"github.com/division-sh/swarm/internal/runtime/conformance"}
+{"Time":"2026-10-19T05:06:17.917823004Z","Action":"run","Package":"github.com/division-sh/swarm/internal/runtime/conformance","Test":"TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified"}
+{"Time":"2026-10-19T05:06:17.917860104Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/conformance","Test":"TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified","Output":"=== RUN   TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified\n"}
+{"Time":"2026-10-19T05:13:12.388699595Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/conformance","Test":"TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified","Output":"--- PASS: TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified (414.47s)\n"}
+{"Time":"2026-10-19T05:13:12.388833466Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/runtime/conformance","Test":"TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified","Elapsed":414.47}
+{"Time":"2026-10-19T05:13:12.388903256Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/conformance","Output":"PASS\n"}
+{"Time":"2026-10-19T05:13:12.398682593Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/conformance","Output":"ok  \tgithub.com/division-sh/swarm/internal/runtime/conformance\t414.487s\n"}
+{"Time":"2026-10-19T05:13:12.398724583Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/runtime/conformance","Elapsed":414.487}
