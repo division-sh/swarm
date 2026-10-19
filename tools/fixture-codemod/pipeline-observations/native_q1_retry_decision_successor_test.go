@@ -22,7 +22,7 @@ func q1RetryDecisionReceipt() (fixtureSetupSuccessor2617, error) {
 		return fixtureSetupSuccessor2617{}, fmt.Errorf("Q1 fixture history changed")
 	}
 	var pins []fixtureSetupSuccessor2617
-	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 40 {
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 42 {
 		return fixtureSetupSuccessor2617{}, fmt.Errorf("Q1 fixture history shape changed: %v", err)
 	}
 	return pins[39], nil
