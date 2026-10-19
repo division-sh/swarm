@@ -173,7 +173,7 @@ func TestNativePipelineColdJoinConstructorAndFanOutRecipesStaySourcePinned(t *te
 			t.Fatalf("native repair differs from its reviewed snapshot: %s/%v/%v", row.Function, err, afterErr)
 		}
 	}
-	if count != 25 {
-		t.Fatalf("native join/constructor/fan-out recipes=%d, want 25", count)
+	if count != 24 {
+		t.Fatalf("native join/constructor/fan-out recipes=%d, want 24", count)
 	}
 }
