@@ -84,11 +84,12 @@ func reviewedCatalogNamedIdentityCurrentSource(row recipe) (string, error) {
 	if row.Successor == "" {
 		return row.After, nil
 	}
-	// These two owner repairs were reviewed at134a521a8; their original run/name
-	// transformation remains pinned in Before/After.
+	// Reviewed owner repairs retain the original run/name transformation.
+	// The recovery join is authorized by reviewer-e6263312471.
 	for _, pin := range []struct{ file, function, digest string }{
 		{"internal/runtime/cataloge2e/receiver_materialization_geometry_test.go", "TestReceiverMaterializationSourceLocalTargetlessAgentControlBothStores", "ba3016484746604e9e3999fc799b1948c71a0d65e67ee16a2e5d900193a53eea"},
 		{"internal/runtime/cataloge2e/receiver_materialization_selected_test.go", "runReceiverMaterializationSelectedForkExecution", "135922df7ee8e651ae20a84d14e3543c34ab3d02a7e6308605ff6ab5f5552cdb"},
+		{"internal/runtime/cataloge2e/receiver_materialization_restart_test.go", "TestReceiverMaterializationPendingAgentRestartBothStores", "7f904f9eb429a1f84d161897aff519728098645094d872fe9796f513cd3ba84d"},
 	} {
 		if row.File == pin.file && row.Function == pin.function {
 			if !historicalCurrentSourcePinned(row.Successor, pin.digest) {
