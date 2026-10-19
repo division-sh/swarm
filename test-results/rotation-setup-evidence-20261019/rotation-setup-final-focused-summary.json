@@ -1,0 +1,19 @@
+{
+  "head": "7886103bc254bd44a202caebc0b2ad8b75a15a2c",
+  "passed_roots": 3,
+  "roots": [
+    "TestSelectedRotationReceiptBothStores",
+    "TestSelectedRotationReceiptPrecisionBothStores",
+    "TestSelectedRotationElapsedExpiryBothStores"
+  ],
+  "backend_children": [
+    "TestSelectedRotationReceiptBothStores/sqlite",
+    "TestSelectedRotationReceiptBothStores/postgres",
+    "TestSelectedRotationReceiptPrecisionBothStores/sqlite",
+    "TestSelectedRotationReceiptPrecisionBothStores/postgres",
+    "TestSelectedRotationElapsedExpiryBothStores/sqlite",
+    "TestSelectedRotationElapsedExpiryBothStores/postgres"
+  ],
+  "failures": [],
+  "skips": []
+}

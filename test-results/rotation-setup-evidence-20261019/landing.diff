@@ -1,0 +1,31 @@
+commit 7886103bc254bd44a202caebc0b2ad8b75a15a2c
+Author:     Youssef Azzaoui <y@azzaoui.fr>
+AuthorDate: Mon Oct 19 09:04:48 2026 +0000
+Commit:     Youssef Azzaoui <y@azzaoui.fr>
+CommitDate: Mon Oct 19 09:04:48 2026 +0000
+
+    test(store): isolate rotation successor expiry from predecessor setup
+    
+    Acquire the predecessor with the existing normal setup TTL. Apply the unchanged 150 ms TTL only immediately before creating the successor; keep every receipt, expiry, refusal and zero-mutation assertion unchanged.
+    
+    Track: FULL
+
+diff --git a/internal/store/internal/runtimepersistence/llm_rotation_receipt_test.go b/internal/store/internal/runtimepersistence/llm_rotation_receipt_test.go
+index 472feac3c8..c7bbe51492 100644
+--- a/internal/store/internal/runtimepersistence/llm_rotation_receipt_test.go
++++ b/internal/store/internal/runtimepersistence/llm_rotation_receipt_test.go
+@@ -478,13 +478,13 @@ func TestSelectedRotationElapsedExpiryBothStores(t *testing.T) {
+ 		fixture := newExactFactFixture(t, selected)
+ 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
+ 		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+-		selected.selected.(interface{ SetSessionLockTTL(time.Duration) }).SetSessionLockTTL(150 * time.Millisecond)
+ 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
+ 		predecessor, _, err := owner.AcquireLiveSession(ctx, identity, "expiry-worker")
+ 		if err != nil {
+ 			t.Fatal(err)
+ 		}
+ 		request := sessions.RotationMetadata{OperationID: "elapsed-expiry-key"}
++		selected.selected.(interface{ SetSessionLockTTL(time.Duration) }).SetSessionLockTTL(150 * time.Millisecond)
+ 		first, err := owner.Rotate(ctx, predecessor, request)
+ 		if err != nil {
+ 			t.Fatal(err)

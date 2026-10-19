@@ -1,0 +1,22 @@
+diff --git a/internal/store/internal/runtimepersistence/llm_rotation_receipt_test.go b/internal/store/internal/runtimepersistence/llm_rotation_receipt_test.go
+index 472feac3c8..92c3145851 100644
+--- a/internal/store/internal/runtimepersistence/llm_rotation_receipt_test.go
++++ b/internal/store/internal/runtimepersistence/llm_rotation_receipt_test.go
+@@ -478,13 +478,16 @@ func TestSelectedRotationElapsedExpiryBothStores(t *testing.T) {
+ 		fixture := newExactFactFixture(t, selected)
+ 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
+ 		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+-		selected.selected.(interface{ SetSessionLockTTL(time.Duration) }).SetSessionLockTTL(150 * time.Millisecond)
+ 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
+ 		predecessor, _, err := owner.AcquireLiveSession(ctx, identity, "expiry-worker")
+ 		if err != nil {
+ 			t.Fatal(err)
+ 		}
++		t.Logf("setup diagnostic after acquire: now=%s predecessor_expires=%s", time.Now().UTC().Format(time.RFC3339Nano), predecessor.ExpiresAt.UTC().Format(time.RFC3339Nano))
++		time.Sleep(200 * time.Millisecond)
++		t.Logf("setup diagnostic before rotate: now=%s predecessor_expires=%s expired=%t", time.Now().UTC().Format(time.RFC3339Nano), predecessor.ExpiresAt.UTC().Format(time.RFC3339Nano), !time.Now().Before(predecessor.ExpiresAt))
+ 		request := sessions.RotationMetadata{OperationID: "elapsed-expiry-key"}
++		selected.selected.(interface{ SetSessionLockTTL(time.Duration) }).SetSessionLockTTL(150 * time.Millisecond)
+ 		first, err := owner.Rotate(ctx, predecessor, request)
+ 		if err != nil {
+ 			t.Fatal(err)

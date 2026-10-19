@@ -1,0 +1,2 @@
+d16bc4958198714dfc8d8a8d02769865b5eb4fc526775804b77ebbb1bd236f5f  internal/store/internal/runtimepersistence/llm_rotation_receipt_test.go
+c560ef8dd92035b62c8f883cd5477df28b5a20c1bc858ab51f7b4b5616f45053  test-results/rotation-setup-delayed-candidate-overlay.patch

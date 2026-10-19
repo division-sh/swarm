@@ -1,0 +1,22 @@
+Precompile outside test slot: environment=0.008s build=42.910s cleanup=0.000s total=42.919s
+Test slot acquired after 5ms. Starting go test ./internal/store/internal/runtimepersistence -run ^(TestSelectedRotationElapsedExpiryBothStores|TestSelectedRotationReceiptBothStores|TestSelectedRotationReceiptPrecisionBothStores)$ -count=1 -v
+=== RUN   TestSelectedRotationReceiptBothStores
+=== RUN   TestSelectedRotationReceiptBothStores/sqlite
+=== RUN   TestSelectedRotationReceiptBothStores/postgres
+--- PASS: TestSelectedRotationReceiptBothStores (2.53s)
+    --- PASS: TestSelectedRotationReceiptBothStores/sqlite (1.14s)
+    --- PASS: TestSelectedRotationReceiptBothStores/postgres (1.38s)
+=== RUN   TestSelectedRotationReceiptPrecisionBothStores
+=== RUN   TestSelectedRotationReceiptPrecisionBothStores/sqlite
+=== RUN   TestSelectedRotationReceiptPrecisionBothStores/postgres
+--- PASS: TestSelectedRotationReceiptPrecisionBothStores (0.73s)
+    --- PASS: TestSelectedRotationReceiptPrecisionBothStores/sqlite (0.43s)
+    --- PASS: TestSelectedRotationReceiptPrecisionBothStores/postgres (0.30s)
+=== RUN   TestSelectedRotationElapsedExpiryBothStores
+=== RUN   TestSelectedRotationElapsedExpiryBothStores/sqlite
+=== RUN   TestSelectedRotationElapsedExpiryBothStores/postgres
+--- PASS: TestSelectedRotationElapsedExpiryBothStores (1.01s)
+    --- PASS: TestSelectedRotationElapsedExpiryBothStores/sqlite (0.51s)
+    --- PASS: TestSelectedRotationElapsedExpiryBothStores/postgres (0.50s)
+PASS
+ok  	github.com/division-sh/swarm/internal/store/internal/runtimepersistence	4.301s

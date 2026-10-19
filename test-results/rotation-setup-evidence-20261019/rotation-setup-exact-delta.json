@@ -1,0 +1,10 @@
+{
+  "base": "a1b901ebb3ca387084c8e7a1c7e176d7a90aebb2",
+  "file": "internal/store/internal/runtimepersistence/llm_rotation_receipt_test.go",
+  "setter_occurrences": [
+    1,
+    1
+  ],
+  "all_other_bytes_equal": true,
+  "diagnostic_overlay_absent": true
+}

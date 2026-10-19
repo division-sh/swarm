@@ -1,0 +1,25 @@
+{
+  "head": "7886103bc254bd44a202caebc0b2ad8b75a15a2c",
+  "profile": "lifecycle",
+  "roots": [
+    {
+      "name": "TestSelectedRotationElapsedExpiryBothStores",
+      "owners": [
+        "store-runtime-selected"
+      ]
+    },
+    {
+      "name": "TestSelectedRotationReceiptBothStores",
+      "owners": [
+        "store-runtime-selected"
+      ]
+    },
+    {
+      "name": "TestSelectedRotationReceiptPrecisionBothStores",
+      "owners": [
+        "store-runtime-selected"
+      ]
+    }
+  ],
+  "exactly_one_owner": true
+}

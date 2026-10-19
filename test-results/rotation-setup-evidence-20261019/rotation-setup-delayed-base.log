@@ -1,0 +1,18 @@
+Precompile outside test slot: environment=0.006s build=55.998s cleanup=0.000s total=56.004s
+Test slot acquired after 3ms. Starting go test ./internal/store/internal/runtimepersistence -run ^TestSelectedRotationElapsedExpiryBothStores$ -count=1 -v
+=== RUN   TestSelectedRotationElapsedExpiryBothStores
+=== RUN   TestSelectedRotationElapsedExpiryBothStores/sqlite
+    llm_rotation_receipt_test.go:487: setup diagnostic after acquire: now=2026-10-19T09:02:52.92998206Z predecessor_expires=2026-10-19T09:02:53.064739475Z
+    llm_rotation_receipt_test.go:489: setup diagnostic before rotate: now=2026-10-19T09:02:53.130507277Z predecessor_expires=2026-10-19T09:02:53.064739475Z expired=true
+    llm_rotation_receipt_test.go:493: session currently leased by another worker
+=== RUN   TestSelectedRotationElapsedExpiryBothStores/postgres
+    llm_rotation_receipt_test.go:487: setup diagnostic after acquire: now=2026-10-19T09:02:54.157824069Z predecessor_expires=2026-10-19T09:02:54.299078Z
+    llm_rotation_receipt_test.go:489: setup diagnostic before rotate: now=2026-10-19T09:02:54.358297896Z predecessor_expires=2026-10-19T09:02:54.299078Z expired=true
+    llm_rotation_receipt_test.go:493: session currently leased by another worker
+--- FAIL: TestSelectedRotationElapsedExpiryBothStores (2.06s)
+    --- FAIL: TestSelectedRotationElapsedExpiryBothStores/sqlite (0.81s)
+    --- FAIL: TestSelectedRotationElapsedExpiryBothStores/postgres (1.25s)
+FAIL
+FAIL	github.com/division-sh/swarm/internal/store/internal/runtimepersistence	2.082s
+FAIL
+exit status 1

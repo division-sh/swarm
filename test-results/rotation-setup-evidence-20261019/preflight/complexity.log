@@ -1,0 +1,37 @@
+{
+  "policy_verdict": "equal-reviewed-policy; independently-measured-base-and-head",
+  "base": "a1b901ebb3ca387084c8e7a1c7e176d7a90aebb2",
+  "head": "7886103bc254bd44a202caebc0b2ad8b75a15a2c",
+  "base_summary": {
+    "cognit": {
+      "callables": 22596,
+      "at_least_30": 538,
+      "at_least_50": 192,
+      "maximum": 302
+    },
+    "cyclo": {
+      "callables": 22596,
+      "at_least_30": 247,
+      "at_least_50": 57,
+      "maximum": 186
+    }
+  },
+  "head_summary": {
+    "cognit": {
+      "callables": 22596,
+      "at_least_30": 538,
+      "at_least_50": 192,
+      "maximum": 302
+    },
+    "cyclo": {
+      "callables": 22596,
+      "at_least_30": 247,
+      "at_least_50": 57,
+      "maximum": 186
+    }
+  },
+  "hotspot_count_increased": false,
+  "removed_file_facts": [],
+  "added_file_facts": [],
+  "callable_changes": []
+}

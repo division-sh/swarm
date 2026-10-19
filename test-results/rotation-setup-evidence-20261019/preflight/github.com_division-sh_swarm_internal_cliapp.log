@@ -1,0 +1,8 @@
+{"Time":"2026-10-19T09:08:11.306534906Z","Action":"start","Package":"github.com/division-sh/swarm/internal/cliapp"}
+{"Time":"2026-10-19T09:08:11.323285339Z","Action":"run","Package":"github.com/division-sh/swarm/internal/cliapp","Test":"TestVerifyBootStartupPredicateCensus"}
+{"Time":"2026-10-19T09:08:11.323317519Z","Action":"output","Package":"github.com/division-sh/swarm/internal/cliapp","Test":"TestVerifyBootStartupPredicateCensus","Output":"=== RUN   TestVerifyBootStartupPredicateCensus\n"}
+{"Time":"2026-10-19T09:08:11.485851468Z","Action":"output","Package":"github.com/division-sh/swarm/internal/cliapp","Test":"TestVerifyBootStartupPredicateCensus","Output":"--- PASS: TestVerifyBootStartupPredicateCensus (0.16s)\n"}
+{"Time":"2026-10-19T09:08:11.485931849Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/cliapp","Test":"TestVerifyBootStartupPredicateCensus","Elapsed":0.16}
+{"Time":"2026-10-19T09:08:11.485990439Z","Action":"output","Package":"github.com/division-sh/swarm/internal/cliapp","Output":"PASS\n"}
+{"Time":"2026-10-19T09:08:11.494260725Z","Action":"output","Package":"github.com/division-sh/swarm/internal/cliapp","Output":"ok  \tgithub.com/division-sh/swarm/internal/cliapp\t0.187s\n"}
+{"Time":"2026-10-19T09:08:11.494306885Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/cliapp","Elapsed":0.188}

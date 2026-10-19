@@ -1,0 +1,14 @@
+Precompile outside test slot: environment=0.003s build=32.012s cleanup=0.000s total=32.016s
+Test slot acquired after 2ms. Starting go test ./internal/store/internal/runtimepersistence -run ^TestSelectedRotationElapsedExpiryBothStores$ -count=1 -v
+=== RUN   TestSelectedRotationElapsedExpiryBothStores
+=== RUN   TestSelectedRotationElapsedExpiryBothStores/sqlite
+    llm_rotation_receipt_test.go:486: setup diagnostic after acquire: now=2026-10-19T09:03:58.423258129Z predecessor_expires=2026-10-19T09:05:58.410112436Z
+    llm_rotation_receipt_test.go:488: setup diagnostic before rotate: now=2026-10-19T09:03:58.623699173Z predecessor_expires=2026-10-19T09:05:58.410112436Z expired=false
+=== RUN   TestSelectedRotationElapsedExpiryBothStores/postgres
+    llm_rotation_receipt_test.go:486: setup diagnostic after acquire: now=2026-10-19T09:03:59.901222078Z predecessor_expires=2026-10-19T09:05:59.890106Z
+    llm_rotation_receipt_test.go:488: setup diagnostic before rotate: now=2026-10-19T09:04:00.101420231Z predecessor_expires=2026-10-19T09:05:59.890106Z expired=false
+--- PASS: TestSelectedRotationElapsedExpiryBothStores (2.64s)
+    --- PASS: TestSelectedRotationElapsedExpiryBothStores/sqlite (1.13s)
+    --- PASS: TestSelectedRotationElapsedExpiryBothStores/postgres (1.51s)
+PASS
+ok  	github.com/division-sh/swarm/internal/store/internal/runtimepersistence	2.672s

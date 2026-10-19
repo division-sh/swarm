@@ -1,0 +1,47 @@
+{
+  "base": "a1b901ebb3ca387084c8e7a1c7e176d7a90aebb2",
+  "delay_ms": 200,
+  "invocations_per_arm": 1,
+  "both_stores": true,
+  "arms": {
+    "base": {
+      "boundaries": [
+        {
+          "now": "2026-10-19T09:02:53.130507277Z",
+          "predecessor_expires": "2026-10-19T09:02:53.064739475Z",
+          "expired": true
+        },
+        {
+          "now": "2026-10-19T09:02:54.358297896Z",
+          "predecessor_expires": "2026-10-19T09:02:54.299078Z",
+          "expired": true
+        }
+      ],
+      "pass": [],
+      "fail": [
+        "TestSelectedRotationElapsedExpiryBothStores/sqlite",
+        "TestSelectedRotationElapsedExpiryBothStores/postgres"
+      ]
+    },
+    "candidate": {
+      "boundaries": [
+        {
+          "now": "2026-10-19T09:03:58.623699173Z",
+          "predecessor_expires": "2026-10-19T09:05:58.410112436Z",
+          "expired": false
+        },
+        {
+          "now": "2026-10-19T09:04:00.101420231Z",
+          "predecessor_expires": "2026-10-19T09:05:59.890106Z",
+          "expired": false
+        }
+      ],
+      "pass": [
+        "TestSelectedRotationElapsedExpiryBothStores/sqlite",
+        "TestSelectedRotationElapsedExpiryBothStores/postgres"
+      ],
+      "fail": []
+    }
+  },
+  "conclusion": "controlled predecessor-setup expiry demonstrated; original hosted cause remains UNCLASSIFIED"
+}

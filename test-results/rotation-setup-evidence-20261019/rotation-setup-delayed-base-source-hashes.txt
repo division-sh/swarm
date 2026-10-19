@@ -1,0 +1,2 @@
+396fcb6d992fb4390d7628508625afd950eec1404ac86586c38ff8ef1cd21305  internal/store/internal/runtimepersistence/llm_rotation_receipt_test.go
+71625128dd1e4e0b87f3eac1433d7a2307c5737c0c4154924043315ece65f95f  test-results/rotation-setup-delayed-base-overlay.patch

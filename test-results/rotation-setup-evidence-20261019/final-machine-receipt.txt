@@ -1,0 +1,6 @@
+<!-- receipt v1 -->
+receipt: head=7886103bc254bd44a202caebc0b2ad8b75a15a2c tree=eb8463b545b0e92b37a8e1209a2d67d712e36e02 parent=a1b901ebb3ca387084c8e7a1c7e176d7a90aebb2 branch=agent-d/rotation-expiry-setup signed=G dirty_files=0
+preflight: test-results/preflight/20261019T090607.269448595-6f1d67e6-fe23-4c08-ad1c-80fb8cf16caa/receipt.json sha256=7cc6870da27398d8de2feafc97a00089250b20fd8da91b20946fa04a04a46310 (exact-head complete unstarted=0)
+tests: ./internal/store/internal/runtimepersistence:TestSelectedRotationElapsedExpiryBothStores,TestSelectedRotationReceiptBothStores,TestSelectedRotationReceiptPrecisionBothStores
+regenerated: not-claimed
+generated: 2026-10-19T09:19:47Z
