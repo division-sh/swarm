@@ -19,6 +19,12 @@ func q10CurrentEndpointRecipes(t *testing.T) []recipe {
 	}
 	matched := make(map[int]bool)
 	for _, pin := range packet.Rows {
+		// #2756/6265855940 retires only this live image, not its history.
+		if pin.Original.Family == "native-run-setup-family144" &&
+			pin.Original.File == "internal/runtime/runforkexecution/activity_fork_execution_test.go" &&
+			pin.Original.Function == "seedSource" {
+			continue
+		}
 		index := -1
 		for i, row := range rows {
 			if sameReviewedRecipeKey(row, pin.Original) {
@@ -43,8 +49,8 @@ func q10CurrentEndpointRecipes(t *testing.T) []recipe {
 		}
 		rows[index], matched[index] = current, true
 	}
-	if len(matched) != 43 {
-		t.Fatal("Q10 current endpoint coverage differs from the retained census")
+	if len(matched) != 42 {
+		t.Fatal("Q10 active endpoint coverage differs from the retained census")
 	}
 	return rows
 }
@@ -57,22 +63,27 @@ func TestQ10CurrentEndpointsPreserveExactHistoryAndRejectCrossedPairs(t *testing
 	rows := q10CurrentEndpointRecipes(t)
 	for _, pin := range packet.Rows {
 		t.Run(pin.Original.File+"/"+pin.Original.Function, func(t *testing.T) {
-			var selected []recipe
-			for _, row := range rows {
-				if sameReviewedRecipeKey(row, pin.Original) {
-					selected = append(selected, row)
+			retired := pin.Original.Family == "native-run-setup-family144" &&
+				pin.Original.File == "internal/runtime/runforkexecution/activity_fork_execution_test.go" &&
+				pin.Original.Function == "seedSource"
+			if !retired {
+				var selected []recipe
+				for _, row := range rows {
+					if sameReviewedRecipeKey(row, pin.Original) {
+						selected = append(selected, row)
+					}
 				}
-			}
-			if len(selected) != 1 {
-				t.Fatal("missing or duplicate composed endpoint")
-			}
-			history := selected[0]
-			history.Successor = pin.Original.Successor
-			if !reflect.DeepEqual(history, pin.Original) {
-				t.Fatal("current endpoint overwrote historical recipe fields")
-			}
-			if files, changes, err := prepareFiles("../../..", selected); err != nil || len(files) != 0 || len(changes) != 0 {
-				t.Fatalf("exact current endpoint is not inert: %v", err)
+				if len(selected) != 1 {
+					t.Fatal("missing or duplicate composed endpoint")
+				}
+				history := selected[0]
+				history.Successor = pin.Original.Successor
+				if !reflect.DeepEqual(history, pin.Original) {
+					t.Fatal("current endpoint overwrote historical recipe fields")
+				}
+				if files, changes, err := prepareFiles("../../..", selected); err != nil || len(files) != 0 || len(changes) != 0 {
+					t.Fatalf("exact current endpoint is not inert: %v", err)
+				}
 			}
 			for _, field := range []string{"family", "file", "function", "before", "after", "successor", "removed", "mechanical"} {
 				mutant := pin.Original
