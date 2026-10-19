@@ -95,6 +95,12 @@ func reviewedSharedCoordinatorCurrentBody2617(row recipe, actual string, prior r
 		if wantErr != nil || actualErr != nil || want != got {
 			return "", fmt.Errorf("account readback differs from exact Q10 header/data successor")
 		}
+		if original, err := fixtureSetupCurrentEndpoint2617(row, actual); err == nil {
+			if _, err := reviewedSharedCoordinatorBody2617(original, prior); err != nil {
+				return "", err
+			}
+			return current, nil
+		}
 		if _, err := reviewedSharedCoordinatorPriorBody2617(row, row.Successor, prior); err != nil {
 			return "", err
 		}
