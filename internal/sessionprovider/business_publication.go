@@ -80,12 +80,14 @@ func prepareSessionBusinessPublication(ctx context.Context, input input.Admissio
 	selectBare := func(text operatorchannel.InboundText) (bool, error) {
 		return store.HasCurrentChannelInputDraft(ownedContext, text, request.OriginalReceivedAt)
 	}
+	var operatorPlans []packs.SatisfactionPlan
+	if !event.Scope.AccountOnly {
+		operatorPlans = []packs.SatisfactionPlan{channel}
+	}
 	for ordinal, output := range delivery.Events {
-		if !event.Scope.AccountOnly {
-			operatorEvent, err = inbound.ProjectOperatorOutput(output, request, []packs.SatisfactionPlan{channel}, selectBare, operatorEvent)
-			if err != nil {
-				return absent, err
-			}
+		operatorEvent, err = inbound.ProjectOperatorOutput(output, request, operatorPlans, selectBare, operatorEvent)
+		if err != nil {
+			return absent, err
 		}
 		item, err := inbound.ProjectOutputEvent(request, ordinal, output, posture)
 		if err != nil {
