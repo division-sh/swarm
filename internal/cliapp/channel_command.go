@@ -43,6 +43,7 @@ type channelConnectOptions struct {
 	credentialStdin  bool
 	resumeCredential string
 	clientLanguage   string
+	waitForPairing   bool
 }
 
 type channelStatusOptions struct {
@@ -288,6 +289,7 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if err := opts.output.validate(); err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
+	opts.waitForPairing = opts.verb == "connect" && !opts.output.asJSON && !opts.output.asYAML && !opts.output.quiet
 	provider = strings.TrimSpace(provider)
 	if provider == "" {
 		return returnCLIValidationError(errOut, errors.New("channel provider is required"))
@@ -410,23 +412,20 @@ func writeChannelNativeQualification(out io.Writer, result channelOnboardingResu
 }
 
 func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer) (channelOnboardingResult, error) {
-	identityAnnounced := false
 	sharedAudienceAnnounced := false
-	waitForPairing := opts.verb == "connect" && !opts.output.asJSON && !opts.output.asYAML && !opts.output.quiet
 	advancePending := opts.verb == "resume"
 	for {
 		pending, err := validateCLIChannelProgress(result)
 		if err != nil {
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
 		}
-		if pending {
-			if waitForPairing {
-				result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, progressOut, errOut)
-				if err != nil {
-					return channelOnboardingResult{}, err
-				}
-			} else if !advancePending && opts.resumeCredential == "" {
-				return result, nil
+		if pending && !opts.waitForPairing && !advancePending && opts.resumeCredential == "" {
+			return result, nil
+		}
+		if pending && opts.waitForPairing {
+			result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, progressOut, errOut)
+			if err != nil {
+				return channelOnboardingResult{}, err
 			}
 		}
 		advancePending = false
@@ -450,10 +449,7 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 			}
 			claimCurrent := identity.ExpiresAt.IsZero() || identity.ExpiresAt.After(now)
 			if identity.State == "awaiting_claim" && claimCurrent {
-				if !identityAnnounced {
-					fmt.Fprintf(progressOut, "Send this exact code through the live %s channel before %s:\n\n  %s\n\nWaiting for an authenticated claimant...\n", result.Operation.Provider, identity.ExpiresAt.Local().Format(time.RFC3339), identity.Challenge)
-					identityAnnounced = true
-				}
+				fmt.Fprintf(progressOut, "Send this exact code through the live %s channel before %s:\n\n  %s\n\nWaiting for an authenticated claimant...\n", result.Operation.Provider, identity.ExpiresAt.Local().Format(time.RFC3339), identity.Challenge)
 				var err error
 				result, err = waitForChannelOnboardingClaim(ctx, client, result, opts.apiOptions)
 				if err != nil {
@@ -481,7 +477,7 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 		if pendingErr != nil {
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, pendingErr)
 		}
-		if pending && !waitForPairing {
+		if pending && !opts.waitForPairing {
 			return next, nil
 		}
 		result = next
@@ -495,26 +491,24 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 	}
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
-	lastQR, lastStatus := "", ""
+	fmt.Fprintf(out, "Connecting to %s...\n", current.Operation.Provider)
+	lastQR := ""
 	for {
 		pending, err := validateCLIChannelProgress(current)
 		if err != nil {
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
 		}
 		if !pending {
-			if current.Pairing != nil && current.Pairing.Status == "qr_expired" {
-				fmt.Fprintln(out, "QR expired, getting a new QR...")
-			}
 			return current, nil
 		}
-		if current.Pairing.Code != lastQR || current.Pairing.Status != lastStatus {
-			if lastQR != "" && current.Pairing.Code != "" {
+		if current.Pairing.Code != lastQR {
+			if lastQR != "" {
 				fmt.Fprintln(out, "QR expired, new QR:")
 			}
 			if err := renderChannelOnboardingResult(out, errOut, opts.output, current); err != nil {
 				return channelOnboardingResult{}, err
 			}
-			lastQR, lastStatus = current.Pairing.Code, current.Pairing.Status
+			lastQR = current.Pairing.Code
 		}
 		select {
 		case <-ctx.Done():
@@ -523,7 +517,7 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 		}
 		// Only the existing checkpoint owner can turn a connected session into
 		// executable admission. A scan alone is not that milestone.
-		if current.Pairing.Connected && (current.Pairing.Status == "paired" || current.Pairing.Status == "connected") {
+		if current.Pairing.Connected && current.Pairing.Code == "" {
 			return current, nil
 		}
 		var next channelOnboardingResult
