@@ -556,17 +556,17 @@ rows:
 
   - id: tool.schema_entry
     ruled: mechanical-ratified
-    paths: "tools.<tool>.category, description, handler_type, effect_class, permission, rate_limit, rate_limit_max_wait, input_schema, output_schema, http, response_mapping, response_success, credentials, managed_credential"
+    paths: "tools.<tool>.category, description, handler_type, permission, rate_limit, rate_limit_max_wait, input_schema, output_schema, http, response_mapping, response_success, credentials, managed_credential"
     owners: [projectToolDeclarationsValue, projectToolValue, ToolSchemaEntry]
     information:
-      fact: [tool map key, handler/effect/schema/transport contract]
+      fact: [tool map key, handler/schema/transport contract]
       choice: [permission, rate limit, credentials]
       annotation: [category, description]
       derived_projection: [empty object input/output schema defaults]
     spelling:
       canonical_candidate: strict_mapping_with_omitted_default_empty_schemas
       retired_duplicates: [explicit_empty_object_schema_equal_to_default]
-      already_retired: [parameters, returns, endpoint, type, required_permission]
+      already_retired: [parameters, returns, endpoint, type, required_permission, effect_class]
     corpus: {project_tool_entries: 0}
 
   - id: tool.schema_value

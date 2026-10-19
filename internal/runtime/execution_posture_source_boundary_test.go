@@ -69,23 +69,42 @@ func TestProcessExecutionPostureOwnsProductionLiveAuthorityLiterals(t *testing.T
 				aliases[name] = importPath
 			}
 			comparisons := map[*ast.SelectorExpr]bool{}
-			if rel == "internal/runtime/runfork/preparation.go" {
-				// The persisted preparation decoder tests whether a probe is required.
-				// Only equality operands in this predicate are exempt, never constructors.
+			predicate, operator, expected := "", token.EQL, -1
+			switch rel {
+			case "internal/runtime/runfork/preparation.go":
+				predicate = "RequiresProbe"
+			case "internal/runtime/pipeline/activity_recovery_result.go":
+				predicate, operator, expected = "admitActivityRecoveryRequest", token.NEQ, 2
+			case "internal/store/internal/startupownership/activity_recovery_native.go":
+				predicate, operator, expected = "reconcileDisplacedHTTPActivity", token.NEQ, 1
+			case "internal/store/internal/runtimepersistence/test_activity_fork_history_fixture.go":
+				predicate, operator, expected = "SeedHistoricalActivityForkAttemptForTest", token.NEQ, 1
+			}
+			if predicate != "" {
+				// #2756/6268224234: exact predicate operands, never minting uses.
 				for _, declaration := range parsed.Decls {
 					fn, ok := declaration.(*ast.FuncDecl)
-					if !ok || fn.Name.Name != "RequiresProbe" {
+					if !ok || fn.Name.Name != predicate {
 						continue
 					}
 					ast.Inspect(fn.Body, func(node ast.Node) bool {
 						comparison, ok := node.(*ast.BinaryExpr)
-						if ok && comparison.Op == token.EQL {
+						if ok && comparison.Op == operator {
 							if selector, ok := comparison.Y.(*ast.SelectorExpr); ok {
-								comparisons[selector] = true
+								if qualifier, ok := selector.X.(*ast.Ident); ok {
+									path := aliases[qualifier.Name]
+									if path == "github.com/division-sh/swarm/internal/runtime/executionmode" && selector.Sel.Name == "Live" ||
+										path == "github.com/division-sh/swarm/internal/runtime/effects" && selector.Sel.Name == "ExecutionModeLive" {
+										comparisons[selector] = true
+									}
+								}
 							}
 						}
 						return true
 					})
+				}
+				if expected >= 0 && len(comparisons) != expected {
+					violations = append(violations, rel+":"+predicate+":comparison-count")
 				}
 			}
 			ast.Inspect(parsed, func(node ast.Node) bool {
