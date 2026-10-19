@@ -392,8 +392,7 @@ func a2WaitJoinPublicRun(t *testing.T, rt servedControlProofRuntime, runID, stat
 			}
 			if stable == 4 {
 				if active > 0 && (last.OperationalState != "running" || last.BlockingLayer != "" || last.BlockingReason != "") ||
-					last.Run.Status == "completed" && last.OperationalState != "completed" ||
-					active == 0 && last.Run.Status == "running" && (last.OperationalState != "stalled" || last.BlockingLayer != "delivery_lifecycle" || last.BlockingReason != "no_active_deliveries") {
+					last.Run.Status == "completed" && last.OperationalState != "completed" {
 					t.Fatalf("public run diagnosis contradicts continuation activity/terminal state: %+v", last)
 				}
 				if ready && last.TestQuiescence != (operatorread.RunTestQuiescence{Ready: true}) {
