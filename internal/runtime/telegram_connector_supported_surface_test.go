@@ -415,7 +415,7 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 		nodes:  nodes,
 		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
-	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, backend.eventStore, runtimepipeline.PipelineCoordinatorOptions{
+	pc := newExternalRuntimeTestActivityCoordinator(t, bus, backend.eventStore, runtimepipeline.PipelineCoordinatorOptions{
 		SourceArtifactFact:  runtimeTestSourceArtifactFact(t, source),
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,

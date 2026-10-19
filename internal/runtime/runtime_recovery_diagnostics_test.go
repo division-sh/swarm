@@ -1186,7 +1186,7 @@ func VerifyRuntimeStart_RecoveryFailureEmitsDegradedDecisionSummaryForTest(t *te
 	managerStore := &recoveryGuardManagerStore{}
 	deliveryStore := fixture.Deliveries
 
-	rt, err := newScopedTestRuntime(t, ctx, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
+	rt, err := nativeRecoveryLogRuntimeForTest(t, fixture, RuntimeDeps{Config: testRecoveryDiagnosticsConfig(true),
 		WorkflowPersistence: startupRecoveryWorkflowPersistence(nil),
 		DeliveryStore:       deliveryStore,
 		RuntimeLogStore:     fixture.Persistence,
