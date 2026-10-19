@@ -301,7 +301,11 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 	if err != nil || len(history.Entities) != 2 {
 		t.Fatalf("constructed fieldless history: %+v %v", history.Entities, err)
 	}
-	request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID()}
+	rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID(), RootAdmission: rooted.Admission()}
 	fork, err := owner.MaterializeRunFork(f.ctx, request)
 	if err != nil {
 		t.Fatal(err)

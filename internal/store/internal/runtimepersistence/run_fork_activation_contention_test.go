@@ -598,9 +598,13 @@ func TestGenericConstructedGateForkUsesFixedSnapshotBothStores(t *testing.T) {
 			if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")) {
 				t.Fatal("fixed gate planning changed source or child state")
 			}
+			rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			var first runfork.RunForkMaterialization
 			for attempt := 0; attempt < 2; attempt++ {
-				result, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+				result, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()})
 				if err != nil || result.ForkRunID == "" {
 					t.Fatalf("fixed gate materialization: %+v %v", result, err)
 				}
