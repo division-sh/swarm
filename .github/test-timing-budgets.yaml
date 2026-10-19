@@ -12,6 +12,9 @@ hard:
     limit_seconds: 540
     justification: Existing ceiling for the required 20-journey served lifecycle matrix; the 492s primary baseline remains measured without an automatic confirmation pass.
   unit_command_seconds:
+    pipeline-rest:
+      limit_seconds: 374
+      justification: 'Reviewer-d timing-policy ruling (2026-10-19): measured variability, not a steady regression; #2745 study https://github.com/division-sh/swarm/issues/2745#issuecomment-6263994620 records n127/p99 324s, so use this unit-only 374s baseline/486.2s ceiling (rounded p99*1.5) with the unchanged 30% buffer and all sibling budgets unchanged.'
     persistence-authority-debt-census:
       limit_seconds: 600
       justification: 'Reviewed #2535 disposition: run 38284182093 at 628a21e74 measured 636s; run 38238632747 at 5182245ed measured 371s; source trees differ and cause is unisolated; use a 600s baseline/780s ceiling with the fixed 30% buffer and unchanged sibling budgets; above 780s split the census job rather than raise again.'
