@@ -79,7 +79,11 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 			if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
 				t.Fatal("refused imported execution changed source or fork state")
 			}
-			request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID()}
+			rootAdmission, present, err := correlation.RootAdmissionFromContext(f.ctx)
+			if err != nil || !present {
+				t.Fatalf("scenario fixture root admission: present=%t err=%v", present, err)
+			}
+			request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID(), RootAdmission: rootAdmission}
 			fork, err := owner.MaterializeRunFork(f.ctx, request)
 			if err != nil {
 				t.Fatal(err)
