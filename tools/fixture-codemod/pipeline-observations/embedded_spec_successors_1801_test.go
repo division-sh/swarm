@@ -68,6 +68,12 @@ func TestEmbeddedSpecHistoricalPairPreservesOnlyGenuinelyUnlistedPaths(t *testin
 		t.Fatal(err)
 	}
 	for _, pin := range packet.Rows {
+		// #2700/6265502341 retires this live image, not its immutable packet.
+		if pin.Original.Family == "native-run-setup-family144" &&
+			pin.Original.File == "internal/runtime/runforkexecution/execution_test.go" &&
+			pin.Original.Function == "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation" {
+			continue
+		}
 		t.Run(pin.Original.Function, func(t *testing.T) {
 			row := pin.Original
 			row.Successor = pin.Candidate
