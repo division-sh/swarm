@@ -39,8 +39,6 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/channelonboarding/admission_current.go", "A10,A27", "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21"},
 	{"internal/channelonboarding/compiler.go", "A10,A27", "2577-native-publication,P08,P10,P21"},
 	{"internal/channelonboarding/session_activity.go", "A10,A27", "2577-authored-session-activity,P08,P10,P21"},
-	// #2577's non-executable progress and its startup/CLI consumers are mapped
-	// in testdata/issue_2577_session_progress_admission_accounting.md.
 	{"internal/channelonboarding/service.go", "A10,A27", "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress"},
 	{"internal/channelonboarding/start_selection.go", "A10,A27", "P08,P10,P21,2577-native-cli-progress"},
 	{"internal/channelonboarding/session_progress.go", "A10,A27", "P08,P10,P21,2577-native-pending,2577-native-startup-wait"},
@@ -54,8 +52,6 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/runtime/channel_activation_admission.go", "A10,A27", "2577-native-publication,2577-native-issuer-refusal,2577-native-activity-handoff,P08,P10,P21"},
 	{"internal/runtime/channelactivation/owner.go", "A10,A27", "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21"},
 	{"internal/channelonboarding/teardown.go", "A10,A27", "P08,P10,P21,2577-logout-reservation-recovery"},
-	// The exact N66 owner/caller and native successor proofs are recorded in
-	// testdata/issue_2577_n66_admission_predicate_accounting.md.
 	{"internal/channelonboarding/logout.go", "A10,A27", "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor"},
 	{"internal/store/internal/backend/channelonboarding/logout.go", "A10,A27", "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor"},
 	{"internal/store/internal/backend/channelonboarding/logout_effect.go", "A10,A27", "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor"},
