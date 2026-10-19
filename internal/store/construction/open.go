@@ -6,7 +6,6 @@ package construction
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"errors"
 	"fmt"
 	"time"
@@ -19,10 +18,6 @@ import (
 )
 
 func OpenPostgres(dsn string) (*private.PostgresStore, *sql.DB, error) {
-	return openPostgres(dsn, nil)
-}
-
-func openPostgres(dsn string, lockOrder *ChannelLockOrder) (*private.PostgresStore, *sql.DB, error) {
 	cfg, err := pq.NewConfig(dsn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
@@ -31,18 +26,7 @@ func openPostgres(dsn string, lockOrder *ChannelLockOrder) (*private.PostgresSto
 	if err != nil {
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
 	}
-	var transport driver.Connector = connector
-	if lockOrder != nil {
-		lockOrder.mu.Lock()
-		if lockOrder.attached {
-			lockOrder.mu.Unlock()
-			return nil, nil, fmt.Errorf("lock-order observer must belong to one original fixture")
-		}
-		lockOrder.attached = true
-		lockOrder.mu.Unlock()
-		transport = &channelLockOrderConnector{native: connector, probe: lockOrder}
-	}
-	db := sql.OpenDB(transport)
+	db := sql.OpenDB(connector)
 	db.SetMaxOpenConns(25)
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxIdleTime(5 * time.Minute)
@@ -145,15 +129,8 @@ func OpenPostgresReadOnly(dsn string) (*private.PostgresStore, error) {
 	return store, nil
 }
 
-func NewPostgres(dsn string, lockOrder ...*ChannelLockOrder) (*private.PostgresStore, error) {
-	if len(lockOrder) > 1 || (len(lockOrder) == 1 && lockOrder[0] == nil) {
-		return nil, fmt.Errorf("postgres construction accepts at most one nonnil fixed lock-order observer")
-	}
-	var observer *ChannelLockOrder
-	if len(lockOrder) == 1 {
-		observer = lockOrder[0]
-	}
-	store, _, err := openPostgres(dsn, observer)
+func NewPostgres(dsn string) (*private.PostgresStore, error) {
+	store, _, err := OpenPostgres(dsn)
 	return store, err
 }
 
