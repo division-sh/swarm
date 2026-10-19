@@ -352,7 +352,8 @@ func admitTestPostgresStore(t testing.TB, db *sql.DB, inspection ...pq.Config) *
 	return pg
 }
 
-func storeTestPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+func storeTestPayloadAdmitter(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+	flowID := payloadProducer.FlowID()
 	return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 }
 

@@ -6,7 +6,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/platform"
 	"gopkg.in/yaml.v3"
 )
@@ -127,6 +130,63 @@ func TestPlatformCatalogMaterializationIsImmutableAndPreservesExactDDL(t *testin
 	projected["platform"] = nil
 	if _, err := platform.PlatformVersionFromValue(spec.SourceValue()); err != nil {
 		t.Fatalf("source projection mutated authority: %v", err)
+	}
+	// Reach: reference law survives admission/readback as reference evidence,
+	// while altered producer/reference declarations cannot grant that authority.
+	const referenceSource = `platform_tables:
+  diagnostics_encoding:
+    runtime_log_encoding:
+      event_name: platform.runtime_log
+      produced_by_type: platform
+      payload_fields: {message: human-readable}
+platform_events:
+  catalog:
+    platform.runtime_log:
+      defined_in: platform_tables.diagnostics_encoding
+      schema_authority: platform-spec.yaml#platform_tables.diagnostics_encoding
+      producer_evidence: {produced_by_type: platform, produced_by: runtime}
+`
+	diagnostic := eventtest.DiagnosticDirect("", events.EventTypePlatformRuntimeLog, "runtime", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Time{})
+	pinned, err := ParsePlatformSpecDocument([]byte(referenceSource), "platform-spec.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration, authority, err := ResolvePlatformEventAuthority(pinned, diagnostic)
+	if err != nil || authority.Reference() != events.RuntimeLogSchemaReference || authority.Digest() == "" || len(declaration.Payload.Properties) != 0 {
+		t.Fatalf("reference declaration lost or reinterpreted: %+v err=%v", authority, err)
+	}
+	if _, invented := EventSchemaRegistryFromCatalog(map[string]EventCatalogEntry{string(diagnostic.Type()): declaration})[string(diagnostic.Type())]; invented {
+		t.Fatal("reference-only catalog entry invented a structural schema")
+	}
+	for name, body := range map[string]string{
+		"missing_producer":     strings.Replace(referenceSource, "producer_evidence: {produced_by_type: platform, produced_by: runtime}", "producer_evidence: {}", 1),
+		"wrong_producer":       strings.Replace(referenceSource, "produced_by: runtime", "produced_by: foreign", 1),
+		"wrong_class":          strings.Replace(referenceSource, "produced_by_type: platform,", "produced_by_type: external,", 1),
+		"missing_reference":    strings.Replace(referenceSource, "schema_authority: platform-spec.yaml#platform_tables.diagnostics_encoding", "schema_authority: ''", 1),
+		"wrong_reference":      strings.Replace(referenceSource, "schema_authority: platform-spec.yaml#platform_tables.diagnostics_encoding", "schema_authority: another.yaml#platform_tables.diagnostics_encoding", 1),
+		"wrong_definition":     strings.Replace(referenceSource, "defined_in: platform_tables.diagnostics_encoding", "defined_in: another_encoding", 1),
+		"inline_contradiction": strings.Replace(referenceSource, "defined_in: platform_tables.diagnostics_encoding", "payload: {}\n      defined_in: platform_tables.diagnostics_encoding", 1),
+		"wrong_law_event":      strings.Replace(referenceSource, "event_name: platform.runtime_log", "event_name: platform.boot", 1),
+	} {
+		candidate, err := ParsePlatformSpecDocument([]byte(body), name+".yaml")
+		if err != nil {
+			continue
+		}
+		if _, _, err := ResolvePlatformEventAuthority(candidate, diagnostic); err == nil {
+			t.Errorf("%s gained reference authority", name)
+		}
+	}
+	changed, err := ParsePlatformSpecDocument([]byte(strings.Replace(referenceSource, "message: human-readable", "message: changed-law", 1)), "changed.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, changedAuthority, err := ResolvePlatformEventAuthority(changed, diagnostic)
+	if err != nil || changedAuthority.Digest() == authority.Digest() {
+		t.Fatal("pinned referenced-law change did not change provenance")
+	}
+	_, stableAuthority, err := ResolvePlatformEventAuthority(pinned, diagnostic)
+	if err != nil || stableAuthority != authority {
+		t.Fatal("later law admission mutated earlier pinned provenance")
 	}
 }
 

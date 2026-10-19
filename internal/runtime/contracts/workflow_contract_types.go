@@ -1517,6 +1517,7 @@ type EventCatalogEntry struct {
 	BusinessKeyField    string           `yaml:"key"`
 	Payload             EventPayloadSpec `yaml:"payload"`
 	admissionProvenance map[string]EffectiveValueProvenance
+	platformAuthority   PlatformEventAuthority
 }
 
 type AgentRegistryEntry struct {

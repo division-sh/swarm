@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -490,7 +491,7 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 			return nil, err
 		}
 		payload, _ := original.PayloadAdmission()
-		if _, err := admitPayload(ctx, original, payload.Binding().FlowID()); err != nil {
+		if _, err := admitPayload(ctx, original, events.EventPayloadProducer(original, payload.Binding().FlowID())); err != nil {
 			return nil, fmt.Errorf("selected starting input %s: %w", event.SourceEventID, err)
 		}
 		constructions := make(map[agentidentity.Plan]flowidentity.Instance)
@@ -513,7 +514,7 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 				}
 				flow = scope.Declaration().OwnerFlowID
 			}
-			if _, err := admitPayload(ctx, original, flow); err != nil {
+			if _, err := admitPayload(ctx, original, events.EventPayloadProducer(original, flow)); err != nil {
 				return nil, fmt.Errorf("selected input %s recipient schema: %w", event.SourceEventID, err)
 			}
 		}

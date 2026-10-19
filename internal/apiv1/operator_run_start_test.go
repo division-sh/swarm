@@ -407,7 +407,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 			ContractBundle:     source,
 			SourceArtifactFact: runStartTestSourceArtifactFact(),
-			PayloadAdmitter: func(_ context.Context, event events.Event, _ string) (events.PayloadAdmission, error) {
+			PayloadAdmitter: func(_ context.Context, event events.Event, _ events.PayloadProducer) (events.PayloadAdmission, error) {
 				if event.Type() != "scan.requested" {
 					return events.PayloadAdmission{}, fmt.Errorf("unexpected event type %q", event.Type())
 				}

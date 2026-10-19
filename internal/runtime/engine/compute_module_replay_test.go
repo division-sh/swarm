@@ -30,7 +30,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func computeReplayRuntimeLogPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+func computeReplayRuntimeLogPayloadAdmitter(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+	flowID := payloadProducer.FlowID()
 	return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 }
 

@@ -120,20 +120,27 @@ payload:
 }
 
 func TestResolveEventSchema_DoesNotInventSchemaForReferenceOnlyPlatformEvent(t *testing.T) {
-	var doc yaml.Node
-	if err := yaml.Unmarshal([]byte(`
-defined_in: platform_tables.diagnostics_encoding
-schema_authority: platform-spec.yaml#platform_tables.diagnostics_encoding
-note: Full payload schema is owned by the diagnostic subtype.
-`), &doc); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
-	}
 	bundle := &runtimecontracts.WorkflowContractBundle{}
 	root := &runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}}
 	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root}}
-	bundle.Platform = admittedCatalogTestSpec(t, map[string]yaml.Node{
-		"platform.runtime_log": *doc.Content[0],
-	})
+	platform, err := runtimecontracts.ParsePlatformSpecDocument([]byte(`
+platform_tables:
+  diagnostics_encoding:
+    runtime_log_encoding:
+      event_name: platform.runtime_log
+      produced_by_type: platform
+      payload_fields: {message: human-readable}
+platform_events:
+  catalog:
+    platform.runtime_log:
+      defined_in: platform_tables.diagnostics_encoding
+      schema_authority: platform-spec.yaml#platform_tables.diagnostics_encoding
+      producer_evidence: {produced_by_type: platform, produced_by: runtime}
+`), "platform-spec.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle.Platform = platform
 
 	source := Wrap(bundle)
 	if scope, found := source.FlowScopeByID("."); !found || scope.ID != "." {

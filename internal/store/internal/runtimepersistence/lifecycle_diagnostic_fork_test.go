@@ -222,11 +222,11 @@ func TestLifecycleDiagnosticForkLifetime(t *testing.T) {
 						})
 						entered, release := make(chan struct{}), make(chan struct{})
 						var once sync.Once
-						sink.SetEventPayloadAdmitter(func(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+						sink.SetEventPayloadAdmitter(func(ctx context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
 							if event.Type() == events.EventTypePlatformRuntimeLog {
 								once.Do(func() { close(entered); <-release })
 							}
-							return storeTestPayloadAdmitter(ctx, event, flowID)
+							return storeTestPayloadAdmitter(ctx, event, payloadProducer)
 						})
 						projected, discarded := make(chan error, 1), make(chan error, 1)
 						go func() { _, err := projectDiagnosticTestBatch(ctx, projector, 100); projected <- err }()

@@ -486,7 +486,8 @@ func newScopedTestEventBus(t *testing.T, store runtimebus.EventStore, opts runti
 		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
 	if opts.PayloadAdmitter == nil {
-		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+			flowID := payloadProducer.FlowID()
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		}
 	}
@@ -536,7 +537,8 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
 	}
 	if opts.PayloadAdmitter == nil {
-		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+			flowID := payloadProducer.FlowID()
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		}
 	}

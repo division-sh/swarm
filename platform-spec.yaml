@@ -22205,10 +22205,20 @@ platform_events:
       schema_authority: platform-spec.yaml#platform_tables.diagnostics_encoding
       producer_evidence:
         produced_by_type: platform
+        produced_by: runtime
         locations:
         - internal/store/internal/backend/eventpersistence/runtime_log_persistence.go
       routing_class: diagnostic_direct_persisted
-      note: Full payload schema defined in platform_tables. Not duplicated here.
+      note: >-
+        Payload authority is the retained diagnostics_encoding reference, not an inline
+        structural schema or schema-less permission. The producer-schema lookup accepts
+        explicit admitted platform/runtime diagnostic identity; authored producers instead
+        require their exact declared flow coordinate. Empty flow is never a producer class.
+        The existing canonical runtime-log decoder validates the referenced subtype.
+        Payload admission binds the reference and a deterministic digest of the pinned
+        referenced law, with platform provenance. Application and durable restoration
+        require agreement with event producer, class and identity; a platform schema label
+        alone is insufficient. The reference is not added to structural schema registries.
     platform.activity_requested:
       description: Internal durable request to execute a handler activity after its immediate handler or proposed-effect approval transaction commits.
       schema_authority: 'platform-spec.yaml#platform_events.catalog["platform.activity_requested"].payload'

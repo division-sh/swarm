@@ -378,7 +378,7 @@ func TestOperatorEventPublishSQLitePayloadFailureLeavesNoIdempotencyCompletionOr
 	bus, err := newScopedAPITestEventBus(t, sqliteStore, runtimebus.EventBusOptions{
 		ContractBundle:     source,
 		SourceArtifactFact: runStartTestSourceArtifactFact(),
-		PayloadAdmitter: func(_ context.Context, event events.Event, _ string) (events.PayloadAdmission, error) {
+		PayloadAdmitter: func(_ context.Context, event events.Event, _ events.PayloadProducer) (events.PayloadAdmission, error) {
 			if event.Type() == "scan.requested" {
 				return events.PayloadAdmission{}, errors.New("schema violation")
 			}
@@ -415,7 +415,8 @@ func TestOperatorEventPublishRejectsPrivateFlowDespiteLiveRecipient(t *testing.T
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle:     source,
 		SourceArtifactFact: runStartTestSourceArtifactFact(),
-		PayloadAdmitter: func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		PayloadAdmitter: func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+			flowID := payloadProducer.FlowID()
 			if string(event.Type()) != canonicalEventName {
 				return events.PayloadAdmission{}, fmt.Errorf("event type = %q, want %s", event.Type(), canonicalEventName)
 			}
@@ -2086,7 +2087,7 @@ func TestOperatorEventPublishHandlersFailClosedBeforePersistence(t *testing.T) {
 		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 			ContractBundle:     source,
 			SourceArtifactFact: runStartTestSourceArtifactFact(),
-			PayloadAdmitter: func(_ context.Context, event events.Event, _ string) (events.PayloadAdmission, error) {
+			PayloadAdmitter: func(_ context.Context, event events.Event, _ events.PayloadProducer) (events.PayloadAdmission, error) {
 				if event.Type() != "scan.requested" {
 					return events.PayloadAdmission{}, fmt.Errorf("unexpected event type %q", event.Type())
 				}

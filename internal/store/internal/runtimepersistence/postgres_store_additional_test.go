@@ -855,7 +855,7 @@ func TestPostgresStore_PersistEventWithDeliveries_RejectsInvalidEntityID(t *test
 func TestPostgresStore_AppendEvent_RejectsPayloadAdmissionFailureBeforePersistence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	pg.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, _ string) (events.PayloadAdmission, error) {
+	pg.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, _ events.PayloadProducer) (events.PayloadAdmission, error) {
 		if strings.TrimSpace(string(event.Type())) != "task.completed" {
 			t.Fatalf("unexpected event type %q", event.Type())
 		}
@@ -903,7 +903,8 @@ func currentPlatformPayloadAdmitterForStoreTest(t testing.TB) runtimebus.Payload
 	t.Helper()
 	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	registry := runtimecontracts.EventSchemaRegistryFromBundle(&runtimecontracts.WorkflowContractBundle{Platform: spec})
-	return func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	return func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+		flowID := payloadProducer.FlowID()
 		eventType := strings.TrimSpace(string(event.Type()))
 		schema, ok := registry[eventType]
 		if !ok {

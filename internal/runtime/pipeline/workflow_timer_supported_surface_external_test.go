@@ -713,7 +713,8 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 	}
 }
 
-func strictWorkflowTimerPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+func strictWorkflowTimerPayloadAdmitter(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+	flowID := payloadProducer.FlowID()
 	if event.Type() != runtimecontracts.WorkflowStageTimerInternalEvent {
 		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	}
@@ -744,8 +745,8 @@ func newFailOnceWorkflowTimerPayloadAdmitter() *failOnceWorkflowTimerPayloadAdmi
 	}
 }
 
-func (v *failOnceWorkflowTimerPayloadAdmitter) admit(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
-	admitted, err := strictWorkflowTimerPayloadAdmitter(ctx, event, flowID)
+func (v *failOnceWorkflowTimerPayloadAdmitter) admit(ctx context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+	admitted, err := strictWorkflowTimerPayloadAdmitter(ctx, event, payloadProducer)
 	if err != nil || event.Type() != runtimecontracts.WorkflowStageTimerInternalEvent {
 		return admitted, err
 	}

@@ -32,6 +32,8 @@ type PayloadSchemaBinding struct {
 	eventKey     string
 	schemaDigest string
 	schemaClass  PayloadSchemaClass
+	producer     PayloadProducer
+	reference    string
 }
 
 type PayloadSchemaBindingInput struct {
@@ -47,9 +49,49 @@ func NewPayloadSchemaBinding(input PayloadSchemaBindingInput) (PayloadSchemaBind
 		bundleHash: strings.TrimSpace(input.BundleHash),
 		flowID:     strings.TrimSpace(input.FlowID), eventKey: strings.TrimSpace(input.EventKey),
 		schemaDigest: strings.TrimSpace(input.SchemaDigest), schemaClass: PayloadSchemaClass(strings.TrimSpace(string(input.SchemaClass))),
+		producer: AuthoredPayloadProducer(input.FlowID),
 	}
 	if err := binding.Validate(); err != nil {
 		return PayloadSchemaBinding{}, err
+	}
+	return binding, nil
+}
+
+func NewPlatformPayloadSchemaBinding(input PayloadSchemaBindingInput, producer PayloadProducer, reference string) (PayloadSchemaBinding, error) {
+	if input.FlowID != "" {
+		return PayloadSchemaBinding{}, fmt.Errorf("platform payload binding cannot carry authored flow authority")
+	}
+	binding, err := NewPayloadSchemaBinding(input)
+	if err != nil {
+		return PayloadSchemaBinding{}, err
+	}
+	binding.producer, binding.reference = producer, reference
+	if !producer.IsPlatform() {
+		return PayloadSchemaBinding{}, fmt.Errorf("platform payload binding requires explicit producer")
+	}
+	if err := binding.Validate(); err != nil {
+		return PayloadSchemaBinding{}, err
+	}
+	return binding, nil
+}
+
+// RestoreEventPayloadSchemaBinding uses the complete durable producer/class
+// tuple. An empty flow column or platform schema label alone selects nothing.
+func RestoreEventPayloadSchemaBinding(input PayloadSchemaBindingInput, class EventAdmissionClass, eventType EventType, producer ProducerIdentity) (PayloadSchemaBinding, error) {
+	binding, err := RestorePayloadSchemaBinding(input)
+	if err != nil {
+		return PayloadSchemaBinding{}, err
+	}
+	if input.SchemaClass == PayloadSchemaPlatform && platformPayloadClass(class) {
+		p := PayloadProducer{kind: "platform", producer: producer, class: class, event: eventType}
+		reference := ""
+		if eventType == EventTypePlatformRuntimeLog {
+			reference = RuntimeLogSchemaReference
+		}
+		return NewPlatformPayloadSchemaBinding(input, p, reference)
+	}
+	if platformPayloadClass(class) || eventType == EventTypePlatformRuntimeLog {
+		return PayloadSchemaBinding{}, fmt.Errorf("platform payload requires persisted producer authority")
 	}
 	return binding, nil
 }
@@ -81,6 +123,24 @@ func (b PayloadSchemaBinding) Validate() error {
 	default:
 		return fmt.Errorf("payload schema class %q is invalid", b.schemaClass)
 	}
+	if b.producer.IsPlatform() {
+		p := b.producer
+		if b.flowID != "" || b.schemaClass != PayloadSchemaPlatform || b.eventKey != string(p.event) || !platformPayloadClass(p.class) || p.producer.Type() != EventProducerPlatform {
+			return fmt.Errorf("platform payload binding disagrees with producer, class or event")
+		}
+		if err := p.producer.Validate(); err != nil {
+			return err
+		}
+		if p.event == EventTypePlatformRuntimeLog {
+			if p.class != EventAdmissionDiagnosticDirect || p.producer.ID() != "runtime" || b.reference != RuntimeLogSchemaReference {
+				return fmt.Errorf("runtime-log payload requires exact platform/runtime reference authority")
+			}
+		} else if b.reference != "" {
+			return fmt.Errorf("platform payload subtype reference is unsupported")
+		}
+	} else if !b.producer.IsAuthored() || b.producer.FlowID() != b.flowID || b.reference != "" {
+		return fmt.Errorf("payload binding requires an explicit producer variant")
+	}
 	return nil
 }
 
@@ -89,10 +149,13 @@ func (b PayloadSchemaBinding) FlowID() string                  { return b.flowID
 func (b PayloadSchemaBinding) EventKey() string                { return b.eventKey }
 func (b PayloadSchemaBinding) SchemaDigest() string            { return b.schemaDigest }
 func (b PayloadSchemaBinding) SchemaClass() PayloadSchemaClass { return b.schemaClass }
+func (b PayloadSchemaBinding) Reference() string               { return b.reference }
+func (b PayloadSchemaBinding) Producer() PayloadProducer       { return b.producer }
 
 func (b PayloadSchemaBinding) Equal(other PayloadSchemaBinding) bool {
 	return b.bundleHash == other.bundleHash && b.flowID == other.flowID &&
-		b.eventKey == other.eventKey && b.schemaDigest == other.schemaDigest && b.schemaClass == other.schemaClass
+		b.eventKey == other.eventKey && b.schemaDigest == other.schemaDigest && b.schemaClass == other.schemaClass &&
+		b.producer == other.producer && b.reference == other.reference
 }
 
 type PayloadAdmission struct {
@@ -134,6 +197,13 @@ func (a PayloadAdmission) Valid() bool                   { return json.Valid(a.p
 func ApplyPayloadAdmission(event Event, admission PayloadAdmission) (Event, error) {
 	if !admission.Valid() {
 		return Event{}, fmt.Errorf("payload admission is invalid")
+	}
+	if admission.binding.producer.IsPlatform() {
+		if err := admission.binding.producer.ValidateForEvent(event); err != nil {
+			return Event{}, err
+		}
+	} else if platformPayloadClass(event.AdmissionClass()) {
+		return Event{}, fmt.Errorf("platform payload requires explicit producer binding")
 	}
 	if current, ok := event.PayloadAdmission(); ok {
 		if !bytes.Equal(current.Payload(), admission.Payload()) || !current.Binding().Equal(admission.Binding()) {

@@ -17,6 +17,9 @@ type EventSchema struct {
 func EventSchemaRegistryFromCatalog(entries map[string]EventCatalogEntry) map[string]EventSchema {
 	out := make(map[string]EventSchema, len(entries))
 	for eventType, entry := range entries {
+		if entry.platformAuthority.declared && !entry.platformAuthority.hasPayload {
+			continue
+		}
 		eventType = strings.TrimSpace(eventType)
 		if eventType == "" {
 			continue

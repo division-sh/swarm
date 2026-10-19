@@ -151,7 +151,8 @@ func newStoreTestEventBus(t *testing.T, selected externalStoreTestDurableEventBu
 		opts.PipelineObligations = selected.PipelineObligations()
 	}
 	if opts.PayloadAdmitter == nil {
-		opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		opts.PayloadAdmitter = func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+			flowID := payloadProducer.FlowID()
 			return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 		}
 	}

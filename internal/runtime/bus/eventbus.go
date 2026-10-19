@@ -42,7 +42,7 @@ type DeliveryRouteInterceptor interface {
 
 // PayloadAdmitter returns the immutable normalized payload and pinned schema
 // evidence before routing, identity extraction, or persistence can observe it.
-type PayloadAdmitter func(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error)
+type PayloadAdmitter func(ctx context.Context, event events.Event, producer events.PayloadProducer) (events.PayloadAdmission, error)
 
 type EventBus struct {
 	mu                          sync.RWMutex

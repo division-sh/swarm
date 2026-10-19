@@ -548,10 +548,10 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 	event := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "inbound.telegram.text_message", "telegram", "", payload, 0, uuid.NewString(), "", events.EventEnvelope{}, producer, time.Now().UTC())
 	// The declaration owns the producer coordinate; no receiver target is supplied.
 	admit := NewRuntimePayloadAdmitter(nil, wrapped, fact)
-	if absent, err := admit(context.Background(), event, ""); err == nil || absent.Valid() {
+	if absent, err := admit(context.Background(), event, events.AuthoredPayloadProducer("")); err == nil || absent.Valid() {
 		t.Fatal("empty producer coordinate gained imported payload admission")
 	}
-	admission, err := admit(context.Background(), event, producerFlow)
+	admission, err := admit(context.Background(), event, events.AuthoredPayloadProducer(producerFlow))
 	if err != nil {
 		t.Fatalf("admit imported provider payload: %v", err)
 	}

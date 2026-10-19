@@ -79,7 +79,8 @@ func AdmitSQLiteRuntimeStore(t testing.TB, db *sql.DB) *store.SQLiteRuntimeStore
 func bindTestPayloadAdmitter(selected interface {
 	SetEventPayloadAdmitter(runtimebus.PayloadAdmitter)
 }) {
-	selected.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	selected.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+		flowID := payloadProducer.FlowID()
 		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 	})
 }

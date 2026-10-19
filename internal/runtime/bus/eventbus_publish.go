@@ -2851,7 +2851,7 @@ func (eb *EventBus) admitEventPayload(ctx context.Context, event events.Event) (
 	} else if flowID == "" {
 		flowID = strings.TrimSpace(event.RoutingSource().Route().FlowID)
 	}
-	admission, err := eb.payloadAdmitter(ctx, event, flowID)
+	admission, err := eb.payloadAdmitter(ctx, event, events.EventPayloadProducer(event, flowID))
 	if err != nil {
 		return event.Clone(), err
 	}

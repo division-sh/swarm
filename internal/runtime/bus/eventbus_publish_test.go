@@ -1508,7 +1508,8 @@ func TestEventBusPublish_AttachesSourceArtifactFactToRuntimeLogs(t *testing.T) {
 
 func TestEventBusPublish_UsesPayloadAdmitter(t *testing.T) {
 	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PayloadAdmitter: func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+		PayloadAdmitter: func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+			flowID := payloadProducer.FlowID()
 			if strings.TrimSpace(string(event.Type())) != "task.completed" {
 				t.Fatalf("unexpected event type %q", event.Type())
 			}
@@ -1529,7 +1530,7 @@ func TestEventBusPublish_UsesPayloadAdmitter(t *testing.T) {
 func TestEventBusPublish_DoesNotReinterpretExistingPayloadAdmission(t *testing.T) {
 	var calls atomic.Int32
 	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PayloadAdmitter: func(context.Context, events.Event, string) (events.PayloadAdmission, error) {
+		PayloadAdmitter: func(context.Context, events.Event, events.PayloadProducer) (events.PayloadAdmission, error) {
 			calls.Add(1)
 			return events.PayloadAdmission{}, errors.New("ambient schema admission must not run")
 		},
@@ -1552,7 +1553,7 @@ func TestEventBusPublish_DoesNotReinterpretExistingPayloadAdmission(t *testing.T
 
 func TestEventBusPublish_PayloadAdmitterFailureAbortsPublish(t *testing.T) {
 	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PayloadAdmitter: func(context.Context, events.Event, string) (events.PayloadAdmission, error) {
+		PayloadAdmitter: func(context.Context, events.Event, events.PayloadProducer) (events.PayloadAdmission, error) {
 			return events.PayloadAdmission{}, context.DeadlineExceeded
 		},
 	})
@@ -1583,7 +1584,7 @@ func TestEventBusPublish_FailsClosedWhenReplayCapableAtomicStoreOmitsCommittedRe
 
 func TestEventBusPublishDirect_PayloadAdmitterFailureAbortsPublish(t *testing.T) {
 	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PayloadAdmitter: func(context.Context, events.Event, string) (events.PayloadAdmission, error) {
+		PayloadAdmitter: func(context.Context, events.Event, events.PayloadProducer) (events.PayloadAdmission, error) {
 			return events.PayloadAdmission{}, context.DeadlineExceeded
 		},
 	})
@@ -1598,7 +1599,7 @@ func TestEventBusPublishDirect_PayloadAdmitterFailureAbortsPublish(t *testing.T)
 
 func TestEventBusCheckDirectRoutes_PayloadAdmitterFailureAbortsBeforeRecipientPlanning(t *testing.T) {
 	eb, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{
-		PayloadAdmitter: func(context.Context, events.Event, string) (events.PayloadAdmission, error) {
+		PayloadAdmitter: func(context.Context, events.Event, events.PayloadProducer) (events.PayloadAdmission, error) {
 			return events.PayloadAdmission{}, context.DeadlineExceeded
 		},
 	})

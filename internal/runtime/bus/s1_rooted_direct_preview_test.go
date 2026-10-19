@@ -52,7 +52,8 @@ func TestS1DirectRecipientPreviewAdmitsFrozenRootBeforeSourceConsumers(t *testin
 			payloadCalls := 0
 			bus, err := newScopedTestEventBus(selected, EventBusOptions{
 				ContractBundle: source, SourceArtifactFact: fact,
-				PayloadAdmitter: func(ctx context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
+				PayloadAdmitter: func(ctx context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+					flow := payloadProducer.FlowID()
 					payloadCalls++
 					root, present, err := correlation.RootAdmissionFromContext(ctx)
 					if err != nil || !present || !root.Equal(rooted.Admission()) {

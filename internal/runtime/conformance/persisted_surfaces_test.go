@@ -69,7 +69,8 @@ type staticWorkspaceResolver struct {
 	err    error
 }
 
-func conformanceRuntimeLogPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+func conformanceRuntimeLogPayloadAdmitter(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+	flowID := payloadProducer.FlowID()
 	return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 }
 

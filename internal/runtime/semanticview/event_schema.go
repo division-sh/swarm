@@ -12,6 +12,7 @@ import (
 )
 
 type EventSchemaResolution struct {
+	Reference         runtimecontracts.PlatformEventAuthority
 	Schema            runtimecontracts.EventSchema
 	CompiledSchema    runtimecontracts.CompiledEventSchema
 	StructuralType    runtimecontracts.ResolvedCatalogType

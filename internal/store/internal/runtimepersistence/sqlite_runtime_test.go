@@ -1188,7 +1188,8 @@ func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.
 func TestSQLiteRuntimeStoreAPIIdempotencyFailedNestedPublishLeavesNoCompletionOrRows(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	admitter := func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	admitter := func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+		flowID := payloadProducer.FlowID()
 		if event.Type() == "item.failed" {
 			return events.PayloadAdmission{}, errors.New("schema violation")
 		}

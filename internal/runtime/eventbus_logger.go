@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -60,20 +59,16 @@ func newRuntimeEventBus(store runtimebus.EventStore, durable runtimebus.DurableD
 // normalized bytes together with immutable schema provenance.
 func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source, bundleFact runtimecorrelation.SourceArtifactFact) runtimebus.PayloadAdmitter {
 	bundleHash := bundleFact.BundleHash()
-	return func(ctx context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	return func(ctx context.Context, event events.Event, producer events.PayloadProducer) (events.PayloadAdmission, error) {
 		eventType := strings.TrimSpace(string(event.Type()))
 		if eventType == "" {
 			return events.PayloadAdmission{}, fmt.Errorf("event type is required for payload admission")
 		}
-		if _, err := runtimeidentity.AdmitFlowIdentity(flowID); err != nil {
-			return events.PayloadAdmission{}, fmt.Errorf("event producer coordinate: %w", err)
+		resolution, err := semanticview.ResolveProducerEventSchema(source, producer, event)
+		if err != nil {
+			return events.PayloadAdmission{}, err
 		}
-		if source == nil {
-			return events.PayloadAdmission{}, fmt.Errorf("event producer coordinate requires a semantic source")
-		}
-		if scope, found := source.FlowScopeByID(flowID); !found || scope.ID != flowID {
-			return events.PayloadAdmission{}, fmt.Errorf("event producer flow %q is not declared in the semantic source", flowID)
-		}
+		flowID := producer.FlowID()
 		payload := event.Payload()
 		if len(payload) == 0 {
 			if event.AdmissionClass() == events.EventAdmissionSelectedForkReplay {
@@ -105,11 +100,16 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 			return events.PayloadAdmission{}, fmt.Errorf("event payload must be a JSON object")
 		}
 
-		resolution := semanticview.ResolveEventSchema(source, flowID, eventType)
 		schema := map[string]any(nil)
 		bindingClass := events.PayloadSchemaSchemaLess
 		eventKey := eventType
 		schemaDigest := canonicaljson.HashBytes([]byte("{}"))
+		if resolution.Reference.Digest() != "" {
+			if _, err := DecodeCanonicalRuntimeLogPayload(payload); err != nil {
+				return events.PayloadAdmission{}, err
+			}
+			bindingClass, schemaDigest = events.PayloadSchemaPlatform, resolution.Reference.Digest()
+		}
 		if resolution.HasSchema {
 			if err := resolution.UnresolvedTypeError(); err != nil {
 				return events.PayloadAdmission{}, err
@@ -175,6 +175,14 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 		})
 		if err != nil {
 			return events.PayloadAdmission{}, err
+		}
+		if producer.IsPlatform() {
+			binding, err = events.NewPlatformPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+				BundleHash: bundleHash, EventKey: eventKey, SchemaDigest: schemaDigest, SchemaClass: bindingClass,
+			}, producer, resolution.Reference.Reference())
+			if err != nil {
+				return events.PayloadAdmission{}, err
+			}
 		}
 		admission, err := events.NewPayloadAdmission(normalizedBytes, binding)
 		if err != nil {

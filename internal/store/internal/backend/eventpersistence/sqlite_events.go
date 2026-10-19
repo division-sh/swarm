@@ -44,7 +44,7 @@ func (s *EventSQLiteOwner) ensureEventPayloadAdmission(ctx context.Context, admi
 		return events.AdmittedEvent{}, fmt.Errorf("event payload admission evidence is required")
 	}
 	flowID := strings.TrimSpace(event.RoutingSource().Route().FlowID)
-	payload, err := admitter(ctx, event, flowID)
+	payload, err := admitter(ctx, event, events.EventPayloadProducer(event, flowID))
 	if err != nil {
 		return events.AdmittedEvent{}, fmt.Errorf("admit event payload: %w", err)
 	}

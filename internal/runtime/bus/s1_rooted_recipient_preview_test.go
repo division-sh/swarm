@@ -60,7 +60,8 @@ func TestS1RecipientPreviewAdmitsFrozenRootBeforeSourceConsumers(t *testing.T) {
 						Instances:    constructionIndexTestReader{err: errors.New("preview read an uncommitted native instance")},
 					},
 					TemplateInstancePlanner: newTestFlowInstanceActivationOwner(nil),
-					PayloadAdmitter: func(ctx context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
+					PayloadAdmitter: func(ctx context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+						flow := payloadProducer.FlowID()
 						payloadCalls++
 						root, present, err := correlation.RootAdmissionFromContext(ctx)
 						if err != nil || !present || !root.Equal(rooted.Admission()) {
