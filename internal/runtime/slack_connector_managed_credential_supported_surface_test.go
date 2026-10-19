@@ -476,7 +476,7 @@ func (m slackManagedConnectorModule) GuardRegistry() runtimepipeline.GuardRegist
 func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackManagedConnectorBackend, source semanticview.Source, managedStore runtimemanagedcredentials.Store) (*runtimebus.EventBus, *runtimepipeline.PipelineCoordinator) {
 	t.Helper()
 	var pc *runtimepipeline.PipelineCoordinator
-	bus, err := newScopedTestEventBus(t, backend.eventStore, runtimebus.EventBusOptions{
+	bus, err := newExternalRuntimeTestActivityBus(t, backend.eventStore, runtimebus.EventBusOptions{
 		ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
