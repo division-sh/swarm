@@ -15,7 +15,73 @@ import (
 // explicit serving roles without making every synthetic process session eligible.
 type startupRecoveryFanOutSession struct {
 	*runtimeTestRetainedSession
-	capacity startupownership.FanOutCapacity
+	capacity           startupownership.FanOutCapacity
+	boundActivityGrant string
+}
+
+func (s *startupRecoveryFanOutSession) ActivityJournalBinder() (startupownership.ActivityJournalGrantBinder, error) {
+	if err := s.ProveCurrent(context.Background()); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+func (s *startupRecoveryFanOutSession) BindActivityGrant(grant startupownership.GrantEvidence) (pipeline.ActivityAttemptJournal, error) {
+	if err := grant.Validate(); err != nil {
+		return nil, err
+	}
+	raw, err := canonicaljson.Bytes(grant)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.released || grant.State != startupownership.GrantAdmitted || s.grants[grant.GrantID] != string(raw) {
+		return nil, errors.New("diagnostic fixture requires its exact admitted activity grant")
+	}
+	s.boundActivityGrant = string(raw)
+	return startupRecoveryDiagnosticJournal{}, nil
+}
+
+func (s *startupRecoveryFanOutSession) requireActivityGrant(t *testing.T, grant startupownership.GenerationGrant) {
+	t.Helper()
+	evidence, err := grant.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := canonicaljson.Bytes(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.boundActivityGrant != string(raw) {
+		t.Fatal("lifecycle fixture did not bind its own exact admitted journal grant")
+	}
+}
+
+// These lifecycle-only controls never execute an HTTP activity. Supplying their
+// captured role must not grant synthetic persistence or recovery permission.
+type startupRecoveryDiagnosticJournal struct{}
+
+func (startupRecoveryDiagnosticJournal) StartActivityAttempt(context.Context, pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
+	return pipeline.ActivityAttemptRecord{}, false, errors.New("lifecycle diagnostic fixture has no HTTP activity execution")
+}
+
+func (j startupRecoveryDiagnosticJournal) ClaimActivityAttemptForLoopGeneration(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
+	return j.StartActivityAttempt(ctx, record)
+}
+
+func (j startupRecoveryDiagnosticJournal) CompleteActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
+	return j.StartActivityAttempt(ctx, record)
+}
+
+func (j startupRecoveryDiagnosticJournal) MarkActivityAttemptUncertain(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
+	return j.StartActivityAttempt(ctx, record)
+}
+
+func (j startupRecoveryDiagnosticJournal) LoadActivityAttempt(ctx context.Context, _ string) (pipeline.ActivityAttemptRecord, bool, error) {
+	return j.StartActivityAttempt(ctx, pipeline.ActivityAttemptRecord{})
 }
 
 func startupRecoveryFanOutSessionForTest(t testing.TB, capacity startupownership.FanOutCapacity) func(*runtimeTestRetainedSession) startupownership.RetainedSession {
@@ -75,6 +141,17 @@ func TestStartupRecoveryFanOutFixtureRefusesUnownedWork(t *testing.T) {
 		FanOutServingStore() (startupownership.FanOutServingStore, error)
 	}); present {
 		t.Fatal("plain synthetic session gained implicit serving permission")
+	}
+	if _, present := any(session).(interface {
+		ActivityJournalBinder() (startupownership.ActivityJournalGrantBinder, error)
+	}); present {
+		t.Fatal("plain synthetic session gained implicit journal binding")
+	}
+	if _, err := fixture.BindActivityGrant(startupownership.GrantEvidence{}); err == nil {
+		t.Fatal("diagnostic fixture accepted an unowned activity grant")
+	}
+	if _, _, err := (startupRecoveryDiagnosticJournal{}).ClaimActivityAttemptForLoopGeneration(context.Background(), pipeline.ActivityAttemptRecord{}); err == nil {
+		t.Fatal("lifecycle diagnostic fixture gained activity execution")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
