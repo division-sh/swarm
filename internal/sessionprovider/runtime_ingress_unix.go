@@ -136,7 +136,7 @@ func (i *runtimeIncoming) businessScope(ctx context.Context) (captureScope, capt
 		return scope, source, err
 	}
 	matched := 0
-	if responsibility.MatchesAccountConnection(op, activation) {
+	if responsibility.MatchesAccountBusiness(op, activation) {
 		matched = 1
 	}
 	for _, binding := range bindings {

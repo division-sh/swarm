@@ -343,6 +343,7 @@ const (
 )
 
 type ReadinessFacts struct {
+	AccountOnly                      bool                                          `json:"-"`
 	Coordinate                       ChannelRuntimeContextCoordinate               `json:"coordinate"`
 	Interface                        operatorchannel.InterfaceIdentity             `json:"interface"`
 	ActivationRevision               int64                                         `json:"activation_revision"`
@@ -369,6 +370,12 @@ type ReadinessFacts struct {
 	SessionAuthority                 operatorchannel.ProviderAuthority             `json:"-"`
 	SessionObservation               *operatorchannel.SessionConnectionObservation `json:"-"`
 	ObservedAt                       time.Time                                     `json:"observed_at"`
+}
+
+func (f ReadinessFacts) NativeSessionCurrent() bool {
+	return f.SessionAuthority.Kind == operatorchannel.ProviderAuthoritySession && f.SessionAuthority.RequireExecutable() == nil &&
+		f.SessionObservation != nil && f.SessionObservation.Validate() == nil && f.SessionObservation.Connected &&
+		f.SessionObservation.Admission == f.SessionAuthority.Session && f.SessionObservation.ObservedAt.Equal(f.ObservedAt)
 }
 
 type ConnectedChannelReadiness struct {
@@ -430,7 +437,10 @@ func ProjectReadiness(f ReadinessFacts) ConnectedChannelReadiness {
 	if !f.ActivationCurrent || f.ActivationRevision < 1 {
 		return fail(ReadinessActivationUnavailable)
 	}
-	if f.BindingRevision < 1 || f.BindingRevision != f.ExpectedBindingRevision {
+	if f.AccountOnly && (f.Posture != ActivationSessionConnection || f.BindingRevision != 0 || f.ExpectedBindingRevision != 0 || f.ProofID != "") {
+		return fail(ReadinessBindingUnavailable)
+	}
+	if !f.AccountOnly && (f.BindingRevision < 1 || f.BindingRevision != f.ExpectedBindingRevision) {
 		return fail(ReadinessBindingUnavailable)
 	}
 	if strings.TrimSpace(f.ProofID) != "" && (!f.ProofCurrent || f.ProofRevision < 1 || f.ProofRevision != f.ExpectedProofRevision) {
@@ -439,7 +449,7 @@ func ProjectReadiness(f ReadinessFacts) ConnectedChannelReadiness {
 	if !f.CredentialsCurrent {
 		return fail(ReadinessCredentialsUnavailable)
 	}
-	if !f.ConfirmationTerminalSuccess || f.ConfirmationActivationRevision != f.ActivationRevision || f.ConfirmationBindingRevision != f.BindingRevision {
+	if !f.AccountOnly && (!f.ConfirmationTerminalSuccess || f.ConfirmationActivationRevision != f.ActivationRevision || f.ConfirmationBindingRevision != f.BindingRevision) {
 		return fail(ReadinessConfirmationUnavailable)
 	}
 	if f.TargetGeneration == 0 || f.TargetGeneration != f.ExpectedTargetGeneration || f.TargetGeneration != f.Coordinate.TargetGeneration {
@@ -454,9 +464,7 @@ func ProjectReadiness(f ReadinessFacts) ConnectedChannelReadiness {
 			return fail(ReadinessRegistrationUnavailable)
 		}
 	case ActivationSessionConnection:
-		if f.SessionAuthority.Kind != operatorchannel.ProviderAuthoritySession || f.SessionAuthority.RequireExecutable() != nil ||
-			f.SessionObservation == nil || f.SessionObservation.Validate() != nil || !f.SessionObservation.Connected ||
-			f.SessionObservation.Admission != f.SessionAuthority.Session || !f.SessionObservation.ObservedAt.Equal(f.ObservedAt) {
+		if !f.NativeSessionCurrent() {
 			return fail(ReadinessSessionUnavailable)
 		}
 	}

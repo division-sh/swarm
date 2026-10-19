@@ -106,7 +106,7 @@ func (a Admission) RequireBusiness(ctx context.Context, provider string, generat
 		ctx.Err() != nil || capture.Context.Err() != nil {
 		return fmt.Errorf("native business input contradicts its original binding")
 	}
-	if capture.Responsibility.MatchesAccountConnection(op, activation) {
+	if capture.Responsibility.MatchesAccountBusiness(op, activation) {
 		if capture.RunCurrent == nil {
 			return fmt.Errorf("native business input has no exact selected run owner")
 		}
