@@ -8,11 +8,11 @@ import (
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
-func ActivityClaimReplyLossPersistenceFault(t testing.TB, ctx context.Context, selected any, run, request string, fault error) (pipeline.WorkflowPersistence, func() int32) {
+func ActivityClaimReplyLossBoundFault(t testing.TB, ctx context.Context, selected any, original pipeline.ActivityAttemptJournal, run, request string, fault error) (pipeline.ActivityAttemptJournal, func() int32) {
 	t.Helper()
-	persistence, count, err := private.ActivityClaimReplyLossPersistenceFaultForTest(ctx, selected, run, request, fault)
+	journal, count, err := private.ActivityClaimReplyLossBoundFaultForTest(ctx, selected, original, run, request, fault)
 	if err != nil {
-		t.Fatalf("install exact native activity claim reply loss: %v", err)
+		t.Fatalf("install exact captured activity claim reply loss: %v", err)
 	}
-	return persistence, count
+	return journal, count
 }

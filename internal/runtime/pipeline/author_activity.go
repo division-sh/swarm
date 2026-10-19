@@ -21,7 +21,7 @@ func ActivityAttemptStoryDraft(rec ActivityAttemptRecord, transition string) run
 		OccurredAt: activityOccurrenceTime(rec, transition), RunID: rec.RunID, EntityID: rec.EntityID, FlowID: rec.FlowInstance,
 		Projection: runtimeauthoractivity.Projection{
 			SubjectType: "activity", SubjectID: rec.ActivityID, NodeID: rec.NodeID, Activity: rec.ActivityID,
-			Tool: rec.Tool, EffectClass: rec.EffectClass, Attempt: intPointer(retry), EventType: eventType, ExecutionMode: string(rec.ExecutionMode),
+			Tool: rec.Tool, Attempt: intPointer(retry), EventType: eventType, ExecutionMode: string(rec.ExecutionMode),
 		},
 		Failure: failure,
 	}

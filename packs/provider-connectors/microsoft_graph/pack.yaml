@@ -2,7 +2,7 @@ id: provider.microsoft_graph.connector
 version: 0.1.0
 platform_version: ">=0.7.0 <0.8.0"
 type: connector
-manifest_hash: sha256:0dda8e5ec0926f6c02c7ecd59d1f1472cf925f533bb1cf7c0e36adea88ab237f
+manifest_hash: sha256:3387268d4e3b0513755cd1743ea7b8353e78d686b32c8cd3f0ed58353b21407e
 provenance:
   source: platform
 capabilities:

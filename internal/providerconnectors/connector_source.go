@@ -26,7 +26,7 @@ func parseConnectorManifestAt(body []byte, file string) (ConnectorManifest, erro
 	if err != nil {
 		return out, err
 	}
-	if out.Tools, err = runtimecontracts.AdmitToolDeclarationsValue(tools); err != nil {
+	if out.Tools, err = runtimecontracts.AdmitConnectorToolDeclarationsValue(tools); err != nil {
 		return out, err
 	}
 	if len(out.Tools) == 0 {

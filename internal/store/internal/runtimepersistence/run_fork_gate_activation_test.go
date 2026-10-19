@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -29,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -866,12 +868,12 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 					if _, err := db.ExecContext(ctx, `
 				INSERT INTO activity_attempts (
 					request_event_id, run_id, execution_mode, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
-					activity_id, tool, effect_class, attempt, status, success_event, failure_event,
+					activity_id, tool, attempt, status, success_event, failure_event,
 					result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
 					started_at, completed_at, updated_at
 				) VALUES (
 							$1, $2, 'live', $3, $4, $5, $6, $7,
-							$8, $9, 'non_idempotent_write', 1, $10, $11, $12,
+							$8, $9, 1, $10, $11, $12,
 							$13, $14, $15, $16, 'input-hash', $17, '', $18, $19, $18
 				)
 					`, continuation.RequestEventID, sourceRunID, continuation.SourceEventID, continuation.EntityID, continuation.FlowInstance,
@@ -884,12 +886,15 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 
 				payload, err := json.Marshal(map[string]any{
 					"activity_id": continuation.ActivityID, "tool": continuation.Tool, "input": continuation.Input.Interface(),
-					"effect_class": string(continuation.EffectClass), "success_event": continuation.SuccessEvent,
-					"failure_event": continuation.FailureEvent, "fork_policy": string(continuation.ForkPolicy),
+					"bundle_hash": continuation.BundleHash, "workflow_version": continuation.WorkflowVersion,
+					"success_event":  continuation.SuccessEvent,
+					"failure_event":  continuation.FailureEvent,
+					"revision_event": continuation.RevisionEvent, "rejected_event": continuation.RejectedEvent,
 					"entity_id": continuation.EntityID, "node_id": continuation.NodeID, "flow_id": continuation.FlowID,
 					"flow_instance":     continuation.FlowInstance,
 					"handler_event_key": continuation.HandlerEventKey, "source_event_id": continuation.SourceEventID,
-					"source_run_id": sourceRunID, "attempt": 1,
+					"source_run_id": sourceRunID, "source_task_id": continuation.SourceTaskID,
+					"parent_event_id": continuation.ParentEventID, "chain_depth": continuation.ChainDepth,
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -900,7 +905,24 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				}
 				request := eventtest.ChildForProducerWithRoutingSource(continuation.RequestEventID, runForkActivityRequestEvent, eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
 					events.EventLineage{RunID: sourceRunID, ParentEventID: continuation.SourceEventID, ExecutionMode: continuation.ExecutionMode}, events.EventEnvelope{}, anchor.Source, now.Add(2*time.Minute))
-				if err := commitSemanticPipelineProcessedEventFixture(ctx, cards, request); err != nil {
+				fact, err := runtimecorrelation.NewSourceArtifactFact(continuation.BundleHash)
+				if err != nil {
+					t.Fatal(err)
+				}
+				admission, err := runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact)(ctx, request, continuation.FlowID)
+				if err != nil {
+					t.Fatalf("admit exact approved activity request: %v", err)
+				}
+				request, err = events.ApplyPayloadAdmission(request, admission)
+				if err != nil {
+					t.Fatal(err)
+				}
+				admitted, err := events.AdmitForPublish(request, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				disposition := pipelineobligation.Acknowledged("pipeline_persisted")
+				if _, err := commitAdmittedSemanticEventFixtureOutcomeWithDisposition(ctx, cards, admitted, nil, pipelineobligation.ScopeDirect, &disposition); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := cards.CompleteProposedEffectRoute(ctx, card.CardID, decisionEventID, now.Add(2*time.Minute)); err != nil {
@@ -943,7 +965,19 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				forkRunID := child.ForkRunID
 				var prepared runfork.RunForkSelectedContractSourceEvent
 				beforePrepare := historicalContextDatabaseRows(t, db, backend.name == "postgres")
-				loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, originalCarriageForRun(t, cards, sourceRunID))
+				loaded, err := cards.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, forkRunID, []string{continuation.RequestEventID}, materializationRequest.OriginalLoopCarriage)
+				if err != nil {
+					recordedCard, cardErr := cards.GetDecisionCard(ctx, card.CardID)
+					recordedContinuation, continuationErr := cards.LoadProposedEffectContinuation(ctx, card.CardID)
+					if cardErr == nil && continuationErr == nil {
+						physicalErr := runtimepipeline.ValidateRecordedActivityProposal(request, recordedCard, recordedContinuation, recordedCard.Snapshot.Decision, continuation.BundleHash)
+						view := events.NewContextDeliveryEvent(request, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: recordedContinuation.ReplyContextID}}).Event()
+						contextErr := runtimepipeline.ValidateRecordedActivityProposal(view, recordedCard, recordedContinuation, recordedCard.Snapshot.Decision, continuation.BundleHash)
+						t.Logf("failure-only original proposal comparison: physical_reply=%q retained_reply=%q physical_error=%v original_reply_view_error=%v", request.DeliveryContext().ReplyContextID(), recordedContinuation.ReplyContextID, physicalErr, contextErr)
+					} else {
+						t.Logf("failure-only original proposal readback: card_error=%v continuation_error=%v", cardErr, continuationErr)
+					}
+				}
 				if err == nil {
 					if len(loaded) != 1 {
 						t.Fatalf("prepared count=%d", len(loaded))
@@ -968,7 +1002,7 @@ func TestPrepareRunForkApprovedProposedEffectRequiresUnambiguousTerminalEvidence
 				if err := json.Unmarshal(prepared.Payload, &forkPayload); err != nil {
 					t.Fatal(err)
 				}
-				if prepared.RoutingSource != eventtest.RootRoutingSource(forkRunID) || forkPayload.EntityID != forkRunID || forkPayload.SourceRunID != forkRunID || forkPayload.ForkPolicy != string(runtimecontracts.ActivityForkRequireConfirmation) {
+				if prepared.RoutingSource != eventtest.RootRoutingSource(forkRunID) || forkPayload.EntityID != forkRunID || forkPayload.SourceRunID != forkRunID {
 					t.Fatalf("approved effect lost root identity or confirmation policy: source=%#v payload=%#v", prepared.RoutingSource, forkPayload)
 				}
 				forkOwner, err := activityidentity.ParseOwnerKey(forkPayload.NodeID)

@@ -55,7 +55,7 @@ func TestActivityPublicationProjectsBeforeIdentityAndPreservesJournal(t *testing
 			// final result, not consult or specialize current declarations.
 			completed := first.CreatedAt()
 			record := ActivityAttemptRecord{
-				Status: ActivityAttemptStatusSucceeded, Attempt: intent.Attempt,
+				Status: ActivityAttemptStatusSucceeded, Attempt: 1,
 				ResultEventID: first.ID(), ResultEventType: string(first.Type()), ResultPayload: payload,
 				CompletedAt: &completed,
 			}

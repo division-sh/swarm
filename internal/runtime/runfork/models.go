@@ -296,6 +296,7 @@ type RunForkPlan struct {
 	historicalRevision        int64
 	historicalEventIDs        []string
 	historicalInputs          map[string]InputPublication
+	activityRequestOrigins    []semanticview.ActivityRequestOrigin
 }
 
 // RunForkFanOutObligation is the exact semantic fan-out progress visible at a
