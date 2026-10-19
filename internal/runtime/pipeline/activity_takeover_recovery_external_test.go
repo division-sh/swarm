@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -141,6 +142,9 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 			if terminal.Status != runtimepipeline.ActivityAttemptStatusUncertain || terminal.Failure == nil || terminal.CompletedAt == nil ||
 				terminal.RequestEventID != started.RequestEventID || terminal.ExecutionBinding != started.ExecutionBinding || calls.Load() != 1 {
 				t.Fatal("takeover lost original identity or repeated the HTTP call")
+			}
+			if terminal.Failure.Class != runtimefailures.ClassOutcomeUncertain || terminal.Failure.Detail.Code != "activity_provider_outcome_uncertain" {
+				t.Fatalf("fenced recovery lost typed uncertainty: %+v", terminal.Failure)
 			}
 			if err := runtimepipeline.ValidateActivityAttemptExecutionIdentity(terminal.ActivityAttemptRecord, started); err != nil {
 				t.Fatal(err)

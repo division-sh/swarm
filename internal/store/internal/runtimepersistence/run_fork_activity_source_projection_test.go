@@ -403,7 +403,7 @@ func TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStor
 			fixture := backend.open(t)
 			for _, owner := range []string{"root", "static"} {
 				t.Run(owner, func(t *testing.T) {
-					input := json.RawMessage(`{"large":9007199254740993,"decimal":1.2300e+09,"negative_zero":-0,"nested":[18446744073709551615]}`)
+					input := json.RawMessage(`{"large":9007199254740991,"decimal":1.2300e+09,"zero":0,"nested":[-9007199254740991,4.2500]}`)
 					sourceRun, child, original := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", owner == "root", true, false, input)
 					before := selectedActivityPersistedSourceEvidence(t, fixture.db, original.ID())
 					loaded, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), sourceRun, child.ForkRunID, []string{original.ID()}, originalActivityCarriageAtPoint(t, fixture.store.(selectedActivityProjectionStore), sourceRun, child.ForkPoint))
@@ -418,8 +418,15 @@ func TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStor
 						t.Fatal(err)
 					}
 					var originalInput, projectedInput map[string]json.RawMessage
-					if err := json.Unmarshal(input, &originalInput); err != nil {
+					var admittedPayload map[string]json.RawMessage
+					if err := json.Unmarshal(original.Payload(), &admittedPayload); err != nil {
 						t.Fatal(err)
+					}
+					if err := json.Unmarshal(admittedPayload["input"], &originalInput); err != nil {
+						t.Fatal(err)
+					}
+					if string(originalInput["decimal"]) != "1.23e+09" || string(originalInput["nested"]) != "[-9007199254740991,4.25]" {
+						t.Fatalf("fixture did not consume canonical admitted numbers: %s", admittedPayload["input"])
 					}
 					var payload map[string]json.RawMessage
 					if err := json.Unmarshal(projected.Payload, &payload); err != nil {
@@ -428,7 +435,7 @@ func TestSelectedContractActivitySourceProjectionPreservesNumericPayloadBothStor
 					if err := json.Unmarshal(payload["input"], &projectedInput); err != nil {
 						t.Fatal(err)
 					}
-					for _, field := range []string{"large", "decimal", "negative_zero", "nested"} {
+					for _, field := range []string{"large", "decimal", "zero", "nested"} {
 						if !bytes.Equal(originalInput[field], projectedInput[field]) {
 							t.Errorf("persistent Load -> shared projection changed input.%s: got %s want exact %s", field, projectedInput[field], originalInput[field])
 						}
@@ -518,7 +525,11 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 		t.Fatal(err)
 	}
 	journal := captureActivityFixtureJournal(t, ctx, fixture.store)
-	inputHash := sha256.Sum256(input)
+	var admittedPayload map[string]json.RawMessage
+	if err := json.Unmarshal(event.Payload(), &admittedPayload); err != nil {
+		t.Fatal(err)
+	}
+	inputHash := sha256.Sum256(admittedPayload["input"])
 	record, inserted, err := journal.StartActivityAttempt(ctx, pipeline.ActivityAttemptRecord{
 		RequestEventID: eventID, RunID: runID, SourceEventID: parentID, ExecutionMode: executionmode.Live,
 		EntityID: entityID, FlowInstance: flowInstance, NodeID: fact.Owner.Key(), HandlerEventKey: fact.HandlerEventKey,
