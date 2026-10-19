@@ -24,14 +24,14 @@ func Q1RetryDecisionHistoricalSource(root, path string, current []byte) ([]byte,
 		return append([]byte(nil), current...), nil
 	}
 	packet, err := os.ReadFile(filepath.Join(root, "tools/fixture-codemod/pipeline-observations/testdata/fixture_setup_successors_2617.json"))
-	if err != nil || fmt.Sprintf("%x", sha256.Sum256(packet)) != "4fab3ee53d02626879682865f47b64d402442f4cdf08a0cf0873a1e805e50548" {
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(packet)) != "cb524fc4b2a711d9835afc048e10103aaf65a625b1133d3588894e8eaedb816b" {
 		return nil, fmt.Errorf("Q1 retry source history changed: %v", err)
 	}
 	var pins []struct {
 		Original  struct{ File, Function, Successor string }
 		Candidate string
 	}
-	if err := json.Unmarshal(packet, &pins); err != nil || len(pins) != 40 {
+	if err := json.Unmarshal(packet, &pins); err != nil || len(pins) != 42 {
 		return nil, fmt.Errorf("Q1 retry source history shape changed: %v", err)
 	}
 	pin := pins[39]
