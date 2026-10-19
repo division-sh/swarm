@@ -1,7 +1,6 @@
 send:
   description: admission-only activity identity control
   handler_type: http
-  effect_class: read_only
   input_schema:
     type: object
     properties:

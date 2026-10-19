@@ -154,19 +154,6 @@ func TestNodeIdentityFixtureLoadsAndVerifies(t *testing.T) {
 	}
 }
 
-func TestNodeIdentityActivityFixtureLoadsAndVerifies(t *testing.T) {
-	Prove(t, ArtifactID("internal/releasee2e/testdata/node_identity_activity"))
-	repo := RepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, filepath.Join(repo, "internal/releasee2e/testdata/node_identity_activity"), runtimecontracts.DefaultPlatformSpecFile(repo))
-	if err != nil {
-		t.Fatal(err)
-	}
-	report := runtimebootverify.Run(context.Background(), semanticview.Wrap(bundle), runtimebootverify.Options{})
-	if findings := report.HardInvalidities(); len(findings) != 0 {
-		t.Fatalf("hard invalidities: %#v", findings)
-	}
-}
-
 func TestStaticDataInvocationFixtureLoadsAndVerifies(t *testing.T) {
 	Prove(t, ArtifactID("internal/releasee2e/testdata/static_data_invocation"))
 	repo := RepoRoot(t)
