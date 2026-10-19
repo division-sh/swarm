@@ -427,6 +427,7 @@ func activityLineageEvents(t *testing.T, ctx context.Context, h *runtimeHarness,
 func assertCatalogActivityLineage(t *testing.T, observed map[string]operatorread.OperatorEventFull, failure bool) {
 	t.Helper()
 	requests, results, diagnostics := 0, 0, 0
+	actions := map[string]int{}
 	var request operatorread.OperatorEventFull
 	for _, event := range observed {
 		if event.EventName == "platform.activity_requested" {
@@ -456,19 +457,18 @@ func assertCatalogActivityLineage(t *testing.T, observed map[string]operatorread
 			continue
 		}
 		diagnostics++
+		action, _ := details["action"].(string)
+		actions[action]++
 		if event.SourceEventID != request.EventID || event.RunID != request.RunID || details["request_event_id"] != request.EventID || details["event_id"] != request.EventID {
 			t.Fatalf("diagnostic does not reference actual persisted request: request=%s event=%+v", request.EventID, event)
 		}
 	}
 	wantDiagnostics := 2
-	if failure {
-		wantDiagnostics = 3
-	}
-	if request.Payload["effect_class"] == "non_idempotent_write" {
-		wantDiagnostics = 1 // Journaled execution emits result_published, not read-attempt diagnostics.
-	}
 	if !reflect.DeepEqual([]int{requests, results, diagnostics}, []int{1, 1, wantDiagnostics}) {
 		t.Fatal(fmt.Sprintf("activity facts = %d requests, %d results, %d diagnostics; want 1,1,%d", requests, results, diagnostics, wantDiagnostics))
+	}
+	if !reflect.DeepEqual(actions, map[string]int{"attempt_started": 1, "result_published": 1}) {
+		t.Fatalf("activity diagnostics = %v, want one attempt_started and one result_published", actions)
 	}
 }
 

@@ -11,10 +11,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -77,6 +80,69 @@ func nativeRuntimeRecoveryLogFixtureForTest(t *testing.T, open RuntimeLogNativeO
 		t.Fatal("recovery log fixture requires its exact admitted workflow source")
 	}
 	return open(t, bundle.SourceArtifact)
+}
+
+func nativeRecoveryLogRuntimeForTest(t *testing.T, fixture RuntimeLogNativeFixtureForTest, deps RuntimeDeps) (*Runtime, error) {
+	t.Helper()
+	ctx := fixture.Context
+	scope, found := authoractivity.ScopeFromContext(ctx)
+	store, native := fixture.Deliveries.(startupownership.Store)
+	if !found || !native {
+		t.Fatal("native recovery proof requires its original runtime scope and retained owner")
+	}
+	deps.Options.RuntimeInstanceID = scope.RuntimeInstanceID
+	deps.Options.ExecutionPosture = executionposture.Live
+	process := runtimeTestProcessWorkOwner(t)
+	deps.Options.ProcessWorkOwner = process
+	rt, err := NewRuntime(ctx, completeRuntimeRecoveryTestDeps(t, deps))
+	if err != nil {
+		return nil, err
+	}
+	capability, err := store.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+		OwnerID: "runtime-recovery-log-proof", BootID: uuid.NewString(), RuntimeInstanceID: scope.RuntimeInstanceID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	t.Cleanup(func() {
+		if err := rt.Shutdown(); err != nil {
+			t.Error(err)
+			return
+		}
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		process.Retire()
+		if _, err := process.Join(cleanup); err != nil {
+			t.Error(err)
+			return
+		}
+		if err := capability.Release(cleanup); err != nil {
+			t.Error(err)
+		}
+	})
+	fact := deps.Options.SourceArtifactFact
+	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	agents, err := rt.Manager.CompileStaticTopologyDesiredAgents(deps.Options.WorkflowModule.SemanticSource(), coordinate)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, agents)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := capability.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+		return nil, err
+	}
+	grant, err := capability.IssueGenerationGrant(ctx, startupownership.GrantRequest{
+		BundleHash: fact.BundleHash(), RuntimeInstanceID: scope.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := rt.InstallStartupGrant(grant); err != nil {
+		return nil, err
+	}
+	return rt, nil
 }
 
 func nativeRuntimeLogSourceFactForTest(t *testing.T, fixture RuntimeLogNativeFixtureForTest) correlation.SourceArtifactFact {
