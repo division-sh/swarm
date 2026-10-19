@@ -120,7 +120,9 @@ func CompileLearnedActivation(candidate Candidate, activation ConnectedChannelAc
 	if activation.Status != ActivationCurrent || activation.SlotKey == "" || !activation.Coordinate.Matches(candidate.Coordinate) || activation.Interface.Normalized() != candidate.Interface.Normalized() || activation.Provider != candidate.Provider || activation.TargetSelector != candidate.Target.Selector || activation.Posture != candidate.Posture {
 		return CompiledActivation{}, fmt.Errorf("current learned activation contradicts the exact candidate")
 	}
-	if activation.BindingRevision < 1 || strings.TrimSpace(activation.ConversationRef) == "" {
+	accountOnly := candidate.Ceremony == CeremonyAccountLink && candidate.Posture == ActivationSessionConnection &&
+		activation.BindingRevision == 0 && activation.ConversationRef == "" && activation.ProofID == "" && activation.ProofRevision == 0
+	if !accountOnly && (activation.BindingRevision < 1 || strings.TrimSpace(activation.ConversationRef) == "") {
 		return CompiledActivation{}, fmt.Errorf("learned activation has no exact bound conversation destination")
 	}
 	if err := activation.ValidateSessionAccount(); err != nil {
@@ -142,9 +144,13 @@ func CompileLearnedActivation(candidate Candidate, activation ConnectedChannelAc
 			return CompiledActivation{}, fmt.Errorf("learned activation is missing credential role %q", required)
 		}
 	}
-	destination, err := candidate.Plan.LearnedDestination(activation.ConversationRef)
-	if err != nil {
-		return CompiledActivation{}, err
+	var destination any
+	if !accountOnly {
+		var err error
+		destination, err = candidate.Plan.LearnedDestination(activation.ConversationRef)
+		if err != nil {
+			return CompiledActivation{}, err
+		}
 	}
 	plan, err := packs.NewOutboundBindingPlanWithRegistration(
 		LearnedBindingID(activation.SlotKey), candidate.Plan, destination, nil, credentialKeys, candidate.Target.Selector,

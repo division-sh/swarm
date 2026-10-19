@@ -440,7 +440,7 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 	if err := r.require(); err != nil {
 		return domain.Operation{}, domain.ConnectedChannelActivation{}, err
 	}
-	if _, err := uuid.Parse(req.ActivationID); err != nil || req.ExpectedRevision < 1 || req.BindingRevision < 1 || strings.TrimSpace(req.ConversationRef) == "" || req.Now.IsZero() || ((req.ProofID == "") != (req.ProofRevision == 0)) {
+	if _, err := uuid.Parse(req.ActivationID); err != nil || req.ExpectedRevision < 1 || req.BindingRevision < 0 || req.Now.IsZero() || ((req.ProofID == "") != (req.ProofRevision == 0)) {
 		return domain.Operation{}, domain.ConnectedChannelActivation{}, domain.ErrInvalidRequest
 	}
 	var outOp domain.Operation
@@ -459,6 +459,13 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 			return domain.ErrRevisionConflict
 		case op.Phase != domain.PhasePublishingActivation:
 			return domain.ErrConflict
+		}
+		if op.AccountConnection() {
+			if req.BindingRevision != 0 || req.ConversationRef != "" || req.ProofID != "" || req.ProofRevision != 0 {
+				return domain.ErrInvalidRequest
+			}
+		} else if req.BindingRevision < 1 || strings.TrimSpace(req.ConversationRef) == "" {
+			return domain.ErrInvalidRequest
 		}
 		// Keep binding confirmation's parent-before-principal order, then use
 		// delivery's principal-before-activation fence, including INSERT FK locks.

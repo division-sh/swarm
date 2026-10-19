@@ -1735,6 +1735,14 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
 	}
+	if sessionBootstrap != nil {
+		stop, err := startServeChannelSessionRecovery(ctx, processWorkOwner, runtimeContextManager, channelOnboardingStore, channelOnboarding, opts.Output)
+		if err != nil {
+			presenter.fail(22, "channel_onboarding", err)
+			return 1
+		}
+		defer stop()
+	}
 	if resetRecovery != nil && len(runtimeContexts) > 0 {
 		if err := runtimeContextManager.ReleaseResetExecution(preflightContexts...); err != nil {
 			presenter.fail(22, "pending_reset_recovery", err)

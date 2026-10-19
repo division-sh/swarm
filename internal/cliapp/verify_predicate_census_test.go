@@ -27,6 +27,10 @@ type admissionPredicateSurface struct {
 }
 
 var admissionPredicateSurfaces = []admissionPredicateSurface{
+	// The comms-only branches retain exact account/source/activation fences.
+	// TestRunServeWhatsAppReceptionistWithoutOperatorBothStores exercises
+	// their native admission, customer reply, restart and provider logout;
+	// the existing signed-pairing controls retain the HITL identity boundary.
 	// #2729's presentation-only body changes and preserved owner/proof mapping
 	// are recorded in testdata/issue_2729_credential_source_accounting.md.
 	// #1801 removes spec-path forwarding, not these admission obligations;

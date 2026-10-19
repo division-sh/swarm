@@ -306,6 +306,10 @@ func (p *serveLifecyclePresenter) recordIneligibleIngress(bindings []runtime.Sta
 	defer p.mu.Unlock()
 	for _, binding := range bindings {
 		if binding.BlockReason == runtimerunlifecycle.StandingBindingSessionRequired {
+			if binding.Provider == "whatsapp" {
+				p.operatorWarnings = append(p.operatorWarnings, "Not linked: run swarm channel connect whatsapp")
+				continue
+			}
 			p.operatorWarnings = append(p.operatorWarnings, fmt.Sprintf(
 				"DORMANT ingress %s/%s (%s): session admission required; no business target, route or standing retention. Run swarm channel connect %s and complete pairing and the authenticated operator ceremony, or resume the exact pending operation.",
 				binding.FlowPath, binding.Provider, binding.SourcePath, binding.Provider))

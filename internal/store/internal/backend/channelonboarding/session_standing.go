@@ -27,7 +27,7 @@ func sessionStandingBindingCurrent(ctx context.Context, r runner, expected domai
 		return false, err
 	}
 	if expected.Posture != domain.ActivationSessionConnection || expected.OperationID == "" ||
-		expected.Revision < 1 || expected.BindingRevision < 1 || expected.ValidateSessionAccount() != nil {
+		expected.Revision < 1 || !expected.AccountConnection() && expected.BindingRevision < 1 || expected.ValidateSessionAccount() != nil {
 		return false, nil
 	}
 	var current bool
@@ -41,6 +41,21 @@ func sessionStandingBindingCurrent(ctx context.Context, r runner, expected domai
 		}
 		if err := channeldelivery.LockPrincipalTx(ctx, tx, op.PrincipalID, r.dialect() == dialectPostgres); err != nil {
 			return err
+		}
+		if op.AccountConnection() {
+			if !op.Phase.RequiresExecutableTarget(op.Posture) || op.Phase == domain.PhasePublishingActivation {
+				current = true
+				return nil
+			}
+			activation, found, err := loadActivationBySlot(ctx, tx, r.dialect(), op.SlotKey, true)
+			if err != nil || !found {
+				return err
+			}
+			responsibility := domain.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
+				ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
+				Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
+			current = responsibility.MatchesAccountConnection(op, activation)
+			return nil
 		}
 		binding, found, err := identityowner.LockBindingTx(ctx, tx, r.dialect() == dialectPostgres, op.Interface)
 		if err != nil || !found {

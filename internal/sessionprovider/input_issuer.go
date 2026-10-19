@@ -117,7 +117,8 @@ func (o *sessionInputOwner) admitRetainedInput(ctx context.Context, reference Se
 	frozen := native.OriginalCapture
 	frozen.Body = bytes.Clone(frozen.Body)
 	return inputfact.SealOwnedCapture(inputfact.Capture{Store: o.store, Responsibility: responsibility,
-		Scope: native.Scope, BindingRevision: native.BindingRevision, PublicationRunID: native.PublicationBinding.RunID,
+		AccountOnly: native.AccountOnly,
+		Scope:       native.Scope, BindingRevision: native.BindingRevision, PublicationRunID: native.PublicationBinding.RunID,
 		PublicationSequence: sequence, OriginalPublicationRequest: native.OriginalPublicationRequest,
 		Body: native.Body, OriginalCapture: original, ReceivedAt: native.ReceivedAt, Generation: native.SourceContext.CatalogGeneration, Context: ownedContext,
 		Release: func() { cancel(); native.Release() }, NativeCurrent: native.NativeCurrent, RunCurrent: runCurrent,

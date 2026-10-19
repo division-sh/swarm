@@ -26,7 +26,7 @@ type AdmissionResponsibility struct {
 // responsibility separately owns retention, including while disconnected.
 func RequireSessionStandingAdmission(op Operation, session operatorchannel.ProviderAuthority) error {
 	if op.Posture != ActivationSessionConnection || op.Phase != PhaseAwaitingOperatorConfirmation ||
-		op.BindingRevision < 1 || op.ValidateSessionAccount() != nil {
+		!op.AccountConnection() && op.BindingRevision < 1 || op.ValidateSessionAccount() != nil {
 		return fmt.Errorf("%w: native standing promotion requires confirmed session responsibility", ErrRevisionConflict)
 	}
 	parent, revision := session.SessionParent()
@@ -115,11 +115,16 @@ func (expected AdmissionResponsibility) MatchesBusinessBinding(op Operation, act
 		binding.ProviderAuthority.Session == expected.SessionAccount
 }
 
+func (expected AdmissionResponsibility) MatchesAccountConnection(op Operation, activation ConnectedChannelActivation) bool {
+	return op.AccountConnection() && expected.MatchesActivation(op, activation) && activation.BindingRevision == 0 &&
+		activation.ConversationRef == "" && activation.ProofID == "" && activation.ProofRevision == 0
+}
+
 // ResumeSessionBusiness projects only an existing activation's process-coordinate
 // refresh. Its publication operation, account, binding and target stay original.
 func (expected AdmissionResponsibility) ResumeSessionBusiness(op Operation, activation ConnectedChannelActivation, bindingRevision int64, activationID string) (AdmissionResponsibility, bool) {
 	if op.Posture != ActivationSessionConnection || expected.ActivationRevision < 1 ||
-		bindingRevision < 1 || op.BindingRevision != bindingRevision ||
+		bindingRevision < 1 && !op.AccountConnection() || op.BindingRevision != bindingRevision ||
 		!expected.Coordinate.MatchesDurableIdentity(op.Coordinate) ||
 		expected.Coordinate.TargetGeneration != op.Coordinate.TargetGeneration ||
 		activationID == "" || activation.ActivationID != activationID ||

@@ -277,6 +277,16 @@ func verifyRequiredPassingBundles(ctx context.Context, repoRoot string, bundles 
 		if strings.HasPrefix(bundle.ID, "archetypes/") {
 			invalid := false
 			for _, name := range []string{"swarm.yaml", "swarm.live.yaml", ".swarm"} {
+				if name == ".swarm" && bundle.ID == "archetypes/whatsapp-receptionist" {
+					// This public starter explicitly provisions a local deployment,
+					// unlike the portable source-only archetypes.
+					entries, err := os.ReadDir(filepath.Join(bundle.Root, name))
+					if err != nil || len(entries) != 2 || entries[0].Name() != "api-token" || entries[1].Name() != "swarm.yaml" {
+						failures = append(failures, fmt.Sprintf("%s has unexpected generated deployment contents", bundle.ID))
+						invalid = true
+					}
+					continue
+				}
 				if _, err := os.Lstat(filepath.Join(bundle.Root, name)); !os.IsNotExist(err) {
 					failures = append(failures, fmt.Sprintf("%s contains forbidden deployment artifact %s", bundle.ID, name))
 					invalid = true

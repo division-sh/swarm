@@ -4,7 +4,14 @@ imports:
     - provider: whatsapp
       event: inbound.whatsapp.message
 stages:
-  active: {}
+  active:
+    gate:
+      decision: retire_service
+      outcomes:
+        retire:
+          advances_to: done
+  done:
+    final: true
 pins:
   inputs:
     - inbound.whatsapp

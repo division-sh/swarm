@@ -796,8 +796,16 @@ func (p OutboundBindingPlan) Capabilities() CompiledChannelCapabilities {
 	return p.structural.Capabilities()
 }
 
-func (p SatisfactionPlan) HasNativeInbox() bool    { return p.nativeInbox != nil }
-func (p OutboundBindingPlan) HasNativeInbox() bool { return p.structural.HasNativeInbox() }
+func (p SatisfactionPlan) HasNativeInbox() bool { return p.nativeInbox != nil }
+func (p OutboundBindingPlan) HasNativeInbox() bool {
+	return !p.ActivitiesOnly() && p.structural.HasNativeInbox()
+}
+
+// A native account without an operator destination can execute authored
+// activities, but cannot expose operator channel tools or an Inbox.
+func (p OutboundBindingPlan) ActivitiesOnly() bool {
+	return p.Transport() == ChannelTransportSession && p.destination.Interface() == nil
+}
 
 func (p SatisfactionPlan) InterfaceIdentity() (operatorchannel.InterfaceIdentity, error) {
 	generation, err := p.Generation()
@@ -1087,8 +1095,10 @@ func NewOutboundBindingPlanWithRegistration(id string, structural SatisfactionPl
 	if err != nil {
 		return OutboundBindingPlan{}, fmt.Errorf("channel outbound binding %q destination admission: %w", bindingID.String(), err)
 	}
-	if err := destinationSchema.Validate(admitted.Interface()); err != nil {
-		return OutboundBindingPlan{}, fmt.Errorf("channel outbound binding %q destination: %w", bindingID.String(), err)
+	if destination != nil || structural.Transport() != ChannelTransportSession {
+		if err := destinationSchema.Validate(admitted.Interface()); err != nil {
+			return OutboundBindingPlan{}, fmt.Errorf("channel outbound binding %q destination: %w", bindingID.String(), err)
+		}
 	}
 	plan := OutboundBindingPlan{
 		id: bindingID, structural: structural, destination: admitted,
@@ -1141,6 +1151,9 @@ func (p OutboundBindingPlan) RuntimeToolID(operation string) string {
 
 func (p OutboundBindingPlan) RuntimeTools() (map[string]runtimecontracts.ToolSchemaEntry, error) {
 	out := make(map[string]runtimecontracts.ToolSchemaEntry, len(p.runtimeTools))
+	if p.ActivitiesOnly() {
+		return out, nil
+	}
 	for id, tool := range p.runtimeTools {
 		out[id] = tool
 	}
@@ -1158,6 +1171,9 @@ func (p OutboundBindingPlan) ConnectorDeclaration(operation string) (string, run
 }
 
 func (p OutboundBindingPlan) PrepareOperation(operation string, input any) (string, map[string]any, error) {
+	if p.ActivitiesOnly() {
+		return "", nil, fmt.Errorf("operator channel operation requires a confirmed operator destination")
+	}
 	if err := p.structural.requireOperation(strings.TrimSpace(operation)); err != nil {
 		return "", nil, err
 	}

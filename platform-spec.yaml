@@ -12667,11 +12667,14 @@ tool_model:
         - session_connection
         identity_ceremony:
         - authenticated_text_challenge
+        - account_link
         rule: >
           Generic onboarding branches only on these admitted axes. Telegram is webhook_registration plus
           authenticated_text_challenge. Discord paper conformance uses session_connection for Gateway input with
-          separately admitted HTTPS outbound operations. Every session provider still uses the same authenticated human
-          challenge; pairing and provider Connected are readiness, never principal or conversation identity. The session
+          separately admitted HTTPS outbound operations. An admitted bundle with a human-authority activity or gate
+          uses the authenticated human challenge. A comms-only session uses account_link, derived from the admitted
+          bundle rather than a configuration key: it admits customer transport but no operator binding, learned HITL
+          destination, challenge, or confirmation send. Pairing and provider Connected are readiness, never principal or conversation identity. The session
           contract is structurally admitted but its uninstalled implementation is explicitly unavailable until #2577
           supplies exact connection/admission/state/health owners. No dummy credential or false setup/READY is permitted.
       learned_destination_declaration: >
@@ -17780,7 +17783,7 @@ platform_tables:
             target_selector TEXT NOT NULL,
             target_generation BIGINT NOT NULL CHECK (target_generation >= 0),
             activation_posture TEXT NOT NULL CHECK (activation_posture IN ('webhook_registration','session_connection')),
-            identity_ceremony TEXT NOT NULL CHECK (identity_ceremony = 'authenticated_text_challenge'),
+            identity_ceremony TEXT NOT NULL CHECK (identity_ceremony IN ('authenticated_text_challenge','account_link')),
             phase TEXT NOT NULL CHECK (phase IN ('preparing','credentials_admitted','activating_provider','awaiting_external_identity','awaiting_operator_confirmation','publishing_activation','publishing_process_activation','promoting_registration','retiring_predecessor','delivering_confirmation','succeeded','failed','retired')),
             operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
             save_proof BOOLEAN NOT NULL,
@@ -17801,6 +17804,7 @@ platform_tables:
             updated_at TIMESTAMPTZ NOT NULL,
             completed_at TIMESTAMPTZ,
             CHECK ((phase IN ('succeeded','failed','retired')) = (completed_at IS NOT NULL)),
+            CHECK (identity_ceremony <> 'account_link' OR activation_posture = 'session_connection'),
             CHECK (target_generation > 0 OR phase IN ('preparing','credentials_admitted','failed','retired') OR (activation_posture = 'session_connection' AND phase IN ('activating_provider','awaiting_external_identity','awaiting_operator_confirmation'))),
             CHECK ((activation_posture = 'webhook_registration' AND session_account_admission IS NULL) OR (activation_posture = 'session_connection' AND (session_account_admission IS NOT NULL OR phase IN ('preparing','credentials_admitted','activating_provider','failed','retired')))),
             CHECK ((activation_posture = 'session_connection') = (session_connection_id IS NOT NULL)),
@@ -17898,7 +17902,7 @@ platform_tables:
             target_selector TEXT NOT NULL,
             target_generation BIGINT NOT NULL CHECK (target_generation > 0),
             activation_posture TEXT NOT NULL CHECK (activation_posture IN ('webhook_registration','session_connection')),
-            binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
+            binding_revision BIGINT NOT NULL CHECK (binding_revision >= 0),
             conversation_reference TEXT NOT NULL,
             proof_id UUID,
             proof_revision BIGINT CHECK (proof_revision IS NULL OR proof_revision > 0),
@@ -17911,6 +17915,7 @@ platform_tables:
             updated_at TIMESTAMPTZ NOT NULL,
             retired_at TIMESTAMPTZ,
             CHECK ((proof_id IS NULL AND proof_revision IS NULL) OR (proof_id IS NOT NULL AND proof_revision IS NOT NULL)),
+            CHECK (binding_revision > 0 OR (activation_posture = 'session_connection' AND conversation_reference = '' AND proof_id IS NULL)),
             CHECK ((activation_posture = 'session_connection') = (session_account_admission IS NOT NULL)),
             CHECK ((status = 'current' AND retired_at IS NULL AND retirement_reason IS NULL) OR (status = 'retired' AND retired_at IS NOT NULL AND retirement_reason IS NOT NULL)),
             UNIQUE INDEX idx_connected_channel_current_slot (slot_key) WHERE status = 'current',
@@ -27857,7 +27862,7 @@ cli_specification:
           channel_rebind_interface: {command: swarm channel rebind, selector: 'flag:interface', family: operator_channel, mode: full_only, safety: mutating}
           channel_rebind_target: {command: swarm channel rebind, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target, safety: mutating}
           channel_resume_operation: {command: swarm channel resume, selector: 'arg:operation-id', family: none, mode: different_concept, scope_rule: exact durable channel onboarding operation identifier, safety: mutating}
-          channel_logout_operation: {command: swarm channel logout, selector: 'arg:operation-id', family: none, mode: different_concept, scope_rule: 'exact retained channel onboarding operation identifier; never a provider account or session path', safety: mutating}
+          channel_logout_operation: {command: swarm channel logout, selector: 'arg:provider', family: none, mode: different_concept, scope_rule: 'WhatsApp resolves the unique current linked operation, including a reconnect successor; an exact retained operation identifier remains supported', safety: mutating}
           channel_status_interface: {command: swarm channel status, selector: 'arg:interface', family: operator_channel, mode: full_only}
           channel_status_source: {command: swarm channel status, selector: 'flag:source', family: none, mode: different_concept, scope_rule: 'explicit local directory admitted once for exact source identity; paired with exact target'}
           channel_status_target: {command: swarm channel status, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target}
@@ -29921,7 +29926,7 @@ cli_specification:
           command: swarm channel unbind <interface> [--json|--quiet]
           api_owner: /v1/rpc channel.unbind
         logout:
-          command: swarm channel logout <operation-id> [--json|--quiet]
+          command: swarm channel logout <provider> [--json|--quiet]
           api_owner: /v1/rpc channel.onboarding_get plus channel.logout
     serve:
       command: swarm serve [directory] [flags]
@@ -36795,7 +36800,7 @@ api_specification:
           coordinate: {$ref: '#/components/schemas/ChannelRuntimeContextCoordinate'}
           target_selector: {type: string, minLength: 1}
           activation_posture: {type: string, enum: [webhook_registration, session_connection]}
-          identity_ceremony: {type: string, enum: [authenticated_text_challenge]}
+          identity_ceremony: {type: string, enum: [authenticated_text_challenge, account_link]}
           phase: {type: string, enum: [preparing, credentials_admitted, activating_provider, awaiting_external_identity, awaiting_operator_confirmation, publishing_activation, publishing_process_activation, promoting_registration, retiring_predecessor, delivering_confirmation, succeeded, failed, retired]}
           revision: {type: integer, minimum: 1}
           save_proof: {type: boolean}
@@ -36853,7 +36858,7 @@ api_specification:
           coordinate: {$ref: '#/components/schemas/ChannelRuntimeContextCoordinate'}
           target: {$ref: '#/components/schemas/ChannelOnboardingCandidateTarget'}
           activation_posture: {type: string, enum: [webhook_registration, session_connection]}
-          identity_ceremony: {type: string, enum: [authenticated_text_challenge]}
+          identity_ceremony: {type: string, enum: [authenticated_text_challenge, account_link]}
           provider_credential_role: {type: string}
           signing_credential_role: {type: string}
           confirmation_operation: {type: string, minLength: 1}
@@ -36934,6 +36939,16 @@ api_specification:
           activation: {$ref: '#/components/schemas/ConnectedChannelActivation'}
           readiness: {$ref: '#/components/schemas/ConnectedChannelReadiness'}
           recovery: {$ref: '#/components/schemas/ConnectedChannelRecovery'}
+          connection: {$ref: '#/components/schemas/ChannelSessionConnection'}
+      ChannelSessionConnection:
+        type: object
+        additionalProperties: false
+        required: [state, linked]
+        properties:
+          state: {type: string, enum: [pairing, connecting, connected, disconnected]}
+          linked: {type: boolean, description: Retained paired account exists; not operator identity or execution authority.}
+          account_presentation: {type: string}
+          account_name: {type: string}
       ConnectedChannelRecovery:
         type: object
         additionalProperties: false
@@ -36963,6 +36978,7 @@ api_specification:
           identity_operation: {$ref: '#/components/schemas/OperatorChannelOperation'}
           binding: {$ref: '#/components/schemas/OperatorChannelBinding'}
           readiness: {$ref: '#/components/schemas/ConnectedChannelReadiness'}
+          connection: {$ref: '#/components/schemas/ChannelSessionConnection'}
           logout: {$ref: '#/components/schemas/ChannelLogoutResult'}
           pairing:
             type: object
@@ -36974,6 +36990,8 @@ api_specification:
               expires_at: {$ref: '#/components/schemas/Timestamp'}
               paired: {type: boolean}
               connected: {type: boolean}
+              account_presentation: {type: string}
+              account_name: {type: string}
       ChannelLogoutResult:
         type: object
         additionalProperties: false
@@ -41442,6 +41460,7 @@ api_specification:
       - {name: provider_credential, required: false, schema: {type: string, minLength: 1, writeOnly: true}}
       - {name: client_language, required: false, schema: {type: string, minLength: 1}}
       - {name: expected_locale_revision, required: false, schema: {type: integer, minimum: 1}}
+      - {name: checkpoint_only, required: false, schema: {type: boolean}, description: Freeze a genuinely paired account for rejection/logout without beginning identity, activation or business publication. Only valid at session pairing.}
       - {name: idempotency_key, required: false, schema: {type: string}}
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelOnboardingResult'}}
       errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED]

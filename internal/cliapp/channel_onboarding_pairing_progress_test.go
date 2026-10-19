@@ -131,8 +131,9 @@ func TestChannelCLIPairingProgressRefusesContradictoryOrExpiredEvidence(t *testi
 }
 
 func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
-	for _, mode := range []string{"human", "--json", "--quiet"} {
+	for _, mode := range []string{"human", "human-receptionist", "--json", "--quiet"} {
 		t.Run(mode, func(t *testing.T) {
+			human := strings.HasPrefix(mode, "human")
 			stage := 0
 			pairingReads := 0
 			var methods []string
@@ -141,15 +142,16 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 				switch stage {
 				case 1:
 					result["pairing"] = map[string]any{"status": "awaiting_qr", "code": "journey-material", "expires_at": time.Now().Add(time.Minute), "paired": false, "connected": false}
-					if mode == "human" && pairingReads == 2 {
+					if human && pairingReads == 2 {
 						result["pairing"].(map[string]any)["code"] = "replacement-material"
-					} else if mode == "human" && pairingReads >= 3 {
+					} else if human && pairingReads >= 3 {
 						result["pairing"] = map[string]any{"status": "qr_expired", "paired": false, "connected": false}
 					}
 				case 2:
 					result["pairing"] = map[string]any{"status": "paired", "paired": true, "connected": false}
-					if mode == "human" {
+					if human {
 						result["pairing"].(map[string]any)["connected"] = true
+						result["pairing"].(map[string]any)["account_presentation"] = "+15550000001"
 					}
 				case 3:
 					result = sessionProgressCLIResult("whatsapp", "", "awaiting_external_identity", false)
@@ -172,7 +174,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						t.Fatal("pairing created a replacement responsibility")
 					}
 				case "channel.onboarding_get":
-					if mode == "human" && stage <= 1 {
+					if human && stage <= 1 {
 						stage = 1
 						pairingReads++
 					}
@@ -186,6 +188,9 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					if stage < 3 {
 						stage++
 					}
+					if mode == "human-receptionist" && stage == 3 {
+						stage = 5
+					}
 				case "channel.confirm":
 					if stage != 4 || req.Params["approve"] != true || req.Params["expected_revision"] != float64(2) {
 						t.Fatal("claim confirmation lost its exact evidence", req.Params, stage)
@@ -197,7 +202,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 				}
 				return progress()
 			})
-			if mode == "human" {
+			if human {
 				isolateCLIAPIConfigEnv(t)
 				project := t.TempDir()
 				if err := os.Mkdir(filepath.Join(project, ".swarm"), 0o700); err != nil {
@@ -209,16 +214,23 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					t.Fatal(err)
 				}
 				opts := defaultRootCommandOptions()
-				opts.httpClient, opts.input = server.Client(), strings.NewReader("y\n")
+				opts.httpClient, opts.input = server.Client(), strings.NewReader("y\ny\n")
 				opts.stdinIsTerminal = func() bool { return true }
 				opts.channelConnectPoll = time.Millisecond
 				var out, errOut bytes.Buffer
 				code := executeRootCommandWithOptions(context.Background(), project, []string{"channel", "connect", "whatsapp"}, &out, &errOut, opts)
 				if code != 0 || !strings.Contains(out.String(), "READY") || !strings.Contains(out.String(), "QR expired, new QR:") ||
-					!strings.Contains(out.String(), "Linked Devices") || !strings.Contains(out.String(), "Claimed by") ||
+					!strings.Contains(out.String(), "Linked Devices") ||
 					!strings.Contains(errOut.String(), "[y/N]") || strings.Contains(out.String()+errOut.String(), operatorChannelCLIOperation) ||
 					strings.Contains(out.String(), "journey-material") || strings.Contains(out.String(), "replacement-material") {
 					t.Fatal("single public connect lost pairing, refresh, claimant confirmation or config targeting", code, out.String(), errOut.String())
+				}
+				if mode == "human-receptionist" {
+					if strings.Contains(out.String(), "operator") || strings.Count(errOut.String(), "[y/N]") != 1 {
+						t.Fatal("receptionist asked for operator authority", out.String(), errOut.String())
+					}
+				} else if !strings.Contains(out.String(), "Code received from") || strings.Count(errOut.String(), "[y/N]") != 2 {
+					t.Fatal("HITL connect lost either account or claimant confirmation", out.String(), errOut.String())
 				}
 			} else {
 				for call := 0; call < 4; call++ {
@@ -238,7 +250,11 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					}
 				}
 			}
-			if stage != 5 || strings.Count(strings.Join(methods, ","), "channel.confirm") != 1 {
+			confirmations := 1
+			if mode == "human-receptionist" {
+				confirmations = 0
+			}
+			if stage != 5 || strings.Count(strings.Join(methods, ","), "channel.confirm") != confirmations {
 				t.Fatal("ceremony failed to reach genuine confirmation", stage, methods)
 			}
 		})

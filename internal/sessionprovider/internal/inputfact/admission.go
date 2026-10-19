@@ -26,6 +26,7 @@ type Capture struct {
 	Responsibility             channelonboarding.AdmissionResponsibility
 	Scope                      channelonboarding.SessionInputScope
 	BindingRevision            int64
+	AccountOnly                bool
 	PublicationRunID           string
 	PublicationSequence        int64
 	OriginalPublicationRequest []byte
@@ -87,12 +88,15 @@ func (a Admission) RequireBusiness(ctx context.Context, provider string, generat
 	}
 	capture := a.value.capture
 	if capture.Scope != channelonboarding.SessionInputBusiness || capture.Responsibility.ActivationRevision < 1 ||
-		capture.BindingRevision < 1 || capture.PublicationRunID == "" || capture.PublicationSequence < 1 {
+		capture.BindingRevision < 1 && !capture.AccountOnly || capture.AccountOnly && capture.BindingRevision != 0 || capture.PublicationRunID == "" || capture.PublicationSequence < 1 {
 		return fmt.Errorf("business publication requires explicit activated native business scope")
 	}
 	op, err := capture.Store.GetChannelOnboarding(ctx, capture.Responsibility.OperationID)
 	if err != nil {
 		return err
+	}
+	if op.AccountConnection() != capture.AccountOnly {
+		return fmt.Errorf("native business input contradicts its account-only scope")
 	}
 	activation, err := capture.Store.GetConnectedChannelActivation(ctx, op.SlotKey)
 	if err != nil {
@@ -101,6 +105,12 @@ func (a Admission) RequireBusiness(ctx context.Context, provider string, generat
 	if op.BindingRevision != capture.BindingRevision || activation.BindingRevision != capture.BindingRevision ||
 		ctx.Err() != nil || capture.Context.Err() != nil {
 		return fmt.Errorf("native business input contradicts its original binding")
+	}
+	if capture.Responsibility.MatchesAccountConnection(op, activation) {
+		if capture.RunCurrent == nil {
+			return fmt.Errorf("native business input has no exact selected run owner")
+		}
+		return capture.RunCurrent(ctx)
 	}
 	bindings, ok := capture.Store.(interface {
 		ListOperatorChannelBindings(context.Context, string) ([]operatorchannel.Binding, error)

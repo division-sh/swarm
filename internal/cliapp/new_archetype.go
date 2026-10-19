@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"crypto/rand"
 	"embed"
 	"fmt"
 	"io"
@@ -30,6 +31,9 @@ var admittedArchetypes = map[string]admittedArchetype{
 	},
 	"webhook-responder": {
 		Files: swarmassets.EmbeddedTelegramAgentExample(), SourceRoot: ".", WorkingDir: ".",
+	},
+	"whatsapp-receptionist": {
+		Files: archetypeFiles, SourceRoot: "archetypes/whatsapp-receptionist", WorkingDir: ".",
 	},
 }
 
@@ -97,6 +101,22 @@ func scaffoldArchetype(root InvocationRoot, out io.Writer, rawName, rawOutput st
 	}); err != nil {
 		return fmt.Errorf("write %s scaffold: %w", name, err)
 	}
+	if name == "whatsapp-receptionist" {
+		if err := os.WriteFile(filepath.Join(absDestination, ".gitignore"), []byte(".swarm/\n"), 0o644); err != nil {
+			return err
+		}
+		deployment := filepath.Join(absDestination, ".swarm")
+		if err := os.Mkdir(deployment, 0o700); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(deployment, "api-token"), []byte(rand.Text()+"\n"), 0o600); err != nil {
+			return err
+		}
+		body := "runtime:\n  recovery_on_startup: true\nstore:\n  backend: sqlite\n  sqlite:\n    path: .swarm/store.sqlite\nworkspace:\n  backend: host\n  allow_exec_on_host: true\nserve:\n  api_listen_addr: 127.0.0.1:8081\n  mcp_listen_addr: 127.0.0.1:8082\n  api_token_file: .swarm/api-token\nconnection:\n  api_server: http://127.0.0.1:8081\n  api_token_file: .swarm/api-token\n"
+		if err := os.WriteFile(filepath.Join(deployment, "swarm.yaml"), []byte(body), 0o600); err != nil {
+			return err
+		}
+	}
 	complete = true
 	display := filepath.Clean(destination)
 	fmt.Fprintf(out, "Created %s in %s\n\nNext:\n", name, display)
@@ -105,6 +125,12 @@ func scaffoldArchetype(root InvocationRoot, out io.Writer, rawName, rawOutput st
 		fmt.Fprintf(out, "  cd %s\n", source.WorkingDir)
 	}
 	fmt.Fprintln(out, "  swarm verify . --portable")
+	if name == "whatsapp-receptionist" {
+		fmt.Fprintln(out, "  swarm serve")
+		fmt.Fprintln(out, "\nIn a second terminal, from this same directory:")
+		fmt.Fprintln(out, "  swarm channel connect whatsapp")
+		return nil
+	}
 	fmt.Fprintln(out, "  swarm test . tests/smoke.yaml")
 	fmt.Fprintln(out, "  swarm serve . --dev")
 	return nil

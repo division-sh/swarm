@@ -353,17 +353,19 @@ func compileSnapshot(publication channelonboarding.ChannelActivationPublication)
 		}
 		for _, name := range binding.OperationNames() {
 			operation := Operation{Binding: binding, Name: name}
-			runtimeID := strings.TrimSpace(binding.RuntimeToolID(name))
-			if runtimeID == "" {
-				return nil, fmt.Errorf("channel binding %q operation %q has no runtime tool identity", binding.BindingID(), name)
+			if !binding.ActivitiesOnly() {
+				runtimeID := strings.TrimSpace(binding.RuntimeToolID(name))
+				if runtimeID == "" {
+					return nil, fmt.Errorf("channel binding %q operation %q has no runtime tool identity", binding.BindingID(), name)
+				}
+				if _, duplicate := next.runtime[runtimeID]; duplicate {
+					return nil, fmt.Errorf("duplicate channel runtime tool %q", runtimeID)
+				}
+				if _, compiled := next.tools[runtimeID]; !compiled {
+					return nil, fmt.Errorf("channel binding %q operation %q runtime tool %q is absent from its compiled projection", binding.BindingID(), name, runtimeID)
+				}
+				next.runtime[runtimeID] = operation
 			}
-			if _, duplicate := next.runtime[runtimeID]; duplicate {
-				return nil, fmt.Errorf("duplicate channel runtime tool %q", runtimeID)
-			}
-			if _, compiled := next.tools[runtimeID]; !compiled {
-				return nil, fmt.Errorf("channel binding %q operation %q runtime tool %q is absent from its compiled projection", binding.BindingID(), name, runtimeID)
-			}
-			next.runtime[runtimeID] = operation
 			activity, err := binding.RuntimeActivityTarget(name)
 			if err != nil {
 				return nil, fmt.Errorf("channel binding %q operation %q private target: %w", binding.BindingID(), name, err)

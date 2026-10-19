@@ -101,8 +101,12 @@ func ChannelOnboardingHandlers(opts ChannelOnboardingHandlerOptions) map[string]
 					return nil, err
 				}
 			}
+			checkpointOnly, err := optionalBoolParam(req.Params, "checkpoint_only", false)
+			if err != nil {
+				return nil, err
+			}
 			result, err := opts.Onboarding.Retry(ctx, channelonboarding.RetryInput{OperationID: operationID, ProviderCredential: credential,
-				ClientLanguage: language, ExpectedLocaleRevision: localeRevision})
+				ClientLanguage: language, ExpectedLocaleRevision: localeRevision, CheckpointOnly: checkpointOnly})
 			if err != nil {
 				return nil, channelOnboardingError(err)
 			}

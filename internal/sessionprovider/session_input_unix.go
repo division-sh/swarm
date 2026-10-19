@@ -26,6 +26,7 @@ type nativeSessionInput struct {
 	Source                     channelonboarding.ChannelDurableContextIdentity
 	PublicationBinding         runtimeinbound.BindingGeneration
 	BindingRevision            int64
+	AccountOnly                bool
 	Body                       []byte
 	ReceivedAt                 time.Time
 	Context                    context.Context
@@ -39,6 +40,7 @@ type nativeSessionInput struct {
 
 func (input nativeSessionInput) matchesOriginalOperation(op channelonboarding.Operation, coordinate channelonboarding.ChannelRuntimeContextCoordinate) bool {
 	return op.OperationID == input.OperationID && op.Posture == channelonboarding.ActivationSessionConnection &&
+		input.AccountOnly == op.AccountConnection() &&
 		op.Phase != channelonboarding.PhaseFailed && op.Phase != channelonboarding.PhaseRetired && op.Coordinate.MatchesDeclaration(coordinate) &&
 		op.SessionAccount == input.Account && op.ActivationRevision == input.ActivationRevision &&
 		op.TargetSelector == input.TargetSelector && op.PrincipalID == input.PrincipalID &&
@@ -127,6 +129,7 @@ func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference Se
 			return r.state.ownsConnectedOccurrence(workContext, occurrence)
 		}
 		return nativeSessionInput{Scope: event.Scope.Kind, Account: event.Scope.Session, OperationID: event.Scope.OnboardingOperation,
+			AccountOnly:       event.Scope.AccountOnly,
 			OperationRevision: event.Scope.OperationRevision, ActivationID: event.Scope.ActivationID, ActivationRevision: event.Scope.ActivationRevision, TargetSelector: event.Scope.TargetSelector,
 			PrincipalID: event.Scope.PrincipalID, Source: event.Scope.Source, BindingRevision: event.Scope.BindingRevision,
 			PublicationBinding:         event.Scope.PublicationBinding,

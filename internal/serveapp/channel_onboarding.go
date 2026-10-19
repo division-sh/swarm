@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -85,6 +86,9 @@ func serveChannelCandidatesForPlan(contextDef runtime.BundleContext, bundleIdent
 	}
 	posture := channelonboarding.ActivationPosture(profile.ActivationPosture())
 	ceremony := channelonboarding.IdentityCeremony(profile.IdentityCeremony())
+	if posture == channelonboarding.ActivationSessionConnection && !serveChannelRequiresOperator(contextDef) {
+		ceremony = channelonboarding.CeremonyAccountLink
+	}
 	var candidates []channelonboarding.Candidate
 	for _, declaration := range declarations {
 		for _, binding := range declaration.Ingress {
@@ -113,6 +117,27 @@ func serveChannelCandidatesForPlan(contextDef runtime.BundleContext, bundleIdent
 		}
 	}
 	return candidates, nil
+}
+
+func serveChannelRequiresOperator(contextDef runtime.BundleContext) bool {
+	if contextDef.Source == nil {
+		return true
+	}
+	if len(contextDef.Source.WorkflowGates()) > 0 {
+		return true
+	}
+	for _, record := range contextDef.Source.ExecutableNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			return true
+		}
+		for _, site := range runtimecontracts.ActivitySitesForNode(node, contextDef.Source.ExecutableNodeEventHandlers(node)) {
+			if site.Spec.Approval != nil || site.Spec.Tool == "notify_human" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func serveChannelDeclarationTarget(contextDef runtime.BundleContext, declaration runtime.StandingTargetDeclaration, binding runtime.StandingIngressBinding) runtime.StandingTarget {
@@ -690,6 +715,19 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 				ActivationGeneration: facts.ActivationGeneration.Diagnostic(), ObservedAt: facts.ObservedAt}, true, nil
 		}
 	}
+	if op.AccountConnection() {
+		responsibility := channelonboarding.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
+			ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
+			Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
+		ready := available && op.Phase == channelonboarding.PhaseSucceeded && candidate.Coordinate.Matches(activation.Coordinate) &&
+			responsibility.MatchesAccountConnection(op, activation) && facts.SessionObservation != nil && facts.SessionObservation.Connected
+		reason := channelonboarding.ReadinessActivationUnavailable
+		if ready {
+			reason = channelonboarding.ReadinessReady
+		}
+		return channelonboarding.ConnectedChannelReadiness{Ready: ready, Reason: reason, Coordinate: activation.Coordinate, ActivationRevision: activation.Revision,
+			ActivationGeneration: facts.ActivationGeneration.Diagnostic(), ObservedAt: now}, true, nil
+	}
 
 	binding, proofCurrent, bindingErr := o.identities.CurrentBindingReadiness(ctx, activation.Interface)
 	if bindingErr != nil {
@@ -1048,6 +1086,9 @@ func (r *serveChannelActivationRefresher) PublishChannelActivation(ctx context.C
 		return fmt.Errorf("successor channel activation process publication is unavailable")
 	}
 	defer lease.Release()
+	if op.AccountConnection() {
+		return nil
+	}
 	wantBinding := channelonboarding.LearnedBindingID(activation.SlotKey)
 	for _, compiled := range lease.Activations() {
 		if compiled.Source == channelonboarding.ActivationSourceLearned && compiled.Plan.BindingID() == wantBinding &&
