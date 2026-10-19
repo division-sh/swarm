@@ -160,6 +160,36 @@ func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthori
 		}
 
 		original := command.Commit.Event.Event()
+		for _, change := range []string{"payload", "source", "run", "type", "bare receiver"} {
+			t.Run(string(original.Type())+"/post-admission/"+change, func(t *testing.T) {
+				payload, routing, runID, eventType, envelope := original.Payload(), original.RoutingSource(), original.RunID(), original.Type(), original.NormalizedEnvelope()
+				switch change {
+				case "payload":
+					payload = []byte(`{"changed":true}`)
+				case "source":
+					routing, err = events.NewExternalIngressRoutingSource("foreign", events.RoutingSourceAuthorityProviderAdmissionPlan)
+					if err != nil {
+						t.Fatal(err)
+					}
+				case "run":
+					runID = eventtest.UUID("foreign-post-admission-run")
+				case "type":
+					eventType = "changed.output"
+				case "bare receiver":
+					envelope = events.EventEnvelope{EntityID: eventtest.UUID("bare-post-admission-receiver")}
+				}
+				changed := command
+				changed.Commit.Event, err = events.AdmitForPersistence(eventtest.ExistingRunRootIngressWithRoutingSource(
+					original.ID(), eventType, "inbound-gateway", "", payload, 0, runID, envelope, routing, original.CreatedAt(),
+				), events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := changed.ValidateInbound(plan.Admission()); err == nil {
+					t.Fatal("changed post-admission publication was accepted")
+				}
+			})
+		}
 		replay := eventtest.ReplayForProducerWithRoutingSource(
 			eventtest.UUID("provider-replay-"+original.ID()), original.Type(), original.Producer(),
 			original.TaskID(), original.Payload(), original.ChainDepth(),
