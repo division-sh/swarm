@@ -18,7 +18,7 @@ func TestS1ProcessWebhookPathKeepsRawProviderKey(t *testing.T) {
 }
 
 func TestS1RuntimeRegistrationComparisonDoesNotRepairProviderKey(t *testing.T) {
-	catalog, err := providertriggers.NewCatalogSnapshot()
+	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies()
 	if err != nil {
 		t.Fatal(err)
 	}

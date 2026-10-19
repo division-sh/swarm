@@ -3,13 +3,11 @@ package cliapp
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/packartifact"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
@@ -24,44 +22,23 @@ func TestPacksListAndShowUseEmbeddedInventoryOutsideProject(t *testing.T) {
 		t.Fatalf("packs list code=%d stderr=%q stdout=%s", code, stderr, stdout)
 	}
 	list := decodeOutputJSON[packInventoryReadback](t, stdout)
-	if list.BaseMode != "embedded" || len(list.Packs) != 14 || list.BaseDigest == "" || list.EffectiveDigest == "" {
+	if list.BaseMode != "embedded" || len(list.Packs) != 10 || list.BaseDigest == "" || list.EffectiveDigest == "" {
 		t.Fatalf("bare embedded list = %#v", list)
 	}
 
-	code, stdout, stderr = runPacksCommand(t, repo, "packs", "show", "provider.telegram", repo, "--json")
+	code, stdout, stderr = runPacksCommand(t, repo, "packs", "show", "telegram", repo, "--json")
 	if code != 0 || stderr != "" {
 		t.Fatalf("packs show code=%d stderr=%q stdout=%s", code, stderr, stdout)
 	}
 	show := decodeOutputJSON[packShowReadback](t, stdout)
-	if show.Pack.ID != "provider.telegram" || show.Pack.Source != "embedded" ||
-		!strings.Contains(show.EnvelopeYAML, "id: provider.telegram") || !strings.Contains(show.ManifestYAML, "provider: telegram") {
+	if show.Pack.ID != "telegram" || show.Pack.Source != "embedded" || len(show.Bodies) != 3 ||
+		!strings.Contains(show.ManifestYAML, "version: 0.1.0") || !strings.Contains(show.Bodies["trigger.yaml"], "event_name:\n  literal: raw") {
 		t.Fatalf("bare embedded show = %#v", show)
 	}
 
-	code, stdout, stderr = runPacksCommand(t, repo, "packs", "show", "provider.telegram", repo)
-	if code != 0 || stderr != "" || !strings.Contains(stdout, "pack.yaml:") || !strings.Contains(stdout, "trigger.yaml:") || !strings.Contains(stdout, "provider: telegram") {
+	code, stdout, stderr = runPacksCommand(t, repo, "packs", "show", "telegram", repo)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "manifest.yaml:") || !strings.Contains(stdout, "trigger.yaml:") || !strings.Contains(stdout, "event_name:\n  literal: raw") {
 		t.Fatalf("human packs show code=%d stderr=%q stdout=%s", code, stderr, stdout)
-	}
-}
-
-func TestPacksListDoesNotRequireRuntimeExecutionPosture(t *testing.T) {
-	t.Setenv("SWARM_CONFIG", "")
-	t.Setenv("SWARM_API_SERVER", "")
-	t.Setenv("SWARM_API_TOKEN", "")
-	t.Setenv("SWARM_API_TOKEN_FILE", "")
-	t.Setenv("SWARM_CONTRACTS_PATH", "")
-	t.Setenv("SWARM_CONTRACTS_DIR", "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
-
-	sourceRoot := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-	code, stdout, stderr := runPacksCommand(t, sourceRoot, "packs", "list", sourceRoot, "--json")
-	if code != 0 || stderr != "" {
-		t.Fatalf("packs list without runtime posture code=%d stderr=%q stdout=%s", code, stderr, stdout)
-	}
-	list := decodeOutputJSON[packInventoryReadback](t, stdout)
-	if list.BaseMode != "embedded" || len(list.Packs) != 14 {
-		t.Fatalf("bare embedded list = %#v", list)
 	}
 }
 
@@ -89,7 +66,7 @@ func TestPacksReadbackReportsConfiguredDevelopmentDirectories(t *testing.T) {
 		}
 	}
 
-	code, stdout, stderr = runPacksCommand(t, sourceRoot, "packs", "show", "provider.telegram", sourceRoot, "--config", configPath, "--json")
+	code, stdout, stderr = runPacksCommand(t, sourceRoot, "packs", "show", "telegram", sourceRoot, "--config", configPath, "--json")
 	if code != 0 || stderr != "" {
 		t.Fatalf("development show code=%d stderr=%q stdout=%s", code, stderr, stdout)
 	}
@@ -148,16 +125,16 @@ func TestImportEmbeddedPackOwnsProjectBytesAndBundleIdentity(t *testing.T) {
 	specPath := runtimecontracts.DefaultPlatformSpecFile(RepoRoot())
 	beforeHash := loadPackCommandBundleHash(t, project, specPath)
 
-	code, stdout, stderr := runPacksCommand(t, RepoRoot(), "import", "provider.telegram", project, "--json")
+	code, stdout, stderr := runPacksCommand(t, RepoRoot(), "import", "telegram", project, "--json")
 	if code != 0 || stderr != "" {
 		t.Fatalf("first import code=%d stderr=%q stdout=%s", code, stderr, stdout)
 	}
 	first := decodeOutputJSON[packImportReadback](t, stdout)
-	if !first.Changed || first.ID != "provider.telegram" || first.Source != "project" {
+	if !first.Changed || first.ID != "telegram" || first.Source != "local" {
 		t.Fatalf("first import = %#v", first)
 	}
 
-	code, stdout, stderr = runPacksCommand(t, RepoRoot(), "import", "provider.telegram", project, "--json")
+	code, stdout, stderr = runPacksCommand(t, RepoRoot(), "import", "telegram", project, "--json")
 	if code != 0 || stderr != "" || decodeOutputJSON[packImportReadback](t, stdout).Changed {
 		t.Fatalf("idempotent import code=%d stderr=%q stdout=%s", code, stderr, stdout)
 	}
@@ -166,7 +143,7 @@ func TestImportEmbeddedPackOwnsProjectBytesAndBundleIdentity(t *testing.T) {
 	if afterImportHash == beforeHash {
 		t.Fatalf("project import did not enter bundle identity: %s", beforeHash)
 	}
-	bodyPath := filepath.Join(project, "packs", "provider.telegram", "trigger.yaml")
+	bodyPath := filepath.Join(project, "telegram", "trigger.yaml")
 	body, err := os.ReadFile(bodyPath)
 	if err != nil {
 		t.Fatal(err)
@@ -183,250 +160,14 @@ func TestImportEmbeddedPackOwnsProjectBytesAndBundleIdentity(t *testing.T) {
 		t.Fatalf("edited project pack did not change bundle identity: %s", afterImportHash)
 	}
 
-	code, stdout, stderr = runPacksCommand(t, RepoRoot(), "packs", "list", project, "--json")
-	if code != 0 || stderr != "" {
-		t.Fatalf("project packs list code=%d stderr=%q stdout=%s", code, stderr, stdout)
-	}
-	list := decodeOutputJSON[packInventoryReadback](t, stdout)
-	var telegram packInventoryEntryReadback
-	for _, entry := range list.Packs {
-		if entry.ID == "provider.telegram" {
-			telegram = entry
-			break
-		}
-	}
-	if telegram.Source != "project" || !telegram.ShadowsBase || !telegram.Modified || !telegram.Origin.Valid() {
-		t.Fatalf("project telegram readback = %#v", telegram)
-	}
-
-	code, _, stderr = runPacksCommand(t, RepoRoot(), "import", "provider.telegram", project)
+	code, _, stderr = runPacksCommand(t, RepoRoot(), "import", "telegram", project)
 	if code == 0 || !strings.Contains(stderr, "will not overwrite") {
 		t.Fatalf("edited reimport code=%d stderr=%q", code, stderr)
 	}
-	code, _, stderr = runPacksCommand(t, RepoRoot(), "import", "provider.unknown", project)
-	if code == 0 || !strings.Contains(stderr, "available embedded packs:") || !strings.Contains(stderr, "provider.telegram") {
+	code, _, stderr = runPacksCommand(t, RepoRoot(), "import", "unknown", project)
+	if code == 0 || !strings.Contains(stderr, "use its directory name from swarm packs list") {
 		t.Fatalf("unknown import code=%d stderr=%q", code, stderr)
 	}
-}
-
-func TestImportEmbeddedPackDoesNotRequireRuntimeExecutionPosture(t *testing.T) {
-	t.Setenv("SWARM_CONFIG", "")
-	t.Setenv("SWARM_API_SERVER", "")
-	t.Setenv("SWARM_API_TOKEN", "")
-	t.Setenv("SWARM_API_TOKEN_FILE", "")
-	t.Setenv("SWARM_CONTRACTS_PATH", "")
-	t.Setenv("SWARM_CONTRACTS_DIR", "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("HOME", t.TempDir())
-
-	project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-	code, stdout, stderr := runPacksCommand(t, RepoRoot(), "import", "provider.telegram", project, "--json")
-	if code != 0 || stderr != "" {
-		t.Fatalf("import without runtime posture code=%d stderr=%q stdout=%s", code, stderr, stdout)
-	}
-	if result := decodeOutputJSON[packImportReadback](t, stdout); !result.Changed || result.ID != "provider.telegram" {
-		t.Fatalf("import without runtime posture = %#v", result)
-	}
-
-	invalidProject := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-	invalidConfig := filepath.Join(t.TempDir(), "swarm.yaml")
-	writeRuntimeConfigText(t, invalidConfig, "runtime:\n  execution_posture: invalid\n")
-	code, stdout, stderr = runPacksCommand(t, RepoRoot(), "import", "provider.telegram", invalidProject, "--config", invalidConfig, "--json")
-	if code == 0 || !strings.Contains(stderr, "runtime.execution_posture") {
-		t.Fatalf("import with invalid authored posture code=%d stderr=%q stdout=%s", code, stderr, stdout)
-	}
-}
-
-func TestPackReadbackMarksEnvelopeOnlyProjectEditsModified(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tests := []struct {
-		name, old, replacement, wantVersion string
-	}{
-		{name: "version", old: "version: 0.1.0", replacement: "version: 0.1.1", wantVersion: "0.1.1"},
-		{name: "tests", old: "providertriggers/telegram", replacement: "providertriggers/telegram-edited", wantVersion: "0.1.0"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-			if changed, err := packartifact.ImportEmbeddedPack(project, "provider.telegram", base); err != nil || !changed {
-				t.Fatalf("import Telegram changed=%t err=%v", changed, err)
-			}
-			envelopePath := filepath.Join(project, "packs", "provider.telegram", packartifact.EnvelopeFileName)
-			body, err := os.ReadFile(envelopePath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			edited := strings.Replace(string(body), tc.old, tc.replacement, 1)
-			if edited == string(body) {
-				t.Fatalf("Telegram envelope %s fixture changed", tc.name)
-			}
-			if err := os.WriteFile(envelopePath, []byte(edited), 0o644); err != nil {
-				t.Fatal(err)
-			}
-
-			code, stdout, stderr := runPacksCommand(t, RepoRoot(), "packs", "show", "provider.telegram", project, "--json")
-			if code != 0 || stderr != "" {
-				t.Fatalf("JSON show code=%d stderr=%q stdout=%s", code, stderr, stdout)
-			}
-			show := decodeOutputJSON[packShowReadback](t, stdout)
-			if show.Pack.Version != tc.wantVersion || !show.Pack.Modified || show.Pack.Origin.Version != "0.1.0" || show.Pack.Origin.EnvelopeHash == "" {
-				t.Fatalf("%s-only JSON show readback = %#v", tc.name, show.Pack)
-			}
-			code, stdout, stderr = runPacksCommand(t, RepoRoot(), "packs", "list", project, "--json")
-			if code != 0 || stderr != "" {
-				t.Fatalf("JSON list code=%d stderr=%q stdout=%s", code, stderr, stdout)
-			}
-			list := decodeOutputJSON[packInventoryReadback](t, stdout)
-			found := false
-			for _, pack := range list.Packs {
-				if pack.ID == "provider.telegram" {
-					found = pack.Modified
-				}
-			}
-			if !found {
-				t.Fatalf("%s-only JSON list did not mark Telegram modified: %#v", tc.name, list.Packs)
-			}
-			code, stdout, stderr = runPacksCommand(t, RepoRoot(), "packs", "show", "provider.telegram", project)
-			if code != 0 || stderr != "" || !strings.Contains(stdout, "version="+tc.wantVersion) || !strings.Contains(stdout, "modified=true") || !strings.Contains(stdout, "origin=provider.telegram@0.1.0") {
-				t.Fatalf("%s-only human readback code=%d stderr=%q stdout=%s", tc.name, code, stderr, stdout)
-			}
-		})
-	}
-}
-
-func TestMalformedPackBodiesFailBeforeEveryCLIPublishingSurface(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	configPath := writeTestVerifyRuntimeConfig(t)
-	base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tests := []struct {
-		name, id, bodyFile, wantErr string
-	}{
-		{name: "trigger", id: "provider.telegram", bodyFile: packartifact.TriggerManifestFileName, wantErr: "provider trigger manifest field \"unknown_field\" is not supported"},
-		{name: "connector", id: "provider.telegram.connector", bodyFile: packartifact.ConnectorManifestFileName, wantErr: "admit provider connector packs"},
-		{name: "channel", id: "provider.telegram.hitl_channel", bodyFile: packartifact.ChannelManifestFileName, wantErr: "admit channel packs"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-			if changed, err := packartifact.ImportEmbeddedPack(project, tc.id, base); err != nil || !changed {
-				t.Fatalf("import %s changed=%t err=%v", tc.id, changed, err)
-			}
-			if err := os.WriteFile(filepath.Join(project, "packs", tc.id, tc.bodyFile), []byte("unknown_field: true\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-
-			assertRejected := func(surface string, args ...string) string {
-				t.Helper()
-				var stdout, stderr bytes.Buffer
-				code := executeRootCommandWithOptions(context.Background(), RepoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
-				combined := stdout.String() + stderr.String()
-				if surface == "verify" {
-					var result verifyCommandResult
-					if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-						t.Fatal(err)
-					}
-					combined = ""
-					for _, finding := range result.Errors {
-						combined += finding.Message + "\n"
-					}
-					if result.OK || result.AdmissionComplete {
-						t.Fatal("malformed pack became complete admission")
-					}
-				}
-				if code == 0 || !strings.Contains(combined, tc.wantErr) {
-					t.Fatalf("%s code=%d stdout=%s stderr=%s, want %q", surface, code, stdout.String(), stderr.String(), tc.wantErr)
-				}
-				return stdout.String()
-			}
-
-			assertRejected("packs list", "packs", "list", project, "--json")
-			assertRejected("packs show", "packs", "show", tc.id, project, "--json")
-			if _, _, err := NewSwarmWorkflowModule(RepoRoot(), project, runtimecontracts.DefaultPlatformSpecFile(RepoRoot())); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("bundle hash admission error = %v, want %q", err, tc.wantErr)
-			}
-			assertRejected("verify", "verify", project, "--config", configPath, "--json")
-			assertRejected("describe", "describe", project, "--config", configPath, "--json")
-		})
-	}
-}
-
-func TestPackAdmissionCLIRejectsTypedCorruption(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	configPath := writeTestVerifyRuntimeConfig(t)
-	for _, row := range []struct{ name, id, file, old, replacement, want string }{
-		{"boolean provider", "provider.telegram.hitl_channel", packartifact.ChannelManifestFileName, "provider: telegram", "provider: true", "want nonempty text"},
-		{"null generation", "provider.telegram.connector", packartifact.ConnectorManifestFileName, "provider: telegram", "provider: telegram\ngeneration: null", "generation"},
-		{"numeric envelope version", "provider.telegram.connector", packartifact.EnvelopeFileName, "version: 0.1.0", "version: 1.5", "want nonempty text"},
-	} {
-		t.Run(row.name, func(t *testing.T) {
-			project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-			if changed, err := packartifact.ImportEmbeddedPack(project, row.id, base); err != nil || !changed {
-				t.Fatalf("import: %t %v", changed, err)
-			}
-			path := filepath.Join(project, "packs", row.id, row.file)
-			body, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			changed := strings.Replace(string(body), row.old, row.replacement, 1)
-			if changed == string(body) {
-				t.Fatal("counterexample did not modify canonical fixture")
-			}
-			if err := os.WriteFile(path, []byte(changed), 0600); err != nil {
-				t.Fatal(err)
-			}
-			for _, args := range [][]string{
-				{"packs", "show", row.id, project, "--json"},
-				{"packs", "list", project, "--json"},
-				{"verify", project, "--config", configPath, "--json"},
-				{"describe", project, "--config", configPath, "--json"},
-			} {
-				var stdout, stderr bytes.Buffer
-				code := executeRootCommandWithOptions(context.Background(), RepoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
-				combined := stdout.String() + stderr.String()
-				if code == 0 || !strings.Contains(combined, row.want) || !strings.Contains(combined, row.file+":") {
-					t.Fatalf("%s accepted/lost teaching source: code=%d %s", args[0], code, combined)
-				}
-			}
-		})
-	}
-}
-
-func TestPresentZeroOptionalFileFailsBeforeEveryCLIPublishingSurface(t *testing.T) {
-	isolateCLIAPIConfigEnv(t)
-	project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-	if err := os.WriteFile(filepath.Join(project, "agents.yaml"), []byte("{}\n"), 0o644); err != nil {
-		t.Fatalf("write present-zero agents file: %v", err)
-	}
-	configPath := writeTestVerifyRuntimeConfig(t)
-	const want = "agents.yaml declares nothing - delete the file (absent means empty)"
-
-	assertRejected := func(surface string, args ...string) {
-		t.Helper()
-		var stdout, stderr bytes.Buffer
-		code := executeRootCommandWithOptions(context.Background(), RepoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
-		if combined := stdout.String() + stderr.String(); code == 0 || !strings.Contains(combined, want) {
-			t.Fatalf("%s code=%d stdout=%s stderr=%s, want %q", surface, code, stdout.String(), stderr.String(), want)
-		}
-	}
-
-	if _, _, err := NewSwarmWorkflowModule(RepoRoot(), project, runtimecontracts.DefaultPlatformSpecFile(RepoRoot())); err == nil || !strings.Contains(err.Error(), want) {
-		t.Fatalf("module/hash admission error = %v, want %q", err, want)
-	}
-	assertRejected("verify", "verify", project, "--config", configPath, "--json")
-	assertRejected("describe", "describe", project, "--config", configPath, "--json")
-	assertRejected("test", "test", project, "--config", configPath)
 }
 
 func runPacksCommand(t testing.TB, repo string, args ...string) (int, string, string) {

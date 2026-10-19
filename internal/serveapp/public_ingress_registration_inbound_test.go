@@ -564,14 +564,18 @@ func loadSupportedTelegramChannelPlan(t *testing.T) packs.SatisfactionPlan {
 	triggers := packfixture.TriggerCatalog(t)
 	var connector packs.ConnectorPackDescriptor
 	for _, candidate := range packfixture.ConnectorRegistry(t).PackDescriptors() {
-		if candidate.Identity.ID() == "provider.telegram.connector" {
+		if candidate.Identity.ID() == "telegram" {
 			connector = candidate
 			break
 		}
 	}
-	plan, err := packs.CompileChannel(registry, channels[0], triggers.PackDescriptors(), []packs.ConnectorPackDescriptor{connector})
+	trigger, present := triggers.PackDescriptorForProvider(channels[0].Key())
+	if !present {
+		t.Fatal("Telegram trigger descriptor is missing")
+	}
+	plan, err := packs.CompileProviderChannel(registry, channels[0], trigger, connector)
 	if err != nil {
-		t.Fatalf("CompileChannel: %v", err)
+		t.Fatalf("CompileProviderChannel: %v", err)
 	}
 	return plan
 }

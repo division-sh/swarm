@@ -126,7 +126,7 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 					mutate := tc.mutateSchema
 					if tc.mutateBody != nil {
 						importProjectTelegramTrigger(t, sourceRoot)
-						path = filepath.Join(sourceRoot, "packs", "provider.telegram", "trigger.yaml")
+						path = filepath.Join(sourceRoot, "telegram", "trigger.yaml")
 						mutate = tc.mutateBody
 					}
 					body, err := os.ReadFile(path)
@@ -447,10 +447,10 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 func importProjectTelegramTrigger(t testing.TB, sourceRoot string) {
 	t.Helper()
 	base := packfixture.EmbeddedBase(t)
-	if changed, err := packartifact.ImportEmbeddedPack(sourceRoot, "provider.telegram", base); err != nil || !changed {
+	if changed, err := packartifact.ImportEmbeddedPack(sourceRoot, "telegram", base); err != nil || !changed {
 		t.Fatalf("import project Telegram trigger changed=%t: %v", changed, err)
 	}
-	path := filepath.Join(sourceRoot, packartifact.ProjectPackDirectory, "provider.telegram", packartifact.TriggerManifestFileName)
+	path := filepath.Join(sourceRoot, "telegram", "trigger.yaml")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

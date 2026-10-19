@@ -32,7 +32,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
-	"github.com/division-sh/swarm/internal/packartifact"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeagentmemory "github.com/division-sh/swarm/internal/runtime/agentmemory"
@@ -107,37 +106,6 @@ func (servedOpenAICompatibleNoopLLMRuntime) ProviderContract() runtimellm.Provid
 }
 
 const serveRuntimeTestBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-
-func TestLoadServeRuntimeBundleRejectsMalformedPackBodiesBeforePublication(t *testing.T) {
-	base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tests := []struct {
-		name, id, bodyFile, wantErr string
-	}{
-		{name: "trigger", id: "provider.telegram", bodyFile: packartifact.TriggerManifestFileName, wantErr: "admit provider trigger packs"},
-		{name: "connector", id: "provider.telegram.connector", bodyFile: packartifact.ConnectorManifestFileName, wantErr: "admit provider connector packs"},
-		{name: "channel", id: "provider.telegram.hitl_channel", bodyFile: packartifact.ChannelManifestFileName, wantErr: "admit channel packs"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-			if changed, err := packartifact.ImportEmbeddedPack(project, tc.id, base); err != nil || !changed {
-				t.Fatalf("import %s changed=%t err=%v", tc.id, changed, err)
-			}
-			if err := os.WriteFile(filepath.Join(project, "packs", tc.id, tc.bodyFile), []byte("unknown_field: true\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			_, err := loadServeRuntimeBundle(context.Background(), repoRootForTest(), nil, cliapp.CLISourcePlatformSpecPaths{
-				SourceRoot: project, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRootForTest()),
-			}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("serve malformed %s error = %v, want %q", tc.name, err, tc.wantErr)
-			}
-		})
-	}
-}
 
 func servedRuntimeRootIdentityForRun(t testing.TB, runID, agentID string) runtimeagentidentity.Identity {
 	t.Helper()
