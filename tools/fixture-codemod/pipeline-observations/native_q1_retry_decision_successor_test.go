@@ -91,7 +91,7 @@ func TestQ1RetryDecisionSuccessorPreservesPriorReceiptsAndOracles(t *testing.T) 
 	var raw []json.RawMessage
 	var pins []fixtureSetupSuccessor2617
 	var rows []recipe
-	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &raw); err != nil || len(raw) != 40 {
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &raw); err != nil || len(raw) != 42 {
 		t.Fatalf("fixture packet shape: rows=%d err=%v", len(raw), err)
 	}
 	prior, err := json.Marshal(raw[:39])
