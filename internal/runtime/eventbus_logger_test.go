@@ -128,8 +128,6 @@ func TestRuntimePayloadAdmitter_ClassifiesGeneratedActivitySchema(t *testing.T) 
 	event, err := admitRuntimePayload(testRuntimePayloadAdmitter(t, bundle), "send.succeeded", []byte(`{
 		"activity_id":"send",
 		"tool":"send",
-		"effect_class":"read_only",
-		"attempt":1,
 		"result":{"delivered":true,"explicit_double":8.0}
 	}`))
 	if err != nil {
