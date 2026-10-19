@@ -752,9 +752,14 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("seed preserved predecessor session: %v", err)
 	}
 	captureRunForkTestRevision(t, pg.backend.ConstructionHandle(), runID)
+	rooted, err := pg.LoadRunRootedSource(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
-		SourceRunID: runID,
-		At:          eventID,
+		SourceRunID:   runID,
+		At:            eventID,
+		RootAdmission: rooted.Admission(),
 	})
 	if err != nil {
 		t.Fatalf("materialize dependent fork: %v", err)
