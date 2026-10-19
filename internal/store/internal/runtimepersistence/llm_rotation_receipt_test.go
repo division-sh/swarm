@@ -478,13 +478,13 @@ func TestSelectedRotationElapsedExpiryBothStores(t *testing.T) {
 		fixture := newExactFactFixture(t, selected)
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
 		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
-		selected.selected.(interface{ SetSessionLockTTL(time.Duration) }).SetSessionLockTTL(150 * time.Millisecond)
 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
 		predecessor, _, err := owner.AcquireLiveSession(ctx, identity, "expiry-worker")
 		if err != nil {
 			t.Fatal(err)
 		}
 		request := sessions.RotationMetadata{OperationID: "elapsed-expiry-key"}
+		selected.selected.(interface{ SetSessionLockTTL(time.Duration) }).SetSessionLockTTL(150 * time.Millisecond)
 		first, err := owner.Rotate(ctx, predecessor, request)
 		if err != nil {
 			t.Fatal(err)
