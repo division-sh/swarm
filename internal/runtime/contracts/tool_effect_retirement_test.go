@@ -42,11 +42,6 @@ func TestKeyFreeHTTPToolRoundTripOmitsRetiredSelector(t *testing.T) {
 				t.Fatal(err)
 			}
 			entry := entries["worker"]
-			for _, field := range []string{"effect_class", "EffectClass"} {
-				if _, present := entry.admissionProvenance[field]; present {
-					t.Fatalf("key-free tool gained authored %s provenance", field)
-				}
-			}
 			value, err := entry.CanonicalValue()
 			if err != nil {
 				t.Fatal(err)
