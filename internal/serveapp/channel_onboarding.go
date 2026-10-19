@@ -691,13 +691,11 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 	}
 	planCurrent := false
 	nativeRequired := false
-	if available {
-		for _, compiled := range publicationLease.Activations() {
-			if compiled.Plan.BindingID() == planID && compiled.Coordinate.Matches(activation.Coordinate) && compiled.ActivationRevision == activation.Revision {
-				planCurrent = true
-				nativeRequired = compiled.Plan.HasNativeInbox()
-				break
-			}
+	for _, compiled := range publicationLease.Activations() {
+		if compiled.Plan.BindingID() == planID && compiled.Coordinate.Matches(activation.Coordinate) && compiled.ActivationRevision == activation.Revision {
+			planCurrent = true
+			nativeRequired = compiled.Plan.HasNativeInbox()
+			break
 		}
 	}
 	if !planCurrent {

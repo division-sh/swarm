@@ -102,19 +102,15 @@ func scaffoldArchetype(root InvocationRoot, out io.Writer, rawName, rawOutput st
 		return fmt.Errorf("write %s scaffold: %w", name, err)
 	}
 	if name == "whatsapp-receptionist" {
-		if err := os.WriteFile(filepath.Join(absDestination, ".gitignore"), []byte(".swarm/\n"), 0o644); err != nil {
-			return err
-		}
 		deployment := filepath.Join(absDestination, ".swarm")
 		if err := os.Mkdir(deployment, 0o700); err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(deployment, "api-token"), []byte(rand.Text()+"\n"), 0o600); err != nil {
-			return err
-		}
 		body := "runtime:\n  recovery_on_startup: true\nstore:\n  backend: sqlite\n  sqlite:\n    path: .swarm/store.sqlite\nworkspace:\n  backend: host\n  allow_exec_on_host: true\nserve:\n  api_listen_addr: 127.0.0.1:8081\n  mcp_listen_addr: 127.0.0.1:8082\n  api_token_file: .swarm/api-token\nconnection:\n  api_server: http://127.0.0.1:8081\n  api_token_file: .swarm/api-token\n"
-		if err := os.WriteFile(filepath.Join(deployment, "swarm.yaml"), []byte(body), 0o600); err != nil {
-			return err
+		for path, content := range map[string]string{".gitignore": ".swarm/\n", ".swarm/api-token": rand.Text() + "\n", ".swarm/swarm.yaml": body} {
+			if err := os.WriteFile(filepath.Join(absDestination, path), []byte(content), 0o600); err != nil {
+				return err
+			}
 		}
 	}
 	complete = true

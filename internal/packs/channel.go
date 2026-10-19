@@ -1154,6 +1154,15 @@ func (p OutboundBindingPlan) RuntimeTools() (map[string]runtimecontracts.ToolSch
 	if p.ActivitiesOnly() {
 		return out, nil
 	}
+	for _, name := range p.OperationNames() {
+		id := p.RuntimeToolID(name)
+		if id == "" {
+			return nil, fmt.Errorf("channel binding %q operation %q has no runtime tool identity", p.BindingID(), name)
+		}
+		if _, compiled := p.runtimeTools[id]; !compiled {
+			return nil, fmt.Errorf("channel binding %q operation %q runtime tool %q is absent from its compiled projection", p.BindingID(), name, id)
+		}
+	}
 	for id, tool := range p.runtimeTools {
 		out[id] = tool
 	}

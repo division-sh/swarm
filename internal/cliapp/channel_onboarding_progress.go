@@ -115,12 +115,39 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 			return
 		}
 		if result.Operation.Provider == "whatsapp" {
-			fmt.Fprintln(w, "WhatsApp: READY")
+			writeWhatsAppConnection(w, result.Connection, true)
 		} else {
 			fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)
 		}
 		writeChannelNativeQualification(w, result)
 	}, func() ([]string, error) { return []string{result.Operation.OperationID}, nil })
+}
+
+func writeWhatsAppConnection(out io.Writer, connection *channelonboarding.SessionConnectionReadback, ready bool) {
+	if ready {
+		fmt.Fprintln(out, "WhatsApp: READY")
+		return
+	}
+	state, reason, account := "disconnected", "Not linked: run swarm channel connect whatsapp", ""
+	if connection != nil {
+		state, account = connection.State, connection.AccountPresentation
+		switch state {
+		case "connected", "connecting", "pairing":
+			reason = ""
+		case "disconnected":
+			if connection.Linked {
+				reason = "WhatsApp disconnected: network unreachable, reconnecting..."
+			}
+		}
+	}
+	fmt.Fprintf(out, "WhatsApp: %s", state)
+	if account != "" {
+		fmt.Fprintf(out, " (%s)", cliSanitizeOneLineValue(account))
+	}
+	fmt.Fprintln(out)
+	if reason != "" {
+		fmt.Fprintln(out, reason)
+	}
 }
 
 func validateCLIChannelProgress(result channelOnboardingResult) (bool, error) {

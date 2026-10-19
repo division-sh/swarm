@@ -435,10 +435,6 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 		}
 		identityKey := operation.Interface.Normalized().Key()
 		identity, found := identityByKey[identityKey]
-		if !found && operation.AccountConnection() {
-			identity = operatorchannel.Readback{PrincipalID: operation.PrincipalID, Interface: operation.Interface, Status: operatorchannel.BindingUnbound}
-			found = true
-		}
 		if !found {
 			return nil, fmt.Errorf("%w: onboarding operation %s has no retained channel identity", ErrConflict, operation.OperationID)
 		}
@@ -461,10 +457,6 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 		}
 		identityKey := operation.Interface.Normalized().Key()
 		identity, found := identityByKey[identityKey]
-		if !found && operation.Posture == ActivationSessionConnection && operation.Ceremony == CeremonyAccountLink {
-			identity = operatorchannel.Readback{PrincipalID: operation.PrincipalID, Interface: operation.Interface, Status: operatorchannel.BindingUnbound}
-			found = true
-		}
 		if !found {
 			continue
 		}
@@ -2056,17 +2048,7 @@ func (s *Service) slotState(ctx context.Context, req StartRequest) (SlotState, o
 	if activationErr != nil && !errors.Is(activationErr, ErrNotFound) {
 		return "", empty, activationErr
 	}
-	if activationCurrent && req.Ceremony == CeremonyAccountLink && req.Posture == ActivationSessionConnection {
-		op, err := s.store.GetChannelOnboarding(ctx, activation.OperationID)
-		if err != nil {
-			return "", empty, err
-		}
-		responsibility := AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
-			ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
-			Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
-		if op.PrincipalID != req.PrincipalID || !responsibility.MatchesAccountConnection(op, activation) {
-			return SlotUncertain, fence, nil
-		}
+	if activationCurrent && req.Ceremony == CeremonyAccountLink && activation.PrincipalID == req.PrincipalID {
 		if !activation.Coordinate.Matches(req.Coordinate) {
 			return SlotActivationStale, fence, nil
 		}
@@ -2199,12 +2181,12 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 		}
 		if err == nil {
 			result.Pairing = &pairing
-			if result.Connection != nil && pairing.Status == "awaiting_qr" {
-				result.Connection.State = "pairing"
-			}
 		} else {
 			result.Pairing = &PairingReadback{Status: PairingStatusPreparing}
 		}
+	}
+	if result.Connection != nil && result.Pairing != nil && result.Pairing.Status == "awaiting_qr" {
+		result.Connection.State = "pairing"
 	}
 	if op.IdentityOperationID != "" {
 		identityOp, err := s.identities.GetOperation(ctx, op.IdentityOperationID)

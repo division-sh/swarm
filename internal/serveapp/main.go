@@ -1735,14 +1735,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
 	}
-	if sessionBootstrap != nil {
-		stop, err := startServeChannelSessionRecovery(ctx, processWorkOwner, runtimeContextManager, channelOnboardingStore, channelOnboarding, opts.Output)
-		if err != nil {
-			presenter.fail(22, "channel_onboarding", err)
-			return 1
-		}
-		defer stop()
-	}
 	if resetRecovery != nil && len(runtimeContexts) > 0 {
 		if err := runtimeContextManager.ReleaseResetExecution(preflightContexts...); err != nil {
 			presenter.fail(22, "pending_reset_recovery", err)
@@ -1916,9 +1908,10 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		store: stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
 		mailbox: stores.MailboxAPI(), proposedEffects: storeDeps.ProposedEffects,
 		activations: channelOnboardingStore, manager: runtimeContextManager,
-		sessions: sessionBootstrap,
-		ingress:  ready,
-		effects:  stores.Effects(), credentials: providerCredentialOwner,
+		sessions: sessionBootstrap, onboarding: channelOnboarding, output: opts.Output,
+		sessionStates: map[string]string{}, sessionAttempts: map[string]int{}, sessionNextAttempt: map[string]time.Time{},
+		ingress: ready,
+		effects: stores.Effects(), credentials: providerCredentialOwner,
 		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
 	}, channelDeliveryWorkerOptions{cadence: opts.TestChannelReconcileCadence, passed: opts.TestChannelReconcilePass, started: opts.TestChannelReconcileStarted}); err != nil {
 		presenter.runtimeFailure("channel_delivery", err)

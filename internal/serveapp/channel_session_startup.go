@@ -4,13 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 )
@@ -30,77 +28,46 @@ func newServeChannelProviderOwners(manager *runtime.RuntimeContextManager, store
 	return sessions, sessions, nil
 }
 
-// Recovery uses the same fenced, joined session owner as startup and explicit
-// connect. The SDK's independent auto-reconnect remains disabled.
-func startServeChannelSessionRecovery(ctx context.Context, owner *worklifetime.Process, manager *runtime.RuntimeContextManager, store channelonboarding.Store, onboarding *channelonboarding.Service, out io.Writer) (func(), error) {
-	catalog, err := serveChannelOnboardingCatalog(manager)
-	if err != nil {
-		return nil, err
+// The existing joined channel worker owns bounded recovery, through the same
+// fenced native owner as startup/connect. SDK auto-reconnect stays disabled.
+func (d *serveChannelDeliveryDispatcher) reconcileSessionConnections(ctx context.Context, activations []channelonboarding.ConnectedChannelActivation) error {
+	if d.onboarding == nil {
+		return nil
 	}
-	installed := false
-	for _, candidate := range catalog.Candidates() {
-		installed = installed || candidate.Provider == "whatsapp"
-	}
-	if !installed {
-		return func() {}, nil
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	lease, err := owner.Begin(ctx)
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer func() { _ = lease.Done() }()
-		ctx := lease.Context()
-		ticker := time.NewTicker(5 * time.Second)
-		defer ticker.Stop()
-		states := map[string]string{}
-		attempts := map[string]int{}
-		for {
-			operations, err := store.ListChannelOnboardingOperations(ctx)
-			restore := false
-			if err == nil {
-				for _, op := range operations {
-					if op.Provider != "whatsapp" || op.Phase != channelonboarding.PhaseSucceeded || op.SessionAccount.Validate() != nil {
-						continue
-					}
-					if current, err := channelonboarding.RetainedSessionCurrent(ctx, store, op); err != nil || !current {
-						continue
-					}
-					result, err := onboarding.Get(ctx, op.OperationID)
-					if err != nil || result.Connection == nil {
-						continue
-					}
-					state := result.Connection.State
-					if state != states[op.OperationID] {
-						if state == "connected" {
-							fmt.Fprintf(out, "WhatsApp: reconnected (%s)\n", result.Connection.AccountPresentation)
-							attempts[op.OperationID] = 0
-						} else {
-							fmt.Fprintln(out, "WhatsApp disconnected: network unreachable, reconnecting...")
-						}
-						states[op.OperationID] = state
-					}
-					if state == "disconnected" && attempts[op.OperationID] < 3 {
-						attempts[op.OperationID]++
-						restore = true
-					}
-				}
-			}
-			if restore {
-				_ = onboarding.RestoreSessions(ctx)
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-			}
+	for _, activation := range activations {
+		if activation.Provider != "whatsapp" {
+			continue
 		}
-	}()
-	return func() { cancel(); <-done }, nil
+		result, err := d.onboarding.Get(ctx, activation.OperationID)
+		if err != nil {
+			return err
+		}
+		op := result.Operation
+		if op.Phase != channelonboarding.PhaseSucceeded || result.Connection == nil {
+			continue
+		}
+		state := result.Connection.State
+		if state == "connected" {
+			if d.sessionStates[op.OperationID] != state {
+				fmt.Fprintf(d.output, "WhatsApp: reconnected (%s)\n", result.Connection.AccountPresentation)
+			}
+			d.sessionStates[op.OperationID], d.sessionAttempts[op.OperationID] = state, 0
+			continue
+		}
+		if d.sessionStates[op.OperationID] != "disconnected" {
+			fmt.Fprintln(d.output, "WhatsApp disconnected: network unreachable, reconnecting...")
+			d.sessionStates[op.OperationID] = "disconnected"
+		}
+		if d.sessionAttempts[op.OperationID] >= 3 || d.now().Before(d.sessionNextAttempt[op.OperationID]) {
+			continue
+		}
+		d.sessionAttempts[op.OperationID]++
+		d.sessionNextAttempt[op.OperationID] = d.now().Add(5 * time.Second)
+		if _, err := d.onboarding.Retry(ctx, channelonboarding.RetryInput{OperationID: op.OperationID}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func restoreServeChannelStartup(ctx context.Context, manager *runtime.RuntimeContextManager, store channelonboarding.Store,

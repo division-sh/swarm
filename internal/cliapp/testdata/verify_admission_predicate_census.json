@@ -333,7 +333,7 @@
     "owner": "internal/channelonboarding/service.go::*Service.ReadbackConnectedChannels",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
-    "body_sha256": "9a60060ed48c78632b7014fb7032def422be21a4b4f3432e72333d5138d1439c"
+    "body_sha256": "147007e7a7e63925478ac6d03d8104481b940c00da72f10f2d967b206412e01a"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.ReconcileLocal",
@@ -543,7 +543,7 @@
     "owner": "internal/channelonboarding/service.go::*Service.result",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
-    "body_sha256": "e565fe81c9fe873562c1e3339487cbed11c99feea34cb0206dd58ca69b02c5d8"
+    "body_sha256": "45372b9af6762df56e2ba67e54e98dde5b8bc902043e31951c2cbe4ae0a20666"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.resumeSession",
@@ -555,7 +555,7 @@
     "owner": "internal/channelonboarding/service.go::*Service.slotState",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
-    "body_sha256": "31ddd6b156dfdab2e73ad44618d3b97ed425ed17dc3495849f3b0057607c9d2f"
+    "body_sha256": "fd412a0fd5dd3dbb76b540fc476f9d339d94300348279759cbea31438e7b5dec"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.validateCredentialAdmissions",
@@ -939,7 +939,7 @@
     "owner": "internal/cliapp/channel_onboarding_progress.go::renderChannelOnboardingResult",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-cli-progress",
-    "body_sha256": "15c5edc626acba4139b685afc849784e1c9f6ce1b4fbc7f14a85c00386f8f221"
+    "body_sha256": "2160530f754ba99d11ae38b477329d3111abe8f7fc6fde40c9ae134db5db0b3f"
   },
   {
     "owner": "internal/cliapp/channel_onboarding_progress.go::selectedChannelCredentialReadback",
@@ -964,6 +964,12 @@
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-cli-progress",
     "body_sha256": "6625bb61745698f9f7849b5384f7c1a25c10befe63af0ce9ab839bedcbb57141"
+  },
+  {
+    "owner": "internal/cliapp/channel_onboarding_progress.go::writeWhatsAppConnection",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-cli-progress",
+    "body_sha256": "6a2083242fd18028cfe5ffd9a08510cdd3725e6a2ad51ced7fa5c532a55883f3"
   },
   {
     "owner": "internal/cliapp/channel_onboarding_selection.go::channelSelectionParam",
@@ -1857,7 +1863,7 @@
     "owner": "internal/runtime/channelactivation/owner.go::compileSnapshot",
     "audit_rows": "A10,A27",
     "proof_families": "2577-native-publication,2577-native-issuer-refusal,P08,P10,P21",
-    "body_sha256": "d092f9bceb073f4f71c085b7e73b6c2af71161aafc5412d8decfb052fad0d9ec"
+    "body_sha256": "3d3ac7df476816a377bd9291ef6a845277d1c2e34b3daf49e0df3ef86dab4cc9"
   },
   {
     "owner": "internal/runtime/channelactivation/owner.go::newOwnedLease",
@@ -4035,7 +4041,7 @@
     "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.reconcileNativeInboxSettings",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-inbox",
-    "body_sha256": "f943993dfc7352c0c90e37d321b5f2af2a12d6c6c791ef811a00d47b73fcc09a"
+    "body_sha256": "7a01f70b2ebd7b2ef8eca9fa955d1d74f31126968669e8644567c3d401f99025"
   },
   {
     "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.recordNativeQualification",
@@ -4125,7 +4131,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.ProjectConnectedChannelReadiness",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
-    "body_sha256": "9ee0c4c5d843ac7bc34be20d0e3388f9b2b0420e5eeadfe00e4c978920972d13"
+    "body_sha256": "3d45f1ccfe51c136ec383a7c7aa0e5eb32c9a3867c10bcae76bf20dba2c70ae8"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.observeSessionReadiness",
@@ -4476,6 +4482,12 @@
     "body_sha256": "d2be2406c8339682413ddbd08c3a2d3673740c184c59f9f5778d4094f253de1c"
   },
   {
+    "owner": "internal/serveapp/channel_session_startup.go::*serveChannelDeliveryDispatcher.reconcileSessionConnections",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-startup",
+    "body_sha256": "fbc90a26f43d0744bf470722aeaa5a784083565de6c63d8a46769fcafad21c09"
+  },
+  {
     "owner": "internal/serveapp/channel_session_startup.go::newServeChannelProviderOwners",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-startup",
@@ -4486,12 +4498,6 @@
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-startup",
     "body_sha256": "e2d604d0686701d3ce8472197f6082297799e94e865b95554c21561d62f3e125"
-  },
-  {
-    "owner": "internal/serveapp/channel_session_startup.go::startServeChannelSessionRecovery",
-    "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-startup",
-    "body_sha256": "80bd69373b4e269020e735202ab31930e7beaafb9851dd1e687670916b22072f"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.ResetStandingService",
@@ -4593,7 +4599,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "fe51e0adcd62731210b57c0734a3df6aacf45c5b13186aa3db58ca0df919bea7"
+    "body_sha256": "97197c0c38f1aa62c94af7d226f969cfd7d1310264e21cd16449f3d2c2011f6c"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
@@ -5469,13 +5475,13 @@
     "owner": "internal/store/internal/backend/channelonboarding/session_standing.go::sessionStandingActivationCurrent",
     "audit_rows": "A10,A27",
     "proof_families": "2577-native-confirmed-retention,2577-native-withdrawal,P08,P10,P21",
-    "body_sha256": "5609c7eb18827e9d5f74c0fc65aa939eb01aa94004e0f3690b739ddbfe820faa"
+    "body_sha256": "3f3ea149599ba6372d5936d7e7e410dfb0f967c3491a658d2f88885754615885"
   },
   {
     "owner": "internal/store/internal/backend/channelonboarding/session_standing.go::sessionStandingBindingCurrent",
     "audit_rows": "A10,A27",
     "proof_families": "2577-native-confirmed-retention,2577-native-withdrawal,P08,P10,P21",
-    "body_sha256": "2cbd4c9f13b3f261b61552eed51ce5478b17c195a9e7e2098b026e38522944b0"
+    "body_sha256": "5549770e3ffdf5b7aace488a2ae9b2a7976e5099a439b89bc20224fbe9e599c6"
   },
   {
     "owner": "internal/store/internal/backend/channelonboarding/session_standing.go::sessionStandingOperationMatches",
