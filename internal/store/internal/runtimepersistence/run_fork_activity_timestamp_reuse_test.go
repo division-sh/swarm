@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -104,11 +103,14 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 						if !reflect.DeepEqual(copied.ResultPayload, sourceRecord.ResultPayload) || !reflect.DeepEqual(copied.Failure, sourceRecord.Failure) {
 							t.Fatalf("result/failure changed: source=%#v child=%#v", sourceRecord, copied)
 						}
+						if !copied.ExecutionBinding.IsZero() {
+							t.Fatal("copied terminal history inherited fresh execution permission")
+						}
 						wantEntity, wantFlow := sourceRecord.EntityID, sourceRecord.FlowInstance
 						if approved {
 							wantEntity, wantFlow = child.ForkRunID, child.ForkRunID
 						}
-						if payload.SourceRunID != child.ForkRunID || copied.EntityID != wantEntity || copied.FlowInstance != wantFlow || copied.Generation.Valid() || payload.Generation.Valid() || (approved && payload.ForkPolicy != string(runtimecontracts.ActivityForkRequireConfirmation)) {
+						if payload.SourceRunID != child.ForkRunID || copied.EntityID != wantEntity || copied.FlowInstance != wantFlow || copied.Generation.Valid() || payload.Generation.Valid() {
 							t.Fatalf("source/child owner or approval policy changed: payload=%#v copied=%#v", payload, copied)
 						}
 						sourceAfter, found, err := journal.LoadActivityAttempt(ctx, sourceRecord.RequestEventID)
@@ -123,10 +125,10 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 						if afterRepeat := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres"); !reflect.DeepEqual(afterFirst, afterRepeat) {
 							t.Fatal("repeated reuse changed persisted rows")
 						}
-						// Exercise the real duplicate-attempt gate, not a connector or
-						// runtime-container provider invocation.
+						// Readback is supported, but historical copies cannot borrow an
+						// ambient process's permission through an unbound writer.
 						restarted, inserted, err := journal.StartActivityAttempt(ctx, copied)
-						if err != nil || inserted || !reflect.DeepEqual(restarted, copied) {
+						if err == nil || inserted || restarted.RequestEventID != "" {
 							t.Fatalf("copied terminal request restarted: inserted=%v err=%v got=%#v want=%#v", inserted, err, restarted, copied)
 						}
 						afterStart := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
@@ -149,8 +151,8 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 									t.Fatalf("copied no-op kernel: err=%v inserted=%v drafts=%d got=%#v", err, inserted, len(spy.drafts), got)
 								}
 								got, inserted, err = activityStoryOuter(fixture, op, request)
-								if err != nil || inserted || !reflect.DeepEqual(got, copied) {
-									t.Fatalf("copied no-op outer: err=%v inserted=%v got=%#v", err, inserted, got)
+								if err == nil || inserted || got.RequestEventID != "" {
+									t.Fatalf("copied history obtained writer permission: err=%v inserted=%v got=%#v", err, inserted, got)
 								}
 								assertActivityStoryTablesUnchanged(t, fixture, backend.name == "postgres", afterFirst)
 							})
@@ -436,8 +438,8 @@ func TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores(t *testi
 			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID())); err != nil {
 				t.Fatal(err)
 			}
-			if _, inserted, err := journal.StartActivityAttempt(ctx, copied); err != nil || inserted {
-				t.Fatalf("precision retry: inserted=%v err=%v", inserted, err)
+			if _, inserted, err := journal.StartActivityAttempt(ctx, copied); err == nil || inserted {
+				t.Fatalf("historical precision copy obtained writer permission: inserted=%v err=%v", inserted, err)
 			}
 			assertActivityStoryTablesUnchanged(t, fixture, postgres, before)
 		})
@@ -474,7 +476,6 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 	flow, instance := "flow-a", "flow-a"
 	node := mustPersistenceNode(flow, "writer")
 	owner := activityidentity.MustNodeOwner(node)
-	policy := runtimecontracts.ActivityForkReuseRecordedResult
 	activity, tool, handler, success, failure := "commit", "provider.write", "review.accepted", "flow-a/commit.succeeded", "flow-a/commit.failed"
 	if ordinaryReplay && !approved {
 		flow, instance, entityID = ".", runID, runID
@@ -493,7 +494,6 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 		if err != nil {
 			t.Fatal(err)
 		}
-		policy = continuation.ForkPolicy
 		activity, tool, handler, success, failure = continuation.ActivityID, continuation.Tool, continuation.HandlerEventKey, continuation.SuccessEvent, continuation.FailureEvent
 		anchor, err := card.Anchor.ProposedEffect()
 		if err != nil {
@@ -572,8 +572,8 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 			t.Fatal(err)
 		}
 	}
-	payload, err := json.Marshal(map[string]any{"activity_id": activity, "tool": tool, "input": input, "effect_class": "non_idempotent_write", "fork_policy": string(policy),
-		"success_event": success, "failure_event": failure, "attempt": 1, "entity_id": entityID, "node_id": owner.Key(), "flow_id": flow, "flow_instance": instance,
+	payload, err := json.Marshal(map[string]any{"activity_id": activity, "tool": tool, "input": input,
+		"success_event": success, "failure_event": failure, "entity_id": entityID, "node_id": owner.Key(), "flow_id": flow, "flow_instance": instance,
 		"handler_event_key": handler, "source_run_id": runID, "source_event_id": parentID, "loop_generation": generation, "loop_stage": loopStage})
 	if err != nil {
 		t.Fatal(err)
@@ -593,11 +593,11 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 			t.Fatal(err)
 		}
 	}
-	journal := fixture.store.(activityTimestampJournal)
+	journal := captureActivityFixtureJournal(t, ctx, fixture.store)
 	record, inserted, err := journal.StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptRecord{
 		RequestEventID: requestID, RunID: runID, SourceEventID: parentID, ExecutionMode: executionmode.Live,
 		EntityID: entityID, FlowInstance: instance, NodeID: owner.Key(), HandlerEventKey: handler, ActivityID: activity, Tool: tool,
-		EffectClass: "non_idempotent_write", Attempt: 1, SuccessEvent: success, FailureEvent: failure, InputHash: "recorded-input-hash",
+		Attempt: 1, SuccessEvent: success, FailureEvent: failure, InputHash: "recorded-input-hash",
 		Generation: generation, LoopStage: loopStage,
 	})
 	if err != nil || !inserted {
@@ -643,6 +643,7 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 			t.Fatal(err)
 		}
 	} else {
+		retainActivityFixtureProcessForMaterialization(t, ctx, fixture.store)
 		child = materializeSelectedActivityFixture(t, ctx, fixture.store.(selectedActivityProjectionStore), runID, event.ID())
 	}
 	wantEntities := 2

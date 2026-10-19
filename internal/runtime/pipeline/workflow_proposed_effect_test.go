@@ -7,7 +7,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
@@ -19,7 +18,7 @@ func TestProposedEffectOutcomeEventRoutesExactTypedVerdicts(t *testing.T) {
 		uuid.NewString(), "", events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), now)
 	continuation := decisioncard.ProposedEffectContinuation{
 		FlowID:     ".",
-		ActivityID: "send_support_reply", Tool: "telegram.send_message", EffectClass: runtimecontracts.ActivityEffectClassNonIdempotentWrite,
+		ActivityID: "send_support_reply", Tool: "telegram.send_message",
 		EffectContentHash: "sha256:effect", SourceTaskID: "task-1",
 		EntityID: parent.EntityID(), FlowInstance: "root",
 		ExecutionMode: parent.ExecutionMode(),
@@ -77,8 +76,8 @@ func TestProposedEffectOutcomeEventRoutesExactTypedVerdicts(t *testing.T) {
 			}
 			for fieldName, want := range map[string]string{
 				"card_id": card.CardID, "activity_id": continuation.ActivityID, "tool": continuation.Tool,
-				"effect_class": string(continuation.EffectClass), "effect_content_hash": continuation.EffectContentHash,
-				"decided_by": card.DecidedBy, "decided_at": now.Format(time.RFC3339Nano),
+				"effect_content_hash": continuation.EffectContentHash,
+				"decided_by":          card.DecidedBy, "decided_at": now.Format(time.RFC3339Nano),
 			} {
 				field, present := payload.Lookup(fieldName)
 				value, stringValue := field.String()

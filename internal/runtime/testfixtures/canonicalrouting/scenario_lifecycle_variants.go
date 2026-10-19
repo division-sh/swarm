@@ -67,7 +67,6 @@ scenario.send:
   category: provider_connector
   credentials: [scenario_mock_secret]
   handler_type: http
-  effect_class: non_idempotent_write
   http: {method: POST, url: https://example.invalid/send}
   output_schema:
     type: object
