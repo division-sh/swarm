@@ -293,9 +293,6 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		}
 		req.RebindCoordinate = &coordinate
 	}
-	if req.SourceRollover != nil && (req.RebindCoordinate != nil || req.BeginOperatorEnrollment || req.SourceRollover.ValidateContext() != nil) {
-		return domain.Operation{}, domain.ErrInvalidRequest
-	}
 	var out domain.Operation
 	var changed render.ReconcileDemand
 	acknowledged, err := r.mutateOutcome(ctx, "advance channel onboarding", func(txctx context.Context, tx *sql.Tx) error {
@@ -310,13 +307,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		if op.Revision != req.ExpectedRevision {
 			return domain.ErrRevisionConflict
 		}
-		coordinateOnlyTerminalRebind := req.RebindCoordinate != nil && op.Phase == domain.PhaseSucceeded && req.Phase == op.Phase
-		beginEnrollment := req.BeginOperatorEnrollment && op.Phase == domain.PhaseSucceeded && op.AccountConnection() &&
-			op.IdentityOperationID == "" && op.ActivationRevision > 0 && req.Phase == domain.PhaseAwaitingExternalIdentity
-		if req.BeginOperatorEnrollment && !beginEnrollment {
-			return domain.ErrConflict
-		}
-		if !validTransition(op.Phase, req.Phase) && !coordinateOnlyTerminalRebind && !beginEnrollment && req.SourceRollover == nil {
+		if !validTransition(op, req) {
 			return domain.ErrConflict
 		}
 		if req.SourceRollover != nil {
@@ -375,7 +366,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			op.ConfirmationOperationID = strings.TrimSpace(req.ConfirmationOperationID)
 		}
 		wasTerminal := op.Phase.Terminal()
-		if beginEnrollment {
+		if req.BeginOperatorEnrollment {
 			op.CompletedAt = time.Time{}
 		}
 		completed := op.Phase != domain.PhaseSucceeded && req.Phase == domain.PhaseSucceeded
@@ -420,7 +411,18 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 	return out, errors.Join(err, r.publishChannelChange(acknowledged, changed))
 }
 
-func validTransition(from, to domain.Phase) bool {
+func validTransition(op domain.Operation, req domain.AdvanceRequest) bool {
+	if req.SourceRollover != nil {
+		return true // The source-rollover transaction validates its exact admission.
+	}
+	if req.BeginOperatorEnrollment {
+		return op.Phase == domain.PhaseSucceeded && op.AccountConnection() && op.IdentityOperationID == "" &&
+			op.ActivationRevision > 0 && req.Phase == domain.PhaseAwaitingExternalIdentity && req.RebindCoordinate == nil
+	}
+	from, to := op.Phase, req.Phase
+	if req.RebindCoordinate != nil && from == domain.PhaseSucceeded && to == from {
+		return true
+	}
 	if from.Terminal() {
 		return false
 	}
@@ -1059,6 +1061,9 @@ func updateOperation(ctx context.Context, tx *sql.Tx, d dialect, op domain.Opera
 func rollSessionSourceTx(ctx context.Context, tx *sql.Tx, d dialect, op *domain.Operation, req domain.AdvanceRequest) error {
 	source, admitted := correlation.SourceArtifactFactFromContext(ctx)
 	coordinate := req.SourceRollover.Normalized()
+	if req.RebindCoordinate != nil || req.BeginOperatorEnrollment || coordinate.ValidateContext() != nil {
+		return domain.ErrInvalidRequest
+	}
 	if !admitted || source.Validate() != nil || source.BundleHash() != coordinate.BundleHash ||
 		op.Phase != domain.PhaseSucceeded || !op.AccountConnection() || op.IdentityOperationID != "" ||
 		op.Coordinate.BundleHash == coordinate.BundleHash || req.Phase != domain.PhaseAwaitingOperatorConfirmation ||

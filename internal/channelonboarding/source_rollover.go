@@ -36,17 +36,17 @@ func (s *Service) RollSessionSources(ctx context.Context) error {
 			continue
 		}
 		current, err := RetainedSessionCurrent(ctx, s.store, op)
-		if err != nil || !current {
-			if err != nil {
-				return err
-			}
+		if err != nil {
+			return err
+		}
+		if !current {
 			continue
 		}
 		name, _, valid := strings.Cut(op.Coordinate.BundleIdentity, "@")
 		if !valid || name == "" {
 			return ErrRevisionConflict
 		}
-		var selected *Candidate
+		var matches []Candidate
 		for _, candidate := range catalog.candidates {
 			nextName, _, _ := strings.Cut(candidate.Coordinate.BundleIdentity, "@")
 			if nextName != name || candidate.Provider != op.Provider || candidate.Posture != op.Posture || candidate.Ceremony != op.Ceremony ||
@@ -54,19 +54,20 @@ func (s *Service) RollSessionSources(ctx context.Context) error {
 				candidate.Coordinate.BundleHash == op.Coordinate.BundleHash {
 				continue
 			}
-			if selected != nil {
-				return fmt.Errorf("%w: source rollover requires one exact current channel declaration", ErrConflict)
-			}
-			selected = &candidate
+			matches = append(matches, candidate)
 		}
-		if selected == nil {
+		switch len(matches) {
+		case 0:
 			continue
+		case 1:
+		default:
+			return fmt.Errorf("%w: source rollover requires one exact current channel declaration", ErrConflict)
 		}
 		unlock, err := s.lockDrive(ctx, op.OperationID)
 		if err != nil {
 			return err
 		}
-		_, err = owner.RollSessionSource(ctx, op, *selected)
+		_, err = owner.RollSessionSource(ctx, op, matches[0])
 		unlock()
 		if err != nil {
 			return err
