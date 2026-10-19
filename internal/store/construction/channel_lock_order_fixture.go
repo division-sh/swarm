@@ -18,7 +18,7 @@ func NewChannelLockOrder() *ChannelLockOrder {
 type channelLockOrderRole struct{}
 
 type ChannelLockOrder struct {
-	native          driver.Connector
+	attached        bool
 	binding         chan struct{}
 	principal       chan struct{}
 	parent          chan struct{}
@@ -79,13 +79,18 @@ func (p *ChannelLockOrder) Reset() {
 	p.milestones = make(map[string]bool)
 }
 
-func (p *ChannelLockOrder) Driver() driver.Driver { return p.native.Driver() }
-func (p *ChannelLockOrder) Connect(ctx context.Context) (driver.Conn, error) {
-	c, err := p.native.Connect(ctx)
+type channelLockOrderConnector struct {
+	native driver.Connector
+	probe  *ChannelLockOrder
+}
+
+func (c *channelLockOrderConnector) Driver() driver.Driver { return c.native.Driver() }
+func (c *channelLockOrderConnector) Connect(ctx context.Context) (driver.Conn, error) {
+	conn, err := c.native.Connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &channelLockOrderConn{Conn: c, probe: p}, nil
+	return &channelLockOrderConn{Conn: conn, probe: c.probe}, nil
 }
 
 type channelLockOrderConn struct {
