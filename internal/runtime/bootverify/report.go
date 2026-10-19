@@ -293,16 +293,6 @@ func (r Report) SemanticDriftWarnings() []Finding {
 	return out
 }
 
-func (r Report) AuditAnalyses() []Finding {
-	out := make([]Finding, 0)
-	for _, finding := range r.Findings {
-		if finding.Severity == SeverityAuditAnalysis {
-			out = append(out, finding)
-		}
-	}
-	return out
-}
-
 func (r Report) LintEvidence() []Finding {
 	out := make([]Finding, 0)
 	for _, finding := range r.Findings {
@@ -371,10 +361,6 @@ func severityRank(severity string) int {
 	default:
 		return 4
 	}
-}
-
-func FindingSurfaceLevel(f Finding, blocking bool) string {
-	return SurfaceLevelForSeverity(f.Severity, blocking)
 }
 
 func SurfaceLevelForSeverity(severity string, blocking bool) string {
