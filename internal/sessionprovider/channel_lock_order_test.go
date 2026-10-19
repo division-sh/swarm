@@ -39,7 +39,7 @@ func TestSessionChannelMutationsShareLockOrderBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			t.Run("quoted_ack", func(t *testing.T) { runQuotedACKLockOrder(t, backend) })
 			t.Run("rebind", func(t *testing.T) {
-				f := newActiveInputFixtureWithProof(t, backend, false, true)
+				f := newActiveInputFixtureWithProof(t, backend, false, true, storetest.NewChannelLockOrder())
 				activateLockOrderPredecessor(t, f)
 				for _, phase := range []channelonboarding.Phase{channelonboarding.PhasePromotingRegistration,
 					channelonboarding.PhaseRetiringPredecessor, channelonboarding.PhaseDeliveringConfirmation, channelonboarding.PhaseSucceeded} {
@@ -97,15 +97,8 @@ func TestSessionChannelMutationsShareLockOrderBothStores(t *testing.T) {
 				var milestones map[string]bool
 				scheduleReached := true
 				if backend == "postgres" {
-					selected, probe := storetest.StartChannelLockOrder(t, f.location)
-					fk, err := probe.PrincipalFKExists(f.ctx)
-					if err != nil {
-						lockOrderStop(t, "principal_fk_read", err)
-					}
-					if !fk {
-						t.Fatal("selected schema lacks the original nondeferrable principal FK")
-					}
-					before, err := probe.Snapshot(f.ctx)
+					selected, probe := f.selected, f.lockOrder
+					before, err := readLockOrderSnapshot(f.ctx, selected, false)
 					if err != nil {
 						lockOrderStop(t, "before_snapshot", err)
 					}
@@ -138,12 +131,12 @@ func TestSessionChannelMutationsShareLockOrderBothStores(t *testing.T) {
 					workers.Wait()
 					cancel()
 					milestones = probe.Milestones()
-					after, err := probe.Snapshot(f.ctx)
+					after, err := readLockOrderSnapshot(f.ctx, selected, false)
 					if err != nil {
 						lockOrderStop(t, "after_snapshot", err)
 					}
 					unchanged := before.UnchangedExceptNewIdentity(after, request.OperationID, rebindErr == nil)
-					logLockOrder(t, map[string]any{"stage": "joined", "schedule_reached": scheduleReached, "actual_fk": fk,
+					logLockOrder(t, map[string]any{"stage": "joined", "schedule_reached": scheduleReached, "schema_owner_verified": true,
 						"distinct_parents": true, "saved_proof": true, "milestones": milestones,
 						"rebind": lockOrderError(rebindErr), "standing": lockOrderError(standingErr),
 						"rebind_committed": rebindErr == nil, "standing_current": standing, "rollback_image_exact": unchanged})
@@ -276,8 +269,9 @@ func proveLockOrderBeginAdmission(t *testing.T, f *activeInputFixture, request o
 
 func proveLockOrderFenceCancellation(t *testing.T, f *activeInputFixture, request operatorchannel.BeginRequest) {
 	t.Helper()
-	selected, probe := storetest.StartChannelLockOrder(t, f.location)
-	before, err := probe.Snapshot(f.ctx)
+	selected, probe := f.selected, f.lockOrder
+	probe.Reset()
+	before, err := readLockOrderSnapshot(f.ctx, selected, false)
 	if err != nil {
 		lockOrderStop(t, "cancel_before_snapshot", err)
 	}
@@ -327,7 +321,7 @@ func proveLockOrderFenceCancellation(t *testing.T, f *activeInputFixture, reques
 		logLockOrder(t, map[string]any{"stage": "fence_cancel_joined", "begin": lockOrderError(beginErr), "standing": lockOrderError(standingErr), "standing_current": current})
 		t.Fatal("cancelled fence admission did not roll back while preserving standing currentness")
 	}
-	after, err := probe.Snapshot(f.ctx)
+	after, err := readLockOrderSnapshot(f.ctx, selected, false)
 	if err != nil || !before.UnchangedExceptNewIdentity(after, request.OperationID, false) {
 		lockOrderStop(t, "cancel_exact_rollback", err)
 	}
@@ -336,7 +330,7 @@ func proveLockOrderFenceCancellation(t *testing.T, f *activeInputFixture, reques
 // Same observer, second native pair, reviewer-g 6253826975. No production locks
 // are synthesized: each barrier follows an original successful row acquisition.
 func runQuotedACKLockOrder(t *testing.T, backend string) {
-	f := newActiveInputFixtureWithProof(t, backend, true, true)
+	f := newActiveInputFixtureWithProof(t, backend, true, true, storetest.NewChannelLockOrder())
 	activateLockOrderPredecessor(t, f)
 	device, err := f.state.device(f.ctx)
 	if err != nil {
@@ -394,8 +388,8 @@ func runQuotedACKLockOrder(t *testing.T, backend string) {
 		proveLockOrderACKReplay(t, f, pending, request, completion)
 		return
 	}
-	selected, probe := storetest.StartChannelLockOrder(t, f.location)
-	before, err := probe.ACKSnapshot(f.ctx)
+	selected, probe := f.selected, f.lockOrder
+	before, err := readLockOrderSnapshot(f.ctx, selected, true)
 	if err != nil {
 		lockOrderStop(t, "ack_before_snapshot", err)
 	}
@@ -419,7 +413,7 @@ func runQuotedACKLockOrder(t *testing.T, backend string) {
 			ackErr = ctx.Err()
 			return
 		}
-		completion, replayed, ackErr = selected.AcknowledgeChannelNotice(probe.ACKContext(ctx), request, pending.Fact)
+		completion, replayed, ackErr = selected.(render.Store).AcknowledgeChannelNotice(probe.ACKContext(ctx), request, pending.Fact)
 	}()
 	scheduleReached := true
 	for _, acquired := range []<-chan struct{}{probe.ParentAcquired(), probe.ACKReady()} {
@@ -432,12 +426,12 @@ func runQuotedACKLockOrder(t *testing.T, backend string) {
 	probe.Release()
 	workers.Wait()
 	cancel()
-	after, err := probe.ACKSnapshot(f.ctx)
+	after, err := readLockOrderSnapshot(f.ctx, selected, true)
 	if err != nil {
 		lockOrderStop(t, "ack_after_snapshot", err)
 	}
 	exact := before.ExactExceptACK(after, noticeID, pending.PublicationID, ackErr == nil)
-	completionExact, err := probe.ACKCompletionExact(f.ctx, request, ackErr == nil)
+	completionExact, err := after.ACKCompletionExact(request, ackErr == nil)
 	if err != nil {
 		lockOrderStop(t, "ack_completion_readback", err)
 	}
