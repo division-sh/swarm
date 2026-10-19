@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -64,6 +65,15 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 		if eventType == "" {
 			return events.PayloadAdmission{}, fmt.Errorf("event type is required for payload admission")
 		}
+		if _, err := runtimeidentity.AdmitFlowIdentity(flowID); err != nil {
+			return events.PayloadAdmission{}, fmt.Errorf("event producer coordinate: %w", err)
+		}
+		if source == nil {
+			return events.PayloadAdmission{}, fmt.Errorf("event producer coordinate requires a semantic source")
+		}
+		if scope, found := source.FlowScopeByID(flowID); !found || scope.ID != flowID {
+			return events.PayloadAdmission{}, fmt.Errorf("event producer flow %q is not declared in the semantic source", flowID)
+		}
 		payload := event.Payload()
 		if len(payload) == 0 {
 			if event.AdmissionClass() == events.EventAdmissionSelectedForkReplay {
@@ -95,7 +105,7 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 			return events.PayloadAdmission{}, fmt.Errorf("event payload must be a JSON object")
 		}
 
-		resolution := semanticview.ResolveEventSchema(source, strings.TrimSpace(flowID), eventType)
+		resolution := semanticview.ResolveEventSchema(source, flowID, eventType)
 		schema := map[string]any(nil)
 		bindingClass := events.PayloadSchemaSchemaLess
 		eventKey := eventType
@@ -160,7 +170,7 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 			}
 		}
 		binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
-			BundleHash: bundleHash, FlowID: strings.TrimSpace(flowID),
+			BundleHash: bundleHash, FlowID: flowID,
 			EventKey: eventKey, SchemaDigest: schemaDigest, SchemaClass: bindingClass,
 		})
 		if err != nil {

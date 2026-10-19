@@ -7904,10 +7904,15 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 		t.Fatal("selected root fixture must use the constructed run entity")
 	}
 	seedRunForkCLIConstruction(t, db, runID, bundleHash, at)
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
-		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "test"),
-		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
-		events.EventEnvelope{EntityID: entityID, FlowInstance: runID, Scope: events.EventScopeEntity}, at)
+	// The typed root source owns ".", independently of the receiver route.
+	producer, err := events.NewRootRoutingSource(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := eventtest.ExistingRunRootIngressWithRoutingSource(eventID, events.EventType(eventName), "test", "",
+		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)), 0, runID,
+		events.EventEnvelope{EntityID: entityID, FlowInstance: runID, Scope: events.EventScopeEntity}, producer, at)
+	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, event)
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, selected, event,
 		[]events.DeliveryRoute{{
 			Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, subscriberID)),

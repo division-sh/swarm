@@ -519,8 +519,18 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 		t.Fatalf("imported payload reader schema resolution = %#v", resolution)
 	}
 	globalResolution := semanticview.ResolveEventSchema(wrapped, "", "inbound.telegram.text_message")
-	if !globalResolution.HasStructural || !globalResolution.HasCompiled || !globalResolution.HasClassification || globalResolution.Classification != runtimecontracts.CompiledEventSchemaImported {
-		t.Fatalf("target-free imported payload schema resolution = %#v", globalResolution)
+	if globalResolution.HasSchema || globalResolution.HasStructural || globalResolution.HasCompiled || globalResolution.HasClassification {
+		t.Fatalf("empty coordinate gained an imported payload schema = %#v", globalResolution)
+	}
+	metadata, found := wrapped.SemanticCapabilities().ProviderTriggerSchemaReadback("inbound.telegram.text_message")
+	_, structural := metadata.StructuralType()
+	if !found || !structural || metadata.Classification() != runtimecontracts.CompiledEventSchemaImported || metadata.EventName() != schema.EventName() || metadata.AcceptanceSchemaDigest() != schema.AcceptanceSchemaDigest() {
+		t.Fatalf("target-free provider metadata lost its bound producer schema: found=%t structural=%t", found, structural)
+	}
+	const producerFlow = "coordinator"
+	authorization, authorized := wrapped.SemanticCapabilities().ProviderTriggerOutputAuthorization(producerFlow, "inbound.telegram.text_message")
+	if !authorized || authorization.Provider() != "telegram" || authorization.Event() != "inbound.telegram.text_message" {
+		t.Fatal("fixture has no exact admitted provider/event output authority")
 	}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle.SourceArtifact == nil {
@@ -531,9 +541,17 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 		t.Fatalf("bundle source fact: %v", err)
 	}
 	payload := []byte(`{"conversation_reference":"12345","conversation_scope":"direct","external_account_reference":"67890","provider_message_reference":1.0,"text":"hello"}`)
-	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "inbound.telegram.text_message", "telegram", "", payload, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
-	// This is a target-free root ingress, not a receiver named telegram-ingress.
-	admission, err := NewRuntimePayloadAdmitter(nil, wrapped, fact)(context.Background(), event, "")
+	producer, err := events.NewExternalIngressRoutingSource(producerFlow, events.RoutingSourceAuthorityProviderAdmissionPlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "inbound.telegram.text_message", "telegram", "", payload, 0, uuid.NewString(), "", events.EventEnvelope{}, producer, time.Now().UTC())
+	// The declaration owns the producer coordinate; no receiver target is supplied.
+	admit := NewRuntimePayloadAdmitter(nil, wrapped, fact)
+	if absent, err := admit(context.Background(), event, ""); err == nil || absent.Valid() {
+		t.Fatal("empty producer coordinate gained imported payload admission")
+	}
+	admission, err := admit(context.Background(), event, producerFlow)
 	if err != nil {
 		t.Fatalf("admit imported provider payload: %v", err)
 	}

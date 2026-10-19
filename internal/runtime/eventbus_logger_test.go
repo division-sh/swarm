@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -35,7 +36,7 @@ func testRuntimePayloadAdmitter(t *testing.T, bundle *runtimecontracts.WorkflowC
 
 func admitRuntimePayload(admitter runtimebus.PayloadAdmitter, eventType string, payload json.RawMessage) (events.Event, error) {
 	event := eventtest.RunCreatingRootIngress("", events.EventType(eventType), "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{})
-	admission, err := admitter(context.Background(), event, "")
+	admission, err := admitter(context.Background(), event, ".")
 	if err != nil {
 		return events.Event{}, err
 	}
@@ -104,6 +105,14 @@ func TestRuntimePayloadAdmitter_AllowsValidSchemaPayload(t *testing.T) {
 	}
 	if admission.Binding().SchemaClass() != events.PayloadSchemaAuthored {
 		t.Fatalf("payload schema class = %q, want authored", admission.Binding().SchemaClass())
+	}
+	// A valid producer scope with no event schema is distinct from missing scope.
+	schemaLess, err := admitRuntimePayload(admitter, "fixture.untyped", []byte(`{"ok":true}`))
+	if err != nil {
+		t.Fatalf("admit genuinely schema-less payload in declared root: %v", err)
+	}
+	if admission, found := schemaLess.PayloadAdmission(); !found || admission.Binding().SchemaClass() != events.PayloadSchemaSchemaLess {
+		t.Fatal("valid schema-less root event lost its admission")
 	}
 }
 
@@ -194,7 +203,7 @@ func TestRuntimePayloadAdmitter_SelectedForkValidatesTargetSchemaWithoutChanging
 	if err != nil {
 		t.Fatalf("selected-fork event: %v", err)
 	}
-	admission, err := testRuntimePayloadAdmitter(t, booleanPayloadBundle(t))(context.Background(), event, "")
+	admission, err := testRuntimePayloadAdmitter(t, booleanPayloadBundle(t))(context.Background(), event, ".")
 	if err != nil {
 		t.Fatalf("admit selected-fork payload: %v", err)
 	}
@@ -216,6 +225,17 @@ func TestRuntimePayloadAdmitter_RejectsSchemaMismatch(t *testing.T) {
 	t.Parallel()
 
 	admitter := testRuntimePayloadAdmitter(t, booleanPayloadBundle(t))
+	// Reach: invalid or absent producer authority must not turn schema refusal
+	// into schema-less approval, even when the supplied payload is otherwise valid.
+	for _, flow := range []string{"", " ", " .", ". ", "./", "child/../root", "foreign", "foreign/child"} {
+		for _, payload := range []json.RawMessage{[]byte(`{"ok":true}`), []byte(`{"ok":"yes"}`)} {
+			event := eventtest.RunCreatingRootIngress("", "task.completed", "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{})
+			admission, err := admitter(context.Background(), event, flow)
+			if err == nil || !reflect.DeepEqual(admission, events.PayloadAdmission{}) {
+				t.Errorf("invalid producer coordinate %q gained payload admission: valid=%t err=%v", flow, admission.Valid(), err)
+			}
+		}
+	}
 	if _, err := admitRuntimePayload(admitter, "task.completed", []byte(`{"ok":"yes"}`)); err == nil {
 		t.Fatal("expected schema-invalid payload to be rejected")
 	}
