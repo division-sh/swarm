@@ -43,6 +43,7 @@ func TestHTTPActivityReopenedStartedAttemptNeedsRecoveryOwnerBothStores(t *testi
 			ctx := requireActivityReplayRun(t, selected, source, runID)
 			bus := newActivityJournalProofBus(t, selected, source)
 			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
+			_, releaseJournal := installActivityReplayJournal(t, ctx, selected, bus, coordinator)
 			intent := runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
 			intent = seedSelectedActivitySource(t, ctx, selected, coordinator, intent)
 			requestID := runtimepipeline.ActivityAttemptStartForTest(intent).RequestEventID
@@ -54,6 +55,8 @@ func TestHTTPActivityReopenedStartedAttemptNeedsRecoveryOwnerBothStores(t *testi
 			}()
 			select {
 			case <-launched:
+			case err := <-firstDone:
+				t.Fatalf("activity returned before physical launch: %v", err)
 			case <-time.After(10 * time.Second):
 				t.Fatal("provider did not observe the physical HTTP request")
 			}
@@ -90,6 +93,7 @@ func TestHTTPActivityReopenedStartedAttemptNeedsRecoveryOwnerBothStores(t *testi
 			if err := bus.WaitForQuiescence(ctx); err != nil {
 				t.Fatal(err)
 			}
+			releaseJournal()
 			if err := closeStore(); err != nil {
 				t.Fatal(err)
 			}
