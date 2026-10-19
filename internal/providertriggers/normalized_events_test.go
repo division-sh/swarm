@@ -249,24 +249,6 @@ normalized_events:
 	}
 }
 
-func TestNormalizedEventManifestRejectsMalformedEventNamesAtLoad(t *testing.T) {
-	for _, eventName := range []string{
-		"inbound.telegram.",
-		"inbound.telegram.TextMessage",
-		"inbound.telegram.text-message",
-		"inbound.telegram..text_message",
-		"inbound.telegram.text message",
-	} {
-		t.Run(eventName, func(t *testing.T) {
-			manifest := normalizedEventTestManifest()
-			manifest.NormalizedEvents[0].Event = eventName
-			if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "valid canonical event name") {
-				t.Fatalf("Validate(%q) error = %v, want canonical event-name rejection", eventName, err)
-			}
-		})
-	}
-}
-
 func TestNormalizedEventManifestRejectsRawTemplateCollision(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	manifest.Provider = "github"

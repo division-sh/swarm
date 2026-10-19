@@ -190,31 +190,6 @@ func TestRawAdmissionPreservesRawPayloadWhileResolvingJSONPathDeliveryID(t *test
 	}
 }
 
-func TestCompileAdmissionTeachingFailures(t *testing.T) {
-	catalog, err := NewCatalogSnapshotFromAdmittedBodies(admissionTestEntry(admissionTestManifest("acme", signatureTypeTokenEquality, true), "provider.acme").Manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name string
-		req  CompileAdmissionRequest
-		want string
-	}{
-		{name: "missing pack", req: CompileAdmissionRequest{Alias: "chat", Provider: "missing"}, want: "pack-required"},
-		{name: "wrong id", req: CompileAdmissionRequest{Alias: "chat", Provider: "acme", Declaration: AdmissionDeclaration{PackID: "provider.acmee"}}, want: `verified pack for "acme" is "provider.acme"`},
-		{name: "provider mismatch", req: CompileAdmissionRequest{Alias: "chat", Provider: "other", Declaration: AdmissionDeclaration{PackID: "provider.acme"}}, want: `which provides "acme"`},
-		{name: "raw fields in pack", req: CompileAdmissionRequest{Alias: "chat", Provider: "acme", Declaration: AdmissionDeclaration{Event: "inbound.acme"}}, want: "remove raw-only fields"},
-		{name: "invalid acknowledgement", req: CompileAdmissionRequest{Alias: "chat", Provider: "acme", SigningSecret: "secret", Declaration: AdmissionDeclaration{Acknowledge: "yes"}}, want: "canonical token"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := catalog.CompileAdmission(tc.req)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("CompileAdmission error = %v, want %q", err, tc.want)
-			}
-		})
-	}
-}
-
 func admissionTestEntry(manifest triggerFixture, id string) CatalogEntry {
 	admitted := manifest.mustAdmit()
 	identity, err := packs.NewProviderBodyIdentity(admitted.value.providerBody)

@@ -1,4 +1,3 @@
-provider: discord
 transport: session
 capabilities:
   card_render: true
@@ -22,7 +21,7 @@ opaque_types:
   conversation_reference: {type: string, pattern: '^[0-9]+$', minLength: 1, maxLength: 20}
 operations:
   deliver:
-    tool: discord.create_message
+    tool: create_message
     input:
       channel_id: context.destination
       content: input.presentation.text
@@ -30,7 +29,7 @@ operations:
       delivery_reference: result.id
 events:
   text:
-    event: inbound.discord.text_message
+    event: text_message
     fields:
       text: event.text
       external_account_reference: event.author_id
