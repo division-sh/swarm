@@ -240,36 +240,37 @@ func (r completionAttributionRow) deliverySurface(delivery privatedelivery.RunOp
 	}
 	if r.authorityKind == effects.AuthoritySelectedContractFork {
 		// Historical readback checks the recorded binding, never its live lease.
+		type usageTarget struct {
+			Kind          effects.UsageTargetKind `json:"kind"`
+			ID            string                  `json:"id"`
+			Ordinal       int                     `json:"ordinal"`
+			RunID         string                  `json:"run_id"`
+			AgentID       string                  `json:"agent_id"`
+			AgentIdentity agentidentity.Identity  `json:"agent_identity"`
+			SessionID     string                  `json:"session_id"`
+			FlowInstance  string                  `json:"flow_instance"`
+		}
 		var recorded struct {
 			Kind        effects.AuthorityKind `json:"authority_kind"`
 			ID          string                `json:"authority_id"`
 			ExecutionID string                `json:"execution_id"`
 			ForkRunID   string                `json:"fork_run_id"`
 			Generation  uint64                `json:"generation"`
-			UsageTarget struct {
-				Kind          effects.UsageTargetKind `json:"kind"`
-				ID            string                  `json:"id"`
-				Ordinal       int                     `json:"ordinal"`
-				RunID         string                  `json:"run_id"`
-				AgentID       string                  `json:"agent_id"`
-				AgentIdentity agentidentity.Identity  `json:"agent_identity"`
-				SessionID     string                  `json:"session_id"`
-				FlowInstance  string                  `json:"flow_instance"`
-			} `json:"usage_target"`
+			UsageTarget usageTarget           `json:"usage_target"`
 		}
 		if err := json.Unmarshal(r.authorityEvidence, &recorded); err != nil {
 			return managedcapabilities.Surface{}, fmt.Errorf("decode selected completion origin: %w", err)
 		}
 		target := recorded.UsageTarget
-		sameActor, err := agentidentity.Equal(identity, target.AgentIdentity)
-		if err != nil {
+		target.AgentIdentity = target.AgentIdentity.Normalize()
+		if err := target.AgentIdentity.Validate(); err != nil {
 			return managedcapabilities.Surface{}, fmt.Errorf("selected completion origin actor: %w", err)
 		}
 		r.paired = r.selectedPaired && recorded.Kind == r.authorityKind && recorded.ID == r.selectedExecutionID &&
 			recorded.ExecutionID == r.selectedExecutionID && recorded.ForkRunID == delivery.RunID && recorded.Generation == r.selectedGeneration &&
-			target.Kind == effects.UsageTargetAgentTurn && target.ID == r.turnID && target.Ordinal == 0 &&
-			target.RunID == identity.RunID && target.AgentID == identity.AgentID() && target.SessionID == r.sessionID &&
-			target.FlowInstance == identity.FlowInstance() && sameActor
+			target == (usageTarget{Kind: effects.UsageTargetAgentTurn, ID: r.turnID, Ordinal: 0,
+				RunID: identity.RunID, AgentID: identity.AgentID(), AgentIdentity: identity,
+				SessionID: r.sessionID, FlowInstance: identity.FlowInstance()})
 	}
 	equal, err := agentidentity.Equal(identity, delivery.AgentIdentity)
 	if err != nil || !equal || !r.paired || !r.claimKnown || r.eventID != delivery.EventID || r.eventType != eventType {
