@@ -1,7 +1,6 @@
 terminal_probe:
   description: Read the terminal retirement proof response.
   handler_type: http
-  effect_class: read_only
   http:
     method: GET
     url: http://terminal-proof.invalid
