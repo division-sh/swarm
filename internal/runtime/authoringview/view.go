@@ -1228,10 +1228,10 @@ func writeRefs(flowID, nodeID, eventType, scope string, writes []runtimecontract
 }
 
 func buildDiagnostics(bundle *runtimecontracts.WorkflowContractBundle, report *runtimebootverify.Report) []DiagnosticView {
-	var findings []runtimebootverify.Finding
-	if report != nil {
-		findings = report.Findings
+	if report == nil {
+		return nil
 	}
+	findings := append([]runtimebootverify.Finding{}, report.Findings...)
 	out := make([]DiagnosticView, 0, len(findings))
 	for _, finding := range findings {
 		out = append(out, DiagnosticView{
@@ -1243,9 +1243,6 @@ func buildDiagnostics(bundle *runtimecontracts.WorkflowContractBundle, report *r
 			Remediation:      strings.TrimSpace(finding.Remediation),
 			Evidence:         trimDiagnosticEvidence(finding.Evidence),
 		})
-	}
-	if report == nil && len(out) == 0 {
-		return nil
 	}
 	return out
 }
