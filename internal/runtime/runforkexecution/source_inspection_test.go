@@ -39,7 +39,8 @@ func TestSelectedSourceInspectionSharesBootCompilerWithoutMaterialization(t *tes
 		t.Run(mode, func(t *testing.T) {
 			runID := uuid.NewString()
 			reader := &countedSourceInspectionStore{fakeSourceArtifactSelectedContractSourceStore: fakeSourceArtifactSelectedContractSourceStore{
-				availability: runbundle.Availability{RunID: runID, Status: "running", BundleHash: record.BundleHash, SourceArtifactPresent: true}, record: record,
+				availability: runbundle.Availability{RunID: runID, Status: "running", BundleHash: record.BundleHash,
+					RootReference: record.rooted.Admission().Reference(), RootAdmissionPresent: true, SourceArtifactPresent: true}, record: record,
 			}}
 			loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: reader}
 			request := SelectedContractSourceLoadRequest{Responsibility: OriginalRunSource(runID), BundleHash: record.BundleHash, Selection: runfork.RunForkContractSelection{Mode: mode}}

@@ -404,6 +404,8 @@ func TestSourceArtifactSelectedContractSourceLoaderLoadsPersistedSourceForReques
 			RunID:                 sourceRunID,
 			Status:                "running",
 			BundleHash:            record.BundleHash,
+			RootReference:         record.rooted.Admission().Reference(),
+			RootAdmissionPresent:  true,
 			SourceArtifactPresent: true,
 		},
 		record: record,
@@ -863,8 +865,10 @@ func TestSourceArtifactSelectedContractSourceLoaderFailsClosedOnUnavailableState
 
 func TestSourceArtifactSelectedContractSourceLoaderFailsClosedOnMissingArtifact(t *testing.T) {
 	ctx := context.Background()
+	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
+	record := persistedSourceArtifactForTest(t, bundle)
 	sourceRunID := uuid.NewString()
-	hash := "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	hash := record.BundleHash
 	loader := SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: runForkExecutionRepoRoot(t),
 		Store: &fakeSourceArtifactSelectedContractSourceStore{
@@ -872,8 +876,11 @@ func TestSourceArtifactSelectedContractSourceLoaderFailsClosedOnMissingArtifact(
 				RunID:                 sourceRunID,
 				Status:                "running",
 				BundleHash:            hash,
+				RootReference:         record.rooted.Admission().Reference(),
+				RootAdmissionPresent:  true,
 				SourceArtifactPresent: true,
 			},
+			record:    record,
 			recordErr: sourceartifact.ErrNotFound,
 		},
 	}
@@ -883,7 +890,7 @@ func TestSourceArtifactSelectedContractSourceLoaderFailsClosedOnMissingArtifact(
 		BundleHash:     hash,
 		Selection:      testDBLoadedContractSelection(),
 	})
-	if err == nil || !strings.Contains(err.Error(), runbundle.CodeBundleDataIntegrityError) {
+	if err == nil || !strings.Contains(err.Error(), runbundle.CodeBundleDataIntegrityError) || !errors.Is(err, sourceartifact.ErrNotFound) {
 		t.Fatalf("error = %v, want %s", err, runbundle.CodeBundleDataIntegrityError)
 	}
 }
