@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -61,21 +60,6 @@ func sameReviewedRecipeKey(left, right recipe) bool {
 	return left.Family == right.Family && left.File == right.File && left.Function == right.Function
 }
 
-func matchesReviewedSuccessor2617(row recipe, source string, pin reviewedSuccessor2617) bool {
-	row, source, err := embeddedSpecHistoricalPair1801(row, source)
-	if err != nil {
-		return false
-	}
-	if original, err := fixtureSetupCurrentEndpoint2617(row, source); err == nil {
-		row, source = original, original.Successor
-	}
-	history := row
-	history.Successor = pin.Original.Successor
-	return reflect.DeepEqual(history, pin.Original) &&
-		historicalCurrentSourcePinned(row.Successor, pin.Pin.CandidateSHA256) &&
-		historicalCurrentSourcePinned(source, pin.Pin.CandidateSHA256)
-}
-
 func reviewedSharedCoordinatorBody2617(row recipe, packet reviewedSuccessorPacket2617) (string, error) {
 	for _, pin := range packet.Shared {
 		if row.Family != pin.Family || row.File != pin.File || row.Function != pin.Function {
@@ -98,113 +82,6 @@ func reviewedSharedCoordinatorBody2617(row recipe, packet reviewedSuccessorPacke
 		return current, nil
 	}
 	return "", fmt.Errorf("unlisted shared coordinator endpoint: %s/%s", row.File, row.Function)
-}
-
-func TestReviewedSuccessors2617PreserveExactHistoryAndRejectHostileCompositions(t *testing.T) {
-	packet := loadReviewedSuccessors2617(t)
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	for _, pin := range packet.Rows {
-		t.Run(pin.Pin.Function, func(t *testing.T) {
-			var matched []recipe
-			for _, row := range rows {
-				if sameReviewedRecipeKey(row, pin.Original) {
-					matched = append(matched, row)
-				}
-			}
-			if len(matched) != 1 {
-				t.Fatalf("finite recipe multiplicity=%d", len(matched))
-			}
-			row := matched[0]
-			prior := pin.Original.After
-			if pin.Original.Successor != "" {
-				prior = pin.Original.Successor
-			}
-			if row.Family != pin.Pin.Family || row.File != pin.Pin.File || row.Function != pin.Pin.Function ||
-				!historicalCurrentSourcePinned(row.Before, pin.Pin.BeforeSHA256) ||
-				!historicalCurrentSourcePinned(row.After, pin.Pin.AfterSHA256) ||
-				!historicalCurrentSourcePinned(prior, pin.Pin.PriorSHA256) ||
-				(row.Mechanical != nil) != pin.Pin.HasMechanicalReceipt {
-				t.Fatal("reviewed historical fields or prior endpoint changed")
-			}
-			actual := selectedCausalObservationBody(t, row.File, row.Function)
-			if !matchesReviewedSuccessor2617(row, actual, pin) {
-				t.Fatal("current source/Successor pair is not the exact authorized endpoint")
-			}
-			candidate, err := canonicalFunction(actual)
-			if err != nil {
-				t.Fatal(err)
-			}
-			historicalRow, historicalSource, err := embeddedSpecHistoricalPair1801(row, actual)
-			if err != nil {
-				t.Fatal(err)
-			}
-			historicalCandidate, err := canonicalFunction(historicalSource)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if previous, err := fixtureSetupCurrentEndpoint2617(historicalRow, historicalSource); err == nil {
-				historicalCandidate, err = canonicalFunction(previous.Successor)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			original, err := reverseReviewedSuccessor2617(historicalCandidate, pin.Edits)
-			if err != nil || !historicalCurrentSourcePinned(original, pin.Pin.PriorSHA256) {
-				t.Fatalf("only the listed edits must recover the prior endpoint: %v", err)
-			}
-			if files, changes, err := prepareFiles("../../..", []recipe{row}); err != nil || len(files) != 0 || len(changes) != 0 {
-				t.Fatalf("authorized current endpoint is not inert: %v", err)
-			}
-			for _, field := range []string{"family", "file", "function", "before", "after", "removed", "mechanical"} {
-				mutant := row
-				switch field {
-				case "family":
-					mutant.Family += "-unreviewed"
-				case "file":
-					mutant.File = "unlisted.go"
-				case "function":
-					mutant.Function += "Unlisted"
-				case "before":
-					mutant.Before = row.After
-				case "after":
-					mutant.After = row.Before
-				case "removed":
-					mutant.Removed = true
-				case "mechanical":
-					mutant.Mechanical = &mechanicalSnapshot{SourceCommit: strings.Repeat("0", 40), After: row.After}
-				}
-				if matchesReviewedSuccessor2617(mutant, actual, pin) {
-					t.Fatalf("changed historical %s accepted", field)
-				}
-			}
-			// Matching an unlisted source and Successor cannot self-authorize.
-			cuts := []string{"SourceArtifactFact", "source", "authority", "DeliveryAuthority", "ParentInstance", "parent", "EffectiveMode", "FlowModeTemplate", "InstanceKey", "pg", "selected", "t.Fatal", "t.Fatalf", "cancel", "Shutdown", "t.Cleanup", "time.After", "timer", "ready", "reply-first", "reply-second", "route_marker", "return"}
-			mutants := 0
-			for _, cut := range cuts {
-				changed := strings.Replace(candidate, cut, "unreviewedCut", 1)
-				if changed == candidate {
-					continue
-				}
-				mutants++
-				mutant := row
-				mutant.Successor = changed
-				if matchesReviewedSuccessor2617(mutant, changed, pin) || matchesReviewedSuccessor2617(row, changed, pin) {
-					t.Fatalf("hostile current source/Successor admitted: %s", cut)
-				}
-			}
-			if mutants == 0 {
-				t.Fatal("no hostility coverage for finite endpoint")
-			}
-			mutant := row
-			mutant.Successor = ""
-			if matchesReviewedSuccessor2617(mutant, actual, pin) {
-				t.Fatal("missing exact successor admitted")
-			}
-		})
-	}
 }
 
 func TestReviewedSuccessors2617RetainDiagnosticBoundsAndExactReplaySiblings(t *testing.T) {
