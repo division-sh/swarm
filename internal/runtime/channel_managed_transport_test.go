@@ -69,7 +69,11 @@ func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, s
 		storetest.AgentFixtureStore
 		storetest.ManagedAgentTurnFixtureStore
 	})
-	actor = prepareRegisteredManagedChannelActor(t, ctx, selected, actor)
+	profile, err := llmselection.ResolveLiveBackend(llmselection.BackendClaudeCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, _ := correlation.SourceArtifactFactFromContext(ctx)
 	state, found, err := store.LoadAgentLifecycleState(ctx, actor.Identity)
 	if err != nil || !found {
 		t.Fatalf("managed lifecycle: found=%v err=%v", found, err)
