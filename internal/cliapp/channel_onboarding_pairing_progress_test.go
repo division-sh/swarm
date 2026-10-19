@@ -1,8 +1,12 @@
 package cliapp
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -130,14 +134,23 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 	for _, mode := range []string{"human", "--json", "--quiet"} {
 		t.Run(mode, func(t *testing.T) {
 			stage := 0
+			pairingReads := 0
 			var methods []string
 			progress := func() map[string]any {
 				result := sessionProgressCLIResult("whatsapp", "", "activating_provider", false)
 				switch stage {
 				case 1:
 					result["pairing"] = map[string]any{"status": "awaiting_qr", "code": "journey-material", "expires_at": time.Now().Add(time.Minute), "paired": false, "connected": false}
+					if mode == "human" && pairingReads == 2 {
+						result["pairing"].(map[string]any)["code"] = "replacement-material"
+					} else if mode == "human" && pairingReads >= 3 {
+						result["pairing"] = map[string]any{"status": "qr_expired", "paired": false, "connected": false}
+					}
 				case 2:
 					result["pairing"] = map[string]any{"status": "paired", "paired": true, "connected": false}
+					if mode == "human" {
+						result["pairing"].(map[string]any)["connected"] = true
+					}
 				case 3:
 					result = sessionProgressCLIResult("whatsapp", "", "awaiting_external_identity", false)
 					result["identity_operation"] = operatorChannelCLIOperationResult("awaiting_claim", 1, 0)
@@ -159,6 +172,10 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						t.Fatal("pairing created a replacement responsibility")
 					}
 				case "channel.onboarding_get":
+					if mode == "human" && stage <= 1 {
+						stage = 1
+						pairingReads++
+					}
 					if stage == 3 {
 						stage = 4
 					}
@@ -180,20 +197,45 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 				}
 				return progress()
 			})
-			for call := 0; call < 4; call++ {
-				args := []string{"channel", "resume", operatorChannelCLIOperation, "--yes"}
-				if call == 0 {
-					args = []string{"channel", "connect", "whatsapp", "--yes"}
+			if mode == "human" {
+				isolateCLIAPIConfigEnv(t)
+				project := t.TempDir()
+				if err := os.Mkdir(filepath.Join(project, ".swarm"), 0o700); err != nil {
+					t.Fatal(err)
 				}
-				if mode != "human" {
-					args = append(args, mode)
+				token := writeCLIAPITokenFile(t, operatorChannelCLIToken)
+				config := "connection:\n  api_server: " + server.URL + "\n  api_token_file: " + token + "\n"
+				if err := os.WriteFile(filepath.Join(project, ".swarm", "swarm.yaml"), []byte(config), 0o600); err != nil {
+					t.Fatal(err)
 				}
-				out, errOut, code := runChannelProgressCLI(t, server, &channelCredentialInput{}, args...)
-				if code != 0 || errOut != "" {
-					t.Fatal("genuine ceremony failed", stage, code, out, errOut)
+				opts := defaultRootCommandOptions()
+				opts.httpClient, opts.input = server.Client(), strings.NewReader("y\n")
+				opts.stdinIsTerminal = func() bool { return true }
+				opts.channelConnectPoll = time.Millisecond
+				var out, errOut bytes.Buffer
+				code := executeRootCommandWithOptions(context.Background(), project, []string{"channel", "connect", "whatsapp"}, &out, &errOut, opts)
+				if code != 0 || !strings.Contains(out.String(), "READY") || !strings.Contains(out.String(), "QR expired, new QR:") ||
+					!strings.Contains(out.String(), "Linked Devices") || !strings.Contains(out.String(), "Claimed by") ||
+					!strings.Contains(errOut.String(), "[y/N]") || strings.Contains(out.String()+errOut.String(), operatorChannelCLIOperation) ||
+					strings.Contains(out.String(), "journey-material") || strings.Contains(out.String(), "replacement-material") {
+					t.Fatal("single public connect lost pairing, refresh, claimant confirmation or config targeting", code, out.String(), errOut.String())
 				}
-				if call < 3 && strings.Contains(out, "Connected ") {
-					t.Fatal("pairing was reported READY before principal confirmation", stage, out)
+			} else {
+				for call := 0; call < 4; call++ {
+					args := []string{"channel", "resume", operatorChannelCLIOperation, "--yes"}
+					if call == 0 {
+						args = []string{"channel", "connect", "whatsapp", "--yes"}
+					}
+					if mode != "human" {
+						args = append(args, mode)
+					}
+					out, errOut, code := runChannelProgressCLI(t, server, &channelCredentialInput{}, args...)
+					if code != 0 || errOut != "" {
+						t.Fatal("genuine ceremony failed", stage, code, out, errOut)
+					}
+					if call < 3 && strings.Contains(out, "Connected ") {
+						t.Fatal("pairing was reported READY before principal confirmation", stage, out)
+					}
 				}
 			}
 			if stage != 5 || strings.Count(strings.Join(methods, ","), "channel.confirm") != 1 {

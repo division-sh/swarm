@@ -357,7 +357,7 @@
     "owner": "internal/channelonboarding/service.go::*Service.Start",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
-    "body_sha256": "5c8104df5849e99050fdd3fdc2bd01abd23cffbb51de6dc45448485fc5a94e3e"
+    "body_sha256": "5f31a18d02dcd5a7522b557ac81ad7c2ba3ef9c8aa3c70d89d8efdb1e59b4a12"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.activationRecovery",
@@ -927,7 +927,7 @@
     "owner": "internal/cliapp/channel_onboarding_progress.go::renderChannelOnboardingResult",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-cli-progress",
-    "body_sha256": "6259d5c9bd8c6f7b8658107072b47d6f845103e584e7ed40f55880d7d7d8eb36"
+    "body_sha256": "12964518b611e355c981329d5596ff4321ea9a945f27065f1da4aa00a269bbe2"
   },
   {
     "owner": "internal/cliapp/channel_onboarding_progress.go::selectedChannelCredentialReadback",
