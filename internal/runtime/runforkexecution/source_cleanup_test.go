@@ -200,7 +200,7 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 				}
 				runID, eventID := uuid.NewString(), uuid.NewString()
 				input := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, runID,
-					events.EventEnvelope{}, events.NoRoutingSource(), time.Unix(1700002200, 0).UTC(), executionmode.Mock)
+					events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Unix(1700002200, 0).UTC(), executionmode.Mock)
 				input, err = eventtest.AdmitPayload(input, ".", "item.received")
 				if err != nil {
 					t.Fatal(err)
