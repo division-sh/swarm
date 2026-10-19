@@ -1370,9 +1370,14 @@ func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	requirePausedRunForTest(t, ctx, store, forkRunID, now)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkEventID, forkRunID, "fork.dependency", events.EventProducerPlatform, "selected-discard", "", "", now)
 	captureRunForkTestRevision(t, db, forkRunID, runforkrevision.FamilyEvents)
+	rooted, err := store.LoadRunRootedSource(ctx, forkRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	dependent, err := store.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
-		SourceRunID: forkRunID,
-		At:          forkEventID,
+		SourceRunID:   forkRunID,
+		At:            forkEventID,
+		RootAdmission: rooted.Admission(),
 	})
 	if err != nil {
 		t.Fatalf("materialize dependent fork: %v", err)
