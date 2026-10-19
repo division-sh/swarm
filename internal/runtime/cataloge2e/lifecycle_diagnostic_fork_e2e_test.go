@@ -78,7 +78,7 @@ func (p *diagnosticForkActivationProbe) ActivateRunForkForSelectedContractExecut
 			}
 			admissionEvent := eventtest.DiagnosticDirect(uuid.NewString(), events.EventTypePlatformRuntimeLog, "runtime", "", payload, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
 			admit := runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(p.h.bundle), catalogSourceArtifactFact(p.t, p.h.bundle))
-			admission, err := admit(ctx, admissionEvent, "")
+			admission, err := admit(ctx, admissionEvent, events.PlatformPayloadProducer(admissionEvent))
 			if err != nil {
 				p.t.Fatal(err)
 			}
