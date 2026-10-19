@@ -3686,15 +3686,17 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	owner := testGatewayWorkOwner(t)
 	root := t.TempDir()
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-fork-gateway-cleanup\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\n")
 	repoRoot := runForkExecutionRepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	loaded, err := (admittedFixtureSelectedContractSourceLoader{
+		RepoRoot: repoRoot, SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	}).LoadRunForkSelectedContractSource(context.Background(), testContractSelection())
 	if err != nil {
 		t.Fatal(err)
 	}
-	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
-	if err != nil {
+	sourceFact := loaded.SourceArtifactFact
+	if err := sourceFact.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	forkRunID := uuid.NewString()
@@ -3706,23 +3708,29 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	ctx := runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), sourceFact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, loaded.RootedSource.Admission())
 	declarations, err := runtimeagenttopology.NewSelectedDeclarationPlan(sourceFact.BundleHash(), []runtimeagenttopology.DesiredAgent{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	processCapability := &selectedFailOnceGrantCapability{ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected)}
 	executionOwner := selectedContractExecutionOwnerForTest(t, selected)
-	loaded := LoadedSelectedContractSource{SourceArtifactFact: sourceFact, EffectiveSourceIdentity: testEffectiveSourceIdentity(sourceFact)}
 	preparedAgents := selectedContractAgentRuntimePlan{Declarations: declarations, Options: SelectedContractAgentRuntimeOptions{ProcessCapability: processCapability}}
-	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, bundle.SourceArtifact, forkRunID, preparedAgents)
+	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, loaded.RootedSource.Artifact(), forkRunID, preparedAgents)
 	ctx = selectedForkExecutionTestContext(t, ctx, authority)
 	badIdentity := selectedContractTestAgentIdentityForRun(t, authority.SelectedFork.ForkRunID, "bad-agent", "")
+	badTopology, err := runtimeagenttopology.StaticAdmission("selected-contract-test-source-set-v1", sourceFact.BundleHash(), runtimeagenttopology.LifetimeEphemeral)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startupSource := loaded
+	startupSource.Source = nil
 
 	_, _, err = startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
 		Owner:        executionOwner,
 		Prepared:     prepared,
 		Admission:    executionAdmission,
-		LoadedSource: LoadedSelectedContractSource{SourceArtifactFact: sourceFact},
+		LoadedSource: startupSource,
 		AgentRuntime: selectedContractAgentRuntimePlan{
 			Declarations: declarations,
 			Proof: SelectedContractAgentRuntimeMaterialization{
@@ -3739,7 +3747,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 					Model:         "regular",
 					Subscriptions: []string{"item.received"},
 				},
-				Topology: selectedContractTestDeclarationTopology(t),
+				Topology: badTopology,
 			}},
 			Options: SelectedContractAgentRuntimeOptions{
 				ExecutionPosture:  executionposture.Live,

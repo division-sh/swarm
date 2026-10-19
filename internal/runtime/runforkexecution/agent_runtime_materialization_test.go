@@ -37,6 +37,7 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -388,9 +389,17 @@ func TestSelectedContractAgentRuntimeBindRunProducesForkLocalIdentityWithoutMuta
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash := selectedContractTestDeclarationTopology(t).Authority.Static.BundleHash
-	declarations, err := runtimeagenttopology.NewSelectedDeclarationPlan(hash, []runtimeagenttopology.DesiredAgent{{
-		Identity: declarationPlan, Source: runtimeagenttopology.SourceCoordinate{BundleHash: hash}, ConfigRevision: revision,
+	rooted, _ := sourceartifactfixture.Rooted(t, "selected-contract-target", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	topology, err := runtimeagenttopology.StaticAdmission("selected-contract-test-source-set-v1", coordinate.BundleHash, runtimeagenttopology.LifetimeEphemeral)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations, err := runtimeagenttopology.NewSelectedDeclarationPlan(coordinate.BundleHash, []runtimeagenttopology.DesiredAgent{{
+		Identity: declarationPlan, Source: coordinate, ConfigRevision: revision,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -403,7 +412,7 @@ func TestSelectedContractAgentRuntimeBindRunProducesForkLocalIdentityWithoutMuta
 		},
 		ConfiguredPlans: []agentidentity.Plan{declarationPlan},
 		Blueprints: []runtimemanager.AgentMaterializationBlueprint{{
-			Config: config, Identity: declarationPlan, Topology: selectedContractTestDeclarationTopology(t),
+			Config: config, Identity: declarationPlan, Topology: topology,
 		}},
 	}
 
@@ -430,15 +439,18 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	owner := testGatewayWorkOwner(t)
 	root := t.TempDir()
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-fork-cancellation\n")
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\n")
 	repoRoot := filepath.Join("..", "..", "..")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	loaded, err := (admittedFixtureSelectedContractSourceLoader{
+		RepoRoot: repoRoot, SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	}).LoadRunForkSelectedContractSource(context.Background(), testContractSelection())
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := semanticview.Wrap(bundle)
-	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	source := loaded.Source
+	sourceFact := loaded.SourceArtifactFact
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(loaded.RootedSource.Admission())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,6 +458,7 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 	wantScope := runtimeauthoractivity.BundleScope("00000000-0000-0000-0000-000000000313", sourceFact.BundleHash())
 	initiatingCtx, cancel := context.WithCancel(runForkTestContext(t))
 	ctx := runtimecorrelation.WithSourceArtifactFact(initiatingCtx, sourceFact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, loaded.RootedSource.Admission())
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
 	identity := selectedContractTestRootAgentIdentity(t, "fork-agent")
 	declaration, err := identity.Plan()
@@ -472,7 +485,6 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 	if err != nil {
 		t.Fatalf("selected-contract declaration revision: %v", err)
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: sourceFact.BundleHash()}
 	declarations, err := runtimeagenttopology.NewSelectedDeclarationPlan(coordinate.BundleHash, []runtimeagenttopology.DesiredAgent{{
 		Identity: declaration, Source: coordinate, ConfigRevision: revision,
 	}})
@@ -485,7 +497,6 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 	if err != nil {
 		t.Fatalf("construct selected-contract static topology: %v", err)
 	}
-	loaded := LoadedSelectedContractSource{Source: source, SourceArtifactFact: sourceFact, EffectiveSourceIdentity: testEffectiveSourceIdentity(sourceFact)}
 	agents := selectedContractAgentRuntimePlan{
 		Declarations: declarations, Blueprints: []runtimemanager.AgentMaterializationBlueprint{blueprint},
 		Records: []runtimemanager.PersistedAgent{{Config: record.Config, Topology: topology, Status: record.Status, HiredBy: record.HiredBy}},
@@ -497,7 +508,7 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 			},
 		},
 	}
-	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, bundle.SourceArtifact, forkRunID, agents)
+	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, loaded.RootedSource.Artifact(), forkRunID, agents)
 	ctx = selectedForkExecutionTestContext(t, ctx, authority)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)

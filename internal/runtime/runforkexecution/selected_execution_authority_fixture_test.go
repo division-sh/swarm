@@ -24,9 +24,10 @@ import (
 func selectedContractTestRuntimeAuthority(t testing.TB, ctx context.Context, db *sql.DB, selected *store.PostgresStore, loaded LoadedSelectedContractSource, artifact *sourceartifact.AdmittedSourceArtifact, runID string, agents selectedContractAgentRuntimePlan) (effects.Authority, *PreparedSelectedFork, runfork.RunForkSelectedContractExecutionAdmission) {
 	t.Helper()
 	source := loaded.SourceArtifactFact
+	root := loaded.RootedSource.Admission()
 	sourceRun, eventID, bindingID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRun, BundleHash: source.BundleHash(), Artifact: artifact,
+		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRun, BundleHash: source.BundleHash(), Artifact: artifact, RootAdmission: root,
 	})
 	now := time.Now().UTC()
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, sourceRun, "selected.proof",
@@ -38,11 +39,11 @@ func selectedContractTestRuntimeAuthority(t testing.TB, ctx context.Context, db 
 	}
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		RunID: runID, State: runtimerunlifecycle.StatePaused, Origin: forkOrigin,
-		Artifact: artifact, StartedAt: now,
+		Artifact: artifact, RootAdmission: root, StartedAt: now,
 	})
 	if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings
-		(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at)
-		VALUES ($1,$2,$3,'event',$4,$5,'selected_contracts',$6)`, bindingID, runID, sourceRun, revision, eventID, now); err != nil {
+		(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at,target_bundle_hash,source_root_directory)
+		VALUES ($1,$2,$3,'event',$4,$5,'selected_contracts',$6,$7,$8)`, bindingID, runID, sourceRun, revision, eventID, now, root.BundleHash(), root.RootDirectory()); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: eventID})
