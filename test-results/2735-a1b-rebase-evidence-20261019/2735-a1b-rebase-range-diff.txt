@@ -1,0 +1,27 @@
+ 1:  4eb6b6dabf =  1:  59244eb9f5 feat(runtime): build read-only operational stall attribution (#2720)
+ 2:  fd6d572236 =  2:  e227347462 fix(runtime): retain proven emissions and classify stall read owners
+ 3:  c2a9bfbd0d =  3:  da5e45ebd0 fix(runtime): distinguish publication evidence from turn silence (#2720)
+ 4:  9da8d8c815 =  4:  25aab19238 test(store): inventory exact stall-attribution record consumer (#2720)
+ 5:  29870419d6 =  5:  56d44da376 fix(runtime): preserve accepted output across delivery failure (#2720)
+ 6:  b09107d79f =  6:  8b84af9552 test(runstalled): preserve pending and decided human waits on both stores
+ 7:  e2658907c0 =  7:  9255b2442a fix(diagnostics): attribute canonical root emissions and preserve native work
+ 8:  a79628ebc2 =  8:  af26b7dabe test(diagnostics): preserve unacknowledged pipeline work before stall projection
+ 9:  0086408a1f =  9:  a32204730f test(diagnostics): isolate the new completion fixture from historical corpus sources
+10:  b10301c984 = 10:  5b84e62b24 refactor(diagnostics): separate membership, completion and publication evidence checks
+11:  1e0a4ac729 = 11:  0fb1ea520f refactor(diagnostics): separate publication receipt validation from row loading
+12:  a858c58673 = 12:  94cce31a5f test(diagnostics): prove independent same-slug turn origins across scopes
+13:  499d3f6947 = 13:  310a1134c4 test(diagnostics): join stateless sibling history by exact provider turn IDs
+14:  6c62642da5 = 14:  4206c00193 fix(diagnostics): keep delivery custody and claim matching behind its owner
+15:  59a3f0e4bf = 15:  3810bc8da6 fix: reconcile detached stall evidence owner inventories
+16:  ba58ea9041 = 16:  c15a1f917f test: retain completion startup diagnostic timestamps
+17:  c4163738ec = 17:  58adf6c5e6 test(cli): expose missing frozen emit grants in text status
+18:  e717a46260 = 18:  bcc99c7ea3 fix(cli): retain frozen emit grants in text run status
+19:  087576709b = 19:  81ef13dfbf runtime: use fixed run-level stalled attribution alerts
+20:  7e0512d63e = 20:  619559d044 test(store): retire the two deleted stalled-policy callbacks
+21:  7ef87d33dd = 21:  a3bc9372af style: format stalled-status ownership fixtures
+22:  c98d4017da = 22:  53c6c66340 test(cliapp): refresh fixed stall-monitor composition accounting
+23:  50657233b7 = 23:  41495de6e5 test(codemod): record the exact N19 barrier observation successor
+24:  f6b03392b0 = 24:  19d1342e7b test(apispec): account for the two accepted N19 schemas
+25:  0b981df028 = 25:  a6a6036736 fix(store): reuse exact operational source semantics per reader
+26:  4df3fb82e3 = 26:  7c40e3d7ee test(cli): migrate scenario diagnosis mocks to required evidence arrays
+27:  7dc9ac1eab <  -:  ---------- test(codemod): compose the exact N19 historical predecessor

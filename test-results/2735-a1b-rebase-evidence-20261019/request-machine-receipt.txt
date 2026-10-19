@@ -1,0 +1,6 @@
+<!-- receipt v1 -->
+receipt: head=7c40e3d7eee94ca1e56c83935d0188e9327ca3e7 tree=6326ac1900a9a1476cd9d50ca47973b91fcfd7fe parent=a6a60367362a3a60c3e32ee5091ed2518a749be3 branch=agent-d/2735-a1b-rebase-20261019 signed=G dirty_files=0
+preflight: test-results/preflight/20261019T050153.314785603-5d092f15-debe-45a6-9c7f-fce66700a293/receipt.json sha256=e7eb8aafca3a3cca8a4c1668cf08853124023f5eee6815c8e494816d94b7e0b0 (STALE(head=378df08141) complete unstarted=0)
+tests: ./tools/fixture-codemod/pipeline-observations:.* (-count=1)
+regenerated: not-claimed
+generated: 2026-10-19T08:21:18Z
