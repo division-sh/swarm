@@ -110,6 +110,9 @@ var eventPayloadBytesSQLFiles = map[string]struct{}{
 }
 
 var directEventSQLTestFixtures = map[string]int{
+	// Isolated five-column work.ready read probe reviewed at 49db0f2b0f;
+	// its transaction is rolled back, with no publication or dispatch.
+	"internal/store/internal/operatorsurface/run_turn_attribution_selected_test.go": 1,
 	// Isolated aggregate-query schema admits NULL/foreign rows deliberately;
 	// these are not executable event fixtures or an event publication path.
 	"internal/store/internal/backend/pipelinepersistence/pipeline_run_summary_materialization_test.go": 4,
