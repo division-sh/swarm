@@ -27,11 +27,12 @@ import (
 // reviewer-c6173181699 retains the exact admitted keyed-parent tree proof.
 // #2287/6148375122 appends the CAS and two join presentation endpoints;
 // every prior setup, mechanical receipt and execution assertion is retained.
+// #2700/6265502341 appends only the two reviewed HTTP activity continuations.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
 
-const fixtureSetupSuccessorPacketSHA256 = "4fab3ee53d02626879682865f47b64d402442f4cdf08a0cf0873a1e805e50548"
+const fixtureSetupSuccessorPacketSHA256 = "cb524fc4b2a711d9835afc048e10103aaf65a625b1133d3588894e8eaedb816b"
 
 // These settled fixture receipts compose with, but do not replace, the earlier
 // historical transformation and current-endpoint packets.
@@ -55,7 +56,7 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 40 {
+	if len(pins) != 42 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -173,7 +174,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 40 {
+	if len(pins) != 42 {
 		t.Fatal("fixture successor row count changed")
 	}
 	for index, pin := range pins {
