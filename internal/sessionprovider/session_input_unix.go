@@ -39,10 +39,15 @@ type nativeSessionInput struct {
 }
 
 func (input nativeSessionInput) matchesOriginalOperation(op channelonboarding.Operation, coordinate channelonboarding.ChannelRuntimeContextCoordinate) bool {
+	activationCurrent := op.ActivationRevision == input.ActivationRevision
+	if input.Scope == channelonboarding.SessionInputOnboarding && input.ActivationRevision == 0 && op.AccountConnection() &&
+		op.IdentityOperationID != "" && (op.Phase == channelonboarding.PhaseAwaitingExternalIdentity || op.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation) {
+		activationCurrent = true
+	}
 	return op.OperationID == input.OperationID && op.Posture == channelonboarding.ActivationSessionConnection &&
-		input.AccountOnly == op.AccountConnection() &&
+		(input.Scope != channelonboarding.SessionInputBusiness || input.AccountOnly == op.AccountConnection()) &&
 		op.Phase != channelonboarding.PhaseFailed && op.Phase != channelonboarding.PhaseRetired && op.Coordinate.MatchesDeclaration(coordinate) &&
-		op.SessionAccount == input.Account && op.ActivationRevision == input.ActivationRevision &&
+		op.SessionAccount == input.Account && activationCurrent &&
 		op.TargetSelector == input.TargetSelector && op.PrincipalID == input.PrincipalID &&
 		op.Coordinate.DurableIdentity().Matches(input.Source) && op.BindingRevision == input.BindingRevision &&
 		op.ValidateSessionAccount() == nil && (input.Scope == channelonboarding.SessionInputOnboarding || input.Scope == channelonboarding.SessionInputBusiness)

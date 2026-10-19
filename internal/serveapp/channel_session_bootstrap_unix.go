@@ -9,6 +9,7 @@ import (
 	"runtime/trace"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -233,6 +234,47 @@ func (s *serveSessionBootstrap) validateResumeSession(ctx context.Context, op ch
 		}
 	}
 	return nil
+}
+
+func (s *serveSessionBootstrap) RollSessionSource(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) (channelonboarding.Operation, error) {
+	if !op.AccountConnection() || op.Phase != channelonboarding.PhaseSucceeded || op.IdentityOperationID != "" ||
+		op.Provider != candidate.Provider || op.Interface.Normalized() != candidate.Interface.Normalized() ||
+		op.TargetSelector != candidate.Target.Selector || candidate.Ceremony != op.Ceremony || candidate.ValidateDeclaration() != nil {
+		return op, channelonboarding.ErrRevisionConflict
+	}
+	owned, incoming, _, release, err := s.selectRuntime(ctx, candidate)
+	if err != nil {
+		return op, err
+	}
+	defer release()
+	if incoming == nil || incoming.Bus == nil {
+		return op, channelonboarding.ErrRevisionConflict
+	}
+	if _, err := incoming.Bus.AdmitSourceArtifactFact(owned); err != nil {
+		return op, err
+	}
+	if err := s.validateRetainedSessionOperation(ctx, op); err != nil {
+		return op, err
+	}
+	if connection := s.connection(op.OperationID); connection != nil {
+		if err := connection.PrepareSourceRollover(ctx); err != nil {
+			return op, err
+		}
+		if err := connection.Close(ctx); err != nil {
+			return op, err
+		}
+	}
+	coordinate := candidate.Coordinate
+	coordinate.TargetGeneration = 0
+	rolled, err := s.store.AdvanceChannelOnboarding(owned, channelonboarding.AdvanceRequest{OperationID: op.OperationID,
+		ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseAwaitingOperatorConfirmation, SourceRollover: &coordinate, Now: time.Now().UTC()})
+	if err != nil {
+		return op, err
+	}
+	if err := s.ResumeSession(ctx, rolled, candidate); err != nil {
+		return rolled, err
+	}
+	return rolled, nil
 }
 
 func (s *serveSessionBootstrap) validateRetainedSessionOperation(ctx context.Context, op channelonboarding.Operation) error {

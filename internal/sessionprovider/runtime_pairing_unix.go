@@ -163,3 +163,31 @@ func (c *RuntimeConnection) DisconnectionReason() string {
 	defer occurrence.mu.Unlock()
 	return occurrence.failureReason
 }
+
+// Complete old-source input before the existing owner reopens the same pairing
+// under fresh source admission. No captured authority is projected into the new source.
+func (c *RuntimeConnection) PrepareSourceRollover(ctx context.Context) (err error) {
+	work, err := c.begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, work.Done()) }()
+	occurrence := c.state.currentOccurrence()
+	if occurrence == nil {
+		return errClientOccurrenceFenced
+	}
+	occurrence.mu.Lock()
+	callbacks := occurrence.callbacks
+	occurrence.mu.Unlock()
+	if callbacks != nil {
+		if err := callbacks.join(work.Context()); err != nil {
+			return err
+		}
+	}
+	if c.incoming != nil {
+		if err := c.incoming.drain(c.ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}

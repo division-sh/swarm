@@ -614,6 +614,8 @@ type AdvanceRequest struct {
 	ExpectedRevision             int64
 	Phase                        Phase
 	RebindCoordinate             *ChannelRuntimeContextCoordinate
+	SourceRollover               *ChannelRuntimeContextCoordinate
+	BeginOperatorEnrollment      bool
 	CredentialAdmissions         []CredentialAdmission
 	ReplaceCredentialAdmissions  bool
 	SessionAccount               *operatorchannel.SessionAccountAdmission
@@ -665,10 +667,10 @@ func (o Operation) ValidateSessionAccount() error {
 	return validateSessionAccount(o.Posture, o.Provider, o.SessionAccount, required)
 }
 
-// Account-only linkage admits customer traffic, never an operator identity.
+// Account linkage admits customer traffic independently of a pending operator claim.
 func (o Operation) AccountConnection() bool {
 	return o.Posture == ActivationSessionConnection && o.Ceremony == CeremonyAccountLink &&
-		o.IdentityOperationID == "" && o.BindingRevision == 0 && o.SessionAccount.Validate() == nil && o.ValidateSessionAccount() == nil
+		o.BindingRevision == 0 && o.SessionAccount.Validate() == nil && o.ValidateSessionAccount() == nil
 }
 
 func validateSessionAccount(posture ActivationPosture, provider string, account operatorchannel.SessionAccountAdmission, required bool) error {

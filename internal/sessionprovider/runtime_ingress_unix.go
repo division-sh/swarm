@@ -25,6 +25,7 @@ type runtimeIncomingStore interface {
 	channelonboarding.Store
 	sessionBusinessStore
 	ListOperatorChannelBindings(context.Context, string) ([]operatorchannel.Binding, error)
+	ListOperatorChannelOperations(context.Context, string) ([]operatorchannel.Operation, error)
 	claimReceiptReader
 	SettleSessionChannelClaim(context.Context, authority.Claim) (operatorchannel.ClaimSettlement, error)
 }
@@ -81,7 +82,7 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 		return err
 	}
 	defer account.Close()
-	scope, source, err := c.incoming.receiveScope(work.Context())
+	scope, source, err := c.incoming.receiveScope(work.Context(), message)
 	if err != nil {
 		return err
 	}
@@ -101,19 +102,55 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 	return c.incoming.drain(work.Context())
 }
 
-func (i *runtimeIncoming) receiveScope(ctx context.Context) (captureScope, captureSource, error) {
+func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Message) (captureScope, captureSource, error) {
 	op, err := i.connection.currentOperation(ctx)
 	if err != nil {
 		return captureScope{}, captureSource{}, err
 	}
-	if (op.Phase != channelonboarding.PhaseAwaitingExternalIdentity && op.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation) ||
-		op.IdentityOperationID == "" || op.ActivationRevision != 0 {
+	if (op.Phase != channelonboarding.PhaseAwaitingExternalIdentity && op.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation) || op.IdentityOperationID == "" {
 		return i.businessScope(ctx)
+	}
+	if op.ActivationRevision > 0 {
+		claim, err := i.pendingOperatorClaim(ctx, op, message)
+		if err != nil {
+			return captureScope{}, captureSource{}, err
+		}
+		if !claim {
+			return i.businessScope(ctx)
+		}
 	}
 	scope := captureScope{Kind: channelonboarding.SessionInputOnboarding, Session: op.SessionAccount,
 		Source: op.Coordinate.DurableIdentity(), OnboardingOperation: op.OperationID, OperationRevision: op.Revision,
 		TargetSelector: op.TargetSelector, PrincipalID: op.PrincipalID, BindingRevision: op.BindingRevision}
 	return scope, captureSource{Coordinate: op.Coordinate, CatalogGeneration: i.handoff.trigger.Generation()}, scope.Validate()
+}
+
+func (i *runtimeIncoming) pendingOperatorClaim(ctx context.Context, op channelonboarding.Operation, message *events.Message) (bool, error) {
+	if message == nil || message.Message == nil || message.Info.IsFromMe {
+		return false, nil
+	}
+	kind, text, _, _, err := incomingContent(message)
+	if err != nil || kind != "message" || text == nil {
+		return false, err
+	}
+	challenge, shaped := operatorchannel.ChallengeFromText(*text)
+	if !shaped {
+		return false, nil
+	}
+	operations, err := i.store.ListOperatorChannelOperations(ctx, op.PrincipalID)
+	if err != nil {
+		return false, err
+	}
+	for _, identity := range operations {
+		if identity.OperationID == op.IdentityOperationID && identity.OnboardingOperationID == op.OperationID &&
+			identity.PrincipalID == op.PrincipalID && identity.Interface.Normalized() == op.Interface.Normalized() &&
+			identity.ProviderAuthority.Kind == operatorchannel.ProviderAuthoritySession && identity.ProviderAuthority.Session == op.SessionAccount &&
+			(identity.State == operatorchannel.StateAwaitingClaim || identity.State == operatorchannel.StateAwaitingConfirmation) &&
+			identity.ExpiresAt.After(time.Now().UTC()) && identity.Challenge == challenge {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (i *runtimeIncoming) businessScope(ctx context.Context) (captureScope, captureSource, error) {

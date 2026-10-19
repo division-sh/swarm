@@ -251,15 +251,15 @@ func (p NativeChannelActivityPermit) ValidateBusinessTarget(ctx context.Context,
 	if err := p.Validate(ctx); err != nil {
 		return err
 	}
-	if op.Phase != channelonboarding.PhaseSucceeded {
-		return fmt.Errorf("native activity requires completed channel readiness")
-	}
 	expected, err := p.launch.activation.AdmissionResponsibility()
 	if err != nil {
 		return err
 	}
 	if p.launch.activation.Plan.ActivitiesOnly() && expected.MatchesAccountBusiness(op, activation) {
 		return nil
+	}
+	if op.Phase != channelonboarding.PhaseSucceeded {
+		return fmt.Errorf("native activity requires completed channel readiness")
 	}
 	if !expected.MatchesBusinessBinding(op, activation, binding, activation.BindingRevision) {
 		return fmt.Errorf("native activity lost its original selected business binding")

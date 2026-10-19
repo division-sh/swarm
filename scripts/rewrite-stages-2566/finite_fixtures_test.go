@@ -213,9 +213,9 @@ func TestRewrite2566NoFinalRootCensusIsExplicitlyClassified(t *testing.T) {
 			"examples/routing/template-select-existing", "examples/routing/template-select-or-create",
 		},
 		"standing/startup/provider/component sources, not finite run.start": {
-			// #2577 served ordered-input/rebind and notice-acknowledgment
-			// journeys use standing provider ingress, never finite run.start.
-			"internal/serveapp/testdata/whatsapp-session-input", "internal/serveapp/testdata/whatsapp-session-notice",
+			// #2577 ordered input and the public receptionist use standing
+			// provider ingress, never finite run.start. The notice source has a final stage.
+			"internal/serveapp/testdata/whatsapp-session-input", "internal/cliapp/archetypes/whatsapp-receptionist",
 			// Public structural readers and standing declare/restart, not finite run.start.
 			"internal/releasee2e/testdata/admission_factoring",
 			"internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h1",
@@ -305,8 +305,12 @@ func TestRewrite2566WhatsAppStandingFixturesRefuseFiniteInitiation(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
+			flowID := "."
+			if name == "whatsapp-session-notice" {
+				flowID = "notices"
+			}
 			var refusal *runstart.FiniteStartError
-			if err := runstart.ValidateFinite(semanticview.Wrap(bundle), nil); !errors.As(err, &refusal) || refusal.FlowID != "." {
+			if err := runstart.ValidateFinite(semanticview.Wrap(bundle), nil); !errors.As(err, &refusal) || refusal.FlowID != flowID {
 				t.Fatalf("standing WhatsApp source gained finite initiation authority: %v", err)
 			}
 		})

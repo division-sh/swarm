@@ -86,7 +86,8 @@ func serveChannelCandidatesForPlan(contextDef runtime.BundleContext, bundleIdent
 	}
 	posture := channelonboarding.ActivationPosture(profile.ActivationPosture())
 	ceremony := channelonboarding.IdentityCeremony(profile.IdentityCeremony())
-	if posture == channelonboarding.ActivationSessionConnection && !serveChannelRequiresOperator(contextDef) {
+	operatorRequired := posture == channelonboarding.ActivationSessionConnection && serveChannelRequiresOperator(contextDef)
+	if posture == channelonboarding.ActivationSessionConnection {
 		ceremony = channelonboarding.CeremonyAccountLink
 	}
 	var candidates []channelonboarding.Candidate
@@ -110,7 +111,7 @@ func serveChannelCandidatesForPlan(contextDef runtime.BundleContext, bundleIdent
 					Alias: target.Alias, Provider: target.Provider, Generation: uint64(target.Generation), PublicationSequence: target.PublicationSequence,
 					AdmissionGeneration: target.AdmissionPlan.Generation(), SigningCredentialKey: target.SigningSecret,
 				},
-				Posture: posture, Ceremony: ceremony,
+				Posture: posture, Ceremony: ceremony, OperatorRequired: operatorRequired,
 				ProviderCredentialRole: profile.ProviderCredential(), SigningCredentialRole: profile.SigningCredential(),
 				ConfirmationOperation: profile.ConfirmationOperation(), ConnectionHealth: profile.ConnectionHealth(), Plan: plan,
 			})
@@ -257,7 +258,7 @@ func compileServeLearnedChannelActivations(ctx context.Context, store channelonb
 func compileServePrebindingActivations(ctx context.Context, catalog *channelonboarding.CandidateCatalog, operations []channelonboarding.Operation, projection *runtimecredentials.SecretBindingProjection) ([]servePrebindingActivation, error) {
 	prebinding := []servePrebindingActivation{}
 	for _, op := range operations {
-		if !op.Phase.SupportsPrebindingRegistration() {
+		if !op.Phase.SupportsPrebindingRegistration() || op.AccountConnection() && op.ActivationRevision > 0 {
 			continue
 		}
 		candidate, current := catalog.FindExact(op.Provider, op.Interface, op.Coordinate, op.TargetSelector)

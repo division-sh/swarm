@@ -81,9 +81,11 @@ func prepareSessionBusinessPublication(ctx context.Context, input input.Admissio
 		return store.HasCurrentChannelInputDraft(ownedContext, text, request.OriginalReceivedAt)
 	}
 	for ordinal, output := range delivery.Events {
-		operatorEvent, err = inbound.ProjectOperatorOutput(output, request, []packs.SatisfactionPlan{channel}, selectBare, operatorEvent)
-		if err != nil {
-			return absent, err
+		if !event.Scope.AccountOnly {
+			operatorEvent, err = inbound.ProjectOperatorOutput(output, request, []packs.SatisfactionPlan{channel}, selectBare, operatorEvent)
+			if err != nil {
+				return absent, err
+			}
 		}
 		item, err := inbound.ProjectOutputEvent(request, ordinal, output, posture)
 		if err != nil {
@@ -94,7 +96,9 @@ func prepareSessionBusinessPublication(ctx context.Context, input input.Admissio
 			projection = authoractivity.InboundProjection{SubjectType: output.AuthorSubjectType, SubjectID: output.AuthorSubjectID}
 		}
 	}
-	if operatorEvent != nil && operatorEvent.BareCandidate == nil {
+	// Exact pending claims arrive through onboarding admission. A challenge-like
+	// customer message with business admission remains authored business input.
+	if operatorEvent != nil && operatorEvent.Claim == nil && operatorEvent.BareCandidate == nil {
 		command, err := sessionOperatorCommand(ownedContext, eventBus, admission, request, operatorEvent, posture)
 		if err != nil {
 			return absent, err
