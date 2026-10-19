@@ -13,16 +13,9 @@ import (
 
 // StartPostgresRuntimeStore constructs one admitted native owner without
 // exposing its pool to the caller.
-func StartPostgresRuntimeStore(t *testing.T, lockOrder ...*ChannelLockOrder) *store.PostgresStore {
+func StartPostgresRuntimeStore(t *testing.T) *store.PostgresStore {
 	t.Helper()
-	if len(lockOrder) > 1 || (len(lockOrder) == 1 && lockOrder[0] == nil) {
-		t.Fatal("native postgres fixture accepts at most one nonnil fixed lock-order observer")
-	}
-	var observer *ChannelLockOrder
-	if len(lockOrder) == 1 {
-		observer = lockOrder[0]
-	}
-	selected, _ := startPostgresRuntimeStoreWithReopen(t, observer)
+	selected, _ := StartPostgresRuntimeStoreWithReopen(t)
 	return selected
 }
 
@@ -30,11 +23,6 @@ func StartPostgresRuntimeStore(t *testing.T, lockOrder ...*ChannelLockOrder) *st
 // No running owner's pool or coordinator is recovered.
 // A supplied sandbox location permits an independently constructed process peer.
 func StartPostgresRuntimeStoreWithReopen(t *testing.T, locations ...string) (*store.PostgresStore, func() *store.PostgresStore) {
-	t.Helper()
-	return startPostgresRuntimeStoreWithReopen(t, nil, locations...)
-}
-
-func startPostgresRuntimeStoreWithReopen(t *testing.T, lockOrder *ChannelLockOrder, locations ...string) (*store.PostgresStore, func() *store.PostgresStore) {
 	t.Helper()
 	if len(locations) > 1 || (len(locations) == 1 && locations[0] == "") {
 		t.Fatal("native postgres fixture requires at most one nonempty sandbox location")
@@ -50,9 +38,6 @@ func startPostgresRuntimeStoreWithReopen(t *testing.T, lockOrder *ChannelLockOrd
 	// Register once, before consumers. Later peers must not jump ahead of
 	// the consumer's join in the testing cleanup stack.
 	t.Cleanup(func() {
-		if lockOrder != nil {
-			lockOrder.Release()
-		}
 		ownersMu.Lock()
 		defer ownersMu.Unlock()
 		for i := len(owners) - 1; i >= 0; i-- {
@@ -61,13 +46,9 @@ func startPostgresRuntimeStoreWithReopen(t *testing.T, lockOrder *ChannelLockOrd
 			}
 		}
 	})
-	open := func(observer *ChannelLockOrder) *store.PostgresStore {
+	open := func() *store.PostgresStore {
 		t.Helper()
-		var observation []*ChannelLockOrder
-		if observer != nil {
-			observation = append(observation, observer)
-		}
-		selected, err := store.NewPostgresStore(dsn, observation...)
+		selected, err := store.NewPostgresStore(dsn)
 		if err != nil {
 			t.Fatalf("construct postgres runtime store: %v", err)
 		}
@@ -75,22 +56,10 @@ func startPostgresRuntimeStoreWithReopen(t *testing.T, lockOrder *ChannelLockOrd
 		owners = append(owners, selected)
 		ownersMu.Unlock()
 		BootstrapPostgresRuntimeStore(t, selected)
-		if observer != nil {
-			// Reuse schema admission, including the genuine principal FK.
-			spec, plans := canonicalPlatformPlans(t)
-			inspection, err := selected.InspectSchema(context.Background(), store.SchemaBootstrapRequest{
-				PlatformPlans: plans, Origin: store.RuntimeStoreOrigin{
-					SwarmVersion: "storetest", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC(),
-				},
-			})
-			if err != nil || inspection.Fresh {
-				t.Fatalf("inspect native lock-order fixture schema: fresh=%t err=%v", inspection.Fresh, err)
-			}
-		}
 		bindTestPayloadAdmitter(selected)
 		return selected
 	}
-	return open(lockOrder), func() *store.PostgresStore { return open(nil) }
+	return open(), open
 }
 
 func StartSQLiteRuntimeStoreWithReopen(t testing.TB, ctx context.Context, locations ...string) (*store.SQLiteRuntimeStore, func() *store.SQLiteRuntimeStore) {
