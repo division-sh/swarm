@@ -407,7 +407,7 @@ func VerifyDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMu
 		t.Fatalf("foreign session binding mutated store %d times", binds)
 	}
 
-	ownerCtx := runtimedelivery.WithClaim(context.Background(), claim)
+	ownerCtx := runtimedelivery.WithClaim(fixture.OriginalCommandContext, claim)
 	bound, err := bus.MarkDeliveryInProgress(ownerCtx, "agent-a", sessionID)
 	if err != nil {
 		t.Fatalf("owner-bound session binding: %v", err)

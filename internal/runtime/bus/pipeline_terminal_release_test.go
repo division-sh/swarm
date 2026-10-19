@@ -666,9 +666,6 @@ func TestEventBusResetAttemptsEveryTerminalPendingReleaseAndAggregatesEvidence(t
 		!strings.Contains(resetErr.Error(), "persistent reset cleanup failure") {
 		t.Fatalf("reset cleanup error = %v, want all terminal evidence", resetErr)
 	}
-	if err := bus.ResetInMemoryState(); err != nil {
-		t.Fatalf("repeat reset after terminal cleanup: %v", err)
-	}
 	for _, eventID := range eventIDs {
 		if got := owner.releaseCalls[eventID]; got != 1 {
 			t.Fatalf("release calls for %s = %d, want one terminal attempt", eventID, got)
@@ -678,6 +675,14 @@ func TestEventBusResetAttemptsEveryTerminalPendingReleaseAndAggregatesEvidence(t
 		bus.mu.RUnlock()
 		if pending != 0 {
 			t.Fatalf("pending operations for %s = %d, want cleared terminal owner", eventID, pending)
+		}
+	}
+	if err := bus.ResetInMemoryState(); err != nil {
+		t.Fatalf("repeat reset after terminal cleanup: %v", err)
+	}
+	for _, eventID := range eventIDs {
+		if got := owner.releaseCalls[eventID]; got != 1 {
+			t.Fatalf("release calls after repeat reset for %s = %d, want one terminal attempt", eventID, got)
 		}
 		reclaimed, err := bus.claimPipelinePublication(context.Background(), eventID)
 		if err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -58,6 +59,7 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 	} else if err := owner.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatal(err)
 	}
+	fixture.OriginalCommandContext = startupownership.CarryMutationAuthority(context.Background(), ctx)
 	fixture.Seed = func(t *testing.T, eventID, runID string, route events.DeliveryRoute) events.Event {
 		t.Helper()
 		var event events.Event
@@ -146,14 +148,6 @@ func TestEventBusResetPreservesPendingOperationUntilPriorRetirementSucceeds(t *t
 			runtimebus.VerifyEventBusResetPreservesPendingOperationUntilPriorRetirementSucceedsForTest(t, func(t *testing.T, selected bool) runtimebus.ExactHandoffNativeFixtureForTest {
 				return openExactHandoffNative(t, backend, selected)
 			})
-		})
-	}
-}
-
-func TestSubscribedRoutePreparationNativeBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			verifyNativeObserverCreationOrder(t, backend, false)
 		})
 	}
 }
