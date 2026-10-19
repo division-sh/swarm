@@ -1426,12 +1426,16 @@ accounts:
 	at := time.Unix(1700000710, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	ctx := unmanagedToolTestContext()
-	if _, err := pg.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
-		t.Fatalf("EnsureSourceArtifact: %v", err)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pg.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatalf("EnsureRootedSource: %v", err)
 	}
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash, RootAdmission: rooted.Admission()})
 	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
 		stateEventID, "fork.state_entry", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
@@ -1473,7 +1477,7 @@ accounts:
 		t.Fatalf("advance live source entity_state: %v", err)
 	}
 	captureEntityToolRunForkRevision(t, db, sourceRunID)
-	result, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID})
+	result, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
@@ -1531,12 +1535,16 @@ accounts:
 	at := time.Unix(1700000720, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	ctx := unmanagedToolTestContext()
-	if _, err := pg.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
-		t.Fatalf("EnsureSourceArtifact: %v", err)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pg.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatalf("EnsureRootedSource: %v", err)
 	}
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash, RootAdmission: rooted.Admission()})
 	source := semanticview.Wrap(bundle)
 	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
@@ -1566,7 +1574,7 @@ accounts:
 		"", []byte(`{}`), 0, sourceRunID, "",
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, forkAt,
 	))
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID})
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID, RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
 	}
