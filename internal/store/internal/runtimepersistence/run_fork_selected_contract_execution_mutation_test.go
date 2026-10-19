@@ -1714,7 +1714,7 @@ func TestSelectedContractExecutionMaterializationRejectsUnversionedRouteProofRem
 // Missing source declarations are fixture errors, not invented readiness facts.
 func canonicalSelectedContractExecutionStoreRequest(t *testing.T, ctx context.Context, pg *PostgresStore, sourceRunID, at string, selection runfork.RunForkContractSelection, fact runtimecorrelation.SourceArtifactFact) runforkreadiness.MaterializeRequest {
 	t.Helper()
-	request := prepareSelectedStoreMaterializationForTest(t, ctx, pg, sourceRunID, at, selection)
+	request := prepareSelectedStoreMaterializationForTest(t, ctx, pg, sourceRunID, at, selection, fact.BundleHash())
 	if !request.SourceArtifactFact.Matches(fact) {
 		t.Fatalf("prepared source differs from requested fixture artifact: got %s want %s", request.SourceArtifactFact.BundleHash(), fact.BundleHash())
 	}
