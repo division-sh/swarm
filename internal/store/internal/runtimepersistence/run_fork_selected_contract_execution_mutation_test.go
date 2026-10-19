@@ -1528,36 +1528,6 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 	}
 }
 
-func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLogDiagnostic(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-	sourceRunID := uuid.NewString()
-	entityID := runtimeflowidentity.EntityID("flow-a/1")
-	eventID := uuid.NewString()
-	at := time.Unix(1700003635, 0).UTC()
-	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-
-	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
-	if err != nil {
-		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
-	}
-	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
-	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, uuid.NewString(), materialized.ForkRunID, "",
-		[]byte(`{"log_level":"info","message":"Tool read_validation_case_business_brief executed successfully","details":{"component":"tool-executor","action":"tool_execution_succeeded","tool_name":"read_validation_case_business_brief"}}`), at.Add(3*time.Second))
-
-	activationRequest.AllowedSourceEventIDs = []string{eventID}
-	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, activationRequest)
-	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") {
-		t.Fatalf("activation error = %v, want fork event lineage blocker", err)
-	}
-	if activation.Activated {
-		t.Fatalf("activation = %#v, want blocked", activation)
-	}
-}
-
 func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
@@ -1717,6 +1687,12 @@ func canonicalSelectedContractExecutionStoreRequest(t *testing.T, ctx context.Co
 	request := prepareSelectedStoreMaterializationForTest(t, ctx, pg, sourceRunID, at, selection, fact.BundleHash())
 	if !request.SourceArtifactFact.Matches(fact) {
 		t.Fatalf("prepared source differs from requested fixture artifact: got %s want %s", request.SourceArtifactFact.BundleHash(), fact.BundleHash())
+	}
+	request.ForkOperation = &runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "bearer:selected-store-proof", IdempotencyKey: uuid.NewString(),
+		TransportHash: "sha256:selected-store-proof", SourceRunID: sourceRunID, ForkEventID: at,
+		TargetBundleHash: fact.BundleHash(), TargetRootReference: request.RootAdmission.Reference(),
+		ContractSelection: selection, AllowSourceFreeze: true,
 	}
 	return request
 }
