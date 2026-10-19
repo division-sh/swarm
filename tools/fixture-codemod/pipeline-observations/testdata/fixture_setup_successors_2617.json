@@ -792,9 +792,7 @@
           "\t}\n",
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       }
     ]
   },
@@ -1753,9 +1751,7 @@
       },
       {
         "Start": 19,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\t\t\t\troute, state := constructFanOutCompletionReceiver(t, ctx, f, \"completion_one\", base)\n"
         ]
@@ -1774,9 +1770,7 @@
     "Edits": [
       {
         "Start": 20,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\t\t\t\tinsertGateRecoveryRun(t, selected.events, runID)\n",
           "\t\t\t\tctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))\n"
@@ -1787,9 +1781,7 @@
         "Current": [
           "\t\t\t\tctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 28,
@@ -1938,9 +1930,7 @@
       },
       {
         "Start": 41,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\t\t\trunID := uuid.NewString()\n",
           "\t\t\tentityID := runID\n",
@@ -1983,9 +1973,7 @@
       },
       {
         "Start": 19,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\t\t\trunID, entityID := uuid.NewString(), uuid.NewString()\n",
           "\t\t\tinsertGateRecoveryRun(t, selected.events, runID)\n",
@@ -2008,18 +1996,14 @@
     "Edits": [
       {
         "Start": 2,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\tctx := testAuthorActivityContext(t, context.Background())\n"
         ]
       },
       {
         "Start": 4,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\tinsertGateRecoveryRun(t, tc.events, runID)\n",
           "\tctx = withLiveGateExecution(runtimecorrelation.WithRunID(ctx, runID))\n"
@@ -2065,9 +2049,7 @@
           "\t\t\t\tt.Fatalf(\"construct explicit parent component: %v\", err)\n",
           "\t\t\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       }
     ]
   },
@@ -2089,9 +2071,7 @@
           "\t\t\t\tt.Fatalf(\"construct explicit parent component: %v\", err)\n",
           "\t\t\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       }
     ]
   },
@@ -2113,9 +2093,7 @@
           "\t\t\t\tt.Fatalf(\"construct explicit parent component: %v\", err)\n",
           "\t\t\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       }
     ]
   },
@@ -2137,9 +2115,7 @@
           "\t\t\t\tt.Fatalf(\"construct explicit parent component: %v\", err)\n",
           "\t\t\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       }
     ]
   },
@@ -2161,9 +2137,7 @@
           "\t\t\t\tt.Fatalf(\"construct explicit parent component: %v\", err)\n",
           "\t\t\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       }
     ]
   },
@@ -2369,9 +2343,7 @@
     "Edits": [
       {
         "Start": 8,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\t\t\tinsertGateRecoveryRun(t, selected.events, runID)\n",
           "\t\t\tctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))\n"
@@ -2382,9 +2354,7 @@
         "Current": [
           "\t\t\tctx, sourceFact := workflowLifecycleSourceContext(t, selected, bundle, runID)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 19,
@@ -2418,9 +2388,7 @@
           "\t\t\t\t\tfiles[name] = strings.Replace(files[name], expectedField, \"  expected: {type: '[text]', initial: ['a', 'b']}\\n\", 1)\n",
           "\t\t\t\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       }
     ]
   },
@@ -2436,9 +2404,7 @@
     "Edits": [
       {
         "Start": 10,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\t\t\t\t\tinsertGateRecoveryRun(t, selected.events, runID)\n",
           "\t\t\t\t\tctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))\n"
@@ -2449,9 +2415,7 @@
         "Current": [
           "\t\t\t\t\tctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 38,
@@ -2494,9 +2458,7 @@
     "Edits": [
       {
         "Start": 10,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\t\t\tinsertGateRecoveryRun(t, selected.events, runID)\n",
           "\t\t\tctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))\n"
@@ -2507,9 +2469,7 @@
         "Current": [
           "\t\t\tctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 18,
@@ -2553,9 +2513,7 @@
     "Edits": [
       {
         "Start": 13,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\t\t\t\tinsertGateRecoveryRun(t, selected.events, runID)\n",
           "\t\t\t\tctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))\n"
@@ -2566,9 +2524,7 @@
         "Current": [
           "\t\t\t\tctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 41,
@@ -2604,9 +2560,7 @@
           "\t\t\t\t\t\tt.Fatalf(\"retained deadline receiver lost stage_defined at stage %q\", instance.CurrentState)\n",
           "\t\t\t\t\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       }
     ]
   },
@@ -2622,9 +2576,7 @@
     "Edits": [
       {
         "Start": 13,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\t\t\t\tinsertGateRecoveryRun(t, selected.events, runID)\n",
           "\t\t\t\tctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))\n"
@@ -2635,9 +2587,7 @@
         "Current": [
           "\t\t\t\tctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 34,
@@ -2680,9 +2630,7 @@
     "Edits": [
       {
         "Start": 8,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\t\t\tinsertGateRecoveryRun(t, selected.events, runID)\n",
           "\t\t\tctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))\n"
@@ -2693,9 +2641,7 @@
         "Current": [
           "\t\t\tctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 19,
@@ -2757,9 +2703,7 @@
       },
       {
         "Start": 15,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\t\t\t\tinsertGateRecoveryRun(t, selected.events, runID)\n"
         ]
@@ -2912,9 +2856,7 @@
           "\t\tt.Fatalf(\"actual run root missing after atomic construction: root=%+v found=%t err=%v\", storedRoot, found, err)\n",
           "\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       }
     ]
   },
@@ -2944,9 +2886,7 @@
           "\t\t\t\tfault.rules[index] = ref\n",
           "\t\t\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 64,
@@ -3027,9 +2967,7 @@
         "Current": [
           "\t\tdisplay       string\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 12,
@@ -3113,9 +3051,7 @@
         "Current": [
           "\tctx = originalEventBusFixtureContext(t, ctx, pg)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 16,
@@ -3144,9 +3080,7 @@
         "Current": [
           "\tctx = originalEventBusFixtureContext(t, ctx, sqliteStore)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 16,
@@ -3175,9 +3109,7 @@
         "Current": [
           "\tctx = originalEventBusFixtureContext(t, ctx, selected)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 13,
@@ -3206,9 +3138,7 @@
         "Current": [
           "\tctx = originalEventBusFixtureContext(t, ctx, selected)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 4,
@@ -3239,9 +3169,7 @@
           "\tctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, sourceFact.BundleHash()))\n",
           "\tctx = originalEventBusFixtureContext(t, ctx, pg)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 17,
@@ -3280,9 +3208,7 @@
         "Current": [
           "\t\t\tctx = originalEventBusFixtureContext(t, ctx, selected)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 94,
@@ -3326,15 +3252,11 @@
         "Current": [
           "\tctx := originalEventBusFixtureContext(t, testAuthorActivityContextForSource(context.Background(), source), selected)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 36,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\tctx := testAuthorActivityContextForSource(context.Background(), source)\n"
         ]
@@ -3444,9 +3366,7 @@
         "Current": [
           "\t\t\t\t\tctx = originalStoreFixtureContext(t, ctx, selected)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 82,
@@ -3475,9 +3395,7 @@
         "Current": [
           "\t\t\tctx = originalStoreFixtureContext(t, ctx, selected)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 68,
@@ -3517,9 +3435,7 @@
           "\t\t}\n",
           "\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 29,
@@ -3623,9 +3539,7 @@
           "\t\tt.Fatal(err)\n",
           "\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 84,
@@ -3714,27 +3628,21 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 54,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 73,
         "Current": [
           "\t\t\tctx = originalRuntimeFixtureContext(t, ctx, eventStore)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 85,
@@ -3798,9 +3706,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 152,
@@ -3835,9 +3741,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 198,
@@ -3856,27 +3760,21 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 223,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 234,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 248,
@@ -3923,9 +3821,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 296,
@@ -3988,9 +3884,7 @@
           "\t\tt.Fatal(err)\n",
           "\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 35,
@@ -4001,15 +3895,11 @@
           "\t\t\treturn input, err\n",
           "\t\t},\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 93,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\tcapability, err := pg.AcquireProcessCapability(ctx, startupownership.AcquireRequest{\n",
           "\t\tOwnerID: \"final-flow-activation-test\", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,\n",
@@ -4057,9 +3947,7 @@
           "\t\t}\n",
           "\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 111,
@@ -4499,9 +4387,7 @@
         "Current": [
           "\t\t\t\t\tbus.sourceArtifactFact = authority.SourceArtifact()\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 223,
@@ -4531,9 +4417,7 @@
         "Current": [
           "\tvar grant startupownership.LiveGenerationGrant\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 18,
@@ -4625,18 +4509,14 @@
           "\t\t\t\tt.Fatal(err)\n",
           "\t\t\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 47,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 51,
@@ -4791,18 +4671,14 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 182,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 193,
@@ -4871,9 +4747,7 @@
           "\t\tt.Fatal(err)\n",
           "\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 25,
@@ -5120,18 +4994,14 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 77,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 102,
@@ -5246,9 +5116,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 58,
@@ -5285,9 +5153,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 85,
@@ -5296,9 +5162,7 @@
           "\t// Hold a real coordinator dispatch across shutdown. Its manager dependency\n",
           "\t// must outlive it, even though retirement has already canceled dispatch.\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 90,
@@ -5341,54 +5205,42 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 119,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 144,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 155,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 171,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 173,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 182,
@@ -5415,9 +5267,7 @@
     "Edits": [
       {
         "Start": 1,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\tctx := testAuthorActivityContext(context.Background())\n"
         ]
@@ -5427,9 +5277,7 @@
         "Current": [
           "\tctx := testAuthorActivityContext(fixture.Context)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 9,
@@ -5447,9 +5295,7 @@
           "\t// A real running manager is an independent dependency, not part of the\n",
           "\t// registration's finite-turn join. Its accepted handler must stay live.\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 15,
@@ -5542,9 +5388,7 @@
           "\tvar releaseOnce sync.Once\n",
           "\treleaseCompletion := func() { releaseOnce.Do(func() { close(completion.release) }) }\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 63,
@@ -5563,9 +5407,7 @@
           "\t// The newly committed obligation is not dispatch-eligible until the\n",
           "\t// publication owner marks handoff. AcceptCommitted must still retain it.\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 92,
@@ -5583,18 +5425,14 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 100,
         "Current": [
           "\t// Match the production precommit reservation / postcommit Submit split.\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 105,
@@ -5618,9 +5456,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 121,
@@ -5638,9 +5474,7 @@
         "Current": [
           "\t// Taking this mutex also detects Close accidentally joining under it.\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 158,
@@ -5660,9 +5494,7 @@
           "\t// The turn may finish before its accepted completion persistence. Runtime\n",
           "\t// must then join that consumer before releasing the generation.\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 186,
@@ -5806,9 +5638,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 82,
@@ -5954,9 +5784,7 @@
           "\t\t\t\t\tt.Fatal(err)\n",
           "\t\t\t\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 112,
@@ -5965,18 +5793,14 @@
           "\t\t\t\t\tt.Fatal(err)\n",
           "\t\t\t\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 119,
         "Current": [
           "\t\t\t\tctx = originalPipelineFixtureContext(t, withLiveGateExecution(correlation.WithRunID(testAuthorActivityContextForSource(t, context.Background(), fact), runID)), selected)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 246,
@@ -6021,9 +5845,7 @@
           "\t\truntimeID = runtimeIDs[0]\n",
           "\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 23,
@@ -6185,9 +6007,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 67,
@@ -6338,9 +6158,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 73,
@@ -6545,9 +6363,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 75,
@@ -6599,9 +6415,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 107,
@@ -6656,9 +6470,7 @@
         "Current": [
           "\tmanagerContext := startupRecoverySourceContext(runtimeTestSourceArtifactFact(t, source), templateInstanceDeliveryRunID)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 10,
@@ -6760,9 +6572,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 102,
@@ -6830,18 +6640,14 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 37,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 53,
@@ -6882,9 +6688,7 @@
           "\t\tt.Fatal(err)\n",
           "\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 31,
@@ -6970,9 +6774,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 67,
@@ -7059,9 +6861,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 68,
@@ -7151,9 +6951,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 61,
@@ -7266,9 +7064,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 91,
@@ -7682,9 +7478,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 190,
@@ -7701,27 +7495,21 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 212,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 227,
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 235,
@@ -7888,18 +7676,14 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 96,
         "Current": [
           "\t\t\t\t\tseedCapability, seedGrant := installExternalRuntimeTestGeneration(t, ctx, selected, seedRuntime, prepared)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 103,
@@ -7975,9 +7759,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 318,
@@ -8040,9 +7822,7 @@
           "\t\t\tprepared := prepareExternalRuntimeFixtureProcess(t, ctx, selected)\n",
           "\t\t\tconstructionCtx := externalRuntimeProcessContext(t, ctx, prepared)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 35,
@@ -8058,9 +7838,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 44,
@@ -8101,9 +7879,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 83,
@@ -8144,9 +7920,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 125,
@@ -8171,9 +7945,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 153,
@@ -8224,9 +7996,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 203,
@@ -8244,9 +8014,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 231,
@@ -8312,9 +8080,7 @@
           "\t}\n",
           "\tctx, processTopology := acquireCatalogRuntimeProcess(t, ctx, selected)\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 60,
@@ -8372,9 +8138,7 @@
           "\t\tt.Fatal(err)\n",
           "\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 34,
@@ -8411,9 +8175,7 @@
         "Current": [
           "\t\t// This fixture anchor carries lineage, not admitted subscriber work.\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 111,
@@ -8519,9 +8281,7 @@
           "\t\tchildContextProof.requireRetiredChildren(t)\n",
           "\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 305,
@@ -8556,9 +8316,7 @@
           "\t\tt.Fatal(bindErr)\n",
           "\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 13,
@@ -8576,9 +8334,7 @@
         "Current": [
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 35,
@@ -8686,9 +8442,7 @@
           "\tt.Cleanup(func() { _ = manager.Shutdown() })\n",
           "\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 110,
@@ -8789,15 +8543,11 @@
           "\t\tt.Fatal(bindErr)\n",
           "\t}\n"
         ],
-        "Prior": [
-
-        ]
+        "Prior": []
       },
       {
         "Start": 43,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\tservedDB, err := sql.Open(\"postgres\", dsn)\n",
           "\tif err != nil {\n",
@@ -8808,18 +8558,14 @@
       },
       {
         "Start": 54,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\tservedStore := storetest.AdmitPostgresRuntimeStore(t, servedDB)\n"
         ]
       },
       {
         "Start": 55,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\tprocessCapability := selectedContractTestProcessCapability(t, ctx, servedStore)\n"
         ]
@@ -8909,9 +8655,7 @@
       },
       {
         "Start": 2,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\tselected := storetest.AdmitPostgresRuntimeStore(t, db)\n"
         ]
@@ -9047,9 +8791,7 @@
       },
       {
         "Start": 20,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\tctx := runForkTestContext(t)\n"
         ]
@@ -9120,9 +8862,7 @@
       },
       {
         "Start": 9,
-        "Current": [
-
-        ],
+        "Current": [],
         "Prior": [
           "\tctx := runForkTestContext(t)\n"
         ]
