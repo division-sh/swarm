@@ -239,10 +239,15 @@ func eventDeclarationLocation(bundle *WorkflowContractBundle, flowID, event stri
 	if err != nil || !ok || compiled.Source().File == "" {
 		return "unknown source"
 	}
-	file := compiled.Source().File
-	slot := NodeProvenanceMapPath("", eventidentity.LeafName(compiled.EventName()))
-	if location, found := bundle.IntroductionLocation(file, slot, true); found {
-		return fmt.Sprintf("%s:%d", file, location.Line)
+	for _, declaration := range bundle.canonicalCurrentEventDeclarationRecords() {
+		if declaration.flowPath != compiled.FlowPath() || declaration.qualifiedName != compiled.EventName() || declaration.sourceFile != compiled.Source().File {
+			continue
+		}
+		slot := NodeProvenanceMapPath("", declaration.localName)
+		if location, found := bundle.IntroductionLocation(declaration.sourceFile, slot, true); found {
+			return fmt.Sprintf("%s:%d", declaration.sourceFile, location.Line)
+		}
+		break
 	}
 	return "unknown source"
 }
