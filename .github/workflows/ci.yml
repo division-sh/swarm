@@ -914,7 +914,7 @@ jobs:
           # Refresh evidence only; never rerun a proof or replace the evaluator's
           # exact run/attempt/head, success, timestamp, and missing-job checks.
           for check in $(seq 1 60); do
-            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > test-results/jobs.json
+            gh api --paginate --slurp -H 'Cache-Control: no-cache' "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100&metadata_poll=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$check" > test-results/jobs.json
             if jq -e --slurpfile plan test-results/plan/proof-plan.json '
               ([$plan[0].batches[].id | "Go proof " + .]) as $expected
               | ([.[].jobs[] | select(.name | startswith("Go proof "))]) as $actual
