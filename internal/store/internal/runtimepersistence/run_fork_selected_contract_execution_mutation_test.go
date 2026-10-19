@@ -695,7 +695,7 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, eventID,
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), at.Add(time.Minute))
 	// Timer ownership is rejected before preparation can authorize materialization.
-	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustCanonicalSelectedContractStoreHash(t))
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) {
 		t.Fatalf("preparation error=%v, want timer blocker", err)
 	}
@@ -752,7 +752,7 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 			seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, eventID,
 				"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), at.Add(2*time.Minute))
 
-			prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+			prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustCanonicalSelectedContractStoreHash(t))
 			if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) {
 				t.Fatalf("materialization error = %v, want %s", err, runfork.RunForkBlockerTimerHistoryUnproven)
 			}
@@ -800,7 +800,7 @@ func TestSelectedContractTimerBlockerRemainsFixedWhenSourceTimerIsDeletedLater(t
 	if !runForkTestHasPlanBlocker(repeatedPlan, runfork.RunForkBlockerTimerHistoryUnproven) {
 		t.Fatalf("repeated fixed-revision plan lost timer blocker: %#v", repeatedPlan.ReplayResumeAdmission)
 	}
-	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustCanonicalSelectedContractStoreHash(t))
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) || prepared != nil {
 		t.Fatalf("fixed timer blocker preparation=%v error=%v", prepared, err)
 	}
