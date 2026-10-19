@@ -1,0 +1,8 @@
+{"Time":"2026-10-19T05:02:02.97311054Z","Action":"start","Package":"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"}
+{"Time":"2026-10-19T05:02:02.97523003Z","Action":"run","Package":"github.com/division-sh/swarm/internal/runtime/deliverycontinuation","Test":"TestExecutableDeliveryContinuationHasClosedProductionConsumers"}
+{"Time":"2026-10-19T05:02:02.9752425Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/deliverycontinuation","Test":"TestExecutableDeliveryContinuationHasClosedProductionConsumers","Output":"=== RUN   TestExecutableDeliveryContinuationHasClosedProductionConsumers\n"}
+{"Time":"2026-10-19T05:02:03.935780554Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/deliverycontinuation","Test":"TestExecutableDeliveryContinuationHasClosedProductionConsumers","Output":"--- PASS: TestExecutableDeliveryContinuationHasClosedProductionConsumers (0.96s)\n"}
+{"Time":"2026-10-19T05:02:03.935888875Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/runtime/deliverycontinuation","Test":"TestExecutableDeliveryContinuationHasClosedProductionConsumers","Elapsed":0.96}
+{"Time":"2026-10-19T05:02:03.935902795Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/deliverycontinuation","Output":"PASS\n"}
+{"Time":"2026-10-19T05:02:03.937258641Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/deliverycontinuation","Output":"ok  \tgithub.com/division-sh/swarm/internal/runtime/deliverycontinuation\t0.964s\n"}
+{"Time":"2026-10-19T05:02:03.937292311Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/runtime/deliverycontinuation","Elapsed":0.964}
