@@ -129,15 +129,24 @@ func TestSelectedContractExecutionMaterializationStampsPersistedBundleIdentity(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	targetArtifact := targetBundle.SourceArtifact
+	targetRoot, err := targetBundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetArtifact := targetRoot.Artifact()
 	bundleHash := targetArtifact.BundleHash()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-	seedStoreTestPersistedArtifact(t, db, targetArtifact)
-
+	if bundleHash == mustCanonicalSelectedContractStoreHash(t) {
+		t.Fatal("selected target must differ from the source run artifact")
+	}
+	if _, err := pg.EnsureRootedSource(ctx, targetRoot); err != nil {
+		t.Fatalf("retain selected target root: %v", err)
+	}
 	bundleSource, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		t.Fatalf("NewSourceArtifactFact: %v", err)
 	}
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, bundleSource), targetRoot.Admission())
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: bundleHash}, bundleSource))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
