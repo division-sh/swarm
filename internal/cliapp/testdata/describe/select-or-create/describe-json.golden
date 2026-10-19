@@ -1640,17 +1640,6 @@
       }
     },
     {
-      "path": "pack_sources[\"provider.github.connector.connector\"].tools[\"github.add_labels_to_issue\"].effect_class",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.github.connector",
-        "source_file": "provider-connectors/github/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "pack_sources[\"provider.github.connector.connector\"].tools[\"github.add_labels_to_issue\"].handler_type",
       "provenance": {
         "origin": "authored",
@@ -2135,17 +2124,6 @@
       }
     },
     {
-      "path": "pack_sources[\"provider.github.connector.connector\"].tools[\"github.create_issue\"].effect_class",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.github.connector",
-        "source_file": "provider-connectors/github/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "pack_sources[\"provider.github.connector.connector\"].tools[\"github.create_issue\"].handler_type",
       "provenance": {
         "origin": "authored",
@@ -2565,17 +2543,6 @@
     },
     {
       "path": "pack_sources[\"provider.github.connector.connector\"].tools[\"github.create_issue_comment\"].description",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.github.connector",
-        "source_file": "provider-connectors/github/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "pack_sources[\"provider.github.connector.connector\"].tools[\"github.create_issue_comment\"].effect_class",
       "provenance": {
         "origin": "authored",
         "pack_identity": "provider.github.connector",
@@ -3082,17 +3049,6 @@
     },
     {
       "path": "pack_sources[\"provider.github.connector.generated_profile\"].operations[0].description",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.github.connector",
-        "source_file": "catalog/generator-profiles/github.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "pack_sources[\"provider.github.connector.generated_profile\"].operations[0].effect_class",
       "provenance": {
         "origin": "authored",
         "pack_identity": "provider.github.connector",
@@ -3697,17 +3653,6 @@
       }
     },
     {
-      "path": "pack_sources[\"provider.github.connector.generated_profile\"].operations[1].effect_class",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.github.connector",
-        "source_file": "catalog/generator-profiles/github.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "pack_sources[\"provider.github.connector.generated_profile\"].operations[1].fixture",
       "provenance": {
         "origin": "authored",
@@ -4281,17 +4226,6 @@
     },
     {
       "path": "pack_sources[\"provider.github.connector.generated_profile\"].operations[2].description",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.github.connector",
-        "source_file": "catalog/generator-profiles/github.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "pack_sources[\"provider.github.connector.generated_profile\"].operations[2].effect_class",
       "provenance": {
         "origin": "authored",
         "pack_identity": "provider.github.connector",
@@ -5127,17 +5061,6 @@
       }
     },
     {
-      "path": "pack_sources[\"provider.microsoft_graph.connector.connector\"].tools[\"microsoft_graph.send_mail\"].effect_class",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.microsoft_graph.connector",
-        "source_file": "provider-connectors/microsoft_graph/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "pack_sources[\"provider.microsoft_graph.connector.connector\"].tools[\"microsoft_graph.send_mail\"].handler_type",
       "provenance": {
         "origin": "authored",
@@ -5589,17 +5512,6 @@
       }
     },
     {
-      "path": "pack_sources[\"provider.notion.connector.connector\"].tools[\"notion.append_block_children\"].effect_class",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.notion.connector",
-        "source_file": "provider-connectors/notion/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "pack_sources[\"provider.notion.connector.connector\"].tools[\"notion.append_block_children\"].handler_type",
       "provenance": {
         "origin": "authored",
@@ -5996,17 +5908,6 @@
       }
     },
     {
-      "path": "pack_sources[\"provider.slack.connector.connector\"].tools[\"slack.post_message\"].effect_class",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.slack.connector",
-        "source_file": "provider-connectors/slack/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "pack_sources[\"provider.slack.connector.connector\"].tools[\"slack.post_message\"].handler_type",
       "provenance": {
         "origin": "authored",
@@ -6360,17 +6261,6 @@
     },
     {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.answer_callback\"].description",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.answer_callback\"].effect_class",
       "provenance": {
         "origin": "authored",
         "pack_identity": "provider.telegram.connector",
@@ -6788,17 +6678,6 @@
       }
     },
     {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.apply_webhook\"].effect_class",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.apply_webhook\"].handler_type",
       "provenance": {
         "origin": "authored",
@@ -7196,17 +7075,6 @@
     },
     {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.edit_message\"].description",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.edit_message\"].effect_class",
       "provenance": {
         "origin": "authored",
         "pack_identity": "provider.telegram.connector",
@@ -8119,17 +7987,6 @@
       }
     },
     {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.identify_bot\"].effect_class",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.identify_bot\"].handler_type",
       "provenance": {
         "origin": "authored",
@@ -8428,17 +8285,6 @@
     },
     {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.install_inbox_commands\"].description",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.install_inbox_commands\"].effect_class",
       "provenance": {
         "origin": "authored",
         "pack_identity": "provider.telegram.connector",
@@ -9088,17 +8934,6 @@
     },
     {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.install_shared_inbox_commands\"].description",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.install_shared_inbox_commands\"].effect_class",
       "provenance": {
         "origin": "authored",
         "pack_identity": "provider.telegram.connector",
@@ -9835,17 +9670,6 @@
       }
     },
     {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.read_bot_address\"].effect_class",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.read_bot_address\"].handler_type",
       "provenance": {
         "origin": "authored",
@@ -10155,17 +9979,6 @@
     },
     {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.read_chat_menu_button\"].description",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.read_chat_menu_button\"].effect_class",
       "provenance": {
         "origin": "authored",
         "pack_identity": "provider.telegram.connector",
@@ -10616,17 +10429,6 @@
       }
     },
     {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.read_default_menu_button\"].effect_class",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.read_default_menu_button\"].handler_type",
       "provenance": {
         "origin": "authored",
@@ -10958,17 +10760,6 @@
     },
     {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.read_inbox_commands\"].description",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.read_inbox_commands\"].effect_class",
       "provenance": {
         "origin": "authored",
         "pack_identity": "provider.telegram.connector",
@@ -11662,17 +11453,6 @@
     },
     {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.read_shared_inbox_commands\"].description",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.read_shared_inbox_commands\"].effect_class",
       "provenance": {
         "origin": "authored",
         "pack_identity": "provider.telegram.connector",
@@ -12453,17 +12233,6 @@
       }
     },
     {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.read_webhook\"].effect_class",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.read_webhook\"].handler_type",
       "provenance": {
         "origin": "authored",
@@ -12740,17 +12509,6 @@
     },
     {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.send_interactive\"].description",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.send_interactive\"].effect_class",
       "provenance": {
         "origin": "authored",
         "pack_identity": "provider.telegram.connector",
@@ -13587,17 +13345,6 @@
     },
     {
       "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.send_message\"].description",
-      "provenance": {
-        "origin": "authored",
-        "pack_identity": "provider.telegram.connector",
-        "source_file": "provider-connectors/telegram/connector.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "pack_sources[\"provider.telegram.connector.connector\"].tools[\"telegram.send_message\"].effect_class",
       "provenance": {
         "origin": "authored",
         "pack_identity": "provider.telegram.connector",
@@ -21085,16 +20832,6 @@
       }
     },
     {
-      "path": "platform.events[\"platform.activity_requested\"].payload.attempt",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "platform.events[\"platform.activity_requested\"].payload.bundle_hash",
       "provenance": {
         "origin": "authored",
@@ -21126,16 +20863,6 @@
     },
     {
       "path": "platform.events[\"platform.activity_requested\"].payload.chain_depth",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.events[\"platform.activity_requested\"].payload.effect_class",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",
@@ -21196,16 +20923,6 @@
     },
     {
       "path": "platform.events[\"platform.activity_requested\"].payload.flow_instance.type",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.events[\"platform.activity_requested\"].payload.fork_policy",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",
@@ -21336,26 +21053,6 @@
     },
     {
       "path": "platform.events[\"platform.activity_requested\"].payload.rejected_event.type",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.events[\"platform.activity_requested\"].payload.retry_backoff",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.events[\"platform.activity_requested\"].payload.retry_max_attempts",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",
