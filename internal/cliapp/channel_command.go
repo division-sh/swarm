@@ -578,6 +578,10 @@ func channelClaimantConfirmationRequired(result channelOnboardingResult, now tim
 }
 
 func waitForChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, begun channelOnboardingResult, opts rootCommandOptions) (channelOnboardingResult, error) {
+	continuation := ""
+	if begun.Operation.Provider != "whatsapp" {
+		continuation = fmt.Sprintf("; resume operation %s with `swarm channel resume %s`", begun.Operation.OperationID, begun.Operation.OperationID)
+	}
 	wait := opts.channelConnectWait
 	if wait <= 0 {
 		wait = 2 * time.Minute
@@ -600,9 +604,9 @@ func waitForChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, be
 		}
 		select {
 		case <-ctx.Done():
-			return channelOnboardingResult{}, fmt.Errorf("%w: stopped waiting for the operator's code", ctx.Err())
+			return channelOnboardingResult{}, fmt.Errorf("%w: stopped waiting for the operator's code%s", ctx.Err(), continuation)
 		case <-deadline.C:
-			return channelOnboardingResult{}, errors.New("timed out waiting for the operator's code")
+			return channelOnboardingResult{}, fmt.Errorf("timed out waiting for the operator's code%s", continuation)
 		case <-ticker.C:
 		}
 	}
