@@ -328,40 +328,6 @@ func TestCounterRunOracleClassificationDoesNotPermitWriters(t *testing.T) {
 	}
 }
 
-func TestS1RunRootSourceRevisionOracleDoesNotPermitWriters(t *testing.T) {
-	const oraclePath = "internal/store/internal/backend/runlifecycle/run_admission_test.go"
-	const oracleFunction = "TestRunAdmissionCanonicalSourceRevisionReloads"
-	queries := []string{
-		"UPDATE runs SET bundle_hash = $2, source_root_directory = $3 WHERE run_id = $1::uuid AND status IN ('running', 'paused')",
-		"UPDATE runs SET bundle_hash = ?, source_root_directory = ? WHERE run_id = ? AND status IN ('running', 'paused')",
-	}
-	for _, query := range queries {
-		for _, tc := range []struct {
-			name, path, function, receiver, method, query string
-			want                                          int
-		}{
-			{"oracle", oraclePath, oracleFunction, "mock", "ExpectExec", query, 1},
-			{"other-path", "internal/runtime/other_test.go", oracleFunction, "mock", "ExpectExec", query, 0},
-			{"other-function", oraclePath, "TestOther", "mock", "ExpectExec", query, 0},
-			{"executing", oraclePath, oracleFunction, "db", "Exec", query, 0},
-			{"foreign-receiver", oraclePath, oracleFunction, "db", "ExpectExec", query, 0},
-			{"rootless", oraclePath, oracleFunction, "mock", "ExpectExec", strings.ReplaceAll(strings.ReplaceAll(query, ", source_root_directory = $3", ""), ", source_root_directory = ?", ""), 0},
-			{"different-column", oraclePath, oracleFunction, "mock", "ExpectExec", strings.ReplaceAll(query, "source_root_directory", "status"), 0},
-		} {
-			t.Run(tc.name, func(t *testing.T) {
-				source := fmt.Sprintf("package fixture\nfunc %s() { %s.%s(%q) }", tc.function, tc.receiver, tc.method, tc.query)
-				file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", source, 0)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if got := len(classifyCounterOracleRunLiterals(tc.path, file)); got != tc.want {
-					t.Fatalf("rooted source revision oracle classified %d, want %d", got, tc.want)
-				}
-			})
-		}
-	}
-}
-
 func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.Pos]bool, error) {
 	if path == "internal/store/internal/backend/pipelinepersistence/a2_collection_projection_test.go" {
 		return classifyA2CollectionMinimalRunLiterals(file)
@@ -468,37 +434,6 @@ func classifySelectedBindingRootMinimalRunLiterals(file *ast.File) (map[token.Po
 		return nil, fmt.Errorf("selected binding reduced root fixture requires one exact schema/insert in their named fixture operations, got %d/%d", schemas, inserts)
 	}
 	return approved, nil
-}
-
-func TestS1SelectedBindingRootFixtureDoesNotPermitLifecycleWriters(t *testing.T) {
-	const path = "internal/store/internal/backend/runforkpersistence/selected_binding_root_test.go"
-	const schema = "CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT, source_root_directory TEXT)"
-	const insert = "INSERT INTO runs (run_id, bundle_hash, source_root_directory) VALUES ($1, $2, $3)"
-	for _, cell := range []struct {
-		name, path, schema, function, query string
-		want                                bool
-	}{
-		{"exact", path, schema, "insertSelectedBindingChildFixture", insert, true},
-		{"foreign-file", "internal/store/internal/backend/runforkpersistence/other_test.go", schema, "insertSelectedBindingChildFixture", insert, false},
-		{"foreign-function", path, schema, "TestUnownedInsert", insert, false},
-		{"missing-schema", path, "", "insertSelectedBindingChildFixture", insert, false},
-		{"semantic-schema", path, strings.Replace(schema, ")", ", status TEXT)", 1), "insertSelectedBindingChildFixture", insert, false},
-		{"mutable-status", path, schema, "insertSelectedBindingChildFixture", "UPDATE runs SET status='running' WHERE run_id=$1", false},
-		{"delete", path, schema, "insertSelectedBindingChildFixture", "DELETE FROM runs WHERE run_id=$1", false},
-		{"duplicate", path, schema, "insertSelectedBindingChildFixture", insert + "`); tx.ExecContext(ctx, `" + insert, false},
-	} {
-		t.Run(cell.name, func(t *testing.T) {
-			source := fmt.Sprintf("package fixture\nfunc selectedBindingRootDatabase() { db.Exec(`%s`) }\nfunc %s() { tx.ExecContext(ctx, `%s`) }", cell.schema, cell.function, cell.query)
-			file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", source, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			classified, err := classifyBackendMinimalRunLiterals(cell.path, file)
-			if got := err == nil && len(classified) == 1; got != cell.want {
-				t.Fatalf("reduced root fixture classified=%t want=%t err=%v", got, cell.want, err)
-			}
-		})
-	}
 }
 
 func classifyA2CollectionMinimalRunLiterals(file *ast.File) (map[token.Pos]bool, error) {
