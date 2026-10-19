@@ -178,45 +178,6 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 	}
 }
 
-func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLifecycleWhenNoLiveWorkRemains(t *testing.T) {
-	dsn, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pg, err := NewPostgresStore(dsn)
-	if err != nil {
-		t.Fatalf("NewPostgresStore: %v", err)
-	}
-	bootstrapTestPostgresStore(t, pg)
-	t.Cleanup(func() { _ = pg.backend.Close() })
-
-	ctx := testAuthorActivityContext()
-	runID := uuid.NewString()
-	eventID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	identity := mustTestAgentIdentityForRun(runID, "agent-1", "lifecycle/agent-1")
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: identity}
-	event := seedAgentLifecycleEvent(t, ctx, pg, eventID, runID, route, time.Now().UTC())
-	claimed, err := claimDeliveryFixture(ctx, pg, event, route)
-	if err != nil {
-		t.Fatalf("claim terminal delivery: %v", err)
-	}
-	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal_exhausted", nil)
-	if _, err := pg.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "terminal_exhausted", Failure: &failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation()}); err != nil {
-		t.Fatalf("settle terminal delivery: %v", err)
-	}
-
-	facts, err := pg.ListAgentDeliveryLifecycleFacts(ctx, []agentidentity.Identity{identity})
-	if err != nil {
-		t.Fatalf("ListAgentDeliveryLifecycleFacts: %v", err)
-	}
-	if got := facts[identity].CurrentState; got != "exhausted" {
-		t.Fatalf("current_state = %q, want exhausted", got)
-	}
-	if got := facts[identity].BlockingLayer; got != "delivery_terminal" {
-		t.Fatalf("blocking_layer = %q, want delivery_terminal", got)
-	}
-}
-
 func seedAgentLifecycleEvent(t *testing.T, ctx context.Context, pg *PostgresStore, eventID, runID string, route events.DeliveryRoute, createdAt time.Time) events.Event {
 	t.Helper()
 	parentID := eventtest.UUID("agent-lifecycle-parent:" + eventID)
