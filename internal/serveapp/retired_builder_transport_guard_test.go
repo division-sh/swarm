@@ -64,7 +64,8 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 		".github/audit-artifacts/issue-2627-preimplementation.md": 1,
 		// Exact historical and current factory/producer-label snapshots, pinned by
 		// the finite codemod guards; these do not restore the retired product.
-		"tools/fixture-codemod/pipeline-observations/recipes.json":                          8,
+		// #2700/6263385066 retires the completed container recipe's three snapshots.
+		"tools/fixture-codemod/pipeline-observations/recipes.json":                          5,
 		"tools/fixture-codemod/pipeline-observations/family144-transitions.json":            4,
 		"internal/runtime/bootverify/workflow_transition_relation_test.go":                  1,
 		"internal/runtime/semanticview/lifecycle_emitter_ownership_guard_test.go":           1,
@@ -224,7 +225,7 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 	const recipePath = "tools/fixture-codemod/pipeline-observations/recipes.json"
 	recipes, recipeErr := os.ReadFile(filepath.Join(repoRootForTest(), recipePath))
 	recipeCandidates, scanErr := retiredBuilderCandidates(recipePath, recipes)
-	if recipeErr != nil || scanErr != nil || len(recipeCandidates) != 8 {
+	if recipeErr != nil || scanErr != nil || len(recipeCandidates) != 5 {
 		t.Fatalf("exact runtime factory snapshot inventory changed: %+v, %v, %v", recipeCandidates, recipeErr, scanErr)
 	}
 	for _, candidate := range recipeCandidates {
@@ -234,7 +235,7 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 	}
 	extraRecipe := append(append([]byte(nil), recipes...), []byte("\n\"After\": \"func foreignFactory() { builder() }\"\n")...)
 	extraCandidates, extraErr := retiredBuilderCandidates(recipePath, extraRecipe)
-	if extraErr != nil || len(extraCandidates) != 9 || isExplicitUnrelatedBuilderText(recipePath, extraCandidates[8].text) {
+	if extraErr != nil || len(extraCandidates) != 6 || isExplicitUnrelatedBuilderText(recipePath, extraCandidates[5].text) {
 		t.Fatalf("foreign snapshot text escaped exact inventory: %+v, %v", extraCandidates, extraErr)
 	}
 	const transitionPath = "tools/fixture-codemod/pipeline-observations/family144-transitions.json"
