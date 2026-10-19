@@ -560,3 +560,26 @@ A failed constructor is not evidence of a closed-original refusal. All existing
 cancellation, 50ms pending reuse, identity, post-close and one-selection checks
 remain unchanged. The single rehearsal stays held until B's shared-runtime
 landing is integrated and its checks plus fresh preflight pass.
+
+### Composition Simplification Accounting
+
+Reviewer-g [6255136214](https://github.com/division-sh/swarm/pull/2614#issuecomment-6255136214)
+authorizes the in-place branching simplification, not a startup contract change.
+The `buildRuntimeComposition` callers remain `Run` and the existing private
+runtime test setup. A01-A04, A10, A19-A22 and A26-A27 retain their original
+P01-P03, P08, P10, P16-P22 and 2577 native retirement/boot/publication proofs.
+Nil-safe shutdown owners now receive the same calls directly; the existing
+nonnegative exit-code fold is `max(code, 1)`; primary-context initialization
+is shared; an empty additional-context list reaches the existing empty loop.
+No source, lease, registration, listener, readiness or admission check moves.
+
+The changed-owner execution proofs are
+`TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker`,
+`TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe`
+and `TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness`, plus the
+existing activated-lifecycle join/close controls. The startup-abort matrix's
+600s aggregate interruption remains unclassified, not PASS or a waived leaf;
+reviewer-g [6260035692](https://github.com/division-sh/swarm/pull/2614#issuecomment-6260035692)
+keeps it selected for hosted arbitration and permits these narrower receipts
+for FINAL HEAD preparation. The predicate fingerprint refresh records only
+this approved body change; it grants no authority or qualification credit.
