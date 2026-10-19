@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -508,6 +509,7 @@ waiting:
 				Title string `json:"title"`
 			} `json:"decision_card"`
 			Notice struct {
+				ID   string `json:"mailbox_id"`
 				Type string `json:"type"`
 			} `json:"notice"`
 		} `json:"items"`
@@ -518,19 +520,17 @@ waiting:
 	if page.NextCursor != "" || page.Unread != 0 {
 		t.Fatal("served baseline Inbox has unexpected notices or pages", page)
 	}
-	lines := []string{"Inbox", "Unread notices: 0", "No open items"}
-	if len(page.Items) > 0 {
-		lines[2] = "Open items:"
-		for _, item := range page.Items {
-			label := item.Card.Title
-			if item.Kind == "notice" {
-				label = item.Notice.Type
-			}
-			if label == "" {
-				t.Fatal("public Inbox entry lost its canonical label", item)
-			}
-			lines = append(lines, "- "+label)
+	var entries []render.InboxEntry
+	for _, item := range page.Items {
+		entry := render.InboxEntry{Kind: "card", ID: item.Card.ID, Label: item.Card.Title, Status: "pending"}
+		if item.Kind == "notice" {
+			entry = render.InboxEntry{Kind: "notice", ID: item.Notice.ID, Label: item.Notice.Type, Status: "pending"}
 		}
+		entries = append(entries, entry)
+	}
+	baseText, err := render.InboxText(page.Unread, entries, page.NextCursor != "")
+	if err != nil {
+		t.Fatal(err)
 	}
 	for _, card := range cards {
 		matched := false
@@ -563,9 +563,53 @@ waiting:
 			if !found || receipt.DeliveryReference != sent.ID {
 				continue
 			}
-			want := strings.Join(lines, "\n") + "\nReference: " + plan.SourceID
-			if sent.Body.GetConversation() != want || sent.ID != strings.ReplaceAll(receipt.OperationID, "-", "") {
-				t.Fatal("decrypted native Inbox differs from canonical public list/exact journal", sent.Body.GetConversation(), want, receipt)
+			if sent.ID != strings.ReplaceAll(receipt.OperationID, "-", "") || receipt.RenderID != plan.CurrentRenderID {
+				t.Fatal("decrypted native Inbox differs from its exact journal identity", sent.ID, receipt)
+			}
+			var uncertain []render.Candidate
+			for _, candidate := range plans {
+				if candidate.Audience == plan.Audience && candidate.State == "uncertain" &&
+					(candidate.SourceKind == "card" || candidate.SourceKind == "notice") {
+					uncertain = append(uncertain, candidate)
+				}
+			}
+			sort.Slice(uncertain, func(i, j int) bool {
+				return uncertain[i].SourceKind+uncertain[i].SourceID < uncertain[j].SourceKind+uncertain[j].SourceID
+			})
+			text := baseText
+			var recovery []render.RecoveryChoice
+			for i, candidate := range uncertain {
+				var detail struct {
+					Card struct {
+						ID            string    `json:"card_id"`
+						Status        string    `json:"status"`
+						DeferredUntil time.Time `json:"deferred_until"`
+					} `json:"decision_card"`
+				}
+				requireServedJSONRPCResult(t, endpoint, "mailbox.get", map[string]any{"mailbox_id": candidate.SourceID}, &detail)
+				if candidate.SourceKind != "card" || detail.Card.ID != candidate.SourceID || detail.Card.Status != "pending" {
+					t.Fatal("baseline Inbox uncertainty no longer names its pending canonical card", candidate, detail)
+				}
+				if i == 0 {
+					text += "\nOlder copies may be outdated. Current state:"
+				}
+				text += "\ncard [" + candidate.SourceID[:8] + "] Decision: pending"
+				if !detail.Card.DeferredUntil.IsZero() {
+					text += "; Deferred until: " + detail.Card.DeferredUntil.UTC().Format(time.RFC3339Nano)
+				}
+				recovery = append(recovery, render.RecoveryChoice{DeliveryID: candidate.DeliveryID,
+					Label: "Resend card [" + candidate.SourceID[:8] + "]"})
+			}
+			frozen, err := render.FreezeResponse(plan.SourceID, text, plan.Audience)
+			if len(recovery) != 0 {
+				frozen, err = render.FreezeRecoveryInbox(plan.SourceID, text, recovery, plan.Audience)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := frozen.FullText + "\nReference: " + plan.SourceID
+			if sent.Body.GetConversation() != want {
+				t.Fatal("decrypted native Inbox differs from canonical public state and recovery presentation", sent.Body.GetConversation(), want)
 			}
 			return cards
 		}
