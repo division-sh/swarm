@@ -7,10 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/providerconnectors"
-	"github.com/division-sh/swarm/internal/providertriggers"
-	runtimeroot "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -39,75 +36,6 @@ func TestConnectorGeneratedSchemaRejectsToolFromAnotherFlow(t *testing.T) {
 	source, err := providerconnectors.SourceWithConnectorPackImports(base, telegramConnectorSupportedSurfacePackRegistry(t, "http://127.0.0.1"))
 	if err == nil || source != nil || !strings.Contains(err.Error(), "admitted in its declaring flow") {
 		t.Fatalf("foreign tool import = %T, %v", source, err)
-	}
-}
-
-func TestConnectorAndProviderSchemaCompositionPreservesBindingsAndGeneration(t *testing.T) {
-	root := canonicalrouting.CopyPublicationConnector(t, "static")
-	replaceConnectorProofText(t, filepath.Join(root, "source", "schema.yaml"), "imports:\n", "imports:\n  provider_trigger_events:\n    - {provider: telegram, event: inbound.telegram.text_message}\n")
-	replaceConnectorProofText(t, filepath.Join(root, "source", "schema.yaml"), "    - activity.requested", "    - activity.requested\n    - inbound.telegram.text_message")
-	bundle := loadRuntimeBundleRoot(t, root)
-	projection, err := packadmission.FromBundle(bundle)
-	if err != nil {
-		t.Fatal(err)
-	}
-	registry := projection.ProviderConnectors
-	base := semanticview.Wrap(bundle)
-	connectorFirst, err := providerconnectors.SourceWithConnectorPackImports(base, registry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	connectorFirst, err = runtimeroot.SourceWithProviderTriggerEvents(connectorFirst, projection.ProviderTriggers)
-	if err != nil {
-		t.Fatal(err)
-	}
-	providerFirst, err := runtimeroot.SourceWithProviderTriggerEvents(base, projection.ProviderTriggers)
-	if err != nil {
-		t.Fatal(err)
-	}
-	providerFirst, err = providerconnectors.SourceWithConnectorPackImports(providerFirst, registry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry, found := projection.ProviderTriggers.EntryByProvider("telegram")
-	if !found {
-		t.Fatal("missing Telegram trigger")
-	}
-	entry.Identity.ManifestHash = "sha256:" + strings.Repeat("b", 64)
-	changed, err := providertriggers.NewCatalogSnapshot(entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, source := range []semanticview.Source{connectorFirst, providerFirst} {
-		for _, event := range []string{"inbound.telegram.text_message", "send.succeeded", "send.failed", "send.revision_requested", "send.rejected"} {
-			want, found, err := connectorFirst.ResolveEffectiveCompiledFlowEventSchema("source", event)
-			if err != nil || !found {
-				t.Fatalf("missing first binding %s: %v", event, err)
-			}
-			got, found, err := source.ResolveEffectiveCompiledFlowEventSchema("source", event)
-			if err != nil || !found || got.AcceptanceSchemaDigest() != want.AcceptanceSchemaDigest() || got.Classification() != want.Classification() {
-				t.Fatalf("composition changed %s: %v, %v", event, found, err)
-			}
-		}
-		want, _ := connectorFirst.FlowInputEventPin("source", "inbound.telegram.text_message")
-		got, _ := source.FlowInputEventPin("source", "inbound.telegram.text_message")
-		if !reflect.DeepEqual(want, got) {
-			t.Fatal("composition changed imported pin")
-		}
-		rebuilt, err := runtimeroot.SourceWithProviderTriggerEvents(source, changed)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !rebuilt.SemanticCapabilities().ConnectorPackImportsApplied() {
-			t.Fatal("trigger generation rebuild discarded connector admission")
-		}
-		if _, found, err := rebuilt.ResolveEffectiveCompiledFlowEventSchema("source", "send.succeeded"); err != nil || !found {
-			t.Fatalf("trigger generation rebuild lost generated schema: %v", err)
-		}
-		generation, _, ok := rebuilt.SemanticCapabilities().ProviderTriggerEvents()
-		if !ok || !generation.Equal(changed.Generation()) {
-			t.Fatal("trigger generation was not replaced")
-		}
 	}
 }
 

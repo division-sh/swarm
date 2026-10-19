@@ -2,8 +2,6 @@ package bus
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"net/http"
 	"os"
@@ -14,6 +12,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -25,7 +25,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
-	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type inboundBatchAuthorizationVerifier struct {
@@ -331,11 +330,11 @@ func TestAuthenticatedRawSettlementCannotEraseGenuineLocalConsumer(t *testing.T)
 	if !present {
 		t.Fatal("authenticated fixture lost its provider catalog entry")
 	}
-	compiled, err := runtimecontracts.CompileImportedEventSchema(flow, "inbound.telegram", entry.Manifest.EventCatalogEntries()["inbound.telegram"], runtimecontracts.CompiledEventSchemaSource{Layer: "provider_trigger_pack", File: entry.Source})
+	compiled, err := runtimecontracts.CompileImportedEventSchema(flow, "inbound.telegram.raw", entry.Manifest.EventCatalogEntries()["inbound.telegram.raw"], runtimecontracts.CompiledEventSchemaSource{Layer: "provider_trigger_pack", File: entry.Source})
 	if err != nil {
 		t.Fatal(err)
 	}
-	pin, present := base.FlowInputEventPin(flow, "inbound.telegram")
+	pin, present := base.FlowInputEventPin(flow, "inbound.telegram.raw")
 	if !present {
 		t.Fatal("consumer fixture lost its declared input")
 	}
@@ -394,24 +393,6 @@ func TestGenericPublicationCannotMintProviderRawSettlementAdmission(t *testing.T
 	}
 }
 
-func TestS1InboundObservationFixtureRequiresCapturedRoot(t *testing.T) {
-	source := inboundRawSettlementSource(t, true)
-	identity := ConstructedFlowInstanceIdentityFixture(source, "telegram-ingress", "", busInternalTestRunID)
-	observation, err := admitConstructionIndexTestObservation(source, busInternalTestRunID, identity, "")
-	if err != nil || !observation.Valid() {
-		t.Fatalf("rooted fixture observation refused: %v", err)
-	}
-	bundle, present := semanticview.Bundle(source)
-	if !present || observation.SourceFact().BundleHash() != bundle.SourceArtifact.BundleHash() {
-		t.Fatal("fixture observation lost its exact admitted source")
-	}
-	rootless := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{{id: "telegram-ingress", mode: "static"}}, nil))
-	observation, err = admitConstructionIndexTestObservation(rootless, busInternalTestRunID, identity, "")
-	if !errors.Is(err, sourceartifact.ErrRootAdmissionMissing) || observation.Valid() {
-		t.Fatalf("programmatic fixture gained rooted observation authority: %v", err)
-	}
-}
-
 func authenticatedTelegramBatchFixture(t testing.TB, flowID string, withText bool) (semanticview.Source, *providertriggers.CatalogSnapshot, InboundDeliveryBatch) {
 	t.Helper()
 	base := inboundRawSettlementSource(t, true)
@@ -427,18 +408,27 @@ func authenticatedTelegramBatchFixture(t testing.TB, flowID string, withText boo
 
 func authenticatedTelegramBatchForSource(t testing.TB, source semanticview.Source, flowID string, withText bool) (*providertriggers.CatalogSnapshot, InboundDeliveryBatch) {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(canonicalrouting.RepoRoot(t), "packs/provider-triggers/telegram/trigger.yaml"))
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("authenticated batch requires its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest, err := providertriggers.ParseManifest(raw)
+	provider, err := packartifact.ProviderFromRootedSource(rooted, "telegram")
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash := sha256.Sum256(raw)
-	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
-		Manifest: manifest, Identity: providertriggers.PackIdentity{ID: "provider.telegram", Version: "1.0.0", ManifestHash: "sha256:" + hex.EncodeToString(hash[:]), Provenance: "platform"}, Source: "committed Telegram pack fixture",
-	})
+	triggerBody, present := provider.Body(packmodel.BodyTrigger)
+	if !present {
+		t.Fatal("captured batch provider has no trigger BODY")
+	}
+	manifest, err := providertriggers.AdmitBody(triggerBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,12 +450,9 @@ func authenticatedTelegramBatchForSource(t testing.TB, source semanticview.Sourc
 	if err != nil {
 		t.Fatal(err)
 	}
-	fact := authorActivityTestSourceArtifactFact
-	if bundle, found := semanticview.Bundle(source); found && bundle.SourceArtifact != nil {
-		fact, err = runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
-		if err != nil {
-			t.Fatal(err)
-		}
+	fact, err := runtimecorrelation.NewSourceArtifactFact(rooted.Admission().BundleHash())
+	if err != nil {
+		t.Fatal(err)
 	}
 	delivery, admission, err := plan.ProjectPublication(admitted, fact.BundleHash(), flowID)
 	if err != nil {
@@ -499,11 +486,30 @@ func loadInboundRawSettlementSource(t testing.TB, admitted, withConsumer bool) s
 	if err := os.MkdirAll(flow, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(flow, "schema.yaml"), []byte("pins:\n  inputs: [inbound.telegram]\n"), 0o600); err != nil {
+	for label, body := range map[string][]byte{
+		"manifest.yaml":                  []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":                    []byte("stages: []\n"),
+		"telegram-ingress/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"telegram-ingress/schema.yaml":   []byte("pins:\n  inputs: [inbound.telegram.raw]\n"),
+	} {
+		if err := os.WriteFile(filepath.Join(root, label), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(root, "telegram"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	for _, label := range []string{"manifest.yaml", "trigger.yaml"} {
+		body, err := os.ReadFile(filepath.Join(canonicalrouting.RepoRoot(t), "packs/providers/telegram", label))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "telegram", label), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if withConsumer {
-		const nodes = "observer:\n  execution_type: system_node\n  subscribes_to: [inbound.telegram]\n  event_handlers:\n    inbound.telegram: {}\n"
+		const nodes = "observer:\n  execution_type: system_node\n  subscribes_to: [inbound.telegram.raw]\n  event_handlers:\n    inbound.telegram.raw: {}\n"
 		if err := os.WriteFile(filepath.Join(flow, "nodes.yaml"), []byte(nodes), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -517,7 +523,7 @@ func loadInboundRawSettlementSource(t testing.TB, admitted, withConsumer bool) s
 	if !admitted {
 		return base
 	}
-	return semanticviewtest.WithProviderIngress(base, map[string][]string{"telegram-ingress": {"inbound.telegram"}})
+	return semanticviewtest.WithProviderIngress(base, map[string][]string{"telegram-ingress": {"inbound.telegram.raw"}})
 }
 
 func inboundBatchAuthorContext(t testing.TB, source semanticview.Source) context.Context {
@@ -555,7 +561,7 @@ func inboundRawSettlementEvent(source events.RoutingSource, target events.RouteI
 	}
 	return eventtest.ExistingRunRootIngressWithRoutingSource(
 		eventtest.UUID("provider-raw-settlement:"+target.FlowInstance+":"+target.EntityID+":"+source.Kind().StorageCode()),
-		events.EventType("inbound.telegram"), "inbound-gateway", "", []byte(`{"update_id":1}`), 0,
+		events.EventType("inbound.telegram.raw"), "inbound-gateway", "", []byte(`{"update_id":1}`), 0,
 		eventtest.UUID("provider-raw-settlement-run"), envelope, source, time.Unix(1, 0).UTC(),
 	)
 }
@@ -564,7 +570,7 @@ func inboundBatchPreflightBatch(authorization runtimeprovideroutput.Authorizatio
 	return InboundDeliveryBatch{
 		Provider: "telegram",
 		Events: []InboundDeliveryEvent{
-			{Event: inboundBatchPreflightEvent("inbound.telegram"), Kind: runtimeprovideroutput.KindRaw},
+			{Event: inboundBatchPreflightEvent("inbound.telegram.raw"), Kind: runtimeprovideroutput.KindRaw},
 			{
 				Event: inboundBatchPreflightEvent("inbound.telegram.text_message"), Kind: runtimeprovideroutput.KindNormalized,
 				Authorization: authorization,

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -533,22 +535,27 @@ func runtimeContextTestWakeup(t *testing.T, key string, dueAt time.Time) runtime
 
 func runtimeAdmissionTestCatalog(t *testing.T, hashToken string) *providertriggers.CatalogSnapshot {
 	t.Helper()
-	manifest, err := providertriggers.ParseManifest([]byte(`provider: acme
-secret: {required: true}
+	provider, err := packartifact.AdmitProviderMembers("acme", map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw]}, cannot: [bypass journal]}\n"),
+		"trigger.yaml": []byte("# captured revision " + hashToken + "\n" + `secret: {required: true}
 signature: {type: token_equality, header: X-Acme-Token}
 delivery_id: {header: X-Acme-Delivery, required: true}
 event_type: {literal: event, required: true}
-event_name: {literal: inbound.acme}
-`))
+event_name: {literal: raw}
+`),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
-		Identity: providertriggers.PackIdentity{
-			ID: "provider.acme", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat(hashToken, 64), Provenance: packs.ProvenanceExternal,
-		},
-		Manifest: manifest, Source: "test", SourcePath: "/packs/acme",
-	})
+	body, present := provider.Body(packmodel.BodyTrigger)
+	if !present {
+		t.Fatal("captured Acme provider has no trigger BODY")
+	}
+	manifest, err := providertriggers.AdmitBody(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}

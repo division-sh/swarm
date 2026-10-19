@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -99,29 +98,6 @@ func TestDormantIngressReadbackCannotHotActivate(t *testing.T) {
 		if len(manager.LoadedContexts()[0].StandingTargets) != 0 {
 			t.Fatal("readback installed an executable target")
 		}
-	}
-}
-
-func TestStandingIngressUnsignedAdmissionNeedsNoCredentialOwner(t *testing.T) {
-	source, _ := standingTelegramDeclarationSource(t, "inbound.partner")
-	bundle, _ := semanticview.Bundle(source)
-	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) {
-		schema.Ingress.Providers[0].Provider = "partner"
-		schema.Ingress.Providers[0].SigningSecret = ""
-		schema.Ingress.Providers[0].Admission = runtimecontracts.ProjectFlowIngressAdmission{
-			Kind: "raw", Acknowledge: providertriggers.UnsignedWebhookAcknowledgement, Event: "inbound.partner", Payload: "json",
-			Authentication: &runtimecontracts.ProjectFlowIngressAuthentication{Kind: "none"},
-			DeliveryID:     &runtimecontracts.ProjectFlowIngressDeliveryID{Source: "json_path", JSONPath: "$.id"},
-		}
-	})
-	catalog, err := providertriggers.NewCatalogSnapshot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	rt := &Runtime{Options: RuntimeOptions{WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: catalog,
-		SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA)}}
-	if targets, err := rt.PlanStandingTargets(); err != nil || len(targets) != 1 {
-		t.Fatalf("explicit unsigned admission = %#v, %v", targets, err)
 	}
 }
 

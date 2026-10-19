@@ -25,6 +25,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -864,7 +866,7 @@ func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedR
 	if first.Code != http.StatusAccepted {
 		t.Fatalf("first status = %d, want 202 body=%s", first.Code, first.Body.String())
 	}
-	if !strings.Contains(first.Body.String(), `"event_names":["inbound.telegram","inbound.telegram.text_message"]`) {
+	if !strings.Contains(first.Body.String(), `"event_names":["inbound.telegram.raw","inbound.telegram.text_message"]`) {
 		t.Fatalf("first response does not expose ordered committed children: %s", first.Body.String())
 	}
 	committedEventCount := len(eventStore.events)
@@ -876,7 +878,7 @@ func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedR
 	if duplicate.Code != http.StatusOK || !strings.Contains(duplicate.Body.String(), `"status":"duplicate"`) {
 		t.Fatalf("duplicate status = %d body=%s", duplicate.Code, duplicate.Body.String())
 	}
-	if !strings.Contains(duplicate.Body.String(), `"event_names":["inbound.telegram","inbound.telegram.text_message"]`) {
+	if !strings.Contains(duplicate.Body.String(), `"event_names":["inbound.telegram.raw","inbound.telegram.text_message"]`) {
 		t.Fatalf("duplicate response did not return original ordered children: %s", duplicate.Body.String())
 	}
 	if len(eventStore.events) != committedEventCount {
@@ -950,35 +952,38 @@ func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProject
 	if got := store.callbackCalls.Load(); got != 1 {
 		t.Fatalf("publication callback calls = %d, want 1", got)
 	}
-	if !strings.Contains(contender.Body.String(), `"event_names":["inbound.telegram","inbound.telegram.text_message"]`) {
+	if !strings.Contains(contender.Body.String(), `"event_names":["inbound.telegram.raw","inbound.telegram.text_message"]`) {
 		t.Fatalf("concurrent loser did not return winner batch: %s", contender.Body.String())
 	}
 }
 
 func compiledRedactedNormalizedPlan(t *testing.T, version, projectedType string) (providertriggers.InboundAdmissionPlan, *providertriggers.CatalogSnapshot) {
 	t.Helper()
-	manifest, err := providertriggers.ParseManifest([]byte(fmt.Sprintf(`provider: telegram
-payload_object_required: true
+	provider, err := packartifact.AdmitProviderMembers("telegram", map[string][]byte{
+		"manifest.yaml": []byte(fmt.Sprintf("version: %s\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n", version)),
+		"trigger.yaml": []byte(fmt.Sprintf(`payload_object_required: true
 delivery_id: {literal: delivery-1, required: true}
 event_type: {literal: message, required: true}
-event_name: {literal: inbound.telegram}
+event_name: {literal: raw}
 redact_keys: [text]
 normalized_events:
-  - event: inbound.telegram.text_message
+  - event: text_message
     fields:
       text: {from: message.text, schema: {type: %s}}
-`, projectedType)))
+`, projectedType)),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
-		Manifest: manifest,
-		Identity: providertriggers.PackIdentity{
-			ID: "provider.telegram", Version: version,
-			ManifestHash: "sha256:" + strings.Repeat(version[:1], 64), Provenance: "platform",
-		},
-		Source: "test",
-	})
+	body, present := provider.Body(packmodel.BodyTrigger)
+	if !present {
+		t.Fatal("captured retry provider has no trigger BODY")
+	}
+	manifest, err := providertriggers.AdmitBody(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(manifest)
 	if err != nil {
 		t.Fatalf("NewCatalogSnapshot: %v", err)
 	}
@@ -2765,7 +2770,7 @@ func TestInboundGateway_NoPlanDoesNotInterpretStripeSignature(t *testing.T) {
 }
 
 func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
-	catalog, err := providertriggers.NewCatalogSnapshot()
+	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2834,7 +2839,7 @@ func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
 }
 
 func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T) {
-	catalog, err := providertriggers.NewCatalogSnapshot()
+	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies()
 	if err != nil {
 		t.Fatal(err)
 	}

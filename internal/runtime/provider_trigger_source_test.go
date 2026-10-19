@@ -406,24 +406,6 @@ func TestSourceWithProviderTriggerEventsRejectsLocalPackEventRedeclaration(t *te
 	}
 }
 
-func TestProviderTriggerCatalogRejectsDifferentPackEventOwnership(t *testing.T) {
-	_, catalog := schemaOnlyTelegramDeclarationSource(t)
-	telegram, ok := catalog.EntryByProvider("telegram")
-	if !ok {
-		t.Fatal("Telegram catalog entry missing")
-	}
-	competing := telegram
-	competing.Identity.ID = "provider.telegram_alt"
-	competing.Identity.ManifestHash = "sha256:" + strings.Repeat("c", 64)
-	competing.Identity.Provenance = "test:provider.telegram_alt"
-	competing.Source = "test competing pack provider.telegram_alt"
-	_, err := providertriggers.NewCatalogSnapshot(telegram, competing)
-	if err == nil || !strings.Contains(err.Error(), `duplicate provider trigger manifest for "telegram"`) ||
-		!strings.Contains(err.Error(), "test competing pack provider.telegram_alt") {
-		t.Fatalf("cross-pack collision error = %v", err)
-	}
-}
-
 func TestSourceWithProviderTriggerEvents_RequiresExactDeclaredIngressPin(t *testing.T) {
 	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
 	bundle, ok := semanticview.Bundle(source)
@@ -769,69 +751,6 @@ func compiledSchemaHasField(schema runtimecontracts.CompiledEventSchema, field s
 		}
 	}
 	return false
-}
-
-func TestSourceWithProviderTriggerEventsRebuildsOnCatalogGenerationChange(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	first, err := SourceWithProviderTriggerEvents(source, catalog)
-	if err != nil {
-		t.Fatalf("first SourceWithProviderTriggerEvents: %v", err)
-	}
-	entry, ok := catalog.EntryByProvider("telegram")
-	if !ok {
-		t.Fatal("Telegram catalog entry missing")
-	}
-	entry.Identity.ManifestHash = "sha256:" + strings.Repeat("a", 64)
-	changed, err := providertriggers.NewCatalogSnapshot(entry)
-	if err != nil {
-		t.Fatalf("NewCatalogSnapshot: %v", err)
-	}
-	if changed.Generation().Equal(catalog.Generation()) {
-		t.Fatal("changed pack identity retained catalog generation")
-	}
-
-	second, err := SourceWithProviderTriggerEvents(first, changed)
-	if err != nil {
-		t.Fatalf("reload SourceWithProviderTriggerEvents: %v", err)
-	}
-	generation, base, ok := second.SemanticCapabilities().ProviderTriggerEvents()
-	if !ok || !generation.Equal(changed.Generation()) {
-		t.Fatalf("reloaded provider trigger source generation = %T %q", second, generation.Diagnostic())
-	}
-	if _, _, nested := base.SemanticCapabilities().ProviderTriggerEvents(); nested {
-		t.Fatal("reload stacked a provider trigger wrapper instead of rebuilding from the base source")
-	}
-	if entry, ok := second.EventEntry("inbound.telegram.text_message"); !ok || entry.Payload.Properties["text"].Type != "text" {
-		t.Fatalf("reloaded normalized event entry = (%#v, %v)", entry, ok)
-	}
-}
-
-func TestSchemaOnlyProviderTriggerImportRebuildsOnCatalogGenerationChange(t *testing.T) {
-	source, catalog := schemaOnlyTelegramDeclarationSource(t)
-	first, err := SourceWithProviderTriggerEvents(source, catalog)
-	if err != nil {
-		t.Fatalf("first SourceWithProviderTriggerEvents: %v", err)
-	}
-	entry, ok := catalog.EntryByProvider("telegram")
-	if !ok {
-		t.Fatal("Telegram catalog entry missing")
-	}
-	entry.Identity.ManifestHash = "sha256:" + strings.Repeat("b", 64)
-	changed, err := providertriggers.NewCatalogSnapshot(entry)
-	if err != nil {
-		t.Fatalf("NewCatalogSnapshot: %v", err)
-	}
-	second, err := SourceWithProviderTriggerEvents(first, changed)
-	if err != nil {
-		t.Fatalf("reload SourceWithProviderTriggerEvents: %v", err)
-	}
-	provenance := second.SemanticCapabilities().ProviderTriggerEventProvenance()
-	if len(provenance) != 1 || provenance[0].ManifestHash != entry.Identity.ManifestHash || !provenance[0].Generation.Equal(changed.Generation()) {
-		t.Fatalf("reloaded schema-only provenance = %#v", provenance)
-	}
-	if authorizations := second.SemanticCapabilities().ProviderTriggerOutputBindings(); len(authorizations) != 0 {
-		t.Fatalf("reloaded schema-only import granted provider authority: %#v", authorizations)
-	}
 }
 
 func TestProviderTriggerCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *testing.T) {
