@@ -72,7 +72,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 			if _, err := owner.CommitWorkflowEngineMutation(f.ctx, pipeline.WorkflowEngineMutationCommand{State: record}); err == nil || err.Error() != "workflow engine state route is missing: ." {
 				t.Fatalf("ordinary mutation granted construction to an import: %v", err)
 			}
-			prepared, err := prepareSelectedStoreForkForTest(t, f.ctx, f.store, runID, marker.ID(), runfork.RunForkContractSelection{Mode: "selected_contracts"})
+			prepared, err := prepareSelectedStoreForkForTest(t, f.ctx, f.store, runID, marker.ID(), runfork.RunForkContractSelection{Mode: "selected_contracts"}, f.bundle.SourceArtifact.BundleHash())
 			if prepared != nil || err == nil || !strings.Contains(err.Error(), runfork.RunForkMaterializedEntitySnapshotMetadataOwner) {
 				t.Fatalf("selected preparation granted construction to an import: prepared=%v err=%v", prepared, err)
 			}

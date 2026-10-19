@@ -330,7 +330,7 @@ func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorAc
 		t.Fatalf("fixture failed to publish exact fixed-revision metadata: %+v", plan.Entities)
 	}
 	fixture.advance()
-	return ctx, prepareSelectedStoreMaterializationForTest(t, ctx, fixture.store, runID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	return ctx, prepareSelectedStoreMaterializationForTest(t, ctx, fixture.store, runID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, hash)
 }
 
 func requireForkWorkflowOwnershipPreserved(t *testing.T, db *sql.DB, sourceRun, forkRun string) {
