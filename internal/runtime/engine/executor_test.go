@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -3441,23 +3442,77 @@ func (w *orderedActivityWriter) WriteActivityIntents(_ context.Context, intents 
 }
 
 func sourceWithActivityTool() semanticview.Source {
+	return sourceWithActivityHTTPTool(http.MethodGet)
+}
+
+func sourceWithActivityHTTPTool(method string) semanticview.Source {
 	return mustCompileEngineFlowSource("research", &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"source.requested": requiredEventPayload(map[string]runtimecontracts.EventFieldSpec{"url": {Type: "text"}}),
 		},
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 				"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 			}), runtimecontracts.ToolSchemaRequired("url")),
 
 				runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 					"title": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 				}))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
-				Method: "GET",
+				Method: method,
 				URL:    "https://example.test/source?url={{input.url}}",
 			})),
 		},
 	})
+}
+
+func TestExecutor_KeyFreeHTTPActivityFixedPolicy(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		for _, site := range []string{"handler", "rule"} {
+			t.Run(method+"/"+site, func(t *testing.T) {
+				order := []string{}
+				repo := &orderedStateRepo{order: &order}
+				writer := &orderedActivityWriter{order: &order}
+				exec, err := NewExecutor(RuntimeDependencies{
+					Source:        sourceWithFixtureStages(sourceWithActivityHTTPTool(method), "research", "pending", "pending"),
+					StateRepo:     repo,
+					MutationOwner: composedMutationOwner{state: repo, activities: writer, order: &order},
+					Locker:        orderedLocker{order: &order},
+				}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				activity := runtimecontracts.ActivitySpec{
+					ID: "fixed_request", Tool: "source_scrape", Input: map[string]runtimecontracts.ExpressionValue{"url": runtimecontracts.CELExpression("payload.url")},
+				}
+				handler := runtimecontracts.SystemNodeEventHandler{Activity: activity}
+				if site == "rule" {
+					handler = runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{Activity: activity}}}
+				}
+				result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+					EntityID: identity.NormalizeEntityID("entity-1"), Node: testFlowExecutableNode(t, "research", "scanner"),
+					HandlerEventKey: "source.requested",
+					Event:           eventtest.RunCreatingRootIngress("evt-1", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 2, "run-1", "", events.EventEnvelope{}, time.Time{}),
+					Handler:         handler,
+					State:           testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+				})
+				if err != nil || !reflect.DeepEqual(order, []string{"lock", "tx", "save", "activity_intents"}) || len(writer.intents) != 1 || len(result.ActivityIntents) != 1 {
+					t.Fatalf("key-free activity lost its existing persistence boundary: order=%v written=%+v result=%+v err=%v", order, writer.intents, result, err)
+				}
+				intent := writer.intents[0]
+				for _, name := range []string{"EffectClass", "Attempt", "RetryMaxAttempts", "RetryBackoff", "ForkPolicy"} {
+					if _, present := reflect.TypeOf(intent).FieldByName(name); present {
+						t.Fatalf("method or site retained authored HTTP policy %s: %+v", name, intent)
+					}
+				}
+				if intent.ActivityID != "fixed_request" || intent.Tool != "source_scrape" || intent.SourceEventID != "evt-1" || intent.SourceRunID != "run-1" || intent.SuccessEvent != "research/fixed_request.succeeded" || intent.FailureEvent != "research/fixed_request.failed" {
+					t.Fatalf("fixed policy changed causal/result identity: %+v", intent)
+				}
+				if value, present := intent.Input.Lookup("url"); !present || value.Interface() != "https://example.com" {
+					t.Fatalf("fixed policy changed admitted input: value=%+v present=%t", value, present)
+				}
+			})
+		}
+	}
 }
 
 func TestExecutor_ActivityIntentPersistsBeforeFollowUpTransfer(t *testing.T) {

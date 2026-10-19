@@ -1175,7 +1175,11 @@ func (g *Gateway) formatError(err error) string {
 		return ""
 	}
 	if failure, ok := failures.As(err); ok {
-		return failure.Failure.Message
+		text, renderErr := failures.AgentToolFailureText(failure.Failure)
+		if renderErr != nil {
+			return failures.FromError(renderErr, "mcp-gateway", "format_error").Failure.Message
+		}
+		return text
 	}
 	if payload := RuntimeErrorPayloadFromError(err); payload != nil && payload.Protocol != nil {
 		return strings.TrimSpace(payload.Protocol.Message)

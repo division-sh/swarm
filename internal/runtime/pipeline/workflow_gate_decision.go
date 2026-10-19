@@ -160,17 +160,17 @@ func activityIntentFromProposedEffect(continuation decisioncard.ProposedEffectCo
 	intent := runtimeengine.ActivityIntent{
 		Context: events.DeliveryContext{}, ActivityID: continuation.ActivityID, Tool: continuation.Tool,
 		BundleHash: continuation.BundleHash, WorkflowVersion: continuation.WorkflowVersion,
-		Input: continuation.Input, EffectClass: continuation.EffectClass,
+		Input:        continuation.Input,
 		SuccessEvent: continuation.SuccessEvent, FailureEvent: continuation.FailureEvent,
 		RevisionEvent: continuation.RevisionEvent, RejectedEvent: continuation.RejectedEvent,
-		RetryMaxAttempts: continuation.RetryMaxAttempts, RetryBackoff: continuation.RetryBackoff, ForkPolicy: continuation.ForkPolicy,
+
 		EntityID: identity.NormalizeEntityID(continuation.EntityID), Owner: owner,
 		ExecutionFlowID: identity.NormalizeFlowID(continuation.FlowID), FlowInstance: continuation.FlowInstance,
 		RoutingSource:   source,
 		HandlerEventKey: continuation.HandlerEventKey, SourceEventID: continuation.SourceEventID,
 		SourceRunID: continuation.SourceRunID, SourceTaskID: continuation.SourceTaskID,
 		ParentEventID: continuation.ParentEventID, ChainDepth: continuation.ChainDepth,
-		Attempt: continuation.Attempt, Generation: continuation.Generation, LoopStage: continuation.LoopStage,
+		Generation: continuation.Generation, LoopStage: continuation.LoopStage,
 		ExecutionMode: continuation.ExecutionMode,
 	}
 	if continuation.ReplyContextID != "" {
@@ -184,7 +184,7 @@ func proposedEffectOutcomeEvent(card decisioncard.Card, parent events.Event, con
 	eventType := continuation.RevisionEvent
 	payloadValues := map[string]any{
 		"card_id": card.CardID, "activity_id": continuation.ActivityID,
-		"tool": continuation.Tool, "effect_class": string(continuation.EffectClass),
+		"tool":                continuation.Tool,
 		"effect_content_hash": continuation.EffectContentHash,
 		"decided_by":          card.DecidedBy, "decided_at": card.DecidedAt.UTC().Format(time.RFC3339Nano),
 	}

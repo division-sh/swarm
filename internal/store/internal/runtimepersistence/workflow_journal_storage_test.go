@@ -23,14 +23,14 @@ func TestWorkflowJournalStoragePreservesOriginalSnapshotAndPhysicalCountsBothSto
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				record := pipeline.ActivityAttemptRecord{
 					RequestEventID: uuid.NewString(), RunID: runID, ExecutionMode: executionmode.Live,
-					ActivityID: uuid.NewString(), Tool: "journal.storage", EffectClass: "non_idempotent_write",
+					ActivityID: uuid.NewString(), Tool: "journal.storage",
 					Attempt: 1, SuccessEvent: "fixture.succeeded", FailureEvent: "fixture.failed",
 					InputHash: "exact-storage-input", StartedAt: time.Now().UTC(),
 				}
 				if runID == other {
 					record.ExecutionMode = executionmode.Mock
 				}
-				if _, inserted, err := fixture.store.(pipeline.ActivityAttemptJournal).StartActivityAttempt(ctx, record); err != nil || !inserted {
+				if _, inserted, err := activityNativeJournalForFixture(t, fixture).StartActivityAttempt(ctx, record); err != nil || !inserted {
 					t.Fatalf("start native journal: inserted=%t err=%v", inserted, err)
 				}
 			}

@@ -20,6 +20,7 @@ type ActivityPostgresOwner struct {
 	catalogMu      sync.Mutex
 	catalog        *runtimeauthoractivity.EventCatalogRegistry
 	channelChanges *render.ReconcileSignal
+	executionGrant *activityExecutionGrant
 }
 
 type ActivitySQLiteOwner struct {
@@ -28,6 +29,7 @@ type ActivitySQLiteOwner struct {
 	catalogMu      sync.Mutex
 	catalog        *runtimeauthoractivity.EventCatalogRegistry
 	channelChanges *render.ReconcileSignal
+	executionGrant *activityExecutionGrant
 }
 
 func (s *ActivityPostgresOwner) BindChannelReconciliation(signal *render.ReconcileSignal) error {

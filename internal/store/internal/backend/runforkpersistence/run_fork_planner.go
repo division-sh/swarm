@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -56,7 +58,7 @@ func (s *RunForkPostgresOwner) PlanRunFork(ctx context.Context, req runfork.RunF
 		return runfork.RunForkPlan{}, fmt.Errorf("begin run fork revision snapshot: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint)
+	return planRunForkSnapshotWithActivityOrigins(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint, s.ReadPresentSourceTx, true)
 }
 
 func (s *RunForkSQLiteOwner) PlanRunFork(ctx context.Context, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
@@ -69,7 +71,7 @@ func (s *RunForkSQLiteOwner) PlanRunFork(ctx context.Context, req runfork.RunFor
 	var plan runfork.RunForkPlan
 	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		plan, err = planRunForkSnapshot(txctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
+		plan, err = planRunForkSnapshotWithActivityOrigins(txctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint, s.ReadPresentSourceTx, false)
 		return err
 	})
 	return plan, err
@@ -84,6 +86,20 @@ func planRunForkSnapshot(
 	req runfork.RunForkPlanRequest,
 	validate runForkRevisionValidator,
 	resolve runForkRevisionPointResolver,
+) (runfork.RunForkPlan, error) {
+	return planRunForkSnapshotWithActivityOrigins(ctx, tx, req, validate, resolve, nil, false)
+}
+
+// Readback-only callers retain their ordinary plan. Preparation additionally
+// requires native source references; absent references never admit an activity.
+func planRunForkSnapshotWithActivityOrigins(
+	ctx context.Context,
+	tx *sql.Tx,
+	req runfork.RunForkPlanRequest,
+	validate runForkRevisionValidator,
+	resolve runForkRevisionPointResolver,
+	sourceAt func(context.Context, *sql.Tx, string) (correlation.SourceArtifactFact, error),
+	postgres bool,
 ) (runfork.RunForkPlan, error) {
 	runID := strings.TrimSpace(req.SourceRunID)
 	if runID == "" {
@@ -168,6 +184,15 @@ func planRunForkSnapshot(
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
+	activityAdmission := runForkSourceStateAdmission{snapshot: snapshot, sourceAt: sourceAt, postgres: postgres}
+	origins, err := activityAdmission.activityRequestOriginsAtCut(ctx, tx)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
+	plan, err = plan.WithActivityRequestOrigins(snapshot.Revision, origins)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
 	plan.ForkPoint = runfork.RunForkPoint{
 		Kind:           cursor.Kind,
 		Input:          at,
@@ -224,6 +249,21 @@ func planRunForkSnapshot(
 	plan.UnsupportedBlockerCount = len(plan.UnsupportedBlockers)
 	plan.ExecutionReady = plan.ReplayResumeAdmission.StateOnlyExecutionReady || plan.ReplayResumeAdmission.DeliveryEventReplayReady
 	return plan, nil
+}
+
+func (a runForkSourceStateAdmission) activityRequestOriginsAtCut(ctx context.Context, tx *sql.Tx) ([]semanticview.ActivityRequestOrigin, error) {
+	origins := make([]semanticview.ActivityRequestOrigin, 0)
+	for _, event := range a.snapshot.Events {
+		if a.sourceAt == nil || event.EventName != runForkActivityRequestEvent {
+			continue
+		}
+		origin, err := a.activityRequestOriginAtCut(ctx, tx, event.EventID, make(map[string]bool))
+		if err != nil {
+			return nil, fmt.Errorf("admit original activity request %s: %w", event.EventID, err)
+		}
+		origins = append(origins, origin)
+	}
+	return origins, nil
 }
 
 func resolveFixedRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID string, point runfork.RunForkPoint, resolve runForkRevisionPointResolver) (runForkEventCursor, error) {

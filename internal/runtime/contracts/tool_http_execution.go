@@ -3,6 +3,7 @@ package contracts
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -504,8 +505,8 @@ func compileHTTPToolSpec(spec HTTPToolSpec) (compiledHTTPToolSpec, error) {
 		}
 	}
 	compiled := compiledHTTPToolSpec{method: method, url: urlTemplate, staticHost: staticHost, headers: headers, timeoutSeconds: spec.TimeoutSeconds}
-	if spec.TimeoutSeconds < 0 {
-		return compiledHTTPToolSpec{}, fmt.Errorf("http.timeout_seconds must be non-negative")
+	if _, err := toolHTTPTimeout(spec.TimeoutSeconds); err != nil {
+		return compiledHTTPToolSpec{}, err
 	}
 	if spec.BodyPresent || spec.Body != nil {
 		compiled.body, err = compileToolTemplateValue(spec.Body, "input", "credentials")
@@ -515,6 +516,19 @@ func compileHTTPToolSpec(spec HTTPToolSpec) (compiledHTTPToolSpec, error) {
 		compiled.hasBody = true
 	}
 	return compiled, nil
+}
+
+func toolHTTPTimeout(seconds int) (time.Duration, error) {
+	if seconds < 0 {
+		return 0, fmt.Errorf("http.timeout_seconds must be non-negative")
+	}
+	if int64(seconds) > math.MaxInt64/int64(time.Second) {
+		return 0, fmt.Errorf("http.timeout_seconds exceeds the representable duration (%d seconds)", math.MaxInt64/int64(time.Second))
+	}
+	if seconds == 0 {
+		return 30 * time.Second, nil
+	}
+	return time.Duration(seconds) * time.Second, nil
 }
 
 func validateTemplatedToolHTTPURLShape(raw string) error {
@@ -586,9 +600,9 @@ func (e ToolHTTPExecution) Prepare(input, credentials map[string]any) (PreparedT
 			headers.Set("Content-Type", "application/json")
 		}
 	}
-	timeout := 30 * time.Second
-	if e.value.timeoutSeconds > 0 {
-		timeout = time.Duration(e.value.timeoutSeconds) * time.Second
+	timeout, err := toolHTTPTimeout(e.value.timeoutSeconds)
+	if err != nil {
+		return PreparedToolHTTPRequest{}, err
 	}
 	return PreparedToolHTTPRequest{
 		method: e.value.method, url: resolvedURL, headers: headers, body: body, timeout: timeout,

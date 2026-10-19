@@ -1257,7 +1257,6 @@ func testProviderConnectorToolOptions(
 	options := []runtimecontracts.ToolSchemaEntryOption{
 		runtimecontracts.WithToolCategory(Category),
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-		runtimecontracts.WithToolEffect(effect),
 		runtimecontracts.WithToolSchemas(objectSchema, objectSchema),
 		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"}),
 	}
@@ -1279,7 +1278,7 @@ func telegramConnectorTool(baseURL string) runtimecontracts.ToolSchemaEntry {
 		runtimecontracts.WithToolCategory(Category),
 		runtimecontracts.WithToolDescription("send Telegram messages"),
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-		runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+
 		runtimecontracts.WithToolSchemas(
 			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 				"chat_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),
@@ -1305,7 +1304,7 @@ func slackConnectorTool(url string) runtimecontracts.ToolSchemaEntry {
 		runtimecontracts.WithToolCategory(Category),
 		runtimecontracts.WithToolDescription("post Slack messages"),
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-		runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+
 		runtimecontracts.WithToolSchemas(
 			runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject, runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 				"channel": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString),

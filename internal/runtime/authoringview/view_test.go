@@ -287,7 +287,7 @@ func TestBuildShowsApprovedOutwardEffectAsCanonicalApprovalPoint(t *testing.T) {
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"telegram_send": runtimecontracts.MustToolSchemaEntry(
 				runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-				runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+
 				runtimecontracts.WithToolSchemas(
 					runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
 					runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
@@ -305,8 +305,7 @@ func TestBuildShowsApprovedOutwardEffectAsCanonicalApprovalPoint(t *testing.T) {
 	}
 	got := view.ApprovalPoints[0]
 	if got.NodeID != identitytest.RootNode(t, "support").Key() || got.HandlerEvent != "support.reply_drafted" || got.Source != "handler.activity" ||
-		got.ActivityID != "send_support_reply" || got.Tool != "telegram_send" || got.Decision != "support_reply" ||
-		got.EffectClass != string(runtimecontracts.ActivityEffectClassNonIdempotentWrite) {
+		got.ActivityID != "send_support_reply" || got.Tool != "telegram_send" || got.Decision != "support_reply" {
 		t.Fatalf("approval point = %#v", got)
 	}
 }
@@ -495,7 +494,7 @@ func TestBuildDiagnosticsPreservesRemediationAndEvidence(t *testing.T) {
 		Evidence:    []string{" timer: reminder ", "", "cancel_on: state:done"},
 	})
 
-	diagnostics := buildDiagnostics(nil, &report)
+	diagnostics := buildDiagnostics(nil, nil, &report)
 	if len(diagnostics) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", diagnostics)
 	}

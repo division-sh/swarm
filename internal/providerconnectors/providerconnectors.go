@@ -185,11 +185,6 @@ func validateRegistrationTool(toolID string, tool runtimecontracts.ToolSchemaEnt
 	if err := tool.Validate(); err != nil {
 		errs = append(errs, fmt.Errorf("%s: %w", context, err))
 	}
-	switch tool.Effect() {
-	case runtimecontracts.ActivityEffectClassReadOnly, runtimecontracts.ActivityEffectClassNonIdempotentWrite:
-	default:
-		errs = append(errs, fmt.Errorf("%s effect_class must be read_only or non_idempotent_write", context))
-	}
 	if len(tool.Credentials()) == 0 {
 		errs = append(errs, fmt.Errorf("%s must declare static credentials", context))
 	}
@@ -224,10 +219,6 @@ func validateTool(toolID string, tool runtimecontracts.ToolSchemaEntry) []error 
 	}
 	if err := tool.Validate(); err != nil {
 		errs = append(errs, fmt.Errorf("%s: %w", context, err))
-	}
-	effectClass := tool.Effect()
-	if effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-		errs = append(errs, fmt.Errorf("%s effect_class must be non_idempotent_write for the Stage 1 connector proof", context))
 	}
 	credentials := tool.Credentials()
 	_, hasManagedCredential := tool.ManagedCredentialExecution()
@@ -392,7 +383,6 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 		},
 		Requirements: requires,
 		Evidence: []packs.Evidence{{Kind: "connector", Fields: map[string]string{
-			"effect_class":  string(tool.Effect()),
 			"endpoint_host": host,
 		}}},
 	}

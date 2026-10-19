@@ -118,6 +118,7 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 				return err
 			}
 			stateAdmission.carriage = original
+			stateAdmission.sourceAt = s.RequirePresentSourceTx
 			events, err := loadSQLiteRunForkSelectedContractEvents(txctx, tx, ids)
 			if err != nil {
 				return fmt.Errorf("load selected-contract source events: %w", err)

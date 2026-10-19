@@ -30,7 +30,6 @@ operations:
     method: post
     tool_id: github.add_labels_to_issue
     description: add labels to GitHub issues
-    effect_class: non_idempotent_write
     path_parameters:
       - {source: owner, input: owner, type: string, required: true}
       - {source: repo, input: repo, type: string, required: true}
@@ -53,7 +52,6 @@ operations:
     method: post
     tool_id: github.create_issue
     description: create GitHub issues
-    effect_class: non_idempotent_write
     path_parameters:
       - {source: owner, input: owner, type: string, required: true}
       - {source: repo, input: repo, type: string, required: true}
@@ -76,7 +74,6 @@ operations:
     method: post
     tool_id: github.create_issue_comment
     description: create GitHub issue comments
-    effect_class: non_idempotent_write
     path_parameters:
       - {source: owner, input: owner, type: string, required: true}
       - {source: repo, input: repo, type: string, required: true}

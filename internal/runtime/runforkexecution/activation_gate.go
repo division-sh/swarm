@@ -164,6 +164,11 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	if !sameSelectedForkPointIdentity(plan.ForkPoint, binding.ForkPoint) {
 		return SelectedContractActivationGateResult{}, errors.New("selected-contract activation plan differs from durable fork point")
 	}
+	original, err = retainOriginalActivityHistory(ctx, req.SourceLoader, original, plan)
+	if err != nil {
+		return SelectedContractActivationGateResult{}, err
+	}
+	resources.originalLoopCarriage = original
 	deferredWorkAdmission, err := admitSelectedContractDeferredWork(plan, loadedSource.Source)
 	if err != nil {
 		return SelectedContractActivationGateResult{Owner: runfork.RunForkSelectedContractExecutionActivationGateOwner}, err
