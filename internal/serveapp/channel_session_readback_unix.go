@@ -17,12 +17,15 @@ func (s *serveSessionBootstrap) ReadSessionConnection(ctx context.Context, op ch
 		view.State = "connecting"
 		return view, nil
 	}
+	connection := s.connection(op.OperationID)
+	if connection != nil {
+		view.Reason = connection.DisconnectionReason()
+	}
 	provider, _, current, err := s.ObserveSession(ctx, op)
 	defer provider.CloseExecution()
 	if err != nil || !current {
 		return view, nil
 	}
-	connection := s.connection(op.OperationID)
 	if connection == nil {
 		return view, nil
 	}
@@ -30,6 +33,6 @@ func (s *serveSessionBootstrap) ReadSessionConnection(ctx context.Context, op ch
 	if err != nil {
 		return view, err
 	}
-	view.State = "connected"
+	view.State, view.Reason = "connected", ""
 	return view, nil
 }

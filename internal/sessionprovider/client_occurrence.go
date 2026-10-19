@@ -34,6 +34,7 @@ type clientOccurrence struct {
 	pairing        *pairingQR
 	started        bool
 	fenced         bool
+	failureReason  string
 	logoutReserved bool
 	logoutDrain    chan struct{}
 	inFlight       int
@@ -73,15 +74,30 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 	client.DisableManualHistorySyncReceipt = true
 	client.PreRetryCallback = func(*events.Receipt, types.MessageID, int, *waE2E.Message) bool { return false }
 	client.AddEventHandlerWithSuccessStatus(func(event any) bool {
+		reason := ""
+		observedDisconnect := false
 		switch event.(type) {
 		case *events.Connected:
 			o.connectOnce.Do(func() { close(o.connected) })
 		case *events.Disconnected:
-			o.fenceAfterDisconnect(true)
-		case *events.ManualLoginReconnect, *events.LoggedOut,
-			*events.StreamReplaced, *events.StreamError, *events.ConnectFailure,
-			*events.CATRefreshError, *events.ClientOutdated, *events.TemporaryBan:
-			o.fence()
+			reason, observedDisconnect = "network unreachable", true
+		case *events.LoggedOut:
+			reason = "logged out"
+		case *events.TemporaryBan:
+			reason = "account temporarily banned"
+		case *events.StreamReplaced:
+			reason = "session replaced by another connection"
+		case *events.ConnectFailure, *events.StreamError:
+			reason = "connection rejected by WhatsApp"
+		case *events.CATRefreshError:
+			reason = "WhatsApp authentication refresh failed"
+		case *events.ClientOutdated:
+			reason = "WhatsApp client needs an update"
+		case *events.ManualLoginReconnect:
+			reason = "connection must be re-established"
+		}
+		if reason != "" {
+			o.fenceAfterDisconnect(observedDisconnect, reason)
 		}
 		// This handler owns lifetime events only, not message capture success.
 		return true
@@ -332,11 +348,15 @@ func (o *clientOccurrence) reserveLogout(ctx context.Context) (context.Context, 
 }
 
 func (o *clientOccurrence) fence() {
-	o.fenceAfterDisconnect(false)
+	o.fenceAfterDisconnect(false, "")
 }
 
-func (o *clientOccurrence) fenceAfterDisconnect(observed bool) {
+func (o *clientOccurrence) fenceAfterDisconnect(observed bool, reason string) {
 	o.mu.Lock()
+	// Generic cleanup/disconnect cannot erase a more specific SDK event.
+	if reason != "" && (o.failureReason == "" || !observed) {
+		o.failureReason = reason
+	}
 	if !o.fenced {
 		o.fenced = true
 		if o.inFlight == 0 {

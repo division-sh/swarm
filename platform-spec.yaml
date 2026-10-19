@@ -36946,6 +36946,7 @@ api_specification:
         required: [state, linked]
         properties:
           state: {type: string, enum: [pairing, connecting, connected, disconnected]}
+          reason: {type: string, description: Display-only finite SDK disconnect reason; not execution or retry authority.}
           linked: {type: boolean, description: Retained paired account exists; not operator identity or execution authority.}
           account_presentation: {type: string}
           account_name: {type: string}

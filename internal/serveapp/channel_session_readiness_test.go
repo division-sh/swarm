@@ -113,6 +113,9 @@ func TestServeSessionReadinessUsesOriginalOwnedObservationBothStores(t *testing.
 			if id, revision := provider.SessionParent(); id != op.OperationID || revision != op.Revision {
 				t.Fatal("health adopted a different selected parent", id, revision)
 			}
+			if view, err := f.adapter.ReadSessionConnection(f.ctx, op); err != nil || view.State != "connected" || view.Reason != "" {
+				t.Fatal("connected public readback retained a disconnected reason", view, err)
+			}
 			readiness := &serveConnectedChannelReadiness{sessions: f.adapter}
 			activation := channelonboarding.ConnectedChannelActivation{OperationID: op.OperationID, PrincipalID: op.PrincipalID,
 				Posture: op.Posture, Provider: op.Provider, Interface: op.Interface, Revision: op.ActivationRevision,
