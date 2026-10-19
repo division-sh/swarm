@@ -103,7 +103,6 @@ func EventSchemaRegistryFromBundle(bundle *WorkflowContractBundle) map[string]Ev
 }
 
 func EventSchemaForFlowEvent(bundle *WorkflowContractBundle, flowID, eventType string) (EventSchema, string, bool) {
-	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)
 	if bundle == nil || eventType == "" {
 		return EventSchema{}, "", false
@@ -166,7 +165,6 @@ func isNumericPrecisionModifier(value string) bool {
 }
 
 func eventSchemaDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, eventType string) (EventCatalogEntry, string, TypeCatalogDocument, bool) {
-	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)
 	if bundle == nil || eventType == "" {
 		return EventCatalogEntry{}, "", TypeCatalogDocument{}, false
@@ -178,10 +176,7 @@ func eventSchemaDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, 
 		}
 		return EventCatalogEntry{}, "", TypeCatalogDocument{}, false
 	}
-	if flowID != "" {
-		return entry, key, bundle.ResolvedTypeCatalogForFlow(flowID), true
-	}
-	return entry, key, bundle.RootTypeCatalog(), true
+	return entry, key, bundle.ResolvedTypeCatalogForFlow(flowID), true
 }
 
 func appendPlatformEventSchemas(out map[string]EventSchema, platform PlatformSpecDocument) {

@@ -172,9 +172,8 @@ func TestGeneratedPublicationSchemaExactCoordinatesAndReadback(t *testing.T) {
 					t.Fatal("sibling borrowed qualified producer")
 				}
 			} else {
-				alias, ok, err := bundle.ResolveCompiledFlowEventSchema("", "send.succeeded")
-				if err != nil || !ok || alias.FlowPath() != "." || alias.AcceptanceSchemaDigest() != producer.AcceptanceSchemaDigest() {
-					t.Fatal("empty/dot root diverged")
+				if _, ok, err := bundle.ResolveCompiledFlowEventSchema("", "send.succeeded"); err != nil || ok {
+					t.Fatal("empty coordinate became a root alias")
 				}
 			}
 			beforeSchema := producer.EventSchema()

@@ -693,8 +693,10 @@ func (b *WorkflowContractBundle) exactFlowEventDeclarationView(flowID string) (*
 	if b == nil || b.FlowTree.Root == nil {
 		return nil, false
 	}
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" || flowID == "." {
+	if _, err := runtimeidentity.AdmitFlowIdentity(flowID); err != nil {
+		return nil, false
+	}
+	if flowID == "." {
 		return b.FlowTree.Root, true
 	}
 	return b.FlowViewByID(flowID)

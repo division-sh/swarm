@@ -596,7 +596,10 @@ func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *test
 	if err := bundle.compileEventSchemaBindings(); err != nil {
 		t.Fatal(err)
 	}
-	rootSchema, rootKey, ok := EventSchemaForFlowEvent(bundle, "", "task.requested")
+	if _, _, ok := EventSchemaForFlowEvent(bundle, "", "task.requested"); ok {
+		t.Fatal("empty coordinate gained a root event schema")
+	}
+	rootSchema, rootKey, ok := EventSchemaForFlowEvent(bundle, ".", "task.requested")
 	if !ok {
 		t.Fatal("missing root event schema")
 	}
@@ -622,7 +625,7 @@ func TestEventSchemaForFlowEvent_UsesDeclaringFlowTypeCatalogForOverride(t *test
 		t.Fatalf("review priority enum = %#v, want [urgent]", got)
 	}
 
-	if _, _, ok := EventSchemaForFlowEvent(bundle, "", "review/task.requested"); ok {
+	if _, _, ok := EventSchemaForFlowEvent(bundle, ".", "review/task.requested"); ok {
 		t.Fatal("root schema lookup must not search a child declaration by qualified name")
 	}
 

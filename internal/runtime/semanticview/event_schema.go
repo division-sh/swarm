@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 )
 
@@ -63,11 +64,12 @@ func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaReso
 	if source == nil || eventType == "" {
 		return EventSchemaResolution{}
 	}
-	if flowID != "" {
-		scope, found := source.FlowScopeByID(flowID)
-		if !found || scope.ID != flowID {
-			return EventSchemaResolution{}
-		}
+	if _, err := runtimeidentity.AdmitFlowIdentity(flowID); err != nil {
+		return EventSchemaResolution{}
+	}
+	scope, found := source.FlowScopeByID(flowID)
+	if !found || scope.ID != flowID {
+		return EventSchemaResolution{}
 	}
 	if compiled, ok, err := source.ResolveEffectiveCompiledFlowEventSchema(flowID, eventType); err == nil && ok {
 		resolution := EventSchemaResolution{
@@ -78,19 +80,8 @@ func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaReso
 		bindStructuralEventSchema(&resolution)
 		return resolution
 	}
-	if flowID == "" {
-		if compiled, ok := source.SemanticCapabilities().ProviderTriggerSchemaReadback(eventType); ok {
-			resolution := EventSchemaResolution{
-				Schema: compiled.EventSchema(), CompiledSchema: compiled,
-				EventKey: compiled.EventName(), HasSchema: true, HasCompiled: true,
-				Classification: compiled.Classification(), HasClassification: true,
-			}
-			bindStructuralEventSchema(&resolution)
-			return resolution
-		}
-	}
 	if bundle, ok := Bundle(source); ok && bundle != nil {
-		if flowID != "" && flowID != "." {
+		if flowID != "." {
 			if _, found := source.FlowSchemaByID(flowID); !found {
 				return EventSchemaResolution{}
 			}

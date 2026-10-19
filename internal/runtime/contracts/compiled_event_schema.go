@@ -302,12 +302,8 @@ type compiledFlowEventSchemas struct {
 // for one exact flow-local event. It never rebuilds evidence from reader-side
 // authored maps.
 func (b *WorkflowContractBundle) ResolveCompiledFlowEventSchema(flowID, eventType string) (CompiledEventSchema, bool, error) {
-	if b == nil {
+	if _, ok := b.exactFlowEventDeclarationView(flowID); !ok {
 		return CompiledEventSchema{}, false, nil
-	}
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" {
-		flowID = "."
 	}
 	bindings, exists := b.compiledEventSchemas[flowID]
 	if !exists {

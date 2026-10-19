@@ -68,10 +68,11 @@ func ResolveFlowEventProof(source Source, flowID, eventType string) FlowEventPro
 	if source == nil || authored == "" {
 		return proof
 	}
-	if flowID != "" {
-		if _, found := FlowScopeByID(source, flowID); !found {
-			return proof
-		}
+	if _, err := runtimeidentity.AdmitFlowIdentity(flowID); err != nil {
+		return proof
+	}
+	if _, found := FlowScopeByID(source, flowID); !found {
+		return proof
 	}
 
 	if canonical := runtimeeventidentity.Normalize(source.ResolveFlowEventReference(flowID, authored)); canonical != "" {

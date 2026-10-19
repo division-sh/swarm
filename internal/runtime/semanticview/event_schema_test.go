@@ -87,11 +87,20 @@ payload:
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{}
+	root := &runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}}
+	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root}}
 	bundle.Platform = admittedCatalogTestSpec(t, map[string]yaml.Node{
 		"mailbox.card_decided": *doc.Content[0],
 	})
 
-	resolution := ResolveEventSchema(Wrap(bundle), "", "mailbox.card_decided")
+	source := Wrap(bundle)
+	if scope, found := source.FlowScopeByID("."); !found || scope.ID != "." {
+		t.Fatal("platform fixture requires an actual dot-root flow")
+	}
+	if resolution := ResolveEventSchema(source, "", "mailbox.card_decided"); resolution.HasSchema {
+		t.Fatal("empty coordinate gained a platform payload schema")
+	}
+	resolution := ResolveEventSchema(source, ".", "mailbox.card_decided")
 	if !resolution.HasSchema {
 		t.Fatal("expected platform event schema resolution")
 	}
@@ -120,11 +129,17 @@ note: Full payload schema is owned by the diagnostic subtype.
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{}
+	root := &runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}}
+	bundle.FlowTree = flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root}}
 	bundle.Platform = admittedCatalogTestSpec(t, map[string]yaml.Node{
 		"platform.runtime_log": *doc.Content[0],
 	})
 
-	resolution := ResolveEventSchema(Wrap(bundle), "", "platform.runtime_log")
+	source := Wrap(bundle)
+	if scope, found := source.FlowScopeByID("."); !found || scope.ID != "." {
+		t.Fatal("reference-only control requires an admitted dot-root flow")
+	}
+	resolution := ResolveEventSchema(source, ".", "platform.runtime_log")
 	if resolution.HasSchema {
 		t.Fatalf("reference-only platform event resolved as payload schema: %#v", resolution)
 	}

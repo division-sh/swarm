@@ -3,8 +3,10 @@ package semanticview_test
 import (
 	"testing"
 
+	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -14,10 +16,17 @@ import (
 
 func TestS1ActivityToolCompilationIncludesInheritedDeclarations(t *testing.T) {
 	bundle := loadScopedActivityBundle(t, packfixture.ScopedActivityMembers())
-	source, err := semanticview.CompileActivityToolBindings(semanticview.Wrap(bundle))
+	fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := rootruntime.AdmitEffectiveSourceProjection(rootruntime.EffectiveSourceProjectionRequest{
+		Source: semanticview.Wrap(bundle), SourceArtifactFact: fact,
+	})
 	if err != nil {
 		t.Fatalf("inherited tool did not reach activity compilation: %v", err)
 	}
+	source := projection.Source()
 	for _, flow := range []string{".", "child", "sibling", "inherited"} {
 		event := "send.succeeded"
 		if flow != "." {
@@ -42,6 +51,38 @@ func TestS1ActivityToolCompilationIncludesInheritedDeclarations(t *testing.T) {
 		if actual, _ := tool.OutputSchema().Property("origin"); !actual.Equal(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString, runtimecontracts.ToolSchemaEnum(origin))) {
 			t.Fatalf("activity execution and result schema disagree in %s", flow)
 		}
+	}
+	// Reach: declaration and actual effective projection require the same exact
+	// producer coordinate; absent/malformed coordinates cannot recover raw schemas.
+	for _, flow := range []string{"", " ", " .", ". ", " child", "child ", "./child", "child/../sibling", "child/missing", "foreign", "child\\nested"} {
+		t.Run("refused/"+flow, func(t *testing.T) {
+			for _, event := range []string{"send.succeeded", "mailbox.card_decided"} {
+				if _, found, err := bundle.ResolveCompiledFlowEventSchema(flow, event); found || err != nil {
+					t.Errorf("declaration schema admitted %q: found=%t err=%v", flow, found, err)
+				}
+				if _, found, err := bundle.ResolveEffectiveCompiledFlowEventSchema(flow, event); found || err != nil {
+					t.Errorf("compiled receiver schema admitted %q: found=%t err=%v", flow, found, err)
+				}
+				if _, _, found := runtimecontracts.EventSchemaForFlowEvent(bundle, flow, event); found {
+					t.Errorf("raw schema accessor admitted %q", flow)
+				}
+				for name, reader := range map[string]semanticview.Source{"declaration": semanticview.Wrap(bundle), "effective": source} {
+					if _, _, found := reader.ResolveFlowEventCatalogEntry(flow, event); found {
+						t.Errorf("%s catalog admitted %q", name, flow)
+					}
+					if _, found, err := reader.ResolveEffectiveCompiledFlowEventSchema(flow, event); found || err != nil {
+						t.Errorf("%s compiled schema admitted %q: found=%t err=%v", name, flow, found, err)
+					}
+					if proof := semanticview.ResolveFlowEventProof(reader, flow, event); proof.HasSchema {
+						t.Errorf("%s event proof admitted %q", name, flow)
+					}
+					resolved := semanticview.ResolveEventSchema(reader, flow, event)
+					if resolved.HasSchema || resolved.HasCompiled || resolved.HasClassification || resolved.HasStructural {
+						t.Errorf("%s payload schema admitted %q: schema=%t compiled=%t classification=%t structural=%t", name, flow, resolved.HasSchema, resolved.HasCompiled, resolved.HasClassification, resolved.HasStructural)
+					}
+				}
+			}
+		})
 	}
 }
 
