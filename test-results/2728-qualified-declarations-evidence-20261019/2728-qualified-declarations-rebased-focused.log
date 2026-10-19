@@ -1,0 +1,53 @@
+Precompile outside test slot: environment=0.004s build=33.074s cleanup=0.000s total=33.078s
+Test slot acquired after 9ms. Starting go test ./internal/runtime/contracts ./internal/store -run ^(TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder|TestEventCatalogAdmissionRetainsAliasValues|TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations|TestNodeAdmissionAliasMergeAndNestedCoordinates|TestConnectedSchemaReadersUseRetainedReceiverCoordinates|TestConnectedSchemaReadersCannotRecompileMissingIndex|TestCompiledConnectEventConsumerRestatementFailsClosed|TestEffectiveEventResolutionPrefersConnectedProducerOverUnrelatedSameNameRoot|TestEffectiveEventResolutionPreservesConnectedRenameOwnership|TestConnectedEventSchemaOwnershipPreservesPortfolioInputs|TestCompileCurrentEventDeclarationRejectsNoncanonicalIdentity|TestPersistenceAuthorityFindingRegistry)$ -count=1 -v
+=== RUN   TestCompileCurrentEventDeclarationRejectsNoncanonicalIdentity
+--- PASS: TestCompileCurrentEventDeclarationRejectsNoncanonicalIdentity (0.00s)
+=== RUN   TestEventCatalogAdmissionRetainsAliasValues
+--- PASS: TestEventCatalogAdmissionRetainsAliasValues (0.00s)
+=== RUN   TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations
+=== RUN   TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations/nested_mapping_alias
+=== RUN   TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations/merge_alias
+--- PASS: TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations (0.00s)
+    --- PASS: TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations/nested_mapping_alias (0.00s)
+    --- PASS: TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations/merge_alias (0.00s)
+=== RUN   TestConnectedSchemaReadersUseRetainedReceiverCoordinates
+--- PASS: TestConnectedSchemaReadersUseRetainedReceiverCoordinates (0.15s)
+=== RUN   TestConnectedSchemaReadersCannotRecompileMissingIndex
+--- PASS: TestConnectedSchemaReadersCannotRecompileMissingIndex (0.02s)
+=== RUN   TestEffectiveEventResolutionPrefersConnectedProducerOverUnrelatedSameNameRoot
+--- PASS: TestEffectiveEventResolutionPrefersConnectedProducerOverUnrelatedSameNameRoot (0.08s)
+=== RUN   TestEffectiveEventResolutionPreservesConnectedRenameOwnership
+--- PASS: TestEffectiveEventResolutionPreservesConnectedRenameOwnership (0.01s)
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/qualified_declaration_coordinates
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/qualified_declaration_coordinates/test-child-flow-pin-wiring
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/qualified_declaration_coordinates/test-nested-three-levels
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/authored_order
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/reversed_order
+--- PASS: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder (0.07s)
+    --- PASS: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/qualified_declaration_coordinates (0.05s)
+        --- PASS: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/qualified_declaration_coordinates/test-child-flow-pin-wiring (0.02s)
+        --- PASS: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/qualified_declaration_coordinates/test-nested-three-levels (0.02s)
+    --- PASS: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/authored_order (0.00s)
+    --- PASS: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/reversed_order (0.00s)
+=== RUN   TestConnectedEventSchemaOwnershipPreservesPortfolioInputs
+=== RUN   TestConnectedEventSchemaOwnershipPreservesPortfolioInputs/barrier
+=== RUN   TestConnectedEventSchemaOwnershipPreservesPortfolioInputs/stream
+--- PASS: TestConnectedEventSchemaOwnershipPreservesPortfolioInputs (0.03s)
+    --- PASS: TestConnectedEventSchemaOwnershipPreservesPortfolioInputs/barrier (0.02s)
+    --- PASS: TestConnectedEventSchemaOwnershipPreservesPortfolioInputs/stream (0.02s)
+=== RUN   TestCompiledConnectEventConsumerRestatementFailsClosed
+--- PASS: TestCompiledConnectEventConsumerRestatementFailsClosed (0.02s)
+=== RUN   TestNodeAdmissionAliasMergeAndNestedCoordinates
+=== RUN   TestNodeAdmissionAliasMergeAndNestedCoordinates/alias
+=== RUN   TestNodeAdmissionAliasMergeAndNestedCoordinates/merge
+--- PASS: TestNodeAdmissionAliasMergeAndNestedCoordinates (0.00s)
+    --- PASS: TestNodeAdmissionAliasMergeAndNestedCoordinates/alias (0.00s)
+    --- PASS: TestNodeAdmissionAliasMergeAndNestedCoordinates/merge (0.00s)
+PASS
+ok  	github.com/division-sh/swarm/internal/runtime/contracts	0.394s
+=== RUN   TestPersistenceAuthorityFindingRegistry
+    persistence_authority_registry_test.go:99: verified 14885 exact resolved authority findings
+--- PASS: TestPersistenceAuthorityFindingRegistry (7.52s)
+PASS
+ok  	github.com/division-sh/swarm/internal/store	7.617s

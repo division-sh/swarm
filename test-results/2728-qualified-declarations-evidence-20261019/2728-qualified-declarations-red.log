@@ -1,0 +1,31 @@
+Precompile outside test slot: environment=0.028s build=12.170s cleanup=0.000s total=12.198s
+Test capacity is busy.
+Queue position: 1
+Active slots: 3/3
+Estimated start: unknown
+Estimated completion: unknown
+Waiting for a test slot... updates every 30s
+Test slot acquired after 15s. Starting go test ./internal/runtime/contracts -run ^TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder$ -count=1 -v
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/qualified_declaration_coordinates
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/qualified_declaration_coordinates/test-child-flow-pin-wiring
+    event_schema_ownership_test.go:417: declaration .:child/work.completed location = "unknown source", want "events.yaml:4"
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/qualified_declaration_coordinates/test-nested-three-levels
+    event_schema_ownership_test.go:417: declaration child:grandchild/micro.done location = "unknown source", want "child/events.yaml:1"
+=== NAME  TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/qualified_declaration_coordinates
+    event_schema_ownership_test.go:434: declaration .:child/work.ready location = "events.yaml:1", want "events.yaml:2"
+    event_schema_ownership_test.go:434: declaration .:other/work.ready location = "events.yaml:1", want "events.yaml:3"
+    event_schema_ownership_test.go:434: declaration nested:child/work.ready location = "nested/events.yaml:1", want "nested/events.yaml:2"
+    event_schema_ownership_test.go:434: declaration nested:other/work.ready location = "nested/events.yaml:1", want "nested/events.yaml:3"
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/authored_order
+=== RUN   TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/reversed_order
+--- FAIL: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder (0.38s)
+    --- FAIL: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/qualified_declaration_coordinates (0.36s)
+        --- FAIL: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/qualified_declaration_coordinates/test-child-flow-pin-wiring (0.30s)
+        --- FAIL: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/qualified_declaration_coordinates/test-nested-three-levels (0.03s)
+    --- PASS: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/authored_order (0.00s)
+    --- PASS: TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder/reversed_order (0.00s)
+FAIL
+FAIL	github.com/division-sh/swarm/internal/runtime/contracts	0.392s
+FAIL
+exit status 1

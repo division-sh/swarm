@@ -1,0 +1,5 @@
+1:  03a722181b = 1:  35c98ef6d0 contracts: replace eager provenance ledger with retained-source lookup
+2:  ba2628b202 = 2:  b3f8783b08 contracts: separate diagnostic slot decoding from source lookup
+3:  ab73ebed83 = 3:  0625deb701 contracts: keep exact lookup traversal flat
+4:  fca3652b94 = 4:  ac3b364a4b test(store): retire two deleted provenance callback findings
+5:  1c7aa6d54c = 5:  91fcf145b0 fix(contracts): preserve qualified event declaration coordinates

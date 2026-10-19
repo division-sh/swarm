@@ -1,0 +1,8 @@
+{"Time":"2026-10-19T05:49:39.409526534Z","Action":"start","Package":"github.com/division-sh/swarm/internal/testutil"}
+{"Time":"2026-10-19T05:49:39.413927368Z","Action":"run","Package":"github.com/division-sh/swarm/internal/testutil","Test":"TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector"}
+{"Time":"2026-10-19T05:49:39.413963618Z","Action":"output","Package":"github.com/division-sh/swarm/internal/testutil","Test":"TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector","Output":"=== RUN   TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector\n"}
+{"Time":"2026-10-19T05:49:40.604733506Z","Action":"output","Package":"github.com/division-sh/swarm/internal/testutil","Test":"TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector","Output":"--- PASS: TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector (1.19s)\n"}
+{"Time":"2026-10-19T05:49:40.604788597Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/testutil","Test":"TestPostgresTestEnvironmentHasNoCompetingReaderOrProjector","Elapsed":1.19}
+{"Time":"2026-10-19T05:49:40.604802887Z","Action":"output","Package":"github.com/division-sh/swarm/internal/testutil","Output":"PASS\n"}
+{"Time":"2026-10-19T05:49:40.606276895Z","Action":"output","Package":"github.com/division-sh/swarm/internal/testutil","Output":"ok  \tgithub.com/division-sh/swarm/internal/testutil\t1.197s\n"}
+{"Time":"2026-10-19T05:49:40.606314015Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/testutil","Elapsed":1.197}

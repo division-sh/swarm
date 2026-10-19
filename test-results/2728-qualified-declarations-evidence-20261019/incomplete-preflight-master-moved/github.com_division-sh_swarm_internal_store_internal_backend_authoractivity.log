@@ -1,0 +1,8 @@
+{"Time":"2026-10-19T05:37:09.933994412Z","Action":"start","Package":"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"}
+{"Time":"2026-10-19T05:37:09.947247311Z","Action":"run","Package":"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity","Test":"TestOrderingScopeConstructorInventoryIsClosed"}
+{"Time":"2026-10-19T05:37:09.947290092Z","Action":"output","Package":"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity","Test":"TestOrderingScopeConstructorInventoryIsClosed","Output":"=== RUN   TestOrderingScopeConstructorInventoryIsClosed\n"}
+{"Time":"2026-10-19T05:37:11.1768303Z","Action":"output","Package":"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity","Test":"TestOrderingScopeConstructorInventoryIsClosed","Output":"--- PASS: TestOrderingScopeConstructorInventoryIsClosed (1.23s)\n"}
+{"Time":"2026-10-19T05:37:11.17688592Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity","Test":"TestOrderingScopeConstructorInventoryIsClosed","Elapsed":1.23}
+{"Time":"2026-10-19T05:37:11.17690017Z","Action":"output","Package":"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity","Output":"PASS\n"}
+{"Time":"2026-10-19T05:37:11.179325425Z","Action":"output","Package":"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity","Output":"ok  \tgithub.com/division-sh/swarm/internal/store/internal/backend/authoractivity\t1.244s\n"}
+{"Time":"2026-10-19T05:37:11.179393545Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity","Elapsed":1.245}

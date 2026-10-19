@@ -1,0 +1,97 @@
+commit 91fcf145b0a7ca73ec2975523256720251fec327
+Author:     Youssef Azzaoui <y@azzaoui.fr>
+AuthorDate: Mon Oct 19 05:34:48 2026 +0000
+Commit:     Youssef Azzaoui <y@azzaoui.fr>
+CommitDate: Mon Oct 19 05:48:24 2026 +0000
+
+    fix(contracts): preserve qualified event declaration coordinates
+    
+    Resolve the exact authored mapping key through the existing declaration owner instead of discarding its path segments. Extend the existing refusal proof with root and nested qualified declarations, same-leaf siblings and missing retained source.
+    
+    Track: FULL
+
+diff --git a/internal/runtime/contracts/event_schema_ownership.go b/internal/runtime/contracts/event_schema_ownership.go
+index dd8a4b4328..2e2039a4c9 100644
+--- a/internal/runtime/contracts/event_schema_ownership.go
++++ b/internal/runtime/contracts/event_schema_ownership.go
+@@ -239,10 +239,15 @@ func eventDeclarationLocation(bundle *WorkflowContractBundle, flowID, event stri
+ 	if err != nil || !ok || compiled.Source().File == "" {
+ 		return "unknown source"
+ 	}
+-	file := compiled.Source().File
+-	slot := NodeProvenanceMapPath("", eventidentity.LeafName(compiled.EventName()))
+-	if location, found := bundle.IntroductionLocation(file, slot, true); found {
+-		return fmt.Sprintf("%s:%d", file, location.Line)
++	for _, declaration := range bundle.canonicalCurrentEventDeclarationRecords() {
++		if declaration.flowPath != compiled.FlowPath() || declaration.qualifiedName != compiled.EventName() || declaration.sourceFile != compiled.Source().File {
++			continue
++		}
++		slot := NodeProvenanceMapPath("", declaration.localName)
++		if location, found := bundle.IntroductionLocation(declaration.sourceFile, slot, true); found {
++			return fmt.Sprintf("%s:%d", declaration.sourceFile, location.Line)
++		}
++		break
+ 	}
+ 	return "unknown source"
+ }
+diff --git a/internal/runtime/contracts/event_schema_ownership_test.go b/internal/runtime/contracts/event_schema_ownership_test.go
+index ffae01c6e1..8736d7dddf 100644
+--- a/internal/runtime/contracts/event_schema_ownership_test.go
++++ b/internal/runtime/contracts/event_schema_ownership_test.go
+@@ -2,6 +2,7 @@ package contracts
+ 
+ import (
+ 	"bytes"
++	"fmt"
+ 	"os"
+ 	"path/filepath"
+ 	"slices"
+@@ -399,6 +400,48 @@ func TestEffectiveEventResolutionPreservesConnectedRenameOwnership(t *testing.T)
+ }
+ 
+ func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder(t *testing.T) {
++	t.Run("qualified declaration coordinates", func(t *testing.T) {
++		repo := repoRootForContractsTest(t)
++		for _, tc := range []struct {
++			fixture, flow, event, want string
++		}{
++			{"test-child-flow-pin-wiring", ".", "child/work.completed", "events.yaml:4"},
++			{"test-nested-three-levels", "child", "grandchild/micro.done", "child/events.yaml:1"},
++		} {
++			t.Run(tc.fixture, func(t *testing.T) {
++				root := filepath.Join(repo, "tests", "tier11-flow-composition", tc.fixture)
++				bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
++				if err != nil {
++					t.Fatal(err)
++				}
++				if got := eventDeclarationLocation(bundle, tc.flow, tc.event); got != tc.want {
++					t.Fatalf("declaration %s:%s location = %q, want %q", tc.flow, tc.event, got, tc.want)
++				}
++			})
++		}
++		root := t.TempDir()
++		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: coordinates\n")
++		for _, flow := range []string{".", "nested"} {
++			writeFixtureFile(t, filepath.Join(root, flow, "events.yaml"), "work.ready:\nchild/work.ready:\nother/work.ready:\n")
++		}
++		bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
++		if err != nil {
++			t.Fatal(err)
++		}
++		for _, flow := range []string{".", "nested"} {
++			for index, event := range []string{"work.ready", "child/work.ready", "other/work.ready"} {
++				want := fmt.Sprintf("%s:%d", filepath.ToSlash(filepath.Join(flow, "events.yaml")), index+1)
++				if got := eventDeclarationLocation(bundle, flow, event); got != want {
++					t.Errorf("declaration %s:%s location = %q, want %q", flow, event, got, want)
++				}
++			}
++		}
++		withoutSource := *bundle
++		withoutSource.SourceArtifact = (WorkflowContractBundle{}).SourceArtifact
++		if got := eventDeclarationLocation(&withoutSource, "nested", "child/work.ready"); got != "unknown source" {
++			t.Fatalf("missing retained declaration source invented a location: %q", got)
++		}
++	})
+ 	root := t.TempDir()
+ 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: ownership\n")
+ 	for endpoint, fieldType := range map[string]string{"producer-a": "text", "producer-b": "uuid"} {

@@ -1,0 +1,8 @@
+{"Time":"2026-10-19T05:49:43.18774861Z","Action":"start","Package":"github.com/division-sh/swarm/scripts/rewrite-stages-2566"}
+{"Time":"2026-10-19T05:49:43.192408204Z","Action":"run","Package":"github.com/division-sh/swarm/scripts/rewrite-stages-2566","Test":"TestRewrite2566NoFinalRootCensusIsExplicitlyClassified"}
+{"Time":"2026-10-19T05:49:43.192443584Z","Action":"output","Package":"github.com/division-sh/swarm/scripts/rewrite-stages-2566","Test":"TestRewrite2566NoFinalRootCensusIsExplicitlyClassified","Output":"=== RUN   TestRewrite2566NoFinalRootCensusIsExplicitlyClassified\n"}
+{"Time":"2026-10-19T05:49:43.211045764Z","Action":"output","Package":"github.com/division-sh/swarm/scripts/rewrite-stages-2566","Test":"TestRewrite2566NoFinalRootCensusIsExplicitlyClassified","Output":"--- PASS: TestRewrite2566NoFinalRootCensusIsExplicitlyClassified (0.02s)\n"}
+{"Time":"2026-10-19T05:49:43.211094485Z","Action":"pass","Package":"github.com/division-sh/swarm/scripts/rewrite-stages-2566","Test":"TestRewrite2566NoFinalRootCensusIsExplicitlyClassified","Elapsed":0.02}
+{"Time":"2026-10-19T05:49:43.211102845Z","Action":"output","Package":"github.com/division-sh/swarm/scripts/rewrite-stages-2566","Output":"PASS\n"}
+{"Time":"2026-10-19T05:49:43.212638403Z","Action":"output","Package":"github.com/division-sh/swarm/scripts/rewrite-stages-2566","Output":"ok  \tgithub.com/division-sh/swarm/scripts/rewrite-stages-2566\t0.025s\n"}
+{"Time":"2026-10-19T05:49:43.212655063Z","Action":"pass","Package":"github.com/division-sh/swarm/scripts/rewrite-stages-2566","Elapsed":0.025}

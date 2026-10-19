@@ -1,0 +1,8 @@
+{"Time":"2026-10-19T05:49:11.471038638Z","Action":"start","Package":"github.com/division-sh/swarm/internal/runtime/effects"}
+{"Time":"2026-10-19T05:49:11.482225199Z","Action":"run","Package":"github.com/division-sh/swarm/internal/runtime/effects","Test":"TestDirectPrimitiveOwnershipManifestIsTotal"}
+{"Time":"2026-10-19T05:49:11.482269649Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/effects","Test":"TestDirectPrimitiveOwnershipManifestIsTotal","Output":"=== RUN   TestDirectPrimitiveOwnershipManifestIsTotal\n"}
+{"Time":"2026-10-19T05:49:12.567580933Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/effects","Test":"TestDirectPrimitiveOwnershipManifestIsTotal","Output":"--- PASS: TestDirectPrimitiveOwnershipManifestIsTotal (1.09s)\n"}
+{"Time":"2026-10-19T05:49:12.567658403Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/runtime/effects","Test":"TestDirectPrimitiveOwnershipManifestIsTotal","Elapsed":1.09}
+{"Time":"2026-10-19T05:49:12.567715894Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/effects","Output":"PASS\n"}
+{"Time":"2026-10-19T05:49:12.569568734Z","Action":"output","Package":"github.com/division-sh/swarm/internal/runtime/effects","Output":"ok  \tgithub.com/division-sh/swarm/internal/runtime/effects\t1.098s\n"}
+{"Time":"2026-10-19T05:49:12.569583454Z","Action":"pass","Package":"github.com/division-sh/swarm/internal/runtime/effects","Elapsed":1.099}
