@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 // Fixed public contract expectations, independent of the implementation codec.
@@ -21,6 +23,7 @@ var nodeIdentityScopes = map[string]struct{ Key, Request string }{
 }
 
 func TestNodeIdentityCanonicalMapKeySQLitePostgres(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/releasee2e/testdata/node_identity_activity"))
 	dsn := strings.TrimSpace(os.Getenv(goldenPostgresEnv))
 	if dsn == "" {
 		t.Fatalf("%s required for both-store node identity proof", goldenPostgresEnv)

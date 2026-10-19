@@ -24,7 +24,7 @@ func TestGeneratorProfileAdmissionFieldPresenceMatrix(t *testing.T) {
 		{path: "pack"}, {path: "pack.id"}, {path: "pack.version"}, {path: "pack.platform_version"}, {path: "pack.provenance"}, {path: "pack.tests"},
 		{path: "auth"}, {path: "auth.mode"}, {path: "auth.credentials"}, {path: "static_headers", emptyMapping: true},
 		{path: "operations"}, {path: "operations.0.operation_id"}, {path: "operations.0.path"}, {path: "operations.0.method"},
-		{path: "operations.0.tool_id"}, {path: "operations.0.description"}, {path: "operations.0.effect_class"}, {path: "operations.0.review_status"},
+		{path: "operations.0.tool_id"}, {path: "operations.0.description"}, {path: "operations.0.review_status"},
 		{path: "operations.0.path_parameters", emptySequence: true}, {path: "operations.0.path_parameters.0.source"},
 		{path: "operations.0.path_parameters.0.input"}, {path: "operations.0.path_parameters.0.type"}, {path: "operations.0.path_parameters.0.required"},
 		{path: "operations.0.request_body"}, {path: "operations.0.request_body.required"}, {path: "operations.0.request_body.variant"},
@@ -43,6 +43,17 @@ func TestGeneratorProfileAdmissionFieldPresenceMatrix(t *testing.T) {
 				}
 			})
 		}
+	}
+	for _, declaration := range []struct{ name, body string }{
+		{"direct", "    effect_class: non_idempotent_write\n"},
+		{"merged", "    <<: {effect_class: non_idempotent_write}\n"},
+	} {
+		t.Run("retired_effect_class/"+declaration.name, func(t *testing.T) {
+			_, err := ParseGeneratorProfile([]byte(string(body) + "\n" + declaration.body))
+			if err == nil || !strings.Contains(err.Error(), `["operations"][0]["effect_class"]`) {
+				t.Fatalf("retired generator operation field was not refused at its source: %v", err)
+			}
+		})
 	}
 }
 
