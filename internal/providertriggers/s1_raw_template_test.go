@@ -13,16 +13,15 @@ func TestS1RawTemplatesUseDirectoryIdentityNotProtocolName(t *testing.T) {
 		for _, local := range []string{"{event_type}", "raw.{event_type}"} {
 			t.Run(key+"/"+local, func(t *testing.T) {
 				fixture := admissionTestManifest(key, signatureTypeTokenEquality, true)
-				fixture.EventName = EventNameManifest{Template: "inbound." + key + "." + local}
+				fixture.EventName = EventNameManifest{Template: local}
 				fixture.EventType.Literal = "Issue.Opened-V2"
 				manifest, err := fixture.admit()
 				if err != nil {
 					t.Fatalf("raw-template policy inferred a protocol from provider key %q: %v", key, err)
 				}
-				catalog, err := NewCatalogSnapshot(CatalogEntry{
-					Manifest: manifest, Identity: PackIdentity{ID: "test.trigger", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64), Provenance: "external"},
-					Source: "test", SourcePath: "/trigger",
-				})
+				catalog, err := NewCatalogSnapshotFromAdmittedBodies(
+					manifest,
+				)
 				if err != nil {
 					t.Fatal(err)
 				}

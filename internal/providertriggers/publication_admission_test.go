@@ -16,7 +16,7 @@ import (
 )
 
 func TestA9DeclarationPublicationRequiresAuthenticatedExactOutputs(t *testing.T) {
-	catalog, err := NewCatalogSnapshot()
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies()
 	if err != nil {
 		t.Fatal(err)
 	}

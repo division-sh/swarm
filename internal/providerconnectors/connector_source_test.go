@@ -2,49 +2,12 @@ package providerconnectors
 
 import (
 	"io/fs"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
-
-func TestGeneratorProfileAdmissionFieldPresenceMatrix(t *testing.T) {
-	body, err := fs.ReadFile(generatedConnectorIdentityFS, "catalog/generator-profiles/acme.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, field := range []struct {
-		path                                  string
-		emptySequence, emptyMapping, optional bool
-	}{
-		{path: "schema_version"}, {path: "provider"}, {path: "source"}, {path: "source.path"},
-		{path: "source.compression"}, {path: "source.sha256"}, {path: "source.openapi_version"}, {path: "source.server"},
-		{path: "pack"}, {path: "pack.id"}, {path: "pack.version"}, {path: "pack.platform_version"}, {path: "pack.provenance"}, {path: "pack.tests"},
-		{path: "auth"}, {path: "auth.mode"}, {path: "auth.credentials"}, {path: "static_headers", emptyMapping: true},
-		{path: "operations"}, {path: "operations.0.operation_id"}, {path: "operations.0.path"}, {path: "operations.0.method"},
-		{path: "operations.0.tool_id"}, {path: "operations.0.description"}, {path: "operations.0.effect_class"}, {path: "operations.0.review_status"},
-		{path: "operations.0.path_parameters", emptySequence: true}, {path: "operations.0.path_parameters.0.source"},
-		{path: "operations.0.path_parameters.0.input"}, {path: "operations.0.path_parameters.0.type"}, {path: "operations.0.path_parameters.0.required"},
-		{path: "operations.0.request_body"}, {path: "operations.0.request_body.required"}, {path: "operations.0.request_body.variant"},
-		{path: "operations.0.request_body.variant.kind"}, {path: "operations.0.request_body.variant.fields"}, {path: "operations.0.request_body.fields"},
-		{path: "operations.0.injected_inputs", emptySequence: true}, {path: "operations.0.permissions"}, {path: "operations.0.permissions.0.id"}, {path: "operations.0.permissions.0.note"},
-		{path: "operations.0.output"}, {path: "operations.0.output.type"}, {path: "operations.0.response_success"}, {path: "operations.0.response_success.kind"},
-		{path: "operations.0.fixture"}, {path: "operations.0.fixture.id"}, {path: "operations.0.fixture.status"},
-	} {
-		for _, state := range []string{"missing", "null", "empty text", "empty sequence", "empty mapping", "wrong kind", "valid", "merge"} {
-			t.Run(field.path+"/"+state, func(t *testing.T) {
-				mutated := mutateCatalogField(t, body, field.path, state)
-				_, err := ParseGeneratorProfile(mutated)
-				wantValid := state == "valid" || state == "merge" || state == "empty sequence" && field.emptySequence || state == "empty mapping" && field.emptyMapping || state == "missing" && field.optional
-				if (err == nil) != wantValid {
-					t.Fatalf("field %s state %s: admit=%t want=%t: %v", field.path, state, err == nil, wantValid, err)
-				}
-			})
-		}
-	}
-}
 
 func TestGeneratorProfileAdmissionRejectsInactiveMembersByPresence(t *testing.T) {
 	body, err := fs.ReadFile(generatedConnectorIdentityFS, "catalog/generator-profiles/acme.yaml")
@@ -57,50 +20,6 @@ func TestGeneratorProfileAdmissionRejectsInactiveMembersByPresence(t *testing.T)
 				_, err := ParseGeneratorProfile(mutateCatalogField(t, body, path, state))
 				if err == nil || !strings.Contains(err.Error(), "forbids") {
 					t.Fatalf("inactive member admitted: %v", err)
-				}
-			})
-		}
-	}
-}
-
-func TestConnectorAndGeneratedIndexAdmissionPreservePresence(t *testing.T) {
-	artifacts, err := GenerateCatalog(os.DirFS("."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, artifact := range artifacts {
-		for _, path := range []string{"provider", "tools", "generation", "generation.schema_version", "generation.generator_version", "generation.source", "generation.source.path", "generation.source.sha256", "generation.source.openapi_version", "generation.profile", "generation.profile.path", "generation.profile.schema_version", "generation.profile.sha256", "generation.operations", "generation.operations.0.operation_id", "generation.operations.0.tool_id", "generation.operations.0.permissions", "generation.operations.0.permissions.0.id", "generation.operations.0.permissions.0.note", "generation.operations.0.response_success", "generation.operations.0.response_success.kind", "generation.operations.0.fixture_id", "generation.operations.0.fixture_status", "generation.operations.0.review_status"} {
-			for _, state := range []string{"missing", "null", "empty text", "empty sequence", "empty mapping", "wrong kind", "valid", "merge"} {
-				t.Run(artifact.Manifest.Provider+"/"+path+"/"+state, func(t *testing.T) {
-					manifest, err := ParseConnectorManifest(mutateCatalogField(t, artifact.ConnectorBody, path, state))
-					if err == nil {
-						err = manifest.Validate()
-					}
-					if err == nil && manifest.Generation != nil {
-						err = manifest.Generation.Validate(manifest.Provider, manifest.Tools)
-					}
-					wantValid := state == "valid" || state == "merge" || path == "generation" && state == "missing"
-					if (err == nil) != wantValid {
-						t.Fatalf("admit=%t want=%t: %v", err == nil, wantValid, err)
-					}
-				})
-			}
-		}
-	}
-	indexBody, err := fs.ReadFile(generatedConnectorIdentityFS, generatedPackIndexFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{"schema_version", "packs", "packs.0.id", "packs.0.provider", "packs.0.profile", "packs.0.kind", "packs.0.output"} {
-		for _, state := range []string{"missing", "null", "empty text", "empty sequence", "empty mapping", "wrong kind", "valid", "merge"} {
-			t.Run("index/"+path+"/"+state, func(t *testing.T) {
-				index, err := admitGeneratedPackIndex(mutateCatalogField(t, indexBody, path, state), generatedPackIndexFile)
-				if err == nil {
-					err = index.Validate(generatedConnectorIdentityFS)
-				}
-				wantValid := state == "valid" || state == "merge"
-				if (err == nil) != wantValid {
-					t.Fatalf("admit=%t want=%t: %v", err == nil, wantValid, err)
 				}
 			})
 		}

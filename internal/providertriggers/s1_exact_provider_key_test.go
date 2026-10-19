@@ -16,16 +16,13 @@ func TestS1TriggerNormalizedOutputKeepsDirectoryKeyAndWireConversionSeparate(t *
 			fixture := normalizedEventTestManifest()
 			fixture.Provider = key
 			fixture.EventType.Literal = "Message.Sent-V2"
-			fixture.EventName.Literal = "inbound." + key + ".raw"
-			fixture.NormalizedEvents[0].Event = "inbound." + key + ".text_message"
+			fixture.EventName.Literal = "raw"
+			fixture.NormalizedEvents[0].Event = "text_message"
 			manifest, err := fixture.admit()
 			if err != nil {
 				t.Fatal(err)
 			}
-			catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: manifest,
-				Identity: PackIdentity{ID: "test.trigger", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64), Provenance: "external"},
-				Source:   "test", SourcePath: "/trigger",
-			})
+			catalog, err := NewCatalogSnapshotFromAdmittedBodies(manifest)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -73,7 +70,7 @@ func TestS1TriggerProviderKeyNeverUsesProtocolNormalization(t *testing.T) {
 			if err != nil || manifest.Provider() != key {
 				t.Fatalf("provider key changed: got=%q err=%v", manifest.Provider(), err)
 			}
-			catalog, err := NewCatalogSnapshot(admissionTestEntry(fixture, "test.trigger"))
+			catalog, err := NewCatalogSnapshotFromAdmittedBodies(admissionTestEntry(fixture, "test.trigger").Manifest)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -116,7 +113,7 @@ func TestS1TriggerProviderKeyNeverUsesProtocolNormalization(t *testing.T) {
 func TestS1TriggerCatalogKeepsHyphenAndUnderscoreKeysDistinct(t *testing.T) {
 	left := admissionTestEntry(admissionTestManifest("telegram-sales", signatureTypeTokenEquality, true), "test.hyphen")
 	right := admissionTestEntry(admissionTestManifest("telegram_sales", signatureTypeTokenEquality, true), "test.underscore")
-	catalog, err := NewCatalogSnapshot(left, right)
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(left.Manifest, right.Manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,11 +138,11 @@ func TestS1TriggerCatalogKeepsHyphenAndUnderscoreKeysDistinct(t *testing.T) {
 		}
 	}
 	left.Identity = right.Identity
-	first, err := NewCatalogSnapshot(left)
+	first, err := NewCatalogSnapshotFromAdmittedBodies(left.Manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := NewCatalogSnapshot(right)
+	second, err := NewCatalogSnapshotFromAdmittedBodies(right.Manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +152,7 @@ func TestS1TriggerCatalogKeepsHyphenAndUnderscoreKeysDistinct(t *testing.T) {
 }
 
 func TestS1TriggerAndRawAdmissionRefuseNonportableProviderKeys(t *testing.T) {
-	catalog, err := NewCatalogSnapshot()
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies()
 	if err != nil {
 		t.Fatal(err)
 	}

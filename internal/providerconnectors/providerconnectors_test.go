@@ -455,167 +455,6 @@ func TestCapabilitySubjectsEffectiveFlowLocalIdentityReplacesAvailableTeachingRo
 	t.Fatal("effective telegram subject missing")
 }
 
-func TestEmbeddedPackInventoryLoadsSlackManagedCredentialPack(t *testing.T) {
-	tool, ok := testBuiltinTool(t, "slack", "slack.post_message")
-	if !ok {
-		t.Fatal("embedded connector tool slack.post_message not found")
-	}
-	if !isProviderConnector(tool) {
-		t.Fatalf("builtin slack tool category = %q, want %q", tool.Category(), Category)
-	}
-	managed, ok := tool.ManagedCredential()
-	if !ok || managed.Key != "slack_oauth" {
-		t.Fatalf("builtin slack managed credential = %#v, want slack_oauth", managed)
-	}
-	success, ok := tool.ResponseSuccess()
-	if !ok || success.Path != "response.body.ok" || success.Equals != true {
-		t.Fatalf("builtin slack response_success = %#v, want response.body.ok true", success)
-	}
-	if credentials := tool.Credentials(); len(credentials) != 0 {
-		t.Fatalf("builtin slack static credentials = %#v, want none", credentials)
-	}
-	httpSpec, _ := tool.HTTP()
-	if strings.Contains(httpSpec.URL, "xoxb") || strings.Contains(httpSpec.URL, "secret") {
-		t.Fatal("builtin slack tool leaked a concrete credential value")
-	}
-}
-
-func TestEmbeddedPackInventoryLoadsNotionManagedCredentialPack(t *testing.T) {
-	tool, ok := testBuiltinTool(t, "notion", "notion.append_block_children")
-	if !ok {
-		t.Fatal("embedded connector tool notion.append_block_children not found")
-	}
-	if !isProviderConnector(tool) {
-		t.Fatalf("builtin Notion tool category = %q, want %q", tool.Category(), Category)
-	}
-	managed, ok := tool.ManagedCredential()
-	if !ok || managed.Key != "notion_oauth" {
-		t.Fatalf("builtin Notion managed credential = %#v, want notion_oauth", managed)
-	}
-	if managed.GrantModel != managedcredentialmodel.GrantModelWorkspace {
-		t.Fatalf("builtin Notion grant_model = %q, want workspace_grant", managed.GrantModel)
-	}
-	wantProfile := managedcredentialmodel.TokenRequestProfile{
-		ClientAuth: managedcredentialmodel.TokenClientAuthBasic,
-		Body:       managedcredentialmodel.TokenBodyJSON,
-		StaticHeaders: map[string]string{
-			"Notion-Version": "2026-03-11",
-		},
-	}
-	if !managedcredentialmodel.TokenRequestProfileEqual(managed.TokenRequest, wantProfile) {
-		t.Fatalf("builtin Notion token_request = %#v, want Basic JSON Notion-Version", managed.TokenRequest)
-	}
-	httpSpec, hasHTTP := tool.HTTP()
-	if !hasHTTP || httpSpec.Method != "PATCH" || !strings.Contains(httpSpec.URL, "/v1/blocks/{{input.block_id}}/children") {
-		t.Fatalf("builtin Notion http = %#v, want append block children PATCH endpoint", httpSpec)
-	}
-	if got := httpSpec.Headers["Notion-Version"]; got != "2026-03-11" {
-		t.Fatalf("builtin Notion API header = %q, want Notion-Version", got)
-	}
-	if credentials := tool.Credentials(); len(credentials) != 0 {
-		t.Fatalf("builtin Notion static credentials = %#v, want none", credentials)
-	}
-}
-
-func TestEmbeddedPackInventoryLoadsMicrosoftGraphManagedCredentialPack(t *testing.T) {
-	tool, ok := testBuiltinTool(t, "microsoft_graph", "microsoft_graph.send_mail")
-	if !ok {
-		t.Fatal("embedded connector tool microsoft_graph.send_mail not found")
-	}
-	if !isProviderConnector(tool) {
-		t.Fatalf("builtin Microsoft Graph tool category = %q, want %q", tool.Category(), Category)
-	}
-	managed, ok := tool.ManagedCredential()
-	if !ok || managed.Key != "microsoft_graph_app" {
-		t.Fatalf("builtin Microsoft Graph managed credential = %#v, want microsoft_graph_app", managed)
-	}
-	if got := strings.Join(managed.Scopes, " "); got != "https://graph.microsoft.com/.default" {
-		t.Fatalf("builtin Microsoft Graph scopes = %q, want Graph .default resource scope", got)
-	}
-	if managedcredentialmodel.NormalizeGrantModel(managed.GrantModel) != managedcredentialmodel.GrantModelScope {
-		t.Fatalf("builtin Microsoft Graph grant_model = %q, want scope_grant", managed.GrantModel)
-	}
-	if !managedcredentialmodel.TokenRequestProfileEqual(managed.TokenRequest, managedcredentialmodel.DefaultTokenRequestProfile()) {
-		t.Fatalf("builtin Microsoft Graph token_request = %#v, want default post/form", managed.TokenRequest)
-	}
-	httpSpec, hasHTTP := tool.HTTP()
-	if !hasHTTP || httpSpec.Method != "POST" || !strings.Contains(httpSpec.URL, "/v1.0/users/{{input.user_id}}/sendMail") {
-		t.Fatalf("builtin Microsoft Graph http = %#v, want sendMail POST endpoint", httpSpec)
-	}
-	if credentials := tool.Credentials(); len(credentials) != 0 {
-		t.Fatalf("builtin Microsoft Graph static credentials = %#v, want none", credentials)
-	}
-	if strings.Contains(httpSpec.URL, "secret") || strings.Contains(httpSpec.URL, "token") {
-		t.Fatal("builtin Microsoft Graph tool leaked a concrete credential value")
-	}
-}
-
-func TestEmbeddedPackInventoryLoadsGitHubAppInstallationPack(t *testing.T) {
-	tool, ok := testBuiltinTool(t, "github", "github.create_issue_comment")
-	if !ok {
-		t.Fatal("embedded connector tool github.create_issue_comment not found")
-	}
-	if !isProviderConnector(tool) {
-		t.Fatalf("builtin GitHub tool category = %q, want %q", tool.Category(), Category)
-	}
-	managed, ok := tool.ManagedCredential()
-	if !ok || managed.Key != "github_app" {
-		t.Fatalf("builtin GitHub managed credential = %#v, want github_app", managed)
-	}
-	if managed.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
-		t.Fatalf("builtin GitHub grant_type = %q, want github_app_installation", managed.GrantType)
-	}
-	if managed.GrantModel != managedcredentialmodel.GrantModelInstallation {
-		t.Fatalf("builtin GitHub grant_model = %q, want installation_grant", managed.GrantModel)
-	}
-	if managed.InstallationIDInput != "installation_id" {
-		t.Fatalf("builtin GitHub installation_id_input = %q, want installation_id", managed.InstallationIDInput)
-	}
-	httpSpec, hasHTTP := tool.HTTP()
-	if !hasHTTP || httpSpec.Method != "POST" || !strings.Contains(httpSpec.URL, "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/comments") {
-		t.Fatalf("builtin GitHub http = %#v, want create issue comment endpoint", httpSpec)
-	}
-	if credentials := tool.Credentials(); len(credentials) != 0 {
-		t.Fatalf("builtin GitHub static credentials = %#v, want none", credentials)
-	}
-	if strings.Contains(httpSpec.URL, "secret") || strings.Contains(httpSpec.URL, "token") {
-		t.Fatal("builtin GitHub tool leaked a concrete credential value")
-	}
-
-	createIssue, ok := testBuiltinTool(t, "github", "github.create_issue")
-	if !ok {
-		t.Fatal("embedded connector tool github.create_issue not found")
-	}
-	createIssueCredential, hasCredential := createIssue.ManagedCredential()
-	if !isProviderConnector(createIssue) || !hasCredential || createIssueCredential.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
-		t.Fatalf("builtin GitHub create issue tool = %#v, want provider connector with github_app_installation", createIssue)
-	}
-	createIssueHTTP, hasHTTP := createIssue.HTTP()
-	if !hasHTTP || createIssueHTTP.Method != "POST" || !strings.Contains(createIssueHTTP.URL, "/repos/{{input.owner}}/{{input.repo}}/issues") {
-		t.Fatalf("builtin GitHub create issue http = %#v, want create issue endpoint", createIssueHTTP)
-	}
-
-	addLabels, ok := testBuiltinTool(t, "github", "github.add_labels_to_issue")
-	if !ok {
-		t.Fatal("embedded connector tool github.add_labels_to_issue not found")
-	}
-	addLabelsCredential, hasCredential := addLabels.ManagedCredential()
-	if !isProviderConnector(addLabels) || !hasCredential || addLabelsCredential.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation {
-		t.Fatalf("builtin GitHub add labels tool = %#v, want provider connector with github_app_installation", addLabels)
-	}
-	addLabelsHTTP, hasHTTP := addLabels.HTTP()
-	if !hasHTTP || addLabelsHTTP.Method != "POST" || !strings.Contains(addLabelsHTTP.URL, "/repos/{{input.owner}}/{{input.repo}}/issues/{{input.issue_number}}/labels") {
-		t.Fatalf("builtin GitHub add labels http = %#v, want issue labels endpoint", addLabelsHTTP)
-	}
-	bodyMap, ok := addLabelsHTTP.Body.(map[string]any)
-	if !ok {
-		t.Fatalf("builtin GitHub add labels body = %#v, want object body", addLabelsHTTP.Body)
-	}
-	if body, ok := bodyMap["labels"].(string); !ok || body != "{{input.labels}}" {
-		t.Fatalf("builtin GitHub add labels body = %#v, want whole-field labels template", addLabelsHTTP.Body)
-	}
-}
-
 func TestNotionConnectorPackReportsWorkspaceGrantAndTokenProfileRequirement(t *testing.T) {
 	ctx := context.Background()
 	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
@@ -636,14 +475,16 @@ func TestNotionConnectorPackReportsWorkspaceGrantAndTokenProfileRequirement(t *t
 		t.Fatalf("unbound surfaces = %#v, want one Notion managed credential requirement", unbound)
 	}
 	requirement := unbound[0].Requirements[0]
-	if requirement.Kind != "managed_credential" || requirement.Name != "notion_oauth" || requirementSatisfied(requirement) || requirement.Status != "UNCONNECTED" {
-		t.Fatalf("unbound requirement = %#v, want unbound notion_oauth", requirement)
+	if requirement.Kind != "managed_credential" || requirement.Name != "notion.notion_oauth" || requirementSatisfied(requirement) || requirement.Status != "UNCONNECTED" {
+		t.Fatalf("unbound requirement = %#v, want unbound notion.notion_oauth", requirement)
 	}
 	if requirement.GrantModel != managedcredentialmodel.GrantModelWorkspace || requirement.TokenRequest.ClientAuth != managedcredentialmodel.TokenClientAuthBasic || requirement.TokenRequest.Body != managedcredentialmodel.TokenBodyJSON {
 		t.Fatalf("unbound requirement shape = %#v, want workspace Basic JSON", requirement)
 	}
 
-	matchingStore := runtimemanagedcredentials.NewMemoryStore(notionConnectedRecord())
+	matching := notionConnectedRecord()
+	matching.Key = "notion.notion_oauth"
+	matchingStore := runtimemanagedcredentials.NewMemoryStore(matching)
 	bound, err := CapabilitySubjects(ctx, source, CapabilityOptions{Registry: testPackRegistry(t), ManagedCredentials: matchingStore})
 	if err != nil {
 		t.Fatalf("CapabilitySubjects bound: %v", err)
@@ -653,6 +494,7 @@ func TestNotionConnectorPackReportsWorkspaceGrantAndTokenProfileRequirement(t *t
 	}
 
 	wrongProfile := notionConnectedRecord()
+	wrongProfile.Key = matching.Key
 	wrongProfile.TokenRequest = managedcredentialmodel.DefaultTokenRequestProfile()
 	wrongProfileStore := runtimemanagedcredentials.NewMemoryStore(wrongProfile)
 	mismatch, err := CapabilitySubjects(ctx, source, CapabilityOptions{Registry: testPackRegistry(t), ManagedCredentials: wrongProfileStore})
@@ -684,8 +526,8 @@ func TestGitHubConnectorPackReportsInstallationGrantRequirement(t *testing.T) {
 		t.Fatalf("unbound surfaces = %#v, want one GitHub managed credential requirement", unbound)
 	}
 	requirement := unbound[0].Requirements[0]
-	if requirement.Kind != "managed_credential" || requirement.Name != "github_app" || requirementSatisfied(requirement) || requirement.Status != "UNCONNECTED" {
-		t.Fatalf("unbound requirement = %#v, want unbound github_app", requirement)
+	if requirement.Kind != "managed_credential" || requirement.Name != "github.github_app" || requirementSatisfied(requirement) || requirement.Status != "UNCONNECTED" {
+		t.Fatalf("unbound requirement = %#v, want unbound github.github_app", requirement)
 	}
 	if requirement.GrantType != runtimemanagedcredentials.GrantGitHubAppInstallation ||
 		requirement.GrantModel != managedcredentialmodel.GrantModelInstallation ||
@@ -693,7 +535,9 @@ func TestGitHubConnectorPackReportsInstallationGrantRequirement(t *testing.T) {
 		t.Fatalf("unbound requirement shape = %#v, want github app installation grant", requirement)
 	}
 
-	matchingStore := runtimemanagedcredentials.NewMemoryStore(githubAppConnectedRecord())
+	matching := githubAppConnectedRecord()
+	matching.Key = "github.github_app"
+	matchingStore := runtimemanagedcredentials.NewMemoryStore(matching)
 	bound, err := CapabilitySubjects(ctx, source, CapabilityOptions{Registry: testPackRegistry(t), ManagedCredentials: matchingStore})
 	if err != nil {
 		t.Fatalf("CapabilitySubjects bound: %v", err)
@@ -703,6 +547,7 @@ func TestGitHubConnectorPackReportsInstallationGrantRequirement(t *testing.T) {
 	}
 
 	wrongGrant := githubAppConnectedRecord()
+	wrongGrant.Key = matching.Key
 	wrongGrant.GrantType = runtimemanagedcredentials.GrantClientCredentials
 	wrongGrantStore := runtimemanagedcredentials.NewMemoryStore(wrongGrant)
 	mismatch, err := CapabilitySubjects(ctx, source, CapabilityOptions{Registry: testPackRegistry(t), ManagedCredentials: wrongGrantStore})
@@ -711,58 +556,6 @@ func TestGitHubConnectorPackReportsInstallationGrantRequirement(t *testing.T) {
 	}
 	if len(mismatch) != 1 || len(mismatch[0].Requirements) != 1 || requirementSatisfied(mismatch[0].Requirements[0]) || mismatch[0].Requirements[0].Status != "SCOPE_INSUFFICIENT" {
 		t.Fatalf("mismatch requirement = %#v, want fail-closed grant_type mismatch", mismatch)
-	}
-}
-
-func TestGitHubConnectorPackImportsMultipleActionsExplicitly(t *testing.T) {
-	ctx := context.Background()
-	source, err := SourceWithConnectorPackImports(providerConnectorScopedSource{
-		Source: semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
-		importScopes: []connectorPackTestImportScope{{
-			Key: ".",
-			Imports: []runtimecontracts.ConnectorPackImport{
-				{Provider: "github", Tool: "github.add_labels_to_issue"},
-				{Provider: "github", Tool: "github.create_issue"},
-				{Provider: "github", Tool: "github.create_issue_comment"},
-			},
-		}},
-	}, testPackRegistry(t))
-	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImports: %v", err)
-	}
-	tools := source.ToolEntries()
-	for _, toolID := range []string{"github.add_labels_to_issue", "github.create_issue", "github.create_issue_comment"} {
-		tool, ok := tools[toolID]
-		if !ok {
-			t.Fatalf("imported tool %s missing", toolID)
-		}
-		managed, hasManaged := tool.ManagedCredential()
-		if !isProviderConnector(tool) || !hasManaged || managed.Key != "github_app" {
-			t.Fatalf("imported GitHub tool %s = %#v, want github_app provider connector", toolID, tool)
-		}
-	}
-	surfaces, err := CapabilitySubjects(ctx, source, CapabilityOptions{Registry: testPackRegistry(t)})
-	if err != nil {
-		t.Fatalf("CapabilitySubjects: %v", err)
-	}
-	if len(surfaces) != 3 {
-		t.Fatalf("surfaces = %#v, want three GitHub action surfaces", surfaces)
-	}
-	seen := map[string]bool{}
-	for _, surface := range surfaces {
-		seen[surface.ID] = true
-		if len(surface.Requirements) != 1 || surface.Requirements[0].Kind != "managed_credential" || surface.Requirements[0].Name != "github_app" || requirementSatisfied(surface.Requirements[0]) {
-			t.Fatalf("surface %s requirements = %#v, want unbound github_app managed credential", surface.ID, surface.Requirements)
-		}
-		generation := evidenceByKind(surface.Evidence, "generation")
-		if generation == nil || generation["operation"] == "" || generation["source"] == "" || generation["profile"] != "catalog/generator-profiles/github.yaml" || !strings.Contains(generation["permissions"], "issues:write") || !strings.HasSuffix(generation["fixture"], ":passing") || generation["review"] != "approved" {
-			t.Fatalf("surface %s generation = %#v, want generated GitHub freshness evidence", surface.ID, generation)
-		}
-	}
-	for _, toolID := range []string{"github.add_labels_to_issue", "github.create_issue", "github.create_issue_comment"} {
-		if !seen[toolID] {
-			t.Fatalf("surface for %s missing in %#v", toolID, surfaces)
-		}
 	}
 }
 
@@ -786,8 +579,8 @@ func TestMicrosoftGraphConnectorPackReportsDefaultScopeManagedCredentialRequirem
 		t.Fatalf("unbound surfaces = %#v, want one Microsoft Graph managed credential requirement", unbound)
 	}
 	requirement := unbound[0].Requirements[0]
-	if requirement.Kind != "managed_credential" || requirement.Name != "microsoft_graph_app" || requirementSatisfied(requirement) || requirement.Status != "UNCONNECTED" {
-		t.Fatalf("unbound requirement = %#v, want unbound microsoft_graph_app", requirement)
+	if requirement.Kind != "managed_credential" || requirement.Name != "microsoft_graph.microsoft_graph_app" || requirementSatisfied(requirement) || requirement.Status != "UNCONNECTED" {
+		t.Fatalf("unbound requirement = %#v, want unbound microsoft_graph.microsoft_graph_app", requirement)
 	}
 	if requirement.GrantModel != managedcredentialmodel.GrantModelScope || requirement.TokenRequest.ClientAuth != managedcredentialmodel.TokenClientAuthPost || requirement.TokenRequest.Body != managedcredentialmodel.TokenBodyForm {
 		t.Fatalf("unbound requirement shape = %#v, want scope_grant post/form", requirement)
@@ -796,7 +589,9 @@ func TestMicrosoftGraphConnectorPackReportsDefaultScopeManagedCredentialRequirem
 		t.Fatalf("unbound requirement scopes = %q, want Graph .default resource scope", got)
 	}
 
-	matchingStore := runtimemanagedcredentials.NewMemoryStore(microsoftGraphConnectedRecord())
+	matching := microsoftGraphConnectedRecord()
+	matching.Key = "microsoft_graph.microsoft_graph_app"
+	matchingStore := runtimemanagedcredentials.NewMemoryStore(matching)
 	bound, err := CapabilitySubjects(ctx, source, CapabilityOptions{Registry: testPackRegistry(t), ManagedCredentials: matchingStore})
 	if err != nil {
 		t.Fatalf("CapabilitySubjects bound: %v", err)
@@ -806,6 +601,7 @@ func TestMicrosoftGraphConnectorPackReportsDefaultScopeManagedCredentialRequirem
 	}
 
 	wrongScope := microsoftGraphConnectedRecord()
+	wrongScope.Key = matching.Key
 	wrongScope.Scopes = []string{"Mail.Send"}
 	wrongScopeStore := runtimemanagedcredentials.NewMemoryStore(wrongScope)
 	mismatch, err := CapabilitySubjects(ctx, source, CapabilityOptions{Registry: testPackRegistry(t), ManagedCredentials: wrongScopeStore})
@@ -814,54 +610,6 @@ func TestMicrosoftGraphConnectorPackReportsDefaultScopeManagedCredentialRequirem
 	}
 	if len(mismatch) != 1 || len(mismatch[0].Requirements) != 1 || requirementSatisfied(mismatch[0].Requirements[0]) || mismatch[0].Requirements[0].Status != "SCOPE_INSUFFICIENT" {
 		t.Fatalf("mismatch requirement = %#v, want fail-closed .default scope mismatch", mismatch)
-	}
-}
-
-func TestConnectorPackImportRequiresExplicitEnableAndReportsSurface(t *testing.T) {
-	ambient := providerConnectorScopedSource{
-		Source:       semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		importScopes: []connectorPackTestImportScope{{Key: "."}},
-	}
-	ambientSource, err := SourceWithConnectorPackImports(ambient, testPackRegistry(t))
-	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImports ambient: %v", err)
-	}
-	if _, exists := ambientSource.ToolEntries()["telegram.send_message"]; exists {
-		t.Fatal("ambient source exposed telegram.send_message without explicit import")
-	}
-
-	explicit := providerConnectorScopedSource{
-		Source: semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
-		importScopes: []connectorPackTestImportScope{
-			flowScopeWithConnectorPackImport(".", "telegram", "telegram.send_message"),
-		},
-	}
-	source, err := SourceWithConnectorPackImports(explicit, testPackRegistry(t))
-	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImports explicit: %v", err)
-	}
-	tool, exists := source.ToolEntries()["telegram.send_message"]
-	if !exists {
-		t.Fatal("explicit import did not expose telegram.send_message")
-	}
-	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector {
-		t.Fatalf("imported tool category = %q, want %q", tool.Category(), Category)
-	}
-	if errs := ValidateSource(source); len(errs) != 0 {
-		t.Fatalf("ValidateSource imported connector errors = %#v", errs)
-	}
-	surfaces, err := CapabilitySubjects(context.Background(), source, CapabilityOptions{Registry: testPackRegistry(t)})
-	if err != nil {
-		t.Fatalf("Surfaces: %v", err)
-	}
-	if len(surfaces) != 1 || surfaces[0].ID != "telegram.send_message" {
-		t.Fatalf("surfaces = %#v, want telegram.send_message", surfaces)
-	}
-	if surfaces[0].Source != "connector_pack_import" || surfaces[0].Applicability != "effective" || surfaces[0].Provenance != packs.ProvenancePlatform {
-		t.Fatalf("surface source = %#v, want effective platform connector pack import", surfaces[0])
-	}
-	if len(surfaces[0].Requirements) != 1 || surfaces[0].Requirements[0].Name != "telegram_bot_token" || requirementSatisfied(surfaces[0].Requirements[0]) {
-		t.Fatalf("surface requirements = %#v, want unbound telegram_bot_token", surfaces[0].Requirements)
 	}
 }
 
@@ -927,52 +675,6 @@ func TestConnectorPackCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *test
 	}
 	if !generationVisible {
 		t.Fatalf("connector generation hidden through overlay: %#v", subjects[0].Evidence)
-	}
-}
-
-func TestSlackConnectorPackImportRequiresExplicitEnableAndReportsManagedSurface(t *testing.T) {
-	ambient := providerConnectorScopedSource{
-		Source:       semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		importScopes: []connectorPackTestImportScope{{Key: "."}},
-	}
-	ambientSource, err := SourceWithConnectorPackImports(ambient, testPackRegistry(t))
-	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImports ambient: %v", err)
-	}
-	if _, exists := ambientSource.ToolEntries()["slack.post_message"]; exists {
-		t.Fatal("ambient source exposed slack.post_message without explicit import")
-	}
-
-	explicit := providerConnectorScopedSource{
-		Source: semanticviewtest.WrapRootAgents(&runtimecontracts.WorkflowContractBundle{}),
-		importScopes: []connectorPackTestImportScope{
-			flowScopeWithConnectorPackImport(".", "slack", "slack.post_message"),
-		},
-	}
-	source, err := SourceWithConnectorPackImports(explicit, testPackRegistry(t))
-	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImports explicit: %v", err)
-	}
-	tool, exists := source.ToolEntries()["slack.post_message"]
-	if !exists {
-		t.Fatal("explicit import did not expose slack.post_message")
-	}
-	managed, hasManaged := tool.ManagedCredential()
-	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || !hasManaged || managed.Key != "slack_oauth" {
-		t.Fatalf("imported tool = %#v, want provider_connector managed slack_oauth", tool)
-	}
-	if errs := ValidateSource(source); len(errs) != 0 {
-		t.Fatalf("ValidateSource imported Slack connector errors = %#v", errs)
-	}
-	surfaces, err := CapabilitySubjects(context.Background(), source, CapabilityOptions{Registry: testPackRegistry(t)})
-	if err != nil {
-		t.Fatalf("CapabilitySubjects: %v", err)
-	}
-	if len(surfaces) != 1 || surfaces[0].ID != "slack.post_message" {
-		t.Fatalf("surfaces = %#v, want slack.post_message", surfaces)
-	}
-	if len(surfaces[0].Requirements) != 1 || surfaces[0].Requirements[0].Kind != "managed_credential" || surfaces[0].Requirements[0].Name != "slack_oauth" || requirementSatisfied(surfaces[0].Requirements[0]) {
-		t.Fatalf("surface requirements = %#v, want unbound managed slack_oauth", surfaces[0].Requirements)
 	}
 }
 

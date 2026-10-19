@@ -1,6 +1,8 @@
 package providertriggers
 
 import (
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"gopkg.in/yaml.v3"
 )
@@ -10,11 +12,21 @@ import (
 type triggerFixture manifestDefinition
 
 func (f triggerFixture) admit() (Manifest, error) {
+	key := f.Provider
+	f.Provider = ""
 	body, err := yaml.Marshal(manifestDefinition(f))
 	if err != nil {
 		return Manifest{}, err
 	}
-	return ParseManifest(body)
+	provider, err := packartifact.AdmitProviderMembers(key, map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw]}, cannot: [execute code]}\n"),
+		"trigger.yaml":  body,
+	})
+	if err != nil {
+		return Manifest{}, err
+	}
+	trigger, _ := provider.Body(packmodel.BodyTrigger)
+	return AdmitBody(trigger)
 }
 
 func (f triggerFixture) Validate() error {

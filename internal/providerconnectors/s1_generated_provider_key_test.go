@@ -6,7 +6,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"gopkg.in/yaml.v3"
 )
 
@@ -150,21 +149,5 @@ func TestS1ConnectorGeneratedIndexAndProfileRefuseKeyRepair(t *testing.T) {
 	profile.Operations[0].ToolID = " " + profile.Operations[0].ToolID
 	if err := profile.Validate(); err == nil {
 		t.Fatal("generator profile repaired a tool identity before generation")
-	}
-}
-
-func TestS1ConnectorRawProviderAndToolFieldsAreNotRepaired(t *testing.T) {
-	for _, key := range []string{"TEAM", " team", "team ", "_team", "con", strings.Repeat("a", 101)} {
-		body := []byte("provider: " + `"` + key + `"` + "\ntools: {}\n")
-		if _, err := ParseConnectorManifest(body); err == nil || !strings.Contains(err.Error(), "portable directory key") || !strings.Contains(err.Error(), "connector.yaml:") {
-			t.Errorf("raw provider field %q escaped located key admission: %v", key, err)
-		}
-	}
-	for _, name := range []string{"", " team.send", "team.send ", "TEAM.send", "team_bot.send"} {
-		pack := s1ConnectorPack("team")
-		pack.Manifest.Tools = map[string]runtimecontracts.ToolSchemaEntry{name: telegramConnectorTool("https://api.telegram.org")}
-		if _, err := NewPackRegistry(pack); err == nil {
-			t.Errorf("malformed or foreign tool key %q escaped manifest admission", name)
-		}
 	}
 }

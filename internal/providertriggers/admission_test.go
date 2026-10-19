@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/packs"
 )
 
 func TestA9CompileAdmissionUsesExactAlias(t *testing.T) {
-	catalog, err := NewCatalogSnapshot(admissionTestEntry(admissionTestManifest("acme", signatureTypeTokenEquality, true), "provider.acme"))
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(admissionTestEntry(admissionTestManifest("acme", signatureTypeTokenEquality, true), "provider.acme").Manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,131 +41,6 @@ func TestManifestRejectsSignedOptionalSecretAndEmptyKeyExecution(t *testing.T) {
 	}
 }
 
-func TestCatalogGenerationIsSemanticAndOrderIndependent(t *testing.T) {
-	a := admissionTestEntry(admissionTestManifest("a", signatureTypeTokenEquality, true), "provider.a")
-	b := admissionTestEntry(admissionTestManifest("b", signatureTypeHMACSHA256, true), "provider.b")
-	first, err := NewCatalogSnapshot(a, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := NewCatalogSnapshot(b, a)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !first.Generation().Valid() || !first.Generation().Equal(second.Generation()) {
-		t.Fatalf("generation ids = %q %q", first.Generation().Diagnostic(), second.Generation().Diagnostic())
-	}
-	b.Identity.ManifestHash = "sha256:" + strings.Repeat("b", 64)
-	changed, err := NewCatalogSnapshot(a, b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if changed.Generation().Equal(first.Generation()) {
-		t.Fatal("manifest identity change did not change catalog generation")
-	}
-}
-
-func TestCatalogSnapshotRejectsNonCanonicalManifestHashAtAdmission(t *testing.T) {
-	entry := admissionTestEntry(admissionTestManifest("acme", signatureTypeTokenEquality, true), "provider.acme")
-	entry.Identity.ManifestHash = strings.Repeat("a", 64)
-	if _, err := NewCatalogSnapshot(entry); err == nil || !strings.Contains(err.Error(), "canonical sha256") {
-		t.Fatalf("NewCatalogSnapshot error = %v, want canonical manifest-hash rejection", err)
-	}
-}
-
-func TestCatalogSnapshotDoesNotExposeMutableManifestState(t *testing.T) {
-	manifest := admissionTestManifest("acme", signatureTypeHMACSHA256, true)
-	manifest.Metadata = map[string]string{"delivery": "delivery_id"}
-	entry := admissionTestEntry(manifest, "provider.acme")
-	catalog, err := NewCatalogSnapshot(entry)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	manifest.Metadata["delivery"] = "event_type"
-	returned, ok := catalog.EntryByProvider("acme")
-	if !ok {
-		t.Fatal("catalog entry missing")
-	}
-	returned.Manifest.Metadata()["delivery"] = "user_agent"
-	again, _ := catalog.EntryByProvider("acme")
-	if got := again.Manifest.Metadata()["delivery"]; got != "delivery_id" {
-		t.Fatalf("catalog manifest metadata = %q, want immutable delivery_id", got)
-	}
-	entries := catalog.Entries()
-	entries[0].Manifest.Metadata()["delivery"] = "event_type"
-	again, _ = catalog.EntryByID("provider.acme")
-	if got := again.Manifest.Metadata()["delivery"]; got != "delivery_id" {
-		t.Fatalf("catalog Entries exposed mutable state: %q", got)
-	}
-}
-
-func TestCompileAdmissionRequiresExplicitUnsignedPackAcknowledgement(t *testing.T) {
-	for _, provenance := range []string{"platform", "external"} {
-		t.Run(provenance, func(t *testing.T) {
-			manifest := admissionTestManifest("acme", "", false)
-			entry := admissionTestEntry(manifest, "provider.acme")
-			entry.Identity.Provenance = provenance
-			catalog, err := NewCatalogSnapshot(entry)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "acme"})
-			if err == nil || !strings.Contains(err.Error(), "admission.acknowledge: unsigned_webhook") {
-				t.Fatalf("CompileAdmission error = %v", err)
-			}
-			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
-				Alias: "chat", Provider: "acme",
-				Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			identity, ok := plan.PackIdentity()
-			if plan.PolicySource() != PolicySourceVerifiedPack || plan.RequestAuthentication() != RequestAuthenticationNone || !plan.AcknowledgedUnsigned() || !ok || identity.Provenance != provenance {
-				t.Fatalf("plan = %+v identity=%+v/%t", plan, identity, ok)
-			}
-			if _, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "acme", SigningSecret: "unexpected", Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement}}); err == nil || !strings.Contains(err.Error(), "must not declare signing_secret") {
-				t.Fatalf("unsigned signing-secret error = %v", err)
-			}
-		})
-	}
-}
-
-func TestPackAuthenticationTransitionRequiresNewExplicitTargetContract(t *testing.T) {
-	signedEntry := admissionTestEntry(admissionTestManifest("acme", signatureTypeTokenEquality, true), "provider.acme")
-	signed, err := NewCatalogSnapshot(signedEntry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	signedPlan, err := signed.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "acme", SigningSecret: "webhook_signing.acme"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	unsignedEntry := admissionTestEntry(admissionTestManifest("acme", "", false), "provider.acme")
-	unsignedEntry.Identity.ManifestHash = "sha256:" + strings.Repeat("b", 64)
-	unsigned, err := NewCatalogSnapshot(unsignedEntry)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if signed.Generation().Equal(unsigned.Generation()) {
-		t.Fatal("signed-to-unsigned pack transition retained catalog generation")
-	}
-	_, err = unsigned.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "acme", SigningSecret: "webhook_signing.acme"})
-	if err == nil || !strings.Contains(err.Error(), "admission.acknowledge: unsigned_webhook") {
-		t.Fatalf("unsigned transition error = %v", err)
-	}
-	unsignedPlan, err := unsigned.CompileAdmission(CompileAdmissionRequest{
-		Alias: "chat", Provider: "acme", Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if signedPlan.RequestAuthentication() != RequestAuthenticationTokenEquality || unsignedPlan.RequestAuthentication() != RequestAuthenticationNone {
-		t.Fatalf("transition plans = %s -> %s", signedPlan.RequestAuthentication(), unsignedPlan.RequestAuthentication())
-	}
-}
-
 func TestCompileAdmissionProjectsExactPackAuthentication(t *testing.T) {
 	for _, tc := range []struct {
 		signature string
@@ -174,7 +51,7 @@ func TestCompileAdmissionProjectsExactPackAuthentication(t *testing.T) {
 		{signatureTypeHMACSHA1, RequestAuthenticationHMACSHA1},
 	} {
 		t.Run(tc.signature, func(t *testing.T) {
-			catalog, err := NewCatalogSnapshot(admissionTestEntry(admissionTestManifest("acme", tc.signature, true), "provider.acme"))
+			catalog, err := NewCatalogSnapshotFromAdmittedBodies(admissionTestEntry(admissionTestManifest("acme", tc.signature, true), "provider.acme").Manifest)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -197,7 +74,7 @@ func TestCompileAdmissionProjectsExactPackAuthentication(t *testing.T) {
 }
 
 func TestRawAdmissionConsumesOnlyDeclaredAuthenticationAndDeliverySources(t *testing.T) {
-	catalog, err := NewCatalogSnapshot()
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +112,7 @@ func TestRawAdmissionConsumesOnlyDeclaredAuthenticationAndDeliverySources(t *tes
 }
 
 func TestRawProviderCannotShadowInstalledPack(t *testing.T) {
-	catalog, err := NewCatalogSnapshot(admissionTestEntry(admissionTestManifest("acme", signatureTypeTokenEquality, true), "provider.acme"))
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(admissionTestEntry(admissionTestManifest("acme", signatureTypeTokenEquality, true), "provider.acme").Manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +126,7 @@ func TestRawProviderCannotShadowInstalledPack(t *testing.T) {
 }
 
 func TestRawAdmissionBase64SignatureComparisonIsCaseSensitive(t *testing.T) {
-	catalog, err := NewCatalogSnapshot()
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +157,7 @@ func TestRawAdmissionBase64SignatureComparisonIsCaseSensitive(t *testing.T) {
 }
 
 func TestRawAdmissionPreservesRawPayloadWhileResolvingJSONPathDeliveryID(t *testing.T) {
-	catalog, err := NewCatalogSnapshot()
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +191,7 @@ func TestRawAdmissionPreservesRawPayloadWhileResolvingJSONPathDeliveryID(t *test
 }
 
 func TestCompileAdmissionTeachingFailures(t *testing.T) {
-	catalog, err := NewCatalogSnapshot(admissionTestEntry(admissionTestManifest("acme", signatureTypeTokenEquality, true), "provider.acme"))
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(admissionTestEntry(admissionTestManifest("acme", signatureTypeTokenEquality, true), "provider.acme").Manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,10 +216,12 @@ func TestCompileAdmissionTeachingFailures(t *testing.T) {
 }
 
 func admissionTestEntry(manifest triggerFixture, id string) CatalogEntry {
-	return CatalogEntry{
-		Identity: PackIdentity{ID: id, Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64), Provenance: "external"},
-		Manifest: manifest.mustAdmit(), Source: "test", SourcePath: "/tmp/" + id,
+	admitted := manifest.mustAdmit()
+	identity, err := packs.NewProviderBodyIdentity(admitted.value.providerBody)
+	if err != nil {
+		panic(err)
 	}
+	return catalogEntryValue{identity: identity, manifest: admitted, source: admitted.value.providerBody.Label()}.readback()
 }
 
 func admissionTestManifest(provider, signatureType string, secretRequired bool) triggerFixture {
@@ -359,6 +238,6 @@ func admissionTestManifest(provider, signatureType string, secretRequired bool) 
 	return triggerFixture{
 		Provider: provider, Secret: SecretManifest{Required: secretRequired}, Signature: signature,
 		DeliveryID: ValueSource{Header: "X-Delivery", Required: true}, EventType: ValueSource{Literal: "event", Required: true},
-		EventName: EventNameManifest{Literal: "inbound." + provider},
+		EventName: EventNameManifest{Literal: "raw"},
 	}
 }

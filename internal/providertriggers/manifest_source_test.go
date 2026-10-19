@@ -243,7 +243,7 @@ func TestTriggerBodyProgrammaticAdmission(t *testing.T) {
 	if _, err := zero.Accept(Request{}); err == nil {
 		t.Fatal("zero policy executed")
 	}
-	if _, err := NewCatalogSnapshot(CatalogEntry{Manifest: zero}); err == nil {
+	if _, err := NewCatalogSnapshotFromAdmittedBodies(zero); err == nil {
 		t.Fatal("zero policy entered catalog")
 	}
 	for i := 0; i < reflect.TypeOf(zero).NumField(); i++ {
@@ -310,7 +310,7 @@ func parseTriggerTestBody(t testing.TB, body string) Manifest {
 
 func compileTriggerTestPlan(t testing.TB, manifest Manifest) InboundAdmissionPlan {
 	t.Helper()
-	catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: manifest, Identity: PackIdentity{ID: "provider." + manifest.Provider(), Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("a", 64), Provenance: "test"}})
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(manifest)
 	if err != nil {
 		t.Fatal(err)
 	}

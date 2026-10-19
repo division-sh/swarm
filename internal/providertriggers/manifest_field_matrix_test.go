@@ -189,7 +189,7 @@ func TestTriggerBodyFieldAdmissionMatrix(t *testing.T) {
 						return
 					}
 					outputs := manifest.OutputManifest()
-					catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: manifest, Identity: PackIdentity{ID: "provider.github", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("b", 64), Provenance: "test"}})
+					catalog, err := NewCatalogSnapshotFromAdmittedBodies(manifest)
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
+	"github.com/division-sh/swarm/internal/runtime/core/packidentity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/userfacing"
 )
@@ -654,18 +656,19 @@ func normalizeTriggerPackIdentity(subject *Subject) error {
 			return fmt.Errorf("effective verified-pack trigger subject %q requires trigger_pack_binding source and pack identity", subject.ID)
 		}
 		pack := admission.Pack
-		source, err := NewPackSource(pack.Provenance, "")
+		id, err := packidentity.ParseID(pack.ID)
 		if err != nil {
 			return fmt.Errorf("effective verified-pack trigger subject %q has invalid pack identity: %w", subject.ID, err)
 		}
-		identity, err := NewPackIdentity(pack.ID, pack.Version, pack.ManifestHash, TypeTrigger, source)
+		version, err := packidentity.ParseVersion(pack.Version)
 		if err != nil {
 			return fmt.Errorf("effective verified-pack trigger subject %q has invalid pack identity: %w", subject.ID, err)
 		}
-		pack.ID = identity.ID()
-		pack.Version = identity.Version()
-		pack.ManifestHash = identity.ManifestHash()
-		pack.Provenance = identity.Source().Provenance()
+		hash, err := manifesthash.Parse(pack.ManifestHash)
+		if err != nil {
+			return fmt.Errorf("effective verified-pack trigger subject %q has invalid pack identity: %w", subject.ID, err)
+		}
+		pack.ID, pack.Version, pack.ManifestHash = id.String(), version.String(), hash.String()
 	} else if subject.Source != "raw_declaration" || admission.Pack != nil {
 		return fmt.Errorf("effective raw trigger subject %q must use raw_declaration source without pack identity", subject.ID)
 	}

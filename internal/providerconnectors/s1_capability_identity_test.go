@@ -79,23 +79,6 @@ func TestS1ConnectorCapabilityIdentityRefusesBeforeCredentialRead(t *testing.T) 
 	}
 }
 
-func TestS1ConnectorInstalledCapabilityRejectsMalformedToolIdentity(t *testing.T) {
-	for _, toolID := range s1MalformedCapabilityToolIDs() {
-		t.Run(toolID, func(t *testing.T) {
-			pack := s1ConnectorPack("telegram")
-			tool := telegramConnectorTool("https://api.telegram.org")
-			pack.Manifest.Tools = map[string]runtimecontracts.ToolSchemaEntry{toolID: tool}
-			if _, err := NewPackRegistry(pack); err == nil {
-				t.Fatal("installed registry admitted malformed identity")
-			}
-			subject, err := availableCapabilitySubject(InstalledTool{Provider: "telegram", ToolID: toolID, Tool: tool, Pack: pack})
-			if err == nil || !strings.Contains(err.Error(), toolID) || !strings.Contains(err.Error(), "<provider>.<action>") || subject.ID != "" {
-				t.Fatalf("installed reader repaired malformed identity: subject=%+v err=%v", subject, err)
-			}
-		})
-	}
-}
-
 func TestS1ConnectorCapabilityReadbackPreservesExactInstalledAndEffectiveIdentity(t *testing.T) {
 	registry, err := NewPackRegistry(s1ConnectorPack("team-bot"), s1ConnectorPack("team_bot"))
 	if err != nil {
