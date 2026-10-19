@@ -60,8 +60,12 @@ func ReadClosedSelectedInstalledJournalCohortTx(ctx context.Context, tx *sql.Tx,
 		if err != nil {
 			return absent, fmt.Errorf("copied journal requires its exact source-lineage membership owner: %w", err)
 		}
+		admission, cut, err := prepareClosedSelectedCopiedAdmissionTx(ctx, tx, forkRunID, sqlite, original)
+		if err != nil {
+			return absent, fmt.Errorf("prepare copied journal cohort admission: %w", err)
+		}
 		for _, candidate := range candidates {
-			fact, err := readClosedSelectedCopiedJournalTx(ctx, tx, permanent, candidate, sqlite, original)
+			fact, err := admission.readClosedSelectedCopiedJournalTx(ctx, tx, permanent, candidate, sqlite, cut)
 			if err != nil {
 				return absent, fmt.Errorf("copied journal requires its exact source-lineage membership owner: %w", err)
 			}

@@ -151,50 +151,65 @@ func proveClosedCopiedSelectedJournalCohort(t *testing.T, backend string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		identity := activityidentity.Fact{RunID: runID, SourceEventID: rootID, EntityID: instance.EntityID, Owner: activityidentity.MustNodeOwner(node),
-			ExecutionFlowID: "flow-a", HandlerEventKey: "review.accepted", ActivityID: "commit", Tool: "provider.write", Attempt: 1}
-		results, err := runtimecontracts.ActivityResultEventsForSite(runtimecontracts.ActivitySite{Node: node, HandlerEventKey: identity.HandlerEventKey,
-			Kind: runtimecontracts.ActivitySiteHandler, RuleIndex: -1, Spec: runtimecontracts.ActivitySpec{ID: identity.ActivityID, Tool: identity.Tool}})
-		if err != nil {
-			t.Fatal(err)
+		var parents []events.Event
+		originals := make(map[string]pipeline.ActivityAttemptRecord)
+		for index, value := range []string{"first-recorded-result", "second-recorded-result"} {
+			if index != 0 {
+				rootID = uuid.NewString()
+				at = at.Add(time.Microsecond)
+				root = eventtest.ExistingRunRootIngress(rootID, "activity.seeded", "fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, at)
+				if err := commitSemanticPipelineProcessedEventFixture(ctx, opened.store, root); err != nil {
+					t.Fatal(err)
+				}
+			}
+			identity := activityidentity.Fact{RunID: runID, SourceEventID: rootID, EntityID: instance.EntityID, Owner: activityidentity.MustNodeOwner(node),
+				ExecutionFlowID: "flow-a", HandlerEventKey: "review.accepted", ActivityID: "commit", Tool: "provider.write", Attempt: 1}
+			results, err := runtimecontracts.ActivityResultEventsForSite(runtimecontracts.ActivitySite{Node: node, HandlerEventKey: identity.HandlerEventKey,
+				Kind: runtimecontracts.ActivitySiteHandler, RuleIndex: -1, Spec: runtimecontracts.ActivitySpec{ID: identity.ActivityID, Tool: identity.Tool}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, err := json.Marshal(map[string]any{"activity_id": identity.ActivityID, "tool": identity.Tool, "input": map[string]any{"value": value},
+				"success_event": results.SuccessEvent, "failure_event": results.FailureEvent, "entity_id": instance.EntityID, "node_id": identity.Owner.Key(),
+				"flow_id": "flow-a", "flow_instance": instance.InstancePath, "handler_event_key": identity.HandlerEventKey, "source_run_id": runID, "source_event_id": rootID,
+				"source_task_id": "", "parent_event_id": identity.ParentEventID, "chain_depth": 0})
+			if err != nil {
+				t.Fatal(err)
+			}
+			parent := eventtest.ChildForProducerWithRoutingSource(activityidentity.RequestEventID(identity), "platform.activity_requested", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
+				events.EventLineage{RunID: runID, ParentEventID: rootID, ExecutionMode: executionmode.Live}, events.EnvelopeForSourceRoute(events.EventEnvelope{}, routing.Route()), routing, at)
+			binding, err := runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact)(ctx, parent, "flow-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			parent, err = events.ApplyPayloadAdmission(parent, binding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			admittedInput, err := events.AdmitForPublish(parent, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := commitAdmittedSemanticEventFixtureOutcome(ctx, opened.store, admittedInput, nil, pipelineobligation.ScopeDirect); err != nil {
+				t.Fatal(err)
+			}
+			original, inserted, err := journal.StartActivityAttempt(ctx, pipeline.ActivityAttemptRecord{RequestEventID: parent.ID(), RunID: runID, SourceEventID: rootID,
+				EntityID: instance.EntityID, FlowInstance: instance.InstancePath, NodeID: identity.Owner.Key(), HandlerEventKey: identity.HandlerEventKey,
+				ActivityID: identity.ActivityID, Tool: identity.Tool, Attempt: 1, SuccessEvent: results.SuccessEvent, FailureEvent: results.FailureEvent,
+				InputHash: "copied-history-input", ExecutionMode: executionmode.Live, StartedAt: at})
+			if err != nil || !inserted {
+				t.Fatalf("start original captured journal: inserted=%t err=%v", inserted, err)
+			}
+			original.Status, original.ResultEventID, original.ResultEventType = pipeline.ActivityAttemptStatusSucceeded, activityidentity.ResultEventID(identity, results.SuccessEvent), results.SuccessEvent
+			original.ResultPayload = map[string]any{"activity_id": identity.ActivityID, "result": map[string]any{"value": value}}
+			original, inserted, err = journal.CompleteActivityAttempt(ctx, original)
+			if err != nil || !inserted {
+				t.Fatalf("complete original captured journal: committed=%t err=%v", inserted, err)
+			}
+			parents = append(parents, parent)
+			originals[parent.ID()] = original
 		}
-		payload, err := json.Marshal(map[string]any{"activity_id": identity.ActivityID, "tool": identity.Tool, "input": map[string]any{"value": "recorded"},
-			"success_event": results.SuccessEvent, "failure_event": results.FailureEvent, "entity_id": instance.EntityID, "node_id": identity.Owner.Key(),
-			"flow_id": "flow-a", "flow_instance": instance.InstancePath, "handler_event_key": identity.HandlerEventKey, "source_run_id": runID, "source_event_id": rootID,
-			"source_task_id": "", "parent_event_id": identity.ParentEventID, "chain_depth": 0})
-		if err != nil {
-			t.Fatal(err)
-		}
-		parent := eventtest.ChildForProducerWithRoutingSource(activityidentity.RequestEventID(identity), "platform.activity_requested", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
-			events.EventLineage{RunID: runID, ParentEventID: rootID, ExecutionMode: executionmode.Live}, events.EnvelopeForSourceRoute(events.EventEnvelope{}, routing.Route()), routing, at)
-		binding, err := runtimepkg.NewRuntimePayloadAdmitter(nil, source, fact)(ctx, parent, "flow-a")
-		if err != nil {
-			t.Fatal(err)
-		}
-		parent, err = events.ApplyPayloadAdmission(parent, binding)
-		if err != nil {
-			t.Fatal(err)
-		}
-		admittedInput, err := events.AdmitForPublish(parent, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := commitAdmittedSemanticEventFixtureOutcome(ctx, opened.store, admittedInput, nil, pipelineobligation.ScopeDirect); err != nil {
-			t.Fatal(err)
-		}
-		original, inserted, err := journal.StartActivityAttempt(ctx, pipeline.ActivityAttemptRecord{RequestEventID: parent.ID(), RunID: runID, SourceEventID: rootID,
-			EntityID: instance.EntityID, FlowInstance: instance.InstancePath, NodeID: identity.Owner.Key(), HandlerEventKey: identity.HandlerEventKey,
-			ActivityID: identity.ActivityID, Tool: identity.Tool, Attempt: 1, SuccessEvent: results.SuccessEvent, FailureEvent: results.FailureEvent,
-			InputHash: "copied-history-input", ExecutionMode: executionmode.Live, StartedAt: at})
-		if err != nil || !inserted {
-			t.Fatalf("start original captured journal: inserted=%t err=%v", inserted, err)
-		}
-		original.Status, original.ResultEventID, original.ResultEventType = pipeline.ActivityAttemptStatusSucceeded, activityidentity.ResultEventID(identity, results.SuccessEvent), results.SuccessEvent
-		original.ResultPayload = map[string]any{"activity_id": identity.ActivityID, "result": map[string]any{"value": "recorded"}}
-		original, inserted, err = journal.CompleteActivityAttempt(ctx, original)
-		if err != nil || !inserted {
-			t.Fatalf("complete original captured journal: committed=%t err=%v", inserted, err)
-		}
+		parent := parents[len(parents)-1]
 		if err := grant.Retire(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -222,7 +237,9 @@ func proveClosedCopiedSelectedJournalCohort(t *testing.T, backend string) {
 			activated, err := lifecycle.ActivateRunForkForSelectedContractExecution(ctx, request)
 			if activated.Activated {
 				publicationAttempted = true
-				publicationErr = commitCopiedCohortInput(t, ctx, opened.store, attached, parent, source, fact, carriage)
+				for _, input := range parents {
+					publicationErr = errors.Join(publicationErr, commitCopiedCohortInput(t, ctx, opened.store, attached, input, source, fact, carriage))
+				}
 			}
 			return activated, errors.Join(err, publicationErr)
 		}
@@ -258,9 +275,10 @@ func proveClosedCopiedSelectedJournalCohort(t *testing.T, backend string) {
 			t.Fatalf("close original copied-cohort successor: closed=%t err=%v", closed, err)
 		}
 		before := historicalContextDatabaseRows(t, opened.db, backend == "postgres")
-		for _, fault := range []string{"complete", "missing_lineage", "foreign_source", "foreign_child", "foreign_event", "changed_authority", "changed_time", "copy_payload", "copy_clock"} {
+		for _, fault := range []string{"complete", "missing_lineage", "foreign_source", "foreign_child", "foreign_event", "changed_authority", "changed_time", "copy_payload", "copy_clock", "last_lineage", "last_copy_payload"} {
 			t.Run(fault, func(t *testing.T) {
 				control.copiedFault = fault
+				control.copiedLineageReads = 0
 				defer func() { control.copiedFault = "" }()
 				var got runforkpersistence.ClosedSelectedInstalledJournalCohort
 				err := runUnrevisionedEventFixtureTransactionForTest(ctx, opened.store, func(ctx context.Context, tx *sql.Tx) error {
@@ -272,14 +290,21 @@ func proveClosedCopiedSelectedJournalCohort(t *testing.T, backend string) {
 					if err == nil || !reflect.DeepEqual(got, runforkpersistence.ClosedSelectedInstalledJournalCohort{}) {
 						t.Fatalf("inconsistent copied lineage returned membership: %+v err=%v", got, err)
 					}
+					if (fault == "last_lineage" || fault == "last_copy_payload") && control.copiedLineageReads != len(parents) {
+						t.Fatalf("late copied-record refusal stopped before the second lineage: reads=%d want=%d err=%v", control.copiedLineageReads, len(parents), err)
+					}
 					return
 				}
-				if err != nil || len(got.Generations) < 2 || len(got.CopiedJournals) != 1 {
+				if err != nil || len(got.Generations) < 2 || len(got.CopiedJournals) != len(parents) {
 					t.Fatalf("copied journal lacks its full closed successor cohort: %+v source=%s expected_input=%s err=%v", got, parent.ID(), activityidentity.ForkLineageEventID(staged.ForkRunID, parent.ID()), err)
 				}
-				copy := got.CopiedJournals[0]
-				if !copy.Record.ExecutionBinding.IsZero() || copy.Record.RunID != staged.ForkRunID || copy.Record.Status != original.Status || !reflect.DeepEqual(copy.Record.ResultPayload, original.ResultPayload) || !reflect.DeepEqual(copy.Record.Failure, original.Failure) || copy.InputEventID == "" || copy.Origin.Request.ID() != parent.ID() || copy.Origin.Validate() != nil {
-					t.Fatalf("copied canonical evidence or original lineage changed: %+v original=%+v", copy, original)
+				seen := make(map[string]bool)
+				for _, copy := range got.CopiedJournals {
+					original, found := originals[copy.Origin.Request.ID()]
+					if !found || seen[copy.Record.RequestEventID] || !copy.Record.ExecutionBinding.IsZero() || copy.Record.RunID != staged.ForkRunID || copy.Record.Status != original.Status || !reflect.DeepEqual(copy.Record.ResultPayload, original.ResultPayload) || !reflect.DeepEqual(copy.Record.Failure, original.Failure) || copy.InputEventID != activityidentity.ForkLineageEventID(staged.ForkRunID, copy.Origin.Request.ID()) || copy.Origin.Validate() != nil {
+						t.Fatalf("copied canonical evidence or original lineage changed: %+v original=%+v", copy, original)
+					}
+					seen[copy.Record.RequestEventID] = true
 				}
 			})
 		}

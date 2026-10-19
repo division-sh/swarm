@@ -21,13 +21,14 @@ import (
 
 type activityGrantHistoryConnector struct {
 	driver.Connector
-	fault          string
-	reads          int
-	cohortFault    string
-	cohortReads    int
-	installedFault string
-	permanentFault string
-	copiedFault    string
+	fault              string
+	reads              int
+	cohortFault        string
+	cohortReads        int
+	installedFault     string
+	permanentFault     string
+	copiedFault        string
+	copiedLineageReads int
 }
 
 func (c *activityGrantHistoryConnector) Connect(ctx context.Context) (driver.Conn, error) {
@@ -74,10 +75,15 @@ func (c *activityGrantHistoryConn) QueryContext(ctx context.Context, query strin
 	if permanent {
 		return &permanentForkEvidenceRows{Rows: rows, fault: c.control.permanentFault, query: query}, nil
 	}
-	if c.control.copiedFault != "" && strings.Contains(query, "COALESCE(source_obligation_event_id, source_event_id)") {
-		return &selectedCopiedInputRows{Rows: rows, fault: c.control.copiedFault}, nil
+	if c.control.copiedFault != "" && strings.HasPrefix(strings.TrimSpace(query), "SELECT CAST(fork_run_id AS TEXT), CAST(source_run_id AS TEXT),") && strings.Contains(query, "COALESCE(source_obligation_event_id, source_event_id)") {
+		fault := c.control.copiedFault
+		c.control.copiedLineageReads++
+		if fault == "last_lineage" && c.control.copiedLineageReads == 2 {
+			fault = "foreign_source"
+		}
+		return &selectedCopiedInputRows{Rows: rows, fault: fault}, nil
 	}
-	if installed && strings.HasPrefix(c.control.copiedFault, "copy_") {
+	if installed && (strings.HasPrefix(c.control.copiedFault, "copy_") || c.control.copiedFault == "last_copy_payload") {
 		return &selectedInstalledHistoryRows{Rows: rows, fault: c.control.copiedFault}, nil
 	}
 	if closed || installed {

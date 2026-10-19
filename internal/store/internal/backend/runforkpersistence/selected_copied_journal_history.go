@@ -31,18 +31,16 @@ type ClosedSelectedCopiedJournalHistory struct {
 	InputEventID string
 }
 
-func readClosedSelectedCopiedJournalTx(ctx context.Context, tx *sql.Tx, permanent ClosedSelectedPermanentForkCohort, record pipeline.ActivityAttemptRecord, sqlite bool, original semanticview.OriginalLoopCarriage) (ClosedSelectedCopiedJournalHistory, error) {
-	var absent ClosedSelectedCopiedJournalHistory
+func prepareClosedSelectedCopiedAdmissionTx(ctx context.Context, tx *sql.Tx, forkRunID string, sqlite bool, original semanticview.OriginalLoopCarriage) (runForkSourceStateAdmission, runForkReplayCut, error) {
 	validate, resolve := runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint
 	loadSource := sourceadmission.LoadPostgresTx
-	dialect := activityjournal.DialectPostgres
 	if sqlite {
 		validate, resolve = runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint
-		loadSource, dialect = sourceadmission.LoadSQLiteTx, activityjournal.DialectSQLite
+		loadSource = sourceadmission.LoadSQLiteTx
 	}
-	admission, err := loadRunForkSourceStateAdmission(ctx, tx, permanent.Binding.ForkRunID, validate, resolve, !sqlite)
+	admission, err := loadRunForkSourceStateAdmission(ctx, tx, forkRunID, validate, resolve, !sqlite)
 	if err != nil {
-		return absent, err
+		return runForkSourceStateAdmission{}, runForkReplayCut{}, err
 	}
 	admission.carriage = original
 	admission.sourceAt = func(ctx context.Context, tx *sql.Tx, runID string) (correlation.SourceArtifactFact, error) {
@@ -50,8 +48,13 @@ func readClosedSelectedCopiedJournalTx(ctx context.Context, tx *sql.Tx, permanen
 	}
 	cut, err := newRunForkReplayCut(admission.snapshot)
 	if err != nil {
-		return absent, err
+		return runForkSourceStateAdmission{}, runForkReplayCut{}, err
 	}
+	return admission, cut, nil
+}
+
+func (admission runForkSourceStateAdmission) readClosedSelectedCopiedJournalTx(ctx context.Context, tx *sql.Tx, permanent ClosedSelectedPermanentForkCohort, record pipeline.ActivityAttemptRecord, sqlite bool, cut runForkReplayCut) (ClosedSelectedCopiedJournalHistory, error) {
+	var absent ClosedSelectedCopiedJournalHistory
 	physical, err := readCopiedSelectedInputTx(ctx, tx, permanent.Binding.ForkRunID, record.SourceEventID, sqlite)
 	if err != nil {
 		return absent, err
@@ -75,7 +78,7 @@ func readClosedSelectedCopiedJournalTx(ctx context.Context, tx *sql.Tx, permanen
 	if err := json.Unmarshal(parent.Payload(), &request); err != nil {
 		return absent, err
 	}
-	if err := validateCopiedActivityDeclaration(original, origin, request); err != nil {
+	if err := validateCopiedActivityDeclaration(admission.carriage, origin, request); err != nil {
 		return absent, err
 	}
 	fact, err := runForkActivityFact(request)
@@ -127,6 +130,10 @@ func readClosedSelectedCopiedJournalTx(ctx context.Context, tx *sql.Tx, permanen
 	}
 	if err := confirmCopiedActivityEvidenceTx(ctx, tx, permanent.Binding.ForkRunID, state.Fork.FlowInstance, request, reference, evidence, replyID); err != nil {
 		return absent, err
+	}
+	dialect := activityjournal.DialectPostgres
+	if sqlite {
+		dialect = activityjournal.DialectSQLite
 	}
 	actual, present, err := activityjournal.Load(ctx, tx, dialect, record.RequestEventID)
 	if err != nil || !present || !reflect.DeepEqual(actual, record) {

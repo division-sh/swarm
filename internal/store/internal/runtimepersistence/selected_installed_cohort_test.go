@@ -22,8 +22,9 @@ import (
 
 type selectedInstalledHistoryRows struct {
 	driver.Rows
-	fault  string
-	closed bool
+	fault    string
+	closed   bool
+	position int
 }
 
 func (r *selectedInstalledHistoryRows) Close() error {
@@ -46,6 +47,7 @@ func (r *selectedInstalledHistoryRows) Next(values []driver.Value) error {
 		if err := r.Rows.Next(values); err != nil {
 			return err
 		}
+		r.position++
 		if r.closed {
 			generation := values[columns["generation"]].(int64)
 			if r.fault == "missing_first" && generation == 1 || r.fault == "missing_last" && generation == 2 {
@@ -72,6 +74,10 @@ func (r *selectedInstalledHistoryRows) Next(values []driver.Value) error {
 			return nil
 		}
 		switch r.fault {
+		case "last_copy_payload":
+			if r.position == 2 {
+				values[columns["result_payload"]] = []byte(`{"value":"changed-last-copy"}`)
+			}
 		case "copy_payload":
 			values[columns["result_payload"]] = []byte(`{"value":"changed-copy"}`)
 		case "copy_clock":
