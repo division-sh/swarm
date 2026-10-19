@@ -358,6 +358,22 @@ func TestWorkflowGateUnavailablePinRecoversThroughPersistedEventBusOnBothStores(
 }
 
 func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *testing.T) {
+	testApprovedActivityFrozenInputBothStores(t, http.MethodPost, "success")
+}
+
+func TestAuthoredHTTPApprovalKeepsFrozenInputAndTerminalOutcomeBothStores(t *testing.T) {
+	for _, tc := range []struct{ method, outcome string }{
+		{http.MethodGet, "success"}, {http.MethodGet, "failed"}, {http.MethodGet, "uncertain"},
+		{http.MethodPost, "failed"}, {http.MethodPost, "uncertain"},
+	} {
+		t.Run(tc.method+"/"+tc.outcome, func(t *testing.T) {
+			testApprovedActivityFrozenInputBothStores(t, tc.method, tc.outcome)
+		})
+	}
+}
+
+func testApprovedActivityFrozenInputBothStores(t *testing.T, method, terminalOutcome string) {
+	t.Helper()
 	for _, tc := range []struct {
 		name string
 		open func(*testing.T) gateRecoveryStoreCase
@@ -370,6 +386,9 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			body := make(chan map[string]any, 1)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
+				if r.Method != method {
+					t.Errorf("approved HTTP method = %s, want %s", r.Method, method)
+				}
 				if got := r.Header.Get("Authorization"); got != "Bearer "+providerSecret {
 					t.Errorf("provider authorization = %q", got)
 				}
@@ -379,11 +398,23 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				} else {
 					body <- got
 				}
+				if terminalOutcome == "uncertain" {
+					conn, _, err := w.(http.Hijacker).Hijack()
+					if err != nil {
+						t.Errorf("interrupt approved HTTP response: %v", err)
+						return
+					}
+					_ = conn.Close()
+					return
+				}
+				if terminalOutcome == "failed" {
+					w.WriteHeader(http.StatusServiceUnavailable)
+				}
 				_ = json.NewEncoder(w).Encode(map[string]any{"message_id": "provider-1"})
 			}))
 			defer server.Close()
 
-			bundle := proposedEffectProofBundle(t, server.URL, false)
+			bundle := proposedEffectProofBundleForMethod(t, server.URL, false, method)
 			source := semanticview.Wrap(bundle)
 			runID := uuid.NewString()
 			entityID := runID
@@ -414,6 +445,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				})
 			}
 			coordinator := newCoordinator(bundleHash)
+			installActivityReplayJournal(t, ctx, selected, bus, coordinator)
 			bus.SetInterceptors(coordinator)
 
 			enteredAt := time.Now().UTC()
@@ -577,8 +609,24 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				t.Fatal("provider body was not observed")
 			}
 			readback, err := selected.cards.ProposedEffectReadback(ctx, card.CardID)
-			if err != nil || readback.DispatchState != "succeeded" {
+			wantStatus := runtimepipeline.ActivityAttemptStatusSucceeded
+			if terminalOutcome == "failed" {
+				wantStatus = runtimepipeline.ActivityAttemptStatusFailed
+			} else if terminalOutcome == "uncertain" {
+				wantStatus = runtimepipeline.ActivityAttemptStatusUncertain
+			}
+			if err != nil || readback.DispatchState != wantStatus {
 				t.Fatalf("proposed-effect readback = %#v, %v", readback, err)
+			}
+			receipt, found, err := activityReplayJournal(selected).LoadActivityAttempt(ctx, releasedRequest.ID())
+			if err != nil || !found || receipt.Status != wantStatus || receipt.Attempt != 1 || receipt.CompletedAt == nil {
+				t.Fatalf("approved terminal journal = %+v, found=%t err=%v", receipt, found, err)
+			}
+			if terminalOutcome == "failed" && (receipt.Failure == nil || receipt.Failure.Class != runtimefailures.ClassConnectorFailure || receipt.Failure.Detail.Code != "provider_http_status") {
+				t.Fatalf("complete approved 503 lost its known failure: %+v", receipt.Failure)
+			}
+			if terminalOutcome == "uncertain" && (receipt.Failure == nil || receipt.Failure.Class != runtimefailures.ClassOutcomeUncertain || receipt.Failure.Detail.Code != "activity_provider_outcome_uncertain") {
+				t.Fatalf("interrupted approved request lost uncertainty: %+v", receipt.Failure)
 			}
 			coordinator = newCoordinator(bundleHash)
 			bus.SetInterceptors(coordinator)
@@ -708,10 +756,10 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					CardID: decisioncard.ProposedEffectCardID(requestEventID, "support_reply"), RunID: runID,
 					RequestEventID: requestEventID, ActivityID: "send_support_reply", Tool: "provider_write",
 					BundleHash: bundleSource.BundleHash(), WorkflowVersion: "1", Input: input,
-					EffectClass:  runtimecontracts.ActivityEffectClassNonIdempotentWrite,
+
 					SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
 					RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
-					RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
+
 					EntityID: entityID, NodeID: supportOwner.Key(), FlowID: ".", FlowInstance: runID, HandlerEventKey: "support.reply_drafted",
 					SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
 					ExecutionMode: executionmode.Live, ReplyContextID: "reply-context-route-proof", State: decisioncard.ProposedEffectPending,
@@ -1561,6 +1609,11 @@ func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 
 func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposal bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
+	return proposedEffectProofBundleForMethod(t, serverURL, queueAfterProposal, http.MethodPost)
+}
+
+func proposedEffectProofBundleForMethod(t *testing.T, serverURL string, queueAfterProposal bool, method string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	files := map[string]string{
 		"schema.yaml":   "name: support\nstages:\n  drafting: {}\n",
 		"entities.yaml": "test_entity: {}\n",
@@ -1581,7 +1634,6 @@ func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposa
 		"tools.yaml": fmt.Sprintf(`provider_write:
   description: Send the approved support reply.
   handler_type: http
-  effect_class: non_idempotent_write
   credentials: [provider_token]
   input_schema:
     type: object
@@ -1590,11 +1642,11 @@ func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposa
       chat_id: {type: string}
       text: {type: string}
   http:
-    method: POST
+    method: %s
     url: %q
     headers: {Authorization: 'Bearer {{credentials.provider_token}}'}
     body: {chat_id: '{{input.chat_id}}', text: '{{input.text}}'}
-`, strings.TrimRight(serverURL, "/")),
+`, method, strings.TrimRight(serverURL, "/")),
 	}
 	if queueAfterProposal {
 		files["schema.yaml"] += "  queued: {}\n"

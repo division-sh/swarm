@@ -9,7 +9,7 @@ generation:
     profile:
         path: catalog/generator-profiles/acme.yaml
         schema_version: "1"
-        sha256: sha256:5e7dfbe07dfe6d2e67af620bf4cc7af08fe612ca9fe06a130fac3027ad9f02d3
+        sha256: sha256:58cfb0cfe6359d36693a79b3088b71fb6fd17ce1187b5410c0a548ee1173faab
     operations:
         - operation_id: widgets/create
           tool_id: acme.create_widget
@@ -27,7 +27,6 @@ tools:
         credentials:
             - acme_api_key
         description: create Acme widgets
-        effect_class: non_idempotent_write
         handler_type: http
         http:
             body:

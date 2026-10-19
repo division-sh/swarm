@@ -235,7 +235,6 @@ type ApprovalPointView struct {
 	ActivityID   string `json:"activity_id"`
 	Tool         string `json:"tool"`
 	Decision     string `json:"decision"`
-	EffectClass  string `json:"effect_class"`
 }
 
 type RequiredAgentsView struct {
@@ -410,7 +409,6 @@ func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) ([]App
 		if err != nil {
 			return nil, err
 		}
-		tool := bundle.ToolEntries()[strings.TrimSpace(site.Spec.Tool)]
 		out = append(out, ApprovalPointView{
 			FlowID:       site.Node.FlowPath(),
 			NodeID:       site.Node.Key(),
@@ -419,7 +417,6 @@ func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) ([]App
 			ActivityID:   result.ActivityID,
 			Tool:         strings.TrimSpace(site.Spec.Tool),
 			Decision:     strings.TrimSpace(site.Spec.Approval.Decision),
-			EffectClass:  string(tool.Effect()),
 		})
 	}
 	return out, nil
@@ -1231,10 +1228,10 @@ func writeRefs(flowID, nodeID, eventType, scope string, writes []runtimecontract
 }
 
 func buildDiagnostics(bundle *runtimecontracts.WorkflowContractBundle, report *runtimebootverify.Report) []DiagnosticView {
-	if report == nil {
-		return nil
+	var findings []runtimebootverify.Finding
+	if report != nil {
+		findings = report.Findings
 	}
-	findings := append([]runtimebootverify.Finding{}, report.Findings...)
 	out := make([]DiagnosticView, 0, len(findings))
 	for _, finding := range findings {
 		out = append(out, DiagnosticView{
@@ -1246,6 +1243,9 @@ func buildDiagnostics(bundle *runtimecontracts.WorkflowContractBundle, report *r
 			Remediation:      strings.TrimSpace(finding.Remediation),
 			Evidence:         trimDiagnosticEvidence(finding.Evidence),
 		})
+	}
+	if report == nil && len(out) == 0 {
+		return nil
 	}
 	return out
 }

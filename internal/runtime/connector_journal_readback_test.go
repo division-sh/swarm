@@ -52,7 +52,7 @@ func TestRuntimeConnectorJournalWitnessesPreserveToolSourceAndEarliestAttemptBot
 			} {
 				record := pipeline.ActivityAttemptRecord{RequestEventID: uuid.NewString(), RunID: identity.run,
 					SourceEventID: identity.source, ExecutionMode: executionmode.Live, ActivityID: uuid.NewString(),
-					Tool: identity.tool, EffectClass: "non_idempotent_write", Attempt: 1,
+					Tool: identity.tool, Attempt: 1,
 					SuccessEvent: "fixture.succeeded", FailureEvent: "fixture.failed", InputHash: "exact-storage-input",
 					StartedAt: at.Add(time.Duration(index) * time.Minute)}
 				stored, inserted, err := selected.StartActivityAttempt(ctx, record)

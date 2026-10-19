@@ -79,7 +79,7 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 					record := pipeline.ActivityAttemptRecord{
 						RequestEventID: uuid.NewString(), RunID: run, EntityID: req.Instance.EntityID, FlowInstance: req.Instance.InstancePath,
 						NodeID: activityidentity.MustNodeOwner(mustPersistenceNode(".", "writer")).Key(), HandlerEventKey: "request", ActivityID: "write", Tool: "provider.write",
-						EffectClass: "non_idempotent_write", Attempt: 1, ExecutionMode: executionmode.Live,
+						Attempt: 1, ExecutionMode: executionmode.Live,
 						SuccessEvent: "write.succeeded", FailureEvent: "write.failed", InputHash: "exact-input", Generation: loop.Generation(), LoopStage: "review",
 					}
 					if cell == "current" || cell == "stale" {
@@ -115,6 +115,7 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 						}
 						record.RequestEventID = continuation.RequestEventID
 					}
+					journal := captureActivityFixtureJournal(t, f.ctx, f.store)
 					switch cell {
 					case "stale":
 						record.Generation.RevisionID = uuid.NewString()
@@ -139,7 +140,6 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 					hints := observeChannelHints(t, f.store.(interface {
 						SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 					}))
-					journal := f.store.(activityStoryJournal)
 					actual, inserted, err := journal.ClaimActivityAttemptForLoopGeneration(f.ctx, record)
 					if cell != "current" {
 						if err == nil || inserted {

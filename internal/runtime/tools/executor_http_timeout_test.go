@@ -28,7 +28,6 @@ func authoredHTTPTimeoutExecutor(t *testing.T, url string, seconds int) *Executo
 	source, err := yamlsource.Load([]byte(fmt.Sprintf(`budget_probe:
   description: Observe the authored HTTP request budget.
   handler_type: http
-  effect_class: read_only
   http:
     method: GET
     url: %q
