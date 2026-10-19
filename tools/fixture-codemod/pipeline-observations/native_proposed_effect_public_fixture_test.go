@@ -32,6 +32,17 @@ func TestNativeProposedEffectPublicFixtureRetainsAdmissionProviderReplayAndCount
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
+	// The completed helper migration retains its finite transformation, not a
+	// comparison with a later execution owner's current implementation (#2700).
+	history, err := os.ReadFile("testdata/completed_mailbox_native_fixture.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var completed []recipe
+	if err := json.Unmarshal(history, &completed); err != nil || len(completed) != 1 || completed[0].Function != "newProposedEffectMailboxHandler" {
+		t.Fatalf("completed mailbox transformation evidence: %v", err)
+	}
+	rows = append(rows, completed...)
 	matched := 0
 	for _, row := range rows {
 		root := row.Function == "TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores"
@@ -48,15 +59,20 @@ func TestNativeProposedEffectPublicFixtureRetainsAdmissionProviderReplayAndCount
 		if root {
 			got, afterErr = canonicalFunction(nativeMailboxCanonicalEventWorkload(t, row.After))
 		}
-		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		value, sourceErr := canonicalFunction(actual)
-		written, writtenErr := canonicalFunction(row.After)
-		if err != nil || afterErr != nil || sourceErr != nil || writtenErr != nil || want != got || value != written {
+		if err != nil || afterErr != nil || want != got {
 			t.Fatalf("%s changed public effect workload beyond the exact native owner cuts", row.Function)
 		}
-		for _, raw := range []string{"*sql.DB", "storetest.Database", "testutil.StartPostgres", "AdmitPostgresRuntimeStore", "db.Query", "runlifecyclefixture.Require"} {
-			if strings.Contains(actual, raw) {
-				t.Fatalf("proposed-effect public fixture regained raw authority: %s", raw)
+		if row.Function != "newProposedEffectMailboxHandler" {
+			actual := selectedCausalObservationBody(t, row.File, row.Function)
+			value, sourceErr := canonicalFunction(actual)
+			written, writtenErr := canonicalFunction(row.After)
+			if sourceErr != nil || writtenErr != nil || value != written {
+				t.Fatalf("%s changed its live public effect workload", row.Function)
+			}
+			for _, raw := range []string{"*sql.DB", "storetest.Database", "testutil.StartPostgres", "AdmitPostgresRuntimeStore", "db.Query", "runlifecyclefixture.Require"} {
+				if strings.Contains(actual, raw) {
+					t.Fatalf("proposed-effect public fixture regained raw authority: %s", raw)
+				}
 			}
 		}
 		for _, cut := range []string{"fact.BundleHash()", "bundle.SourceArtifact", "ReadProposedEffectRunExecutionStorage(context.Background(), selected, runID)", "counts.Requests != 1", "counts.SuccessfulAttempts != 1", "calls.Load()", "t.Fatal(", "t.Fatalf("} {

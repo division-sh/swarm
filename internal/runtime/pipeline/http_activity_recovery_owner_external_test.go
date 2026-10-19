@@ -11,7 +11,6 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -105,9 +104,8 @@ func TestHTTPActivityReopenedStartedAttemptNeedsRecoveryOwnerBothStores(t *testi
 			if err != nil || !found || calls.Load() != 1 {
 				t.Fatalf("reopen redispatched or lost the attempt: found=%t record=%+v calls=%d err=%v", found, after, calls.Load(), err)
 			}
-			failure, uncertain := runtimefailures.EnvelopeFromError(replayErr)
-			if !uncertain || failure.Class != runtimefailures.ClassOutcomeUncertain {
-				t.Errorf("reopened postlaunch attempt did not expose typed uncertainty: err=%v record=%+v identical_to_live=%t publications=%d calls=%d", replayErr, after, reflect.DeepEqual(started, after), len(replayBus.publishes), calls.Load())
+			if replayErr != nil || !reflect.DeepEqual(started, after) || len(replayBus.publishes) != 0 {
+				t.Errorf("reopened reader changed the started attempt or made progress: err=%v record=%+v identical_to_live=%t publications=%d calls=%d", replayErr, after, reflect.DeepEqual(started, after), len(replayBus.publishes), calls.Load())
 			}
 		})
 	}

@@ -329,7 +329,11 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), deps.Options.SourceArtifactFact.BundleHash()), runtimeTestManagedLifecycleRunID)
 	gatewayBinding, installGateway := startManagedNativeLifecycleGateway(t)
 	deps.Options.ToolGatewayBinding = gatewayBinding
-	rt, err := newScopedTestRuntime(t, ctx, deps)
+	var retained *startupRecoveryFanOutSession
+	rt, err := newScopedTestRuntime(t, ctx, deps, func(session *runtimeTestRetainedSession) runtimestartupownership.RetainedSession {
+		retained = &startupRecoveryFanOutSession{runtimeTestRetainedSession: session, capacity: runtimestartupownership.SQLiteFanOutCapacity()}
+		return retained
+	})
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
@@ -370,6 +374,7 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
+	retained.requireActivityGrant(t, rt.startupGrant)
 	if got := delivery.claimCalls.Load(); got == 0 {
 		t.Fatal("recovery start did not enter backlog replay after managed preflight")
 	}
@@ -412,7 +417,11 @@ func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission
 	}
 	predecessorDeps.Options.SourceArtifactFact = testSourceArtifactFact(t, predecessorBundle.SourceArtifact.BundleHash())
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), predecessorDeps.Options.SourceArtifactFact.BundleHash()), runtimeTestManagedLifecycleRunID)
-	predecessor, err := newScopedTestRuntime(t, ctx, predecessorDeps)
+	var predecessorRetained *startupRecoveryFanOutSession
+	predecessor, err := newScopedTestRuntime(t, ctx, predecessorDeps, func(session *runtimeTestRetainedSession) runtimestartupownership.RetainedSession {
+		predecessorRetained = &startupRecoveryFanOutSession{runtimeTestRetainedSession: session, capacity: runtimestartupownership.SQLiteFanOutCapacity()}
+		return predecessorRetained
+	})
 	if err != nil {
 		t.Fatalf("NewRuntime(predecessor): %v", err)
 	}
@@ -422,6 +431,7 @@ func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission
 	if err := predecessor.Start(ctx); err != nil {
 		t.Fatalf("Start(predecessor): %v", err)
 	}
+	predecessorRetained.requireActivityGrant(t, predecessor.startupGrant)
 	if err := predecessor.ShutdownWithOptions(DefaultShutdownOptions()); err != nil {
 		t.Fatalf("ShutdownWithOptions(predecessor): %v", err)
 	}
@@ -438,7 +448,11 @@ func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission
 	candidateCtx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), candidateDeps.Options.SourceArtifactFact.BundleHash()), runtimeTestManagedLifecycleRunID)
 	gatewayBinding, installGateway := startManagedNativeLifecycleGateway(t)
 	candidateDeps.Options.ToolGatewayBinding = gatewayBinding
-	candidate, err := newScopedTestRuntime(t, candidateCtx, candidateDeps)
+	var candidateRetained *startupRecoveryFanOutSession
+	candidate, err := newScopedTestRuntime(t, candidateCtx, candidateDeps, func(session *runtimeTestRetainedSession) runtimestartupownership.RetainedSession {
+		candidateRetained = &startupRecoveryFanOutSession{runtimeTestRetainedSession: session, capacity: runtimestartupownership.SQLiteFanOutCapacity()}
+		return candidateRetained
+	})
 	if err != nil {
 		t.Fatalf("NewRuntime(candidate): %v", err)
 	}
@@ -451,6 +465,7 @@ func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission
 	if err := candidate.Start(candidateCtx); err != nil {
 		t.Fatalf("Start(candidate): %v", err)
 	}
+	candidateRetained.requireActivityGrant(t, candidate.startupGrant)
 
 	authority, err := candidate.startupGrant.Evidence()
 	if err != nil {
