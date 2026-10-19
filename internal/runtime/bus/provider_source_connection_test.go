@@ -1,7 +1,9 @@
 package bus
 
 import (
-	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
@@ -12,6 +14,9 @@ import (
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 // This isolates routing with existing selected owners. Gateway authentication and
@@ -25,24 +30,38 @@ func TestExternalIngressConnectionOnlyChangesAuthorizedBranch(t *testing.T) {
 				continue
 			}
 			t.Run(origin+"->"+receiver, func(t *testing.T) {
-				var flows []connectRoutePlanTestFlow
+				members := map[string][]byte{}
 				for _, flow := range []string{".", "alpha", "first", "second"} {
-					flows = append(flows, connectRoutePlanTestFlow{
-						id: flow, mode: "static",
-						inputs:  []runtimecontracts.FlowInputEventPin{{Event: eventName}},
-						outputs: []runtimecontracts.FlowOutputEventPin{{Event: eventName}},
-						nodes: map[string]runtimecontracts.SystemNodeContract{"observer": {
-							SubscribesTo:  []string{eventName},
-							EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: {}},
-						}},
-					})
+					prefix := ""
+					if flow != "." {
+						prefix = flow + "/"
+					}
+					members[prefix+"manifest.yaml"] = []byte("version: 1.0.0\nplatform_version: '*'\n")
+					members[prefix+"schema.yaml"] = []byte(fmt.Sprintf("pins:\n  inputs: [%s]\n  outputs: [%s]\n", eventName, eventName))
+					members[prefix+"nodes.yaml"] = []byte(fmt.Sprintf("observer:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s: {}\n", eventName, eventName))
 				}
 				// Only this edge changes. All declared consumers, pins, and owners stay fixed.
-				var connections []runtimecontracts.FlowConnect
 				if receiver != "" {
-					connections = []runtimecontracts.FlowConnect{{Event: eventName, From: origin, To: receiver}}
+					members["schema.yaml"] = append(members["schema.yaml"], []byte(fmt.Sprintf("connect:\n  - {event: %s, from: %q, to: %q}\n", eventName, origin, receiver))...)
 				}
-				base := semanticviewtest.WithProviderIngress(semanticview.Wrap(connectRoutePlanTestBundle(t, flows, connections)), map[string][]string{origin: {"inbound.telegram"}})
+				repo := canonicalrouting.RepoRoot(t)
+				for _, label := range []string{"manifest.yaml", "trigger.yaml"} {
+					body, err := os.ReadFile(filepath.Join(repo, "packs/providers/telegram", label))
+					if err != nil {
+						t.Fatal(err)
+					}
+					members["telegram/"+label] = body
+				}
+				artifact, err := sourceartifact.AdmitMembers(members)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rooted, _ := sourceartifactfixture.Rooted(t, "branch-isolation", artifact)
+				bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				base := semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{origin: {"inbound.telegram.raw"}})
 				catalog, batch := authenticatedTelegramBatchForSource(t, base, origin, true)
 				authorization := batch.Events[1].Authorization
 				source := providerOutputAuthorizedTestSource{Source: base, declaringFlow: origin, generation: catalog.Generation(), authorizations: []runtimeprovideroutput.Authorization{authorization}}
@@ -64,7 +83,7 @@ func TestExternalIngressConnectionOnlyChangesAuthorizedBranch(t *testing.T) {
 					installConnectionSourceConstructionForRun(t, eb, source, flow, runID)
 				}
 				evt := batch.Events[1].Event
-				ctx := testAuthorActivityContext(context.Background())
+				ctx := inboundBatchAuthorContext(t, source)
 				plan, err := eb.PrepareInboundDeliveryBatch(ctx, batch)
 				if err != nil {
 					t.Fatal(err)
