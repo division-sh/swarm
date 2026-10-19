@@ -175,6 +175,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			}
 			sourceFact := sourceartifactfixture.RequireArtifact(t, ctx, writer, bundle.SourceArtifact)
 			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
+			ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, sourceFact.BundleHash()))
 			switch typed := eventStore.(type) {
 			case *store.PostgresStore:
@@ -187,7 +188,12 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			agentOwner := configuredChannelAgentOwner(t, source)
 			var coordinator *runtimepipeline.PipelineCoordinator
 			dispatchFence := newChannelActivityDispatchFenceProbe()
-			bus, err := newScopedTestEventBus(t, eventStore, runtimebus.EventBusOptions{
+			actor := models.AgentConfig{
+				ExecutionMode: "live", ID: "channel-sender", Identity: agentidentitytest.DeclaredForRun(t, runID, "channel-sender", agentOwner, flowPath, flowInstanceID, flowInstance), Role: "worker", FlowID: "global",
+				FlowPath: flowInstance, EntityID: entityID, Tools: []string{"channel.ops.deliver"},
+			}
+			actor = prepareRegisteredManagedChannelActor(t, ctx, eventStore, actor)
+			bus, err := newExternalRuntimeTestActivityBus(t, eventStore, runtimebus.EventBusOptions{
 				ContractBundle:     source,
 				SourceArtifactFact: sourceFact,
 				TestLifecycleProbe: dispatchFence,
@@ -254,10 +260,6 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 
 			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
 			executor := configuredChannelExecutor(source, activationOwner, credentialStore, coordinator, coordinator)
-			actor := models.AgentConfig{
-				ExecutionMode: "live", ID: "channel-sender", Identity: agentidentitytest.DeclaredForRun(t, runID, "channel-sender", agentOwner, flowPath, flowInstanceID, flowInstance), Role: "worker", FlowID: "global",
-				FlowPath: flowInstance, EntityID: entityID, Tools: []string{"channel.ops.deliver"},
-			}
 			input := map[string]any{
 				"presentation": map[string]any{"text": "Approve deployment?"},
 				"actions":      []any{map[string]any{"label": "Approve", "token": "approve_1"}},

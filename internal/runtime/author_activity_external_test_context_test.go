@@ -58,7 +58,6 @@ type externalRuntimeTestEventBusOwner struct {
 	bundleHash    string
 	activityMu    sync.Mutex
 	activity      runtimepipeline.ActivityAttemptJournal
-	capability    runtimestartupownership.ProcessCapability
 }
 
 func (o *externalRuntimeTestEventBusOwner) close(ctx context.Context) error {
@@ -74,11 +73,6 @@ func (o *externalRuntimeTestEventBusOwner) close(ctx context.Context) error {
 		if _, err := o.process.Join(ctx); err != nil {
 			o.err = fmt.Errorf("join external runtime test process: %w", err)
 			return
-		}
-		if o.capability != nil {
-			if err := o.capability.Release(ctx); err != nil {
-				o.err = fmt.Errorf("release external runtime test activity capability: %w", err)
-			}
 		}
 	})
 	return o.err
@@ -259,24 +253,22 @@ func newExternalRuntimeTestActivityCoordinator(t *testing.T, bus *runtimebus.Eve
 		t.Fatal("activity coordinator differs from its original admitted source and process")
 	}
 	if owner.activity == nil {
-		store, ok := selected.(runtimestartupownership.Store)
+		store, ok := selected.(agentfixture.Store)
 		writer, writable := selected.(sourceartifactfixture.Writer)
 		if !ok || !writable {
 			t.Fatal("activity coordinator requires its original native source and process owners")
 		}
 		ctx := runtimecorrelation.WithSourceArtifactFact(t.Context(), fact)
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, owner.runtimeID)
 		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(owner.runtimeID, fact.BundleHash()))
 		bundle, _ := semanticview.Bundle(source)
 		if err := sourceartifactfixture.EnsureArtifact(ctx, writer, bundle.SourceArtifact); err != nil {
 			t.Fatal(err)
 		}
-		capability, err := store.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-			OwnerID: "external-activity-coordinator", BootID: uuid.NewString(), RuntimeInstanceID: owner.runtimeID,
-		})
+		capability, err := agentfixture.ProcessCapability(t, ctx, store)
 		if err != nil {
 			t.Fatal(err)
 		}
-		owner.capability = capability
 		current, installed, err := capability.CurrentSourceSet(ctx)
 		if err != nil {
 			t.Fatal(err)
@@ -303,18 +295,22 @@ func newExternalRuntimeTestActivityCoordinator(t *testing.T, bus *runtimebus.Eve
 		if err != nil {
 			t.Fatal(err)
 		}
-		grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-			BundleHash: fact.BundleHash(), RuntimeInstanceID: owner.runtimeID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
-		})
+		grant, err := agentfixture.AdmitGeneration(t, ctx, store, plan, runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
-			t.Fatal(err)
-		}
-		evidence, err := grant.AdmitExecution(ctx)
+		evidence, err := grant.Evidence()
 		if err != nil {
 			t.Fatal(err)
+		}
+		if evidence.State != runtimestartupownership.GrantAdmitted {
+			if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+				t.Fatal(err)
+			}
+			evidence, err = grant.AdmitExecution(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 		owner.activity, err = runtimestartupownership.CaptureActivityJournal(ctx, grant, evidence)
 		if err != nil {
@@ -325,6 +321,23 @@ func newExternalRuntimeTestActivityCoordinator(t *testing.T, bus *runtimebus.Eve
 		t.Fatal(err)
 	}
 	return pc
+}
+
+func newExternalRuntimeTestActivityBus(t *testing.T, selected runtimebus.EventStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
+	t.Helper()
+	store, native := selected.(agentfixture.Store)
+	if !native || opts.SourceArtifactFact.Validate() != nil {
+		t.Fatal("activity event bus requires its original native source owner")
+	}
+	if opts.RuntimeInstanceID == "" {
+		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
+	}
+	ctx := runtimecorrelation.WithRuntimeInstanceID(t.Context(), opts.RuntimeInstanceID)
+	// Register the retained fixture owner before bus cleanup, so every bus joins first.
+	if _, err := agentfixture.ProcessCapability(t, ctx, store); err != nil {
+		return nil, err
+	}
+	return newScopedTestEventBus(t, selected, opts, differentEvents...)
 }
 
 func completeExternalRuntimeTestWorkflowDeps(t testing.TB, selected any, deps runtimepkg.RuntimeDeps) runtimepkg.RuntimeDeps {
