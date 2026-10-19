@@ -214,7 +214,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 	work, _ := storeTestWorkFixtures.Load(t)
 	selectedMaterializationProcessForTest(t, work.(*storeTestWorkFixture), pg)
 	before := snapshotForkHistoricalExecutionTables(t, db, true)
-	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, bundle.SourceArtifact.BundleHash())
 	if prepared != nil || err == nil || !strings.Contains(err.Error(), runfork.RunForkMaterializedEntitySnapshotMetadataOwner) {
 		t.Fatalf("imported snapshot acquired selected execution: prepared=%v err=%v", prepared, err)
 	}
