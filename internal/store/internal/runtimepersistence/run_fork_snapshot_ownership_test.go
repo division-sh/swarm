@@ -176,7 +176,11 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 					if !plan.ExecutionReady || !plan.ReplayResumeAdmission.StateOnlyExecutionReady || len(plan.UnsupportedBlockers) != 0 {
 						t.Fatalf("fixed snapshot acquired authority from unrelated event context: %#v", plan.UnsupportedBlockers)
 					}
-					req := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}
+					rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					req := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()}
 					materialized, err := f.store.MaterializeRunFork(f.ctx, req)
 					if err != nil {
 						t.Fatal(err)
@@ -294,6 +298,10 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type"} {
 						t.Run(invalid, func(t *testing.T) {
 							f := newSnapshotOwnershipFixture(t, backend, false, false)
+							rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+							if err != nil {
+								t.Fatal(err)
+							}
 							plan := f.plan(t)
 							if len(plan.Entities) != 2 {
 								t.Fatalf("constructed parent and child headers: %#v", plan.Entities)
@@ -311,7 +319,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 							var forkBefore [5]int
 							var forkEntityBefore snapshotOwnershipEntityRow
 							if phase == "exact_replay" {
-								materialized, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+								materialized, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()})
 								if err != nil {
 									t.Fatal(err)
 								}
@@ -384,7 +392,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 							if planErr == nil && !runForkTestHasPlanBlocker(got, runfork.RunForkBlockerEntitySnapshotMetadataUnproven) {
 								t.Fatalf("invalid historical metadata admitted: %#v", got)
 							}
-							if _, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}); err == nil {
+							if _, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()}); err == nil {
 								t.Fatal("invalid historical metadata materialized")
 							}
 							if after := snapshotOwnershipCounts(t, f, f.runID); after != before {
