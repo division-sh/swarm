@@ -4,6 +4,7 @@ package serveapp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -142,6 +143,17 @@ func TestServeInstalledWhatsAppArtifactSelectsBootstrapWithoutExecutionBothStore
 			}
 			if err := sessions.(*serveSessionBootstrap).connection(started.Operation.OperationID).ReconcileIncoming(ctx); err != nil {
 				t.Fatal("artifact-derived bootstrap omitted incoming ownership", err)
+			}
+			original := sessions.(*serveSessionBootstrap).connection(started.Operation.OperationID)
+			attached, err := service.Start(ctx, channelonboarding.StartInput{Verb: channelonboarding.VerbConnect,
+				Selection: channelonboarding.CandidateSelection{Provider: "whatsapp"}})
+			if err != nil || attached.Operation.OperationID != started.Operation.OperationID ||
+				sessions.(*serveSessionBootstrap).connection(started.Operation.OperationID) != original || attached.IdentityOperation != nil {
+				t.Fatal("connect did not attach to its original pairing operation", attached, err)
+			}
+			if _, err := service.Start(ctx, channelonboarding.StartInput{Verb: channelonboarding.VerbConnect,
+				Selection: channelonboarding.CandidateSelection{Provider: "whatsapp"}, SaveProof: true}); !errors.Is(err, channelonboarding.ErrConflict) {
+				t.Fatal("attachment changed the original proof-retention choice", err)
 			}
 		})
 	}
