@@ -29,6 +29,7 @@ type sessionConstructionStore interface {
 	inboundpublication.Runner
 	pipeline.StandingServicePersistence
 	ListOperatorChannelBindings(context.Context, string) ([]operatorchannel.Binding, error)
+	ListOperatorChannelOperations(context.Context, string) ([]operatorchannel.Operation, error)
 	LoadOperatorChannelClaimReceipt(context.Context, string) (operatorchannel.ClaimReceipt, bool, error)
 	SettleSessionChannelClaim(context.Context, authority.Claim) (operatorchannel.ClaimSettlement, error)
 	HasCurrentChannelInputDraft(context.Context, operatorchannel.InboundText, time.Time) (bool, error)
