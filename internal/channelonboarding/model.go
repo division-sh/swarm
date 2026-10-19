@@ -373,6 +373,9 @@ type ReadinessFacts struct {
 }
 
 func (f ReadinessFacts) NativeSessionCurrent() bool {
+	if f.AccountOnly && (f.BindingRevision != 0 || f.ExpectedBindingRevision != 0 || f.ProofID != "") {
+		return false
+	}
 	return f.SessionAuthority.Kind == operatorchannel.ProviderAuthoritySession && f.SessionAuthority.RequireExecutable() == nil &&
 		f.SessionObservation != nil && f.SessionObservation.Validate() == nil && f.SessionObservation.Connected &&
 		f.SessionObservation.Admission == f.SessionAuthority.Session && f.SessionObservation.ObservedAt.Equal(f.ObservedAt)
@@ -428,7 +431,7 @@ func ProjectReadiness(f ReadinessFacts) ConnectedChannelReadiness {
 		result.ActivationGeneration = f.ActivationGeneration.Diagnostic()
 	}
 	fail := func(reason ReadinessReason) ConnectedChannelReadiness { result.Reason = reason; return result }
-	if f.Coordinate.Validate() != nil || f.Interface.Validate() != nil || !f.Posture.Valid() {
+	if f.Coordinate.Validate() != nil || f.Interface.Validate() != nil || !f.Posture.Valid() || f.AccountOnly && f.Posture != ActivationSessionConnection {
 		return fail(ReadinessCoordinateInvalid)
 	}
 	if !f.PlanGeneration.Equal(f.Coordinate.PlanGeneration) || !f.ActivationGeneration.Valid() {
@@ -436,9 +439,6 @@ func ProjectReadiness(f ReadinessFacts) ConnectedChannelReadiness {
 	}
 	if !f.ActivationCurrent || f.ActivationRevision < 1 {
 		return fail(ReadinessActivationUnavailable)
-	}
-	if f.AccountOnly && (f.Posture != ActivationSessionConnection || f.BindingRevision != 0 || f.ExpectedBindingRevision != 0 || f.ProofID != "") {
-		return fail(ReadinessBindingUnavailable)
 	}
 	if !f.AccountOnly && (f.BindingRevision < 1 || f.BindingRevision != f.ExpectedBindingRevision) {
 		return fail(ReadinessBindingUnavailable)
