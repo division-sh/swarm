@@ -7892,37 +7892,6 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 	}
 }
 
-func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash, eventName, subscriberID string, rootAdmission sourceartifact.RootAdmission, at time.Time) {
-	t.Helper()
-	ctx := context.Background()
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
-		BundleHash: bundleHash, RootAdmission: rootAdmission,
-	})
-	if entityID != runID {
-		t.Fatal("selected root fixture must use the constructed run entity")
-	}
-	seedRunForkCLIConstruction(t, db, runID, bundleHash, at)
-	// The typed root source owns ".", independently of the receiver route.
-	producer, err := events.NewRootRoutingSource(runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	event := eventtest.ExistingRunRootIngressWithRoutingSource(eventID, events.EventType(eventName), "test", "",
-		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)), 0, runID,
-		events.EventEnvelope{EntityID: entityID, FlowInstance: runID, Scope: events.EventScopeEntity}, producer, at)
-	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, event)
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, selected, event,
-		[]events.DeliveryRoute{{
-			Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, subscriberID)),
-			Target: events.MustExistingEntityTarget(events.RouteIdentity{
-				FlowID: ".", FlowInstance: runID, EntityID: runID,
-			}),
-		}})
-	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
-}
-
 func captureRunForkCLIRevision(t *testing.T, db *sql.DB, runID string, families ...runforkrevision.Family) int64 {
 	t.Helper()
 	tx, err := db.BeginTx(context.Background(), nil)

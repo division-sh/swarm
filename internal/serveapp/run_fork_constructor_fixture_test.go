@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
@@ -22,19 +21,18 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store"
 )
 
 // This establishes real source construction, not executable attachment or a
 // public launch. The fork controls keep their original admission assertions.
-func seedRunForkCLIConstruction(t *testing.T, db *sql.DB, runID, bundleHash string, at time.Time) {
+func seedRunForkCLIConstruction(t *testing.T, parent context.Context, selected *store.PostgresStore, runID string, at time.Time) {
 	t.Helper()
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: repoRootForTest(), PlatformSpecPath: contracts.DefaultPlatformSpecFile(repoRootForTest()), Store: selected,
 	}
-	loaded, err := loader.LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{
-		Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: bundleHash,
+	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(parent, runforkexecution.SelectedContractSourceLoadRequest{
+		Responsibility: runforkexecution.OriginalRunSource(runID), Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -46,9 +44,11 @@ func seedRunForkCLIConstruction(t *testing.T, db *sql.DB, runID, bundleHash stri
 			}
 		}
 	})
+	bundleHash := loaded.SourceArtifactFact.BundleHash()
 	work := newSupervisorTestRuntimeOccurrence(t, bundleHash)
 	ctx := effects.WithExecutionMode(correlation.WithRunID(correlation.WithSourceArtifactFact(
-		worklifetime.WithOccurrence(context.Background(), work), loaded.SourceArtifactFact), runID), executionmode.Live)
+		worklifetime.WithOccurrence(parent, work), loaded.SourceArtifactFact), runID), executionmode.Live)
+	ctx = correlation.WithRootAdmission(ctx, loaded.RootedSource.Admission())
 	runtimeID := work.Identity().RuntimeInstanceID
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, bundleHash))
 	authority, err := deliverylifecycle.NewNormalExecutionAuthority(loaded.SourceArtifactFact, runtimeID, 1)
