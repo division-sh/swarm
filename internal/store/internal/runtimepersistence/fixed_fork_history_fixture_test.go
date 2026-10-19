@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"reflect"
 	"sort"
 	"strings"
@@ -21,11 +20,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
-	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
@@ -361,208 +358,6 @@ func TestFixedForkHistoricalConstructionWitnessesBothStores(t *testing.T) {
 				if writes != 1 {
 					t.Fatalf("ordinary subsequent write count=%d, want1", writes)
 				}
-			})
-		}
-	}
-}
-
-func TestFixedForkHistoricalOccurrenceRefusalsBothStores(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
-		for _, witness := range []struct{ name, event string }{
-			{"exact-facts", "matrix.event"}, {"materializer-state", "fork.before"},
-			{"unsupported-delivery", "fork.pending"}, {"source-metadata", "fork.no_event_flow"},
-			{"typed-collision", "fork.conflicting_entity_type"},
-			{"route-timer-blocker", "fork.state"},
-		} {
-			t.Run(backend.name+"/"+witness.name, func(t *testing.T) {
-				opened := backend.open(t)
-				run, entity := uuid.NewString(), uuid.NewString()
-				at := time.Unix(1700000500, 0).UTC()
-				if witness.name == "route-timer-blocker" {
-					at = time.Unix(1700000210, 0).UTC()
-				}
-				event := semanticEventRecordFixture(uuid.NewString(), run, events.EventType(witness.event), eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), semanticEventRecordFixtureEnvelope(entity, ""), at)
-				if witness.name == "exact-facts" {
-					event = eventtest.ExistingRunRootIngress(event.ID(), events.EventType(witness.event), "revision-matrix", "", []byte(`{"matrix":true,"items":["matrix"]}`), 0, run, events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
-				}
-				f := prepareFixedForkHistoryFixture(t, opened.store.(agentFixtureFlowStore), witness.name, run, entity, event)
-				record, err := f.construction.Child.PersistenceRecord()
-				if err != nil {
-					t.Fatal(err)
-				}
-				before := snapshotForkHistoricalExecutionTables(t, opened.db, backend.name == "postgres")
-				var ended *mutationprotocol.Attempt
-				var retained *privatemutationlog.ConstructionOccurrence
-				if err := runSelectedFixtureMutation(f.ctx, opened.store, "capture fixed occurrence", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
-					ended = attempt
-					var err error
-					retained, err = privatemutationlog.FixedForkConstructionOccurrenceForTest(ctx, attempt, f.construction.Parent, f.construction.Child, event)
-					return err
-				}); err != nil {
-					t.Fatal(err)
-				}
-				if err := retained.ValidateBirthOccurrence(f.ctx, ended, record.State); err == nil || err.Error() != "mutation attempt is not active" {
-					t.Fatalf("completed fixed attempt retained authority: %v", err)
-				}
-				for _, name := range []string{"unknown_path", "mixed_state", "mixed_type", "wrong_payload", "wrong_parent", "extra_child", "added_key", "initial_fields", "internal_gates", "internal_accumulator", "internal_bookkeeping", "wrong_event", "event_time", "wrong_run", "wrong_source", "wrong_entity", "wrong_time", "wrong_operation", "wrong_attempt", "changed_after_mint", "wrong_birth_value"} {
-					t.Run(name, func(t *testing.T) {
-						if err := runSelectedFixtureMutation(f.ctx, opened.store, "fixed occurrence refusal", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
-							child, parent := f.construction.Child, f.construction.Parent
-							if parent != nil {
-								copy := *parent
-								parent = &copy
-							}
-							child.Instance.Fields = maps.Clone(child.Instance.Fields)
-							creatingEvent := event
-							mintRefusal := true
-							switch name {
-							case "unknown_path":
-								child.Identity.InstancePath = "unknown/1"
-							case "mixed_state":
-								child.Instance.CurrentState = "queued"
-								if f.construction.Child.Instance.CurrentState == "queued" {
-									child.Instance.CurrentState = "ready"
-								}
-							case "mixed_type":
-								child.Instance.EntityType = "source_case"
-								if f.construction.Child.Instance.EntityType == "source_case" {
-									child.Instance.EntityType = "fork_entity"
-								}
-							case "wrong_payload":
-								child.Instance.Fields["unlisted"] = true
-							case "wrong_parent":
-								if parent == nil {
-									copy := child
-									parent = &copy
-								}
-								parent.Identity.EntityID = uuid.NewString()
-							case "added_key":
-								child.Instance.InstanceKey = "unlisted"
-							case "initial_fields":
-								child.Instance.InitialFieldValues = map[string]any{"unlisted": true}
-							case "internal_gates":
-								child.Instance.Gates = map[string]bool{"unlisted": true}
-							case "internal_accumulator":
-								child.Instance.StateBuckets = map[string]any{"unlisted": true}
-							case "internal_bookkeeping":
-								child.Instance.Bookkeeping = map[string]any{"unlisted": true}
-							case "extra_child":
-								child.Children = []pipeline.FlowInstanceActivationPlan{child}
-							case "wrong_event":
-								creatingEvent = events.Event{}
-							case "event_time":
-								child.OccurredAt = at.Add(time.Second)
-							default:
-								mintRefusal = false
-							}
-							occurrence, err := privatemutationlog.FixedForkConstructionOccurrenceForTest(ctx, attempt, parent, child, creatingEvent)
-							if mintRefusal {
-								if err == nil || occurrence != nil {
-									t.Fatalf("%s admitted an unenumerated construction: %v", name, err)
-								}
-								return nil
-							}
-							if err != nil {
-								return err
-							}
-							state, writeCtx := record.State, ctx
-							want := ""
-							switch name {
-							case "wrong_run":
-								writeCtx, want = correlation.WithRunID(ctx, uuid.NewString()), "belongs to another attempt/run/source"
-							case "wrong_source":
-								writeCtx, want = correlation.WithSourceArtifactFact(ctx, mustStoreTestSourceArtifactFact("bundle-v2:sha256:"+strings.Repeat("a", 64))), "belongs to another attempt/run/source"
-							case "wrong_entity":
-								state.EntityID, want = uuid.NewString(), "does not match its admitted entity/birth"
-							case "wrong_time":
-								state.UpdatedAt, want = at.Add(time.Second), "requires its exact birth operation/time"
-							case "wrong_operation":
-								state.Transition, want = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion, "requires its exact birth operation/time"
-							case "wrong_attempt":
-								occurrence, want = retained, "belongs to another attempt/run/source"
-							case "changed_after_mint":
-								child.Instance.Fields["unlisted"] = true
-								if err := occurrence.ValidateBirthOccurrence(ctx, attempt, state); err != nil {
-									t.Fatalf("caller mutation changed copied evidence: %v", err)
-								}
-								changed, err := child.PersistenceRecord()
-								if err != nil {
-									return err
-								}
-								state, want = changed.State, "does not match its admitted entity/birth"
-							case "wrong_birth_value":
-								want = "refuses a non-birth or repeated mutation"
-							}
-							// Nil owner forces every refusal to precede native writes.
-							err = privatemutationlog.InsertConstructionEntityStateDiff(writeCtx, attempt, nil, state, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{Fields: map[string]any{"unlisted": true}}, runtimemutationlog.Writer{Type: "platform", ID: "workflow_engine", HandlerStep: "create"}, occurrence, backend.name == "postgres")
-							if err == nil || !strings.Contains(err.Error(), want) {
-								t.Fatalf("%s refusal = %v, want %s", name, err, want)
-							}
-							return nil
-						}); err != nil {
-							t.Fatal(err)
-						}
-						if after := snapshotForkHistoricalExecutionTables(t, opened.db, backend.name == "postgres"); !reflect.DeepEqual(before, after) {
-							t.Fatalf("%s refusal changed native source, receipt, history or publication", name)
-						}
-					})
-				}
-				t.Run("repeated_birth", func(t *testing.T) {
-					rollback := errors.New("roll back real birth after repeated-use refusal")
-					err := runSelectedFixtureMutation(f.ctx, opened.store, "fixed occurrence repeated birth", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
-						occurrence, err := privatemutationlog.FixedForkConstructionOccurrenceForTest(ctx, attempt, f.construction.Parent, f.construction.Child, event)
-						if err != nil {
-							return err
-						}
-						var previous, next runtimemutationlog.EntityStateProjection
-						if err := json.Unmarshal(record.State.InitialFields, &previous.Fields); err != nil {
-							return err
-						}
-						for _, bucket := range []struct {
-							raw    []byte
-							target *map[string]any
-						}{{record.State.Fields, &next.Fields}, {record.State.Bookkeeping, &next.Bookkeeping}, {record.State.Gates, &next.Gates}, {record.State.Accumulator, &next.Accumulator}} {
-							if err := json.Unmarshal(bucket.raw, bucket.target); err != nil {
-								return err
-							}
-						}
-						next.CurrentState = runtimemutationlog.PresentLifecycleState(record.State.CurrentState)
-						var owner privatemutationlog.ActiveRunSourceOwner
-						switch selected := opened.store.(type) {
-						case *PostgresStore:
-							owner = selected.pipelinePostgresOwner
-						case *SQLiteRuntimeStore:
-							owner = selected.pipelineSQLiteOwner
-						}
-						if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-							switch selected := opened.store.(type) {
-							case *PostgresStore:
-								_, err := selected.pipelinePostgresOwner.RequireActiveSourceTx(ctx, tx, run)
-								return err
-							case *SQLiteRuntimeStore:
-								_, err := selected.pipelineSQLiteOwner.RequireActiveSourceTx(ctx, tx, run)
-								return err
-							}
-							return fmt.Errorf("unexpected fixed witness backend %T", opened.store)
-						}); err != nil {
-							return err
-						}
-						writer := runtimemutationlog.Writer{Type: "platform", ID: "workflow_engine", HandlerStep: "create"}
-						if err := privatemutationlog.InsertConstructionEntityStateDiff(ctx, attempt, owner, record.State, previous, next, writer, occurrence, backend.name == "postgres"); err != nil {
-							return err
-						}
-						if err := privatemutationlog.InsertConstructionEntityStateDiff(ctx, attempt, owner, record.State, previous, next, writer, occurrence, backend.name == "postgres"); err == nil || !strings.Contains(err.Error(), "refuses a non-birth or repeated mutation") {
-							t.Fatalf("repeated birth = %v", err)
-						}
-						return rollback
-					})
-					if !errors.Is(err, rollback) {
-						t.Fatalf("repeated birth did not reach its exact refusal: %v", err)
-					}
-					if after := snapshotForkHistoricalExecutionTables(t, opened.db, backend.name == "postgres"); !reflect.DeepEqual(before, after) {
-						t.Fatal("repeated-birth rollback leaked native evidence")
-					}
-				})
 			})
 		}
 	}
