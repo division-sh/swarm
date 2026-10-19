@@ -140,7 +140,13 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				sourceID, eventID := uuid.NewString(), uuid.NewString()
-				seedSelectedOperationSource(t, ctx, selected, loaded, sourceID, eventID)
+				input := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, sourceID,
+					events.EventEnvelope{}, eventtest.RootRoutingSource(sourceID), time.Unix(1700002200, 0).UTC(), executionmode.Mock)
+				input, err = eventtest.AdmitPayload(input, ".", "item.received")
+				if err != nil {
+					t.Fatal(err)
+				}
+				seedSelectedOperationSource(t, ctx, selected, loaded, sourceID, eventID, input)
 				process, _ := worklifetime.ProcessFromContext(ctx)
 				retireRuntime := func() {
 					t.Helper()

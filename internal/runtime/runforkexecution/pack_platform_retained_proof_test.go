@@ -7,10 +7,14 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -63,7 +67,13 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 				t.Fatal(err)
 			}
 			sourceRun, eventID := uuid.NewString(), uuid.NewString()
-			seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID)
+			input := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, sourceRun,
+				events.EventEnvelope{}, eventtest.RootRoutingSource(sourceRun), time.Unix(1700002200, 0).UTC(), executionmode.Mock)
+			input, err = eventtest.AdmitPayload(input, ".", "item.received")
+			if err != nil {
+				t.Fatal(err)
+			}
+			seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID, input)
 			if err := os.RemoveAll(root); err != nil {
 				t.Fatal(err)
 			}
