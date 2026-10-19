@@ -672,25 +672,6 @@ func assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t testing.TB, 
 	}
 }
 
-func selectedForkExecutionTestContext(t testing.TB, ctx context.Context, authority runtimeeffects.Authority) context.Context {
-	t.Helper()
-	admission, err := managedexecution.New(
-		managedexecution.KindSelectedContractFork,
-		authority.SelectedFork.ExecutionID,
-		authority.SelectedFork.Generation,
-		authority.SelectedFork.ForkRunID,
-		authority.SelectedFork.ActorCensusFingerprint,
-		runForkTestBundleHash,
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("build selected-fork test admission: %v", err)
-	}
-	ctx = runtimeeffects.WithAuthority(ctx, authority)
-	ctx = runtimeeffects.WithExecutionMode(ctx, authority.ExecutionMode)
-	return managedexecution.WithAdmission(ctx, admission)
-}
-
 func TestSelectedRunRootEntityContractUsesExactRunCoordinate(t *testing.T) {
 	repoRoot := runForkExecutionRepoRoot(t)
 	loader := admittedFixtureSelectedContractSourceLoader{
