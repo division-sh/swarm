@@ -152,7 +152,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 	credentialStore := telegramConnectorSupportedSurfaceCredentialStore(t, "telegram_bot_token", "provider-secret")
 	source := telegramConnectorSupportedSurfaceSource(t, server.URL, backend.flowInstance)
 	var pc *runtimepipeline.PipelineCoordinator
-	bus, err := newScopedTestEventBus(t, backend.eventStore, runtimebus.EventBusOptions{
+	bus, err := newExternalRuntimeTestActivityBus(t, backend.eventStore, runtimebus.EventBusOptions{
 		ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
@@ -241,7 +241,7 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 	credentialStore := telegramConnectorSupportedSurfaceCredentialStore(t, "", "")
 	source := telegramConnectorSupportedSurfaceSource(t, baseURL, backend.flowInstance)
 	var pc *runtimepipeline.PipelineCoordinator
-	bus, err := newScopedTestEventBus(t, backend.eventStore, runtimebus.EventBusOptions{
+	bus, err := newExternalRuntimeTestActivityBus(t, backend.eventStore, runtimebus.EventBusOptions{
 		ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
