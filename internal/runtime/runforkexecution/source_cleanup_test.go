@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -55,9 +56,8 @@ func TestSelectedSourceCleanupRetainsOwnership(t *testing.T) {
 				err = p.Close()
 			} else {
 				selection := testContractSelection()
-				selected := testLoadedSelectedSource(selection)
+				selected, original := rootedSourceCleanupFixture(t)
 				selected.Module = nil // Stop after successful original compilation, before any store mutation.
-				original := *originalActivationSourceFixture(t)
 				req := SelectedContractExecutionRequest{ContractSelection: selection, SourceArtifactFact: selected.SourceArtifactFact}
 				if phase == "selected_validation" {
 					selected.Cleanup = release
@@ -326,8 +326,12 @@ func TestSelectedSourceStagedCleanupOwnership(t *testing.T) {
 			owner, process, ctx := contextLifetimeOwner(t)
 			store := &fakeSelectedContractActivationStore{originalRunID: uuid.NewString(), activation: runfork.RunForkActivation{Activated: true}}
 			binding := testSelectedContractBinding(uuid.NewString())
-			selected := testLoadedSelectedSource(binding.ContractSelection)
-			original := *originalActivationSourceFixture(t)
+			selected, original := rootedSourceCleanupFixture(t)
+			binding.TargetRootReference = selected.RootedSource.Admission().Reference()
+			availability := testSelectedContractBundleAvailability(binding.ForkRunID)
+			availability.BundleHash = selected.SourceArtifactFact.BundleHash()
+			availability.RootReference = binding.TargetRootReference
+			availability.RootAdmissionPresent = true
 			calls, repaired := 0, false
 			defer func() {
 				repaired = true
@@ -353,7 +357,7 @@ func TestSelectedSourceStagedCleanupOwnership(t *testing.T) {
 			}
 			if phase == "selected_validation" || phase == "selected_original_compilation" {
 				store.binding, store.bindingOK = binding, true
-				store.bundleAvailability = testSelectedContractBundleAvailability(binding.ForkRunID)
+				store.bundleAvailability = availability
 			}
 			result, err := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{ForkRunID: binding.ForkRunID, Store: store, ExecutionOwner: owner, SourceLoader: &fakeSelectedContractSourceLoader{loaded: selected, original: &original}})
 			if !errors.Is(err, errSourceRelease) || calls != 1 || process.ActiveCount() != 1 {
@@ -371,6 +375,23 @@ func TestSelectedSourceStagedCleanupOwnership(t *testing.T) {
 			}
 		})
 	}
+}
+
+func rootedSourceCleanupFixture(t *testing.T) (LoadedSelectedContractSource, LoadedSelectedContractSource) {
+	t.Helper()
+	repo, targetRoot := runForkExecutionRepoRoot(t), t.TempDir()
+	writeSelectedContractFixtureFile(t, filepath.Join(targetRoot, "schema.yaml"), "stages: []\n")
+	var sources [2]LoadedSelectedContractSource
+	for i, root := range []string{targetRoot, canonicalrouting.CopyForkFanOutCarrier(t, false, false)} {
+		loaded, err := (admittedFixtureSelectedContractSourceLoader{
+			RepoRoot: repo, SourceRoot: root, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo),
+		}).LoadRunForkSelectedContractSource(context.Background(), testContractSelection())
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources[i] = loaded
+	}
+	return sources[0], sources[1]
 }
 
 func TestSelectedSourceFilesystemCleanupRetainsOwnership(t *testing.T) {
