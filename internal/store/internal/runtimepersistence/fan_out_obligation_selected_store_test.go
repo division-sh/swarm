@@ -1427,7 +1427,11 @@ func TestRunForkFanOutMaterializationPreservesPrefixAndResumesIndependently(t *t
 			captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, postgres)
 			forkPointEventID := historicalLineageCheckpoint(t, db, fixture.runID, postgres, createdAt.Add(2*time.Second))
 
-			materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
+			rooted, err := owner.(rootedRunStore).LoadRunRootedSource(ctx, fixture.runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
 			if err != nil {
 				t.Fatalf("MaterializeRunFork: %v", err)
 			}
@@ -1550,7 +1554,11 @@ func TestRunForkFanOutMaterializationRetainsExactEntityRevisionSource(t *testing
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkPointEventID, fixture.runID, "fork.entity", events.EventProducerPlatform, "fork-test", "", "", createdAt.Add(time.Second))
 	captureRunForkTestRevision(t, db, fixture.runID)
 
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
+	rooted, err := pg.LoadRunRootedSource(ctx, fixture.runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork entity source: %v", err)
 	}
@@ -1934,12 +1942,18 @@ func TestRunForkFanOutSelectedBundleProofRebindsOrRejectsBeforeMutation(t *testi
 	if len(targetPlans) != 1 {
 		t.Fatal("replacement must carry the exact compiled fan-out declaration")
 	}
-	seedStoreTestPersistedArtifact(t, db, targetArtifact)
+	targetRooted, err := targetBundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pg.EnsureRootedSource(ctx, targetRooted); err != nil {
+		t.Fatal(err)
+	}
 	targetSource, err := runtimecorrelation.NewSourceArtifactFact(targetHash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, SourceArtifactFact: targetSource, OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)}
+	base := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, SourceArtifactFact: targetSource, RootAdmission: targetRooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)}
 	if _, err := pg.MaterializeRunFork(ctx, base); err == nil || !strings.Contains(err.Error(), "has no proof") {
 		t.Fatalf("missing selected fan-out proof error = %v", err)
 	}
@@ -1995,7 +2009,11 @@ func materializeFanOutForkAtCurrentRevision(t *testing.T, ctx context.Context, d
 	forkPointEventID := uuid.NewString()
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, forkPointEventID, fixture.runID, events.EventType(eventName), events.EventProducerPlatform, "fork-test", "", "", at)
 	captureRunForkTestRevision(t, db, fixture.runID)
-	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
+	rooted, err := pg.LoadRunRootedSource(ctx, fixture.runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: forkPointEventID, RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, pg, fixture.runID)})
 	if err != nil {
 		t.Fatalf("materialize %s fan-out fork: %v", eventName, err)
 	}
