@@ -1203,6 +1203,7 @@ func seedPostgresInboundGatewayRuntime(
 	}
 	fact := runtimeTestSourceArtifactFact(t, source)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 	target := seedBoundedStandingTarget(t, ctx, pg, entityID, source)
 	if target.RunID != runID {
@@ -1337,6 +1338,7 @@ func seedSQLiteInboundGatewayRuntime(
 	}
 	fact := runtimeTestSourceArtifactFact(t, source)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 	target := seedBoundedStandingTarget(t, ctx, sqliteStore, entityID, source)
 	if target.RunID != runID {
