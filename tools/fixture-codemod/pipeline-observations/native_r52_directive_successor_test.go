@@ -141,21 +141,6 @@ func r52NativeExecutionCurrentBody(row recipe, actual string) (string, error) {
 	return "", fmt.Errorf("unlisted native-execution successor")
 }
 
-func r52SharedCoordinatorCurrentBody(row recipe, actual string) (string, error) {
-	if row.Successor == "" {
-		return row.After, nil
-	}
-	for _, pin := range r52DirectiveSuccessorPins {
-		if pin.family == "native-shared-coordinator-authority" && row.Family == pin.family && row.Function == pin.function {
-			if err := reverseR52DirectiveSuccessor(row, actual, pin); err != nil {
-				return "", err
-			}
-			return row.Successor, nil
-		}
-	}
-	return "", fmt.Errorf("unlisted shared-coordinator successor")
-}
-
 func TestR52DirectiveFixtureSuccessorsPreserveNativeSetupAndHostility(t *testing.T) {
 	var rows []recipe
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
