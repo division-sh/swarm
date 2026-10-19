@@ -378,7 +378,6 @@ func TestSemanticOwnershipProducerConsumerLedgerIsClosed(t *testing.T) {
 		"toolSchemaEntryValue": {
 			"category":          "ToolCategory",
 			"handler":           "ToolHandlerKind",
-			"effect":            "ActivityEffectClass",
 			"permission":        "ToolPermission",
 			"ratePolicy":        "ToolRatePolicy",
 			"inputSchema":       "ToolInputSchema",
