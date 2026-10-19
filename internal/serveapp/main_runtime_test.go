@@ -57,7 +57,6 @@ import (
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
-	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -88,7 +87,6 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -3260,12 +3258,10 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	t.Helper()
 	ctx := servedControlProofAuthorActivityContext(t, rt)
 	now := time.Now().UTC().Add(-time.Minute)
-	runID, entityID, sourceEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	bundleFact := rt.Runtime.Options.SourceArtifactFact
-	bundleHash := bundleFact.BundleHash()
+	runID, sourceEventID := uuid.NewString(), uuid.NewString()
+	entityID := runtimeflowidentity.EntityID(runID)
 	var cards decisioncard.Store
 	workflow := rt.Runtime.Pipeline
-	workflowVersion := workflow.SemanticSource().WorkflowVersion()
 	var seedEvent func(context.Context, events.Event) error
 	var insertNotice func(context.Context, runtimetools.MailboxItem) (string, error)
 	switch rt.Backend {
@@ -3310,93 +3306,23 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		t.Fatalf("seed mailbox notice: %v", err)
 	}
 
-	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {Verdict: "approve", AdvancesTo: "done"},
-		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
-	}
-	routes, err := gateruntime.FreezeRoutes(outcomes, servedDecisionCardTransitionFixture(t, rt.Runtime.Pipeline.SemanticSource(), outcomes))
-	if err != nil {
-		t.Fatalf("FreezeRoutes: %v", err)
-	}
-	activation, err := gateruntime.New(runID, runID, entityID, ".", "awaiting_review", "launch_review", bundleHash, routes, sourceEventID, now)
-	if err != nil {
-		t.Fatalf("new gate activation: %v", err)
-	}
-	carrier := runtimeengine.NewStateCarrier(nil, nil, nil)
-	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
-		t.Fatalf("store gate activation: %v", err)
-	}
 	materializeCtx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
-	rootFlowID := semanticview.RootExecutionFlowID(workflow.SemanticSource())
-	if rootFlowID == "" {
-		t.Fatal("served decision-card fixture requires canonical root flow identity")
+	source := workflow.SemanticSource()
+	if err := rt.Runtime.Manager.ActivateFlowInstance(materializeCtx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source,
+		Instance:       runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, entityID, ""),
+		TriggerEvent:   evt,
+		OccurredAt:     now,
+	}); err != nil {
+		t.Fatalf("activate served decision-card fixture: %v", err)
 	}
-	rootSchema, ok := workflow.SemanticSource().FlowSchemaByID(rootFlowID)
-	if !ok {
-		t.Fatal("served decision-card fixture requires the admitted root schema")
+	items, cursor, err := cards.ListDecisionCards(materializeCtx, decisioncard.ListOptions{RunID: runID, Limit: 2})
+	if err != nil || cursor != "" || len(items) != 1 {
+		t.Fatalf("load activated decision card: count=%d cursor=%q err=%v", len(items), cursor, err)
 	}
-	entityType := servedRequiredRootEntityType(t, workflow)
-	{
-		construction3123Ctx := materializeCtx
-		construction3123At := now
-		construction3123Instance, construction3123Lifecycle, err := workflow.PrepareInitialEntryLifecycle(construction3123Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(rootFlowID, runID, runID)}, runtimepipeline.WorkflowInstance{
-			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: workflowVersion,
-			CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
-			EntityType: entityType, Mode: rootSchema.EffectiveMode(),
-		}, construction3123At)
-		if err != nil {
-			t.Fatalf("prepare fixture initial lifecycle: %v", err)
-		}
-		construction3123Command, err := flowactivationfixture.Command(construction3123Ctx, construction3123Instance, construction3123Lifecycle, construction3123At)
-		if err != nil {
-			t.Fatalf("prepare fixture activation command: %v", err)
-		}
-		construction3123Committed, err := any(cards).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction3123Ctx, construction3123Command)
-		if err != nil {
-			t.Fatalf("seed gated workflow instance: %v", err)
-		}
-		if err == nil && !construction3123Committed.Acknowledged {
-			t.Fatal("fixture activation was not acknowledged")
-		}
-		if construction3123Committed.Acknowledged && construction3123Committed.Created {
-			if finalizeErr := workflow.FinalizeInitialEntryLifecycle(construction3123Ctx, construction3123Committed.Lifecycle); finalizeErr != nil {
-				t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
-			}
-		}
-	}
-	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Launch review", map[string]any{"environment": "staging"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}, InputOrder: []string{"score"}},
-		"reject":  {Verdict: "reject", AdvancesTo: "rework", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}, InputOrder: []string{"feedback"}},
-	})
+	card, err := cards.GetDecisionCard(materializeCtx, items[0].CardID)
 	if err != nil {
-		t.Fatalf("freeze decision card snapshot: %v", err)
-	}
-	provenance, err := canonicaljson.FromGo(map[string]any{"source_event": sourceEventID})
-	if err != nil {
-		t.Fatalf("admit decision card provenance: %v", err)
-	}
-	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		Route: runtimeflowidentity.RouteForInstancePath(runID), FlowID: ".", EntityID: entityID, Stage: activation.Stage,
-		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
-	})
-	if err != nil {
-		t.Fatalf("new decision card anchor: %v", err)
-	}
-	card, err := decisioncard.New(decisioncard.Card{
-		CardID:        activation.CardID,
-		RunID:         runID,
-		ExecutionMode: executionmode.Live,
-		Anchor:        anchor,
-		Snapshot:      snapshot,
-		BundleHash:    bundleHash, WorkflowVersion: workflowVersion,
-		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
-		Provenance:       provenance, CreatedAt: now,
-	})
-	if err != nil {
-		t.Fatalf("new decision card: %v", err)
-	}
-	if err := cards.CreateDecisionCard(runtimecorrelation.WithRunID(ctx, runID), card); err != nil {
-		t.Fatalf("seed decision card: %v", err)
+		t.Fatalf("read activated decision card: %v", err)
 	}
 	return servedDecisionCardFixture{RunID: runID, EntityID: entityID, CardID: card.CardID, ContentHash: card.CardContentHash, NoticeID: noticeID, Workflow: workflow}
 }
@@ -4543,31 +4469,9 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 
 func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime, runID string, now time.Time) (string, string) {
 	t.Helper()
-	ctx := runtimecorrelation.WithRunID(servedControlProofAuthorActivityContext(t, rt), runID)
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(servedControlProofAuthorActivityContext(t, rt), runID), executionmode.Live)
 	entityID := runtimeflowidentity.EntityID(runID)
-	sourceEventID := uuid.NewString()
-	bundleHash := strings.TrimSpace(rt.BundleHash)
-	if bundleHash == "" {
-		bundleHash = "bundle-v2:sha256:" + strings.Repeat("a", 64)
-	}
-	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {Verdict: "approve", AdvancesTo: "done"},
-		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
-	}
-	routes, err := gateruntime.FreezeRoutes(outcomes, servedDecisionCardTransitionFixture(t, rt.Runtime.Pipeline.SemanticSource(), outcomes))
-	if err != nil {
-		t.Fatalf("freeze %s run.stop gate routes: %v", rt.Backend, err)
-	}
-	activation, err := gateruntime.New(runID, runID, entityID, ".", "awaiting_review", "launch_review", bundleHash, routes, sourceEventID, now)
-	if err != nil {
-		t.Fatalf("new %s run.stop gate activation: %v", rt.Backend, err)
-	}
-	carrier := runtimeengine.NewStateCarrier(map[string]any{"run_id": runID}, nil, nil)
-	if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {
-		t.Fatalf("store %s run.stop gate activation: %v", rt.Backend, err)
-	}
 	var cards decisioncard.Store
-	workflow := rt.Runtime.Pipeline
 	switch rt.Backend {
 	case "postgres":
 		if rt.Postgres == nil {
@@ -4575,91 +4479,26 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		}
 		cards = rt.Postgres
 	case "sqlite":
-		sqlite := rt.SQLite
-		if sqlite == nil {
+		if rt.SQLite == nil {
 			t.Fatal("accepted SQLite store owner is required")
 		}
-		cards = sqlite
+		cards = rt.SQLite
 	default:
 		t.Fatalf("unknown run.stop decision-card proof backend %q", rt.Backend)
 	}
-	rootFlowID := semanticview.RootExecutionFlowID(workflow.SemanticSource())
-	if rootFlowID == "" {
-		t.Fatal("served run-control fixture requires canonical root flow identity")
+	source := rt.Runtime.Pipeline.SemanticSource()
+	if err := rt.Runtime.Manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source,
+		Instance:       runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, entityID, ""),
+		OccurredAt:     now,
+	}); err != nil {
+		t.Fatalf("activate served run-control fixture: %v", err)
 	}
-	rootSchema, ok := workflow.SemanticSource().FlowSchemaByID(rootFlowID)
-	if !ok {
-		t.Fatal("served run-control fixture requires the admitted root schema")
+	items, cursor, err := cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, Limit: 2})
+	if err != nil || cursor != "" || len(items) != 1 {
+		t.Fatalf("load activated run-control card: count=%d cursor=%q err=%v", len(items), cursor, err)
 	}
-	entityType := servedRequiredRootEntityType(t, workflow)
-	{
-		construction4356Ctx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
-		construction4356At := now
-		construction4356Instance, construction4356Lifecycle, err := workflow.PrepareInitialEntryLifecycle(construction4356Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(rootFlowID, runID, runID)}, runtimepipeline.WorkflowInstance{
-			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
-			CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
-			EntityType: entityType, Mode: rootSchema.EffectiveMode(),
-		}, construction4356At)
-		if err != nil {
-			t.Fatalf("prepare fixture initial lifecycle: %v", err)
-		}
-		construction4356Command, err := flowactivationfixture.Command(construction4356Ctx, construction4356Instance, construction4356Lifecycle, construction4356At)
-		if err != nil {
-			t.Fatalf("prepare fixture activation command: %v", err)
-		}
-		construction4356Committed, err := any(cards).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction4356Ctx, construction4356Command)
-		if err != nil {
-			t.Fatalf("seed %s run.stop gated workflow instance: %v", rt.Backend, err)
-		}
-		if err == nil && !construction4356Committed.Acknowledged {
-			t.Fatal("fixture activation was not acknowledged")
-		}
-		if construction4356Committed.Acknowledged && construction4356Committed.Created {
-			if finalizeErr := workflow.FinalizeInitialEntryLifecycle(construction4356Ctx, construction4356Committed.Lifecycle); finalizeErr != nil {
-				t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
-			}
-		}
-	}
-	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Run stop review", map[string]any{"operation": "run.stop"}, outcomes)
-	if err != nil {
-		t.Fatalf("freeze %s run.stop decision-card snapshot: %v", rt.Backend, err)
-	}
-	provenance, err := canonicaljson.FromGo(map[string]any{"source_event": sourceEventID})
-	if err != nil {
-		t.Fatalf("admit %s run.stop decision-card provenance: %v", rt.Backend, err)
-	}
-	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		Route: runtimeflowidentity.RouteForInstancePath(runID), FlowID: ".", EntityID: entityID, Stage: activation.Stage,
-		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
-	})
-	if err != nil {
-		t.Fatalf("new %s run.stop decision-card anchor: %v", rt.Backend, err)
-	}
-	card, err := decisioncard.New(decisioncard.Card{
-		CardID: activation.CardID, RunID: runID, ExecutionMode: executionmode.Live, Anchor: anchor,
-		Snapshot: snapshot, BundleHash: bundleHash, WorkflowVersion: "1.0.0",
-		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
-		Provenance:       provenance, CreatedAt: now,
-	})
-	if err != nil {
-		t.Fatalf("new %s run.stop decision card: %v", rt.Backend, err)
-	}
-	if err := cards.CreateDecisionCard(ctx, card); err != nil {
-		t.Fatalf("seed %s run.stop decision card: %v", rt.Backend, err)
-	}
-	return entityID, card.CardID
-}
-
-func servedRequiredRootEntityType(t testing.TB, workflow *runtimepipeline.PipelineCoordinator) string {
-	t.Helper()
-	if workflow == nil {
-		t.Fatal("served fixture requires a workflow coordinator")
-	}
-	contract, ok := entityruntime.ResolveForFlow(workflow.SemanticSource(), "")
-	if !ok || strings.TrimSpace(contract.EntityType) == "" {
-		t.Fatal("served stateful fixture requires one canonical root entity contract")
-	}
-	return strings.TrimSpace(contract.EntityType)
+	return entityID, items[0].CardID
 }
 
 func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedControlProofRuntime, runID, entityID, cardID string) {
