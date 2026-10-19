@@ -15,7 +15,6 @@ import (
 // it must not enter Profiles, TierRank, CI-Units or hosted coverage deferrals.
 var preflightCandidates = []TestRoot{
 	preflightRoot("internal/cliapp", "TestVerifyBootStartupPredicateCensus"),
-	preflightRoot("tools/fixture-codemod/pipeline-observations", "TestNativeRunSetupWholeFamilySnapshotsAndHostility"),
 	preflightRoot("internal/runtime/conformance", "TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysClassified"),
 	preflightRoot("internal/runtime/manager", "TestDynamicFlowRuntimeReadinessProductionConsumersStatic"),
 	preflightRoot("internal/testplanning", "TestCurrentProofPlansBindActiveRequiredRoots"),
