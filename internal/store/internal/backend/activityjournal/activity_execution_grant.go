@@ -1,4 +1,4 @@
-package startupownership
+package activityjournal
 
 import (
 	"context"
@@ -12,6 +12,13 @@ import (
 	"github.com/google/uuid"
 )
 
+type activityExecutionGrantRow struct {
+	grantID, processAuthorityID, processOwnerID, state, bundleHash, runtimeInstanceID string
+	stateVersion, runtimeGeneration                                                   uint64
+	sourceSetRevision, selectedBindingID, selectedRunID, selectedExecutionID          sql.NullString
+	snapshot                                                                          []byte
+}
+
 // ReadActivityExecutionGrantTx resolves immutable attribution, not current
 // execution permission. Its caller must hold the original writer's fences.
 func ReadActivityExecutionGrantTx(ctx context.Context, tx *sql.Tx, grantID string, stateVersion uint64) (runtimeownership.GrantEvidence, error) {
@@ -20,12 +27,7 @@ func ReadActivityExecutionGrantTx(ctx context.Context, tx *sql.Tx, grantID strin
 	if tx == nil || err != nil || id == uuid.Nil || id.String() != grantID || stateVersion == 0 || stateVersion > math.MaxInt64 {
 		return absent, errors.New("activity grant history requires its native transaction and exact grant/version")
 	}
-	var row struct {
-		grantID, processAuthorityID, processOwnerID, state, bundleHash, runtimeInstanceID string
-		stateVersion, runtimeGeneration                                                   uint64
-		sourceSetRevision, selectedBindingID, selectedRunID, selectedExecutionID          sql.NullString
-		snapshot                                                                          []byte
-	}
+	var row activityExecutionGrantRow
 	err = tx.QueryRowContext(ctx, `SELECT CAST(grant_id AS TEXT) AS grant_id,
 		CAST(process_authority_id AS TEXT) AS process_authority_id, process_owner_id,
 		state_version, state, bundle_hash, CAST(runtime_instance_id AS TEXT) AS runtime_instance_id,
@@ -40,6 +42,11 @@ func ReadActivityExecutionGrantTx(ctx context.Context, tx *sql.Tx, grantID strin
 	if err != nil {
 		return absent, fmt.Errorf("read exact activity grant history: %w", err)
 	}
+	return decodeActivityExecutionGrantRow(row, grantID, stateVersion)
+}
+
+func decodeActivityExecutionGrantRow(row activityExecutionGrantRow, grantID string, stateVersion uint64) (runtimeownership.GrantEvidence, error) {
+	var absent runtimeownership.GrantEvidence
 	var grant runtimeownership.GrantEvidence
 	if err := canonicaljson.DecodeInto(row.snapshot, &grant); err != nil {
 		return absent, fmt.Errorf("decode exact activity grant history: %w", err)

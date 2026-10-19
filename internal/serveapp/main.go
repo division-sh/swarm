@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
-
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -36,6 +34,7 @@ import (
 	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -1453,9 +1452,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		NoticePresentation:    noticePresentation,
 		SelectedFork:          supervisor.selected,
 	}
-	apiStoreCaps, err := buildSelectedAPICapabilities(stores, apiCapabilityRequest)
+	apiStoreCaps, failureStage, err := buildRecoveredSelectedAPICapabilities(ctx, stores, apiCapabilityRequest, runtimeContexts)
 	if err != nil {
-		presenter.fail(5, "runtime_context", err)
+		presenter.fail(5, failureStage, err)
 		return 1
 	}
 	supervisor.selectedRecoveryEnvironment = apiStoreCaps.SelectedForkRecovery
@@ -3145,4 +3144,12 @@ func validateServeMultiContextToolGatewayAdmission(cfg *config.Config, loadedBun
 
 func validateServeGatewayURLEnvForNonDev() error {
 	return cliapp.ValidateGeneratedBoundaryEnv()
+}
+
+func buildRecoveredSelectedAPICapabilities(ctx context.Context, stores *storeselected.Owner, req selectedAPICapabilityRequest, contexts []serveRuntimeBundleContext) (selectedAPICapabilities, string, error) {
+	if err := recoverServeDisplacedHTTPActivities(ctx, req.ProcessCapability, contexts); err != nil {
+		return selectedAPICapabilities{}, "activity_startup_recovery", err
+	}
+	caps, err := buildSelectedAPICapabilities(stores, req)
+	return caps, "runtime_context", err
 }
