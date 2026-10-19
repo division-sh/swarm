@@ -31,7 +31,7 @@ func selectedContractTestRuntimeAuthority(t testing.TB, ctx context.Context, db 
 	now := time.Now().UTC()
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventID, sourceRun, "selected.proof",
 		eventtest.Producer(events.EventProducerExternal, "selected-proof"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
-	revision := captureSelectedExecutionSourceRevision(t, db, sourceRun)
+	revision := captureSelectedExecutionSourceRevision(t, selected, sourceRun)
 	forkOrigin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRun, runtimerunlifecycle.ForkOriginPointEvent, revision, eventID)
 	if err != nil {
 		t.Fatal(err)
