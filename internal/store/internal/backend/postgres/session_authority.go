@@ -832,11 +832,11 @@ func RunAdmittedAuthorityTransactionOutcome(ctx context.Context, session *Sessio
 }
 
 func RunAdmittedAuthorityTransactionOutcomeWithOptions(ctx context.Context, session *SessionAuthority, opts *sql.TxOptions, fn func(context.Context, *sql.Tx) error) (bool, error) {
-	ctx, err := generationauthority.PrepareMutationAdmission(ctx)
+	original, err := generationauthority.PrepareMutationAdmission(ctx)
 	if err != nil {
-		return false, err
+		return false, cancellationBeforeMutationAdmission(ctx, err)
 	}
-	return runAuthorityTransaction(ctx, session, opts, fn)
+	return runAuthorityTransaction(original, session, opts, fn)
 }
 
 // RunAuthorityTransactionOutcomeWithOptions uses the same settlement owner with

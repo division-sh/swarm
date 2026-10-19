@@ -77,11 +77,11 @@ func (b *Backend) RunAdmittedTransactionOutcome(ctx context.Context, operation f
 }
 
 func (b *Backend) RunAdmittedTransactionWithOptionsOutcome(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (bool, error) {
-	ctx, err := generationauthority.PrepareMutationAdmission(ctx)
+	original, err := generationauthority.PrepareMutationAdmission(ctx)
 	if err != nil {
-		return false, err
+		return false, cancellationBeforeMutationAdmission(ctx, err)
 	}
-	return b.runTransactionOutcome(ctx, opts, true, operation)
+	return b.runTransactionOutcome(original, opts, true, operation)
 }
 
 // RunReadTransaction owns one caller-scoped, transactionally consistent read.
@@ -268,7 +268,8 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 
 func prepareOptionalMutationAdmission(ctx context.Context, opts *sql.TxOptions, drain bool) (context.Context, error) {
 	if drain && (opts == nil || !opts.ReadOnly) && runtimeownership.HasMutationAuthority(ctx) {
-		return generationauthority.PrepareMutationAdmission(ctx)
+		original, err := generationauthority.PrepareMutationAdmission(ctx)
+		return original, cancellationBeforeMutationAdmission(ctx, err)
 	}
 	return ctx, nil
 }

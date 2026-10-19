@@ -452,7 +452,13 @@ func Reject[T any](err error) Result[T] { return failed[T](err) }
 func runRuntime[T any](ctx context.Context, dialect privateactivity.Dialect, evidence Evidence, kind Kind, baseline *Baseline, candidates *runhandoff.CandidateCoordinator, native nativeRunner, write func(context.Context, *Attempt) (T, error)) Result[T] {
 	original, err := runtimeownership.FreezeMutationAuthority(ctx)
 	if err != nil {
-		return failed[T](err)
+		if err == context.Canceled && native != nil {
+			_, nativeErr := native(ctx, func(context.Context, *sql.Tx) error { return context.Canceled })
+			if nativeErr != nil {
+				err = nativeErr
+			}
+		}
+		return Result[T]{err: err, phase: BeforeAttempt, dialect: dialect}
 	}
 	return run(original, dialect, evidence, kind, baseline, candidates, native, write)
 }

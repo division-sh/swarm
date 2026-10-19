@@ -50,11 +50,11 @@ func (b *Backend) RunAdmittedTransaction(ctx context.Context, label string, oper
 }
 
 func (b *Backend) RunAdmittedTransactionOutcome(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) (bool, error) {
-	ctx, err := generationauthority.PrepareMutationAdmission(ctx)
+	original, err := generationauthority.PrepareMutationAdmission(ctx)
 	if err != nil {
-		return false, err
+		return false, cancellationBeforeMutationAdmission(ctx, err)
 	}
-	return b.RunTransactionOutcome(ctx, label, operation)
+	return b.RunTransactionOutcome(original, label, operation)
 }
 
 // RunTransactionOutcome keeps acknowledged COMMIT separate from later cleanup
@@ -73,11 +73,11 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, opera
 		ctx = context.Background()
 	}
 	if runtimeownership.HasMutationAuthority(ctx) {
-		var err error
-		ctx, err = generationauthority.PrepareMutationAdmission(ctx)
+		original, err := generationauthority.PrepareMutationAdmission(ctx)
 		if err != nil {
-			return false, err
+			return false, cancellationBeforeMutationAdmission(ctx, err)
 		}
+		ctx = original
 	}
 	label = mutationLabel(label)
 	var recoveryDeadline time.Time

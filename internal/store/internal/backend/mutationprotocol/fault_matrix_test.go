@@ -13,6 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	runtimeactivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privatefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -202,6 +203,32 @@ func TestFaultMatrixRollbackAndFinalizationPhases(t *testing.T) {
 func TestFaultMatrixCancellationAndCommitAcknowledgement(t *testing.T) {
 	faultMatrixStores(t, func(t *testing.T, db *sql.DB, dialect privateactivity.Dialect) {
 		base := faultMatrixNative(db, nil, dialect)
+		t.Run("runtime_cancellation_keeps_missing_original_refusal", func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			entered := false
+			write := func(context.Context, *Attempt) (string, error) {
+				entered = true
+				return "", nil
+			}
+			var result Result[string]
+			if dialect == privateactivity.DialectPostgres {
+				backend, err := postgresbackend.New(db)
+				if err != nil {
+					t.Fatal(err)
+				}
+				result = RunPostgres(ctx, backend, RevisionOnly, Ordinary, nil, nil, write)
+			} else {
+				backend, err := sqlitebackend.New(db)
+				if err != nil {
+					t.Fatal(err)
+				}
+				result = RunSQLite(ctx, backend, "missing original cancellation", RevisionOnly, Ordinary, nil, nil, write)
+			}
+			if _, clean := result.CleanCancellation(); clean || entered || result.Acknowledged() || !errors.Is(result.Err(), runtimeownership.ErrMutationAuthorityMissing) {
+				t.Fatalf("cancellation concealed missing original: clean=%t entered=%t outcome=%+v", clean, entered, result)
+			}
+		})
 		t.Run("joined native cancellation", func(t *testing.T) {
 			var native nativeRunner
 			if dialect == privateactivity.DialectPostgres {
