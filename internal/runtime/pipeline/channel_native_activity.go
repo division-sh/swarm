@@ -258,7 +258,7 @@ func (p NativeChannelActivityPermit) ValidateBusinessTarget(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	if p.launch.activation.Plan.ActivitiesOnly() && expected.MatchesAccountConnection(op, activation) {
+	if p.launch.activation.Plan.ActivitiesOnly() && expected.MatchesAccountBusiness(op, activation) {
 		return nil
 	}
 	if !expected.MatchesBusinessBinding(op, activation, binding, activation.BindingRevision) {

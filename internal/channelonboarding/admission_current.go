@@ -120,6 +120,10 @@ func (expected AdmissionResponsibility) MatchesAccountConnection(op Operation, a
 		activation.ConversationRef == "" && activation.ProofID == "" && activation.ProofRevision == 0
 }
 
+func (expected AdmissionResponsibility) MatchesAccountBusiness(op Operation, activation ConnectedChannelActivation) bool {
+	return op.Phase == PhaseSucceeded && expected.MatchesAccountConnection(op, activation)
+}
+
 // ResumeSessionBusiness projects only an existing activation's process-coordinate
 // refresh. Its publication operation, account, binding and target stay original.
 func (expected AdmissionResponsibility) ResumeSessionBusiness(op Operation, activation ConnectedChannelActivation, bindingRevision int64, activationID string) (AdmissionResponsibility, bool) {

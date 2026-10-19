@@ -1,5 +1,11 @@
 [
   {
+    "owner": "internal/channelonboarding/admission_current.go::AdmissionResponsibility.MatchesAccountBusiness",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21",
+    "body_sha256": "ed5d60d59b74d96362efa5a6952a5ccc9db5a9f235469802ae98b223b0ac73ec"
+  },
+  {
     "owner": "internal/channelonboarding/admission_current.go::AdmissionResponsibility.MatchesAccountConnection",
     "audit_rows": "A10,A27",
     "proof_families": "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21",
@@ -4131,7 +4137,7 @@
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.ProjectConnectedChannelReadiness",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication",
-    "body_sha256": "3d45f1ccfe51c136ec383a7c7aa0e5eb32c9a3867c10bcae76bf20dba2c70ae8"
+    "body_sha256": "4aa4bac68b42c4a5ece9e6b8bc2dfdb6ab54e1b59958805e5ca67d518debf983"
   },
   {
     "owner": "internal/serveapp/channel_onboarding.go::*serveConnectedChannelReadiness.observeSessionReadiness",

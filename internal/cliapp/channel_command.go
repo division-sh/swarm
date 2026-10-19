@@ -542,13 +542,7 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 		if err != nil {
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
 		}
-		if current.Readiness != nil && current.Readiness.Ready {
-			return current, nil
-		}
-		if !pending && current.Operation.Phase != channelonboarding.PhaseSucceeded {
-			return current, nil
-		}
-		if !pending && (current.Connection == nil || !current.Connection.Linked) {
+		if !pending && (current.Operation.Phase != channelonboarding.PhaseSucceeded || current.Connection == nil || !current.Connection.Linked || current.Readiness != nil && current.Readiness.Ready) {
 			return current, nil
 		}
 		if pending && current.Pairing.Code != lastQR {

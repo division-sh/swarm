@@ -39,7 +39,7 @@ func RequireSessionBusinessInputTx(ctx context.Context, tx *sql.Tx, postgres boo
 		if err != nil {
 			return err
 		}
-		if !found || input.BindingRevision() != 0 || !expected.MatchesAccountConnection(op, activation) || !input.LifetimeCurrent(ctx) {
+		if !found || input.BindingRevision() != 0 || !expected.MatchesAccountBusiness(op, activation) || !input.LifetimeCurrent(ctx) {
 			return domain.ErrRevisionConflict
 		}
 		return nil

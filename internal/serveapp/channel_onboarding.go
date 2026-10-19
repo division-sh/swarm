@@ -715,16 +715,12 @@ func (o *serveConnectedChannelReadiness) ProjectConnectedChannelReadiness(ctx co
 	}
 	if op.AccountConnection() {
 		responsibility := channelonboarding.AdmissionResponsibility{OperationID: op.OperationID, OperationRevision: activation.OperationRevision,
-			ActivationRevision: op.ActivationRevision, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector,
+			ActivationRevision: op.ActivationRevision, Coordinate: candidate.Coordinate, TargetSelector: op.TargetSelector,
 			Provider: op.Provider, Credentials: op.CredentialAdmissions, SessionAccount: op.SessionAccount}
-		ready := available && op.Phase == channelonboarding.PhaseSucceeded && candidate.Coordinate.Matches(activation.Coordinate) &&
-			responsibility.MatchesAccountConnection(op, activation) && facts.SessionObservation != nil && facts.SessionObservation.Connected
-		reason := channelonboarding.ReadinessActivationUnavailable
-		if ready {
-			reason = channelonboarding.ReadinessReady
-		}
-		return channelonboarding.ConnectedChannelReadiness{Ready: ready, Reason: reason, Coordinate: activation.Coordinate, ActivationRevision: activation.Revision,
-			ActivationGeneration: facts.ActivationGeneration.Diagnostic(), ObservedAt: now}, true, nil
+		facts.AccountOnly = true
+		facts.ActivationCurrent = responsibility.MatchesAccountBusiness(op, activation)
+		facts.CredentialsCurrent = len(activation.CredentialAdmissions) == 0
+		return channelonboarding.ProjectReadiness(facts), true, nil
 	}
 
 	binding, proofCurrent, bindingErr := o.identities.CurrentBindingReadiness(ctx, activation.Interface)
