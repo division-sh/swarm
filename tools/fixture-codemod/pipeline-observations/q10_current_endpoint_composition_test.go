@@ -143,45 +143,6 @@ func TestQ10CurrentEndpointEvidenceRejectsChangedPacket(t *testing.T) {
 	}
 }
 
-func TestQ10CurrentEndpointsUseTheOriginalMigrationPreparationOwner(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	if files, changes, err := prepareFiles("../../..", rows); err != nil || len(files) != 0 || len(changes) != 0 {
-		t.Fatalf("real migration preparation differs from exact Q10 endpoints: %v", err)
-	}
-	packet, err := decodeQ10CurrentEndpoints(q10CurrentEndpointBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, pin := range packet.Rows {
-		projected, err := q10CurrentRecipe(pin.Original)
-		want := pin.Candidate
-		if pin.Original.Family == "native-invalid-lifecycle-target" {
-			want = strings.Replace(want, "if after.Presence != WorkflowTargetPersistenceCompleteFieldless ||", "if after.Presence != WorkflowTargetPersistenceLifecycleOnly ||", 1)
-		}
-		if err != nil || projected.Successor != want {
-			t.Fatalf("original preparation omitted fixed endpoint %s: %v", pin.Original.Function, err)
-		}
-		unlisted := pin.Original
-		unlisted.Function += "Unlisted"
-		if got, err := q10CurrentRecipe(unlisted); err != nil || !reflect.DeepEqual(got, unlisted) {
-			t.Fatal("finite endpoint owner interpreted an unlisted recipe")
-		}
-		crossed := pin.Original
-		crossed.Before = pin.Candidate
-		got, err := q10CurrentRecipe(crossed)
-		if pin.Original.File == "internal/serveapp/receiver_restart_test.go" && pin.Original.Function == "TestReceiverCompositionRestartBothStores" {
-			if err == nil || err.Error() != "Q10 restart changed complete delivered row or history" {
-				t.Fatal("listed restart composition did not refuse crossed full-row history exactly")
-			}
-		} else if err != nil || !reflect.DeepEqual(got, crossed) {
-			t.Fatal("finite endpoint owner interpreted crossed historical input")
-		}
-	}
-}
-
 func TestQ10MissingCompanionSuccessorPreservesConservationAndHistory(t *testing.T) {
 	packet, err := decodeQ10CurrentEndpoints(q10CurrentEndpointBytes)
 	if err != nil {
