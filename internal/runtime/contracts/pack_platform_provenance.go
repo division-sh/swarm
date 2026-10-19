@@ -1,10 +1,10 @@
 package contracts
 
 import (
-	"path"
 	"strconv"
 
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -16,9 +16,6 @@ func populatePackPlatformProvenance(bundle *WorkflowContractBundle, builder *eff
 		return err
 	}
 
-	if err := add("packs.project_membership", bundle.ProjectPacks.SourceValue(), ""); err != nil {
-		return err
-	}
 	if bundle.PackInventory != nil {
 		if bundle.PackInventory.BaseSelectionMode() == packartifact.SelectionDevelopmentOverride {
 			builder.set("packs.platform_membership", EffectiveValueProvenance{
@@ -30,16 +27,16 @@ func populatePackPlatformProvenance(bundle *WorkflowContractBundle, builder *eff
 			}
 		}
 		for _, entry := range bundle.PackInventory.Entries() {
-			prefix := "packs[" + strconv.Quote(entry.ID()) + "].envelope"
-			if err := add(prefix, entry.Envelope().SourceValue(), entry.ID()); err != nil {
+			prefix := "packs[" + strconv.Quote(entry.ID()) + "].manifest"
+			if err := add(prefix, entry.Provider().Metadata().SourceValue(), entry.ID()); err != nil {
 				return err
 			}
-			builder.set("packs["+strconv.Quote(entry.ID())+"].body", EffectiveValueProvenance{
-				Origin: EffectiveValueOriginBoundarySnapshot, RuleID: "pack.admitted_body_bytes", PackIdentity: entry.ID(),
-				SourceFile: path.Join(entry.Directory(), packartifact.ManifestFileNameForType(entry.Type())),
-			})
-			if entry.Source() == packartifact.ProvenanceProject {
-				builder.set(prefix+".effective_manifest_hash", EffectiveValueProvenance{Origin: EffectiveValueOriginDerived, RuleID: "pack.manifest_body_digest", PackIdentity: entry.ID(), InputPaths: []string{prefix + ".manifest_hash", "packs[" + strconv.Quote(entry.ID()) + "].body"}})
+			for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+				if body, present := entry.Provider().Body(role); present {
+					if err := add("packs["+strconv.Quote(entry.ID())+"].bodies["+strconv.Quote(role.FileName())+"]", body.SourceValue(), entry.ID()); err != nil {
+						return err
+					}
+				}
 			}
 		}
 	}
@@ -47,7 +44,11 @@ func populatePackPlatformProvenance(bundle *WorkflowContractBundle, builder *eff
 		identities := map[string]string{}
 		if bundle.PackInventory != nil {
 			for _, entry := range bundle.PackInventory.Entries() {
-				identities[entry.ID()+"."+entry.Type()] = entry.ID()
+				for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+					if _, present := entry.Provider().Body(role); present {
+						identities[entry.ID()+"."+role.String()] = entry.ID()
+					}
+				}
 				identities[entry.ID()+".generated_profile"] = entry.ID()
 			}
 		}

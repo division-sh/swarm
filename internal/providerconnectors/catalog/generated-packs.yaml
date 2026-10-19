@@ -1,11 +1,11 @@
 schema_version: "1"
 packs:
-  - id: provider.github.connector
+  - id: github
     provider: github
     profile: catalog/generator-profiles/github.yaml
     kind: builtin
-    output: provider-connectors/github
-  - id: provider.acme.connector
+    output: providers/github
+  - id: acme
     provider: acme
     profile: catalog/generator-profiles/acme.yaml
     kind: fixture

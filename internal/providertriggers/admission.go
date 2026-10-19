@@ -390,12 +390,9 @@ func (s *CatalogSnapshot) InstalledCapabilitySubjects() ([]packs.Subject, error)
 	entries := s.Entries()
 	subjects := make([]packs.Subject, 0, len(entries))
 	for _, entry := range entries {
-		loaded := LoadedPack{
-			Envelope: packs.Envelope{
-				ID: entry.Identity.ID, Version: entry.Identity.Version, ManifestHash: entry.Identity.ManifestHash,
-				Provenance: packs.Provenance{Source: entry.Identity.Provenance},
-			},
-			Manifest: entry.Manifest, SourcePath: entry.SourcePath, Source: entry.Source,
+		loaded, err := loadPackBody(entry.Manifest.value.providerBody)
+		if err != nil {
+			return nil, err
 		}
 		subject, err := loaded.CapabilitySubject()
 		if err != nil {

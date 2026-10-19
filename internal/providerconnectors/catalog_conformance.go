@@ -194,7 +194,7 @@ func validateCatalogFixtureBinding(artifact GeneratedCatalogArtifact, operation 
 	if fixture.Provider != artifact.Manifest.Provider || strings.TrimSpace(fixture.OperationID) != strings.TrimSpace(operation.OperationID) || fixture.ToolID != operation.ToolID {
 		return fmt.Errorf("provider/operation/tool identity does not match generated evidence")
 	}
-	if normalizeSHA(fixture.SourceSHA256) != normalizeSHA(artifact.SourceHash) || normalizeSHA(fixture.ProfileSHA256) != normalizeSHA(artifact.ProfileHash) || normalizeSHA(fixture.ManifestSHA256) != normalizeSHA(artifact.PackEnvelope.ManifestHash) {
+	if normalizeSHA(fixture.SourceSHA256) != normalizeSHA(artifact.SourceHash) || normalizeSHA(fixture.ProfileSHA256) != normalizeSHA(artifact.ProfileHash) || normalizeSHA(fixture.ManifestSHA256) != normalizeSHA(sha256String(artifact.ConnectorBody)) {
 		return fmt.Errorf("source/profile/manifest freshness binding does not match generated output")
 	}
 	if strings.TrimSpace(fixture.FixtureStatus) != strings.TrimSpace(operation.FixtureStatus) || strings.TrimSpace(fixture.ReviewStatus) != strings.TrimSpace(operation.ReviewStatus) {

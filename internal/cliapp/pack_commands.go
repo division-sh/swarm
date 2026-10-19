@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/spf13/cobra"
 )
@@ -22,15 +23,12 @@ type packCommandOptions struct {
 }
 
 type packInventoryEntryReadback struct {
-	ID           string                    `json:"id" yaml:"id"`
-	Type         string                    `json:"type" yaml:"type"`
-	Version      string                    `json:"version" yaml:"version"`
-	ManifestHash string                    `json:"manifest_hash" yaml:"manifest_hash"`
-	Source       string                    `json:"source" yaml:"source"`
-	Directory    string                    `json:"directory" yaml:"directory"`
-	Origin       packartifact.ImportOrigin `json:"origin,omitempty" yaml:"origin,omitempty"`
-	Modified     bool                      `json:"modified" yaml:"modified"`
-	ShadowsBase  bool                      `json:"shadows_base" yaml:"shadows_base"`
+	ID           string   `json:"id" yaml:"id"`
+	Bodies       []string `json:"bodies" yaml:"bodies"`
+	Version      string   `json:"version" yaml:"version"`
+	ManifestHash string   `json:"manifest_hash" yaml:"manifest_hash"`
+	Source       string   `json:"source" yaml:"source"`
+	Directory    string   `json:"directory" yaml:"directory"`
 }
 
 type packInventoryReadback struct {
@@ -49,8 +47,8 @@ type packImportReadback struct {
 
 type packShowReadback struct {
 	Pack         packInventoryEntryReadback `json:"pack" yaml:"pack"`
-	EnvelopeYAML string                     `json:"envelope_yaml" yaml:"envelope_yaml"`
 	ManifestYAML string                     `json:"manifest_yaml" yaml:"manifest_yaml"`
+	Bodies       map[string]string          `json:"bodies" yaml:"bodies"`
 }
 
 func newPacksCommand(ctx context.Context, invocationRoot InvocationRoot, root rootCommandOptions) *cobra.Command {
@@ -94,7 +92,7 @@ func newPacksListCommand(_ context.Context, repo string, root rootCommandOptions
 func newPacksShowCommand(_ context.Context, repo string, root rootCommandOptions) *cobra.Command {
 	opts := packCommandOptions{repoRoot: repo, root: root}
 	cmd := &cobra.Command{
-		Use: "show <pack-id> [directory]", Short: "Show one selected pack and its provenance.", Args: argcount.RangeArgs(1, 2),
+		Use: "show <provider> [directory]", Short: "Show one selected provider directory.", Args: argcount.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 2 {
 				opts.sourceRoot = args[1]
@@ -106,22 +104,25 @@ func newPacksShowCommand(_ context.Context, repo string, root rootCommandOptions
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			id := strings.TrimSpace(args[0])
+			id := args[0]
 			entry, ok := inventory.Lookup(id)
 			if ok {
 				pack := packInventoryEntryReadbackFromEntry(entry)
-				show := packShowReadback{Pack: pack, EnvelopeYAML: string(entry.EnvelopeBody()), ManifestYAML: string(entry.ManifestBody())}
+				show := packShowReadback{Pack: pack, ManifestYAML: string(entry.ManifestBody()), Bodies: map[string]string{}}
+				for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+					if body, present := entry.Provider().Body(role); present {
+						show.Bodies[role.FileName()] = string(body.Bytes())
+					}
+				}
 				return renderCLIOutput(cmd.OutOrStdout(), cmd.ErrOrStderr(), opts.output, show, func(out io.Writer) {
 					writePackEntry(out, pack)
-					fmt.Fprintln(out, "pack.yaml:")
-					fmt.Fprint(out, show.EnvelopeYAML)
-					if !strings.HasSuffix(show.EnvelopeYAML, "\n") {
-						fmt.Fprintln(out)
-					}
-					fmt.Fprintf(out, "%s:\n", packartifact.ManifestFileNameForType(entry.Type()))
+					fmt.Fprintln(out, "manifest.yaml:")
 					fmt.Fprint(out, show.ManifestYAML)
 					if !strings.HasSuffix(show.ManifestYAML, "\n") {
 						fmt.Fprintln(out)
+					}
+					for _, name := range pack.Bodies {
+						fmt.Fprintf(out, "%s:\n%s\n", name, show.Bodies[name])
 					}
 				}, func() ([]string, error) { return []string{pack.ID}, nil })
 			}
@@ -136,7 +137,7 @@ func newPacksShowCommand(_ context.Context, repo string, root rootCommandOptions
 func newImportPackCommand(invocationRoot InvocationRoot, root rootCommandOptions) *cobra.Command {
 	opts := packCommandOptions{repoRoot: invocationRoot.Path(), root: root}
 	cmd := &cobra.Command{
-		Use: "import <pack-id> [directory]", Short: "Import an embedded pack into the selected source tree.", Args: argcount.RangeArgs(1, 2),
+		Use: "import <provider> [directory]", Short: "Copy an embedded provider directory into the selected flow.", Args: argcount.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 2 {
 				opts.sourceRoot = args[1]
@@ -164,18 +165,18 @@ func newImportPackCommand(invocationRoot InvocationRoot, root rootCommandOptions
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			id := strings.TrimSpace(args[0])
+			id := args[0]
 			changed, err := packartifact.ImportEmbeddedPack(sourceRoot, id, embedded)
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			result := packImportReadback{ID: id, Changed: changed, Source: packartifact.ProvenanceProject}
+			result := packImportReadback{ID: id, Changed: changed, Source: "local"}
 			return renderCLIOutput(cmd.OutOrStdout(), cmd.ErrOrStderr(), opts.output, result, func(out io.Writer) {
 				state := "already imported"
 				if changed {
 					state = "imported"
 				}
-				fmt.Fprintf(out, "pack %s: %s source=project\n", id, state)
+				fmt.Fprintf(out, "provider %s: %s source=local\n", id, state)
 			}, func() ([]string, error) { return []string{id}, nil })
 		},
 	}
@@ -242,10 +243,16 @@ func packInventoryReadbackFromInventory(inventory *packartifact.EffectivePackInv
 }
 
 func packInventoryEntryReadbackFromEntry(entry packartifact.Entry) packInventoryEntryReadback {
-	return packInventoryEntryReadback{
-		ID: entry.ID(), Type: entry.Type(), Version: entry.Version(), ManifestHash: entry.ManifestHash(),
-		Source: entry.Source(), Directory: entry.Directory(), Origin: entry.Origin(), Modified: entry.Modified(), ShadowsBase: entry.ShadowsBase(),
+	out := packInventoryEntryReadback{
+		ID: entry.ID(), Version: entry.Version(), ManifestHash: entry.ManifestHash(),
+		Source: entry.Source(), Directory: entry.Directory(),
 	}
+	for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+		if _, present := entry.Provider().Body(role); present {
+			out.Bodies = append(out.Bodies, role.FileName())
+		}
+	}
+	return out
 }
 
 func writePackInventory(out io.Writer, inventory packInventoryReadback) {
@@ -259,15 +266,6 @@ func writePackInventory(out io.Writer, inventory packInventoryReadback) {
 }
 
 func writePackEntry(out io.Writer, pack packInventoryEntryReadback) {
-	fmt.Fprintf(out, "%s type=%s version=%s source=%s manifest=%s", pack.ID, pack.Type, pack.Version, pack.Source, pack.ManifestHash)
-	if pack.ShadowsBase {
-		fmt.Fprint(out, " shadows_base=true")
-	}
-	if pack.Modified {
-		fmt.Fprint(out, " modified=true")
-	}
-	if pack.Origin.Valid() {
-		fmt.Fprintf(out, " origin=%s@%s:%s", pack.Origin.ID, pack.Origin.Version, pack.Origin.ManifestHash)
-	}
+	fmt.Fprintf(out, "%s bodies=%s version=%s source=%s manifest=%s", pack.ID, strings.Join(pack.Bodies, ","), pack.Version, pack.Source, pack.ManifestHash)
 	fmt.Fprintln(out)
 }

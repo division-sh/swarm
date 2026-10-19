@@ -210,14 +210,14 @@ func admitManifestHeader(root yamlsource.Value, fields map[string]yamlsource.Val
 }
 
 func admitManifestCapabilities(value yamlsource.Value) (Capabilities, error) {
-	fields, err := envelopeFields(value, "can", "cannot")
+	fields, err := manifestMapping(value, "can", "cannot")
 	if err != nil {
 		return Capabilities{}, err
 	}
-	if err := envelopeRequired(value, fields, "can", "cannot"); err != nil {
+	if err := manifestRequired(value, fields, "can", "cannot"); err != nil {
 		return Capabilities{}, err
 	}
-	can, err := envelopeFields(fields["can"], "receive_https_route", "verify_secret", "emit_events", "persist_dedupe_markers", "call_provider_actions", "lower_through_activity", "journal_activity_attempts")
+	can, err := manifestMapping(fields["can"], "receive_https_route", "verify_secret", "emit_events", "persist_dedupe_markers", "call_provider_actions", "lower_through_activity", "journal_activity_attempts")
 	if err != nil {
 		return Capabilities{}, err
 	}
@@ -225,7 +225,7 @@ func admitManifestCapabilities(value yamlsource.Value) (Capabilities, error) {
 	if err := admitCanValues(can, &out); err != nil {
 		return Capabilities{}, err
 	}
-	if out.Cannot, err = envelopeTexts(fields["cannot"]); err != nil {
+	if out.Cannot, err = manifestTexts(fields["cannot"]); err != nil {
 		return Capabilities{}, err
 	}
 	if len(out.Cannot) == 0 {

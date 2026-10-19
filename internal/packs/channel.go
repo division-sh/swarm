@@ -2,8 +2,6 @@ package packs
 
 import (
 	"fmt"
-	"io/fs"
-	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -494,84 +492,8 @@ type ChannelMapping struct {
 	Item []map[string]ChannelMapping
 }
 
-type LoadedChannelPack struct {
-	Envelope     Envelope
-	Manifest     ChannelManifest
-	ManifestBody []byte
-	Directory    string
-	Source       PackSource
-}
-
-func LoadChannelPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedChannelPack, error) {
-	loaded, err := Load(fsys, dir, runningPlatformVersion)
-	if err != nil {
-		return LoadedChannelPack{}, err
-	}
-	return LoadChannelPack(loaded)
-}
-
-func LoadChannelPack(loaded Loaded) (LoadedChannelPack, error) {
-	if strings.TrimSpace(loaded.Envelope.Type) != TypeChannel {
-		return LoadedChannelPack{}, fmt.Errorf("channel pack %q has unsupported type %q", loaded.Envelope.ID, loaded.Envelope.Type)
-	}
-	if len(loaded.Envelope.Requires.Packs) != 2 || strings.TrimSpace(loaded.Envelope.Requires.Packs[TypeTrigger]) == "" || strings.TrimSpace(loaded.Envelope.Requires.Packs[TypeConnector]) == "" {
-		return LoadedChannelPack{}, fmt.Errorf("channel pack %q requires exactly trigger and connector pack roles", loaded.Envelope.ID)
-	}
-	manifest, err := parseChannelManifestAt(loaded.ManifestBody, path.Join(loaded.Directory, "channel.yaml"))
-	if err != nil {
-		return LoadedChannelPack{}, fmt.Errorf("parse channel manifest for pack %q: %w", loaded.Envelope.ID, err)
-	}
-	if err := validateChannelManifest(loaded.Envelope.ID, manifest); err != nil {
-		return LoadedChannelPack{}, err
-	}
-	return LoadedChannelPack{
-		Envelope: loaded.Envelope, Manifest: manifest, ManifestBody: append([]byte(nil), loaded.ManifestBody...),
-		Directory: loaded.Directory, Source: MustPackSource(loaded.Envelope.Provenance.Source, loaded.Envelope.ID),
-	}, nil
-}
-
 func ParseChannelManifest(body []byte) (ChannelManifest, error) {
 	return parseChannelManifestAt(body, "channel.yaml")
-}
-
-func CompileChannelInventory(registry *InterfaceRegistry, channels []LoadedChannelPack, triggers []TriggerPackDescriptor, connectors []ConnectorPackDescriptor) ([]SatisfactionPlan, error) {
-	seenIDs := map[string]PackIdentity{}
-	register := func(identity PackIdentity) error {
-		id := identity.ID()
-		if id == "" {
-			return fmt.Errorf("pack identity is required")
-		}
-		if prior, exists := seenIDs[id]; exists {
-			return fmt.Errorf("duplicate accepted pack id %q across roles %q and %q", id, prior.Type(), identity.Type())
-		}
-		seenIDs[id] = identity
-		return nil
-	}
-	for _, trigger := range triggers {
-		if err := register(trigger.Identity); err != nil {
-			return nil, err
-		}
-	}
-	for _, connector := range connectors {
-		if err := register(connector.Identity); err != nil {
-			return nil, err
-		}
-	}
-	for _, channel := range channels {
-		if err := register(identityFromEnvelope(channel.Envelope, channel.Source)); err != nil {
-			return nil, err
-		}
-	}
-	plans := make([]SatisfactionPlan, 0, len(channels))
-	for _, channel := range channels {
-		plan, err := CompileChannel(registry, channel, triggers, connectors)
-		if err != nil {
-			return nil, err
-		}
-		plans = append(plans, plan)
-	}
-	sort.Slice(plans, func(i, j int) bool { return plans[i].channel.ID() < plans[j].channel.ID() })
-	return plans, nil
 }
 
 func validateChannelManifest(packID string, manifest ChannelManifest) error {
@@ -1460,28 +1382,6 @@ func cloneRequirements(in []Requirement) []Requirement {
 	return out
 }
 
-func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, triggers []TriggerPackDescriptor, connectors []ConnectorPackDescriptor) (SatisfactionPlan, error) {
-	if registry == nil {
-		return SatisfactionPlan{}, fmt.Errorf("channel interface registry is required")
-	}
-	if len(channel.Envelope.Implements) != 1 {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q requires exactly one interface reference", channel.Envelope.ID)
-	}
-	compilation, err := prepareChannelCompilation(registry, identityFromEnvelope(channel.Envelope, channel.Source), channel.Manifest, channel.Envelope.Implements[0])
-	if err != nil {
-		return SatisfactionPlan{}, err
-	}
-	trigger, err := resolveTriggerDependency(channel, triggers)
-	if err != nil {
-		return SatisfactionPlan{}, err
-	}
-	connector, err := resolveConnectorDependency(channel, connectors)
-	if err != nil {
-		return SatisfactionPlan{}, err
-	}
-	return compileChannelSatisfaction(compilation, trigger, connector)
-}
-
 type channelCompilation struct {
 	Identity   PackIdentity
 	Manifest   ChannelManifest
@@ -1848,40 +1748,6 @@ func intersectSelectedConstraint(name string, left, right *runtimecontracts.Tool
 		return nil, fmt.Errorf("selected channel constraint %q: %w", name, err)
 	}
 	return &out, nil
-}
-
-func resolveTriggerDependency(channel LoadedChannelPack, descriptors []TriggerPackDescriptor) (TriggerPackDescriptor, error) {
-	id := strings.TrimSpace(channel.Envelope.Requires.Packs[TypeTrigger])
-	var matches []TriggerPackDescriptor
-	for _, descriptor := range descriptors {
-		if descriptor.Identity.ID() == id {
-			matches = append(matches, descriptor)
-		}
-	}
-	if len(matches) != 1 {
-		return TriggerPackDescriptor{}, fmt.Errorf("channel pack %q trigger dependency %q resolved %d accepted packs; require exactly one", channel.Envelope.ID, id, len(matches))
-	}
-	if matches[0].Identity.Type() != TypeTrigger {
-		return TriggerPackDescriptor{}, fmt.Errorf("channel pack %q dependency %q has wrong role %q", channel.Envelope.ID, id, matches[0].Identity.Type())
-	}
-	return matches[0], nil
-}
-
-func resolveConnectorDependency(channel LoadedChannelPack, descriptors []ConnectorPackDescriptor) (ConnectorPackDescriptor, error) {
-	id := strings.TrimSpace(channel.Envelope.Requires.Packs[TypeConnector])
-	var matches []ConnectorPackDescriptor
-	for _, descriptor := range descriptors {
-		if descriptor.Identity.ID() == id {
-			matches = append(matches, descriptor)
-		}
-	}
-	if len(matches) != 1 {
-		return ConnectorPackDescriptor{}, fmt.Errorf("channel pack %q connector dependency %q resolved %d accepted packs; require exactly one", channel.Envelope.ID, id, len(matches))
-	}
-	if matches[0].Identity.Type() != TypeConnector {
-		return ConnectorPackDescriptor{}, fmt.Errorf("channel pack %q dependency %q has wrong role %q", channel.Envelope.ID, id, matches[0].Identity.Type())
-	}
-	return matches[0], nil
 }
 
 func validateOperationBinding(name string, operation runtimecontracts.PackInterfaceOperation, binding ChannelOperationBinding, schemas, opaque, constraints map[string]runtimecontracts.ToolInputSchema, tool runtimecontracts.ToolSchemaEntry) (compiledChannelMappingTopology, compiledChannelMappingTopology, error) {
@@ -2461,10 +2327,6 @@ func stringSet(values []string) map[string]struct{} {
 		out[strings.TrimSpace(value)] = struct{}{}
 	}
 	return out
-}
-
-func identityFromEnvelope(envelope Envelope, source PackSource) PackIdentity {
-	return MustPackIdentity(envelope.ID, envelope.Version, envelope.ManifestHash, envelope.Type, source)
 }
 
 func cloneInterfaceDefinition(in runtimecontracts.PackInterfaceDefinition) runtimecontracts.PackInterfaceDefinition {

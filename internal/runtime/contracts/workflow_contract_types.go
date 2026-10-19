@@ -73,7 +73,6 @@ type WorkflowContractBundle struct {
 	URIRegistry           ContractURIRegistry
 	PackInventory         *packartifact.EffectivePackInventory
 	PackAdmission         PackAdmissionProjection
-	ProjectPacks          packartifact.ProjectPackSet
 	fanOutPlansBySite     map[FanOutSiteRef]FanOutCompiledPlan
 	fanOutPlansByElement  map[FanOutElementRef]FanOutCompiledPlan
 	fanOutPlanFailures    []FanOutPlanFailure

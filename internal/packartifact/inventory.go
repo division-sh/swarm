@@ -9,46 +9,16 @@ import (
 	"sort"
 	"strings"
 
-	basepacks "github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
-	"github.com/division-sh/swarm/internal/runtime/core/packidentity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 const (
-	InventoryManifestFileName = "inventory.yaml"
-	ManifestHashDerived       = "derived"
-
-	SelectionEmbedded            SelectionMode = "embedded"
-	SelectionDevelopmentOverride SelectionMode = "development_override"
-
-	ProvenancePlatform            = basepacks.ProvenancePlatform
-	ProvenanceExternal            = basepacks.ProvenanceExternal
-	ProvenanceProject             = basepacks.ProvenanceProject
-	ProvenanceEmbedded            = "embedded"
-	ProvenanceDevelopmentOverride = "development_override"
-
-	EnvelopeFileName          = basepacks.EnvelopeFileName
-	TriggerManifestFileName   = basepacks.TriggerManifestFileName
-	ConnectorManifestFileName = basepacks.ConnectorManifestFileName
-	ChannelManifestFileName   = basepacks.ChannelManifestFileName
-
-	TypeTrigger   = basepacks.TypeTrigger
-	TypeConnector = basepacks.TypeConnector
-	TypeChannel   = basepacks.TypeChannel
-)
-
-type (
-	Envelope        = basepacks.Envelope
-	Provenance      = basepacks.Provenance
-	Capabilities    = basepacks.Capabilities
-	CanCapabilities = basepacks.CanCapabilities
-	Requires        = basepacks.Requires
-)
-
-var (
-	StampEnvelope           = basepacks.StampEnvelope
-	ManifestFileNameForType = basepacks.ManifestFileNameForType
+	InventoryManifestFileName                   = "inventory.yaml"
+	SelectionEmbedded             SelectionMode = "embedded"
+	SelectionDevelopmentOverride  SelectionMode = "development_override"
+	ProvenanceEmbedded                          = "embedded"
+	ProvenanceDevelopmentOverride               = "development_override"
 )
 
 type SelectionMode string
@@ -64,146 +34,48 @@ type InventoryManifest struct {
 }
 
 type InventoryManifestPack struct {
-	ID   string `yaml:"id"`
-	Type string `yaml:"type"`
 	Path string `yaml:"path"`
 }
 
 func LoadInventoryManifest(fsys fs.FS, manifestPath string) (InventoryManifest, error) {
-	if fsys == nil {
-		return InventoryManifest{}, fmt.Errorf("platform pack inventory filesystem is required")
+	if fsys == nil || cleanRelativePath(manifestPath) == "" {
+		return InventoryManifest{}, fmt.Errorf("platform inventory requires a filesystem and exact relative manifest path")
 	}
-	manifestPath = cleanRelativePath(manifestPath)
-	if manifestPath == "" {
-		return InventoryManifest{}, fmt.Errorf("platform pack inventory manifest path is required")
-	}
-	manifestBody, err := fs.ReadFile(fsys, manifestPath)
+	body, err := fs.ReadFile(fsys, manifestPath)
 	if err != nil {
-		return InventoryManifest{}, fmt.Errorf("read platform pack inventory manifest %q: %w", manifestPath, err)
+		return InventoryManifest{}, err
 	}
-	manifest, err := admitInventoryManifest(manifestBody, manifestPath)
+	manifest, err := admitInventoryManifest(body, manifestPath)
 	if err != nil {
-		return InventoryManifest{}, fmt.Errorf("parse platform pack inventory manifest %q: %w", manifestPath, err)
-	}
-	if manifest.Version != 1 {
-		return InventoryManifest{}, fmt.Errorf("platform pack inventory version %d is unsupported", manifest.Version)
+		return InventoryManifest{}, err
 	}
 	if len(manifest.Packs) == 0 {
-		return InventoryManifest{}, fmt.Errorf("platform pack inventory packs are required")
+		return InventoryManifest{}, fmt.Errorf("platform inventory requires provider directories")
 	}
-	seenIDs := make(map[string]struct{}, len(manifest.Packs))
-	seenPaths := make(map[string]string, len(manifest.Packs))
-	for index := range manifest.Packs {
-		declared := &manifest.Packs[index]
-		declared.ID = strings.TrimSpace(declared.ID)
-		declared.Type = strings.TrimSpace(declared.Type)
-		declared.Path = cleanRelativePath(declared.Path)
-		if declared.ID == "" || declared.Path == "" || ManifestFileNameForType(declared.Type) == "" {
-			return InventoryManifest{}, fmt.Errorf("platform pack inventory packs[%d] requires valid id, type, and relative path", index)
+	seen := map[string]bool{}
+	for _, item := range manifest.Packs {
+		if cleanRelativePath(item.Path) == "" || seen[item.Path] {
+			return InventoryManifest{}, fmt.Errorf("platform inventory provider path %q is invalid or repeated", item.Path)
 		}
-		if _, duplicate := seenIDs[declared.ID]; duplicate {
-			return InventoryManifest{}, fmt.Errorf("duplicate platform pack inventory id %q", declared.ID)
-		}
-		if previous, duplicate := seenPaths[declared.Path]; duplicate {
-			return InventoryManifest{}, fmt.Errorf("platform pack inventory path %q is shared by %q and %q", declared.Path, previous, declared.ID)
-		}
-		seenIDs[declared.ID] = struct{}{}
-		seenPaths[declared.Path] = declared.ID
+		seen[item.Path] = true
 	}
 	return manifest, nil
 }
 
-type ImportOrigin struct {
-	Source       string `yaml:"source" json:"source"`
-	ID           string `yaml:"id" json:"id"`
-	Version      string `yaml:"version" json:"version"`
-	ManifestHash string `yaml:"manifest_hash" json:"manifest_hash"`
-	EnvelopeHash string `yaml:"envelope_hash" json:"envelope_hash"`
-}
-
-func (o ImportOrigin) Valid() bool {
-	if strings.TrimSpace(o.Source) != ProvenanceEmbedded {
-		return false
-	}
-	if _, err := packidentity.ParseID(strings.TrimSpace(o.ID)); err != nil {
-		return false
-	}
-	if _, err := packidentity.ParseVersion(strings.TrimSpace(o.Version)); err != nil {
-		return false
-	}
-	if _, err := manifesthash.Parse(strings.TrimSpace(o.ManifestHash)); err != nil {
-		return false
-	}
-	_, err := manifesthash.Parse(strings.TrimSpace(o.EnvelopeHash))
-	return err == nil
-}
-
-type ProjectPackSource struct {
-	Path         string
-	EnvelopeBody []byte
-	ManifestBody []byte
-	Origin       ImportOrigin
-}
-
+// Entry retains one captured provider directory, including all its bodies.
 type Entry struct {
-	envelope     Envelope
-	envelopeBody []byte
-	manifestBody []byte
-	directory    string
-	selection    string
-	origin       ImportOrigin
-	shadowsBase  bool
+	provider  AdmittedProvider
+	directory string
+	selection string
 }
 
-func (e Entry) ID() string           { return e.envelope.ID }
-func (e Entry) Version() string      { return e.envelope.Version }
-func (e Entry) Type() string         { return e.envelope.Type }
-func (e Entry) ManifestHash() string { return e.envelope.ManifestHash }
-func (e Entry) Directory() string    { return e.directory }
-func (e Entry) Source() string       { return e.selection }
-func (e Entry) Origin() ImportOrigin { return e.origin }
-func (e Entry) ShadowsBase() bool    { return e.shadowsBase }
-func (e Entry) Modified() bool {
-	return e.selection == ProvenanceProject && e.origin.Valid() &&
-		(e.Version() != strings.TrimSpace(e.origin.Version) ||
-			e.ManifestHash() != strings.TrimSpace(e.origin.ManifestHash) ||
-			importedEnvelopeHash(e.envelopeBody) != strings.TrimSpace(e.origin.EnvelopeHash))
-}
-func (e Entry) Envelope() Envelope   { return cloneEnvelope(e.envelope) }
-func (e Entry) EnvelopeBody() []byte { return append([]byte(nil), e.envelopeBody...) }
-func (e Entry) ManifestBody() []byte { return append([]byte(nil), e.manifestBody...) }
-
-func (e Entry) Loaded(runningPlatformVersion string) (basepacks.Loaded, error) {
-	if err := e.envelope.ValidateCommon(runningPlatformVersion); err != nil {
-		return basepacks.Loaded{}, err
-	}
-	return basepacks.Loaded{Envelope: e.Envelope(), ManifestBody: e.ManifestBody(), Directory: e.directory}, nil
-}
-
-func cloneEntry(e Entry) Entry {
-	e.envelope = cloneEnvelope(e.envelope)
-	e.envelopeBody = append([]byte(nil), e.envelopeBody...)
-	e.manifestBody = append([]byte(nil), e.manifestBody...)
-	return e
-}
-
-func cloneEnvelope(envelope Envelope) Envelope {
-	envelope.Implements = append([]string(nil), envelope.Implements...)
-	envelope.Capabilities.Can.EmitEvents = append([]string(nil), envelope.Capabilities.Can.EmitEvents...)
-	envelope.Capabilities.Can.CallProviderActions = append([]string(nil), envelope.Capabilities.Can.CallProviderActions...)
-	envelope.Capabilities.Cannot = append([]string(nil), envelope.Capabilities.Cannot...)
-	envelope.Requires.Secrets = append([]string(nil), envelope.Requires.Secrets...)
-	envelope.Requires.ManagedCredentials = append([]string(nil), envelope.Requires.ManagedCredentials...)
-	if envelope.Requires.Packs != nil {
-		requiredPacks := envelope.Requires.Packs
-		envelope.Requires.Packs = make(map[string]string, len(requiredPacks))
-		for id, version := range requiredPacks {
-			envelope.Requires.Packs[id] = version
-		}
-	}
-	envelope.Tests = append([]string(nil), envelope.Tests...)
-	return envelope
-}
+func (e Entry) ID() string                 { return e.provider.Key() }
+func (e Entry) Version() string            { return e.provider.Metadata().Version }
+func (e Entry) Directory() string          { return e.directory }
+func (e Entry) Source() string             { return e.selection }
+func (e Entry) Provider() AdmittedProvider { return e.provider }
+func (e Entry) ManifestBody() []byte       { return e.provider.ManifestBody() }
+func (e Entry) ManifestHash() string       { return manifesthash.FromBytes(e.ManifestBody()).String() }
 
 type PlatformPackInventory struct {
 	source                 yamlsource.Value
@@ -212,7 +84,6 @@ type PlatformPackInventory struct {
 	runningPlatformVersion string
 	sourceDirectories      []string
 	entries                map[string]Entry
-	embeddedImportOrigins  map[string]ImportOrigin
 }
 
 func (i *PlatformPackInventory) SourceValue() yamlsource.Value {
@@ -221,41 +92,31 @@ func (i *PlatformPackInventory) SourceValue() yamlsource.Value {
 	}
 	return i.source
 }
-
 func (i *PlatformPackInventory) SelectionMode() SelectionMode {
 	if i == nil {
 		return ""
 	}
 	return i.mode
 }
-
 func (i *PlatformPackInventory) Digest() string {
 	if i == nil {
 		return ""
 	}
 	return i.digest
 }
-
-func (i *PlatformPackInventory) Lookup(id string) (Entry, bool) {
+func (i *PlatformPackInventory) Lookup(key string) (Entry, bool) {
 	if i == nil {
 		return Entry{}, false
 	}
-	entry, ok := i.entries[strings.TrimSpace(id)]
-	return cloneEntry(entry), ok
+	entry, ok := i.entries[key]
+	return entry, ok
 }
-
 func (i *PlatformPackInventory) Entries() []Entry {
 	if i == nil {
 		return nil
 	}
-	ids := sortedEntryIDs(i.entries)
-	out := make([]Entry, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, cloneEntry(i.entries[id]))
-	}
-	return out
+	return sortedEntries(i.entries)
 }
-
 func (i *PlatformPackInventory) SourceDirectories() []string {
 	if i == nil {
 		return nil
@@ -263,253 +124,124 @@ func (i *PlatformPackInventory) SourceDirectories() []string {
 	return append([]string(nil), i.sourceDirectories...)
 }
 
-func LoadPlatformPackInventoryFS(fsys fs.FS, manifestPath, runningPlatformVersion string, mode SelectionMode) (*PlatformPackInventory, error) {
-	if fsys == nil {
-		return nil, fmt.Errorf("platform pack inventory filesystem is required")
-	}
+func LoadPlatformPackInventoryFS(fsys fs.FS, manifestPath, runningVersion string, mode SelectionMode) (*PlatformPackInventory, error) {
 	if !mode.Valid() {
-		return nil, fmt.Errorf("platform pack inventory selection mode %q is invalid", mode)
-	}
-	manifestPath = cleanRelativePath(manifestPath)
-	if manifestPath == "" {
-		return nil, fmt.Errorf("platform pack inventory manifest path is required")
+		return nil, fmt.Errorf("invalid platform inventory selection %q", mode)
 	}
 	manifest, err := LoadInventoryManifest(fsys, manifestPath)
 	if err != nil {
 		return nil, err
 	}
-
-	selection := ProvenanceEmbedded
-	if mode == SelectionDevelopmentOverride {
-		selection = ProvenanceDevelopmentOverride
-	}
-	entries := make(map[string]Entry, len(manifest.Packs))
-	expectedFiles := map[string]struct{}{manifestPath: {}}
+	entries := map[string]Entry{}
+	expected := map[string]struct{}{manifestPath: {}}
 	for _, declared := range manifest.Packs {
-		loaded, err := basepacks.Load(fsys, declared.Path, runningPlatformVersion)
+		provider, err := LoadProviderFS(fsys, declared.Path, runningVersion)
 		if err != nil {
-			return nil, fmt.Errorf("load platform inventory pack %q: %w", declared.ID, err)
+			return nil, err
 		}
-		if loaded.Envelope.ID != declared.ID {
-			return nil, fmt.Errorf("platform inventory path %q declares id %q but envelope owns %q", declared.Path, declared.ID, loaded.Envelope.ID)
+		for name := range provider.Members() {
+			expected[path.Join(declared.Path, name)] = struct{}{}
 		}
-		if loaded.Envelope.Type != declared.Type {
-			return nil, fmt.Errorf("platform inventory pack %q declares type %q but envelope owns %q", declared.ID, declared.Type, loaded.Envelope.Type)
+		if _, duplicate := entries[provider.Key()]; duplicate {
+			return nil, fmt.Errorf("duplicate provider directory key %q", provider.Key())
 		}
-		if loaded.Envelope.Provenance.Source != ProvenancePlatform {
-			return nil, fmt.Errorf("platform inventory pack %q provenance %q must be %q", declared.ID, loaded.Envelope.Provenance.Source, ProvenancePlatform)
-		}
-		envelopePath := path.Join(declared.Path, EnvelopeFileName)
-		manifestFilePath := path.Join(declared.Path, ManifestFileNameForType(declared.Type))
-		envelopeBody, err := fs.ReadFile(fsys, envelopePath)
-		if err != nil {
-			return nil, fmt.Errorf("read platform inventory envelope %q: %w", envelopePath, err)
-		}
-		expectedFiles[envelopePath] = struct{}{}
-		expectedFiles[manifestFilePath] = struct{}{}
-		entries[declared.ID] = Entry{
-			envelope: loaded.Envelope, envelopeBody: envelopeBody, manifestBody: loaded.ManifestBody,
-			directory: declared.Path, selection: selection,
-		}
+		entries[provider.Key()] = Entry{provider: provider, directory: declared.Path, selection: string(mode)}
 	}
-	if err := rejectUnexpectedInventoryFiles(fsys, expectedFiles); err != nil {
+	if err := rejectUnexpectedInventoryFiles(fsys, expected); err != nil {
 		return nil, err
 	}
-	digest, err := digestInventoryFiles(fsys, expectedFiles)
+	digest, err := digestInventoryFiles(fsys, expected)
 	if err != nil {
 		return nil, err
 	}
-	inventory := &PlatformPackInventory{
-		source: manifest.source,
-		mode:   mode, digest: digest, runningPlatformVersion: runningPlatformVersion, entries: entries,
-	}
-	if mode == SelectionEmbedded {
-		inventory.embeddedImportOrigins = make(map[string]ImportOrigin, len(entries))
-		for id, entry := range entries {
-			_, origin, err := importedProjectArtifact(entry)
-			if err != nil {
-				return nil, fmt.Errorf("derive embedded pack %q import baseline: %w", id, err)
-			}
-			inventory.embeddedImportOrigins[id] = origin
-		}
-	}
-	return inventory, nil
+	return &PlatformPackInventory{source: manifest.source, mode: mode, digest: digest, runningPlatformVersion: runningVersion, entries: entries}, nil
 }
 
-type EffectivePackInventory struct {
-	source          yamlsource.Value
-	baseDigest      string
-	digest          string
-	baseMode        SelectionMode
-	baseDirectories []string
-	entries         map[string]Entry
-}
+type EffectivePackInventory struct{ base *PlatformPackInventory }
 
+func NewEffectivePackInventory(base *PlatformPackInventory) (*EffectivePackInventory, error) {
+	if base == nil || base.Digest() == "" || !base.SelectionMode().Valid() {
+		return nil, fmt.Errorf("selected platform provider inventory is required")
+	}
+	return &EffectivePackInventory{base: base}, nil
+}
 func (i *EffectivePackInventory) SourceValue() yamlsource.Value {
 	if i == nil {
 		return yamlsource.Value{}
 	}
-	return i.source
+	return i.base.SourceValue()
 }
-
-func NewEffectivePackInventory(base *PlatformPackInventory, projects []ProjectPackSource) (*EffectivePackInventory, error) {
-	if base == nil || base.Digest() == "" || !base.SelectionMode().Valid() {
-		return nil, fmt.Errorf("selected platform pack base inventory is required")
-	}
-	entries := make(map[string]Entry, len(base.entries)+len(projects))
-	for id, entry := range base.entries {
-		entries[id] = cloneEntry(entry)
-	}
-	seenPaths := make(map[string]string, len(projects))
-	for index, source := range projects {
-		projectPath := cleanRelativePath(source.Path)
-		if projectPath == "" {
-			return nil, fmt.Errorf("project pack source %d path is invalid", index)
-		}
-		if previous, duplicate := seenPaths[projectPath]; duplicate {
-			return nil, fmt.Errorf("duplicate project pack path %q for %q", projectPath, previous)
-		}
-		if !source.Origin.Valid() {
-			return nil, fmt.Errorf("project pack %q import origin is invalid", projectPath)
-		}
-		expectedOrigin, ok := base.embeddedImportOrigins[strings.TrimSpace(source.Origin.ID)]
-		if !ok {
-			return nil, fmt.Errorf("project pack %q import origin id %q has no embedded import baseline", projectPath, source.Origin.ID)
-		}
-		if source.Origin != expectedOrigin {
-			return nil, fmt.Errorf("project pack %q import origin contradicts the embedded import baseline for %q", projectPath, source.Origin.ID)
-		}
-		envelope, err := basepacks.ParseEnvelopeAt(source.EnvelopeBody, path.Join(projectPath, EnvelopeFileName))
-		if err != nil {
-			return nil, fmt.Errorf("parse project pack %q envelope: %w", projectPath, err)
-		}
-		if envelope.Provenance.Source != ProvenanceProject {
-			return nil, fmt.Errorf("project pack %q provenance %q must be %q", projectPath, envelope.Provenance.Source, ProvenanceProject)
-		}
-		if strings.TrimSpace(envelope.ManifestHash) != ManifestHashDerived {
-			return nil, fmt.Errorf("project pack %q manifest_hash must be %q", projectPath, ManifestHashDerived)
-		}
-		envelope.ManifestHash = basepacks.ManifestHash(source.ManifestBody)
-		if err := envelope.ValidateCommon(base.runningPlatformVersion); err != nil {
-			return nil, fmt.Errorf("validate project pack %q: %w", projectPath, err)
-		}
-		if envelope.ID != source.Origin.ID {
-			return nil, fmt.Errorf("project pack %q id %q contradicts imported origin id %q", projectPath, envelope.ID, source.Origin.ID)
-		}
-		seenPaths[projectPath] = envelope.ID
-		_, shadowsBase := entries[envelope.ID]
-		entries[envelope.ID] = Entry{
-			envelope: envelope, envelopeBody: append([]byte(nil), source.EnvelopeBody...),
-			manifestBody: append([]byte(nil), source.ManifestBody...), directory: projectPath,
-			selection: ProvenanceProject, origin: source.Origin, shadowsBase: shadowsBase,
-		}
-	}
-	digest := digestEffectiveInventory(base.Digest(), entries)
-	return &EffectivePackInventory{
-		source:          base.SourceValue(),
-		baseDigest:      base.Digest(),
-		digest:          digest,
-		baseMode:        base.SelectionMode(),
-		baseDirectories: base.SourceDirectories(),
-		entries:         entries,
-	}, nil
-}
-
 func (i *EffectivePackInventory) BaseDigest() string {
 	if i == nil {
 		return ""
 	}
-	return i.baseDigest
+	return i.base.Digest()
 }
-
+func (i *EffectivePackInventory) Digest() string { return i.BaseDigest() }
 func (i *EffectivePackInventory) BaseSelectionMode() SelectionMode {
 	if i == nil {
 		return ""
 	}
-	return i.baseMode
+	return i.base.SelectionMode()
 }
-
 func (i *EffectivePackInventory) BaseDirectories() []string {
 	if i == nil {
 		return nil
 	}
-	return append([]string(nil), i.baseDirectories...)
+	return i.base.SourceDirectories()
 }
-
-func (i *EffectivePackInventory) Digest() string {
-	if i == nil {
-		return ""
-	}
-	return i.digest
-}
-
-func (i *EffectivePackInventory) Lookup(id string) (Entry, bool) {
+func (i *EffectivePackInventory) Lookup(key string) (Entry, bool) {
 	if i == nil {
 		return Entry{}, false
 	}
-	entry, ok := i.entries[strings.TrimSpace(id)]
-	return cloneEntry(entry), ok
+	return i.base.Lookup(key)
 }
-
 func (i *EffectivePackInventory) Entries() []Entry {
 	if i == nil {
 		return nil
 	}
-	ids := sortedEntryIDs(i.entries)
-	out := make([]Entry, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, cloneEntry(i.entries[id]))
-	}
-	return out
+	return i.base.Entries()
 }
 
-func (i *EffectivePackInventory) EntriesByType(packType string) []Entry {
-	out := make([]Entry, 0)
-	for _, entry := range i.Entries() {
-		if entry.Type() == strings.TrimSpace(packType) {
-			out = append(out, entry)
-		}
+func sortedEntries(entries map[string]Entry) []Entry {
+	keys := make([]string, 0, len(entries))
+	for key := range entries {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]Entry, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, entries[key])
 	}
 	return out
 }
 
 func cleanRelativePath(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" || strings.Contains(value, "\\") || strings.HasPrefix(value, "/") {
+	if value == "" || strings.Contains(value, "\\") || !fs.ValidPath(value) || value == "." {
 		return ""
 	}
-	cleaned := path.Clean(value)
-	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") || cleaned != value {
-		return ""
-	}
-	return cleaned
+	return value
 }
 
 func rejectUnexpectedInventoryFiles(fsys fs.FS, expected map[string]struct{}) error {
-	expectedDirectories := map[string]struct{}{".": {}}
+	directories := map[string]bool{".": true}
 	for name := range expected {
-		for parent := path.Dir(name); parent != "." && parent != "/"; parent = path.Dir(parent) {
-			expectedDirectories[parent] = struct{}{}
+		for dir := path.Dir(name); dir != "."; dir = path.Dir(dir) {
+			directories[dir] = true
 		}
 	}
-	return fs.WalkDir(fsys, ".", func(name string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
+	return fs.WalkDir(fsys, ".", func(name string, item fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		if entry.IsDir() {
-			if _, ok := expectedDirectories[name]; !ok {
-				return fmt.Errorf("platform pack inventory contains unlisted directory %q", name)
+		if item.IsDir() {
+			if !directories[name] {
+				return fmt.Errorf("platform inventory contains unlisted directory %q", name)
 			}
 			return nil
 		}
-		if entry.Type()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("platform pack inventory path %q is a symlink", name)
-		}
-		if !entry.Type().IsRegular() {
-			return fmt.Errorf("platform pack inventory path %q is not a regular file", name)
-		}
-		if _, ok := expected[name]; !ok {
-			return fmt.Errorf("platform pack inventory contains unlisted file %q", name)
+		if _, ok := expected[name]; !ok || !item.Type().IsRegular() {
+			return fmt.Errorf("platform inventory contains unlisted or non-regular file %q", name)
 		}
 		return nil
 	})
@@ -526,7 +258,7 @@ func digestInventoryFiles(fsys fs.FS, expected map[string]struct{}) (string, err
 	for _, name := range names {
 		body, err := fs.ReadFile(fsys, name)
 		if err != nil {
-			return "", fmt.Errorf("read platform pack inventory digest input %q: %w", name, err)
+			return "", err
 		}
 		writeDigestField(hash, []byte(name))
 		writeDigestField(hash, body)
@@ -534,44 +266,11 @@ func digestInventoryFiles(fsys fs.FS, expected map[string]struct{}) (string, err
 	return fmt.Sprintf("sha256:%x", hash.Sum(nil)), nil
 }
 
-func digestEffectiveInventory(baseDigest string, entries map[string]Entry) string {
-	hash := sha256.New()
-	_, _ = hash.Write([]byte("swarm-effective-pack-inventory-v1\n"))
-	writeDigestField(hash, []byte(baseDigest))
-	for _, id := range sortedEntryIDs(entries) {
-		entry := entries[id]
-		for _, value := range []string{
-			entry.ID(), entry.Version(), entry.Type(), entry.ManifestHash(), entry.Source(),
-			entry.origin.Source, entry.origin.ID, entry.origin.Version, entry.origin.ManifestHash, entry.origin.EnvelopeHash,
-		} {
-			writeDigestField(hash, []byte(value))
-		}
-		writeDigestField(hash, entry.envelopeBody)
-		writeDigestField(hash, entry.manifestBody)
-	}
-	return fmt.Sprintf("sha256:%x", hash.Sum(nil))
-}
-
-func importedEnvelopeHash(body []byte) string {
-	return manifesthash.FromBytes(body).String()
-}
-
-type digestWriter interface {
-	Write([]byte) (int, error)
-}
+type digestWriter interface{ Write([]byte) (int, error) }
 
 func writeDigestField(writer digestWriter, value []byte) {
-	var length [8]byte
-	binary.BigEndian.PutUint64(length[:], uint64(len(value)))
-	_, _ = writer.Write(length[:])
+	var size [8]byte
+	binary.BigEndian.PutUint64(size[:], uint64(len(value)))
+	_, _ = writer.Write(size[:])
 	_, _ = writer.Write(value)
-}
-
-func sortedEntryIDs(entries map[string]Entry) []string {
-	ids := make([]string, 0, len(entries))
-	for id := range entries {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
 }

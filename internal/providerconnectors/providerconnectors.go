@@ -376,7 +376,7 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 		sourceKind = "connector_pack_import"
 		sourcePath = importSource.URI()
 		if loaded, found := opts.Registry.Lookup(provider, toolID); found {
-			provenance = strings.TrimSpace(loaded.Envelope.Provenance.Source)
+			provenance = strings.TrimSpace(loaded.Identity.Source().Provenance())
 		}
 	}
 	subject := packs.Subject{
@@ -431,7 +431,7 @@ func availableCapabilitySubject(installed InstalledTool) (packs.Subject, error) 
 		Provider:      provider,
 		Action:        action,
 		Source:        "connector_pack",
-		Provenance:    strings.TrimSpace(installed.Pack.Envelope.Provenance.Source),
+		Provenance:    strings.TrimSpace(installed.Pack.Identity.Source().Provenance()),
 		SourcePath:    strings.TrimSpace(installed.Pack.Directory),
 		Applicability: "installed",
 		Capabilities: []packs.Capability{

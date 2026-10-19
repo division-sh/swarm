@@ -1940,11 +1940,6 @@ func serveLifecyclePackFacts(contexts []serveRuntimeBundleContext) []serveLifecy
 			EffectiveDigest: inventory.Digest(),
 			PackCount:       len(inventory.Entries()),
 		}
-		for _, entry := range inventory.Entries() {
-			if entry.Source() == packartifact.ProvenanceProject {
-				fact.ProjectPacks = append(fact.ProjectPacks, entry.ID())
-			}
-		}
 		facts = append(facts, fact)
 	}
 	return facts

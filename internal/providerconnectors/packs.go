@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
@@ -28,7 +29,8 @@ type ConnectorManifest struct {
 
 type LoadedPack struct {
 	identitySource yamlsource.Value
-	Envelope       packs.Envelope
+	Identity       packs.PackIdentity
+	body           packartifact.ProviderBody
 	Manifest       ConnectorManifest
 	ManifestBody   []byte
 	Directory      string
@@ -48,8 +50,8 @@ func (r *PackRegistry) SourceValues() map[string]yamlsource.Value {
 	out["generated_index"] = r.indexSource
 	for _, tools := range r.byProvider {
 		for _, pack := range tools {
-			out[pack.Envelope.ID+".connector"] = pack.Manifest.SourceValue()
-			out[pack.Envelope.ID+".generated_profile"] = pack.identitySource
+			out[pack.Identity.ID()+".connector"] = pack.Manifest.SourceValue()
+			out[pack.Identity.ID()+".generated_profile"] = pack.identitySource
 		}
 	}
 	return out
@@ -62,7 +64,7 @@ func (r *PackRegistry) PackDescriptors() []packs.ConnectorPackDescriptor {
 	byID := map[string]LoadedPack{}
 	for _, byTool := range r.byProvider {
 		for _, pack := range byTool {
-			byID[strings.TrimSpace(pack.Envelope.ID)] = pack
+			byID[strings.TrimSpace(pack.Identity.ID())] = pack
 		}
 	}
 	ids := make([]string, 0, len(byID))
@@ -75,13 +77,7 @@ func (r *PackRegistry) PackDescriptors() []packs.ConnectorPackDescriptor {
 		pack := cloneLoadedPack(byID[id])
 		tools := cloneToolMap(pack.Manifest.Tools)
 		out = append(out, packs.ConnectorPackDescriptor{
-			Identity: packs.MustPackIdentity(
-				pack.Envelope.ID,
-				pack.Envelope.Version,
-				pack.Envelope.ManifestHash,
-				packs.TypeConnector,
-				packs.MustPackSource(pack.Envelope.Provenance.Source, pack.Source),
-			),
+			Identity: pack.Identity,
 			Provider: pack.Manifest.Provider, Tools: tools,
 		})
 	}
@@ -99,7 +95,7 @@ func NewPackRegistryFromInventory(inventory *packartifact.EffectivePackInventory
 	if inventory == nil {
 		return nil, fmt.Errorf("effective pack inventory is required")
 	}
-	entries := inventory.EntriesByType(packartifact.TypeConnector)
+	entries := inventory.Entries()
 	index, err := loadGeneratedPackIndex(generatedConnectorIdentityFS)
 	if err != nil {
 		return nil, err
@@ -108,24 +104,24 @@ func NewPackRegistryFromInventory(inventory *packartifact.EffectivePackInventory
 	seenGenerated := make(map[string]struct{}, len(expectedGenerated))
 	loaded := make([]LoadedPack, 0, len(entries))
 	for _, entry := range entries {
-		admitted, err := entry.Loaded(runningPlatformVersion)
-		if err != nil {
-			return nil, err
+		body, present := entry.Provider().Body(packmodel.BodyConnector)
+		if !present {
+			continue
 		}
-		pack, err := loadPackBody(admitted)
+		pack, err := loadPackBody(body)
 		if err != nil {
 			return nil, fmt.Errorf("load effective connector pack %q: %w", entry.ID(), err)
 		}
 		pack.Directory = entry.Directory()
 		pack.Source = entry.Source() + ":" + entry.ID()
-		expected, indexed := expectedGenerated[strings.TrimSpace(pack.Envelope.ID)]
+		expected, indexed := expectedGenerated[strings.TrimSpace(pack.Identity.ID())]
 		if indexed {
 			if err := validateGeneratedPackIdentity(generatedConnectorIdentityFS, &pack, expected); err != nil {
-				return nil, fmt.Errorf("admit effective generated connector pack %q: %w", pack.Envelope.ID, err)
+				return nil, fmt.Errorf("admit effective generated connector pack %q: %w", pack.Identity.ID(), err)
 			}
-			seenGenerated[strings.TrimSpace(pack.Envelope.ID)] = struct{}{}
+			seenGenerated[strings.TrimSpace(pack.Identity.ID())] = struct{}{}
 		} else if pack.Manifest.Generation != nil {
-			return nil, fmt.Errorf("effective connector pack %q carries generation evidence but is not in the generated pack index", pack.Envelope.ID)
+			return nil, fmt.Errorf("effective connector pack %q carries generation evidence but is not in the generated pack index", pack.Identity.ID())
 		}
 		loaded = append(loaded, pack)
 	}
@@ -144,20 +140,34 @@ func NewPackRegistryFromInventory(inventory *packartifact.EffectivePackInventory
 func NewPackRegistry(loaded ...LoadedPack) (*PackRegistry, error) {
 	registry := &PackRegistry{byProvider: map[string]map[string]LoadedPack{}}
 	for _, pack := range loaded {
+		var err error
+		pack, err = loadPackBody(pack.body)
+		if err != nil {
+			return nil, err
+		}
+		if err := ValidateDirectoryConnectorGeneration(pack.Manifest); err != nil {
+			return nil, err
+		}
+		if generation := pack.Manifest.Generation; generation != nil {
+			pack.identitySource, err = validateIndexedGenerationSource(generatedConnectorIdentityFS, *generation, generation.Profile.Path)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if err := pack.Manifest.Validate(); err != nil {
-			return nil, fmt.Errorf("validate connector manifest for pack %q: %w", pack.Envelope.ID, err)
+			return nil, fmt.Errorf("validate connector manifest for pack %q: %w", pack.Identity.ID(), err)
 		}
 		admittedTools := make(map[string]runtimecontracts.ToolSchemaEntry, len(pack.Manifest.Tools))
 		for toolID, tool := range pack.Manifest.Tools {
 			if err := tool.Validate(); err != nil {
-				return nil, fmt.Errorf("admit connector tool %q for pack %q: %w", toolID, pack.Envelope.ID, err)
+				return nil, fmt.Errorf("admit connector tool %q for pack %q: %w", toolID, pack.Identity.ID(), err)
 			}
 			admittedTools[toolID] = tool
 		}
 		pack.Manifest.Tools = admittedTools
 		if pack.Manifest.Generation != nil {
 			if err := pack.Manifest.Generation.Validate(pack.Manifest.Provider, pack.Manifest.Tools); err != nil {
-				return nil, fmt.Errorf("validate generation evidence for pack %q: %w", pack.Envelope.ID, err)
+				return nil, fmt.Errorf("validate generation evidence for pack %q: %w", pack.Identity.ID(), err)
 			}
 		}
 		pack = cloneLoadedPack(pack)
@@ -165,11 +175,11 @@ func NewPackRegistry(loaded ...LoadedPack) (*PackRegistry, error) {
 		if registry.byProvider[provider] == nil {
 			registry.byProvider[provider] = map[string]LoadedPack{}
 		}
-		source := firstNonEmpty(pack.Source, pack.Envelope.Provenance.Source+":"+pack.Envelope.ID)
+		source := firstNonEmpty(pack.Source, pack.Identity.Source().Provenance()+":"+pack.Identity.ID())
 		names := manifestToolNames(pack.Manifest)
 		for _, toolID := range names {
 			if existing, exists := registry.byProvider[provider][toolID]; exists {
-				existingSource := firstNonEmpty(existing.Source, existing.Envelope.Provenance.Source+":"+existing.Envelope.ID)
+				existingSource := firstNonEmpty(existing.Source, existing.Identity.Source().Provenance()+":"+existing.Identity.ID())
 				return nil, fmt.Errorf("duplicate provider connector pack tool %q for provider %q from %s and %s", toolID, provider, existingSource, source)
 			}
 			pack.Source = source
@@ -224,7 +234,7 @@ func (r *PackRegistry) Inventory() []InstalledTool {
 }
 
 func GenerationSurfaceForPackTool(pack LoadedPack, toolID string) (GenerationSurface, bool) {
-	return GenerationSurfaceForConnectorTool(pack.Manifest, pack.Envelope.ManifestHash, toolID)
+	return GenerationSurfaceForConnectorTool(pack.Manifest, pack.Identity.ManifestHash(), toolID)
 }
 
 // GenerationSurfaceForConnectorTool projects admitted metadata, not tool or
@@ -269,44 +279,27 @@ func GenerationSurfaceForConnectorTool(manifest ConnectorManifest, bodyHash, too
 }
 
 func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, error) {
-	loaded, err := packs.Load(fsys, dir, runningPlatformVersion)
+	provider, err := packartifact.LoadProviderFS(fsys, dir, runningPlatformVersion)
 	if err != nil {
 		return LoadedPack{}, err
 	}
-	return loadPackBody(loaded)
+	body, present := provider.Body(packmodel.BodyConnector)
+	if !present {
+		return LoadedPack{}, fmt.Errorf("provider %q has no connector.yaml BODY", provider.Key())
+	}
+	return loadPackBody(body)
 }
 
-func loadPackBody(loaded packs.Loaded) (LoadedPack, error) {
-	if strings.TrimSpace(loaded.Envelope.Type) != packs.TypeConnector {
-		return LoadedPack{}, fmt.Errorf("provider connector pack %q has unsupported type %q", loaded.Envelope.ID, loaded.Envelope.Type)
-	}
-	manifest, err := parseConnectorManifestAt(loaded.ManifestBody, path.Join(loaded.Directory, packs.ConnectorManifestFileName))
+func loadPackBody(body packartifact.ProviderBody) (LoadedPack, error) {
+	manifest, err := AdmitBody(body)
 	if err != nil {
-		return LoadedPack{}, fmt.Errorf("parse connector manifest for pack %q: %w", loaded.Envelope.ID, err)
+		return LoadedPack{}, err
 	}
-	if err := manifest.Validate(); err != nil {
-		return LoadedPack{}, fmt.Errorf("validate connector manifest for pack %q: %w", loaded.Envelope.ID, err)
+	identity, err := packs.NewProviderBodyIdentity(body)
+	if err != nil {
+		return LoadedPack{}, err
 	}
-	if manifest.Generation != nil {
-		if err := manifest.Generation.Validate(manifest.Provider, manifest.Tools); err != nil {
-			return LoadedPack{}, fmt.Errorf("validate generation evidence for pack %q: %w", loaded.Envelope.ID, err)
-		}
-	}
-	expectedCapabilities := DerivedCapabilities(manifest)
-	if !packs.CapabilitiesEqual(loaded.Envelope.Capabilities, expectedCapabilities) {
-		return LoadedPack{}, fmt.Errorf("pack %q capabilities do not match connector manifest", loaded.Envelope.ID)
-	}
-	expectedRequires := DerivedRequires(manifest)
-	if !packs.RequiresEqual(loaded.Envelope.Requires, expectedRequires) {
-		return LoadedPack{}, fmt.Errorf("pack %q requires do not match connector manifest", loaded.Envelope.ID)
-	}
-	return LoadedPack{
-		Envelope:     loaded.Envelope,
-		Manifest:     manifest,
-		ManifestBody: loaded.ManifestBody,
-		Directory:    loaded.Directory,
-		Source:       loaded.Envelope.Provenance.Source + ":" + loaded.Envelope.ID,
-	}, nil
+	return LoadedPack{Identity: identity, body: body, Manifest: manifest, ManifestBody: body.Bytes(), Directory: path.Dir(body.Label()), Source: body.Label()}, nil
 }
 
 func ParseConnectorManifest(body []byte) (ConnectorManifest, error) {
@@ -449,10 +442,10 @@ func SourceWithConnectorPackImports(source semanticview.Source, registry *PackRe
 		}
 		importSources[item.toolID] = importSource
 		importProvenance[item.toolID] = semanticview.ConnectorPackProvenance{
-			PackID:       strings.TrimSpace(pack.Envelope.ID),
-			Version:      strings.TrimSpace(pack.Envelope.Version),
-			ManifestHash: strings.TrimSpace(pack.Envelope.ManifestHash),
-			Source:       strings.TrimSpace(firstNonEmpty(pack.Source, pack.Envelope.Provenance.Source)),
+			PackID:       strings.TrimSpace(pack.Identity.ID()),
+			Version:      strings.TrimSpace(pack.Identity.Version()),
+			ManifestHash: strings.TrimSpace(pack.Identity.ManifestHash()),
+			Source:       strings.TrimSpace(firstNonEmpty(pack.Source, pack.Identity.Source().Provenance())),
 		}
 		for _, scope := range source.FlowScopes() {
 			flowPath := connectorFlowPath(scope)
@@ -637,19 +630,6 @@ func cloneToolMap(in map[string]runtimecontracts.ToolSchemaEntry) map[string]run
 
 func cloneLoadedPack(in LoadedPack) LoadedPack {
 	out := in
-	out.Envelope.Implements = append([]string(nil), in.Envelope.Implements...)
-	out.Envelope.Tests = append([]string(nil), in.Envelope.Tests...)
-	out.Envelope.Capabilities.Cannot = append([]string(nil), in.Envelope.Capabilities.Cannot...)
-	out.Envelope.Capabilities.Can.EmitEvents = append([]string(nil), in.Envelope.Capabilities.Can.EmitEvents...)
-	out.Envelope.Capabilities.Can.CallProviderActions = append([]string(nil), in.Envelope.Capabilities.Can.CallProviderActions...)
-	out.Envelope.Requires.Secrets = append([]string(nil), in.Envelope.Requires.Secrets...)
-	out.Envelope.Requires.ManagedCredentials = append([]string(nil), in.Envelope.Requires.ManagedCredentials...)
-	if in.Envelope.Requires.Packs != nil {
-		out.Envelope.Requires.Packs = make(map[string]string, len(in.Envelope.Requires.Packs))
-		for name, version := range in.Envelope.Requires.Packs {
-			out.Envelope.Requires.Packs[name] = version
-		}
-	}
 	out.Manifest.Tools = cloneToolMap(in.Manifest.Tools)
 	if in.Manifest.Generation != nil {
 		generation := *in.Manifest.Generation

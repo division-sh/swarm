@@ -2,6 +2,8 @@ package packartifact
 
 import (
 	"fmt"
+	"io/fs"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
@@ -14,6 +16,41 @@ type AdmittedProvider struct {
 	source    *sourceartifact.AdmittedSourceArtifact
 	directory sourceartifact.ProviderDirectory
 	key       string
+}
+
+func LoadProviderFS(fsys fs.FS, directory, runningVersion string) (AdmittedProvider, error) {
+	if cleanRelativePath(directory) == "" {
+		return AdmittedProvider{}, fmt.Errorf("provider requires its exact directory name")
+	}
+	members := map[string][]byte{}
+	err := fs.WalkDir(fsys, directory, func(name string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return fmt.Errorf("provider member %q must be a regular file", name)
+		}
+		body, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			return err
+		}
+		members[strings.TrimPrefix(name, directory+"/")] = body
+		return nil
+	})
+	if err != nil {
+		return AdmittedProvider{}, err
+	}
+	provider, err := AdmitProviderMembers(directory, members)
+	if err != nil {
+		return AdmittedProvider{}, err
+	}
+	if err := provider.Metadata().ValidatePlatformVersion(runningVersion); err != nil {
+		return AdmittedProvider{}, err
+	}
+	return provider, nil
 }
 
 func ProviderFromArtifact(source *sourceartifact.AdmittedSourceArtifact, directory string) (AdmittedProvider, error) {
@@ -83,6 +120,23 @@ func (p AdmittedProvider) ManifestBody() []byte {
 	}
 	entry, _ := p.source.Entry(label)
 	return entry.Bytes()
+}
+
+func (p AdmittedProvider) Members() map[string][]byte {
+	out := map[string][]byte{}
+	if !p.Valid() {
+		return out
+	}
+	prefix := ""
+	if p.Directory() != "." {
+		prefix = p.Directory() + "/"
+	}
+	for _, entry := range p.source.Entries() {
+		if strings.HasPrefix(entry.Label(), prefix) {
+			out[strings.TrimPrefix(entry.Label(), prefix)] = entry.Bytes()
+		}
+	}
+	return out
 }
 
 type ProviderBody struct {

@@ -19,7 +19,7 @@ const (
 	CatalogGeneratorVersion  = "swarm-openapi-gen/v1"
 	generatedPackIndexFile   = "catalog/generated-packs.yaml"
 	generatedProfileRoot     = "catalog/generator-profiles"
-	connectorPackRoot        = "provider-connectors"
+	connectorPackRoot        = "providers"
 	GeneratedPackKindBuiltin = "builtin"
 	GeneratedPackKindFixture = "fixture"
 	GenerationReviewApproved = "approved"
@@ -286,17 +286,17 @@ func (i GeneratedPackIndex) BuiltinByID() map[string]GeneratedPackIndexEntry {
 
 func validateGeneratedPackIdentity(fsys fs.FS, pack *LoadedPack, expected GeneratedPackIndexEntry) error {
 	if pack.Manifest.Generation == nil {
-		return fmt.Errorf("generated connector pack %q is indexed as generated but generation evidence is missing", pack.Envelope.ID)
+		return fmt.Errorf("generated connector pack %q is indexed as generated but generation evidence is missing", pack.Identity.ID())
 	}
 	if pack.Manifest.Provider != expected.Provider {
-		return fmt.Errorf("generated connector pack %q provider %q does not match indexed provider %q", pack.Envelope.ID, pack.Manifest.Provider, expected.Provider)
+		return fmt.Errorf("generated connector pack %q provider %q does not match indexed provider %q", pack.Identity.ID(), pack.Manifest.Provider, expected.Provider)
 	}
 	if strings.TrimSpace(pack.Manifest.Generation.Profile.Path) != strings.TrimSpace(expected.Profile) {
-		return fmt.Errorf("generated connector pack %q profile %q does not match indexed profile %q", pack.Envelope.ID, pack.Manifest.Generation.Profile.Path, expected.Profile)
+		return fmt.Errorf("generated connector pack %q profile %q does not match indexed profile %q", pack.Identity.ID(), pack.Manifest.Generation.Profile.Path, expected.Profile)
 	}
 	source, err := validateIndexedGenerationSource(fsys, *pack.Manifest.Generation, expected.Profile)
 	if err != nil {
-		return fmt.Errorf("generated connector pack %q: %w", pack.Envelope.ID, err)
+		return fmt.Errorf("generated connector pack %q: %w", pack.Identity.ID(), err)
 	}
 	pack.identitySource = source
 	return nil

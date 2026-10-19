@@ -170,15 +170,11 @@ func LoadWorkflowContractBundleFromRootedSource(repoRoot string, rooted sourcear
 	if err := artifact.ValidatePlatformVersion(bundle.Platform.Platform.Version); err != nil {
 		return nil, err
 	}
-	projectPacks, err := packartifact.LoadProjectPackSetFS(artifact.FS())
-	if err != nil {
-		return nil, err
-	}
 	base, err := resolveWorkflowPlatformPackBase(options, strings.TrimSpace(bundle.Platform.Platform.Version))
 	if err != nil {
 		return nil, err
 	}
-	effective, err := packartifact.NewEffectivePackInventory(base, projectPacks.Sources)
+	effective, err := packartifact.NewEffectivePackInventory(base)
 	if err != nil {
 		return nil, fmt.Errorf("resolve effective pack inventory: %w", err)
 	}
@@ -191,10 +187,9 @@ func LoadWorkflowContractBundleFromRootedSource(repoRoot string, rooted sourcear
 			return nil, fmt.Errorf("admitted pack projection does not own effective inventory %s", effective.Digest())
 		}
 		bundle.PackAdmission = admission
-	} else if base.SelectionMode() == packartifact.SelectionDevelopmentOverride || len(projectPacks.Sources) > 0 {
+	} else if base.SelectionMode() == packartifact.SelectionDevelopmentOverride {
 		return nil, fmt.Errorf("body-specific pack admission is required for development or project pack inventory")
 	}
-	bundle.ProjectPacks = projectPacks
 	bundle.PackInventory = effective
 	if err := finalizeWorkflowContractBundle(bundle); err != nil {
 		return nil, err

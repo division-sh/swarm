@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -15,7 +16,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
@@ -38,7 +39,6 @@ type GeneratorProfile struct {
 	SchemaVersion string               `yaml:"schema_version"`
 	Provider      string               `yaml:"provider"`
 	Source        GeneratorSource      `yaml:"source"`
-	Pack          GeneratorPack        `yaml:"pack"`
 	Auth          GeneratorAuth        `yaml:"auth"`
 	StaticHeaders map[string]string    `yaml:"static_headers"`
 	Operations    []GeneratorOperation `yaml:"operations"`
@@ -50,14 +50,6 @@ type GeneratorSource struct {
 	SHA256         string `yaml:"sha256"`
 	OpenAPIVersion string `yaml:"openapi_version"`
 	Server         string `yaml:"server"`
-}
-
-type GeneratorPack struct {
-	ID              string   `yaml:"id"`
-	Version         string   `yaml:"version"`
-	PlatformVersion string   `yaml:"platform_version"`
-	Provenance      string   `yaml:"provenance"`
-	Tests           []string `yaml:"tests"`
 }
 
 type GeneratorAuth struct {
@@ -126,8 +118,6 @@ type GeneratedCatalogArtifact struct {
 	SourceHash    string
 	Manifest      ConnectorManifest
 	ConnectorBody []byte
-	PackEnvelope  packs.Envelope
-	PackBody      []byte
 }
 
 func ParseGeneratorProfile(body []byte) (GeneratorProfile, error) {
@@ -169,14 +159,6 @@ func (p GeneratorProfile) Validate() error {
 	}
 	if _, err := url.ParseRequestURI(strings.TrimSpace(p.Source.Server)); err != nil {
 		return fmt.Errorf("generator profile source server is invalid: %w", err)
-	}
-	if strings.TrimSpace(p.Pack.ID) == "" || strings.TrimSpace(p.Pack.Version) == "" || strings.TrimSpace(p.Pack.PlatformVersion) == "" || strings.TrimSpace(p.Pack.Provenance) == "" || len(p.Pack.Tests) == 0 {
-		return fmt.Errorf("generator profile pack id, version, platform_version, provenance, and tests are required")
-	}
-	for _, test := range p.Pack.Tests {
-		if strings.TrimSpace(test) == "" {
-			return fmt.Errorf("generator profile pack tests must not contain empty entries")
-		}
 	}
 	switch strings.TrimSpace(p.Auth.Mode) {
 	case profileAuthManaged:
@@ -372,10 +354,7 @@ func WriteGeneratedCatalog(catalogRoot, packRoot string) error {
 		if err := os.MkdirAll(path.Join(root, output), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(path.Join(root, output, packs.ConnectorManifestFileName), artifact.ConnectorBody, 0o644); err != nil {
-			return err
-		}
-		if err := os.WriteFile(path.Join(root, output, packs.EnvelopeFileName), artifact.PackBody, 0o644); err != nil {
+		if err := os.WriteFile(path.Join(root, output, packmodel.ConnectorManifestFileName), artifact.ConnectorBody, 0o644); err != nil {
 			return err
 		}
 	}
@@ -396,10 +375,7 @@ func CheckGeneratedCatalog(catalogFS, packFS fs.FS) ([]GeneratedCatalogArtifact,
 		if artifact.IndexEntry.Kind == GeneratedPackKindBuiltin {
 			outputFS = packFS
 		}
-		if err := compareGeneratedFile(outputFS, path.Join(output, packs.ConnectorManifestFileName), artifact.ConnectorBody); err != nil {
-			return nil, err
-		}
-		if err := compareGeneratedFile(outputFS, path.Join(output, packs.EnvelopeFileName), artifact.PackBody); err != nil {
+		if err := compareGeneratedFile(outputFS, path.Join(output, packmodel.ConnectorManifestFileName), artifact.ConnectorBody); err != nil {
 			return nil, err
 		}
 	}
@@ -428,27 +404,28 @@ func validateCheckedInGeneratedIdentity(catalogFS, packFS fs.FS) error {
 	expected := index.BuiltinByID()
 	seen := make(map[string]struct{}, len(expected))
 	for _, entry := range manifest.Packs {
-		if entry.Type != packartifact.TypeConnector {
+		if _, err := fs.Stat(packFS, path.Join(entry.Path, packmodel.ConnectorManifestFileName)); errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		pack, err := LoadPackFS(packFS, entry.Path, runningPlatformVersion)
 		if err != nil {
-			return fmt.Errorf("load embedded connector pack %q for generated identity: %w", entry.ID, err)
+			return fmt.Errorf("load embedded connector %q for generated identity: %w", entry.Path, err)
 		}
-		indexed, ok := expected[entry.ID]
+		key := pack.Identity.ID()
+		indexed, ok := expected[key]
 		if !ok {
 			if pack.Manifest.Generation != nil {
-				return fmt.Errorf("builtin connector pack %q carries generation evidence but is not in the generated pack index", entry.ID)
+				return fmt.Errorf("builtin connector %q carries generation evidence but is not in the generated index", key)
 			}
 			continue
 		}
 		if strings.Trim(strings.TrimSpace(indexed.Output), "/") != entry.Path {
-			return fmt.Errorf("generated connector pack %q output %q contradicts explicit inventory path %q", entry.ID, indexed.Output, entry.Path)
+			return fmt.Errorf("generated connector %q output %q contradicts inventory path %q", key, indexed.Output, entry.Path)
 		}
 		if err := validateGeneratedPackIdentity(catalogFS, &pack, indexed); err != nil {
 			return err
 		}
-		seen[entry.ID] = struct{}{}
+		seen[key] = struct{}{}
 	}
 	for packID := range expected {
 		if _, ok := seen[packID]; !ok {
@@ -463,21 +440,17 @@ func validateGeneratedInventoryMembership(packFS fs.FS, artifacts []GeneratedCat
 	if err != nil {
 		return fmt.Errorf("load explicit embedded inventory for generated connectors: %w", err)
 	}
-	declared := make(map[string]packartifact.InventoryManifestPack, len(manifest.Packs))
+	declared := make(map[string]bool, len(manifest.Packs))
 	for _, entry := range manifest.Packs {
-		declared[entry.ID] = entry
+		declared[entry.Path] = true
 	}
 	for _, artifact := range artifacts {
 		if artifact.IndexEntry.Kind != GeneratedPackKindBuiltin {
 			continue
 		}
-		entry, ok := declared[artifact.PackEnvelope.ID]
-		if !ok {
-			return fmt.Errorf("generated connector pack %q is absent from %s", artifact.PackEnvelope.ID, packartifact.InventoryManifestFileName)
-		}
 		output := strings.Trim(strings.TrimSpace(artifact.IndexEntry.Output), "/")
-		if entry.Type != packartifact.TypeConnector || entry.Path != output {
-			return fmt.Errorf("generated connector pack %q output %q contradicts explicit inventory type=%q path=%q", artifact.PackEnvelope.ID, output, entry.Type, entry.Path)
+		if !declared[output] || path.Base(output) != artifact.IndexEntry.ID {
+			return fmt.Errorf("generated connector %q output %q must match its declared provider directory", artifact.IndexEntry.ID, output)
 		}
 	}
 	return nil
@@ -503,7 +476,7 @@ func generateCatalogPack(fsys fs.FS, entry GeneratedPackIndexEntry) (GeneratedCa
 	if err != nil {
 		return GeneratedCatalogArtifact{}, fmt.Errorf("parse profile %q: %w", entry.Profile, err)
 	}
-	if strings.TrimSpace(profile.Pack.ID) != strings.TrimSpace(entry.ID) || profile.Provider != entry.Provider {
+	if profile.Provider != entry.Provider || path.Base(entry.Output) != entry.ID {
 		return GeneratedCatalogArtifact{}, fmt.Errorf("profile pack/provider identity does not match generated index")
 	}
 	sourceBody, err := readGeneratorSource(fsys, profile.Source)
@@ -560,21 +533,16 @@ func generateCatalogPack(fsys fs.FS, entry GeneratedPackIndexEntry) (GeneratedCa
 	if err := manifest.Generation.Validate(manifest.Provider, manifest.Tools); err != nil {
 		return GeneratedCatalogArtifact{}, err
 	}
-	connectorBody, err := yaml.Marshal(manifest)
-	if err != nil {
-		return GeneratedCatalogArtifact{}, err
+	shortTools := make(map[string]runtimecontracts.ToolSchemaEntry, len(tools))
+	for name, tool := range tools {
+		shortTools[strings.TrimPrefix(name, profile.Provider+".")] = tool
 	}
-	envelope := packs.Envelope{
-		ID:              strings.TrimSpace(profile.Pack.ID),
-		Version:         strings.TrimSpace(profile.Pack.Version),
-		PlatformVersion: strings.TrimSpace(profile.Pack.PlatformVersion),
-		Type:            packs.TypeConnector,
-		Provenance:      packs.Provenance{Source: strings.TrimSpace(profile.Pack.Provenance)},
-		Capabilities:    DerivedCapabilities(manifest),
-		Requires:        DerivedRequires(manifest),
-		Tests:           append([]string(nil), profile.Pack.Tests...),
+	generation := *manifest.Generation
+	generation.Operations = append([]GenerationOperationEvidence(nil), evidence...)
+	for i := range generation.Operations {
+		generation.Operations[i].ToolID = strings.TrimPrefix(generation.Operations[i].ToolID, profile.Provider+".")
 	}
-	envelope, packBody, err := packs.StampEnvelope(envelope, connectorBody)
+	connectorBody, err := yaml.Marshal(map[string]any{"generation": generation, "tools": shortTools})
 	if err != nil {
 		return GeneratedCatalogArtifact{}, err
 	}
@@ -585,8 +553,6 @@ func generateCatalogPack(fsys fs.FS, entry GeneratedPackIndexEntry) (GeneratedCa
 		SourceHash:    sourceHash,
 		Manifest:      manifest,
 		ConnectorBody: connectorBody,
-		PackEnvelope:  envelope,
-		PackBody:      packBody,
 	}, nil
 }
 

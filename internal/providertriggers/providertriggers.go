@@ -20,6 +20,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
@@ -117,7 +118,7 @@ type catalogEntryValue struct {
 }
 
 type LoadedPack struct {
-	Envelope     packs.Envelope
+	Identity     packs.PackIdentity
 	Manifest     Manifest
 	ManifestBody []byte
 	Directory    string
@@ -166,50 +167,6 @@ func triggerPackDescriptor(entry catalogEntryValue, generation triggergeneration
 		events[output.Event] = packs.TriggerEvent{Name: output.Event, Fields: fields}
 	}
 	return packs.TriggerPackDescriptor{Identity: entry.identity, Provider: entry.manifest.Provider(), Generation: generation, Events: events}
-}
-
-func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {
-	snapshot := &CatalogSnapshot{
-		byProvider: make(map[string]catalogEntryValue, len(entries)),
-		byID:       make(map[string]catalogEntryValue, len(entries)),
-	}
-	normalizedEntries := make([]catalogEntryValue, 0, len(entries))
-	for _, entry := range entries {
-		if err := entry.Manifest.Validate(); err != nil {
-			return nil, fmt.Errorf(
-				"validate provider trigger pack %q version=%s manifest_hash=%s: %w",
-				strings.TrimSpace(entry.Identity.ID), strings.TrimSpace(entry.Identity.Version),
-				strings.TrimSpace(entry.Identity.ManifestHash), err,
-			)
-		}
-		provider := entry.Manifest.Provider()
-		entry.Identity.Provenance = strings.TrimSpace(entry.Identity.Provenance)
-		entry.SourcePath = strings.TrimSpace(entry.SourcePath)
-		entry.Source = firstNonEmpty(entry.Source, "unknown")
-		if entry.Identity.ID == "" || entry.Identity.Version == "" || entry.Identity.ManifestHash == "" || entry.Identity.Provenance == "" {
-			return nil, fmt.Errorf("provider trigger catalog entry for %q requires pack id, version, manifest_hash, and provenance", provider)
-		}
-		source, err := packs.NewPackSource(entry.Identity.Provenance, entry.SourcePath)
-		if err != nil {
-			return nil, fmt.Errorf("provider trigger catalog entry for %q %w", provider, err)
-		}
-		identity, err := packs.NewPackIdentity(
-			entry.Identity.ID,
-			entry.Identity.Version,
-			entry.Identity.ManifestHash,
-			packs.TypeTrigger,
-			source,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("provider trigger catalog entry for %q %w", provider, err)
-		}
-		value := catalogEntryValue{identity: identity, manifest: entry.Manifest, source: entry.Source}
-		if err := recordCatalogEntry(snapshot, value); err != nil {
-			return nil, err
-		}
-		normalizedEntries = append(normalizedEntries, value)
-	}
-	return freezeCatalogSnapshot(snapshot, normalizedEntries)
 }
 
 // NewCatalogSnapshotFromAdmittedBodies consumes frozen typed BODY admission.
@@ -264,14 +221,14 @@ func NewCatalogSnapshotFromInventory(inventory *packartifact.EffectivePackInvent
 	if inventory == nil {
 		return nil, nil, fmt.Errorf("effective pack inventory is required")
 	}
-	entries := inventory.EntriesByType(packartifact.TypeTrigger)
+	entries := inventory.Entries()
 	loaded := make([]LoadedPack, 0, len(entries))
 	for _, entry := range entries {
-		admitted, err := entry.Loaded(runningPlatformVersion)
-		if err != nil {
-			return nil, nil, err
+		body, present := entry.Provider().Body(packmodel.BodyTrigger)
+		if !present {
+			continue
 		}
-		pack, err := loadPackBody(admitted)
+		pack, err := loadPackBody(body)
 		if err != nil {
 			return nil, nil, fmt.Errorf("load effective provider trigger pack %q: %w", entry.ID(), err)
 		}
@@ -283,7 +240,11 @@ func NewCatalogSnapshotFromInventory(inventory *packartifact.EffectivePackInvent
 	if err := validateLoadedPackIdentities(loaded); err != nil {
 		return nil, nil, err
 	}
-	snapshot, err := NewCatalogSnapshot(CatalogEntriesFromLoadedPacks(loaded...)...)
+	manifests := make([]Manifest, 0, len(loaded))
+	for _, pack := range loaded {
+		manifests = append(manifests, pack.Manifest)
+	}
+	snapshot, err := NewCatalogSnapshotFromAdmittedBodies(manifests...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -293,10 +254,10 @@ func NewCatalogSnapshotFromInventory(inventory *packartifact.EffectivePackInvent
 func validateLoadedPackIdentities(loaded []LoadedPack) error {
 	seen := map[string]LoadedPack{}
 	for _, pack := range loaded {
-		id := pack.Envelope.ID
+		id := pack.Identity.ID()
 		if previous, ok := seen[id]; ok {
-			if previous.Envelope.Version == pack.Envelope.Version && previous.Envelope.ManifestHash != pack.Envelope.ManifestHash {
-				return fmt.Errorf("competing immutable provider trigger pack identity (%q, %q) from %s and %s has manifest hashes %q and %q", id, pack.Envelope.Version, loadedPackSource(previous), loadedPackSource(pack), previous.Envelope.ManifestHash, pack.Envelope.ManifestHash)
+			if previous.Identity.Version() == pack.Identity.Version() && previous.Identity.ManifestHash() != pack.Identity.ManifestHash() {
+				return fmt.Errorf("competing immutable provider trigger pack identity (%q, %q) from %s and %s has manifest hashes %q and %q", id, pack.Identity.Version(), loadedPackSource(previous), loadedPackSource(pack), previous.Identity.ManifestHash(), pack.Identity.ManifestHash())
 			}
 			return fmt.Errorf("duplicate provider trigger pack id %q from %s and %s", id, loadedPackSource(previous), loadedPackSource(pack))
 		}
@@ -306,7 +267,7 @@ func validateLoadedPackIdentities(loaded []LoadedPack) error {
 }
 
 func loadedPackSource(pack LoadedPack) string {
-	provenance := strings.TrimSpace(pack.Envelope.Provenance.Source)
+	provenance := strings.TrimSpace(pack.Identity.Source().Provenance())
 	if provenance == "" {
 		provenance = "unknown"
 	}
@@ -317,7 +278,7 @@ func loadedPackSource(pack LoadedPack) string {
 	if sourcePath == "" {
 		sourcePath = "unknown"
 	}
-	return fmt.Sprintf("provenance=%s path=%q pack=%q", provenance, sourcePath, strings.TrimSpace(pack.Envelope.ID))
+	return fmt.Sprintf("provenance=%s path=%q pack=%q", provenance, sourcePath, strings.TrimSpace(pack.Identity.ID()))
 }
 
 func CatalogEntriesFromLoadedPacks(loaded ...LoadedPack) []CatalogEntry {
@@ -325,8 +286,8 @@ func CatalogEntriesFromLoadedPacks(loaded ...LoadedPack) []CatalogEntry {
 	for _, pack := range loaded {
 		entries = append(entries, CatalogEntry{
 			Identity: PackIdentity{
-				ID: pack.Envelope.ID, Version: pack.Envelope.Version,
-				ManifestHash: pack.Envelope.ManifestHash, Provenance: pack.Envelope.Provenance.Source,
+				ID: pack.Identity.ID(), Version: pack.Identity.Version(),
+				ManifestHash: pack.Identity.ManifestHash(), Provenance: pack.Identity.Source().Provenance(),
 			},
 			Manifest: pack.Manifest, SourcePath: strings.TrimSpace(pack.SourcePath),
 			Source: firstNonEmpty(pack.Source, loadedPackSource(pack)),
@@ -336,36 +297,33 @@ func CatalogEntriesFromLoadedPacks(loaded ...LoadedPack) []CatalogEntry {
 }
 
 func LoadPackFS(fsys fs.FS, dir, runningPlatformVersion string) (LoadedPack, error) {
-	loaded, err := packs.Load(fsys, dir, runningPlatformVersion)
+	provider, err := packartifact.LoadProviderFS(fsys, dir, runningPlatformVersion)
 	if err != nil {
 		return LoadedPack{}, err
 	}
-	return loadPackBody(loaded)
+	body, present := provider.Body(packmodel.BodyTrigger)
+	if !present {
+		return LoadedPack{}, fmt.Errorf("provider %q has no trigger.yaml BODY", provider.Key())
+	}
+	return loadPackBody(body)
 }
 
-func loadPackBody(loaded packs.Loaded) (LoadedPack, error) {
-	manifest, err := parseManifestAt(loaded.ManifestBody, path.Join(loaded.Directory, packs.TriggerManifestFileName))
+func loadPackBody(body packartifact.ProviderBody) (LoadedPack, error) {
+	manifest, err := AdmitBody(body)
 	if err != nil {
-		return LoadedPack{}, fmt.Errorf("parse trigger manifest for pack %q: %w", loaded.Envelope.ID, err)
+		return LoadedPack{}, err
 	}
-	if err := manifest.Validate(); err != nil {
-		return LoadedPack{}, fmt.Errorf("validate trigger manifest for pack %q: %w", loaded.Envelope.ID, err)
-	}
-	expectedCapabilities := DerivedCapabilities(manifest)
-	if !packs.CapabilitiesEqual(loaded.Envelope.Capabilities, expectedCapabilities) {
-		return LoadedPack{}, fmt.Errorf("pack %q capabilities do not match trigger manifest", loaded.Envelope.ID)
-	}
-	expectedRequires := DerivedRequires(manifest)
-	if !packs.RequiresEqual(loaded.Envelope.Requires, expectedRequires) {
-		return LoadedPack{}, fmt.Errorf("pack %q requires do not match trigger manifest", loaded.Envelope.ID)
+	identity, err := packs.NewProviderBodyIdentity(body)
+	if err != nil {
+		return LoadedPack{}, err
 	}
 	return LoadedPack{
-		Envelope:     loaded.Envelope,
+		Identity:     identity,
 		Manifest:     manifest,
-		ManifestBody: loaded.ManifestBody,
-		Directory:    loaded.Directory,
-		SourcePath:   loaded.Directory,
-		Source:       fmt.Sprintf("provenance=%s path=%q pack=%q", loaded.Envelope.Provenance.Source, loaded.Directory, loaded.Envelope.ID),
+		ManifestBody: body.Bytes(),
+		Directory:    path.Dir(body.Label()),
+		SourcePath:   body.Label(),
+		Source:       body.Label(),
 	}, nil
 }
 
@@ -415,11 +373,11 @@ func DerivedRequires(manifest Manifest) packs.Requires {
 func (p LoadedPack) CapabilitySubject() (packs.Subject, error) {
 	capabilities := DerivedCapabilities(p.Manifest)
 	subject := packs.Subject{
-		ID:            strings.TrimSpace(p.Envelope.ID),
+		ID:            strings.TrimSpace(p.Identity.ID()),
 		Kind:          packs.SubjectProviderTrigger,
 		Provider:      p.Manifest.Provider(),
 		Source:        "trigger_pack",
-		Provenance:    strings.TrimSpace(p.Envelope.Provenance.Source),
+		Provenance:    strings.TrimSpace(p.Identity.Source().Provenance()),
 		SourcePath:    strings.TrimSpace(p.SourcePath),
 		Applicability: "installed",
 		TriggerEvents: triggerEventDescriptors(p.Manifest),
