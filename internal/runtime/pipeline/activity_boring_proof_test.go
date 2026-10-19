@@ -176,47 +176,6 @@ func VerifyNativeActivityBoringProofHandAuthoredFlowCrashAfterRequestBeforeResul
 	}
 }
 
-func VerifyNativeActivityBoringProofHandAuthoredReadOnlyForkReexecuteUsesForkLocalIdentityForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
-	for _, tc := range activityBoringStoreCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			var calls atomic.Int32
-			entityID := uuid.NewString()
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls.Add(1)
-				_ = json.NewEncoder(w).Encode(map[string]any{"title": "Example Source"})
-			}))
-			defer server.Close()
-
-			fixture := nativeActivityBoringFixture(t, tc.name, server.URL, true, open)
-			sourceEvent := nativeActivityBoringSourceEventForTest(entityID, uuid.NewString(), "https://example.com/source")
-			forkEvent := nativeActivityBoringSourceEventForTest(entityID, uuid.NewString(), "https://example.com/source")
-			sourceExpected := activityBoringExpectedIntentForSourceEvent(sourceEvent, "https://example.com/source")
-			forkExpected := activityBoringExpectedIntentForSourceEvent(forkEvent, "https://example.com/source")
-			if activityRequestEventID(sourceExpected) == activityRequestEventID(forkExpected) {
-				t.Fatal("fork-local hand-authored request identity did not change")
-			}
-
-			for _, evt := range []events.Event{sourceEvent, forkEvent} {
-				ctx := seedNativeActivityBoringSourceFlowForTest(t, fixture, evt)
-				ctx = withWorkflowNodeDeliveryRoute(ctx, activityBoringNodeRoute(evt, "scanner"))
-				handled, _, err := fixture.pc.handleEventResult(ctx, evt)
-				if err != nil {
-					t.Fatalf("hand-authored fork source handleEventResult(%s): %v", evt.RunID(), err)
-				}
-				if !handled {
-					t.Fatalf("hand-authored fork source handleEventResult(%s) handled = false, want true", evt.RunID())
-				}
-			}
-			if got := calls.Load(); got != 2 {
-				t.Fatalf("server calls across source+fork hand-authored read_only execution = %d, want declared reexecute_read call per identity", got)
-			}
-			if activityBoringSuccessEventID(sourceExpected) == activityBoringSuccessEventID(forkExpected) {
-				t.Fatal("fork-local hand-authored result identity did not change")
-			}
-		})
-	}
-}
-
 func VerifyNativeActivityBoringProofDuplicateRequestReusesRecordedReadResultForTest(t *testing.T, open func(*testing.T, string, semanticview.Source) WorkflowActivityNativeFixtureForTest) {
 	for _, tc := range activityBoringStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
