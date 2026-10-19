@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -32,21 +33,26 @@ import (
 )
 
 type serveChannelDeliveryDispatcher struct {
-	store             runtimechanneldelivery.Store
-	native            runtimechannelnative.Store
-	cards             decisioncard.Store
-	mailbox           apiv1.MailboxAPIStore
-	proposedEffects   decisioncard.ProposedEffectStore
-	activations       channelonboarding.Store
-	manager           *runtime.RuntimeContextManager
-	ingress           *runtimepublicingress.ReadinessOwner
-	effects           runtimeeffects.Store
-	credentials       *runtimecredentials.SnapshotOwner
-	posture           executionposture.Posture
-	runtimeInstanceID string
-	httpClient        *http.Client
-	sessions          serveSessionBootstrapOwner
-	now               func() time.Time
+	store              runtimechanneldelivery.Store
+	native             runtimechannelnative.Store
+	cards              decisioncard.Store
+	mailbox            apiv1.MailboxAPIStore
+	proposedEffects    decisioncard.ProposedEffectStore
+	activations        channelonboarding.Store
+	manager            *runtime.RuntimeContextManager
+	ingress            *runtimepublicingress.ReadinessOwner
+	effects            runtimeeffects.Store
+	credentials        *runtimecredentials.SnapshotOwner
+	posture            executionposture.Posture
+	runtimeInstanceID  string
+	httpClient         *http.Client
+	sessions           serveSessionBootstrapOwner
+	onboarding         *channelonboarding.Service
+	output             io.Writer
+	sessionStates      map[string]string
+	sessionAttempts    map[string]int
+	sessionNextAttempt map[string]time.Time
+	now                func() time.Time
 }
 
 type channelCardActionResult struct {

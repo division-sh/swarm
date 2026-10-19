@@ -91,6 +91,9 @@ func (d *serveChannelDeliveryDispatcher) reconcileNativeInboxSettings(ctx contex
 	if err != nil {
 		return err
 	}
+	if err := d.reconcileSessionConnections(ctx, activations); err != nil {
+		return err
+	}
 	for _, activation := range activations {
 		if err := d.reconcileNativeInboxActivation(ctx, activation); err != nil {
 			return fmt.Errorf("native inbox activation %s: %w", activation.ActivationID, err)

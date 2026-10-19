@@ -353,16 +353,10 @@ func compileSnapshot(publication channelonboarding.ChannelActivationPublication)
 		}
 		for _, name := range binding.OperationNames() {
 			operation := Operation{Binding: binding, Name: name}
-			if !binding.ActivitiesOnly() {
-				runtimeID := strings.TrimSpace(binding.RuntimeToolID(name))
-				if runtimeID == "" {
-					return nil, fmt.Errorf("channel binding %q operation %q has no runtime tool identity", binding.BindingID(), name)
-				}
+			runtimeID := strings.TrimSpace(binding.RuntimeToolID(name))
+			if _, exposed := tools[runtimeID]; exposed {
 				if _, duplicate := next.runtime[runtimeID]; duplicate {
 					return nil, fmt.Errorf("duplicate channel runtime tool %q", runtimeID)
-				}
-				if _, compiled := next.tools[runtimeID]; !compiled {
-					return nil, fmt.Errorf("channel binding %q operation %q runtime tool %q is absent from its compiled projection", binding.BindingID(), name, runtimeID)
 				}
 				next.runtime[runtimeID] = operation
 			}
