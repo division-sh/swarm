@@ -76,7 +76,7 @@ func (e ToolSchemaEntry) validateModule() error {
 	if module.Path == "" || module.ABI == "" || module.Entry == "" || !computeModuleDigestPattern.MatchString(module.Digest) || module.Limits.Gas == 0 || module.Limits.MemoryPages == 0 || module.Limits.OutputBytes <= 0 {
 		return fmt.Errorf("module requires path, ABI, entry, pinned digest and positive limits")
 	}
-	if e.value.category != ToolCategoryUnspecified || e.value.hasHTTP || e.value.hasMCP || e.value.hasResponseMapping || e.value.hasResponseSuccess || e.value.hasManagedCredential || e.value.hasCompiledResult || len(e.value.credentials) > 0 || e.value.permission.String() != "" || e.value.effect != "" || e.RatePolicy().Enabled() {
+	if e.value.category != ToolCategoryUnspecified || e.value.hasHTTP || e.value.hasMCP || e.value.hasResponseMapping || e.value.hasResponseSuccess || e.value.hasManagedCredential || e.value.hasCompiledResult || len(e.value.credentials) > 0 || e.value.permission.String() != "" || e.RatePolicy().Enabled() {
 		return fmt.Errorf("module tools cannot acquire agent/transport/effect authority")
 	}
 	for _, pair := range []struct {

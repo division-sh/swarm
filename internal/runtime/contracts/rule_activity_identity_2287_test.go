@@ -113,7 +113,7 @@ func TestUnnamedProgrammaticRuleActivityCannotCompileGeneratedCatalog(t *testing
 				"request": {Rules: []HandlerRuleEntry{{Activity: ActivitySpec{ID: id, Tool: "send"}}}},
 			}}},
 			Tools: map[string]ToolSchemaEntry{"send": MustToolSchemaEntry(
-				WithToolHandler(ToolHandlerHTTP), WithToolEffect(ActivityEffectClassReadOnly),
+				WithToolHandler(ToolHandlerHTTP),
 				WithToolSchemas(MustToolInputSchema(ToolSchemaObject), MustToolInputSchema(ToolSchemaObject)),
 				WithToolHTTP(HTTPToolSpec{Method: "GET", URL: "https://proof.invalid"}),
 			)},

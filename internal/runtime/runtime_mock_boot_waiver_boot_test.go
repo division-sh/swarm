@@ -156,7 +156,7 @@ func fullyMockedBootAgentMemoryWithConnectorSource(t *testing.T) semanticview.So
 	connector := runtimecontracts.MustToolSchemaEntry(
 		runtimecontracts.WithToolCategory("provider_connector"),
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-		runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))),
+
 		runtimecontracts.WithToolSchemas(objectSchema, objectSchema),
 		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.example/messages"}),
 		runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}),

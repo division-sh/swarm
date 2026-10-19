@@ -19,6 +19,9 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			db := bootstrappedForkPointSchemaDB(t, backend)
 			ctx := context.Background()
 			sourceRunID, eventID, bundleHash := seedForkPointSchemaRunAndEvent(t, db)
+			t.Run("activity_execution_binding", func(t *testing.T) {
+				verifyActivityExecutionBindingColumn(t, db, sourceRunID)
+			})
 			insertForkRun := func(kind string, revision int64, eventID any) (string, error) {
 				t.Helper()
 				runID := uuid.NewString()
