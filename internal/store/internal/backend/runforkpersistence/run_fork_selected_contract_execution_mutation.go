@@ -646,6 +646,7 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 				return err
 			}
 			stateAdmission.carriage = original
+			stateAdmission.sourceAt = s.RequirePresentSourceTx
 			records, err := eventrecordpostgres.LoadMany(ctx, tx, ids)
 			if err != nil {
 				return fmt.Errorf("load selected-contract source events: %w", err)

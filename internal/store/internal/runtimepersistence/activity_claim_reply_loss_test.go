@@ -29,6 +29,7 @@ func TestActivityClaimReplyLossUsesExactNativeCommitAndCannotRearmBothStores(t *
 			if err != nil || journal == nil || !pipeline.NewWorkflowPersistence(journal).Valid() {
 				t.Fatalf("install native claim reply loss: %v", err)
 			}
+			journal.original = activityNativeJournalForFixture(t, fixture)
 			lost := journal.lost.Load
 			probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
 			if err != nil {
@@ -114,7 +115,7 @@ func TestWorkflowActivityAttemptStatusDiagnosticDiscardsPartialRowsBothStores(t 
 func claimReplyLossStartForTest(run string) pipeline.ActivityAttemptRecord {
 	return pipeline.ActivityAttemptRecord{
 		RequestEventID: uuid.NewString(), RunID: run, ExecutionMode: executionmode.Live,
-		ActivityID: uuid.NewString(), Tool: "provider_write", EffectClass: "non_idempotent_write",
+		ActivityID: uuid.NewString(), Tool: "provider_write",
 		Attempt: 1, SuccessEvent: "fixture.succeeded", FailureEvent: "fixture.failed", InputHash: "exact",
 		StartedAt: time.Now().UTC(),
 	}

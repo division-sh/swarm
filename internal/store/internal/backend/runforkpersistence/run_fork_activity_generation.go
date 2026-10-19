@@ -5,18 +5,16 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -33,10 +31,8 @@ const RunForkActivityRequestEvent = runForkActivityRequestEvent
 type runForkActivityRequestPayload struct {
 	ActivityID      string                       `json:"activity_id"`
 	Tool            string                       `json:"tool"`
-	EffectClass     string                       `json:"effect_class"`
 	SuccessEvent    string                       `json:"success_event"`
 	FailureEvent    string                       `json:"failure_event"`
-	ForkPolicy      string                       `json:"fork_policy"`
 	EntityID        string                       `json:"entity_id"`
 	NodeID          string                       `json:"node_id"`
 	FlowID          string                       `json:"flow_id"`
@@ -44,7 +40,6 @@ type runForkActivityRequestPayload struct {
 	SourceEventID   string                       `json:"source_event_id"`
 	SourceRunID     string                       `json:"source_run_id"`
 	ParentEventID   string                       `json:"parent_event_id"`
-	Attempt         int                          `json:"attempt"`
 	Generation      attemptgeneration.Generation `json:"loop_generation,omitempty"`
 	LoopStage       string                       `json:"loop_stage,omitempty"`
 }
@@ -53,6 +48,7 @@ type RunForkActivityRequestPayload = runForkActivityRequestPayload
 
 type runForkActivityAttemptEvidence struct {
 	SourceRequest   runForkActivityRequestPayload
+	Attempt         int
 	FlowInstance    string
 	ResultEventID   string
 	GenerationJSON  json.RawMessage
@@ -72,6 +68,7 @@ type runForkSourceStateAdmission struct {
 	forkRunID string
 	snapshot  *runForkRevisionSnapshot
 	postgres  bool
+	sourceAt  func(context.Context, *sql.Tx, string) (correlation.SourceArtifactFact, error)
 }
 
 type runForkProjectedSourceState struct {
@@ -223,13 +220,6 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if err != nil {
 		return event, err
 	}
-	sourceFact, err := runForkActivityFact(sourceRequest)
-	if err != nil {
-		return event, err
-	}
-	if activityidentity.RequestEventID(sourceFact) != event.SourceEventID {
-		return event, fmt.Errorf("activity request identity contradicts its exact source coordinates")
-	}
 	flowID, err := admission.carriage.ExecutionFlow(sourceEvent.RoutingSource)
 	if err != nil {
 		return event, err
@@ -237,10 +227,14 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if sourceRequest.SourceRunID != admission.snapshot.RunID || sourceRequest.EntityID != state.Source.EntityID || sourceRequest.FlowID != flowID {
 		return event, fmt.Errorf("activity source request disagrees with fixed-revision ownership")
 	}
+	origin, err := admission.activityRequestOriginAtCut(ctx, tx, sourceEvent.SourceEventID, make(map[string]bool))
+	if err != nil {
+		return event, err
+	}
 	var role semanticview.LoopRevisionRole
 	var declared bool
 	if node, isNode := owner.Node(); isNode {
-		role, declared, err = admission.carriage.ResolveActivity(node, sourceRequest.HandlerEventKey, sourceRequest.ActivityID, sourceRequest.Tool)
+		role, declared, err = admission.carriage.ResolveOriginalActivity(origin, node, sourceRequest.HandlerEventKey, sourceRequest.ActivityID, sourceRequest.Tool)
 	} else {
 		role, declared, err = admission.carriage.ResolveEvent(sourceEvent.RoutingSource, sourceRequest.HandlerEventKey, identity.ExecutableNode{}, "")
 	}
@@ -276,52 +270,19 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if err := json.Unmarshal(event.Payload, &request); err != nil {
 		return event, fmt.Errorf("decode selected-contract activity request %s: %w", event.SourceEventID, err)
 	}
-	policy := runtimecontracts.ActivityForkPolicy(strings.TrimSpace(request.ForkPolicy))
-	proposed, err := loadRunForkProposedEffectAuthority(ctx, tx, event.SourceEventID)
+	proposed, err := admission.requireOriginalActivityApproval(ctx, tx, origin)
 	if err != nil {
 		return event, err
-	}
-	if proposed {
-		if policy != runtimecontracts.ActivityForkRequireConfirmation {
-			return event, fmt.Errorf("approved activity request %s must retain require_manual_confirmation fork policy", event.SourceEventID)
-		}
-		evidence, err := loadRunForkActivityAttemptEvidence(ctx, tx, event.SourceEventID)
-		if err != nil {
-			return event, fmt.Errorf("approved proposed effect %s cannot authorize a fork-local call: %w", event.SourceEventID, err)
-		}
-		if evidence.Status == "uncertain" {
-			return event, fmt.Errorf("approved proposed effect %s has ambiguous dispatch evidence and cannot authorize a fork-local call", event.SourceEventID)
-		}
-		if evidence.ExecutionMode != event.ExecutionMode {
-			return event, fmt.Errorf("approved proposed effect %s execution mode %q conflicts with source event mode %q", event.SourceEventID, evidence.ExecutionMode, event.ExecutionMode)
-		}
-		if err := validateSourceActivityEvidence(evidence, sourceRequest, state, event.SourceEventID); err != nil {
-			return event, err
-		}
-		if err := copyRunForkActivityAttemptEvidence(ctx, tx, story, forkRunID, flowInstance, request, reference, evidence); err != nil {
-			return event, err
-		}
-		return event, nil
-	}
-	switch policy {
-	case runtimecontracts.ActivityForkReexecuteRead:
-		if runtimecontracts.NormalizeActivityEffectClass(request.EffectClass) != runtimecontracts.ActivityEffectClassReadOnly {
-			return event, fmt.Errorf("activity request %s declares reexecute_read for effect class %s", event.SourceEventID, request.EffectClass)
-		}
-		return event, nil
-	case runtimecontracts.ActivityForkReuseRecordedResult:
-		if runtimecontracts.NormalizeActivityEffectClass(request.EffectClass) != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-			return event, fmt.Errorf("activity request %s declares reuse_recorded_result for effect class %s", event.SourceEventID, request.EffectClass)
-		}
-	default:
-		return event, fmt.Errorf("activity request %s fork policy %q is not executable", event.SourceEventID, policy)
 	}
 	evidence, err := loadRunForkActivityAttemptEvidence(ctx, tx, event.SourceEventID)
 	if err != nil {
-		return event, err
+		return event, fmt.Errorf("approved proposed effect %s cannot authorize a fork-local call: %w", event.SourceEventID, err)
+	}
+	if proposed && evidence.Status == "uncertain" {
+		return event, fmt.Errorf("approved proposed effect %s has ambiguous dispatch evidence and cannot authorize a fork-local call", event.SourceEventID)
 	}
 	if evidence.ExecutionMode != event.ExecutionMode {
-		return event, fmt.Errorf("activity request %s execution mode %q conflicts with source event mode %q", event.SourceEventID, evidence.ExecutionMode, event.ExecutionMode)
+		return event, fmt.Errorf("approved proposed effect %s execution mode %q conflicts with source event mode %q", event.SourceEventID, evidence.ExecutionMode, event.ExecutionMode)
 	}
 	if err := validateSourceActivityEvidence(evidence, sourceRequest, state, event.SourceEventID); err != nil {
 		return event, err
@@ -330,26 +291,6 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		return event, err
 	}
 	return event, nil
-}
-
-func loadRunForkProposedEffectAuthority(ctx context.Context, tx *sql.Tx, requestEventID string) (bool, error) {
-	var status, verdict, state string
-	err := tx.QueryRowContext(ctx, `
-		SELECT c.status, COALESCE(c.verdict, ''), p.state
-		FROM proposed_effect_continuations p
-		JOIN decision_cards c ON c.card_id = p.card_id
-		WHERE p.request_event_id = $1
-	`, strings.TrimSpace(requestEventID)).Scan(&status, &verdict, &state)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("load proposed-effect fork authority for request %s: %w", requestEventID, err)
-	}
-	if status != decisioncard.StatusDecided || verdict != "approve" || state != decisioncard.ProposedEffectRequestReleased {
-		return false, fmt.Errorf("approved proposed effect %s is not terminal fork evidence: card=%s verdict=%s continuation=%s", requestEventID, status, verdict, state)
-	}
-	return true, nil
 }
 
 func bindRunForkActivitySourceEvent(raw json.RawMessage, forkRunID, sourceRequestEventID, entityID string, reference *loopruntime.ForkChildReference) (json.RawMessage, error) {
@@ -504,13 +445,13 @@ func loadRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, request
 		       COALESCE(failure, 'null'), input_hash, started_at, completed_at, updated_at,
 		       CAST(run_id AS TEXT), COALESCE(CAST(source_event_id AS TEXT), ''), COALESCE(CAST(parent_event_id AS TEXT), ''),
 		       COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(flow_instance, ''), node_id, handler_event_key,
-		       activity_id, tool, effect_class, attempt, success_event, failure_event,
+		       activity_id, tool, attempt, success_event, failure_event,
 		       COALESCE(CAST(result_event_id AS TEXT), ''), loop_generation, COALESCE(loop_stage, '')
 		FROM activity_attempts WHERE request_event_id = $1
 	`, requestEventID).Scan(&evidence.Status, &evidence.ExecutionMode, &evidence.ResultEventType, &resultPayload, &failure, &evidence.InputHash, &startedRaw, &completedRaw, &updatedRaw,
 		&evidence.SourceRequest.SourceRunID, &evidence.SourceRequest.SourceEventID, &evidence.SourceRequest.ParentEventID,
 		&evidence.SourceRequest.EntityID, &evidence.FlowInstance, &evidence.SourceRequest.NodeID, &evidence.SourceRequest.HandlerEventKey,
-		&evidence.SourceRequest.ActivityID, &evidence.SourceRequest.Tool, &evidence.SourceRequest.EffectClass, &evidence.SourceRequest.Attempt,
+		&evidence.SourceRequest.ActivityID, &evidence.SourceRequest.Tool, &evidence.Attempt,
 		&evidence.SourceRequest.SuccessEvent, &evidence.SourceRequest.FailureEvent, &evidence.ResultEventID, &generation, &evidence.SourceRequest.LoopStage)
 	if err == sql.ErrNoRows {
 		return evidence, fmt.Errorf("activity request %s has no recorded attempt evidence for fork reuse", requestEventID)
@@ -558,8 +499,8 @@ func validateSourceActivityEvidence(e runForkActivityAttemptEvidence, request ru
 	want := request
 	// These coordinates are not columns in the attempt journal. Their owners
 	// remain the admitted request declaration and source entity projection.
-	want.FlowID, want.ForkPolicy, want.Generation = "", "", attemptgeneration.Generation{}
-	if e.SourceRequest != want || e.FlowInstance != state.Source.FlowInstance {
+	want.FlowID, want.Generation = "", attemptgeneration.Generation{}
+	if e.Attempt != 1 || e.SourceRequest != want || e.FlowInstance != state.Source.FlowInstance {
 		return fmt.Errorf("source activity journal contradicts exact request ownership")
 	}
 	generationJSON, err := json.Marshal(request.Generation)
@@ -591,12 +532,9 @@ func runForkActivityFact(request runForkActivityRequestPayload) (activityidentit
 	if err != nil {
 		return activityidentity.Fact{}, err
 	}
-	if request.Attempt <= 0 {
-		return activityidentity.Fact{}, fmt.Errorf("activity request attempt must be positive")
-	}
 	return activityidentity.Fact{RunID: request.SourceRunID, SourceEventID: request.SourceEventID, ParentEventID: request.ParentEventID,
 		EntityID: request.EntityID, Owner: owner, ExecutionFlowID: request.FlowID, HandlerEventKey: request.HandlerEventKey,
-		ActivityID: request.ActivityID, Tool: request.Tool, Attempt: request.Attempt, RevisionID: request.Generation.RevisionID}, nil
+		ActivityID: request.ActivityID, Tool: request.Tool, Attempt: 1, RevisionID: request.Generation.RevisionID}, nil
 }
 
 func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, forkRunID, flowInstance string, request runForkActivityRequestPayload, reference *loopruntime.ForkChildReference, evidence runForkActivityAttemptEvidence) error {
@@ -635,19 +573,19 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO activity_attempts (
 			request_event_id, run_id, execution_mode, source_event_id, parent_event_id, entity_id, flow_instance,
-			node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
+			node_id, handler_event_key, activity_id, tool, attempt, status,
 			success_event, failure_event, result_event_id, result_event_type, result_payload,
 			failure, input_hash, loop_generation, loop_stage, reply_context_id,
-			started_at, completed_at, updated_at
+			started_at, completed_at, updated_at, execution_binding
 		) VALUES (
-			$1, $2, $25, $3, $4, $5, $24,
-			$6, $7, $8, $9, $10, 1, $11,
-			$12, $13, $14, $15, $16,
-			$17, $18, $19, $20, NULL,
-			$21, $22, $23
+			$1, $2, $24, $3, $4, $5, $23,
+			$6, $7, $8, $9, 1, $10,
+			$11, $12, $13, $14, $15,
+			$16, $17, $18, $19, NULL,
+			$20, $21, $22, NULL
 		) ON CONFLICT (request_event_id) DO NOTHING
 	`, requestEventID, forkRunID, nullableRunForkString(request.SourceEventID), nullableRunForkString(request.ParentEventID), nullableRunForkString(request.EntityID),
-		request.NodeID, request.HandlerEventKey, request.ActivityID, request.Tool, request.EffectClass, evidence.Status,
+		request.NodeID, request.HandlerEventKey, request.ActivityID, request.Tool, evidence.Status,
 		request.SuccessEvent, request.FailureEvent, resultEventID, evidence.ResultEventType, string(resultPayload),
 		failure, evidence.InputHash, string(generationJSON), nullableRunForkString(request.LoopStage),
 		evidence.StartedAt.UTC().Format(time.RFC3339Nano), evidence.CompletedAt.UTC().Format(time.RFC3339Nano), evidence.UpdatedAt.UTC().Format(time.RFC3339Nano), nullableRunForkString(flowInstance), evidence.ExecutionMode)
@@ -659,25 +597,27 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 		return err
 	}
 	var gotRunID, gotStatus, gotResultID string
+	var gotAttempt int
 	var gotExecutionMode executionmode.Mode
 	var gotRequest runForkActivityRequestPayload
 	var gotFlowInstance, gotResultType, gotInputHash, gotReplyContext string
 	var gotGeneration, gotResultPayload, gotFailure []byte
 	var gotStarted, gotCompleted, gotUpdated any
+	var gotExecutionBinding any
 	if err := tx.QueryRowContext(ctx, `
 		SELECT CAST(run_id AS TEXT), execution_mode, status, CAST(result_event_id AS TEXT), loop_generation,
 		       COALESCE(CAST(source_event_id AS TEXT), ''), COALESCE(CAST(parent_event_id AS TEXT), ''),
 		       COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(flow_instance, ''), node_id, handler_event_key,
-		       activity_id, tool, effect_class, attempt, success_event, failure_event, result_event_type,
+		       activity_id, tool, attempt, success_event, failure_event, result_event_type,
 		       result_payload, COALESCE(failure, 'null'), input_hash, COALESCE(loop_stage, ''),
-		       COALESCE(CAST(reply_context_id AS TEXT), ''), started_at, completed_at, updated_at
+		       COALESCE(CAST(reply_context_id AS TEXT), ''), started_at, completed_at, updated_at, execution_binding
 		FROM activity_attempts WHERE request_event_id = $1`, requestEventID).
 		Scan(&gotRunID, &gotExecutionMode, &gotStatus, &gotResultID, &gotGeneration,
 			&gotRequest.SourceEventID, &gotRequest.ParentEventID, &gotRequest.EntityID, &gotFlowInstance,
 			&gotRequest.NodeID, &gotRequest.HandlerEventKey, &gotRequest.ActivityID, &gotRequest.Tool,
-			&gotRequest.EffectClass, &gotRequest.Attempt, &gotRequest.SuccessEvent, &gotRequest.FailureEvent,
+			&gotAttempt, &gotRequest.SuccessEvent, &gotRequest.FailureEvent,
 			&gotResultType, &gotResultPayload, &gotFailure, &gotInputHash, &gotRequest.LoopStage,
-			&gotReplyContext, &gotStarted, &gotCompleted, &gotUpdated); err != nil {
+			&gotReplyContext, &gotStarted, &gotCompleted, &gotUpdated, &gotExecutionBinding); err != nil {
 		return fmt.Errorf("confirm fork-local activity evidence %s: %w", request.ActivityID, err)
 	}
 	var got attemptgeneration.Generation
@@ -690,10 +630,10 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 		gotRequest.SourceEventID != request.SourceEventID || gotRequest.ParentEventID != request.ParentEventID ||
 		gotRequest.EntityID != request.EntityID || gotFlowInstance != flowInstance || gotRequest.NodeID != request.NodeID ||
 		gotRequest.HandlerEventKey != request.HandlerEventKey || gotRequest.ActivityID != request.ActivityID ||
-		gotRequest.Tool != request.Tool || gotRequest.EffectClass != request.EffectClass || gotRequest.Attempt != 1 ||
+		gotRequest.Tool != request.Tool || gotAttempt != 1 ||
 		gotRequest.SuccessEvent != request.SuccessEvent || gotRequest.FailureEvent != request.FailureEvent ||
 		gotResultType != evidence.ResultEventType || gotInputHash != evidence.InputHash || gotRequest.LoopStage != request.LoopStage ||
-		gotReplyContext != "" || !workflowCommitJSONEqual(gotGeneration, generationJSON) || !workflowCommitJSONEqual(gotResultPayload, resultPayload) {
+		gotReplyContext != "" || gotExecutionBinding != nil || !workflowCommitJSONEqual(gotGeneration, generationJSON) || !workflowCommitJSONEqual(gotResultPayload, resultPayload) {
 		return fmt.Errorf("fork-local activity evidence %s conflicts with canonical fork identity", request.ActivityID)
 	}
 	expectedFailure := evidence.Failure
@@ -733,7 +673,7 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 		OccurredAt: evidence.CompletedAt.UTC(), RunID: forkRunID, EntityID: request.EntityID, FlowID: strings.TrimSpace(flowInstance),
 		Projection: runtimeauthoractivity.Projection{
 			SubjectType: "activity", SubjectID: request.ActivityID, NodeID: request.NodeID, Activity: request.ActivityID,
-			Tool: request.Tool, EffectClass: request.EffectClass, Attempt: &attempt, EventType: evidence.ResultEventType, ExecutionMode: string(evidence.ExecutionMode),
+			Tool: request.Tool, Attempt: &attempt, EventType: evidence.ResultEventType, ExecutionMode: string(evidence.ExecutionMode),
 		},
 		Failure: canonicalFailure,
 	})

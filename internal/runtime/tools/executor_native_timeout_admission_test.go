@@ -18,6 +18,7 @@ func TestNativeWebSearchCustomPolicyRejectsInvalidHTTP(t *testing.T) {
 		{"zero", map[string]any{"timeout_seconds": 0}},
 		{"null", map[string]any{"timeout_seconds": nil}},
 		{"negative", map[string]any{"timeout_seconds": -1}},
+		{"unrepresentable", map[string]any{"timeout_seconds": 9223372037}},
 		{"string", map[string]any{"timeout_seconds": "1"}},
 		{"boolean", map[string]any{"timeout_seconds": true}},
 		{"fractional", map[string]any{"timeout_seconds": 1.5}},

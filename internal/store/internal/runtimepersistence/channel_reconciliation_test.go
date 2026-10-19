@@ -38,10 +38,10 @@ func TestChannelActivityNativeAcknowledgementCutsBothStores(t *testing.T) {
 						RequestEventID: continuation.RequestEventID, RunID: continuation.RunID, ExecutionMode: continuation.ExecutionMode,
 						SourceEventID: continuation.SourceEventID, EntityID: continuation.EntityID, FlowInstance: continuation.FlowInstance,
 						NodeID: continuation.NodeID, HandlerEventKey: continuation.HandlerEventKey, ActivityID: continuation.ActivityID,
-						Tool: continuation.Tool, EffectClass: string(continuation.EffectClass), Attempt: 1,
+						Tool: continuation.Tool, Attempt: 1,
 						SuccessEvent: continuation.SuccessEvent, FailureEvent: continuation.FailureEvent, InputHash: continuation.EffectContentHash,
 					}
-					journal := fixture.store.(activityStoryJournal)
+					journal := captureActivityFixtureJournal(t, ctx, fixture.store)
 					write := journal.StartActivityAttempt
 					var predecessor runtimepipeline.ActivityAttemptRecord
 					switch operation {
@@ -153,7 +153,7 @@ func TestChannelPostCommitActivityHintsBothStores(t *testing.T) {
 						RequestEventID: continuation.RequestEventID, RunID: runID, ExecutionMode: continuation.ExecutionMode,
 						SourceEventID: continuation.SourceEventID, EntityID: continuation.EntityID, FlowInstance: continuation.FlowInstance,
 						NodeID: continuation.NodeID, HandlerEventKey: continuation.HandlerEventKey, ActivityID: continuation.ActivityID,
-						Tool: continuation.Tool, EffectClass: string(continuation.EffectClass), Attempt: 1,
+						Tool: continuation.Tool, Attempt: 1,
 						SuccessEvent: continuation.SuccessEvent, FailureEvent: continuation.FailureEvent, InputHash: continuation.EffectContentHash,
 					}
 					proof := observeChannelHints(t, cards.(interface {
@@ -163,7 +163,7 @@ func TestChannelPostCommitActivityHintsBothStores(t *testing.T) {
 					if linked {
 						want = render.ReconcileOrdinary
 					}
-					journal := cards.(activityStoryJournal)
+					journal := captureActivityFixtureJournal(t, ctx, cards)
 					write := journal.StartActivityAttempt
 					var cleanupCause error
 					switch operation {
@@ -181,7 +181,7 @@ func TestChannelPostCommitActivityHintsBothStores(t *testing.T) {
 						}
 						record = activityStoryTerminal(t, started, status)
 						cleanupCause = errors.New("activity post-acknowledgment cleanup cut")
-						faulted, err := activityJournalCleanupFaultForTest(cards, cleanupCause)
+						faulted, _, err := ActivityJournalCleanupBoundFaultForTest(cards, journal, cleanupCause)
 						if err != nil {
 							t.Fatal(err)
 						}
