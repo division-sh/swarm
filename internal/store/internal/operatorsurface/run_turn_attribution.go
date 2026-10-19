@@ -158,6 +158,22 @@ func loadDeliveryCompletionEvidence(ctx context.Context, q eventReadQueryer, del
 		AND o.flow_scope_key=t.flow_scope_key AND o.flow_instance_id=t.flow_instance_id AND o.flow_instance=t.flow_instance
 		AND a.origin_run_id=t.run_id AND a.origin_route_identity=$2 AND a.origin_subscriber_type='agent' AND a.origin_subscriber_id=t.agent_id
 		AND a.capability_surface_id=t.capability_surface_id),
+		o.authority_kind,a.authority_evidence,COALESCE(CAST(o.selected_execution_id AS TEXT),''),o.generation,
+		COALESCE((o.authority_kind='selected_contract_fork' AND o.effect_kind='provider_turn'
+		AND a.usage_target_kind='agent_turn' AND a.usage_target_id=t.turn_id AND COALESCE(a.target_ordinal,0)=0
+		AND a.origin_run_id=t.run_id AND a.origin_route_identity=$2 AND a.origin_subscriber_type='agent' AND a.origin_subscriber_id=t.agent_id
+		AND a.capability_surface_id=t.capability_surface_id
+		AND EXISTS(SELECT 1 FROM event_deliveries d
+			JOIN run_fork_selected_contract_runtime_executions e ON e.execution_id=d.selected_execution_id
+			JOIN run_fork_selected_contract_bindings b ON b.binding_id=e.binding_id AND b.fork_run_id=e.fork_run_id
+			JOIN runs r ON r.run_id=e.fork_run_id
+			WHERE d.delivery_id=a.origin_delivery_id AND d.run_id=t.run_id
+			AND d.execution_authority_kind='selected_contract_fork'
+			AND d.execution_authority_id=CAST(e.execution_id AS TEXT) AND d.execution_authority_generation=e.generation
+			AND d.selected_fork_run_id=e.fork_run_id AND d.selected_execution_generation=e.generation
+			AND o.selected_execution_id=e.execution_id AND o.authority_id=CAST(e.execution_id AS TEXT) AND o.generation=e.generation AND a.generation=e.generation
+			AND o.bundle_hash=d.authority_bundle_hash AND o.bundle_hash=r.bundle_hash
+			AND (b.mode='selected_contracts' OR (b.mode='bundle_hash' AND b.bundle_hash=r.bundle_hash)))),FALSE),
 		EXISTS(SELECT 1 FROM runtime_provider_attempt_drains d WHERE d.attempt_id=a.attempt_id)
 		FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 		JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id
@@ -176,7 +192,8 @@ func loadDeliveryCompletionEvidence(ctx context.Context, q eventReadQueryer, del
 		var row completionAttributionRow
 		if err := rows.Scan(&row.turnID, &row.sessionID, &row.identity.RunID, &row.identity.AgentID, &row.identity.NameOwner, &row.identity.NameSource,
 			&row.identity.RoutePresence, &row.identity.FlowScopeKey, &row.identity.FlowInstanceID, &row.identity.FlowInstancePath,
-			&row.eventID, &row.eventType, &row.surface, &row.operationID, &row.attemptID, &row.adapter, &row.state, &row.phase, &row.active, &row.evidence, &row.fingerprint, &row.paired, &row.drained); err != nil {
+			&row.eventID, &row.eventType, &row.surface, &row.operationID, &row.attemptID, &row.adapter, &row.state, &row.phase, &row.active, &row.evidence, &row.fingerprint, &row.paired,
+			&row.authorityKind, &row.authorityEvidence, &row.selectedExecutionID, &row.selectedGeneration, &row.selectedPaired, &row.drained); err != nil {
 			return nil, false, nil, err
 		}
 		count++
@@ -209,12 +226,50 @@ type completionAttributionRow struct {
 	identity                                                                               agentidentity.StorageFields
 	surface, evidence                                                                      []byte
 	active, paired, claimKnown, drained                                                    bool
+	authorityKind                                                                          effects.AuthorityKind
+	authorityEvidence                                                                      []byte
+	selectedExecutionID                                                                    string
+	selectedGeneration                                                                     uint64
+	selectedPaired                                                                         bool
 }
 
 func (r completionAttributionRow) deliverySurface(delivery privatedelivery.RunOperationalFact, eventType string) (managedcapabilities.Surface, error) {
 	identity, err := agentidentity.FromStorageFields(r.identity)
 	if err != nil {
 		return managedcapabilities.Surface{}, err
+	}
+	if r.authorityKind == effects.AuthoritySelectedContractFork {
+		// Historical readback checks the recorded binding, never its live lease.
+		var recorded struct {
+			Kind        effects.AuthorityKind `json:"authority_kind"`
+			ID          string                `json:"authority_id"`
+			ExecutionID string                `json:"execution_id"`
+			ForkRunID   string                `json:"fork_run_id"`
+			Generation  uint64                `json:"generation"`
+			UsageTarget struct {
+				Kind          effects.UsageTargetKind `json:"kind"`
+				ID            string                  `json:"id"`
+				Ordinal       int                     `json:"ordinal"`
+				RunID         string                  `json:"run_id"`
+				AgentID       string                  `json:"agent_id"`
+				AgentIdentity agentidentity.Identity  `json:"agent_identity"`
+				SessionID     string                  `json:"session_id"`
+				FlowInstance  string                  `json:"flow_instance"`
+			} `json:"usage_target"`
+		}
+		if err := json.Unmarshal(r.authorityEvidence, &recorded); err != nil {
+			return managedcapabilities.Surface{}, fmt.Errorf("decode selected completion origin: %w", err)
+		}
+		target := recorded.UsageTarget
+		sameActor, err := agentidentity.Equal(identity, target.AgentIdentity)
+		if err != nil {
+			return managedcapabilities.Surface{}, fmt.Errorf("selected completion origin actor: %w", err)
+		}
+		r.paired = r.selectedPaired && recorded.Kind == r.authorityKind && recorded.ID == r.selectedExecutionID &&
+			recorded.ExecutionID == r.selectedExecutionID && recorded.ForkRunID == delivery.RunID && recorded.Generation == r.selectedGeneration &&
+			target.Kind == effects.UsageTargetAgentTurn && target.ID == r.turnID && target.Ordinal == 0 &&
+			target.RunID == identity.RunID && target.AgentID == identity.AgentID() && target.SessionID == r.sessionID &&
+			target.FlowInstance == identity.FlowInstance() && sameActor
 	}
 	equal, err := agentidentity.Equal(identity, delivery.AgentIdentity)
 	if err != nil || !equal || !r.paired || !r.claimKnown || r.eventID != delivery.EventID || r.eventType != eventType {
@@ -223,6 +278,10 @@ func (r completionAttributionRow) deliverySurface(delivery privatedelivery.RunOp
 	surface, err := storecapability.Decode(r.surface)
 	if err != nil {
 		return managedcapabilities.Surface{}, err
+	}
+	if r.authorityKind == effects.AuthoritySelectedContractFork && (surface.Authority.ExecutionKind != managedcapabilities.ExecutionSelectedContractFork ||
+		surface.Authority.ExecutionAuthorityID != r.selectedExecutionID || surface.Authority.ID != r.turnID) {
+		return managedcapabilities.Surface{}, fmt.Errorf("completion evidence contradicts exact selected capability surface")
 	}
 	if err := storecapability.ValidateAgentTurn(surface, identity, r.sessionID, delivery.RunID); err != nil {
 		return managedcapabilities.Surface{}, err
