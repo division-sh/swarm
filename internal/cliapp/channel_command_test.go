@@ -36,7 +36,7 @@ func TestChannelCLIReportsNativeQualificationWithoutInventingLocale(t *testing.T
 				language = ""
 			}
 			result := channelOnboardingResult{
-				Operation: channelonboarding.Operation{OperationID: operatorChannelCLIOperation, ClientLanguage: language},
+				Operation: channelonboarding.Operation{OperationID: operatorChannelCLIOperation, Provider: "telegram", ClientLanguage: language},
 				Readiness: &channelonboarding.ConnectedChannelReadiness{Ready: true, NativeInbox: &channelnative.Qualification{
 					State: state, ClientLanguage: language, LocaleRevision: 2, Reason: "exact owner evidence",
 				}},

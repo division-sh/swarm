@@ -357,7 +357,7 @@
     "owner": "internal/channelonboarding/service.go::*Service.Start",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
-    "body_sha256": "5f31a18d02dcd5a7522b557ac81ad7c2ba3ef9c8aa3c70d89d8efdb1e59b4a12"
+    "body_sha256": "dba5cad762e26aceafbcca017a25151149a1231815a808698971ed51f0be3237"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.activationRecovery",
@@ -388,6 +388,12 @@
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
     "body_sha256": "901de5a5b73bc26721a32f2a71d4733ebeeff8a882d50f81eb4cf4dafbf59f88"
+  },
+  {
+    "owner": "internal/channelonboarding/service.go::*Service.attachOpenConnection",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
+    "body_sha256": "0138303a7574ee60770bc467c7fdc63759c2b4bdd502e977087c4303bdc48157"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.bindCurrentCandidate",
