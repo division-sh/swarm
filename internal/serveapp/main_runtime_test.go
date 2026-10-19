@@ -7892,13 +7892,13 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 	}
 }
 
-func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash, eventName, subscriberID string, at time.Time) {
+func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash, eventName, subscriberID string, rootAdmission sourceartifact.RootAdmission, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
-		BundleHash: bundleHash,
+		BundleHash: bundleHash, RootAdmission: rootAdmission,
 	})
 	if entityID != runID {
 		t.Fatal("selected root fixture must use the constructed run entity")

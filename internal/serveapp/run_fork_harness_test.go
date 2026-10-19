@@ -255,6 +255,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 				At:                      strings.TrimSpace(*at),
 				ContractSelection:       contractSelection,
 				SourceArtifactFact:      loaded.SourceArtifactFact,
+				RootAdmission:           loaded.RootedSource.Admission(),
 				EffectiveSourceIdentity: loaded.EffectiveSourceIdentity,
 			})
 			if err != nil {
