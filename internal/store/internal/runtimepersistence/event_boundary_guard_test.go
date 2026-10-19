@@ -59,6 +59,9 @@ var eventRecordImportFiles = map[string]struct{}{
 	"internal/store/internal/backend/pipelinepersistence/publication_group.go": {},
 	// Clock replay reads accepted occurrences through the canonical event record owner.
 	"internal/store/internal/backend/pipelinepersistence/generic_schedule_occurrence_commit.go": {},
+	// Fixed-session activity recovery reads retained requests/results through the
+	// complete native decoder; it gains no event SQL or construction allowance.
+	"internal/store/internal/startupownership/activity_recovery_native.go": {},
 	// Operator hydration uses canonical admitted records and canonical delivery snapshots.
 	"internal/store/internal/operatorsurface/operator_event_batch.go":                {},
 	"internal/store/internal/operatorsurface/operator_observability_read_surface.go": {},
@@ -571,6 +574,7 @@ func TestHostileEventObservationMarkerClassificationIsExact(t *testing.T) {
 
 func TestHostileEventRecordConsumerClassificationDoesNotGrantSQL(t *testing.T) {
 	for _, path := range []string{
+		"internal/store/internal/startupownership/activity_recovery_native.go",
 		"internal/store/internal/backend/pipelinepersistence/fan_out_barrier_owner.go",
 		"internal/store/internal/backend/pipelinepersistence/publication_group.go",
 		"internal/store/internal/backend/pipelinepersistence/generic_schedule_occurrence_commit.go",
