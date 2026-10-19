@@ -168,6 +168,28 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		}
 	})
 
+	t.Run("native list retains the disconnected reason", func(t *testing.T) {
+		for _, reason := range []string{"network unreachable", "logged out", "account temporarily banned", "session replaced by another connection", "connection rejected by WhatsApp"} {
+			server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+				if request.Method != "channel.list" {
+					t.Fatalf("method = %q, want channel.list", request.Method)
+				}
+				result := operatorChannelCLIListResult("unbound", nil)
+				row := result["channels"].([]any)[0].(map[string]any)
+				op := sessionProgressCLIResult("whatsapp", "", "succeeded", true)["operation"].(map[string]any)
+				row["identity"].(map[string]any)["interface"] = op["interface"]
+				row["operation"] = op
+				row["connection"] = map[string]any{"state": "disconnected", "linked": true, "reason": reason}
+				return result
+			})
+			out, errOut, code := runOperatorChannelCLI(t, server, "channel", "list")
+			if code != 0 || errOut != "" || !strings.Contains(out, "WhatsApp: disconnected") || !strings.Contains(out, "WhatsApp disconnected: "+reason) ||
+				reason != "network unreachable" && strings.Contains(out, "network unreachable") {
+				t.Fatal("native health lost or invented its disconnected reason", code, out, errOut)
+			}
+		}
+	})
+
 	t.Run("status selects one exact activation coordinate", func(t *testing.T) {
 		firstBundle := "bundle-v2:sha256:" + strings.Repeat("b", 64)
 		sourceDir, artifact := identitySource2376(t)

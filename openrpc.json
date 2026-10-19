@@ -15895,6 +15895,10 @@
             "description": "Retained paired account exists; not operator identity or execution authority.",
             "type": "boolean"
           },
+          "reason": {
+            "description": "Display-only finite SDK disconnect reason; not execution or retry authority.",
+            "type": "string"
+          },
           "state": {
             "enum": [
               "pairing",

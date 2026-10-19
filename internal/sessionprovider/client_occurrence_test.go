@@ -318,8 +318,14 @@ func TestWhatsAppClientOccurrenceRejectsSDKReceiptReplay(t *testing.T) {
 }
 
 func TestWhatsAppClientOccurrenceLoginReconnectAndUnlinkRetainState(t *testing.T) {
-	for _, code := range []string{"515", "401"} {
-		t.Run(code, func(t *testing.T) {
+	for _, test := range []struct{ code, reason string }{
+		{"515", "connection must be re-established"},
+		{"401", "logged out"},
+		{"replaced", "session replaced by another connection"},
+		{"402", "account temporarily banned"},
+		{"400", "connection rejected by WhatsApp"},
+	} {
+		t.Run(test.code, func(t *testing.T) {
 			peer := newSDKPeer(t)
 			_, container := openSDKStoreFixture(t, filepath.Join(t.TempDir(), "provider.db"))
 			device := newSDKDeviceFixture(t, container)
@@ -328,9 +334,13 @@ func TestWhatsAppClientOccurrenceLoginReconnectAndUnlinkRetainState(t *testing.T
 			done := make(chan error, 1)
 			go func() { done <- runOccurrenceProbe(peer.ctx, o, "send", "LOGIN_FENCE_PROBE") }()
 			first := peer.next(t)
-			failure := waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": code}}
-			if code == "401" {
+			failure := waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": test.code}}
+			if test.code == "401" {
 				failure.Content = []waBinary.Node{{Tag: "conflict", Attrs: waBinary.Attrs{"type": "device_removed"}}}
+			} else if test.code == "replaced" {
+				failure.Content = []waBinary.Node{{Tag: "conflict", Attrs: waBinary.Attrs{"type": "replaced"}}}
+			} else if test.code == "402" || test.code == "400" {
+				failure = waBinary.Node{Tag: "failure", Attrs: waBinary.Attrs{"reason": test.code}}
 			}
 			if err := first.peer.send(peer.ctx, failure); err != nil {
 				t.Fatal(err)
@@ -345,6 +355,12 @@ func TestWhatsAppClientOccurrenceLoginReconnectAndUnlinkRetainState(t *testing.T
 			}
 			if err := o.join(peer.ctx); err != nil {
 				t.Fatal(err)
+			}
+			o.mu.Lock()
+			reason := o.failureReason
+			o.mu.Unlock()
+			if reason != test.reason {
+				t.Fatalf("SDK fence lost its public reason: got %q, want %q", reason, test.reason)
 			}
 			retained, err := container.GetDevice(peer.ctx, jid)
 			if err != nil || retained == nil || device.Deleted {

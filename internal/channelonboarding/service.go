@@ -237,6 +237,7 @@ type Result struct {
 
 type SessionConnectionReadback struct {
 	State               string `json:"state"`
+	Reason              string `json:"reason,omitempty"`
 	Linked              bool   `json:"linked"`
 	AccountPresentation string `json:"account_presentation,omitempty"`
 	AccountName         string `json:"account_name,omitempty"`

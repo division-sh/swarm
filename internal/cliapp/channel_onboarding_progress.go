@@ -145,8 +145,13 @@ func writeWhatsAppConnection(out io.Writer, connection *channelonboarding.Sessio
 		case "connected", "connecting", "pairing":
 			reason = ""
 		case "disconnected":
-			if connection.Linked {
-				reason = "WhatsApp disconnected: network unreachable, reconnecting..."
+			if connection.Reason != "" {
+				reason = "WhatsApp disconnected: " + cliSanitizeOneLineValue(connection.Reason)
+				if connection.Reason == "network unreachable" {
+					reason += ", reconnecting..."
+				}
+			} else if connection.Linked {
+				reason = "WhatsApp disconnected: connection unavailable"
 			}
 		}
 	}

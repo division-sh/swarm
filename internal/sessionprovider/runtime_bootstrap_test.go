@@ -286,7 +286,7 @@ func TestWhatsAppPairingDuplicateDisconnectReadbackBothStores(t *testing.T) {
 						t.Fatal("duplicate disconnect granted channel execution")
 					}
 				}
-				occurrence.fenceAfterDisconnect(true)
+				occurrence.fenceAfterDisconnect(true, "network unreachable")
 				if view, err := f.connection.PairingReadback(f.ctx, f.principal); err != nil || view != (channelonboarding.PairingReadback{Status: status}) {
 					t.Error("SDK lifetime fence erased the same terminal observation")
 				}
@@ -294,14 +294,14 @@ func TestWhatsAppPairingDuplicateDisconnectReadbackBothStores(t *testing.T) {
 					t.Fatal("duplicate disconnect granted bootstrap health")
 				}
 				occurrence.fence()
-				occurrence.fenceAfterDisconnect(true)
+				occurrence.fenceAfterDisconnect(true, "network unreachable")
 				if view, err := f.connection.PairingReadback(f.ctx, f.principal); err == nil || view != (channelonboarding.PairingReadback{}) {
 					t.Fatal("later disconnect resurrected a generically retired observation")
 				}
 				if _, err := f.owner.RetireAndWait(f.ctx); err != nil {
 					t.Fatal(err)
 				}
-				occurrence.fenceAfterDisconnect(true)
+				occurrence.fenceAfterDisconnect(true, "network unreachable")
 				if view, err := f.connection.PairingReadback(f.ctx, f.principal); err == nil || view != (channelonboarding.PairingReadback{}) {
 					t.Fatal("later disconnect resurrected a retired runtime")
 				}

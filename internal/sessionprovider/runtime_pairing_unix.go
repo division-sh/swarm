@@ -149,3 +149,17 @@ func (c *RuntimeConnection) AccountPresentation(ctx context.Context) (phone, nam
 	}
 	return "+" + device.ID.User, name, nil
 }
+
+// DisconnectionReason is display-only; it grants no session execution authority.
+func (c *RuntimeConnection) DisconnectionReason() string {
+	if c == nil || c.state == nil {
+		return ""
+	}
+	occurrence := c.state.currentOccurrence()
+	if occurrence == nil {
+		return ""
+	}
+	occurrence.mu.Lock()
+	defer occurrence.mu.Unlock()
+	return occurrence.failureReason
+}
