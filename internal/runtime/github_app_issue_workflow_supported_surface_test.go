@@ -33,8 +33,6 @@ func TestGitHubAppIssueWorkflowConnectorPackRoundTripThroughActivityJournal(t *t
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-workflow-observer")
-		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runGitHubAppIssueWorkflowSurface(t, slackManagedConnectorBackend{
 			name:          "postgres",
@@ -43,7 +41,6 @@ func TestGitHubAppIssueWorkflowConnectorPackRoundTripThroughActivityJournal(t *t
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
-			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(pg),
 			runLifecycle:  pg,
 			obligations:   pg.PipelineObligations(),
@@ -59,8 +56,6 @@ func TestGitHubAppIssueWorkflowConnectorPackRoundTripThroughActivityJournal(t *t
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-workflow-observer")
-		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runGitHubAppIssueWorkflowSurface(t, slackManagedConnectorBackend{
 			name:          "sqlite",
@@ -69,7 +64,6 @@ func TestGitHubAppIssueWorkflowConnectorPackRoundTripThroughActivityJournal(t *t
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
-			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(sqliteStore),
 			runLifecycle:  sqliteStore,
 			obligations:   sqliteStore.PipelineObligations(),
@@ -109,6 +103,8 @@ func runGitHubAppIssueWorkflowSurface(t *testing.T, backend slackManagedConnecto
 		ExpiresAt:      time.Now().Add(-time.Hour),
 	})
 	source := githubAppIssueWorkflowSource(t, fake.server.URL, backend.flowInstance)
+	backend.source = source
+	backend.ctx, backend.inboundTarget = seedCapturedProviderTarget(t, backend.ctx, backend.inboundStore, source, backend.runID, backend.entityID, backend.flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-workflow-observer")
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	backend.activityAttempts = pc
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
@@ -450,7 +446,7 @@ func assertGitHubAppIssueWorkflowManagedCredentialFailureBeforeDispatch(t *testi
 	beforeComments := fake.commentRequestCount()
 	beforeIssues := fake.issueRequestCount()
 	beforeLabels := fake.labelRequestCount()
-	source := githubAppIssueWorkflowSource(t, fake.server.URL, backend.flowInstance)
+	source := backend.source
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	backend.activityAttempts = pc
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)

@@ -44,8 +44,6 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
-		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runTelegramConnectorSupportedSurfaceRoundTrip(t, telegramConnectorSupportedSurfaceBackend{
 			name:          "postgres",
@@ -54,7 +52,6 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
-			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(pg),
 			runLifecycle:  pg,
 			obligations:   pg.PipelineObligations(),
@@ -70,8 +67,6 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
-		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runTelegramConnectorSupportedSurfaceRoundTrip(t, telegramConnectorSupportedSurfaceBackend{
 			name:          "sqlite",
@@ -80,7 +75,6 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
-			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(sqliteStore),
 			runLifecycle:  sqliteStore,
 			obligations:   sqliteStore.PipelineObligations(),
@@ -93,6 +87,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 }
 
 type telegramConnectorSupportedSurfaceBackend struct {
+	source           semanticview.Source
 	name             string
 	ctx              context.Context
 	db               *sql.DB
@@ -148,6 +143,8 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 
 	credentialStore := telegramConnectorSupportedSurfaceCredentialStore(t, "telegram_bot_token", "provider-secret")
 	source := telegramConnectorSupportedSurfaceSource(t, server.URL, backend.flowInstance)
+	backend.source = source
+	backend.ctx, backend.inboundTarget = seedCapturedProviderTarget(t, backend.ctx, backend.inboundStore, source, backend.runID, backend.entityID, backend.flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, backend.eventStore, runtimebus.EventBusOptions{
 		ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
@@ -236,7 +233,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, baseURL string, calls <-chan telegramConnectorSupportedSurfaceCall) {
 	t.Helper()
 	credentialStore := telegramConnectorSupportedSurfaceCredentialStore(t, "", "")
-	source := telegramConnectorSupportedSurfaceSource(t, baseURL, backend.flowInstance)
+	source := backend.source
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, backend.eventStore, runtimebus.EventBusOptions{
 		ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),

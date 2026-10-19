@@ -20,7 +20,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
@@ -55,13 +54,8 @@ func TestInboundGatewaySignedTelegramOperatorChannelClaimSelectedStoreParity(t *
 func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorChannelInboundSelectedStore, db *sql.DB, sqlite bool, runID, entityID, flowInstance string) {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	source := providerRawSettlementSemanticSource(t, runtimepkg.InboundTarget{FlowPath: flowInstance, Alias: entityID}, providerRawSettlementCase{provider: "telegram", eventName: "inbound.telegram"}, "telegram-secret")
-	var inboundTarget runtimepkg.InboundTarget
-	if sqlite {
-		inboundTarget = seedSQLiteInboundGatewayRuntime(t, ctx, selected.(*store.SQLiteRuntimeStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer", source)
-	} else {
-		inboundTarget = seedPostgresInboundGatewayRuntime(t, ctx, selected.(*store.PostgresStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer", source)
-	}
+	source := capturedTelegramOperatorSource(t)
+	ctx, inboundTarget := seedCapturedProviderTarget(t, ctx, selected, source, runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer")
 
 	plan := compileEmbeddedTelegramOperatorChannelPlan(t)
 	identity, err := plan.InterfaceIdentity()
@@ -110,8 +104,8 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 		t.Fatal(err)
 	}
 
-	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source},
-		"inbound.telegram", "inbound.telegram.text_message", "inbound.telegram.callback_action")
+	bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source)},
+		"inbound.telegram.raw", "inbound.telegram.text_message", "inbound.telegram.callback_action")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -318,7 +318,21 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runID, entityID := boundedInboundTestCoordinates()
-			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-operator", "")
+			source := capturedTelegramOperatorSource(t)
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			var selected operatorChannelInboundSelectedStore
+			var db *sql.DB
+			if backend == "postgres" {
+				_, postgresDB, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				db = postgresDB
+				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+			} else {
+				sqlite := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+				selected = sqlite
+				db = storetest.DatabaseForTest(sqlite)
+			}
+			ctx, target := seedCapturedProviderTarget(t, ctx, selected, source, runID, entityID, boundedProviderFlowID, "ack-operator", "telegram", "telegram-secret", "")
 			plan := compileEmbeddedTelegramOperatorChannelPlan(t)
 			identity, err := plan.InterfaceIdentity()
 			if err != nil {
@@ -365,7 +379,7 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
+			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source)}, "inbound.telegram.raw", "inbound.telegram.text_message")
 			if err != nil {
 				t.Fatal(err)
 			}

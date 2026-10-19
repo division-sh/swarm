@@ -30,8 +30,6 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
-		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runNotionManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "postgres",
@@ -40,7 +38,6 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
-			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(pg),
 			runLifecycle:  pg,
 			obligations:   pg.PipelineObligations(),
@@ -56,8 +53,6 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
-		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runNotionManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "sqlite",
@@ -66,7 +61,6 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
-			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(sqliteStore),
 			runLifecycle:  sqliteStore,
 			obligations:   sqliteStore.PipelineObligations(),
@@ -110,6 +104,8 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 		ExpiresAt:    time.Now().Add(-time.Hour),
 	})
 	source := notionManagedConnectorSource(t, fake.server.URL, backend.flowInstance)
+	backend.source = source
+	backend.ctx, backend.inboundTarget = seedCapturedProviderTarget(t, backend.ctx, backend.inboundStore, source, backend.runID, backend.entityID, backend.flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	backend.activityAttempts = pc
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
@@ -324,7 +320,7 @@ func (f *fakeNotionManagedConnectorServer) providerHTTPRequestCount() int {
 
 func assertNotionManagedConnectorMissingCredential(t *testing.T, backend slackManagedConnectorBackend, baseURL string) {
 	t.Helper()
-	source := notionManagedConnectorSource(t, baseURL, backend.flowInstance)
+	source := backend.source
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, runtimemanagedcredentials.NewMemoryStore())
 	backend.activityAttempts = pc
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)

@@ -30,8 +30,6 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "microsoft-graph-client-credentials-observer")
-		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runMicrosoftGraphClientCredentialsConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "postgres",
@@ -40,7 +38,6 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
-			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(pg),
 			runLifecycle:  pg,
 			obligations:   pg.PipelineObligations(),
@@ -56,8 +53,6 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "microsoft-graph-client-credentials-observer")
-		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runMicrosoftGraphClientCredentialsConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "sqlite",
@@ -66,7 +61,6 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
-			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(sqliteStore),
 			runLifecycle:  sqliteStore,
 			obligations:   sqliteStore.PipelineObligations(),
@@ -91,6 +85,8 @@ func runMicrosoftGraphClientCredentialsConnectorSurface(t *testing.T, backend sl
 
 	managedStore := runtimemanagedcredentials.NewMemoryStore(microsoftGraphClientCredentialsRecord(fake.server.URL, "expired-token", time.Now().Add(-time.Hour)))
 	source := microsoftGraphConnectorSource(t, fake.server.URL, backend.flowInstance)
+	backend.source = source
+	backend.ctx, backend.inboundTarget = seedCapturedProviderTarget(t, backend.ctx, backend.inboundStore, source, backend.runID, backend.entityID, backend.flowInstance, "customer-a", "telegram", "telegram-secret", "microsoft-graph-client-credentials-observer")
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	backend.activityAttempts = pc
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)
@@ -336,7 +332,7 @@ func assertMicrosoftGraphManagedCredentialFailureBeforeDispatch(t *testing.T, ba
 	t.Helper()
 	tokenRequestsBefore := fake.tokenRequestCount()
 	graphRequestsBefore := fake.providerHTTPRequestCount()
-	source := microsoftGraphConnectorSource(t, fake.server.URL, backend.flowInstance)
+	source := backend.source
 	bus, pc := startSlackManagedConnectorBusAndCoordinator(t, backend, source, managedStore)
 	backend.activityAttempts = pc
 	gateway := newTestInboundGateway(t, bus, nil, nil, backend.inboundStore)

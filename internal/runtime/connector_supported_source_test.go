@@ -1,14 +1,52 @@
 package runtime_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packmodel"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
+
+func seedCapturedProviderTarget(t *testing.T, ctx context.Context, persistence runtimepkg.InboundPersistence, source semanticview.Source, runID, entityID, flowInstance, slug, provider, secret, agentID string) (context.Context, runtimepkg.InboundTarget) {
+	t.Helper()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("provider fixture requires its captured bundle")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(rooted.Artifact())), rooted.Admission())
+	var target runtimepkg.InboundTarget
+	switch selected := persistence.(type) {
+	case *store.PostgresStore:
+		if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
+			t.Fatal(err)
+		}
+		target = seedPostgresInboundGatewayRuntime(t, ctx, selected, runID, entityID, flowInstance, slug, provider, secret, agentID, source)
+	case *store.SQLiteRuntimeStore:
+		if _, err := selected.EnsureRootedSource(ctx, rooted); err != nil {
+			t.Fatal(err)
+		}
+		target = seedSQLiteInboundGatewayRuntime(t, ctx, selected, runID, entityID, flowInstance, slug, provider, secret, agentID, source)
+	default:
+		t.Fatalf("unsupported provider fixture store %T", persistence)
+	}
+	return boundedInboundTargetContext(t, ctx, target), target
+}
+
+func capturedTelegramOperatorSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	return boundedStandingConnectorSource(t, "telegram", "https://api.telegram.org", "[inbound.telegram.raw, inbound.telegram.text_message, inbound.telegram.callback_action]", "")
+}
 
 // These five runtime fixtures author the same bounded ingress flow, with each
 // provider's HTTP endpoint changed in its BODY before source capture.
@@ -21,7 +59,9 @@ func boundedStandingConnectorSource(t *testing.T, provider, baseURL, inputs, nod
 		boundedProviderFlowID + "/manifest.yaml": manifest,
 		boundedProviderFlowID + "/schema.yaml":   "stages:\n  active: {}\npins:\n  inputs: " + inputs + "\n",
 		boundedProviderFlowID + "/entities.yaml": "bounded_entity: {}\n",
-		boundedProviderFlowID + "/nodes.yaml":    nodes,
+	}
+	if nodes != "" {
+		files[boundedProviderFlowID+"/nodes.yaml"] = nodes
 	}
 	providers := []string{provider}
 	if provider != "telegram" && provider != "github" {
