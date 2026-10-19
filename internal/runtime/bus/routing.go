@@ -46,29 +46,3 @@ func UniqueStrings(in []string) []string {
 	}
 	return out
 }
-
-func FilterOutAgentIDs(in []string, disallow []string) []string {
-	if len(in) == 0 || len(disallow) == 0 {
-		return in
-	}
-	set := make(map[string]struct{}, len(disallow))
-	for _, v := range disallow {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
-		}
-		set[v] = struct{}{}
-	}
-	out := make([]string, 0, len(in))
-	for _, v := range in {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
-		}
-		if _, blocked := set[v]; blocked {
-			continue
-		}
-		out = append(out, v)
-	}
-	return out
-}
