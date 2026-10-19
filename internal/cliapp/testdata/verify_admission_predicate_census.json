@@ -2817,7 +2817,7 @@
     "owner": "internal/runtime/runtime.go::*PreparedSourceSetGenerationRefresh.Commit",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "da383b942953beec0e9339903e23c5e25edcdca56a9c86d831a4e68f94c65efb"
+    "body_sha256": "d6b8a444d4dca02f1e17d13dc043895ffe8c16b7de02bc99a51183af0c0c811f"
   },
   {
     "owner": "internal/runtime/runtime.go::*PreparedSourceSetGenerationRefresh.RetainForRetry",
@@ -4618,6 +4618,12 @@
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "c316c68308fc91bd91b1960eb34c912fb3bd80c694058110fd870fe6de926e0f"
+  },
+  {
+    "owner": "internal/serveapp/main.go::buildRecoveredSelectedAPICapabilities",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "body_sha256": "a2a1a22abe451eeaf2ffd336cbb84afc74fb573589e9a8c9cea37ff905427d42"
   },
   {
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
