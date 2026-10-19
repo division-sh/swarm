@@ -11,22 +11,36 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
-// A caller-supplied recovery role must not fit either native binding.
+// A caller-supplied recovery role must not acquire either native binding.
 type displacedHTTPActivityRecoveryStub struct {
 	activityRecoveryRoleProbe
+	recoveryCalls int
 }
 
-func (*displacedHTTPActivityRecoveryStub) ReconcileDisplacedHTTPActivitiesTx(context.Context, *mutationprotocol.Attempt, displacedHTTPActivityCut) (runtimepipeline.ActivityRecoverySummary, error) {
+func (s *displacedHTTPActivityRecoveryStub) ReconcileDisplacedHTTPActivitiesTx(context.Context, *mutationprotocol.Attempt, displacedHTTPActivityCut) (runtimepipeline.ActivityRecoverySummary, error) {
+	s.recoveryCalls++
 	panic("a substituted recovery role must never be called")
 }
 
 func TestDisplacedHTTPActivityRecoveryStubCannotEnableRecovery(t *testing.T) {
-	for _, binding := range []reflect.Type{
-		reflect.TypeOf((*StartupPostgresOwner).BindActivityJournalRole),
-		reflect.TypeOf((*StartupSQLiteOwner).BindActivityJournalRole),
-	} {
-		if reflect.TypeOf(&displacedHTTPActivityRecoveryStub{}).AssignableTo(binding.In(1)) {
-			t.Fatal("a substituted recovery role fits a native journal binding")
+	pg, sqlite := &StartupPostgresOwner{}, &StartupSQLiteOwner{}
+	substitute := &displacedHTTPActivityRecoveryStub{}
+	for _, bound := range []bool{false, true} {
+		if bound {
+			if err := pg.BindActivityJournalRole(&activityjournal.ActivityPostgresOwner{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := sqlite.BindActivityJournalRole(&activityjournal.ActivitySQLiteOwner{}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		originalPG, originalSQLite := pg.activityJournal, sqlite.activityJournal
+		pgErr, sqliteErr := pg.BindActivityJournalRole(substitute), sqlite.BindActivityJournalRole(substitute)
+		if pgErr == nil || sqliteErr == nil || pg.activityJournal != originalPG || sqlite.activityJournal != originalSQLite {
+			t.Fatalf("substitute changed native recovery binding: bound=%v postgres=%v sqlite=%v", bound, pgErr, sqliteErr)
+		}
+		if len(substitute.bound) != 0 || substitute.recoveryCalls != 0 {
+			t.Fatalf("substitute invoked recovery: bound=%v grant calls=%d recovery calls=%d", bound, len(substitute.bound), substitute.recoveryCalls)
 		}
 	}
 	for _, journal := range []reflect.Type{
