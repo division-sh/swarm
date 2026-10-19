@@ -33,15 +33,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// Called by the real dual-store channel/private-activity fixture. Only the
-// provider protocol is simulated; lifecycle, claim, completion admission,
-// registry, HTTP gateway, catalog hashes, executor, journal and connector run.
-func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, selected any, executor *tools.Executor, owner *channelactivation.Owner, predecessor packs.OutboundBindingPlan, actor models.AgentConfig, calls func() int32) {
+func prepareRegisteredManagedChannelActor(t *testing.T, ctx context.Context, selected any, actor models.AgentConfig) models.AgentConfig {
 	t.Helper()
-	store := selected.(interface {
-		storetest.AgentFixtureStore
-		storetest.ManagedAgentTurnFixtureStore
-	})
+	store := selected.(storetest.AgentFixtureStore)
 	actor.Identity.RunID = correlation.RunIDFromContext(ctx)
 	actor.Model = "regular"
 	actor.Type = "generic"
@@ -63,6 +57,19 @@ func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, s
 	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, store, manager.PersistedAgent{Config: actor, Status: "active"}, source); err != nil {
 		t.Fatal(err)
 	}
+	return actor
+}
+
+// Called by the real dual-store channel/private-activity fixture. Only the
+// provider protocol is simulated; lifecycle, claim, completion admission,
+// registry, HTTP gateway, catalog hashes, executor, journal and connector run.
+func proveRegisteredManagedChannelTransport(t *testing.T, ctx context.Context, selected any, executor *tools.Executor, owner *channelactivation.Owner, predecessor packs.OutboundBindingPlan, actor models.AgentConfig, calls func() int32) {
+	t.Helper()
+	store := selected.(interface {
+		storetest.AgentFixtureStore
+		storetest.ManagedAgentTurnFixtureStore
+	})
+	actor = prepareRegisteredManagedChannelActor(t, ctx, selected, actor)
 	state, found, err := store.LoadAgentLifecycleState(ctx, actor.Identity)
 	if err != nil || !found {
 		t.Fatalf("managed lifecycle: found=%v err=%v", found, err)
