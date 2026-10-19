@@ -114,6 +114,10 @@ func TestRunForkExactFactsFixedEventMaterializationBothStores(t *testing.T) {
 				exactFactRef(t, runforkrevision.FamilyEvents, laterEvent), exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID), exactFactRef(t, runforkrevision.FamilyEntityMutations, laterMutation)), 2, true)
 		})
 		ctx := testAuthorActivityContext()
+		rooted, err := s.selected.(rootedRunStore).LoadRunRootedSource(ctx, f.runID)
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, point := range []struct {
 			event, name string
 			revision    int64
@@ -131,7 +135,7 @@ func TestRunForkExactFactsFixedEventMaterializationBothStores(t *testing.T) {
 					t.Fatalf("wrong historical event %s", id)
 				}
 			}
-			child, err := s.selected.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: point.event})
+			child, err := s.selected.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: point.event, RootAdmission: rooted.Admission()})
 			if err != nil {
 				t.Fatalf("materialize exact fixed event: %v", err)
 			}
