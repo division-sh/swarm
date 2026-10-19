@@ -265,6 +265,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		command.Activations = ownedActivations
 		command.Commit.inbound = &preparedInboundPublication{
 			admission: validated.Admission, eventID: command.Commit.Event.ID(),
+			authenticated: item.Event.Clone(), normalized: admitted.Event().Clone(),
 			bundleHash: eb.sourceArtifactFact.BundleHash(), provider: validated.Provider,
 			ordinal: index, count: len(validated.Events), kind: item.Kind, authorization: item.Authorization,
 		}

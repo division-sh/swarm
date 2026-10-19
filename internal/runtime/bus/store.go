@@ -182,8 +182,19 @@ func (c PublicationCommand) ValidateInbound(admission providertriggers.Publicati
 	if prepared == nil || !prepared.admission.SameOwner(admission) || !c.prospective.Empty() || c.Commit.Event.ID() != prepared.eventID {
 		return fmt.Errorf("provider ingress publication requires its original prepared output seal")
 	}
+	event := c.Commit.Event.Event()
+	if event.Type() != prepared.normalized.Type() || event.RunID() != prepared.normalized.RunID() ||
+		event.RoutingSource() != prepared.normalized.RoutingSource() || !slices.Equal(event.Payload(), prepared.normalized.Payload()) {
+		return fmt.Errorf("provider publication changed its schema-admitted output")
+	}
+	// Check the original authenticated payload with the current receiver facts;
+	// canonical optional-null lowering is bound above, not a new provider output.
+	authenticated, err := events.ResolveEnvelope(prepared.authenticated, event.NormalizedEnvelope())
+	if err != nil {
+		return err
+	}
 	if err := admission.ValidateCommitOutput(context.Background(), prepared.bundleHash, prepared.provider,
-		prepared.ordinal, prepared.count, c.Commit.Event.Event(), prepared.kind, prepared.authorization); err != nil {
+		prepared.ordinal, prepared.count, authenticated, prepared.kind, prepared.authorization); err != nil {
 		return err
 	}
 	if err := events.ValidateGenericPublishEvent(c.Commit.Event.Event()); err != nil {
@@ -497,6 +508,8 @@ type CommitPublishRequest struct {
 // under its distinct causal admission rather than repeating input admission.
 type preparedInboundPublication struct {
 	admission     providertriggers.PublicationAdmission
+	authenticated events.Event
+	normalized    events.Event
 	eventID       string
 	bundleHash    string
 	provider      string
