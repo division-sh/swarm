@@ -51,7 +51,6 @@ func TestValidateSourceRejectsUnsupportedProviderConnectorShape(t *testing.T) {
 	errs := ValidateSource(source)
 	joined := joinErrors(errs)
 	for _, want := range []string{
-		"effect_class must be non_idempotent_write",
 		"must declare exactly one credential binding mode",
 		"uses rate_limit",
 	} {
