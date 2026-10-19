@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -399,6 +400,48 @@ func TestEffectiveEventResolutionPreservesConnectedRenameOwnership(t *testing.T)
 }
 
 func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder(t *testing.T) {
+	t.Run("qualified declaration coordinates", func(t *testing.T) {
+		repo := repoRootForContractsTest(t)
+		for _, tc := range []struct {
+			fixture, flow, event, want string
+		}{
+			{"test-child-flow-pin-wiring", ".", "child/work.completed", "events.yaml:4"},
+			{"test-nested-three-levels", "child", "grandchild/micro.done", "child/events.yaml:1"},
+		} {
+			t.Run(tc.fixture, func(t *testing.T) {
+				root := filepath.Join(repo, "tests", "tier11-flow-composition", tc.fixture)
+				bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := eventDeclarationLocation(bundle, tc.flow, tc.event); got != tc.want {
+					t.Fatalf("declaration %s:%s location = %q, want %q", tc.flow, tc.event, got, tc.want)
+				}
+			})
+		}
+		root := t.TempDir()
+		writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: coordinates\n")
+		for _, flow := range []string{".", "nested"} {
+			writeFixtureFile(t, filepath.Join(root, flow, "events.yaml"), "work.ready:\nchild/work.ready:\nother/work.ready:\n")
+		}
+		bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, flow := range []string{".", "nested"} {
+			for index, event := range []string{"work.ready", "child/work.ready", "other/work.ready"} {
+				want := fmt.Sprintf("%s:%d", filepath.ToSlash(filepath.Join(flow, "events.yaml")), index+1)
+				if got := eventDeclarationLocation(bundle, flow, event); got != want {
+					t.Errorf("declaration %s:%s location = %q, want %q", flow, event, got, want)
+				}
+			}
+		}
+		withoutSource := *bundle
+		withoutSource.SourceArtifact = (WorkflowContractBundle{}).SourceArtifact
+		if got := eventDeclarationLocation(&withoutSource, "nested", "child/work.ready"); got != "unknown source" {
+			t.Fatalf("missing retained declaration source invented a location: %q", got)
+		}
+	})
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: ownership\n")
 	for endpoint, fieldType := range map[string]string{"producer-a": "text", "producer-b": "uuid"} {
