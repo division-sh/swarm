@@ -367,7 +367,7 @@ func completionRecoveryTurnContext(ctx context.Context, tx *sql.Tx, recovered co
 	turn := settlement.AgentTurn
 	if source.AttemptID != attempt.AttemptID || source.Kind != string(runtimeeffects.KindProviderTurn) ||
 		source.AuthorityKind != string(attempt.Authority.Kind) || source.AuthorityID != attempt.Authority.ID ||
-		source.AgentID != turn.AgentID || source.ExecutionMode != string(attempt.Authority.ExecutionMode) ||
+		source.AgentID != attempt.Authority.Normal.AgentID || source.ExecutionMode != string(attempt.Authority.ExecutionMode) ||
 		source.BundleHash != frame.Session.SourceArtifact.Hash ||
 		turn.TurnID != attempt.Authority.Target.ID || turn.RunID != frame.Turn.Event.RunID ||
 		turn.TriggerEventID != frame.Turn.Event.ID || turn.Identity != frame.Session.AgentIdentity {
