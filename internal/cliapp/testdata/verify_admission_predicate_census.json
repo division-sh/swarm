@@ -939,7 +939,7 @@
     "owner": "internal/cliapp/channel_onboarding_progress.go::renderChannelOnboardingResult",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-cli-progress",
-    "body_sha256": "2160530f754ba99d11ae38b477329d3111abe8f7fc6fde40c9ae134db5db0b3f"
+    "body_sha256": "cac4b2e3967ce82b8687212640c555b7d56a49b7714a946d54b07847fa7892d6"
   },
   {
     "owner": "internal/cliapp/channel_onboarding_progress.go::selectedChannelCredentialReadback",

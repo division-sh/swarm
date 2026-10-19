@@ -92,6 +92,16 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 		return returnCLIValidationError(errOut, err)
 	}
 	if !pending && (result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Readiness == nil || !result.Readiness.Ready) {
+		if result.Operation.Provider == "whatsapp" {
+			return returnCLIValidationError(errOut, errors.New("Not linked: run swarm channel connect whatsapp"))
+		}
+		if result.Operation.Phase == channelonboarding.PhaseSucceeded {
+			reason := "connected readiness evidence is unavailable"
+			if result.Readiness != nil {
+				reason = string(result.Readiness.Reason)
+			}
+			return returnCLIValidationError(errOut, fmt.Errorf("channel onboarding succeeded historically but the channel is not READY: %s", reason))
+		}
 		return returnCLIValidationError(errOut, errors.New("channel result has neither current READY evidence nor owned pending preparation"))
 	}
 	var pairingQR string

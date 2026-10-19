@@ -481,23 +481,10 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 		}
 		advancePending = false
 		switch result.Operation.Phase {
-		case "succeeded":
-			if result.Readiness != nil && result.Readiness.Ready {
-				return result, nil
-			}
-			reason := "connected readiness evidence is unavailable"
-			if result.Readiness != nil && strings.TrimSpace(string(result.Readiness.Reason)) != "" {
-				reason = string(result.Readiness.Reason)
-			}
-			if opts.waitForPairing && result.Operation.Provider == "whatsapp" {
-				return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("WhatsApp disconnected: network unreachable, reconnecting..."))
-			}
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding succeeded historically but the channel is not READY: %s", reason))
-		case "failed", "retired":
-			if opts.waitForPairing && result.Operation.Provider == "whatsapp" {
-				return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("Not linked: run swarm channel connect whatsapp"))
-			}
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding ended in %s: %s", result.Operation.Phase, result.Operation.FailureMessage))
+		case "succeeded", "failed", "retired":
+			// The shared result renderer owns READY validation and terminal
+			// diagnostics for connect and explicit machine continuations.
+			return result, nil
 		}
 		if identity := result.IdentityOperation; identity != nil {
 			now := time.Now()
@@ -555,13 +542,14 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 		if err != nil {
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
 		}
-		if !pending {
-			if current.Operation.Phase != channelonboarding.PhaseSucceeded || current.Connection == nil || !current.Connection.Linked {
-				return current, nil
-			}
-			if current.Readiness != nil && current.Readiness.Ready {
-				return current, nil
-			}
+		if current.Readiness != nil && current.Readiness.Ready {
+			return current, nil
+		}
+		if !pending && current.Operation.Phase != channelonboarding.PhaseSucceeded {
+			return current, nil
+		}
+		if !pending && (current.Connection == nil || !current.Connection.Linked) {
+			return current, nil
 		}
 		if pending && current.Pairing.Code != lastQR {
 			if lastQR != "" {
@@ -589,6 +577,10 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 		}
 		current = next
 	}
+	return confirmCLIChannelAccount(ctx, client, current, opts, out, errOut, acceptedAccount)
+}
+
+func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, error) {
 	// A scan is a preview, not executable admission. Only approval advances
 	// through the checkpoint owner; rejection can checkpoint solely for logout.
 	account := current.Pairing.AccountPresentation
@@ -611,14 +603,10 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
 		}
 	}
-	if !approve {
-		return replaceCLIChannelAccount(ctx, client, current, opts, out, errOut)
+	if approve {
+		*acceptedAccount = account
+		return current, nil
 	}
-	*acceptedAccount = account
-	return current, nil
-}
-
-func replaceCLIChannelAccount(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer) (channelOnboardingResult, error) {
 	var paired channelOnboardingResult
 	if err := client.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": current.Operation.OperationID, "checkpoint_only": true}, &paired); err != nil {
 		return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
