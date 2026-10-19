@@ -295,7 +295,11 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					})
 					proof, activation, forkID, executed, err = result.ForkLocalRuntimeContainer, result.Activation, result.Materialization.ForkRunID, result.ExecutedEventCount, executeErr
 				} else {
-					materialized := materializeSelectedRuntimeOutcomeFork(t, ctx, owner, loader, selection, sourceID, eventID)
+					materialized := materializeSelectedRuntimeOutcomeFork(t, ctx, owner, SelectedContractExecutionRequest{
+						SourceRunID: sourceID, At: eventID, Owner: owner,
+						SourceLoader: loader, ContractSelection: selection,
+						AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
+					})
 					forkID = materialized.ForkRunID
 					result, activateErr := ActivateSelectedContractRunFork(ctx, SelectedContractActivationGateRequest{
 						ForkRunID: forkID, AllowSourceFreeze: true, Store: selected.(SelectedContractActivationStore), ExecutionOwner: owner, SourceLoader: loader,
@@ -480,13 +484,9 @@ func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend
 	}
 }
 
-func materializeSelectedRuntimeOutcomeFork(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, loader SelectedContractSourceLoader, selection runfork.RunForkContractSelection, sourceID, eventID string) runfork.RunForkMaterialization {
+func materializeSelectedRuntimeOutcomeFork(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, request SelectedContractExecutionRequest) runfork.RunForkMaterialization {
 	t.Helper()
-	prepared, err := owner.Prepare(ctx, SelectedContractExecutionRequest{
-		SourceRunID: sourceID, At: eventID, Owner: owner,
-		SourceLoader: loader, ContractSelection: selection,
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: owner.ports.contexts.capability},
-	})
+	prepared, err := owner.Prepare(ctx, request)
 	if err != nil {
 		t.Fatal(err)
 	}
