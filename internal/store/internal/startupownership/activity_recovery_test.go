@@ -25,6 +25,18 @@ func (p *activityRecoveryRoleProbe) BindActivityGrant(grant runtimeownership.Gra
 
 func TestStartupActivityJournalRequiresOneDualRole(t *testing.T) {
 	pg, sqlite := &StartupPostgresOwner{}, &StartupSQLiteOwner{}
+	for _, invalid := range []runtimeownership.ActivityJournalGrantBinder{
+		(*activityjournal.ActivityPostgresOwner)(nil),
+		(*activityjournal.ActivitySQLiteOwner)(nil),
+		&activityRecoveryRoleProbe{},
+	} {
+		if pg.BindActivityJournalRole(invalid) == nil || sqlite.BindActivityJournalRole(invalid) == nil || pg.activityJournal != nil || sqlite.activityJournal != nil {
+			t.Fatal("missing or non-native role changed the original native owner")
+		}
+	}
+	if pg.BindActivityJournalRole(&activityjournal.ActivitySQLiteOwner{}) == nil || sqlite.BindActivityJournalRole(&activityjournal.ActivityPostgresOwner{}) == nil || pg.activityJournal != nil || sqlite.activityJournal != nil {
+		t.Fatal("other-store role changed the original native owner")
+	}
 	for _, test := range []struct {
 		name string
 		bind func(bool) error

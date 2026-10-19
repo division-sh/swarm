@@ -11,19 +11,21 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
-func (s *StartupPostgresOwner) BindActivityJournalRole(role *activityjournal.ActivityPostgresOwner) error {
-	if s == nil || role == nil || s.activityJournal != nil {
+func (s *StartupPostgresOwner) BindActivityJournalRole(role runtimeownership.ActivityJournalGrantBinder) error {
+	native, ok := role.(*activityjournal.ActivityPostgresOwner)
+	if s == nil || !ok || native == nil || s.activityJournal != nil {
 		return errors.New("startup PostgreSQL activity journal must be bound exactly once")
 	}
-	s.activityJournal = role
+	s.activityJournal = native
 	return nil
 }
 
-func (s *StartupSQLiteOwner) BindActivityJournalRole(role *activityjournal.ActivitySQLiteOwner) error {
-	if s == nil || role == nil || s.activityJournal != nil {
+func (s *StartupSQLiteOwner) BindActivityJournalRole(role runtimeownership.ActivityJournalGrantBinder) error {
+	native, ok := role.(*activityjournal.ActivitySQLiteOwner)
+	if s == nil || !ok || native == nil || s.activityJournal != nil {
 		return errors.New("startup SQLite activity journal must be bound exactly once")
 	}
-	s.activityJournal = role
+	s.activityJournal = native
 	return nil
 }
 
