@@ -25,11 +25,12 @@ import (
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	waBinary "go.mau.fi/whatsmeow/binary"
 )
 
 func TestRunServeWhatsAppSignedPairingBothStores(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/serveapp/testdata/whatsapp-session"))
-	testRunServeWhatsAppSignedPairing(t, servedNativeJourneyProof{})
+	testRunServeWhatsAppSignedPairing(t, servedNativeJourneyProof{revokedPairing: true})
 }
 
 func TestRunServeWhatsAppQuotedCardDecisionBothStores(t *testing.T) {
@@ -63,6 +64,7 @@ func TestRunServeWhatsAppPublicResetRetainsPairingBothStores(t *testing.T) {
 }
 
 type servedNativeJourneyProof struct {
+	revokedPairing       bool
 	quotedRetirement     bool
 	explicitLogout       bool
 	resetSources         *bool
@@ -139,8 +141,13 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{
 				"provider": "whatsapp", "verb": "connect", "save_proof": false, "idempotency_key": "native-pairing"}, &result)
 			id := result.Operation.OperationID
+			originalID := id
 			deadline := time.Now().Add(5 * time.Second)
 			result = requireServedNativePairingProgress(t, endpoint, result, deadline)
+			if proof.revokedPairing {
+				result = requireServedRevokedPairingRecovery(t, endpoint, peer, opts.SwarmDir, backend, storeDSN, result)
+				id = result.Operation.OperationID
+			}
 			peer.pair(result.Pairing.Code)
 			_, initialPrekeyUploads := peer.awaitPostLogin()
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id, "checkpoint_only": true}, &result)
@@ -150,8 +157,17 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				t.Fatal("operator account preview advanced before approval", result)
 			}
 			for _, key := range []string{"native-pairing", ""} {
+				result = channelonboarding.Result{}
 				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{
 					"provider": "whatsapp", "verb": "connect", "save_proof": false, "idempotency_key": key}, &result)
+				if proof.revokedPairing && key != "" {
+					if result.Operation.OperationID != originalID || result.Operation.Phase != channelonboarding.PhaseFailed ||
+						result.Operation.FailureCode != "session_pairing_revoked" || result.IdentityOperation != nil || result.Binding != nil ||
+						result.Readiness != nil && result.Readiness.Ready {
+						t.Fatal("keyed replay replaced or activated the terminal original pairing")
+					}
+					continue
+				}
 				if !reflect.DeepEqual(result.Operation, preview) || result.IdentityOperation != nil || result.Binding != nil ||
 					result.Readiness != nil && result.Readiness.Ready {
 					t.Fatal("connecting again began operator enrollment before account approval", result)
@@ -354,7 +370,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				}
 				return
 			}
-			pairingFiles, err := filepath.Glob(filepath.Join(opts.SwarmDir, "*", "session.json"))
+			pairingFiles, err := filepath.Glob(filepath.Join(opts.SwarmDir, readServedNativeConnectionID(t, backend, storeDSN, id), "session.json"))
 			if err != nil || len(pairingFiles) != 1 {
 				t.Fatal("single actual pairing owner has no exact retained header", pairingFiles, err)
 			}
@@ -433,6 +449,77 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			}
 		})
 	}
+}
+
+func requireServedRevokedPairingRecovery(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, directory, backend, location string, result channelonboarding.Result) channelonboarding.Result {
+	t.Helper()
+	old := result.Operation
+	connectionID := readServedNativeConnectionID(t, backend, location, old.OperationID)
+	peer.mu.Lock()
+	handoff := peer.loginHandoff
+	peer.loginHandoff = false
+	peer.mu.Unlock()
+	peer.pair(result.Pairing.Code)
+	peer.awaitPostLogin()
+	path := filepath.Join(directory, connectionID, "session.json")
+	header, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer.mu.Lock()
+	wire := peer.wire
+	peer.mu.Unlock()
+	if err := wire.Send(peer.ctx, waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "401"},
+		Content: []waBinary.Node{{Tag: "conflict", Attrs: waBinary.Attrs{"type": "device_removed"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	joined := false
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		peer.mu.Lock()
+		joined = peer.disconnected == peer.connections
+		peer.mu.Unlock()
+		if joined {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !joined {
+		t.Fatal("native revocation did not finish its original peer")
+	}
+	result = channelonboarding.Result{}
+	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{"provider": "whatsapp", "verb": "connect", "save_proof": false}, &result)
+	if result.Operation.OperationID == old.OperationID || readServedNativeConnectionID(t, backend, location, result.Operation.OperationID) == connectionID ||
+		result.Operation.SessionAccount != (operatorchannel.SessionAccountAdmission{}) || result.IdentityOperation != nil || result.Binding != nil ||
+		result.Operation.ActivationRevision != 0 || result.Readiness != nil && result.Readiness.Ready {
+		t.Fatal("revoked pairing reused the old reservation or granted authority")
+	}
+	var retained channelonboarding.Result
+	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": old.OperationID}, &retained)
+	if retained.Operation.Phase != channelonboarding.PhaseFailed || retained.Operation.FailureCode != "session_pairing_revoked" ||
+		readServedNativeConnectionID(t, backend, location, old.OperationID) != connectionID || retained.Operation.SessionAccount != (operatorchannel.SessionAccountAdmission{}) {
+		t.Fatal("replacement did not retain the exact terminalized parent")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(header, after) {
+		t.Fatal("replacement changed retained pairing evidence", err)
+	}
+	fixture, owner, err := sessionstate.OpenSDKFixture(peer.ctx, filepath.Join(filepath.Dir(path), "provider.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, readErr := owner.CurrentDevice(peer.ctx, peer.account.ToNonAD().String())
+	closeErr := fixture.Close()
+	if readErr != nil || closeErr != nil || device == nil || device.ID == nil || device.Deleted {
+		t.Fatal("revocation deleted or reopened the old private device", readErr, closeErr)
+	}
+	peer.mu.Lock()
+	joined = peer.disconnected == peer.connections-1
+	peer.loginHandoff = handoff
+	peer.mu.Unlock()
+	if !joined {
+		t.Fatal("fresh reservation opened before the revoked peer joined")
+	}
+	return requireServedNativePairingProgress(t, endpoint, result, time.Now().Add(5*time.Second))
 }
 
 type observedNativeReset struct {
