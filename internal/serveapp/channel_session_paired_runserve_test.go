@@ -486,6 +486,15 @@ func requireServedRevokedPairingRecovery(t *testing.T, endpoint string, peer *se
 	if !joined {
 		t.Fatal("native revocation did not finish its original peer")
 	}
+	var revoked channelonboarding.Result
+	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": old.OperationID}, &revoked)
+	if revoked.Operation.OperationID != old.OperationID || revoked.Operation.Phase != channelonboarding.PhaseActivatingProvider ||
+		revoked.Pairing == nil || *revoked.Pairing != (channelonboarding.PairingReadback{Status: "failed"}) ||
+		revoked.Connection == nil || revoked.Connection.State != "disconnected" || revoked.Connection.Reason != "logged out" ||
+		revoked.IdentityOperation != nil || revoked.Binding != nil || revoked.Operation.ActivationRevision != 0 ||
+		revoked.Readiness != nil && revoked.Readiness.Ready {
+		t.Fatal("exact native revocation did not remain observable without QR or executable authority")
+	}
 	result = channelonboarding.Result{}
 	requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{"provider": "whatsapp", "verb": "connect", "save_proof": false}, &result)
 	if result.Operation.OperationID == old.OperationID || readServedNativeConnectionID(t, backend, location, result.Operation.OperationID) == connectionID ||
