@@ -59,6 +59,7 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 					t.Fatal("receptionist required operator authority", result.Operation.Ceremony)
 				}
 				result = requireServedNativePairingProgress(t, endpoint, result, time.Now().Add(5*time.Second))
+				result = requireServedRevokedPairingRecovery(t, endpoint, peer, opts.SwarmDir, backend, location, result)
 				peer.pair(result.Pairing.Code)
 				id := result.Operation.OperationID
 				for deadline := time.Now().Add(5 * time.Second); result.Operation.Phase == channelonboarding.PhaseActivatingProvider && time.Now().Before(deadline); {
