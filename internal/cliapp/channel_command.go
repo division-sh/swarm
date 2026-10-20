@@ -376,6 +376,9 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if opts.waitForPairing && opts.apiOptions.input != nil {
 		opts.apiOptions.input = bufio.NewReader(opts.apiOptions.input)
 	}
+	if opts.waitForPairing && begun.Operation.Posture == channelonboarding.ActivationSessionConnection {
+		fmt.Fprintf(out, "Connecting to %s...\n", begun.Operation.Provider)
+	}
 	progressOut := out
 	if opts.output.asJSON || opts.output.quiet {
 		progressOut = io.Discard
@@ -464,6 +467,7 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 	sharedAudienceAnnounced := false
 	acceptedAccount := ""
 	advancePending := opts.verb == "resume"
+	awaitLogin := false
 	for {
 		pending, err := validateCLIChannelProgress(result)
 		if err != nil {
@@ -475,7 +479,7 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 		waitingForConnection := result.Operation.Phase == channelonboarding.PhaseSucceeded && result.Connection != nil && result.Connection.Linked
 		if opts.waitForPairing {
 			if pending || waitingForConnection {
-				result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, progressOut, errOut)
+				result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, awaitLogin, progressOut, errOut)
 				if err != nil {
 					return channelOnboardingResult{}, err
 				}
@@ -485,6 +489,7 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 			if err != nil {
 				return channelOnboardingResult{}, err
 			}
+			awaitLogin = previewPending
 			if previewPending {
 				continue
 			}
@@ -538,19 +543,21 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 	}
 }
 
-func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer) (channelOnboardingResult, error) {
+func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, awaitLogin bool, out, errOut io.Writer) (channelOnboardingResult, error) {
 	poll := opts.apiOptions.channelConnectPoll
 	if poll <= 0 {
 		poll = 500 * time.Millisecond
 	}
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
-	fmt.Fprintf(out, "Connecting to %s...\n", current.Operation.Provider)
 	lastQR := ""
 	for {
 		pending, err := validateCLIChannelProgress(current)
 		if err != nil {
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
+		}
+		if current.Connection != nil && current.Connection.State == "disconnected" && current.Connection.Reason != "" {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("WhatsApp disconnected: %s", cliSanitizeOneLineValue(current.Connection.Reason)))
 		}
 		if !pending && (current.Operation.Phase != channelonboarding.PhaseSucceeded || current.Connection == nil || !current.Connection.Linked || current.Readiness != nil && current.Readiness.Ready) {
 			return current, nil
@@ -563,13 +570,14 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 				return channelOnboardingResult{}, err
 			}
 			lastQR = current.Pairing.Code
+			awaitLogin = false
 		}
 		select {
 		case <-ctx.Done():
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel connection stopped"))
 		case <-ticker.C:
 		}
-		if pending && current.Pairing.Status != channelonboarding.PairingStatusPreparing && current.Pairing.Code == "" {
+		if pending && current.Pairing.Status != channelonboarding.PairingStatusPreparing && current.Pairing.Code == "" && (!awaitLogin || current.Pairing.Connected) {
 			break
 		}
 		var next channelOnboardingResult

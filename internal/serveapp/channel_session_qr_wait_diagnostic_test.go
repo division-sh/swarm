@@ -184,6 +184,10 @@ func TestReadinessPublicUnpairedQRWaitDiagnosticBothStores(t *testing.T) {
 				if currentErr == nil || bootstrapErr == nil {
 					t.Fatal("pairing observation granted execution health")
 				}
+				view, viewErr := owner.ReadSessionConnection(t.Context(), result.Operation)
+				if viewErr != nil || view.State != "disconnected" || view.Reason != "network unreachable" || view.Linked {
+					t.Fatal("unadmitted disconnected transport was presented as still connecting", view, viewErr)
+				}
 				if _, err := connection.ChannelExecution(t.Context()); err == nil {
 					t.Fatal("terminal pairing granted channel execution")
 				}

@@ -132,9 +132,10 @@ func TestChannelCLIPairingProgressRefusesContradictoryOrExpiredEvidence(t *testi
 }
 
 func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
-	for _, mode := range []string{"human", "human-receptionist", "human-login-handoff", "human-reentry", "human-reentry-receptionist", "--json", "--quiet"} {
+	for _, mode := range []string{"human", "human-receptionist", "human-login-handoff", "human-login-disconnected", "human-reentry", "human-reentry-receptionist", "--json", "--quiet"} {
 		t.Run(mode, func(t *testing.T) {
 			human := strings.HasPrefix(mode, "human")
+			loginHandoff := strings.HasPrefix(mode, "human-login-")
 			reentry := strings.Contains(mode, "reentry")
 			receptionist := strings.Contains(mode, "receptionist")
 			stage := 0
@@ -143,6 +144,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 			}
 			pairingReads := 0
 			checkpoints := 0
+			loginReads := 0
 			var methods []string
 			var out, errOut bytes.Buffer
 			progress := func() map[string]any {
@@ -157,13 +159,21 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					}
 				case 2:
 					result["pairing"] = map[string]any{"status": "paired", "paired": true, "connected": false}
-					if human && mode != "human-login-handoff" {
+					if human && !loginHandoff {
 						result["pairing"].(map[string]any)["connected"] = true
 						result["pairing"].(map[string]any)["account_presentation"] = "+15550000001"
 					}
 					if reentry {
 						result = sessionProgressCLIResult("whatsapp", "", "awaiting_external_identity", false)
 						result["connection"] = map[string]any{"state": "connected", "linked": true, "account_presentation": "+15550000001"}
+					}
+					if loginHandoff && loginReads >= 2 {
+						if mode == "human-login-disconnected" {
+							result["connection"] = map[string]any{"state": "disconnected", "linked": false, "reason": "network unreachable"}
+						} else {
+							result["pairing"].(map[string]any)["connected"] = true
+							result["pairing"].(map[string]any)["account_presentation"] = "+15550000001"
+						}
 					}
 				case 3:
 					result = sessionProgressCLIResult("whatsapp", "", "awaiting_external_identity", false)
@@ -179,7 +189,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						result["readiness"].(map[string]any)["native_inbox"] = map[string]any{"state": "qualified"}
 					}
 				}
-				if mode == "human-login-handoff" || reentry {
+				if loginHandoff || reentry {
 					result["operation"].(map[string]any)["revision"] = stage + checkpoints + 1
 				}
 				return result
@@ -192,6 +202,9 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						t.Fatal("pairing created a replacement responsibility")
 					}
 				case "channel.onboarding_get":
+					if loginHandoff && stage == 2 && checkpoints > 0 {
+						loginReads++
+					}
 					if human && stage <= 1 {
 						stage = 1
 						pairingReads++
@@ -201,10 +214,13 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					}
 				case "channel.onboarding_retry":
 					if req.Params["checkpoint_only"] == true {
-						if mode != "human-login-handoff" || stage != 2 {
+						if !loginHandoff || stage != 2 {
 							t.Fatal("unexpected pairing-only login handoff", stage, req.Params)
 						}
 						checkpoints++
+						if checkpoints == 1 {
+							return progress()
+						}
 						stage = 3
 						result := sessionProgressCLIResult("whatsapp", "", "awaiting_external_identity", false)
 						result["operation"].(map[string]any)["revision"] = stage + 1
@@ -260,6 +276,16 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					opts.input = strings.NewReader("y\ny\n")
 				}
 				code := executeRootCommandWithOptions(context.Background(), project, []string{"channel", "connect", "whatsapp"}, &out, &errOut, opts)
+				if mode == "human-login-disconnected" {
+					if code != 2 || checkpoints != 1 || loginReads != 2 ||
+						!strings.Contains(errOut.String(), "WhatsApp disconnected: network unreachable") ||
+						strings.Contains(out.String(), "READY") || strings.Contains(errOut.String(), "[y/N]") ||
+						strings.Count(out.String(), "Connecting to whatsapp...") != 1 ||
+						strings.Count(strings.Join(methods, ","), "channel.onboarding_retry") != 1 {
+						t.Fatal("disconnected retained pairing kept driving, prompted, or lost its plain reason", code, checkpoints, loginReads, methods)
+					}
+					return
+				}
 				if code != 0 || !strings.Contains(out.String(), "READY") || !reentry && (!strings.Contains(out.String(), "QR expired, new QR:") ||
 					!strings.Contains(out.String(), "Linked Devices")) ||
 					strings.Contains(out.String(), "Native inbox") ||
@@ -299,8 +325,8 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 			if stage != 5 || strings.Count(strings.Join(methods, ","), "channel.confirm") != confirmations {
 				t.Fatal("ceremony failed to reach genuine confirmation", stage, methods)
 			}
-			if mode == "human-login-handoff" && checkpoints != 1 {
-				t.Fatal("login handoff did not use exactly the pairing-only checkpoint", checkpoints)
+			if mode == "human-login-handoff" && (checkpoints != 1 || loginReads < 2 || strings.Count(out.String(), "Connecting to whatsapp...") != 1) {
+				t.Fatal("pending login repeated the checkpoint/status instead of waiting for read-only authenticated progress", checkpoints, loginReads)
 			}
 		})
 	}

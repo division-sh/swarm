@@ -13,13 +13,15 @@ func (s *serveSessionBootstrap) ReadSessionConnection(ctx context.Context, op ch
 	if op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired {
 		return view, nil
 	}
-	if op.SessionAccount.Validate() != nil {
-		view.State = "connecting"
-		return view, nil
-	}
 	connection := s.connection(op.OperationID)
 	if connection != nil {
 		view.Reason = connection.DisconnectionReason()
+	}
+	if op.SessionAccount.Validate() != nil {
+		if view.Reason == "" {
+			view.State = "connecting"
+		}
+		return view, nil
 	}
 	provider, _, current, err := s.ObserveSession(ctx, op)
 	defer provider.CloseExecution()
