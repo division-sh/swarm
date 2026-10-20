@@ -94,7 +94,7 @@ func TestPairedNativeResultReadinessPreservesCallerCancellation(t *testing.T) {
 	history := &cancellationObservedHistoryRead{Store: &cancelBeforeNativeReadbackStore{Store: selected, cancel: cancel}}
 	service := &Service{store: history,
 		sessions: &canceledSessionReadback{}, identities: &cancellationTestIdentities{}, readiness: readiness}
-	result, err := service.driveLocked(caller, op, candidate, "")
+	result, err := service.driveLocked(caller, op, candidate, "", true)
 	if !errors.Is(err, context.Canceled) || !history.canceled || readiness.canceled {
 		t.Fatalf("paired native history did not fence disclosure at its first canceled reader: err=%v canceled=%v", err, history.canceled)
 	}
@@ -123,7 +123,7 @@ func TestNativeSessionResultReadbackPreservesCallerCancellation(t *testing.T) {
 			service := &Service{store: history, sessions: sessions,
 				identities: &cancellationTestIdentities{}, readiness: cancellationTestReadiness{},
 				now: func() time.Time { return now }}
-			result, err := service.driveLocked(caller, op, candidate, "")
+			result, err := service.driveLocked(caller, op, candidate, "", true)
 			if !errors.Is(err, context.Canceled) || !history.canceled || sessions.readbackCanceled {
 				t.Fatalf("native history did not fence disclosure at its first canceled reader: err=%v canceled=%v", err, history.canceled)
 			}

@@ -633,7 +633,7 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 		}
 		return s.result(ctx, paired, &candidate)
 	}
-	result, err := s.driveLocked(ctx, rebound, candidate, input.ProviderCredential)
+	result, err := s.driveLocked(ctx, rebound, candidate, input.ProviderCredential, true)
 	if err != nil {
 		return result, fmt.Errorf("drive onboarding retry: %w", err)
 	}
@@ -939,7 +939,7 @@ func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly b
 		// execute the retained declaration's historical business generation.
 		return nil
 	}
-	if _, err := s.driveLocked(ctx, op, candidate, ""); err != nil {
+	if _, err := s.driveLocked(ctx, op, candidate, "", false); err != nil {
 		var credentialRequired *CredentialRequiredError
 		if errors.As(err, &credentialRequired) {
 			return nil
@@ -996,10 +996,10 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 		return Result{}, err
 	}
 	defer unlock()
-	return s.driveLocked(ctx, op, candidate, providerCredential)
+	return s.driveLocked(ctx, op, candidate, providerCredential, false)
 }
 
-func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candidate, providerCredential string) (Result, error) {
+func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candidate, providerCredential string, approveAccount bool) (Result, error) {
 	caller := ctx
 	// Durable post-reservation settlement retains its existing lifetime. Native
 	// connection waits/checkpoints still honor the requesting caller's deadline.
@@ -1122,6 +1122,11 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return Result{}, err
 			}
 		case PhaseAwaitingExternalIdentity:
+			// Start/re-entry and recovery retain the account preview. Only an
+			// explicit continuation may activate it or begin operator enrollment.
+			if !approveAccount && op.Posture == ActivationSessionConnection && op.IdentityOperationID == "" && op.ActivationRevision == 0 {
+				return s.result(readback, op, &candidate)
+			}
 			if op.AccountConnection() && !candidate.OperatorRequired && op.IdentityOperationID == "" {
 				op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
 					Phase: PhaseAwaitingOperatorConfirmation, Now: s.now().UTC()})

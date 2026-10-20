@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -131,13 +132,19 @@ func TestChannelCLIPairingProgressRefusesContradictoryOrExpiredEvidence(t *testi
 }
 
 func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
-	for _, mode := range []string{"human", "human-receptionist", "human-login-handoff", "--json", "--quiet"} {
+	for _, mode := range []string{"human", "human-receptionist", "human-login-handoff", "human-reentry", "human-reentry-receptionist", "--json", "--quiet"} {
 		t.Run(mode, func(t *testing.T) {
 			human := strings.HasPrefix(mode, "human")
+			reentry := strings.Contains(mode, "reentry")
+			receptionist := strings.Contains(mode, "receptionist")
 			stage := 0
+			if reentry {
+				stage = 2
+			}
 			pairingReads := 0
 			checkpoints := 0
 			var methods []string
+			var out, errOut bytes.Buffer
 			progress := func() map[string]any {
 				result := sessionProgressCLIResult("whatsapp", "", "activating_provider", false)
 				switch stage {
@@ -154,6 +161,10 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						result["pairing"].(map[string]any)["connected"] = true
 						result["pairing"].(map[string]any)["account_presentation"] = "+15550000001"
 					}
+					if reentry {
+						result = sessionProgressCLIResult("whatsapp", "", "awaiting_external_identity", false)
+						result["connection"] = map[string]any{"state": "connected", "linked": true, "account_presentation": "+15550000001"}
+					}
 				case 3:
 					result = sessionProgressCLIResult("whatsapp", "", "awaiting_external_identity", false)
 					result["identity_operation"] = operatorChannelCLIOperationResult("awaiting_claim", 1, 0)
@@ -164,11 +175,11 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					result["identity_operation"].(map[string]any)["expires_at"] = time.Now().Add(time.Minute)
 				case 5:
 					result = sessionProgressCLIResult("whatsapp", "", "succeeded", true)
-					if mode != "human-receptionist" {
+					if !receptionist {
 						result["readiness"].(map[string]any)["native_inbox"] = map[string]any{"state": "qualified"}
 					}
 				}
-				if mode == "human-login-handoff" {
+				if mode == "human-login-handoff" || reentry {
 					result["operation"].(map[string]any)["revision"] = stage + checkpoints + 1
 				}
 				return result
@@ -177,7 +188,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 				methods = append(methods, req.Method)
 				switch req.Method {
 				case "channel.onboarding_start":
-					if stage != 0 {
+					if stage != 0 && !(reentry && stage == 2) {
 						t.Fatal("pairing created a replacement responsibility")
 					}
 				case "channel.onboarding_get":
@@ -203,10 +214,13 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					if stage == 4 || stage > 5 || req.Params["operation_id"] != operatorChannelCLIOperation {
 						t.Fatal("pairing skipped explicit confirmation or changed responsibility", req.Params, stage)
 					}
+					if reentry && stage == 2 && !strings.Contains(errOut.String(), "Is this the right account? [y/N]") {
+						t.Fatal("retained account advanced without its confirmation prompt")
+					}
 					if stage < 3 {
 						stage++
 					}
-					if mode == "human-receptionist" && stage == 3 {
+					if receptionist && stage == 3 {
 						stage = 5
 					}
 				case "channel.confirm":
@@ -235,16 +249,25 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 				opts.httpClient, opts.input = server.Client(), strings.NewReader("y\ny\n")
 				opts.stdinIsTerminal = func() bool { return true }
 				opts.channelConnectPoll = time.Millisecond
-				var out, errOut bytes.Buffer
+				if reentry {
+					opts.input = iotest.ErrReader(context.Canceled)
+					code := executeRootCommandWithOptions(context.Background(), project, []string{"channel", "connect", "whatsapp"}, &out, &errOut, opts)
+					if code == 0 || stage != 2 || !strings.Contains(errOut.String(), "Is this the right account? [y/N]") {
+						t.Fatal("cancelled account confirmation advanced the retained preview", code, stage)
+					}
+					out.Reset()
+					errOut.Reset()
+					opts.input = strings.NewReader("y\ny\n")
+				}
 				code := executeRootCommandWithOptions(context.Background(), project, []string{"channel", "connect", "whatsapp"}, &out, &errOut, opts)
-				if code != 0 || !strings.Contains(out.String(), "READY") || !strings.Contains(out.String(), "QR expired, new QR:") ||
-					!strings.Contains(out.String(), "Linked Devices") ||
+				if code != 0 || !strings.Contains(out.String(), "READY") || !reentry && (!strings.Contains(out.String(), "QR expired, new QR:") ||
+					!strings.Contains(out.String(), "Linked Devices")) ||
 					strings.Contains(out.String(), "Native inbox") ||
 					!strings.Contains(errOut.String(), "[y/N]") || strings.Contains(out.String()+errOut.String(), operatorChannelCLIOperation) ||
 					strings.Contains(out.String(), "journey-material") || strings.Contains(out.String(), "replacement-material") {
 					t.Fatal("single public connect lost pairing, refresh, claimant confirmation or config targeting", code, out.String(), errOut.String())
 				}
-				if mode == "human-receptionist" {
+				if receptionist {
 					if strings.Contains(out.String(), "operator") || strings.Count(errOut.String(), "[y/N]") != 1 {
 						t.Fatal("receptionist asked for operator authority", out.String(), errOut.String())
 					}
@@ -270,7 +293,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 				}
 			}
 			confirmations := 1
-			if mode == "human-receptionist" {
+			if receptionist {
 				confirmations = 0
 			}
 			if stage != 5 || strings.Count(strings.Join(methods, ","), "channel.confirm") != confirmations {
