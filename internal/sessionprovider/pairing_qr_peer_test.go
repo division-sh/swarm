@@ -7,8 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/testutil/whatsappfixture"
 	"github.com/google/uuid"
 	waBinary "go.mau.fi/whatsmeow/binary"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
 
@@ -54,6 +56,47 @@ func TestWhatsAppDirectQRPublicSDKRepeatedBatches(t *testing.T) {
 		case <-peer.ctx.Done():
 			t.Fatal("real public QR event not consumed")
 		}
+	}
+	paired, loginHandoff := make(chan struct{}, 1), make(chan struct{}, 1)
+	o.client.AddEventHandler(func(raw any) {
+		switch raw.(type) {
+		case *events.PairSuccess:
+			paired <- struct{}{}
+		case *events.ManualLoginReconnect:
+			loginHandoff <- struct{}{}
+		}
+	})
+	current, err := q.read(scope)
+	if err != nil {
+		t.Fatal("read current pairing before login handoff", err)
+	}
+	if err := socket.send(peer.ctx, whatsappfixture.SignedPairingResponse(t, current.Code,
+		types.NewJID("100000000001", types.DefaultUserServer), types.NewJID("100000000001", types.HiddenUserServer))); err != nil {
+		t.Fatal("send signed pairing response", err)
+	}
+	select {
+	case <-paired:
+	case <-peer.ctx.Done():
+		t.Fatal("signed pairing did not complete before login handoff")
+	}
+	if err := socket.send(peer.ctx, waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "515"}}); err != nil {
+		t.Fatal("send post-pairing login handoff", err)
+	}
+	select {
+	case <-loginHandoff:
+	case <-o.ctx.Done():
+		t.Fatal("post-pairing login handoff cancelled the original pairing")
+	case <-peer.ctx.Done():
+		t.Fatal("SDK did not report the post-pairing login handoff")
+	}
+	if view, err := q.read(scope); err != nil || !view.Paired || view.Connected || view.Code != "" {
+		t.Fatal("post-pairing handoff lost its non-executable signed pairing observation", err)
+	}
+	peer.mu.Lock()
+	connections := len(peer.peers)
+	peer.mu.Unlock()
+	if connections != 1 || o.ctx.Err() != nil {
+		t.Fatal("post-pairing handoff started an unowned reconnect", connections)
 	}
 	o.fence()
 	if got, err := q.read(scope); got.Code != "" || !errors.Is(err, errPairingStopped) {

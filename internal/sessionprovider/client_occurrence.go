@@ -43,6 +43,7 @@ type clientOccurrence struct {
 	stopOnce       sync.Once
 	connected      chan struct{}
 	connectOnce    sync.Once
+	loginReconnect bool
 }
 
 func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
@@ -94,6 +95,20 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 		case *events.ClientOutdated:
 			reason = "WhatsApp client needs an update"
 		case *events.ManualLoginReconnect:
+			o.mu.Lock()
+			pairing := o.pairing
+			o.mu.Unlock()
+			if pairing != nil {
+				view, err := pairing.read(pairing.scope)
+				if err == nil && view.Paired && !view.Connected && o.client.Store.ID != nil {
+					// The explicit onboarding caller owns the next authenticated
+					// socket; this is not a failed scan or SDK auto-reconnect.
+					o.mu.Lock()
+					o.loginReconnect = true
+					o.mu.Unlock()
+					return true
+				}
+			}
 			reason = "connection must be re-established"
 		}
 		if reason != "" {

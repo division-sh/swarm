@@ -364,7 +364,7 @@ func (s *Service) attachOpenConnection(ctx context.Context, requested StartReque
 		if err != nil {
 			return Result{}, err
 		}
-		if current.Phase == PhaseSucceeded && current.Posture == ActivationSessionConnection {
+		if sessionResumeRequired(current) {
 			if err := s.resumeSession(ctx, current, candidate); err != nil && !errors.Is(err, ErrSessionPending) {
 				return Result{}, err
 			}

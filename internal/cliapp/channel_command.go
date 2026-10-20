@@ -545,7 +545,7 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 		if !pending && (current.Operation.Phase != channelonboarding.PhaseSucceeded || current.Connection == nil || !current.Connection.Linked || current.Readiness != nil && current.Readiness.Ready) {
 			return current, nil
 		}
-		if pending && current.Pairing.Code != lastQR {
+		if pending && current.Pairing.Code != "" && current.Pairing.Code != lastQR {
 			if lastQR != "" {
 				fmt.Fprintln(out, "QR expired, new QR:")
 			}
@@ -554,7 +554,27 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 			}
 			lastQR = current.Pairing.Code
 		}
-		if pending && current.Pairing.Connected && current.Pairing.Code == "" {
+		if pending && current.Pairing.Paired && !current.Pairing.Connected {
+			var next channelOnboardingResult
+			if err := client.call(ctx, "channel.onboarding_retry", map[string]any{
+				"operation_id": current.Operation.OperationID, "checkpoint_only": true,
+			}, &next); err != nil {
+				return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+			}
+			nextPending, err := validateCLIChannelContinuation(current, next)
+			if err != nil || next.Operation.Revision < current.Operation.Revision {
+				return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("pairing login changed the retained operation"))
+			}
+			current = next
+			if !nextPending && current.Operation.Phase == channelonboarding.PhaseAwaitingExternalIdentity && current.Connection != nil &&
+				current.Connection.Linked && current.Connection.State == "connected" &&
+				current.IdentityOperation == nil && current.Binding == nil && (current.Readiness == nil || !current.Readiness.Ready) {
+				break
+			}
+			if !nextPending {
+				return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("pairing login did not return the account preview"))
+			}
+		} else if pending && current.Pairing.Connected && current.Pairing.Code == "" {
 			break
 		}
 		select {
@@ -577,7 +597,14 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, error) {
 	// A scan is a preview, not executable admission. Only approval advances
 	// through the checkpoint owner; rejection can checkpoint solely for logout.
-	account := current.Pairing.AccountPresentation
+	account, name := "", ""
+	if current.Pairing != nil {
+		account, name = current.Pairing.AccountPresentation, current.Pairing.AccountName
+	} else if current.Operation.Phase == channelonboarding.PhaseAwaitingExternalIdentity && current.Connection != nil &&
+		current.Connection.Linked && current.Connection.State == "connected" && current.IdentityOperation == nil &&
+		(current.Readiness == nil || !current.Readiness.Ready) {
+		account, name = current.Connection.AccountPresentation, current.Connection.AccountName
+	}
 	if account == "" {
 		return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("the linked account could not be identified; connection is not READY"))
 	}
@@ -585,8 +612,8 @@ func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current
 		return current, nil
 	}
 	label := cliSanitizeOneLineValue(account)
-	if current.Pairing.AccountName != "" {
-		label += " (" + cliSanitizeOneLineValue(current.Pairing.AccountName) + ")"
+	if name != "" {
+		label += " (" + cliSanitizeOneLineValue(name) + ")"
 	}
 	fmt.Fprintf(out, "Linked to %s\n", label)
 	approve := opts.yes
@@ -601,9 +628,11 @@ func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current
 		*acceptedAccount = account
 		return current, nil
 	}
-	var paired channelOnboardingResult
-	if err := client.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": current.Operation.OperationID, "checkpoint_only": true}, &paired); err != nil {
-		return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+	paired := current
+	if current.Operation.Phase == channelonboarding.PhaseActivatingProvider {
+		if err := client.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": current.Operation.OperationID, "checkpoint_only": true}, &paired); err != nil {
+			return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+		}
 	}
 	if paired.Operation.OperationID != current.Operation.OperationID || paired.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity ||
 		paired.Connection == nil || !paired.Connection.Linked {

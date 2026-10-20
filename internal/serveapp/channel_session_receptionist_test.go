@@ -26,6 +26,9 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				isolateCLIAPIConfigEnv(t)
 				peer := newServeNativeProtocolPeer(t)
+				peer.mu.Lock()
+				peer.loginHandoff = true
+				peer.mu.Unlock()
 				source := t.TempDir()
 				copyReleaseFixtureTree(t, filepath.Join(repoRootForTest(), "internal/cliapp/archetypes/whatsapp-receptionist"), source)
 				opts := cliapp.ServeOptions{
@@ -56,9 +59,14 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 				}
 				result = requireServedNativePairingProgress(t, endpoint, result, time.Now().Add(5*time.Second))
 				peer.pair(result.Pairing.Code)
-				peer.awaitPostLogin()
 				id := result.Operation.OperationID
-				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id, "checkpoint_only": true}, &result)
+				for deadline := time.Now().Add(5 * time.Second); result.Operation.Phase == channelonboarding.PhaseActivatingProvider && time.Now().Before(deadline); {
+					requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id, "checkpoint_only": true}, &result)
+					if result.Operation.Phase == channelonboarding.PhaseActivatingProvider {
+						time.Sleep(10 * time.Millisecond)
+					}
+				}
+				peer.awaitPostLogin()
 				if result.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity || result.Operation.ActivationRevision != 0 ||
 					result.IdentityOperation != nil || result.Connection == nil || !result.Connection.Linked || result.Readiness != nil && result.Readiness.Ready {
 					t.Fatal("account-preview checkpoint published customer traffic or operator authority", result)
@@ -73,9 +81,18 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 				}
 				result = requireServedNativePairingProgress(t, endpoint, result, time.Now().Add(5*time.Second))
 				peer.pair(result.Pairing.Code)
-				peer.awaitPostLogin()
 				id = result.Operation.OperationID
+				for deadline := time.Now().Add(5 * time.Second); result.Operation.Phase == channelonboarding.PhaseActivatingProvider && time.Now().Before(deadline); {
+					requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id, "checkpoint_only": true}, &result)
+					if result.Operation.Phase == channelonboarding.PhaseActivatingProvider {
+						time.Sleep(10 * time.Millisecond)
+					}
+				}
+				if result.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity || result.Operation.ActivationRevision != 0 || result.IdentityOperation != nil {
+					t.Fatal("login handoff did not retain the non-executable account preview", result.Operation.Phase)
+				}
 				response := requestServedJSONRPC(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id})
+				peer.awaitPostLogin()
 				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
 				if response.Error != nil {
 					t.Fatal("receptionist continuation refused", response.Error, "phase", result.Operation.Phase, "target", result.Operation.Coordinate.TargetGeneration)
