@@ -5,6 +5,7 @@ package serveapp
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -70,6 +71,12 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 				if result.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity || result.Operation.ActivationRevision != 0 ||
 					result.IdentityOperation != nil || result.Connection == nil || !result.Connection.Linked || result.Readiness != nil && result.Readiness.Ready {
 					t.Fatal("account-preview checkpoint published customer traffic or operator authority", result)
+				}
+				preview := result.Operation
+				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{"provider": "whatsapp", "verb": "connect", "save_proof": false}, &result)
+				if !reflect.DeepEqual(result.Operation, preview) || result.IdentityOperation != nil || result.Binding != nil ||
+					result.Readiness != nil && result.Readiness.Ready {
+					t.Fatal("connecting again approved the retained account preview", result)
 				}
 				rejected := requireServedNativeCLILogout(t, endpoint, id, "reject-preview")
 				if rejected.Teardown.Phase != channelonboarding.TeardownSucceeded {

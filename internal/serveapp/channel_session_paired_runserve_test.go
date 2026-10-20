@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -142,6 +143,20 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 			result = requireServedNativePairingProgress(t, endpoint, result, deadline)
 			peer.pair(result.Pairing.Code)
 			_, initialPrekeyUploads := peer.awaitPostLogin()
+			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id, "checkpoint_only": true}, &result)
+			preview := result.Operation
+			if preview.Phase != channelonboarding.PhaseAwaitingExternalIdentity || preview.ActivationRevision != 0 ||
+				result.IdentityOperation != nil || result.Binding != nil || result.Readiness != nil && result.Readiness.Ready {
+				t.Fatal("operator account preview advanced before approval", result)
+			}
+			for _, key := range []string{"native-pairing", ""} {
+				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_start", map[string]any{
+					"provider": "whatsapp", "verb": "connect", "save_proof": false, "idempotency_key": key}, &result)
+				if !reflect.DeepEqual(result.Operation, preview) || result.IdentityOperation != nil || result.Binding != nil ||
+					result.Readiness != nil && result.Readiness.Ready {
+					t.Fatal("connecting again began operator enrollment before account approval", result)
+				}
+			}
 			result = channelonboarding.Result{}
 			requireServedJSONRPCResult(t, endpoint, "channel.onboarding_retry", map[string]any{"operation_id": id}, &result)
 			if result.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity || result.IdentityOperation == nil ||

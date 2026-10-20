@@ -473,10 +473,12 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 			return result, nil
 		}
 		waitingForConnection := result.Operation.Phase == channelonboarding.PhaseSucceeded && result.Connection != nil && result.Connection.Linked
-		if opts.waitForPairing && (pending || waitingForConnection) {
-			result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, progressOut, errOut)
-			if err != nil {
-				return channelOnboardingResult{}, err
+		if opts.waitForPairing {
+			if pending || waitingForConnection {
+				result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, progressOut, errOut)
+				if err != nil {
+					return channelOnboardingResult{}, err
+				}
 			}
 			var previewPending bool
 			result, previewPending, err = confirmCLIChannelAccount(ctx, client, result, opts, progressOut, errOut, &acceptedAccount)
@@ -589,10 +591,12 @@ func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current
 	if err != nil {
 		return channelOnboardingResult{}, false, returnCLIValidationError(errOut, err)
 	}
-	if !pending {
+	if !pending && (current.Operation.Posture != channelonboarding.ActivationSessionConnection ||
+		current.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity || current.Operation.ActivationRevision != 0 ||
+		current.IdentityOperation != nil || current.Binding != nil || current.Readiness != nil && current.Readiness.Ready) {
 		return current, false, nil
 	}
-	if current.Pairing.Paired && !current.Pairing.Connected {
+	if pending && current.Pairing.Paired && !current.Pairing.Connected {
 		var next channelOnboardingResult
 		if err := client.call(ctx, "channel.onboarding_retry", map[string]any{
 			"operation_id": current.Operation.OperationID, "checkpoint_only": true,

@@ -363,7 +363,7 @@
     "owner": "internal/channelonboarding/service.go::*Service.Retry",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
-    "body_sha256": "c3b48bd2c291dc762cb81277be195f001efd2818bf4b7398af99fecc49697e09"
+    "body_sha256": "8af4b41e05a8780d24b6108e7db6d21a83302e6e71cfeeb7f134dd93cccd4458"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.Start",
@@ -453,13 +453,13 @@
     "owner": "internal/channelonboarding/service.go::*Service.drive",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
-    "body_sha256": "00b277e47568eca52b70719d0eb78da86856b9520ccfacd10de03c4c0c809c4f"
+    "body_sha256": "9f7a727c2b5c067397bcbbd2b7aea54881f34fac615fe605a70cead5d08f5034"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.driveLocked",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
-    "body_sha256": "f52b1a5c130e1da72528508b9e7cd5bbbcd6a0a654f013474843e743bbefa527"
+    "body_sha256": "151caab8903b7b7d65593800ea6b04b3cbb77587d30589dc93436e9a39b3c8e5"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.ensureCredentialAdmissionsCurrent",
@@ -513,7 +513,7 @@
     "owner": "internal/channelonboarding/service.go::*Service.recoverOperation",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
-    "body_sha256": "8b1b7a4c1517ea2abab98f2c55555c8ce23d34739e7cb4fb2427dee2d2bcdb54"
+    "body_sha256": "54d1dafe2b7353e85265459b36fe02ca820535b5dbbfbc8ab4893e7214560e43"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.recoverTerminalCredentials",
