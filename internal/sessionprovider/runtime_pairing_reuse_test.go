@@ -87,6 +87,31 @@ func TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores(t *testing.T) 
 					if factErr != nil || fact == nil || !fact.MatchesOperation(started.Operation) {
 						t.Fatal("native revocation lost its exact unadmitted parent", factErr)
 					}
+					view, readErr := c.PairingReadback(f.ctx, f.principal)
+					if readErr != nil || view != (channelonboarding.PairingReadback{Status: "failed"}) {
+						t.Fatal("native revocation readback lost its zero-code, non-executable observation", readErr)
+					}
+					foreign := f.principal
+					foreign.ID = started.Operation.OperationID
+					if view, err := c.PairingReadback(f.ctx, foreign); err == nil || view != (channelonboarding.PairingReadback{}) {
+						t.Fatal("native revocation disclosed progress to another principal")
+					}
+					canceled, cancel := context.WithCancel(f.ctx)
+					cancel()
+					if view, err := c.PairingReadback(canceled, f.principal); err == nil || view != (channelonboarding.PairingReadback{}) {
+						t.Fatal("native revocation suppressed caller cancellation")
+					}
+					pairing.mu.Lock()
+					coordinate := pairing.scope.Coordinate
+					pairing.scope.Coordinate.BundleIdentity = "another-source"
+					pairing.mu.Unlock()
+					view, readErr = c.PairingReadback(f.ctx, f.principal)
+					pairing.mu.Lock()
+					pairing.scope.Coordinate = coordinate
+					pairing.mu.Unlock()
+					if !errors.Is(readErr, errPairingScope) || view != (channelonboarding.PairingReadback{}) {
+						t.Fatal("native revocation suppressed the QR owner's original source scope")
+					}
 					for _, change := range []func(*channelonboarding.Operation){
 						func(op *channelonboarding.Operation) { op.Revision++ },
 						func(op *channelonboarding.Operation) { op.PrincipalID = "another-principal" },

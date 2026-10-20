@@ -98,6 +98,7 @@ func (c *RuntimeConnection) PairingReadback(ctx context.Context, principal opera
 	}
 	occurrence.mu.Lock()
 	pairing := occurrence.pairing
+	revoked := occurrence.revoked != nil
 	occurrence.mu.Unlock()
 	if pairing == nil {
 		// An explicit resume can authenticate retained pairing before its
@@ -113,23 +114,29 @@ func (c *RuntimeConnection) PairingReadback(ctx context.Context, principal opera
 			Connected: occurrence.ctx.Err() == nil && occurrence.client.IsConnected() && occurrence.client.IsLoggedIn()}
 	} else {
 		view, err := pairing.readAuthorized(work.Context(), principal, c.store, op.Coordinate)
+		fact := revokedPairing{connection: c, occurrence: occurrence, operation: op}
+		if revoked && errors.Is(err, errPairingStopped) && !errors.Is(err, errPairingScope) &&
+			fact.MatchesOperation(op) && work.Context().Err() == nil {
+			return channelonboarding.PairingReadback{Status: "failed"}, nil
+		}
 		if err != nil {
 			return result, err
 		}
 		result = channelonboarding.PairingReadback{Status: string(view.Status), Code: view.Code,
 			ExpiresAt: view.ExpiresAt, Paired: view.Paired, Connected: view.Connected}
 	}
-	if result.Paired && result.Connected {
-		device, err := c.state.device(work.Context())
-		if err != nil {
-			return result, err
-		}
-		if device.ID != nil {
-			result.AccountPresentation = "+" + device.ID.User
-			if device.Contacts != nil {
-				if contact, err := device.Contacts.GetContact(work.Context(), device.ID.ToNonAD()); err == nil {
-					result.AccountName = contact.PushName
-				}
+	if !result.Paired || !result.Connected {
+		return result, nil
+	}
+	device, err := c.state.device(work.Context())
+	if err != nil {
+		return result, err
+	}
+	if device.ID != nil {
+		result.AccountPresentation = "+" + device.ID.User
+		if device.Contacts != nil {
+			if contact, err := device.Contacts.GetContact(work.Context(), device.ID.ToNonAD()); err == nil {
+				result.AccountName = contact.PushName
 			}
 		}
 	}
