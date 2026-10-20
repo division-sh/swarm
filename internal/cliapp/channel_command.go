@@ -585,16 +585,22 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 }
 
 func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, bool, error) {
-	// A scan is a preview, not executable admission. Only approval advances
-	// through the checkpoint owner; rejection can checkpoint solely for logout.
+	// A pairing checkpoint preserves only a preview. Account approval is
+	// required before continuing to activation or operator enrollment.
 	pending, err := validateCLIChannelProgress(current)
 	if err != nil {
 		return channelOnboardingResult{}, false, returnCLIValidationError(errOut, err)
 	}
-	if !pending && (current.Operation.Posture != channelonboarding.ActivationSessionConnection ||
-		current.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity || current.Operation.ActivationRevision != 0 ||
-		current.IdentityOperation != nil || current.Binding != nil || current.Readiness != nil && current.Readiness.Ready) {
-		return current, false, nil
+	if !pending {
+		switch {
+		case current.Operation.Posture != channelonboarding.ActivationSessionConnection,
+			current.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity,
+			current.Operation.ActivationRevision != 0, current.IdentityOperation != nil, current.Binding != nil:
+			return current, false, nil
+		case current.Connection == nil, !current.Connection.Linked, current.Connection.State != "connected",
+			current.Readiness != nil && current.Readiness.Ready:
+			return channelOnboardingResult{}, false, returnCLIValidationError(errOut, errors.New("the retained account preview has no connected, non-executable pairing"))
+		}
 	}
 	if pending && current.Pairing.Paired && !current.Pairing.Connected {
 		var next channelOnboardingResult
@@ -615,9 +621,7 @@ func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current
 	account, name := "", ""
 	if current.Pairing != nil {
 		account, name = current.Pairing.AccountPresentation, current.Pairing.AccountName
-	} else if current.Operation.Phase == channelonboarding.PhaseAwaitingExternalIdentity && current.Connection != nil &&
-		current.Connection.Linked && current.Connection.State == "connected" && current.IdentityOperation == nil &&
-		(current.Readiness == nil || !current.Readiness.Ready) {
+	} else if current.Connection != nil {
 		account, name = current.Connection.AccountPresentation, current.Connection.AccountName
 	}
 	if account == "" {
