@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,6 +50,31 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 				} else {
 					location = testutil.StartEmptyPostgresDSN(t)
 					opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, location)
+				}
+				if !rollover {
+					var injected atomic.Bool
+					opts.TestChannelOnboardingBarrier = func(boundary channelonboarding.TestLifecycleBoundary, _ string) error {
+						if boundary != channelonboarding.TestAfterActivationCommitBeforePublication || !injected.CompareAndSwap(false, true) {
+							return nil
+						}
+						peer.mu.Lock()
+						before := peer.disconnected
+						peer.mu.Unlock()
+						message, _, _ := peer.customerMessage("Message during account activation", "PENDING_ACCOUNT_ACTIVATION")
+						peer.sendEncryptedFrame(message)
+						for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+							peer.mu.Lock()
+							disconnected := peer.disconnected > before
+							peer.mu.Unlock()
+							if disconnected {
+								t.Log("activation diagnostic: native peer disconnected before process publication")
+								return nil
+							}
+							time.Sleep(10 * time.Millisecond)
+						}
+						t.Log("activation diagnostic: no disconnect at the existing 5s observation cut")
+						return nil
+					}
 				}
 				process := startServeRuntimeTestProcess(t, opts)
 				process.waitForReadyLine()
