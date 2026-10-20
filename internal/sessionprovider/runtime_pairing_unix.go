@@ -100,17 +100,26 @@ func (c *RuntimeConnection) PairingReadback(ctx context.Context, principal opera
 	pairing := occurrence.pairing
 	occurrence.mu.Unlock()
 	if pairing == nil {
-		// A paired private database after an interrupted checkpoint is not QR
-		// material or new executable admission. Recovery owns its next action.
-		return channelonboarding.PairingReadback{Status: "recovery_required"}, nil
+		// An explicit resume can authenticate retained pairing before its
+		// account checkpoint. This progress is not executable admission.
+		device, err := c.state.device(work.Context())
+		if err != nil {
+			return result, err
+		}
+		if device.ID == nil {
+			return channelonboarding.PairingReadback{Status: "recovery_required"}, nil
+		}
+		result = channelonboarding.PairingReadback{Status: "paired", Paired: true,
+			Connected: occurrence.ctx.Err() == nil && occurrence.client.IsConnected() && occurrence.client.IsLoggedIn()}
+	} else {
+		view, err := pairing.readAuthorized(work.Context(), principal, c.store, op.Coordinate)
+		if err != nil {
+			return result, err
+		}
+		result = channelonboarding.PairingReadback{Status: string(view.Status), Code: view.Code,
+			ExpiresAt: view.ExpiresAt, Paired: view.Paired, Connected: view.Connected}
 	}
-	view, err := pairing.readAuthorized(work.Context(), principal, c.store, op.Coordinate)
-	if err != nil {
-		return result, err
-	}
-	result = channelonboarding.PairingReadback{Status: string(view.Status), Code: view.Code,
-		ExpiresAt: view.ExpiresAt, Paired: view.Paired, Connected: view.Connected}
-	if view.Paired && view.Connected {
+	if result.Paired && result.Connected {
 		device, err := c.state.device(work.Context())
 		if err != nil {
 			return result, err

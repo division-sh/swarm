@@ -405,7 +405,7 @@
     "owner": "internal/channelonboarding/service.go::*Service.attachOpenConnection",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
-    "body_sha256": "eb651213ea0043487323f748dbbd51fb3e586dc80ec6668357b200d1909af294"
+    "body_sha256": "4119851e8aad487eb1453bf40433f3c6f152cda1a9f457d4ee3b1825128537d5"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.bindCurrentCandidate",

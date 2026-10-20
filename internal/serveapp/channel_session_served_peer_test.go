@@ -57,6 +57,7 @@ type serveNativeProtocolPeer struct {
 	disconnect     func()
 	onACKTimeout   func(string)
 	replacementQR  *servedReplacementQRBatchCut
+	loginHandoff   bool
 }
 
 type servedNativeMessage struct {
@@ -236,6 +237,15 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 			case p.paired <- struct{}{}:
 			default:
 				p.t.Error("served peer pairing evidence overflow")
+				return
+			}
+			p.mu.Lock()
+			loginHandoff := p.loginHandoff
+			p.mu.Unlock()
+			if loginHandoff {
+				if err := wire.Send(p.ctx, waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "515"}}); err != nil {
+					p.t.Error(err)
+				}
 				return
 			}
 			if err := p.success(wire); err != nil {

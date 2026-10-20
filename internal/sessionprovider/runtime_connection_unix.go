@@ -379,7 +379,11 @@ func (c *RuntimeConnection) CheckSessionReuse(ctx context.Context, expected chan
 		}
 		occurrence.mu.Lock()
 		pairing := occurrence.pairing
+		loginReconnect := occurrence.loginReconnect
 		occurrence.mu.Unlock()
+		if loginReconnect {
+			return false, nil
+		}
 		if pairing != nil {
 			view, err := pairing.read(pairingQRScope{PrincipalID: expected.PrincipalID,
 				OperationID: expected.OperationID, ConnectionID: expected.SessionConnectionID,

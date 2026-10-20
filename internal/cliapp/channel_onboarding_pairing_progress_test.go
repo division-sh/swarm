@@ -131,11 +131,12 @@ func TestChannelCLIPairingProgressRefusesContradictoryOrExpiredEvidence(t *testi
 }
 
 func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
-	for _, mode := range []string{"human", "human-receptionist", "--json", "--quiet"} {
+	for _, mode := range []string{"human", "human-receptionist", "human-login-handoff", "--json", "--quiet"} {
 		t.Run(mode, func(t *testing.T) {
 			human := strings.HasPrefix(mode, "human")
 			stage := 0
 			pairingReads := 0
+			checkpoints := 0
 			var methods []string
 			progress := func() map[string]any {
 				result := sessionProgressCLIResult("whatsapp", "", "activating_provider", false)
@@ -149,7 +150,7 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					}
 				case 2:
 					result["pairing"] = map[string]any{"status": "paired", "paired": true, "connected": false}
-					if human {
+					if human && mode != "human-login-handoff" {
 						result["pairing"].(map[string]any)["connected"] = true
 						result["pairing"].(map[string]any)["account_presentation"] = "+15550000001"
 					}
@@ -166,6 +167,9 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 					if mode != "human-receptionist" {
 						result["readiness"].(map[string]any)["native_inbox"] = map[string]any{"state": "qualified"}
 					}
+				}
+				if mode == "human-login-handoff" {
+					result["operation"].(map[string]any)["revision"] = stage + checkpoints + 1
 				}
 				return result
 			}
@@ -185,6 +189,17 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						stage = 4
 					}
 				case "channel.onboarding_retry":
+					if req.Params["checkpoint_only"] == true {
+						if mode != "human-login-handoff" || stage != 2 {
+							t.Fatal("unexpected pairing-only login handoff", stage, req.Params)
+						}
+						checkpoints++
+						stage = 3
+						result := sessionProgressCLIResult("whatsapp", "", "awaiting_external_identity", false)
+						result["operation"].(map[string]any)["revision"] = stage + 1
+						result["connection"] = map[string]any{"state": "connected", "linked": true, "account_presentation": "+15550000001"}
+						return result
+					}
 					if stage == 4 || stage > 5 || req.Params["operation_id"] != operatorChannelCLIOperation {
 						t.Fatal("pairing skipped explicit confirmation or changed responsibility", req.Params, stage)
 					}
@@ -260,6 +275,9 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 			}
 			if stage != 5 || strings.Count(strings.Join(methods, ","), "channel.confirm") != confirmations {
 				t.Fatal("ceremony failed to reach genuine confirmation", stage, methods)
+			}
+			if mode == "human-login-handoff" && checkpoints != 1 {
+				t.Fatal("login handoff did not use exactly the pairing-only checkpoint", checkpoints)
 			}
 		})
 	}

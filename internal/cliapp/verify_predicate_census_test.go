@@ -43,6 +43,9 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/channelonboarding/admission_current.go", "A10,A27", "2577-native-confirmed-retention,2577-native-held-target,P08,P10,P21"},
 	{"internal/channelonboarding/compiler.go", "A10,A27", "2577-native-publication,P08,P10,P21"},
 	{"internal/channelonboarding/session_activity.go", "A10,A27", "2577-authored-session-activity,P08,P10,P21"},
+	// Pending attach uses Retry's original session-resume owner after signed
+	// pairing; the CLI handoff and both-store receptionist controls keep the
+	// source/account fences and non-executable account-preview checkpoint.
 	{"internal/channelonboarding/service.go", "A10,A27", "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress"},
 	{"internal/channelonboarding/start_selection.go", "A10,A27", "P08,P10,P21,2577-native-cli-progress"},
 	{"internal/channelonboarding/session_progress.go", "A10,A27", "P08,P10,P21,2577-native-pending,2577-native-startup-wait"},
