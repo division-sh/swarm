@@ -281,7 +281,8 @@ func TestChannelCLIExplicitPairingClaimConfirmationJourney(t *testing.T) {
 						!strings.Contains(errOut.String(), "WhatsApp disconnected: network unreachable") ||
 						strings.Contains(out.String(), "READY") || strings.Contains(errOut.String(), "[y/N]") ||
 						strings.Count(out.String(), "Connecting to whatsapp...") != 1 ||
-						strings.Count(strings.Join(methods, ","), "channel.onboarding_retry") != 1 {
+						// One exhausted QR refresh precedes the one login handoff.
+						strings.Count(strings.Join(methods, ","), "channel.onboarding_retry") != 2 {
 						t.Fatal("disconnected retained pairing kept driving, prompted, or lost its plain reason", code, checkpoints, loginReads, methods)
 					}
 					return

@@ -556,13 +556,12 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 		if err != nil {
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
 		}
-		if current.Connection != nil && current.Connection.State == "disconnected" && current.Connection.Reason != "" {
+		switch {
+		case current.Connection != nil && current.Connection.State == "disconnected" && current.Connection.Reason != "":
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("WhatsApp disconnected: %s", cliSanitizeOneLineValue(current.Connection.Reason)))
-		}
-		if !pending && (current.Operation.Phase != channelonboarding.PhaseSucceeded || current.Connection == nil || !current.Connection.Linked || current.Readiness != nil && current.Readiness.Ready) {
+		case !pending && (current.Operation.Phase != channelonboarding.PhaseSucceeded || current.Connection == nil || !current.Connection.Linked || current.Readiness != nil && current.Readiness.Ready):
 			return current, nil
-		}
-		if pending && current.Pairing.Code != "" && current.Pairing.Code != lastQR {
+		case pending && current.Pairing.Code != "" && current.Pairing.Code != lastQR:
 			if lastQR != "" {
 				fmt.Fprintln(out, "QR expired, new QR:")
 			}
