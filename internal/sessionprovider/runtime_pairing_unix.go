@@ -98,7 +98,6 @@ func (c *RuntimeConnection) PairingReadback(ctx context.Context, principal opera
 	}
 	occurrence.mu.Lock()
 	pairing := occurrence.pairing
-	revoked := occurrence.revoked != nil
 	occurrence.mu.Unlock()
 	if pairing == nil {
 		// An explicit resume can authenticate retained pairing before its
@@ -114,12 +113,15 @@ func (c *RuntimeConnection) PairingReadback(ctx context.Context, principal opera
 			Connected: occurrence.ctx.Err() == nil && occurrence.client.IsConnected() && occurrence.client.IsLoggedIn()}
 	} else {
 		view, err := pairing.readAuthorized(work.Context(), principal, c.store, op.Coordinate)
-		fact := revokedPairing{connection: c, occurrence: occurrence, operation: op}
-		if revoked && errors.Is(err, errPairingStopped) && !errors.Is(err, errPairingScope) &&
-			fact.MatchesOperation(op) && work.Context().Err() == nil {
-			return channelonboarding.PairingReadback{Status: "failed"}, nil
-		}
 		if err != nil {
+			occurrence.mu.Lock()
+			revoked := occurrence.revoked != nil
+			occurrence.mu.Unlock()
+			fact := revokedPairing{connection: c, occurrence: occurrence, operation: op}
+			if revoked && errors.Is(err, errPairingStopped) && !errors.Is(err, errPairingScope) &&
+				fact.MatchesOperation(op) && work.Context().Err() == nil {
+				return channelonboarding.PairingReadback{Status: "failed"}, nil
+			}
 			return result, err
 		}
 		result = channelonboarding.PairingReadback{Status: string(view.Status), Code: view.Code,

@@ -15,7 +15,7 @@ import (
 
 func TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, mode := range []string{"current", "expired", "observation_error", "scope_error", "canceled", "native_revocation", "display_only"} {
+		for _, mode := range []string{"current", "expired", "observation_error", "scope_error", "canceled", "native_revocation", "native_revocation_during_lookup", "display_only"} {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				f := newRuntimeBootstrapFixture(t, backend)
 				started, err := f.service.Start(f.ctx, channelonboarding.StartInput{Verb: channelonboarding.VerbConnect,
@@ -47,6 +47,7 @@ func TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores(t *testing.T) 
 				}
 				ctx := f.ctx
 				var want error
+				nativeRevocation := mode == "native_revocation" || mode == "native_revocation_during_lookup"
 				switch mode {
 				case "expired":
 					if err := pairing.handle(&events.QR{}); err != nil {
@@ -81,9 +82,32 @@ func TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores(t *testing.T) 
 					case <-f.ctx.Done():
 						t.Fatal("native revocation did not fence its original occurrence")
 					}
+				case "native_revocation_during_lookup":
+					original := c.store
+					reads := 0
+					c.store = &sessionInputCancelLookupStore{sessionInputSelectedStore: f.store, cancel: func() {
+						reads++
+						if reads != 2 {
+							return
+						}
+						if err := socket.send(f.ctx, waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "401"},
+							Content: []waBinary.Node{{Tag: "conflict", Attrs: waBinary.Attrs{"type": "device_removed"}}}}); err != nil {
+							t.Fatal(err)
+						}
+						select {
+						case <-occurrence.ctx.Done():
+						case <-f.ctx.Done():
+							t.Fatal("native revocation did not reach the original readback cut")
+						}
+					}}
+					view, readErr := c.PairingReadback(f.ctx, f.principal)
+					c.store = original
+					if reads != 2 || readErr != nil || view != (channelonboarding.PairingReadback{Status: "failed"}) {
+						t.Fatal("revocation during authenticated lookup lost its safe failed observation", reads, readErr)
+					}
 				}
 				fact, factErr := c.RevokedSession(ctx, started.Operation)
-				if mode == "native_revocation" {
+				if nativeRevocation {
 					if factErr != nil || fact == nil || !fact.MatchesOperation(started.Operation) {
 						t.Fatal("native revocation lost its exact unadmitted parent", factErr)
 					}
@@ -137,7 +161,7 @@ func TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores(t *testing.T) 
 				if reuse != (mode == "current" || mode == "display_only") || !errors.Is(err, want) {
 					t.Fatal("reuse confused expired progress with health or converted an observation error to replacement", reuse, err)
 				}
-				if (c.CheckBootstrap(f.ctx) == nil) != (mode != "native_revocation") {
+				if (c.CheckBootstrap(f.ctx) == nil) == nativeRevocation {
 					t.Fatal("reuse observation retired the live transport instead of leaving explicit resume in charge")
 				}
 				select {
