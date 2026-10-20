@@ -358,9 +358,13 @@ func TestWhatsAppClientOccurrenceLoginReconnectAndUnlinkRetainState(t *testing.T
 			}
 			o.mu.Lock()
 			reason := o.failureReason
+			revoked := o.revoked != nil
 			o.mu.Unlock()
 			if reason != test.reason {
 				t.Fatalf("SDK fence lost its public reason: got %q, want %q", reason, test.reason)
+			}
+			if revoked != (test.code == "401") {
+				t.Fatal("native revocation was confused with reconnect, replacement, ban or rejection")
 			}
 			retained, err := container.GetDevice(peer.ctx, jid)
 			if err != nil || retained == nil || device.Deleted {

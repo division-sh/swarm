@@ -134,6 +134,14 @@ func (s *serveSessionBootstrap) connection(operationID string) *sessionprovider.
 	return nil
 }
 
+func (s *serveSessionBootstrap) RevokedSession(ctx context.Context, op channelonboarding.Operation) (channelonboarding.SessionRevocation, error) {
+	connection := s.connection(op.OperationID)
+	if connection == nil {
+		return nil, nil
+	}
+	return connection.RevokedSession(ctx, op)
+}
+
 func (s *serveSessionBootstrap) BootstrapSession(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) (err error) {
 	if err := s.QualifySessionPlan(candidate); err != nil {
 		return err

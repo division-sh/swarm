@@ -405,7 +405,7 @@
     "owner": "internal/channelonboarding/service.go::*Service.attachOpenConnection",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
-    "body_sha256": "4119851e8aad487eb1453bf40433f3c6f152cda1a9f457d4ee3b1825128537d5"
+    "body_sha256": "5cfad4fce41dff37265db7ef2575382b12ac267add1933efa5caf329490d0e14"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.bindCurrentCandidate",
@@ -532,6 +532,12 @@
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
     "body_sha256": "eacad8bd61c687048958acddb5339ac027cca46e2535c93fab5fcae82c171dc0"
+  },
+  {
+    "owner": "internal/channelonboarding/service.go::*Service.replaceRevokedPairing",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
+    "body_sha256": "562ca9fa8db0762506870374605b2bee1bf1aeb3178b6f8cae1d5abb6b262dfb"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.resetCredentialStaleIdentity",
@@ -4414,6 +4420,12 @@
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "b2be89cfa49464c8bb866786c857e2103fd70558cecbe5780dfb379733dc1b72"
+  },
+  {
+    "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.RevokedSession",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
+    "body_sha256": "475fc7e0336f958d871eaa329973a5a914ee53a7c4a7c282a23c9a704fa91c0e"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.RollSessionSource",

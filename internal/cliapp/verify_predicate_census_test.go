@@ -46,6 +46,11 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	// Pending attach uses Retry's original session-resume owner after signed
 	// pairing; the CLI handoff and both-store receptionist controls keep the
 	// source/account fences and non-executable account-preview checkpoint.
+	// The same entry now checks native unadmitted revocation before resume:
+	// TestRunServeWhatsAppSignedPairingBothStores and the receptionist root
+	// require terminalization/join, retained evidence and a fresh reservation;
+	// TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores retains the
+	// revision/source/principal and admitted-account/binding refusal controls.
 	{"internal/channelonboarding/service.go", "A10,A27", "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress"},
 	{"internal/channelonboarding/start_selection.go", "A10,A27", "P08,P10,P21,2577-native-cli-progress"},
 	{"internal/channelonboarding/session_progress.go", "A10,A27", "P08,P10,P21,2577-native-pending,2577-native-startup-wait"},

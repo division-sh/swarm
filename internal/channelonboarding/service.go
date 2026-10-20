@@ -130,6 +130,14 @@ type SessionBootstrapOwner interface {
 	ReadSessionPairing(context.Context, Operation, operatorchannel.Principal) (PairingReadback, error)
 }
 
+// SessionRevocation is native occurrence evidence, not connection display text.
+// Join must retain private state and verify the terminalized original parent.
+type SessionRevocation interface {
+	error
+	MatchesOperation(Operation) bool
+	Join(context.Context) error
+}
+
 // ErrSessionPending describes owned non-executable preparation, not successful
 // bootstrap, pairing, an admitted account or permission to publish business input.
 var ErrSessionPending = errors.New("channel session preparation is pending")
@@ -360,18 +368,97 @@ func (s *Service) attachOpenConnection(ctx context.Context, requested StartReque
 			requested.ClientLanguage != "" && current.ClientLanguage != requested.ClientLanguage {
 			return Result{}, fmt.Errorf("%w: the open channel connection has different requested settings", ErrConflict)
 		}
+		unlock, err := s.lockDrive(ctx, current.OperationID)
+		if err != nil {
+			return Result{}, err
+		}
+		defer unlock()
+		current, err = s.store.GetChannelOnboarding(ctx, current.OperationID)
+		if err != nil {
+			return Result{}, err
+		}
+		if current.Phase == PhaseFailed || current.Phase == PhaseRetired {
+			return Result{}, ErrRevisionConflict
+		}
 		current, candidate, err = s.bindCurrentCandidate(ctx, current)
 		if err != nil {
 			return Result{}, err
+		}
+		if result, replaced, err := s.replaceRevokedPairing(ctx, current, requested, candidate); replaced || err != nil {
+			return result, err
 		}
 		if sessionResumeRequired(current) {
 			if err := s.resumeSession(ctx, current, candidate); err != nil && !errors.Is(err, ErrSessionPending) {
 				return Result{}, err
 			}
 		}
-		return s.drive(ctx, current, candidate, "")
+		if result, replaced, err := s.replaceRevokedPairing(ctx, current, requested, candidate); replaced || err != nil {
+			return result, err
+		}
+		return s.driveLocked(ctx, current, candidate, "", false)
 	}
 	return Result{}, fmt.Errorf("%w: the open channel connection is no longer available", ErrConflict)
+}
+
+func (s *Service) replaceRevokedPairing(ctx context.Context, current Operation, requested StartRequest, candidate Candidate) (Result, bool, error) {
+	if current.Posture != ActivationSessionConnection || current.Phase != PhaseActivatingProvider ||
+		current.SessionAccount != (operatorchannel.SessionAccountAdmission{}) || current.IdentityOperationID != "" ||
+		current.BindingRevision != 0 || current.ActivationRevision != 0 {
+		return Result{}, false, nil
+	}
+	owner, ok := s.sessions.(interface {
+		RevokedSession(context.Context, Operation) (SessionRevocation, error)
+	})
+	if !ok {
+		return Result{}, false, nil
+	}
+	revoked, err := owner.RevokedSession(ctx, current)
+	if err != nil || revoked == nil {
+		return Result{}, false, err
+	}
+	if !revoked.MatchesOperation(current) {
+		return Result{}, false, ErrRevisionConflict
+	}
+	if _, err := s.identities.RetainedCurrentBinding(ctx, current.Interface); !errors.Is(err, operatorchannel.ErrNotFound) {
+		if err == nil {
+			err = ErrConflict
+		}
+		return Result{}, false, err
+	}
+	if _, err := s.store.GetConnectedChannelActivation(ctx, current.SlotKey); !errors.Is(err, ErrNotFound) {
+		if err == nil {
+			err = ErrConflict
+		}
+		return Result{}, false, err
+	}
+	failed, err := s.failOperation(ctx, current, "session_pairing_revoked", "The provider revoked this pairing before account admission")
+	if err != nil {
+		return Result{}, false, err
+	}
+	if err := revoked.Join(ctx); err != nil {
+		return Result{}, false, err
+	}
+	fresh, err := s.currentCandidate(failed)
+	if err != nil {
+		return Result{}, false, err
+	}
+	if !fresh.Coordinate.MatchesRuntimeContext(candidate.Coordinate) {
+		return Result{}, false, ErrRevisionConflict
+	}
+	state, fence, err := s.slotState(ctx, requested)
+	if err != nil {
+		return Result{}, false, err
+	}
+	if state != SlotAbsent {
+		return Result{}, false, ErrConflict
+	}
+	requested.ConnectFenceRevision = fence.Revision
+	next, err := s.store.ReserveChannelOnboarding(ctx, requested)
+	if err != nil {
+		return Result{}, false, err
+	}
+	result, err := s.drive(ctx, next, fresh, "")
+	return result, true, err
 }
 
 func (s *Service) Get(ctx context.Context, operationID string) (Result, error) {

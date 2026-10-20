@@ -15,7 +15,7 @@ import (
 
 func TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, mode := range []string{"current", "expired", "observation_error", "scope_error", "canceled"} {
+		for _, mode := range []string{"current", "expired", "observation_error", "scope_error", "canceled", "native_revocation", "display_only"} {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				f := newRuntimeBootstrapFixture(t, backend)
 				started, err := f.service.Start(f.ctx, channelonboarding.StartInput{Verb: channelonboarding.VerbConnect,
@@ -67,12 +67,52 @@ func TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores(t *testing.T) 
 					ctx, cancel = context.WithCancel(f.ctx)
 					cancel()
 					want = context.Canceled
+				case "display_only":
+					occurrence.mu.Lock()
+					occurrence.failureReason = "logged out"
+					occurrence.mu.Unlock()
+				case "native_revocation":
+					if err := socket.send(f.ctx, waBinary.Node{Tag: "stream:error", Attrs: waBinary.Attrs{"code": "401"},
+						Content: []waBinary.Node{{Tag: "conflict", Attrs: waBinary.Attrs{"type": "device_removed"}}}}); err != nil {
+						t.Fatal(err)
+					}
+					select {
+					case <-occurrence.ctx.Done():
+					case <-f.ctx.Done():
+						t.Fatal("native revocation did not fence its original occurrence")
+					}
+				}
+				fact, factErr := c.RevokedSession(ctx, started.Operation)
+				if mode == "native_revocation" {
+					if factErr != nil || fact == nil || !fact.MatchesOperation(started.Operation) {
+						t.Fatal("native revocation lost its exact unadmitted parent", factErr)
+					}
+					for _, change := range []func(*channelonboarding.Operation){
+						func(op *channelonboarding.Operation) { op.Revision++ },
+						func(op *channelonboarding.Operation) { op.PrincipalID = "another-principal" },
+						func(op *channelonboarding.Operation) { op.Coordinate.BundleHash = "another-source" },
+						func(op *channelonboarding.Operation) { op.SessionAccount.ConnectionID = "already-admitted" },
+						func(op *channelonboarding.Operation) { op.IdentityOperationID = "operator-enrollment" },
+						func(op *channelonboarding.Operation) { op.BindingRevision = 1 },
+						func(op *channelonboarding.Operation) { op.ActivationRevision = 1 },
+					} {
+						other := started.Operation
+						change(&other)
+						if fact.MatchesOperation(other) {
+							t.Fatal("revocation granted replacement outside its unadmitted occurrence")
+						}
+					}
+					if err := fact.Join(f.ctx); !errors.Is(err, channelonboarding.ErrRevisionConflict) {
+						t.Fatal("revocation joined before its exact parent was terminalized", err)
+					}
+				} else if fact != nil || mode != "canceled" && factErr != nil || mode == "canceled" && factErr == nil {
+					t.Fatal("non-revocation observation granted replacement", factErr)
 				}
 				reuse, err := c.CheckSessionReuse(ctx, started.Operation)
-				if reuse != (mode == "current") || !errors.Is(err, want) {
+				if reuse != (mode == "current" || mode == "display_only") || !errors.Is(err, want) {
 					t.Fatal("reuse confused expired progress with health or converted an observation error to replacement", reuse, err)
 				}
-				if c.CheckBootstrap(f.ctx) != nil {
+				if (c.CheckBootstrap(f.ctx) == nil) != (mode != "native_revocation") {
 					t.Fatal("reuse observation retired the live transport instead of leaving explicit resume in charge")
 				}
 				select {

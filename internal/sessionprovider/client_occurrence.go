@@ -44,6 +44,7 @@ type clientOccurrence struct {
 	connected      chan struct{}
 	connectOnce    sync.Once
 	loginReconnect bool
+	revoked        *events.LoggedOut
 }
 
 func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
@@ -77,12 +78,18 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 	client.AddEventHandlerWithSuccessStatus(func(event any) bool {
 		reason := ""
 		observedDisconnect := false
-		switch event.(type) {
+		switch observed := event.(type) {
 		case *events.Connected:
 			o.connectOnce.Do(func() { close(o.connected) })
 		case *events.Disconnected:
 			reason, observedDisconnect = "network unreachable", true
 		case *events.LoggedOut:
+			if observed != nil && observed.Reason.IsLoggedOut() {
+				fact := *observed
+				o.mu.Lock()
+				o.revoked = &fact
+				o.mu.Unlock()
+			}
 			reason = "logged out"
 		case *events.TemporaryBan:
 			reason = "account temporarily banned"
