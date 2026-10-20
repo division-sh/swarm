@@ -173,13 +173,21 @@ func validateCLIChannelProgress(result channelOnboardingResult) (bool, error) {
 	return pending, nil
 }
 
-func validateCLIChannelContinuation(previous, next channelOnboardingResult) (bool, error) {
-	if next.Operation.OperationID != previous.Operation.OperationID {
+func validateCLIChannelContinuation(previous, next channelOnboardingResult, checkpointOnly bool) (bool, error) {
+	if next.Operation.OperationID != previous.Operation.OperationID || next.Operation.Revision < previous.Operation.Revision {
 		return false, errors.New("channel retry changed the retained operation")
 	}
 	pending, err := validateCLIChannelProgress(next)
 	if err != nil || pending {
 		return pending, err
+	}
+	if checkpointOnly {
+		if next.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity || next.Connection == nil ||
+			!next.Connection.Linked || next.Connection.State != "connected" || next.IdentityOperation != nil || next.Binding != nil ||
+			next.Readiness != nil && next.Readiness.Ready {
+			return false, errors.New("pairing login did not return the non-executable account preview")
+		}
+		return false, nil
 	}
 	if next.Operation.Revision == previous.Operation.Revision && next.Operation.Phase == previous.Operation.Phase {
 		return false, fmt.Errorf("channel onboarding is blocked in %s; retry after resolving the reported prerequisite", next.Operation.Phase)
