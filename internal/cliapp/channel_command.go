@@ -468,6 +468,10 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 	acceptedAccount := ""
 	advancePending := opts.verb == "resume"
 	awaitLogin := false
+	now := time.Now
+	if opts.apiOptions.now != nil {
+		now = opts.apiOptions.now
+	}
 	for {
 		pending, err := validateCLIChannelProgress(result)
 		if err != nil {
@@ -501,25 +505,23 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 			// diagnostics for connect and explicit machine continuations.
 			return result, nil
 		}
-		identity := result.IdentityOperation
-		now := time.Now()
-		if identity != nil && opts.apiOptions.now != nil {
-			now = opts.apiOptions.now()
+		if identity := result.IdentityOperation; identity != nil {
+			observedAt := now()
+			switch {
+			case identity.State == "awaiting_claim" && (identity.ExpiresAt.IsZero() || identity.ExpiresAt.After(observedAt)):
+				fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339))
+				var err error
+				result, err = waitForChannelOnboardingClaim(ctx, client, result, opts.apiOptions)
+				if err != nil {
+					return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+				}
+				continue
+			case channelClaimantConfirmationRequired(result, observedAt):
+				err = confirmChannelOnboardingClaim(ctx, client, result, opts, progressOut, errOut, &sharedAudienceAnnounced)
+			}
 		}
-		switch {
-		case identity == nil:
-		case identity.State == "awaiting_claim" && (identity.ExpiresAt.IsZero() || identity.ExpiresAt.After(now)):
-			fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339))
-			var err error
-			result, err = waitForChannelOnboardingClaim(ctx, client, result, opts.apiOptions)
-			if err != nil {
-				return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
-			}
-			continue
-		case channelClaimantConfirmationRequired(result, now):
-			if err := confirmChannelOnboardingClaim(ctx, client, result, opts, progressOut, errOut, &sharedAudienceAnnounced); err != nil {
-				return channelOnboardingResult{}, err
-			}
+		if err != nil {
+			return channelOnboardingResult{}, err
 		}
 		params := map[string]any{"operation_id": result.Operation.OperationID}
 		if opts.resumeCredential != "" {
