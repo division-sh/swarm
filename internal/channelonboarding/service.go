@@ -133,7 +133,6 @@ type SessionBootstrapOwner interface {
 // SessionRevocation is native occurrence evidence, not connection display text.
 // Join must retain private state and verify the terminalized original parent.
 type SessionRevocation interface {
-	error
 	MatchesOperation(Operation) bool
 	Join(context.Context) error
 }
@@ -350,54 +349,63 @@ func (s *Service) attachOpenConnection(ctx context.Context, requested StartReque
 	if err != nil {
 		return Result{}, err
 	}
-	for _, current := range operations {
-		if current.SlotKey != requested.SlotKey() || current.Phase == PhaseFailed || current.Phase == PhaseRetired {
+	var current Operation
+	found := false
+	for _, operation := range operations {
+		if operation.SlotKey != requested.SlotKey() || operation.Phase == PhaseFailed || operation.Phase == PhaseRetired {
 			continue
 		}
-		if current.Phase == PhaseSucceeded {
-			activation, err := s.store.GetConnectedChannelActivation(ctx, current.SlotKey)
+		if operation.Phase == PhaseSucceeded {
+			activation, err := s.store.GetConnectedChannelActivation(ctx, operation.SlotKey)
 			if err != nil {
 				return Result{}, err
 			}
-			if activation.Status != ActivationCurrent || activation.OperationID != current.OperationID {
+			if activation.Status != ActivationCurrent || activation.OperationID != operation.OperationID {
 				continue
 			}
 		}
-		if current.PrincipalID != requested.PrincipalID || current.Provider != candidate.Provider ||
-			current.Posture != candidate.Posture || current.Ceremony != candidate.Ceremony || current.SaveProof != requested.SaveProof ||
-			requested.ClientLanguage != "" && current.ClientLanguage != requested.ClientLanguage {
-			return Result{}, fmt.Errorf("%w: the open channel connection has different requested settings", ErrConflict)
-		}
-		unlock, err := s.lockDrive(ctx, current.OperationID)
-		if err != nil {
-			return Result{}, err
-		}
-		defer unlock()
-		current, err = s.store.GetChannelOnboarding(ctx, current.OperationID)
-		if err != nil {
-			return Result{}, err
-		}
-		if current.Phase == PhaseFailed || current.Phase == PhaseRetired {
-			return Result{}, ErrRevisionConflict
-		}
-		current, candidate, err = s.bindCurrentCandidate(ctx, current)
-		if err != nil {
-			return Result{}, err
-		}
-		if result, replaced, err := s.replaceRevokedPairing(ctx, current, requested, candidate); replaced || err != nil {
-			return result, err
-		}
-		if sessionResumeRequired(current) {
-			if err := s.resumeSession(ctx, current, candidate); err != nil && !errors.Is(err, ErrSessionPending) {
-				return Result{}, err
-			}
-		}
-		if result, replaced, err := s.replaceRevokedPairing(ctx, current, requested, candidate); replaced || err != nil {
-			return result, err
-		}
-		return s.driveLocked(ctx, current, candidate, "", false)
+		current, found = operation, true
+		break
 	}
-	return Result{}, fmt.Errorf("%w: the open channel connection is no longer available", ErrConflict)
+	if !found {
+		return Result{}, fmt.Errorf("%w: the open channel connection is no longer available", ErrConflict)
+	}
+	switch {
+	case current.PrincipalID != requested.PrincipalID,
+		current.Provider != candidate.Provider, current.Posture != candidate.Posture,
+		current.Ceremony != candidate.Ceremony, current.SaveProof != requested.SaveProof,
+		requested.ClientLanguage != "" && current.ClientLanguage != requested.ClientLanguage:
+		return Result{}, fmt.Errorf("%w: the open channel connection has different requested settings", ErrConflict)
+	}
+	unlock, err := s.lockDrive(ctx, current.OperationID)
+	if err != nil {
+		return Result{}, err
+	}
+	defer unlock()
+	current, err = s.store.GetChannelOnboarding(ctx, current.OperationID)
+	if err != nil {
+		return Result{}, err
+	}
+	switch current.Phase {
+	case PhaseFailed, PhaseRetired:
+		return Result{}, ErrRevisionConflict
+	}
+	current, candidate, err = s.bindCurrentCandidate(ctx, current)
+	if err != nil {
+		return Result{}, err
+	}
+	if result, replaced, err := s.replaceRevokedPairing(ctx, current, requested, candidate); replaced || err != nil {
+		return result, err
+	}
+	if sessionResumeRequired(current) {
+		if err := s.resumeSession(ctx, current, candidate); err != nil && !errors.Is(err, ErrSessionPending) {
+			return Result{}, err
+		}
+	}
+	if result, replaced, err := s.replaceRevokedPairing(ctx, current, requested, candidate); replaced || err != nil {
+		return result, err
+	}
+	return s.driveLocked(ctx, current, candidate, "", false)
 }
 
 func (s *Service) replaceRevokedPairing(ctx context.Context, current Operation, requested StartRequest, candidate Candidate) (Result, bool, error) {

@@ -16,8 +16,6 @@ type revokedPairing struct {
 	operation  channelonboarding.Operation
 }
 
-func (*revokedPairing) Error() string { return "WhatsApp revoked this unadmitted pairing" }
-
 func (r *revokedPairing) MatchesOperation(op channelonboarding.Operation) bool {
 	return r.connection.state.currentOccurrence() == r.occurrence && r.connection.ctx.Err() == nil &&
 		op.OperationID == r.operation.OperationID && op.Revision == r.operation.Revision &&
