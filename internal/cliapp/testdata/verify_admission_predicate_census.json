@@ -963,7 +963,7 @@
     "owner": "internal/cliapp/channel_onboarding_progress.go::validateCLIChannelContinuation",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-cli-progress",
-    "body_sha256": "feb118e793c0f75d9a73afe3e6cb5db1a3a4351d7a8a89698d30e5d08858aecc"
+    "body_sha256": "e578d145349a6d8afcce15fe2110292e2900c6c56ef0184fa61420e695744250"
   },
   {
     "owner": "internal/cliapp/channel_onboarding_progress.go::validateCLIChannelProgress",

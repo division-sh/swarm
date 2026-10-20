@@ -474,9 +474,31 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 		}
 		waitingForConnection := result.Operation.Phase == channelonboarding.PhaseSucceeded && result.Connection != nil && result.Connection.Linked
 		if opts.waitForPairing && (pending || waitingForConnection) {
-			result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, progressOut, errOut, &acceptedAccount)
+			result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, progressOut, errOut)
 			if err != nil {
 				return channelOnboardingResult{}, err
+			}
+			if result.Pairing != nil {
+				if result.Pairing.Paired && !result.Pairing.Connected {
+					var next channelOnboardingResult
+					if err := client.call(ctx, "channel.onboarding_retry", map[string]any{
+						"operation_id": result.Operation.OperationID, "checkpoint_only": true,
+					}, &next); err != nil {
+						return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+					}
+					pending, err := validateCLIChannelContinuation(result, next, true)
+					if err != nil {
+						return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
+					}
+					result = next
+					if pending {
+						continue
+					}
+				}
+				result, err = confirmCLIChannelAccount(ctx, client, result, opts, progressOut, errOut, &acceptedAccount)
+				if err != nil {
+					return channelOnboardingResult{}, err
+				}
 			}
 		}
 		advancePending = false
@@ -517,7 +539,7 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 		}
 		delete(params, "provider_credential")
 		opts.resumeCredential = ""
-		pending, pendingErr := validateCLIChannelContinuation(result, next)
+		pending, pendingErr := validateCLIChannelContinuation(result, next, false)
 		if pendingErr != nil {
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, pendingErr)
 		}
@@ -528,7 +550,7 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 	}
 }
 
-func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, error) {
+func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer) (channelOnboardingResult, error) {
 	poll := opts.apiOptions.channelConnectPoll
 	if poll <= 0 {
 		poll = 500 * time.Millisecond
@@ -554,33 +576,13 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 			}
 			lastQR = current.Pairing.Code
 		}
-		if pending && current.Pairing.Paired && !current.Pairing.Connected {
-			var next channelOnboardingResult
-			if err := client.call(ctx, "channel.onboarding_retry", map[string]any{
-				"operation_id": current.Operation.OperationID, "checkpoint_only": true,
-			}, &next); err != nil {
-				return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
-			}
-			nextPending, err := validateCLIChannelContinuation(current, next)
-			if err != nil || next.Operation.Revision < current.Operation.Revision {
-				return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("pairing login changed the retained operation"))
-			}
-			current = next
-			if !nextPending && current.Operation.Phase == channelonboarding.PhaseAwaitingExternalIdentity && current.Connection != nil &&
-				current.Connection.Linked && current.Connection.State == "connected" &&
-				current.IdentityOperation == nil && current.Binding == nil && (current.Readiness == nil || !current.Readiness.Ready) {
-				break
-			}
-			if !nextPending {
-				return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("pairing login did not return the account preview"))
-			}
-		} else if pending && current.Pairing.Connected && current.Pairing.Code == "" {
-			break
-		}
 		select {
 		case <-ctx.Done():
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel connection stopped"))
 		case <-ticker.C:
+		}
+		if pending && current.Pairing.Status != channelonboarding.PairingStatusPreparing && current.Pairing.Code == "" {
+			break
 		}
 		var next channelOnboardingResult
 		if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": current.Operation.OperationID}, &next); err != nil {
@@ -591,7 +593,7 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 		}
 		current = next
 	}
-	return confirmCLIChannelAccount(ctx, client, current, opts, out, errOut, acceptedAccount)
+	return current, nil
 }
 
 func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, error) {
