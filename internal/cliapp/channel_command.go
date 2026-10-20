@@ -478,27 +478,13 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 			if err != nil {
 				return channelOnboardingResult{}, err
 			}
-			if result.Pairing != nil {
-				if result.Pairing.Paired && !result.Pairing.Connected {
-					var next channelOnboardingResult
-					if err := client.call(ctx, "channel.onboarding_retry", map[string]any{
-						"operation_id": result.Operation.OperationID, "checkpoint_only": true,
-					}, &next); err != nil {
-						return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
-					}
-					pending, err := validateCLIChannelContinuation(result, next, true)
-					if err != nil {
-						return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
-					}
-					result = next
-					if pending {
-						continue
-					}
-				}
-				result, err = confirmCLIChannelAccount(ctx, client, result, opts, progressOut, errOut, &acceptedAccount)
-				if err != nil {
-					return channelOnboardingResult{}, err
-				}
+			var previewPending bool
+			result, previewPending, err = confirmCLIChannelAccount(ctx, client, result, opts, progressOut, errOut, &acceptedAccount)
+			if err != nil {
+				return channelOnboardingResult{}, err
+			}
+			if previewPending {
+				continue
 			}
 		}
 		advancePending = false
@@ -596,9 +582,32 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 	return current, nil
 }
 
-func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, error) {
+func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, bool, error) {
 	// A scan is a preview, not executable admission. Only approval advances
 	// through the checkpoint owner; rejection can checkpoint solely for logout.
+	pending, err := validateCLIChannelProgress(current)
+	if err != nil {
+		return channelOnboardingResult{}, false, returnCLIValidationError(errOut, err)
+	}
+	if !pending {
+		return current, false, nil
+	}
+	if current.Pairing.Paired && !current.Pairing.Connected {
+		var next channelOnboardingResult
+		if err := client.call(ctx, "channel.onboarding_retry", map[string]any{
+			"operation_id": current.Operation.OperationID, "checkpoint_only": true,
+		}, &next); err != nil {
+			return channelOnboardingResult{}, false, returnCLIAPIError(errOut, err, channelErrorClassifier())
+		}
+		pending, err := validateCLIChannelContinuation(current, next, true)
+		if err != nil {
+			return channelOnboardingResult{}, false, returnCLIValidationError(errOut, err)
+		}
+		if pending {
+			return next, true, nil
+		}
+		current = next
+	}
 	account, name := "", ""
 	if current.Pairing != nil {
 		account, name = current.Pairing.AccountPresentation, current.Pairing.AccountName
@@ -608,10 +617,10 @@ func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current
 		account, name = current.Connection.AccountPresentation, current.Connection.AccountName
 	}
 	if account == "" {
-		return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("the linked account could not be identified; connection is not READY"))
+		return channelOnboardingResult{}, false, returnCLIValidationError(errOut, errors.New("the linked account could not be identified; connection is not READY"))
 	}
 	if account == *acceptedAccount {
-		return current, nil
+		return current, false, nil
 	}
 	label := cliSanitizeOneLineValue(account)
 	if name != "" {
@@ -619,33 +628,33 @@ func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current
 	}
 	fmt.Fprintf(out, "Linked to %s\n", label)
 	approve := opts.yes
-	var err error
 	if !approve {
 		approve, err = confirmChannelAccount(opts.apiOptions.input, errOut, "Is this the right account? [y/N] ")
 		if err != nil {
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
+			return channelOnboardingResult{}, false, returnCLIValidationError(errOut, err)
 		}
 	}
 	if approve {
 		*acceptedAccount = account
-		return current, nil
+		return current, false, nil
 	}
 	paired := current
 	if current.Operation.Phase == channelonboarding.PhaseActivatingProvider {
 		if err := client.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": current.Operation.OperationID, "checkpoint_only": true}, &paired); err != nil {
-			return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+			return channelOnboardingResult{}, false, returnCLIAPIError(errOut, err, channelErrorClassifier())
 		}
 	}
 	if paired.Operation.OperationID != current.Operation.OperationID || paired.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity ||
 		paired.Connection == nil || !paired.Connection.Linked {
-		return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("the rejected account has no exact logout target"))
+		return channelOnboardingResult{}, false, returnCLIValidationError(errOut, errors.New("the rejected account has no exact logout target"))
 	}
 	if err := runChannelLogout(ctx, out, errOut, current.Operation.OperationID, "", opts.apiOptions, opts.output); err != nil {
-		return channelOnboardingResult{}, err
+		return channelOnboardingResult{}, false, err
 	}
 	params := map[string]any{"provider": current.Operation.Provider, "verb": "connect", "save_proof": !opts.noSave,
 		"bundle": current.Operation.Coordinate.BundleHash, "interface": current.Operation.Interface.Selector, "target": current.Operation.TargetSelector}
-	return startCLIChannelOnboarding(ctx, client, params, opts, errOut)
+	next, err := startCLIChannelOnboarding(ctx, client, params, opts, errOut)
+	return next, true, err
 }
 
 func confirmChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer, sharedAudienceAnnounced *bool) error {
