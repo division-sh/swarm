@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/testutil"
+	"go.mau.fi/whatsmeow/types"
 )
 
 // A comms-only connection carries customer traffic, not operator authority.
@@ -51,6 +52,9 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 					location = testutil.StartEmptyPostgresDSN(t)
 					opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, location)
 				}
+				const pendingText = "Message during account activation"
+				const pendingID = "PENDING_ACCOUNT_ACTIVATION"
+				pendingCustomer := types.NewJID("15551234579", types.DefaultUserServer)
 				if !rollover {
 					var injected atomic.Bool
 					opts.TestChannelOnboardingBarrier = func(boundary channelonboarding.TestLifecycleBoundary, _ string) error {
@@ -60,19 +64,28 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 						peer.mu.Lock()
 						before := peer.disconnected
 						peer.mu.Unlock()
-						message, _, _ := peer.customerMessage("Message during account activation", "PENDING_ACCOUNT_ACTIVATION")
-						peer.sendEncryptedFrame(message)
-						for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+						sender, _, _ := peer.senderFrom(pendingCustomer, types.NewJID("100000000007", types.HiddenUserServer))
+						peer.sendEncryptedFrame(sender.EncryptText(t, pendingText, pendingID))
+						for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
 							peer.mu.Lock()
 							disconnected := peer.disconnected > before
 							peer.mu.Unlock()
 							if disconnected {
-								t.Log("activation diagnostic: native peer disconnected before process publication")
+								t.Error("pending account activation fenced the native peer")
 								return nil
 							}
 							time.Sleep(10 * time.Millisecond)
 						}
-						t.Log("activation diagnostic: no disconnect at the existing 5s observation cut")
+						select {
+						case <-peer.receipts:
+							t.Error("pending account activation acknowledged unadmitted input")
+						default:
+						}
+						select {
+						case <-peer.sent:
+							t.Error("pending account activation published customer input")
+						default:
+						}
 						return nil
 					}
 				}
@@ -143,6 +156,16 @@ func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
 				customer, retained := peer.receiver(originalReply.To)
 				if !retained {
 					t.Fatal("original customer sender was not retained")
+				}
+				if !rollover {
+					sender, found := peer.receiver(pendingCustomer)
+					if !found {
+						t.Fatal("pending input lost its original encrypted sender")
+					}
+					peer.sendEncrypted(sender.sender.EncryptText(t, pendingText, pendingID), pendingID)
+					if reply := awaitServedNativeProcessSend(t, peer, pendingText); reply.To.ToNonAD() != pendingCustomer && reply.To.ToNonAD() != sender.lid {
+						t.Fatal("admitted redelivery changed the exact customer recipient")
+					}
 				}
 				if code := process.stop(); code != 0 {
 					t.Fatal("receptionist shutdown failed", code, process.outputString())

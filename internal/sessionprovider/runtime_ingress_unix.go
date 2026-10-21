@@ -107,6 +107,19 @@ func (i *runtimeIncoming) receiveScope(ctx context.Context, message *events.Mess
 	if err != nil {
 		return captureScope{}, captureSource{}, err
 	}
+	// Native account admission precedes this check. Pending execution is not
+	// a capture failure, and cannot acknowledge or publish the incoming input.
+	switch op.Phase {
+	case channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation:
+		if op.ActivationRevision == 0 && op.IdentityOperationID == "" {
+			return captureScope{}, captureSource{}, errIncomingAdmissionPending
+		}
+	case channelonboarding.PhasePublishingActivation, channelonboarding.PhasePublishingProcessActivation,
+		channelonboarding.PhasePromotingRegistration, channelonboarding.PhaseRetiringPredecessor, channelonboarding.PhaseDeliveringConfirmation:
+		if op.AccountConnection() {
+			return captureScope{}, captureSource{}, errIncomingAdmissionPending
+		}
+	}
 	if (op.Phase != channelonboarding.PhaseAwaitingExternalIdentity && op.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation) || op.IdentityOperationID == "" {
 		return i.businessScope(ctx)
 	}
