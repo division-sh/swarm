@@ -14,12 +14,14 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/testutil"
 	"go.mau.fi/whatsmeow/types"
 )
 
 // A comms-only connection carries customer traffic, not operator authority.
 func TestRunServeWhatsAppReceptionistWithoutOperatorBothStores(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/cliapp/archetypes/whatsapp-receptionist"))
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, rollover := range []bool{false, true} {
 			name := backend
