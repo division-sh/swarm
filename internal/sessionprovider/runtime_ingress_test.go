@@ -119,6 +119,12 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 				t.Fatal("runtime publication retained completed capture", len(rows), err)
 			}
 			assertRuntimeIncomingSetupReceipt(t, f)
+			spoofed := incomingMessageFixture()
+			spoofed.Info.IsFromMe = true
+			guard := c.state.currentOccurrence().callbacks
+			if guard.receive(spoofed) || !errors.Is(guard.currentFailure(), errIncomingMalformed) || c.CheckBootstrap(f.ctx) == nil {
+				t.Fatal("a foreign sender bypassed refusal by claiming a self echo")
+			}
 		})
 	}
 }

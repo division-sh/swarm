@@ -86,6 +86,20 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 	if err != nil {
 		return err
 	}
+	if message.Info.IsFromMe {
+		device, err := c.state.device(work.Context())
+		if err != nil {
+			return err
+		}
+		sender := message.Info.Sender.ToNonAD()
+		if device.ID == nil || sender.IsEmpty() || message.Message == nil || !exactMessageID(message.Info.ID) ||
+			message.Info.Timestamp.IsZero() || message.Info.Timestamp.UnixMilli() < 1 ||
+			sender != device.ID.ToNonAD() && sender != device.LID.ToNonAD() {
+			return errIncomingMalformed
+		}
+		// The SDK owns linked-device echoes and sync, not customer ingress.
+		return nil
+	}
 	occurrence := c.state.currentOccurrence()
 	if occurrence == nil {
 		return errClientOccurrenceFenced
