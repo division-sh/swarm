@@ -52,7 +52,7 @@ func TestChannelOnboardingE2E07ClaimTimeoutResume(t *testing.T) {
 			operationID := channelOnboardingOperationIDPattern.FindString(surface)
 			resumeCommand := "swarm channel resume " + operationID
 			if code == 0 || admittedID == "" || operationID != admittedID || !strings.Contains(surface, resumeCommand) ||
-				!strings.Contains(surface, "context deadline exceeded: channel claim wait stopped") {
+				!strings.Contains(surface, "context deadline exceeded: stopped waiting for the operator's code") {
 				t.Fatalf("%s E2E-07 timeout code=%d lacks exact resume\nstdout:\n%s\nstderr:\n%s", backend, code, stdout.String(), stderr.String())
 			}
 			if registrations, deliveries := harness.provider.Counts(); registrations != 1 || deliveries != 0 {
