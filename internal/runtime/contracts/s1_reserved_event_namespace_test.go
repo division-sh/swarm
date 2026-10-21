@@ -37,6 +37,9 @@ func TestS1ReservedInboundDeclarationDiskAndRetainedSource(t *testing.T) {
 			}
 			root := t.TempDir()
 			file := filepath.Join(root, "events.yaml")
+			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(file, []byte(fmt.Sprintf("%q:\n", tc.declaration)), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -107,6 +110,14 @@ func TestS1ReservedInboundDeclarationStopsExecutableCompiler(t *testing.T) {
 			file := filepath.Join(root, flow, "events.yaml")
 			if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
 				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if flow != "." {
+				if err := os.WriteFile(filepath.Join(root, "child", "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o600); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := os.WriteFile(file, []byte("inbound.telegram.message:\n"), 0o600); err != nil {
 				t.Fatal(err)

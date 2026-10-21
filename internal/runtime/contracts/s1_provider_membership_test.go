@@ -17,6 +17,7 @@ func TestS1FlowSourcesExcludeProviderDirectories(t *testing.T) {
 		"team-bot/manifest.yaml":       manifest,
 		"team-bot/trigger.yaml":        "event_name: {literal: inbound.team}\n",
 		"child/data/value.txt":         "child\n",
+		"child/manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
 		"child/team-bot/manifest.yaml": manifest,
 		"child/team-bot/trigger.yaml":  "event_name: {literal: inbound.team}\n",
 	}

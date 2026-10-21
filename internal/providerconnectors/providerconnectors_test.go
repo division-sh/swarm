@@ -210,11 +210,14 @@ func loadNestedProviderConnectorAgentSource(t *testing.T) semanticview.Source {
 			t.Fatalf("WriteFile(%s): %v", path, err)
 		}
 	}
-	write(filepath.Join(root, "schema.yaml"), "name: nested-provider-agent\n")
-	write(filepath.Join(root, "parent", "schema.yaml"), "name: parent\n")
-	write(filepath.Join(root, "parent", "child", "schema.yaml"), "name: child\n")
+	write(filepath.Join(root, "schema.yaml"), "# fixture: nested-provider-agent\n{}\n")
+	write(filepath.Join(root, "parent", "schema.yaml"), "# fixture: parent\n{}\n")
+	write(filepath.Join(root, "parent", "child", "schema.yaml"), "# fixture: child\n{}\n")
 	flowRoot := filepath.Join(root, "parent", "child", "support")
-	write(filepath.Join(flowRoot, "schema.yaml"), "name: support\nstages:\n  active: {}\n")
+	write(filepath.Join(flowRoot, "schema.yaml"), "# fixture: support\nstages:\n  active: {}\n")
+	for _, flow := range []string{".", "parent", "parent/child", "parent/child/support"} {
+		write(filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	}
 	write(filepath.Join(flowRoot, "agents.yaml"), `
 sender:
   id: public-sender

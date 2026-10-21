@@ -9,6 +9,7 @@ import (
 func TestS1ContractLoaderExactSourcePath(t *testing.T) {
 	parent := filepath.Join(t.TempDir(), "parent with spaces ")
 	writeBundleIdentityFile(t, filepath.Join(parent, "shop-a", "schema.yaml"), "stages: []\n")
+	writeBundleIdentityFile(t, filepath.Join(parent, "shop-a", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	repo := repoRootForContractsTest(t)
 	for _, name := range []string{" shop-a", "shop-a ", "shop-a\t", "shop-a\n"} {
 		root := filepath.Join(parent, name)
