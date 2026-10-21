@@ -25,6 +25,7 @@ func TestOrderedRuleRetirementReachesDiskCatalogAndRetainedChildren(t *testing.T
 				writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 				writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: ordered-rule-source\n")
 				if scope != "." {
+					writeFixtureFile(t, filepath.Join(root, scope, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 					writeFixtureFile(t, filepath.Join(root, scope, "schema.yaml"), "stages: []\n# fixture: unused-child\n")
 				}
 				writeFixtureFile(t, filepath.Join(root, scope, "events.yaml"), "request:\ndone:\n")

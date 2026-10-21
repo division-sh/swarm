@@ -381,6 +381,7 @@ func TestFanOutCompiledPlanRegistryOwnsEverySiteAndReturnsImmutableCopies(t *tes
 func fanOutPlanRegistryTestBundle(t *testing.T, handler SystemNodeEventHandler) *WorkflowContractBundle {
 	t.Helper()
 	root := t.TempDir()
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	schemaFile := filepath.Join(root, "schema.yaml")
 	platformFile := filepath.Join(root, "platform-spec.yaml")
 	if err := os.WriteFile(schemaFile, []byte("stages: []\n# fixture: fan-out-plan-registry-test\n"), 0o644); err != nil {

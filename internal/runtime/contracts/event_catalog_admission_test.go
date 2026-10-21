@@ -108,7 +108,7 @@ func TestEventCatalogAdmissionRejectsRetiredAndAmbiguousSyntax(t *testing.T) {
 		{name: "duplicate through merge", source: "<<: &base\n  id: text\nid: uuid", wantErr: "duplicate effective field \"id\""},
 		{name: "double optional marker", source: "id: text??", wantErr: "exactly one trailing ?"},
 		{name: "optional business key", source: "key: id\nid: uuid?", wantErr: "must be required"},
-		{name: "missing business key field", source: "key: id\n# fixture: text", wantErr: "is not a declared payload field"},
+		{name: "missing business key field", source: "key: id\nname: text", wantErr: "is not a declared payload field"},
 		{name: "null declaration", source: "null", wantErr: "an event with no fields is declared bare"},
 		{name: "unknown swarm metadata", source: "swarm:\n  producerr: external", wantErr: `event field name "swarm"`},
 		{name: "unknown swarm metadata through merge", source: "swarm:\n  <<: &metadata\n    producerr: external", wantErr: `event field name "swarm"`},
