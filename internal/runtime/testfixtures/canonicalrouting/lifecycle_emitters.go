@@ -71,12 +71,12 @@ collector:
 func CopyLifecycleSelectedCarriers(t testing.TB, reordered bool) string {
 	t.Helper()
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	flows := []string{"", "child/", "sibling/", "child/nested/"}
 	if reordered {
 		flows = []string{"child/nested/", "sibling/", "child/", ""}
 	}
 	for _, prefix := range flows {
+		writeClosedVariantFile(t, root, prefix+"manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, prefix+"schema.yaml", `# fixture: selected-carriers
 stages:
   waiting: {}

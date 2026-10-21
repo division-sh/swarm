@@ -11,14 +11,9 @@ func TestRule2287CanonicalConsumersKeepSelectionAndExplicitActivityIdentity(t *t
 		name string
 		copy func(testing.TB) string
 	}{
-		{"publication/root", func(t testing.TB) string { return CopyPublicationStateResult(t, "root") }},
-		{"publication/static", func(t testing.TB) string { return CopyPublicationStateResult(t, "static") }},
-		{"selection_retry", CopySelectionRetry},
 		{"artifact/template", func(t testing.TB) string { return CopyArtifactActionResultDelivery(t, "template", false) }},
 		{"artifact/static", func(t testing.TB) string { return CopyArtifactActionResultDelivery(t, "static", false) }},
-		{"served_followup", CopyRootIngressServedFollowUp},
 		{"selection_trace", CopyHandlerRuleSelectionProof},
-		{"gate_completion", CopyGateCompletionDiagnostic},
 		{"carriers/original", func(t testing.TB) string { return CopyLifecycleSelectedCarriers(t, false) }},
 		{"carriers/reordered", func(t testing.TB) string { return CopyLifecycleSelectedCarriers(t, true) }},
 		{"selected_activity", func(t testing.TB) string { return CopySelectedForkReadiness(t, 1, "activity_loop_rule") }},

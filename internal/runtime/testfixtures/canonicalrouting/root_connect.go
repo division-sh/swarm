@@ -36,6 +36,7 @@ platform_version: ">=0.7.0 <0.8.0"
   event_handlers:
     bootstrap.requested: {}
 `,
+		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n",
 		"operating/schema.yaml": `instance: operating_id
 pins:
   inputs:
@@ -137,6 +138,7 @@ func CopyRootOutputConnectMissingReceiver(t testing.TB) string {
 func CopyRootOutputConnectWithChildPublisher(t testing.TB) string {
 	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
+	writeClosedVariantFile(t, root, "child/manifest.yaml", "version: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n")
 	writeClosedVariantFile(t, root, "child/schema.yaml", "pins:\n  outputs: [root.ready]\n")
 	writeClosedVariantFile(t, root, "child/events.yaml", "root.ready:\n  entity_id: text\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `child-node:
@@ -202,6 +204,8 @@ func CopySingletonOutputRootConnect(t testing.TB) string {
 func CopyNestedSingletonOutputRootConnect(t testing.TB) string {
 	t.Helper()
 	root := copySingletonOutputRootConnect(t, "left/child/scout")
+	writeClosedVariantFile(t, root, "left/manifest.yaml", "version: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n")
+	writeClosedVariantFile(t, root, "left/child/manifest.yaml", "version: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n")
 	return root
 }
 
