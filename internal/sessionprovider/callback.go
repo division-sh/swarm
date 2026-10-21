@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"sync"
 
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/sessioncapture"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow"
 )
 
 type callbackFailure = sessioncapture.CallbackFailure
+
+var errIncomingAdmissionPending = errors.New("WhatsApp incoming account admission is pending")
 
 // callbackGuard catches inside the SDK's success-status handler. The SDK's
 // outer panic recovery does not change its successful return value.
@@ -62,6 +65,9 @@ func (g *callbackGuard) receive(event any) (success bool) {
 		}
 	}()
 	if err := g.handle(g.ctx, event); err != nil {
+		if runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == errIncomingAdmissionPending }) {
+			return false
+		}
 		g.fail("capture_failed", err)
 		return false
 	}

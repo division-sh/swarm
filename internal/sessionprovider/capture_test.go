@@ -213,11 +213,27 @@ func TestWhatsAppCaptureAcknowledgmentRequiresCommitAndSurvivesReopen(t *testing
 	event := captureFixture(t)
 	path := filepath.Join(t.TempDir(), "incoming.db")
 	db, store := openCaptureFixture(t, path, event.Scope.Session.ConnectionID)
+	pending := true
 	guard, err := newCallbackGuard(context.Background(), event.Scope.Session.ConnectionID, event.OccurrenceID,
-		func(context.Context, any) error { return store.capture(context.Background(), event) }, store.recordFailure)
+		func(context.Context, any) error {
+			if pending {
+				return errors.Join(errIncomingAdmissionPending)
+			}
+			return store.capture(context.Background(), event)
+		}, store.recordFailure)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if guard.receive(event) || guard.fenced || guard.currentFailure() != nil {
+		t.Fatal("pending admission acknowledged input or fenced the callback")
+	}
+	if rows, err := store.pending(context.Background()); err != nil || len(rows) != 0 {
+		t.Fatal("pending admission created a capture", len(rows), err)
+	}
+	if count, err := db.CallbackFailureCount(context.Background(), "", event.OccurrenceID, ""); err != nil || count != 0 {
+		t.Fatal("pending admission recorded a capture failure", count, err)
+	}
+	pending = false
 	if !guard.receive(event) {
 		t.Fatal("committed capture was not acknowledged")
 	}
@@ -247,11 +263,13 @@ func TestWhatsAppCaptureWriteFailureHasNoAckAndRetainsFailureEvidence(t *testing
 		t.Fatal(err)
 	}
 	guard, err := newCallbackGuard(context.Background(), event.Scope.Session.ConnectionID, event.OccurrenceID,
-		func(context.Context, any) error { return store.capture(context.Background(), event) }, store.recordFailure)
+		func(context.Context, any) error {
+			return errors.Join(errIncomingAdmissionPending, store.capture(context.Background(), event))
+		}, store.recordFailure)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if guard.receive(event) || guard.currentFailure() == nil {
+	if guard.receive(event) || !guard.fenced || guard.currentFailure() == nil {
 		t.Fatal("failed capture reported acknowledgment")
 	}
 	got, err := store.pending(context.Background())

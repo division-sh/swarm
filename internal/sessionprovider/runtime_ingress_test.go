@@ -16,12 +16,14 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -261,6 +263,18 @@ func TestWhatsAppRuntimeIncomingAuthorityFencesBothStores(t *testing.T) {
 					f.activate(t)
 				}
 				c := openRuntimeIncomingFixture(t, f)
+				observed := make(chan error, 1)
+				if cell == "onboarding" {
+					guard := c.state.currentOccurrence().callbacks
+					handle := guard.handle
+					guard.handle = func(ctx context.Context, raw any) error {
+						err := handle(ctx, raw)
+						if _, message := raw.(*events.Message); message {
+							observed <- err
+						}
+						return err
+					}
+				}
 				connectRuntimeConnectionFixture(t, f, c)
 				now := time.Now().UTC().Truncate(time.Microsecond)
 				var err error
@@ -281,7 +295,21 @@ func TestWhatsAppRuntimeIncomingAuthorityFencesBothStores(t *testing.T) {
 				}
 				id := uuid.NewString()
 				sendRuntimeIncomingFixture(t, f, c, id, "refused business message")
-				waitRuntimeIncomingFailure(t, f, c, id)
+				if cell == "onboarding" {
+					select {
+					case err := <-observed:
+						if !runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == errIncomingAdmissionPending }) {
+							t.Fatal("authenticated unapproved input was not classified as pending", err)
+						}
+					case <-f.peer.ctx.Done():
+						t.Fatal("pending incoming input was not observed")
+					}
+					if err := c.CheckBootstrap(f.ctx); err != nil || c.state.currentOccurrence().callbacks.currentFailure() != nil {
+						t.Fatal("pending approval fenced its original SDK transport", err)
+					}
+				} else {
+					waitRuntimeIncomingFailure(t, f, c, id)
+				}
 				fixture, spool := openCaptureFixture(t, filepath.Join(c.state.directory.path, "provider.db"), f.operation.SessionAccount.ConnectionID)
 				defer fixture.Close()
 				rows, err := spool.pending(context.Background())
