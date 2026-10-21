@@ -19,6 +19,7 @@ func TestHandlerConstructionRetirementDiskAndReconstructedSource(t *testing.T) {
 			}
 			body += "      emit: work.completed\n"
 			root := t.TempDir()
+			writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			path := filepath.Join(root, "nodes.yaml")
 			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
 				t.Fatal(err)

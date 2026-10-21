@@ -307,8 +307,10 @@ func TestListSpellingRetirementCombinedNestedBundle(t *testing.T) {
 			} {
 				t.Run(scope+surface+"/"+test.retired, func(t *testing.T) {
 					root := t.TempDir()
+					writeFixtureFile(t, root+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 					writeFixtureFile(t, root+"/schema.yaml", "# fixture: nested-proof\nstages: {done: {final: true}}\n")
 					if scope != "" {
+						writeFixtureFile(t, root+"/child/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 						writeFixtureFile(t, root+"/child/schema.yaml", "# fixture: child\nstages: {done: {final: true}}\n")
 					}
 					file := scope + surface + ".yaml"

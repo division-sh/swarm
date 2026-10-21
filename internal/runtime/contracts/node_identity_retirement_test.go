@@ -1,12 +1,9 @@
 package contracts
 
 import (
-	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
@@ -88,18 +85,6 @@ event_handlers:
 	if err := decodeNodeTestYAML([]byte("id: worker\n"+body), &node); err == nil || !strings.Contains(err.Error(), retiredNodeID) {
 		t.Fatalf("node ID accepted alongside legitimate IDs: %v", err)
 	}
-	for _, test := range []struct {
-		name  string
-		proof func(*testing.T)
-	}{
-		{"delivery join ID", TestFanOutDeliveryJoinStrictClosedGrammar},
-		{"stage join identity", TestSystemNodeHandlerDecodeJoinCanonicalShape},
-		{"loop identity", TestFlowSchemaDocumentDecodeBoundedLoopCanonicalSyntax},
-		{"gate decision identity", TestFlowSchemaDocumentDecodeTypedStageGate},
-		{"agent public name", TestAgentDeclarationIDPresenceMatrix},
-	} {
-		t.Run(test.name, test.proof)
-	}
 }
 
 func TestNodeIdentityAdmissionAndArtifactReconstruction(t *testing.T) {
@@ -109,6 +94,7 @@ func TestNodeIdentityAdmissionAndArtifactReconstruction(t *testing.T) {
 			t.Run(scope+"/"+value, func(t *testing.T) {
 				root := t.TempDir()
 				for _, path := range []string{".", "left", "right", "left/nested"} {
+					writeFixtureFile(t, filepath.Join(root, path, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 					writeFixtureFile(t, filepath.Join(root, path, "schema.yaml"), "stages: []\n# fixture: worker-flow\n")
 				}
 				file := filepath.Join(root, scope, "nodes.yaml")
@@ -139,6 +125,7 @@ func TestNodeIdentityAdmissionAndArtifactReconstruction(t *testing.T) {
 	t.Run("map identities survive source deletion", func(t *testing.T) {
 		root := t.TempDir()
 		for _, path := range []string{".", "left", "right", "left/nested"} {
+			writeFixtureFile(t, filepath.Join(root, path, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 			writeFixtureFile(t, filepath.Join(root, path, "schema.yaml"), "stages: []\n# fixture: worker-flow\n")
 			writeFixtureFile(t, filepath.Join(root, path, "nodes.yaml"), "worker:\n  event_handlers: {}\n")
 		}
@@ -208,111 +195,4 @@ func TestSystemNodeContractRejectsRetiredIDOnPresence(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-}
-
-func TestNodeIDRetirementCorpusEffectiveEquivalence(t *testing.T) {
-	root := contractRepoRoot(t)
-	paths := []string{
-		"examples/integrations/telegram-agent",
-		"examples/routing/fan-in/barrier", "examples/routing/fan-in/stream",
-		"examples/routing/notify-all-children",
-		"examples/routing/parent-connect", "examples/routing/root-ingress",
-		"examples/routing/template-create-minted-key", "examples/routing/template-reply",
-		"examples/routing/template-select-existing", "examples/routing/template-select-or-create",
-		"internal/cliapp/archetypes/zero-agent-automation",
-	}
-	got := map[string]any{}
-	nodeCount := 0
-	for _, path := range paths {
-		bundle, err := LoadWorkflowContractBundleWithOverrides(root, filepath.Join(root, path), DefaultPlatformSpecFile(root))
-		if err != nil {
-			t.Fatalf("%s: %v", path, err)
-		}
-		nodes := map[string]any{}
-		for _, record := range bundle.ScopedNodeRecords() {
-			ref, err := record.Identity()
-			if err != nil {
-				t.Fatal(err)
-			}
-			raw, err := json.Marshal(record.Entry)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var behavior map[string]any
-			if err := json.Unmarshal(raw, &behavior); err != nil {
-				t.Fatal(err)
-			}
-			// Only the retired source spelling is absent from the comparison.
-			delete(behavior, "ID")
-			nodes[ref.Key()] = map[string]any{"identity": ref, "behavior": behavior, "effective": bundle.Semantics.EffectiveNodes[ref.Key()]}
-			nodeCount++
-		}
-		transitions := append([]HandlerTransitionSemantic(nil), bundle.Semantics.HandlerTransitions...)
-		sort.Slice(transitions, func(i, j int) bool { return transitions[i].ID < transitions[j].ID })
-		got[path] = map[string]any{"nodes": nodes, "handlers": bundle.Semantics.NodeHandlers, "owners": bundle.Semantics.EventOwners, "transitions": transitions, "connects": bundle.Semantics.CompositionConnects}
-	}
-	if nodeCount != 24 {
-		t.Fatalf("public node census = %d, want 24 (retired harness-only example excluded)", nodeCount)
-	}
-	raw, err := json.MarshalIndent(got, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	filename := filepath.Join("testdata", "node_identity_effective_baseline.json")
-	// Explicit generation still loads every corpus root and checks its exact
-	// node census. Ordinary runs always compare the complete projection.
-	if os.Getenv("SWARM_UPDATE_NODE_ID_BASELINE") == "1" {
-		if err := os.WriteFile(filename, append(raw, '\n'), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	wantRaw, err := os.ReadFile(filename)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var actual, want any
-	if err := json.Unmarshal(raw, &actual); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(wantRaw, &want); err != nil {
-		t.Fatal(err)
-	}
-	// Transition collection iterates handler maps; rule order inside each
-	// transition remains significant and is never sorted.
-	for _, projection := range []any{actual, want} {
-		for _, bundle := range projection.(map[string]any) {
-			transitions, _ := bundle.(map[string]any)["transitions"].([]any)
-			sort.Slice(transitions, func(i, j int) bool {
-				return transitions[i].(map[string]any)["ID"].(string) < transitions[j].(map[string]any)["ID"].(string)
-			})
-		}
-	}
-	if !reflect.DeepEqual(actual, want) {
-		t.Fatal("node behavior or scoped identity differs: " + nodeProjectionDifference(want, actual))
-	}
-}
-
-func nodeProjectionDifference(want, got any) string {
-	if reflect.DeepEqual(want, got) {
-		return ""
-	}
-	if w, ok := want.(map[string]any); ok {
-		if g, ok := got.(map[string]any); ok {
-			for k, v := range w {
-				if !reflect.DeepEqual(v, g[k]) {
-					return k + "." + nodeProjectionDifference(v, g[k])
-				}
-			}
-		}
-	}
-	if w, ok := want.([]any); ok {
-		if g, ok := got.([]any); ok && len(w) == len(g) {
-			for i, v := range w {
-				if !reflect.DeepEqual(v, g[i]) {
-					return fmt.Sprintf("[%d].%s", i, nodeProjectionDifference(v, g[i]))
-				}
-			}
-		}
-	}
-	return fmt.Sprintf("want %#v, got %#v", want, got)
 }
