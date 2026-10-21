@@ -14,7 +14,7 @@ func TestCatalogReferenceDiagnosticNamesAuthoredEvent(t *testing.T) {
 			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "# fixture: diagnostic\nstages: {done: {final: true}}\n")
 			if flow != "." {
 				writeFixtureFile(t, filepath.Join(root, "support/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-				writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+				writeFixtureFile(t, filepath.Join(root, flow, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 				writeFixtureFile(t, filepath.Join(root, "support/schema.yaml"), "# fixture: support\nstages: {done: {final: true}}\n")
 				writeFixtureFile(t, filepath.Join(root, flow, "schema.yaml"), "# fixture: child\nstages: {done: {final: true}}\n")
 			}

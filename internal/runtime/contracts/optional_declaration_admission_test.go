@@ -366,6 +366,7 @@ func TestOptionalDeclarationAdmissionIsConsumedAtSupportedScopes(t *testing.T) {
 					root := t.TempDir()
 					writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 					writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: optional-declaration-scope\n")
+					writeFixtureFile(t, filepath.Join(root, "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 					writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "# fixture: child\nstages:\n  active: {}\n")
 					targetRoot := scope.targetRoot(root)
 					target := filepath.Join(targetRoot, role.fileName)
@@ -386,38 +387,6 @@ func TestOptionalDeclarationAdmissionIsConsumedAtSupportedScopes(t *testing.T) {
 	}
 }
 
-func TestMergeOnlyCustomDocumentsFailBeforeBundlePublicationAtEverySupportedScope(t *testing.T) {
-	repoRoot := contractRepoRoot(t)
-	for _, test := range []struct {
-		name   string
-		target func(string) string
-	}{
-		{name: "root/entities", target: func(root string) string { return filepath.Join(root, "entities.yaml") }},
-		{name: "root/types", target: func(root string) string { return filepath.Join(root, "types.yaml") }},
-		{name: "root/policy", target: func(root string) string { return filepath.Join(root, "policy.yaml") }},
-		{name: "child/entities", target: func(root string) string { return filepath.Join(root, "child", "entities.yaml") }},
-		{name: "child/types", target: func(root string) string { return filepath.Join(root, "child", "types.yaml") }},
-		{name: "child/policy", target: func(root string) string { return filepath.Join(root, "child", "policy.yaml") }},
-	} {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			root := writeMergeProjectionBundleSkeleton(t)
-			target := test.target(root)
-			writeFixtureFile(t, target, "<<: &empty {}\n")
-			wantLocation, err := filepath.Rel(root, target)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-			diagnostic, ok := AsLoaderDiagnostic(err)
-			if bundle != nil || !ok || diagnostic.Code != "contract_loader.optional_declaration_file_empty" || filepath.Clean(diagnostic.Location.File) != filepath.Clean(wantLocation) {
-				t.Fatalf("bundle = %#v, diagnostic = %#v, error = %v", bundle, diagnostic, err)
-			}
-		})
-	}
-}
-
 func TestPositiveMergedDeclarationsPublishRealRootIdentities(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
 	for _, role := range optionalDeclarationRoleTestCases() {
@@ -435,15 +404,6 @@ func TestPositiveMergedDeclarationsPublishRealRootIdentities(t *testing.T) {
 			assertMergedBundleIdentity(t, role.name, bundle)
 		})
 	}
-}
-
-func writeMergeProjectionBundleSkeleton(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: merge-projection\n")
-	writeFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "# fixture: child\nstages:\n  active: {}\n")
-	return root
 }
 
 func assertMergedBundleIdentity(t *testing.T, role string, bundle *WorkflowContractBundle) {

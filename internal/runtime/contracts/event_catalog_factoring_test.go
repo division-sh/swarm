@@ -159,6 +159,7 @@ func TestEventCatalogFactoringCharacterization(t *testing.T) {
 func TestEventCatalogFactoringConsumers(t *testing.T) {
 	t.Run("artifact_and_disk", func(t *testing.T) {
 		root := t.TempDir()
+		writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 		path := filepath.Join(root, "events.yaml")
 		const body = "test.event:\n  id: uuid\n  note: text?\n"
 		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
@@ -212,24 +213,6 @@ func TestEventCatalogFactoringConsumers(t *testing.T) {
 			t.Fatalf("independent reconstruction/source nonmutation: %v", err)
 		}
 	})
-	for _, tc := range []struct {
-		name  string
-		proof func(*testing.T)
-	}{
-		{"platform_marker", TestPlatformEventCatalogUsesRequiredByDefaultTypedOmission},
-		{"platform_retired_required", TestPlatformEventCatalogRejectsRetiredRequiredList},
-		{"type_marker", TestTypeCatalogDocumentDecode_PreservesNamedFieldOptionalityAndMergedMappings},
-		{"entity_marker", TestEntityContractsDocumentDecode_PreservesOptionalTopLevelField},
-		{"type_refusal", TestTypeCatalogDocumentDecode_RejectsInvalidOptionalMarkers},
-		{"type_lowering", TestEventSchemaRegistryFromBundle_PreservesWave1TypeMeaning},
-		{"business_key_lowering", TestEventCatalogBusinessKeyRejectsDynamicSemanticsAtBundleAdmission},
-		{"provenance_ledger", TestNodeAdmissionProvenanceComposesWithEvents},
-		{"connected_rename", TestEffectiveEventResolutionPreservesConnectedRenameOwnership},
-		{"shared_refinements", TestSharedRefinementBoundPresenceMatrix},
-		{"shared_vocabulary", TestRemovedClosedFieldsUseCurrentVocabularyAcrossPresenceAndMerges},
-	} {
-		t.Run(tc.name, tc.proof)
-	}
 	for _, text := range []string{"text?", "[uuid]?", "map[text]uuid?"} {
 		kind, optional, err := admitEventFieldTypeMarker(text, "shared")
 		if err != nil || !optional || strings.Contains(kind, "?") {
