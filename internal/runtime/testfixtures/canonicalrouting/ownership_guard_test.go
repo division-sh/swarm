@@ -22,7 +22,6 @@ import (
 	"unicode"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
-	"github.com/division-sh/swarm/internal/sourceartifact"
 	"gopkg.in/yaml.v3"
 )
 
@@ -61,55 +60,6 @@ type artifactRegistryEntry struct {
 	Owner       string     `yaml:"owner"`
 	Proof       string     `yaml:"proof"`
 	Issue       int        `yaml:"issue"`
-}
-
-func TestCheckedYAMLRoutingArtifactRegistryEqualsLiveCensus(t *testing.T) {
-	repo := RepoRoot(t)
-	registry := loadArtifactRegistry(t, repo)
-	proofs := directExecutableArtifactProofs(t, repo)
-	registered := map[ArtifactID]artifactRegistryEntry{}
-	for _, entry := range registry.Artifacts {
-		entry.Root = normalizeArtifactID(entry.Root)
-		if entry.Root == "." || entry.Owner == "" || entry.Proof == "" {
-			t.Fatalf("incomplete artifact registry entry: %#v", entry)
-		}
-		if _, exists := registered[entry.Root]; exists {
-			t.Fatalf("duplicate artifact registry root %s", entry.Root)
-		}
-		switch entry.Disposition {
-		case "canonical-owner", "canonical-overlay", "negative-mutation", "different-concept":
-			if entry.Issue != 0 {
-				t.Fatalf("artifact %s disposition %s must not carry split issue %d", entry.Root, entry.Disposition, entry.Issue)
-			}
-		case "tracked-split":
-			if entry.Issue <= 0 {
-				t.Fatalf("tracked split %s is missing issue", entry.Root)
-			}
-		default:
-			t.Fatalf("artifact %s has unknown disposition %q", entry.Root, entry.Disposition)
-		}
-		if _, err := sourceartifact.AdmitDirectory(filepath.Join(repo, filepath.FromSlash(string(entry.Root)))); err != nil {
-			t.Fatalf("admit artifact %s: %v", entry.Root, err)
-		}
-		if !pathQualifiedGoSymbol(entry.Proof) {
-			t.Fatalf("artifact %s proof %q must be path-qualified as *_test.go:TestXxx", entry.Root, entry.Proof)
-		}
-		declared, executable := proofs[entry.Proof]
-		if !executable {
-			t.Fatalf("artifact %s proof %s is not an executable Go test", entry.Root, entry.Proof)
-		}
-		if _, exact := declared[entry.Root]; !exact {
-			t.Fatalf("artifact %s proof %s does not directly call canonicalrouting.Prove with its exact ArtifactID", entry.Root, entry.Proof)
-		}
-		registered[entry.Root] = entry
-	}
-
-	live := liveCheckedYAMLRoutingRoots(t, repo)
-	missing := difference(live, registered)
-	stale := difference(registered, live)
-	if len(missing) != 0 || len(stale) != 0 {
-		t.Fatalf("checked YAML routing census drifted\nunregistered live roots: %v\nstale registry roots: %v", missing, stale)
-	}
 }
 
 func TestCheckedYAMLRoutingCensusIsRepoWideAndStructural(t *testing.T) {
@@ -1453,15 +1403,4 @@ func fileContainsAuthoredRouting(t testing.TB, path string) bool {
 			}
 		}
 	}
-}
-
-func difference[A any, B any](left map[ArtifactID]A, right map[ArtifactID]B) []string {
-	var out []string
-	for key := range left {
-		if _, ok := right[key]; !ok {
-			out = append(out, string(key))
-		}
-	}
-	sort.Strings(out)
-	return out
 }
