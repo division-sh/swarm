@@ -26,6 +26,7 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 	case ArrivalJoinBoundReply, ArrivalJoinBoundReplyObserver:
 		files := arrivalJoinBoundReplyFiles()
 		if variant == ArrivalJoinBoundReplyObserver {
+			files["observer/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 			files["schema.yaml"] += "  - {event: provider.replied, from: provider, to: observer, resolution: select}\n"
 			files["schema.yaml"] += "  - {event: provider.notified, from: provider, to: observer, resolution: select}\n"
 			files["provider/schema.yaml"] = strings.Replace(files["provider/schema.yaml"], "    - provider.replied\n", "    - provider.replied\n    - provider.notified\n", 1)
@@ -60,6 +61,7 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 				"  awaiting: {}\n  dispatching: {}\n", "  dispatching: {}\n  awaiting: {}\n", 1)
 		}
 		if variant == ArrivalJoinPayloadDirectedMultipleRecipients {
+			files["mirror/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 			files["schema.yaml"] += "  - {event: item.completed, from: ., to: mirror, resolution: select}\n"
 			for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "nodes.yaml"} {
 				files["mirror/"+name] = strings.Replace(files["orders/"+name], "# fixture: orders", "# fixture: mirror", 1)
