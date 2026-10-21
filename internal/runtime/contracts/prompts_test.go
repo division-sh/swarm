@@ -13,6 +13,7 @@ import (
 func TestResolvedAgentIntent_LocalScopedDeclarationOwner(t *testing.T) {
 	repo := repoRoot(t)
 	root := writePromptTestBundle(t, repo)
+	writePromptFixtureFile(t, filepath.Join(root, "extras", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writePromptFixtureFile(t, filepath.Join(root, "extras", "agents.yaml"), "ops-lead:\n  role: extras-ops-lead\n  intent: prompts/ops-lead.md\n")
 	writePromptFixtureFile(t, filepath.Join(root, "extras", "prompts", "ops-lead.md"), "Extras-local intent.\n")
 	writePromptFixtureFile(t, filepath.Join(root, "intake", "agents.yaml"), "ops-lead:\n  role: flow-ops-lead\n  intent: prompts/ops-lead.md\n")

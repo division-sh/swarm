@@ -945,6 +945,8 @@ func TestLoadWorkflowContractBundleAllowsSiblingFlowLocalWildcardAuthoritativeOw
 	root := t.TempDir()
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: wildcard-owner-test\n")
+	writeFixtureFile(t, filepath.Join(root, "flow-a", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "flow-b", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "flow-a", "schema.yaml"), `# fixture: flow-a
 stages:
   active: {}

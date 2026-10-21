@@ -252,6 +252,7 @@ func TestLoadWorkflowContractBundleLoadsCanonicalToolSchemasFromRootAndFlowTools
 
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: canonical-tool-schema\n")
+	writeFixtureFile(t, filepath.Join(root, "worker", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), `
 root_lookup:
   description: Root-level lookup tool.
@@ -371,6 +372,8 @@ item:
 `)
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: cross-flow-localization\n")
+	writeFixtureFile(t, filepath.Join(root, "scoring", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "validation", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 
 	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `# fixture: scoring
 stages:
@@ -446,6 +449,8 @@ item:
 `)
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: cross-flow-on-success\n")
+	writeFixtureFile(t, filepath.Join(root, "scoring", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "validation", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 
 	writeFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), `# fixture: scoring
 stages:
@@ -586,6 +591,8 @@ func writeLayer3FlowTreeFixture(t *testing.T) string {
 	root := t.TempDir()
 
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "parent", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "parent", "child", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 # fixture: root-platform
 required_agents:
