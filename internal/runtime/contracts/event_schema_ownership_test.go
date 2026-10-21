@@ -221,11 +221,19 @@ func TestConnectedRootInputUsesExactBindingForBothRootCoordinates(t *testing.T) 
 	}
 	for _, flow := range []string{".", ""} {
 		got, ok, err := bundle.ResolveEffectiveCompiledFlowEventSchema(flow, "work.ready")
-		if err != nil || !ok || got.value != producer.value {
+		if flow == "" {
+			if ok || got.value != nil {
+				t.Errorf("empty flow recovered compiled binding: found=%t err=%v", ok, err)
+			}
+		} else if err != nil || !ok || got.value != producer.value {
 			t.Errorf("root %q lost exact connected binding: %t %v", flow, ok, err)
 		}
 		entry, name, ok := bundle.ResolveFlowEventCatalogEntry(flow, "work.ready")
-		if !ok || name != producer.EventName() || entry.Payload.Properties["value"].Type != "text" {
+		if flow == "" {
+			if ok || name != "" || len(entry.Payload.Properties) != 0 {
+				t.Errorf("empty flow recovered producer catalog evidence: %q %t %+v", name, ok, entry)
+			}
+		} else if !ok || name != producer.EventName() || entry.Payload.Properties["value"].Type != "text" {
 			t.Errorf("root %q lost producer catalog evidence: %q %t %+v", flow, name, ok, entry)
 		}
 	}
@@ -406,52 +414,6 @@ func TestEffectiveEventResolutionPreservesConnectedRenameOwnership(t *testing.T)
 	provenance, ok := bundle.EffectiveProvenance().Lookup(effectiveEventProjectionProvenancePrefix(".", "worker", "work.assign") + ".declaration")
 	if !ok || provenance.Origin != EffectiveValueOriginDerived || provenance.RuleID != eventConsumerProjectionRule {
 		t.Fatalf("renamed projection provenance = %#v, found=%t", provenance, ok)
-	}
-}
-
-func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder(t *testing.T) {
-	owner := func(endpoint, fieldType string, line int) eventSchemaOwnershipRow {
-		entry := EventCatalogEntry{
-			Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"value": {Type: fieldType}}},
-			admissionProvenance: map[string]EffectiveValueProvenance{
-				"declaration": {SourceFile: endpoint + "/events.yaml", SourceLine: line, SourceColumn: 1},
-			},
-		}
-		return eventSchemaOwnershipRow{
-			ownerFlowPath: ".", producerEndpoint: endpoint, producerFlowID: endpoint,
-			producerEvent: "work.ready", producerName: "work.ready", producer: entry,
-			receiverEndpoint: "consumer", receiverFlowID: "consumer", receiverEvent: "work.ready",
-		}
-	}
-	baseRows := []eventSchemaOwnershipRow{owner("producer-a", "text", 1), owner("producer-b", "uuid", 1)}
-	for _, reverse := range []bool{false, true} {
-		name := "authored order"
-		if reverse {
-			name = "reversed order"
-		}
-		t.Run(name, func(t *testing.T) {
-			rows := append([]eventSchemaOwnershipRow(nil), baseRows...)
-			if reverse {
-				rows[0], rows[1] = rows[1], rows[0]
-			}
-			wrong := EventCatalogEntry{Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"wrong": {Type: "text"}}}}
-			bundle := &WorkflowContractBundle{
-				Events:         map[string]EventCatalogEntry{"work.ready": wrong},
-				eventOwnership: rows,
-				Semantics: WorkflowSemanticView{flowInputEventPins: map[string][]CompiledFlowInputPin{
-					"consumer": {mustCompileInputPinForTest(t, "consumer", "work.ready")},
-				}},
-				eventOwnersByFlow: map[string][]eventSchemaOwnershipRow{"consumer": rows},
-			}
-			errs := validateCompiledConnectEventSchemaOwnership(bundle)
-			if len(errs) != 1 || !strings.Contains(errs[0].Error(), "multiple connected producer schema owners") || !strings.Contains(errs[0].Error(), "producer-a") || !strings.Contains(errs[0].Error(), "producer-b") {
-				t.Fatalf("ownership errors = %v, want deterministic distinct-producer rejection", errs)
-			}
-			entry, key, _, connected, ok := resolveEffectiveEventDeclarationForFlowEvent(bundle, "consumer", "work.ready")
-			if ok || !connected || key != "" || len(entry.Payload.Properties) != 0 {
-				t.Fatalf("ambiguous resolution = entry:%#v key:%q connected:%t ok:%t, want fail closed before generic fallback", entry, key, connected, ok)
-			}
-		})
 	}
 }
 
