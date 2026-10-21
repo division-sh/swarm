@@ -21,6 +21,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -39,6 +40,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
+
+func s1LoadProviderMembers(directory string, members map[string][]byte) (packartifact.AdmittedProvider, error) {
+	files := fstest.MapFS{}
+	for name, body := range members {
+		files[directory+"/"+name] = &fstest.MapFile{Data: body}
+	}
+	return packartifact.LoadProviderFS(files, directory, "0.7.0")
+}
 
 func TestInboundGatewayStandingServiceAdmissionClosesDrainsAndReopens(t *testing.T) {
 	gateway := NewInboundGateway(nil, nil, nil, executionposture.Live)
@@ -959,7 +968,7 @@ func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProject
 
 func compiledRedactedNormalizedPlan(t *testing.T, version, projectedType string) (providertriggers.InboundAdmissionPlan, *providertriggers.CatalogSnapshot) {
 	t.Helper()
-	provider, err := packartifact.AdmitProviderMembers("telegram", map[string][]byte{
+	provider, err := s1LoadProviderMembers("telegram", map[string][]byte{
 		"manifest.yaml": []byte(fmt.Sprintf("version: %s\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n", version)),
 		"trigger.yaml": []byte(fmt.Sprintf(`payload_object_required: true
 delivery_id: {literal: delivery-1, required: true}

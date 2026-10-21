@@ -1,13 +1,13 @@
 package packartifact
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-	"testing/fstest"
 
 	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -18,7 +18,8 @@ func LoadDevelopmentPlatformPackInventory(runningVersion string, dirs []string, 
 	if embedded == nil || embedded.SelectionMode() != SelectionEmbedded || len(dirs) == 0 {
 		return nil, fmt.Errorf("complete development provider directories and embedded inventory are required")
 	}
-	files := fstest.MapFS{}
+	files := map[string][]byte{}
+	providers := map[string]Entry{}
 	manifest := InventoryManifest{Version: 1}
 	resolved := make(map[string]string, len(dirs))
 	for _, raw := range dirs {
@@ -33,24 +34,45 @@ func LoadDevelopmentPlatformPackInventory(runningVersion string, dirs []string, 
 		if previous, duplicate := resolved[key]; duplicate {
 			return nil, fmt.Errorf("duplicate development provider %q from %q and %q", key, previous, dir)
 		}
-		root, err := openAdmittedArtifactRoot(dir)
+		root, err := openAdmittedArtifactRoot(filepath.Dir(dir))
 		if err != nil {
 			return nil, err
 		}
 		entries, readErr := root.readDir(".")
+		var selected fs.DirEntry
+		var captured *admittedArtifactRoot
+		if readErr == nil {
+			selected, readErr = selectProviderDirectory(entries, key)
+		}
+		if readErr == nil {
+			var directory *os.File
+			directory, readErr = root.openDirectory(key)
+			if readErr == nil {
+				captured = &admittedArtifactRoot{directory: directory}
+				entries, readErr = captured.readDir(".")
+			}
+		}
 		var bodies map[string][]byte
 		if readErr == nil {
-			bodies, readErr = readDevelopmentPackArtifacts(root, ".", entries)
+			bodies, readErr = readDevelopmentPackArtifacts(captured, ".", entries)
 		}
 		closeErr := root.close()
+		if captured != nil {
+			closeErr = errors.Join(closeErr, captured.close())
+		}
 		if readErr != nil {
 			return nil, readErr
 		}
 		if closeErr != nil {
 			return nil, closeErr
 		}
+		provider, err := admitCapturedProvider(selected, dir, bodies, runningVersion)
+		if err != nil {
+			return nil, err
+		}
+		providers[provider.Key()] = Entry{provider: provider, directory: dir, selection: string(SelectionDevelopmentOverride)}
 		for name, body := range bodies {
-			files[key+"/"+name] = &fstest.MapFile{Data: body, Mode: 0o444}
+			files[key+"/"+name] = body
 		}
 		manifest.Packs = append(manifest.Packs, InventoryManifestPack{Path: key})
 		resolved[key] = dir
@@ -59,10 +81,14 @@ func LoadDevelopmentPlatformPackInventory(runningVersion string, dirs []string, 
 	if err != nil {
 		return nil, err
 	}
-	files[InventoryManifestFileName] = &fstest.MapFile{Data: body, Mode: 0o444}
-	inventory, err := LoadPlatformPackInventoryFS(files, InventoryManifestFileName, runningVersion, SelectionDevelopmentOverride)
+	files[InventoryManifestFileName] = body
+	admitted, err := admitInventoryManifest(body, InventoryManifestFileName)
 	if err != nil {
 		return nil, err
+	}
+	inventory := &PlatformPackInventory{
+		source: admitted.source, mode: SelectionDevelopmentOverride,
+		digest: digestInventoryMembers(files), runningPlatformVersion: runningVersion, entries: providers,
 	}
 	if err := requireCompleteReplacement(embedded, inventory); err != nil {
 		return nil, err

@@ -16,7 +16,7 @@ import (
 
 func s1ChannelProviderDescriptors(t testing.TB, key string, members map[string][]byte) (packartifact.AdmittedProvider, packs.TriggerPackDescriptor, packs.ConnectorPackDescriptor) {
 	t.Helper()
-	provider, err := packartifact.AdmitProviderMembers(key, members)
+	provider, err := s1LoadProviderMembers(key, members)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestS1ProviderChannelCompilesCapturedCoLocatedRoles(t *testing.T) {
 				t.Fatal(err)
 			}
 			identity, err := plan.InterfaceIdentity()
-			if err != nil || identity.InterfaceRef != "swarm.hitl-channel/v2" || plan.Provider() != key || plan.ChannelIdentity().ID() != key || plan.ChannelIdentity().Source().Provenance() != "" || plan.ChannelIdentity().Source().Diagnostic() != key+"/channel.yaml" {
+			if err != nil || identity.InterfaceRef != "swarm.hitl-channel/v2" || plan.Provider() != key || plan.ChannelIdentity().ID() != key || plan.ChannelIdentity().Source().Provenance() != "" || plan.ChannelIdentity().Source().Diagnostic() != "channel.yaml" {
 				t.Fatalf("captured structural identity changed or invented provenance: %+v %v", identity, err)
 			}
 			bounds, err := plan.PresentationBounds()
@@ -104,7 +104,12 @@ func TestS1ProviderChannelRefusesCrossedRoleIdentity(t *testing.T) {
 	versioned := packfixture.NeutralProviderMembers()
 	versioned["manifest.yaml"] = bytes.Replace(versioned["manifest.yaml"], []byte("version: 1.0.0"), []byte("version: 1.0.1"), 1)
 	_, versionedTrigger, _ := s1ChannelProviderDescriptors(t, "team-bot", versioned)
-	members := map[string][]byte{"shop/agents.yaml": []byte("{}\n"), "shop/schema.yaml": []byte("stages: []\n")}
+	members := map[string][]byte{
+		"manifest.yaml":      []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"shop/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"shop/agents.yaml":   []byte("{}\n"),
+		"shop/schema.yaml":   []byte("stages: []\n"),
+	}
 	for label, body := range packfixture.NeutralProviderMembers() {
 		members["shop/team-bot/"+label] = body
 	}
@@ -172,7 +177,7 @@ func TestS1ProviderChannelUsesOneNamedPlatformInterfaceWithoutFirstFit(t *testin
 		if role == "channel.yaml and other roles" {
 			delete(members, "connector.yaml")
 		}
-		without, err := packartifact.AdmitProviderMembers("team-bot", members)
+		without, err := s1LoadProviderMembers("team-bot", members)
 		if err != nil {
 			t.Fatal(err)
 		}

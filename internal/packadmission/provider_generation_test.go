@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"gopkg.in/yaml.v3"
 )
@@ -60,7 +59,7 @@ func TestS1ProviderDirectoryGenerationRetainsReviewedSourceWithoutNameInference(
 	}
 	for _, key := range []string{"team-bot", "team_bot"} {
 		members := generatedProviderDirectoryMembers(t, builtin, nil)
-		provider, err := packartifact.AdmitProviderMembers(key, members)
+		provider, err := s1LoadProviderMembers(key, members)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +94,7 @@ func TestS1ProviderDirectoryGenerationRetainsReviewedSourceWithoutNameInference(
 		{"fixture profile", func(g *providerconnectors.GenerationEvidence) { g.Profile = fixture.Manifest.Generation.Profile }},
 	} {
 		t.Run(cell.name, func(t *testing.T) {
-			provider, err := packartifact.AdmitProviderMembers("team-bot", generatedProviderDirectoryMembers(t, builtin, cell.change))
+			provider, err := s1LoadProviderMembers("team-bot", generatedProviderDirectoryMembers(t, builtin, cell.change))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packmodel"
@@ -12,6 +13,14 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
+
+func s1LoadProviderMembers(directory string, members map[string][]byte) (packartifact.AdmittedProvider, error) {
+	files := fstest.MapFS{}
+	for name, body := range members {
+		files[directory+"/"+name] = &fstest.MapFile{Data: body}
+	}
+	return packartifact.LoadProviderFS(files, directory, "0.7.0")
+}
 
 func providerDefinitionPlatform(t *testing.T) runtimecontracts.PlatformSpecDocument {
 	t.Helper()
@@ -30,7 +39,7 @@ func TestS1ProviderDirectoryAdmissionOwnsAllRoleInputs(t *testing.T) {
 	platform := providerDefinitionPlatform(t)
 	for _, key := range []string{"team-bot", "team_bot", "9-team"} {
 		t.Run(key, func(t *testing.T) {
-			provider, err := packartifact.AdmitProviderMembers(key, packfixture.NeutralProviderMembers())
+			provider, err := s1LoadProviderMembers(key, packfixture.NeutralProviderMembers())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -87,7 +96,13 @@ func TestS1ProviderDirectoryAdmissionReturnsNoPartialDefinition(t *testing.T) {
 		t.Run(cell.name, func(t *testing.T) {
 			members := packfixture.NeutralProviderMembers()
 			members[cell.label] = bytes.Replace(members[cell.label], []byte(cell.old), []byte(cell.replacement), 1)
-			provider, err := packartifact.AdmitProviderMembers("team-bot", members)
+			provider, err := s1LoadProviderMembers("team-bot", members)
+			if cell.name == "platform" {
+				if err == nil || provider.Valid() {
+					t.Fatal("incompatible provider returned a captured declaration")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -112,7 +127,12 @@ func TestS1ProviderDirectoryAdmissionReturnsNoPartialDefinition(t *testing.T) {
 }
 
 func TestS1ProviderDirectoryNearestScopeNeverBorrowsMissingRoles(t *testing.T) {
-	members := map[string][]byte{"child/agents.yaml": []byte("{}\n"), "child/schema.yaml": []byte("stages: []\n")}
+	members := map[string][]byte{
+		"manifest.yaml":       []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"child/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"child/agents.yaml":   []byte("{}\n"),
+		"child/schema.yaml":   []byte("stages: []\n"),
+	}
 	for label, body := range packfixture.NeutralProviderMembers() {
 		members["team-bot/"+label] = body
 		if label == "connector.yaml" {

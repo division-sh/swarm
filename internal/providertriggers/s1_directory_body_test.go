@@ -37,7 +37,7 @@ event_name: {` + rawName + `}
 
 func s1AdmittedTriggerBody(t testing.TB, key, rawName, normalizedName string) packartifact.ProviderBody {
 	t.Helper()
-	provider, err := packartifact.AdmitProviderMembers(key, s1TriggerDirectoryMembers(rawName, normalizedName))
+	provider, err := s1LoadProviderMembers(key, s1TriggerDirectoryMembers(rawName, normalizedName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestS1TriggerDirectoryBodyRefusesQualifiedAndNoncanonicalNames(t *testing.T
 	for _, raw := range []string{"'inbound.team-bot.raw'", "'inbound.foreign.raw'", "' raw'", "'raw '", "'foo .bar'", "'raw/foreign'", "'raw.*'"} {
 		t.Run("raw/"+raw, func(t *testing.T) {
 			body := s1AdmittedTriggerBody(t, "team-bot", "literal: "+raw, "text_message")
-			if _, err := AdmitBody(body); err == nil || !strings.Contains(err.Error(), "team-bot/trigger.yaml:") || !strings.Contains(err.Error(), "short") {
+			if _, err := AdmitBody(body); err == nil || !strings.Contains(err.Error(), "trigger.yaml:") || !strings.Contains(err.Error(), "short") {
 				t.Fatalf("invalid raw name gained policy or lost teaching location: %v", err)
 			}
 		})
@@ -139,7 +139,7 @@ func TestS1TriggerDirectoryBodyRefusesQualifiedAndNoncanonicalNames(t *testing.T
 	for _, name := range []string{"'inbound.team-bot.text_message'", "'inbound.foreign.text_message'", "' text_message'", "'text_message '", "'foo .bar'", "'text/message'", "'text.*'"} {
 		t.Run("normalized/"+name, func(t *testing.T) {
 			body := s1AdmittedTriggerBody(t, "team-bot", "literal: raw", name)
-			if _, err := AdmitBody(body); err == nil || !strings.Contains(err.Error(), "team-bot/trigger.yaml:") || !strings.Contains(err.Error(), "short") {
+			if _, err := AdmitBody(body); err == nil || !strings.Contains(err.Error(), "trigger.yaml:") || !strings.Contains(err.Error(), "short") {
 				t.Fatalf("invalid normalized name gained policy or lost teaching location: %v", err)
 			}
 		})
@@ -155,7 +155,12 @@ func TestS1TriggerDirectoryBodyRefusesQualifiedAndNoncanonicalNames(t *testing.T
 }
 
 func TestS1TriggerDirectoryBodyRetainedAndScopedSourceUsesFrozenKey(t *testing.T) {
-	members := map[string][]byte{"schema.yaml": []byte("description: root\n"), "child/schema.yaml": []byte("description: child\n")}
+	members := map[string][]byte{
+		"manifest.yaml":       []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"child/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":         []byte("description: root\n"),
+		"child/schema.yaml":   []byte("description: child\n"),
+	}
 	for _, directory := range []string{"team-bot", "child/team_bot"} {
 		for label, body := range s1TriggerDirectoryMembers("literal: raw", "text_message") {
 			members[directory+"/"+label] = body
@@ -282,7 +287,7 @@ func TestS1TriggerDirectoryBodyHonorsLexicalAliasesAndRoleBoundary(t *testing.T)
 	members := s1TriggerDirectoryMembers("literal: raw", "text_message")
 	members["trigger.yaml"] = bytes.Replace(members["trigger.yaml"], []byte("literal: raw"), []byte("literal: &raw raw"), 1)
 	members["trigger.yaml"] = bytes.Replace(members["trigger.yaml"], []byte("event: text_message"), []byte("event: *raw"), 1)
-	provider, err := packartifact.AdmitProviderMembers("team-bot", members)
+	provider, err := s1LoadProviderMembers("team-bot", members)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +296,7 @@ func TestS1TriggerDirectoryBodyHonorsLexicalAliasesAndRoleBoundary(t *testing.T)
 		t.Fatalf("alias hid a compiled-name collision: %v", err)
 	}
 	members["connector.yaml"] = []byte("{}\n")
-	provider, err = packartifact.AdmitProviderMembers("team-bot", members)
+	provider, err = s1LoadProviderMembers("team-bot", members)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,8 +2,10 @@ package packartifact
 
 import (
 	"bytes"
+	"io/fs"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -16,18 +18,32 @@ func s1ProviderMembers() map[string][]byte {
 	}
 }
 
+func s1LoadProviderMembers(directory string, members map[string][]byte) (AdmittedProvider, error) {
+	files := fstest.MapFS{}
+	for name, body := range members {
+		files[directory+"/"+name] = &fstest.MapFile{Data: body}
+	}
+	return LoadProviderFS(files, directory, testPlatformVersion)
+}
+
 func TestS1ProviderArtifactOwnsExactCapturedMembers(t *testing.T) {
 	members := s1ProviderMembers()
 	wantBody := append([]byte(nil), members["trigger.yaml"]...)
-	provider, err := AdmitProviderMembers("team-bot", members)
+	provider, err := s1LoadProviderMembers("team-bot", members)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !provider.Valid() || provider.Key() != "team-bot" || provider.Metadata().Version != "1.0.0" || provider.Directory() != "team-bot" || provider.DeclaringFlow() != "." {
+	if !provider.Valid() || provider.Key() != "team-bot" || provider.Metadata().Version != "1.0.0" || provider.Directory() != "team-bot" || provider.DeclaringFlow() != "" {
 		t.Fatalf("wrong provider identity: %+v", provider)
 	}
+	if provider.source.Root() != nil {
+		t.Fatal("standalone provider fabricated a flow")
+	}
+	if _, present := provider.source.RootAdmission(); present {
+		t.Fatal("standalone provider fabricated runtime root authority")
+	}
 	body, present := provider.Body(packmodel.BodyTrigger)
-	if !present || !body.Valid() || body.ProviderKey() != "team-bot" || body.Role() != packmodel.BodyTrigger || body.Label() != "team-bot/trigger.yaml" || body.Metadata().Version != "1.0.0" {
+	if !present || !body.Valid() || body.ProviderKey() != "team-bot" || body.Role() != packmodel.BodyTrigger || body.Label() != "trigger.yaml" || body.Metadata().Version != "1.0.0" {
 		t.Fatalf("body lost its admitted parent: %+v", body)
 	}
 	wantHash := body.Hash()
@@ -43,7 +59,7 @@ func TestS1ProviderArtifactOwnsExactCapturedMembers(t *testing.T) {
 	if !bytes.Equal(body.Bytes(), wantBody) || body.Hash() != wantHash || body.Metadata().Version != "1.0.0" || body.ProviderKey() != "team-bot" {
 		t.Fatal("mutable caller changed captured provider bytes or identity")
 	}
-	if value := body.SourceValue(); value.Location().File != "team-bot/trigger.yaml" {
+	if value := body.SourceValue(); value.Location().File != "trigger.yaml" {
 		t.Fatalf("source evidence detached from admitted body: %s", value.Location())
 	}
 	if _, present := provider.Body(packmodel.BodyConnector); present {
@@ -56,25 +72,42 @@ func TestS1ProviderArtifactOwnsExactCapturedMembers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := ProviderFromArtifact(retained, "team-bot")
-	if err != nil {
-		t.Fatal(err)
+	retainedBody, present := retained.Entry("trigger.yaml")
+	if !present || !bytes.Equal(retainedBody.Bytes(), wantBody) {
+		t.Fatal("logical reconstruction changed exact provider bytes")
 	}
-	reopenedBody, present := reopened.Body(packmodel.BodyTrigger)
-	if !present || reopened.Key() != "team-bot" || reopenedBody.ProviderKey() != "team-bot" || reopenedBody.Hash() != wantHash || !bytes.Equal(reopenedBody.Bytes(), wantBody) || reopenedBody.Metadata().Version != "1.0.0" {
-		t.Fatal("retained reconstruction changed provider ownership or exact bytes")
+	if reopened, err := ProviderFromArtifact(retained, "."); err == nil || reopened.Valid() {
+		t.Fatal("content-only reconstruction invented the captured directory identity")
 	}
 }
 
 func TestS1ProviderArtifactRefusesPathAliasesAndForeignSelection(t *testing.T) {
 	for _, directory := range []string{"", "../team-bot", "/team-bot", "./team-bot", "team-bot/.", "TEAM-BOT"} {
 		t.Run(directory, func(t *testing.T) {
-			if _, err := AdmitProviderMembers(directory, s1ProviderMembers()); err == nil {
+			if _, err := s1LoadProviderMembers(directory, s1ProviderMembers()); err == nil {
 				t.Fatalf("noncanonical or mismatched directory %q admitted", directory)
 			}
 		})
 	}
-	files := map[string][]byte{"schema.yaml": []byte("description: root\n")}
+	standalone := fstest.MapFS{
+		"providers/team-bot/manifest.yaml": {Data: s1ProviderMembers()["manifest.yaml"]},
+		"providers/team-bot/trigger.yaml":  {Data: s1ProviderMembers()["trigger.yaml"]},
+		"providers/link":                   {Mode: fs.ModeSymlink, Data: []byte("team-bot")},
+		"providers/file":                   {Data: []byte("not a directory")},
+	}
+	for _, directory := range []string{"providers/team_bot", "providers/TEAM-BOT", "providers/link", "providers/file"} {
+		if provider, err := LoadProviderFS(standalone, directory, testPlatformVersion); err == nil || provider.Valid() {
+			t.Fatalf("unobserved or non-directory selection %q admitted", directory)
+		}
+	}
+	if provider, err := LoadProviderFS(nil, "team-bot", testPlatformVersion); err == nil || provider.Valid() {
+		t.Fatal("missing reader produced a captured provider")
+	}
+	files := map[string][]byte{
+		"manifest.yaml":       []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"child/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":         []byte("description: root\n"),
+	}
 	for label, body := range s1ProviderMembers() {
 		files["child/team-bot/"+label] = body
 	}
@@ -115,9 +148,19 @@ func TestS1ProviderArtifactRefusesMalformedCapturedMembers(t *testing.T) {
 		t.Run(bad, func(t *testing.T) {
 			members := s1ProviderMembers()
 			members["trigger.yaml"] = []byte(bad)
-			if _, err := AdmitProviderMembers("team-bot", members); err == nil || !strings.Contains(err.Error(), "trigger.yaml:") {
+			if _, err := s1LoadProviderMembers("team-bot", members); err == nil || !strings.Contains(err.Error(), "trigger.yaml:") {
 				t.Fatalf("captured member bypassed canonical admission: %v", err)
 			}
 		})
+	}
+	for _, label := range []string{"manifest.yaml", "trigger.yaml"} {
+		files := fstest.MapFS{}
+		for name, body := range s1ProviderMembers() {
+			files["team-bot/"+name] = &fstest.MapFile{Data: body}
+		}
+		files["team-bot/"+label].Mode = fs.ModeSymlink
+		if provider, err := LoadProviderFS(files, "team-bot", testPlatformVersion); err == nil || provider.Valid() || !strings.Contains(err.Error(), "regular file") {
+			t.Fatalf("non-regular %s produced captured evidence: %v", label, err)
+		}
 	}
 }

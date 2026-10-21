@@ -8,7 +8,9 @@ import (
 	"os"
 )
 
-type admittedArtifactRoot struct{}
+type admittedArtifactRoot struct {
+	directory *os.File
+}
 
 func openAdmittedArtifactRoot(target string) (*admittedArtifactRoot, error) {
 	return nil, fmt.Errorf("artifact root %q cannot be admitted safely on this platform", target)

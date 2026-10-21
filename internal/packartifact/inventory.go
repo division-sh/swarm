@@ -248,22 +248,30 @@ func rejectUnexpectedInventoryFiles(fsys fs.FS, expected map[string]struct{}) er
 }
 
 func digestInventoryFiles(fsys fs.FS, expected map[string]struct{}) (string, error) {
-	names := make([]string, 0, len(expected))
+	members := make(map[string][]byte, len(expected))
 	for name := range expected {
+		body, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			return "", err
+		}
+		members[name] = body
+	}
+	return digestInventoryMembers(members), nil
+}
+
+func digestInventoryMembers(members map[string][]byte) string {
+	names := make([]string, 0, len(members))
+	for name := range members {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	hash := sha256.New()
 	_, _ = hash.Write([]byte("swarm-platform-pack-inventory-v1\n"))
 	for _, name := range names {
-		body, err := fs.ReadFile(fsys, name)
-		if err != nil {
-			return "", err
-		}
 		writeDigestField(hash, []byte(name))
-		writeDigestField(hash, body)
+		writeDigestField(hash, members[name])
 	}
-	return fmt.Sprintf("sha256:%x", hash.Sum(nil)), nil
+	return fmt.Sprintf("sha256:%x", hash.Sum(nil))
 }
 
 type digestWriter interface{ Write([]byte) (int, error) }

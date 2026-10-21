@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -781,7 +782,11 @@ func configuredTelegramChannelBindingWithTextLimit(t *testing.T, serverURL strin
 		connector = strings.Replace(connector, textSchema, "text: {type: string, minLength: 1, maxLength: 4095}", 1)
 	}
 	members["connector.yaml"] = []byte(connector)
-	provider, err := packartifact.AdmitProviderMembers("telegram", members)
+	files := fstest.MapFS{}
+	for name, body := range members {
+		files["telegram/"+name] = &fstest.MapFile{Data: body}
+	}
+	provider, err := packartifact.LoadProviderFS(files, "telegram", "0.7.0")
 	if err != nil {
 		t.Fatal(err)
 	}

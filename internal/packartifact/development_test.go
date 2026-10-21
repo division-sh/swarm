@@ -47,6 +47,19 @@ func TestDevelopmentOverrideRejectsNonRegularEnvelopeBeforeRead(t *testing.T) {
 				}
 				dirs = append(dirs, directory)
 			}
+			captured, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded)
+			if err != nil {
+				t.Fatalf("capture complete development inventory before fault: %v", err)
+			}
+			for _, entry := range captured.Entries() {
+				provider := entry.Provider()
+				if provider.Key() != filepath.Base(entry.Directory()) || provider.DeclaringFlow() != "" || provider.source.Root() != nil {
+					t.Fatal("development reader invented a provider name or flow")
+				}
+				if _, present := provider.source.RootAdmission(); present {
+					t.Fatal("development reader minted runtime root authority")
+				}
+			}
 			member := filepath.Join(dirs[0], "manifest.yaml")
 			if err := os.Remove(member); err != nil {
 				t.Fatal(err)

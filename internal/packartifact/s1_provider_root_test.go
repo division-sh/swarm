@@ -12,7 +12,11 @@ import (
 )
 
 func TestS1ProviderRootRequiresCapturedDirectoryIdentity(t *testing.T) {
-	provider, err := AdmitProviderMembers(".", s1ProviderMembers())
+	content, err := sourceartifact.AdmitMembers(s1ProviderMembers())
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := ProviderFromArtifact(content, ".")
 	if !errors.Is(err, sourceartifact.ErrRootAdmissionMissing) || provider.Valid() {
 		t.Fatalf("content-only provider acquired a directory identity: valid=%t err=%v", provider.Valid(), err)
 	}

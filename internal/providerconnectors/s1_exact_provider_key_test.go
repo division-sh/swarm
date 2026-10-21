@@ -4,12 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packmodel"
 )
 
 func s1ConnectorPack(key string) LoadedPack {
-	provider, err := packartifact.AdmitProviderMembers(key, s1ConnectorDirectoryMembers())
+	provider, err := s1LoadProviderMembers(key, s1ConnectorDirectoryMembers())
 	if err != nil {
 		return LoadedPack{}
 	}

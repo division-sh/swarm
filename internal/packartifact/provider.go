@@ -3,6 +3,7 @@ package packartifact
 import (
 	"fmt"
 	"io/fs"
+	"path"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packmodel"
@@ -16,14 +17,24 @@ type AdmittedProvider struct {
 	source    *sourceartifact.AdmittedSourceArtifact
 	directory sourceartifact.ProviderDirectory
 	key       string
+	// Standalone readers retain a filesystem location, not a declaring flow.
+	capturedDirectory string
 }
 
 func LoadProviderFS(fsys fs.FS, directory, runningVersion string) (AdmittedProvider, error) {
-	if cleanRelativePath(directory) == "" {
+	if fsys == nil || cleanRelativePath(directory) == "" {
 		return AdmittedProvider{}, fmt.Errorf("provider requires its exact directory name")
 	}
+	entries, err := fs.ReadDir(fsys, path.Dir(directory))
+	if err != nil {
+		return AdmittedProvider{}, err
+	}
+	selected, err := selectProviderDirectory(entries, directory)
+	if err != nil {
+		return AdmittedProvider{}, err
+	}
 	members := map[string][]byte{}
-	err := fs.WalkDir(fsys, directory, func(name string, entry fs.DirEntry, err error) error {
+	err = fs.WalkDir(fsys, directory, func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -37,19 +48,49 @@ func LoadProviderFS(fsys fs.FS, directory, runningVersion string) (AdmittedProvi
 		if err != nil {
 			return err
 		}
+		if len(members) >= sourceartifact.MaxMembers {
+			return fmt.Errorf("provider directory exceeds the source member bound")
+		}
 		members[strings.TrimPrefix(name, directory+"/")] = body
 		return nil
 	})
 	if err != nil {
 		return AdmittedProvider{}, err
 	}
-	provider, err := AdmitProviderMembers(directory, members)
+	return admitCapturedProvider(selected, directory, members, runningVersion)
+}
+
+func selectProviderDirectory(entries []fs.DirEntry, directory string) (fs.DirEntry, error) {
+	for _, entry := range entries {
+		if entry.Name() != path.Base(directory) {
+			continue
+		}
+		if !entry.IsDir() || entry.Type()&fs.ModeSymlink != 0 {
+			return nil, fmt.Errorf("provider directory %q must be a real directory", directory)
+		}
+		if err := sourceartifact.ValidateFlowSegment(entry.Name()); err != nil {
+			return nil, fmt.Errorf("provider directory %q: %w", directory, err)
+		}
+		return entry, nil
+	}
+	return nil, &fs.PathError{Op: "capture provider", Path: directory, Err: fs.ErrNotExist}
+}
+
+// Only filesystem readers supply the selected entry; member bytes cannot mint
+// a provider key or a runtime root admission.
+func admitCapturedProvider(selected fs.DirEntry, directory string, members map[string][]byte, runningVersion string) (AdmittedProvider, error) {
+	source, err := sourceartifact.AdmitMembers(members)
+	if err != nil {
+		return AdmittedProvider{}, err
+	}
+	provider, err := providerFromArtifact(source, ".", selected.Name())
 	if err != nil {
 		return AdmittedProvider{}, err
 	}
 	if err := provider.Metadata().ValidatePlatformVersion(runningVersion); err != nil {
 		return AdmittedProvider{}, err
 	}
+	provider.capturedDirectory = directory
 	return provider, nil
 }
 
@@ -79,44 +120,30 @@ func providerFromArtifact(source *sourceartifact.AdmittedSourceArtifact, directo
 	return AdmittedProvider{source: source, directory: provider, key: key}, nil
 }
 
-// AdmitProviderMembers consumes captured bytes, not host paths or an import
-// receipt. Embedded/development readers retain their existing safe I/O owners.
-func AdmitProviderMembers(directory string, members map[string][]byte) (AdmittedProvider, error) {
-	if directory == "" {
-		return AdmittedProvider{}, fmt.Errorf("provider directory is required")
-	}
-	if len(members) > sourceartifact.MaxMembers {
-		return AdmittedProvider{}, fmt.Errorf("provider directory exceeds the source member bound")
-	}
-	labels := make(map[string][]byte, len(members))
-	for member, body := range members {
-		label := member
-		if directory != "." {
-			label = directory + "/" + member
-		}
-		labels[label] = body
-	}
-	source, err := sourceartifact.AdmitMembers(labels)
-	if err != nil {
-		return AdmittedProvider{}, err
-	}
-	return ProviderFromArtifact(source, directory)
-}
-
 func (p AdmittedProvider) Valid() bool {
 	return p.source != nil && p.key != "" && p.directory.Manifest().Kind() == packmodel.DirectoryProvider
 }
-func (p AdmittedProvider) Key() string                  { return p.key }
-func (p AdmittedProvider) Directory() string            { return p.directory.Path() }
-func (p AdmittedProvider) DeclaringFlow() string        { return p.directory.FlowPath() }
+func (p AdmittedProvider) Key() string { return p.key }
+func (p AdmittedProvider) Directory() string {
+	if p.capturedDirectory != "" {
+		return p.capturedDirectory
+	}
+	return p.directory.Path()
+}
+func (p AdmittedProvider) DeclaringFlow() string {
+	if p.capturedDirectory != "" {
+		return ""
+	}
+	return p.directory.FlowPath()
+}
 func (p AdmittedProvider) Metadata() packmodel.Manifest { return p.directory.Manifest() }
 func (p AdmittedProvider) ManifestBody() []byte {
 	if !p.Valid() {
 		return nil
 	}
 	label := packmodel.ManifestFileName
-	if p.Directory() != "." {
-		label = p.Directory() + "/" + label
+	if p.directory.Path() != "." {
+		label = p.directory.Path() + "/" + label
 	}
 	entry, _ := p.source.Entry(label)
 	return entry.Bytes()
@@ -128,8 +155,8 @@ func (p AdmittedProvider) Members() map[string][]byte {
 		return out
 	}
 	prefix := ""
-	if p.Directory() != "." {
-		prefix = p.Directory() + "/"
+	if p.directory.Path() != "." {
+		prefix = p.directory.Path() + "/"
 	}
 	for _, entry := range p.source.Entries() {
 		if strings.HasPrefix(entry.Label(), prefix) {

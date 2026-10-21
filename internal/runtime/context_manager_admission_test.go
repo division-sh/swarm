@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -535,7 +534,7 @@ func runtimeContextTestWakeup(t *testing.T, key string, dueAt time.Time) runtime
 
 func runtimeAdmissionTestCatalog(t *testing.T, hashToken string) *providertriggers.CatalogSnapshot {
 	t.Helper()
-	provider, err := packartifact.AdmitProviderMembers("acme", map[string][]byte{
+	provider, err := s1LoadProviderMembers("acme", map[string][]byte{
 		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw]}, cannot: [bypass journal]}\n"),
 		"trigger.yaml": []byte("# captured revision " + hashToken + "\n" + `secret: {required: true}
 signature: {type: token_equality, header: X-Acme-Token}

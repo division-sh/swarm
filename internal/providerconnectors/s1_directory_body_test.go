@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packmodel"
@@ -13,6 +14,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
+
+func s1LoadProviderMembers(directory string, members map[string][]byte) (packartifact.AdmittedProvider, error) {
+	files := fstest.MapFS{}
+	for name, body := range members {
+		files[directory+"/"+name] = &fstest.MapFile{Data: body}
+	}
+	return packartifact.LoadProviderFS(files, directory, "0.7.0")
+}
 
 func s1ConnectorDirectoryMembers() map[string][]byte {
 	return map[string][]byte{
@@ -40,7 +49,7 @@ func s1ConnectorDirectoryMembers() map[string][]byte {
 
 func s1CapturedConnectorBody(t testing.TB, key string, members map[string][]byte) packartifact.ProviderBody {
 	t.Helper()
-	provider, err := packartifact.AdmitProviderMembers(key, members)
+	provider, err := s1LoadProviderMembers(key, members)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +78,7 @@ func TestS1ConnectorBodyQualifiesToolsRolesAndCompiledTemplatesTogether(t *testi
 				t.Fatal("directory qualification changed exact body hash")
 			}
 			firstHash = body.Hash()
-			if !bytes.Equal(body.Bytes(), members["connector.yaml"]) || manifest.SourceValue().Location().File != key+"/connector.yaml" {
+			if !bytes.Equal(body.Bytes(), members["connector.yaml"]) || manifest.SourceValue().Location().File != "connector.yaml" {
 				t.Fatal("connector lost exact source bytes or lexical provenance")
 			}
 			execution, _ := tool.HTTPExecution()
@@ -132,7 +141,7 @@ func TestS1ConnectorBodyRefusesQualifiedNamesRolesAndForeignTemplates(t *testing
 			members := s1ConnectorDirectoryMembers()
 			members["connector.yaml"] = bytes.ReplaceAll(members["connector.yaml"], []byte(cell.old), []byte(cell.replacement))
 			body := s1CapturedConnectorBody(t, "team-bot", members)
-			if _, err := AdmitBody(body); err == nil || !strings.Contains(err.Error(), "team-bot/connector.yaml:") {
+			if _, err := AdmitBody(body); err == nil || !strings.Contains(err.Error(), "connector.yaml:") {
 				t.Fatalf("invalid local-name or template acquired a connector: %v", err)
 			}
 		})
@@ -180,7 +189,10 @@ func TestS1ConnectorBodyManagedRolePreservesGrantPolicy(t *testing.T) {
 }
 
 func TestS1ConnectorBodyLogicalReadbackAndRegistryKeepSeparateKeys(t *testing.T) {
-	members := map[string][]byte{"schema.yaml": []byte("description: root\n")}
+	members := map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("description: root\n"),
+	}
 	for _, key := range []string{"team-bot", "team_bot"} {
 		for label, body := range s1ConnectorDirectoryMembers() {
 			members[key+"/"+label] = body
@@ -287,7 +299,7 @@ func TestS1ConnectorBodyAliasesAndHeaderRemainSourceOwned(t *testing.T) {
 	for _, provider := range []string{"team-bot", "foreign", "null"} {
 		bad := s1ConnectorDirectoryMembers()
 		bad["connector.yaml"] = append(bad["connector.yaml"], []byte("provider: "+provider+"\n")...)
-		if _, err := packartifact.AdmitProviderMembers("team-bot", bad); err == nil || !strings.Contains(err.Error(), "directory is the provider name") {
+		if _, err := s1LoadProviderMembers("team-bot", bad); err == nil || !strings.Contains(err.Error(), "directory is the provider name") {
 			t.Fatalf("authored provider header bypassed shared ownership: %v", err)
 		}
 	}

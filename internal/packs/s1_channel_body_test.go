@@ -5,12 +5,21 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
+
+func s1LoadProviderMembers(directory string, members map[string][]byte) (packartifact.AdmittedProvider, error) {
+	files := fstest.MapFS{}
+	for name, body := range members {
+		files[directory+"/"+name] = &fstest.MapFile{Data: body}
+	}
+	return packartifact.LoadProviderFS(files, directory, "0.7.0")
+}
 
 const s1ChannelDirectoryBody = `transport: webhook
 capabilities:
@@ -48,7 +57,7 @@ registration:
 
 func s1CapturedChannelBody(t testing.TB, key, source string) packartifact.ProviderBody {
 	t.Helper()
-	provider, err := packartifact.AdmitProviderMembers(key, map[string][]byte{
+	provider, err := s1LoadProviderMembers(key, map[string][]byte{
 		"manifest.yaml":  []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send_message]}, cannot: [bypass journal]}\n"),
 		"channel.yaml":   []byte(source),
 		"trigger.yaml":   []byte("event_name: {literal: raw}\n"),
@@ -86,7 +95,7 @@ func TestS1ChannelBodyQualifiesOnlyProviderReferences(t *testing.T) {
 			if manifest.Operations["deliver"].Input["room"].From != "context.destination" || manifest.Events["text"].Fields["text"] != "event.text" || manifest.Onboarding.LearnedDestination["destination"].From != "conversation_reference" {
 				t.Fatal("namespace qualification rewrote mapping paths")
 			}
-			if !bytes.Equal(body.Bytes(), []byte(s1ChannelDirectoryBody)) || manifest.SourceValue().Location().File != key+"/channel.yaml" || (hash != "" && hash != body.Hash()) {
+			if !bytes.Equal(body.Bytes(), []byte(s1ChannelDirectoryBody)) || manifest.SourceValue().Location().File != "channel.yaml" || (hash != "" && hash != body.Hash()) {
 				t.Fatal("projection changed captured source bytes, provenance or hash")
 			}
 			hash = body.Hash()
@@ -122,7 +131,7 @@ func TestS1ChannelBodyRejectsQualifiedForeignAndNoncanonicalReferences(t *testin
 	} {
 		t.Run(cell.name, func(t *testing.T) {
 			body := s1CapturedChannelBody(t, "team-bot", strings.ReplaceAll(s1ChannelDirectoryBody, cell.old, cell.replacement))
-			if _, err := packs.AdmitChannelBody(body); err == nil || !strings.Contains(err.Error(), "team-bot/channel.yaml:") || !strings.Contains(err.Error(), "short") {
+			if _, err := packs.AdmitChannelBody(body); err == nil || !strings.Contains(err.Error(), "channel.yaml:") || !strings.Contains(err.Error(), "short") {
 				t.Fatalf("invalid reference gained channel admission without teaching error: %v", err)
 			}
 		})
@@ -179,7 +188,7 @@ func TestS1ChannelBodyAliasesAndRepeatedProjectionKeepFrozenEvidence(t *testing.
 }
 
 func TestS1ChannelBodyRequiresCapturedRoleAndRejectsAuthoredProvider(t *testing.T) {
-	provider, err := packartifact.AdmitProviderMembers("team-bot", map[string][]byte{
+	provider, err := s1LoadProviderMembers("team-bot", map[string][]byte{
 		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw]}, cannot: [execute code]}\n"),
 		"trigger.yaml":  []byte("event_name: {literal: raw}\n"),
 	})
@@ -191,7 +200,7 @@ func TestS1ChannelBodyRequiresCapturedRoleAndRejectsAuthoredProvider(t *testing.
 		t.Fatal("trigger role became a channel")
 	}
 	for _, authored := range []string{"team-bot", "foreign", "null"} {
-		_, err := packartifact.AdmitProviderMembers("team-bot", map[string][]byte{
+		_, err := s1LoadProviderMembers("team-bot", map[string][]byte{
 			"manifest.yaml":  []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw]}, cannot: [execute code]}\n"),
 			"trigger.yaml":   []byte("event_name: {literal: raw}\n"),
 			"connector.yaml": []byte("tools: {}\n"),
@@ -205,6 +214,8 @@ func TestS1ChannelBodyRequiresCapturedRoleAndRejectsAuthoredProvider(t *testing.
 
 func TestS1ChannelBodyLogicalReconstructionRetainsNamespace(t *testing.T) {
 	members := map[string][]byte{
+		"manifest.yaml":                []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"shop/manifest.yaml":           []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"shop/agents.yaml":             []byte("{}\n"),
 		"shop/schema.yaml":             []byte("stages: []\n"),
 		"shop/team-bot/manifest.yaml":  []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send_message]}, cannot: [bypass journal]}\n"),

@@ -17,10 +17,14 @@ import (
 
 func scopedProviderMembers() map[string][]byte {
 	members := map[string][]byte{
-		"schema.yaml":            []byte("stages: []\n"),
-		"child/schema.yaml":      []byte("stages: []\n"),
-		"child/deep/schema.yaml": []byte("stages: []\n"),
-		"sibling/schema.yaml":    []byte("stages: []\n"),
+		"manifest.yaml":            []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"child/manifest.yaml":      []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"child/deep/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"sibling/manifest.yaml":    []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":              []byte("stages: []\n"),
+		"child/schema.yaml":        []byte("stages: []\n"),
+		"child/deep/schema.yaml":   []byte("stages: []\n"),
+		"sibling/schema.yaml":      []byte("stages: []\n"),
 	}
 	for label, body := range packfixture.NeutralProviderMembers() {
 		members["team-bot/"+label] = body
@@ -239,7 +243,10 @@ func TestS1ProviderSourceKeepsEqualContentRootsDistinct(t *testing.T) {
 }
 
 func TestS1ProviderSourceEmptyMembershipStillRequiresValidPlatform(t *testing.T) {
-	rooted, _ := capturedProviderSource(t, map[string][]byte{"schema.yaml": []byte("stages: []\n")})
+	rooted, _ := capturedProviderSource(t, map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	})
 	platform := providerDefinitionPlatform(t)
 	source, err := AdmitProviderSource(rooted, platform)
 	if err != nil || !source.Valid() {

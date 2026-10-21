@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
@@ -37,7 +36,7 @@ func TestTriggerPredicatePathIdentityBeforeProjection(t *testing.T) {
 		t.Run(predicate, func(t *testing.T) {
 			for attempt := 0; attempt < 20; attempt++ {
 				manifest, err := admitTestTriggerBody(fmt.Sprintf(triggerPredicateFixture, predicate))
-				if err == nil || !strings.Contains(err.Error(), "acme/trigger.yaml:") || !strings.Contains(err.Error(), "when") {
+				if err == nil || !strings.Contains(err.Error(), "trigger.yaml:") || !strings.Contains(err.Error(), "when") {
 					t.Fatalf("noncanonical predicate admitted: %v", err)
 				}
 				if manifest.Validate() == nil {
@@ -180,7 +179,7 @@ func TestTriggerPatternAdmissionRejectsNonStringCaptureProperties(t *testing.T) 
 				body := fmt.Sprintf(triggerPatternFixture, `^(?P<reference>.+)$`, optional)
 				body = strings.Replace(body, "reference: {type: string}", "reference: "+tc.schema, 1)
 				manifest, err := admitTestTriggerBody(body)
-				if err == nil || !strings.Contains(err.Error(), "capture reference requires a string output property") || !strings.Contains(err.Error(), "acme/trigger.yaml:") {
+				if err == nil || !strings.Contains(err.Error(), "capture reference requires a string output property") || !strings.Contains(err.Error(), "trigger.yaml:") {
 					t.Fatalf("non-string capture schema admitted: %v", err)
 				}
 				if manifest.Validate() == nil {
@@ -197,7 +196,7 @@ func TestTriggerPatternAdmissionRejectsRequiredPropertyWithoutCapture(t *testing
 			body := fmt.Sprintf(triggerPatternFixture, `^(?P<reference>.+)$`, optional)
 			body = strings.Replace(body, "required: [reference]", "required: [reference, address]", 1)
 			manifest, err := admitTestTriggerBody(body)
-			if err == nil || !strings.Contains(err.Error(), "required output property address has no named capture") || !strings.Contains(err.Error(), "acme/trigger.yaml:") {
+			if err == nil || !strings.Contains(err.Error(), "required output property address has no named capture") || !strings.Contains(err.Error(), "trigger.yaml:") {
 				t.Fatalf("unsupplied required property admitted: %v", err)
 			}
 			if manifest.Validate() == nil {
@@ -264,7 +263,7 @@ func parseTriggerTestBody(t testing.TB, body string) Manifest {
 }
 
 func admitTestTriggerBody(body string) (Manifest, error) {
-	provider, err := packartifact.AdmitProviderMembers("acme", map[string][]byte{
+	provider, err := s1LoadProviderMembers("acme", map[string][]byte{
 		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, observed, command]}, cannot: [execute code]}\n"),
 		"trigger.yaml":  []byte(body),
 	})
