@@ -77,6 +77,27 @@ func TestWhatsAppRuntimeIncomingPublishesBeforeAcknowledgementBothStores(t *test
 			f.activate(t)
 			c := openRuntimeIncomingFixture(t, f)
 			connectRuntimeConnectionFixture(t, f, c)
+			device, err := c.state.device(f.ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			selfID := uuid.NewString()
+			self := encryptedMessageFromFixture(t, device, f.sender, device.ID.ToNonAD(),
+				&waE2E.Message{Conversation: proto.String("paired phone echo, not customer input")})
+			self.Attrs["id"] = selfID
+			f.peer.mu.Lock()
+			socket := f.peer.peers[len(f.peer.peers)-1]
+			f.peer.mu.Unlock()
+			if err := socket.send(f.peer.ctx, self); err != nil {
+				t.Fatal(err)
+			}
+			waitRuntimeIncomingReceipt(t, f, c, selfID)
+			if err := c.CheckBootstrap(f.ctx); err != nil {
+				t.Fatal("paired phone echo fenced its own session", err)
+			}
+			if _, found, err := f.selected.(sessionBusinessStore).LoadInboundPublicationByIdentity(f.ctx, runtimeIncomingIdentityFixture(t, f, selfID)); err != nil || found {
+				t.Fatal("paired phone echo became customer business input", found, err)
+			}
 			id := uuid.NewString()
 			sendRuntimeIncomingFixture(t, f, c, id, "installed native business text")
 			waitRuntimeIncomingReceipt(t, f, c, id)
