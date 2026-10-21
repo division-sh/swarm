@@ -100,6 +100,7 @@ func TestCompiledEventSchemasPreserveFilesystemFlowOwner(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: event-owner-root\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "root.started:\n")
+	writeFixtureFile(t, filepath.Join(root, "orders", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeFixtureFile(t, filepath.Join(root, "orders", "schema.yaml"), "stages: []\n# fixture: orders\n")
 	writeFixtureFile(t, filepath.Join(root, "orders", "events.yaml"), "ready:\n  order_id: text\n")
 

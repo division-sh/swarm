@@ -23,12 +23,13 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 	template := mode == "template" || mode == "nested_template"
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "sibling/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	prefix := flow + "/"
 	if flow == "." {
 		prefix = ""
+	} else {
+		writeClosedVariantFile(t, root, prefix+"manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	}
 	request := "activity.requested:\n  key: case_id\n  case_id: text\n  message: text\n"
 	results := []string{"send.succeeded", "send.failed"}
@@ -49,6 +50,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: activity-driver\npins:\n  inputs:\n    - activity.requested\n  outputs:\n    - activity.dispatch\nconnect:\n"+connects)
 		writeClosedVariantFile(t, root, prefix+"entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver identity}\n")
 		if mode == "nested_template" {
+			writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 			writeClosedVariantFile(t, root, "outer/schema.yaml", "stages: []\n# fixture: outer\n")
 		}
 	} else {

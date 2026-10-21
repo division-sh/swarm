@@ -35,7 +35,6 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "sibling/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeClosedVariantFile(t, root, "source/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	valueType, valueExpr := "integer", `payload.choice`
 	if textValues {
 		valueType, valueExpr = "text", `string(payload.choice)`
@@ -128,6 +127,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		writeClosedVariantFile(t, root, "events.yaml", requestSchemas+eventSchemas+siblingRequestSchemas)
 		writeClosedVariantFile(t, root, "nodes.yaml", handlers+local+wildcard)
 	} else {
+		writeClosedVariantFile(t, root, "source/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		rootSchema := "# fixture: publication-driver\npins:\n  inputs:\n"
 		if mode == "template" {
 			sourceSchema = strings.Replace(sourceSchema, "# fixture: publication-source\n", "# fixture: publication-source\ninstance: case_id\n", 1)
