@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
@@ -35,6 +36,7 @@ const (
 	runCommandStatusCancelled      = "cancelled"
 	runCommandStatusForked         = "forked"
 	defaultRunTraceAttachTimeout   = 5 * time.Second
+	defaultRunCommandTimeout       = 10 * time.Minute
 	runTraceObserverDetachedType   = "run_trace_observer_detached"
 	runTraceObserverWarning        = "warning"
 )
@@ -60,6 +62,7 @@ type runCommandOptions struct {
 	payloadPath    string
 	connectURL     string
 	noFollow       bool
+	timeout        time.Duration
 	reattachRunID  string
 	configPath     string
 	backend        string
@@ -184,6 +187,7 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 	cmd.Flags().StringVar(&opts.payloadPath, "payload", "", "Path to JSON object payload file")
 	cmd.Flags().StringVar(&opts.connectURL, "connect", "", "Existing Swarm API base URL")
 	cmd.Flags().BoolVar(&opts.noFollow, "no-follow", false, "Start through a connected server and print the run id without opening a trace subscription")
+	cmd.Flags().DurationVar(&opts.timeout, "timeout", defaultRunCommandTimeout, "Maximum time to follow after publication; 0 waits indefinitely; expiry never cancels work")
 	cmd.Flags().StringVar(&opts.reattachRunID, "reattach", "", "Existing run id to reattach to")
 	cmd.Flags().StringVar(&opts.configPath, "config", "", deploymentConfigFlagHelp+" (local foreground only)")
 	cmd.Flags().StringVar(&opts.backend, "backend", "", "LLM backend profile for local foreground startup: anthropic, claude_cli, openai_compatible, or openai_responses")
@@ -232,7 +236,6 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 		}
 	}
 
-	var stopLocal func()
 	if strings.TrimSpace(opts.connectURL) == "" {
 		var err error
 		opts, err = opts.withLocalForegroundServeAuth(root)
@@ -240,16 +243,6 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 			writeCLIAPIError(errOut, err)
 			return commandExitError{code: runCommandErrorExitCode(err)}
 		}
-		if _, err := newCLIAPIClient(opts.apiOptions); err != nil {
-			writeCLIAPIError(errOut, err)
-			return commandExitError{code: runCommandErrorExitCode(err)}
-		}
-		stopLocal, err = startLocalRunServe(ctx, root, opts, errOut)
-		if err != nil {
-			writeCLIAPIError(errOut, err)
-			return commandExitError{code: runCommandErrorExitCode(err)}
-		}
-		defer stopLocal()
 	}
 
 	client, err := newCLIAPIClient(opts.apiOptions)
@@ -259,6 +252,10 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 	}
 	health, err := runCommandHealth(ctx, client)
 	if err != nil {
+		if errors.Is(err, syscall.ECONNREFUSED) {
+			fmt.Fprintln(errOut, "No serve running for this deployment: start `swarm serve` first")
+			return commandExitError{code: cliExitConflict}
+		}
 		writeCLIAPIError(errOut, err)
 		return commandExitError{code: runCommandErrorExitCode(err)}
 	}
@@ -277,6 +274,9 @@ func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writ
 }
 
 func (o runCommandOptions) validate() error {
+	if o.timeout < 0 {
+		return fmt.Errorf("--timeout must be non-negative (0 waits indefinitely)")
+	}
 	if o.apiPort < 0 || o.apiPort > 65535 || (o.changedFlags["api-port"] && o.apiPort == 0) {
 		return fmt.Errorf("--api-port must be between 1 and 65535")
 	}
@@ -305,9 +305,6 @@ func (o runCommandOptions) validate() error {
 		if strconv.Itoa(o.apiPort) == mcpPort {
 			return fmt.Errorf("--api-port %d conflicts with MCP listener %s", o.apiPort, effectiveMCPAddr)
 		}
-	}
-	if o.noFollow && strings.TrimSpace(o.connectURL) == "" {
-		return fmt.Errorf("--no-follow requires --connect")
 	}
 	if o.noFollow && strings.TrimSpace(o.reattachRunID) != "" {
 		return fmt.Errorf("--no-follow and --reattach are mutually exclusive")
@@ -748,6 +745,11 @@ func runReattachCommand(ctx context.Context, out, errOut io.Writer, opts runComm
 }
 
 func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, opts runCommandOptions, wsEndpoint, runID string, replaySince *time.Time, stopOnInterrupt bool) error {
+	if opts.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, opts.timeout)
+		defer cancel()
+	}
 	poll := opts.apiOptions.runStatusPoll
 	if poll <= 0 {
 		poll = time.Second
@@ -798,6 +800,10 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		}
 		select {
 		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				settleObservation()
+				return writeRunCommandTimeout(errOut, runID, opts.connectURL)
+			}
 			var stopErr error
 			if stopOnInterrupt {
 				stopErr = runCommandStop(context.Background(), client, runID)
@@ -820,6 +826,9 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 			run, err := runCommandGet(ctx, client, runID)
 			if err != nil {
 				settleObservation()
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					return writeRunCommandTimeout(errOut, runID, opts.connectURL)
+				}
 				writeCLIAPIError(errOut, err)
 				return commandExitError{code: runCommandErrorExitCode(err)}
 			}
@@ -1247,6 +1256,15 @@ func writeRunCommandNoFollowGuidance(out io.Writer, runID, connectURL string) {
 		return
 	}
 	fmt.Fprintf(out, "reattach: %s\n", runCommandReattachGuidance(runID, connectURL))
+}
+
+func writeRunCommandTimeout(out io.Writer, runID, connectURL string) error {
+	command := "swarm run status " + runID
+	if connectURL != "" {
+		command += " --api-server " + connectURL
+	}
+	fmt.Fprintf(out, "Timed out waiting for run %s; work continues. Check: %s\n", runID, command)
+	return commandExitError{code: cliExitRunTimeout}
 }
 
 func runCommandReattachGuidance(runID, connectURL string) string {
