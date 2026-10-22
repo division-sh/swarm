@@ -3027,7 +3027,7 @@ func TestRouteTablePrivateInputsDoNotAcquirePublicIngressAuthority(t *testing.T)
 		},
 		{
 			name:      "non external subscription",
-			source:    staticAPIEventPublicationSource(),
+			source:    staticAPIEventPublicationSource(t),
 			eventType: "child/work.requested", recipient: "child-worker",
 			wantPath: "child", wantRouteCode: "subscription",
 		},

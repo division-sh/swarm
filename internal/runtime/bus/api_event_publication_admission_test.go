@@ -11,22 +11,12 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
-
-func TestOrdinaryChildHasNoPublicAPIEventPublicationEndpoint(t *testing.T) {
-	source := staticAPIEventPublicationSource()
-	for _, event := range []string{"child/work.requested", "sibling/work.requested", "work.requested", "child/work.missing"} {
-		if _, err := NewRootInputAPIEventPublicationEndpoint(source, event); err == nil {
-			t.Fatalf("private child event %q acquired public authority", event)
-		}
-	}
-}
 
 func TestRootInputAPIEventPublicationAdmissionIsExactAndClosed(t *testing.T) {
 	source := semanticview.Wrap(routedRootInputFlowNodeBundle())
@@ -78,7 +68,7 @@ func TestPublicInputAuthorityCannotTargetPrivateChild(t *testing.T) {
 }
 
 func TestAPIEventPublicationRequiresEndpointBeforePlanningOrMutation(t *testing.T) {
-	source := staticAPIEventPublicationSource()
+	source := staticAPIEventPublicationSource(t)
 	store := newTargetRouteMemoryStore()
 	eventBus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -94,40 +84,20 @@ func TestAPIEventPublicationRequiresEndpointBeforePlanningOrMutation(t *testing.
 	}
 }
 
-func staticAPIEventPublicationSource() semanticview.Source {
-	child := runtimecontracts.FlowContractView{
-		Path: "child", Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"work.requested": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"child-worker": {
-				SubscribesTo:  []string{"work.requested"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.requested": {}},
-			},
-		},
-	}
-	sibling := runtimecontracts.FlowContractView{
-		Path: "sibling", Paths: runtimecontracts.FlowContractPaths{FlowPath: "sibling"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"work.requested": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"sibling-worker": {
-				SubscribesTo:  []string{"work.requested"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.requested": {}},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{child, sibling}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"child": &root.Children[0], "sibling": &root.Children[1],
-			},
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
-	}
-	return semanticview.Wrap(bundle)
+func staticAPIEventPublicationSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	return semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":           "stages: []\n",
+		"child/manifest.yaml":   "version: 1.0.0\nplatform_version: '*'\n",
+		"child/schema.yaml":     "stages: []\n",
+		"child/events.yaml":     "work.requested:\n",
+		"child/nodes.yaml":      "child-worker:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested: {}\n",
+		"sibling/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"sibling/schema.yaml":   "stages: []\n",
+		"sibling/events.yaml":   "work.requested:\n",
+		"sibling/nodes.yaml":    "sibling-worker:\n  execution_type: system_node\n  subscribes_to: [work.requested]\n  event_handlers:\n    work.requested: {}\n",
+	}))
 }
 
 func acknowledgedRootInputEndpoint(t testing.TB) (semanticview.Source, APIEventPublicationEndpoint) {
