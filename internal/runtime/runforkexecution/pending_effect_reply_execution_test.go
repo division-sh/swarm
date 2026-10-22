@@ -258,7 +258,7 @@ func approvePendingReplyCard(t *testing.T, ctx context.Context, store pendingRep
 	t.Helper()
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	waitPendingReplyControlReady(t, ctx, owner, card.RunID)
+	waitSelectedRuntimeStartup(t, ctx, owner, card.RunID)
 	at, decisionID := time.Now().UTC(), uuid.NewString()
 	principal, err := store.EnsureOperatorPrincipal(ctx, at)
 	if err != nil {
@@ -274,8 +274,10 @@ func approvePendingReplyCard(t *testing.T, ctx context.Context, store pendingRep
 	}
 }
 
-func waitPendingReplyControlReady(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, runID string) {
+func waitSelectedRuntimeStartup(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, runID string) {
 	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
 	for {
 		ready := false
 		owner.ports.contexts.mu.Lock()

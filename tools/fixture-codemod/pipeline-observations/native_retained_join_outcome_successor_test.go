@@ -128,6 +128,23 @@ func validateRetainedJoinSuccessor(row recipe, candidate string) error {
 	return nil
 }
 
+// Remove only the added positive branch before checking the original refusal
+// and exact outcome waits. Historical Before/After pins remain unchanged.
+func restoreRetainedJoinRefusalBranch(source string) (string, error) {
+	const signature = "func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoint, success bool)"
+	const original = "func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoint bool)"
+	const request = "\t\t\trequest := runfork.RunForkMaterializeRequest{SourceRunID: started.RunID, At: frontier, OriginalLoopCarriage: carriage}\n"
+	const branch = request + "\t\t\tif success {\n\t\t\t\trequireServedRetainedJoinForkSuccess(t, rt, selected, request, current, sourceJoins)\n\t\t\t\treturn\n\t\t\t}\n"
+	const start = "\t\t\t// Delivery settlement does not join the lifecycle candidate executor. Stop"
+	const finish = "\t\t\tconst refusal = \"fork materialization requires execution-ready plan; blockers: timer_history_unproven\""
+	if strings.Count(source, signature) != 1 || strings.Count(source, branch+start) != 1 || strings.Count(source, finish) != 1 {
+		return "", fmt.Errorf("retained join success branch changed the original refusal boundary")
+	}
+	source = strings.Replace(source, signature, original, 1)
+	source = strings.Replace(source, branch+start, start, 1)
+	return strings.Replace(source, finish, request+finish, 1), nil
+}
+
 func q10RetainedJoinCurrentSource(row recipe) (string, error) {
 	if row.File != "internal/serveapp/fork_retained_join_test.go" || row.Function != "testServedJoinWriterCompletedHistoryRefusal" {
 		return "", fmt.Errorf("unreviewed retained-join current endpoint")

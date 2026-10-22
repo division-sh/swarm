@@ -119,6 +119,7 @@ func TestIssue642SourceAndForkDecideOwnPendingEffectsBothStores(t *testing.T) {
 			}
 			child := result.Materialization.ForkRunID
 			card := requirePendingReplyCard(t, ctx, store, child)
+			waitSelectedRuntimeStartup(t, ctx, owner, child)
 			rows, err := storetest.ReadReplyContextRecords(ctx, selected, child)
 			if err != nil || len(rows) != 2 || card.CardID == sourceCard.CardID || card.DecidedBy != "" || card.Verdict != "" {
 				t.Fatalf("fork inherited approval or lost its own open returns: card=%+v rows=%+v error=%v", card, rows, err)

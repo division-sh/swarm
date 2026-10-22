@@ -561,7 +561,7 @@ func runPendingEffectReplyCrashHelper(t *testing.T, ctx context.Context, selecte
 		!reflect.DeepEqual(original, actualCard) || !reflect.DeepEqual(originalEffect, actualEffect) || !reflect.DeepEqual(originalRows, actualRows) {
 		t.Fatalf("pending crash preparation changed source work: errors=%v/%v/%v/%v/%v", err, stagedErr, cardErr, effectErr, rowsErr)
 	}
-	waitPendingReplyControlReady(t, ctx, owner, card.RunID)
+	waitSelectedRuntimeStartup(t, ctx, owner, card.RunID)
 	use, isSelected, err := owner.AcquireSelectedDecisionCardControl(ctx, card.RunID, runfork.ControlMailboxDecide)
 	if err != nil || !isSelected || use == nil {
 		t.Fatalf("activated pending crash child lacks actual control: selected=%t error=%v", isSelected, err)
@@ -648,7 +648,7 @@ func loadPendingReplyRecoveryOperation(t *testing.T, ctx context.Context, select
 func requirePendingReplyRecoveryRefusals(t *testing.T, ctx context.Context, selected any, store pendingReplyExecutionStore, owner SelectedContractExecutionOwner,
 	card decisioncard.Card, principal string, previous pendingReplyCrashEvidence, current effects.Authority) {
 	t.Helper()
-	waitPendingReplyControlReady(t, ctx, owner, card.RunID)
+	waitSelectedRuntimeStartup(t, ctx, owner, card.RunID)
 	before, err := store.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 100})
 	if err != nil {
 		t.Fatal(err)

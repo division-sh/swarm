@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -164,6 +166,28 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, 
 		if err != nil || len(deliveries) != 1 || deliveries[0].SubscriberType != "node" || deliveries[0].SubscriberID != receiver.Key() ||
 			deliveries[0].Status != "delivered" || deliveries[0].FlowInstance != materialized.ForkRunID {
 			t.Fatalf("actual pinned row did not settle through its exact receiver: deliveries=%+v err=%v", deliveries, err)
+		}
+	}
+	waitSelectedRuntimeStartup(t, ctx, request.Owner, materialized.ForkRunID)
+	logs := loader.Store.(interface {
+		ListOperatorRuntimeLogs(context.Context, operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
+	})
+	for {
+		page, err := logs.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{RunID: materialized.ForkRunID,
+			Component: "run_fork", ActionOrEventType: "selected_contract_event_dispatched", Limit: 2})
+		if err != nil || page.NextCursor != "" || len(page.Logs) > 1 {
+			t.Fatalf("read exact initial dispatch before replay baseline: %+v error=%v", page, err)
+		}
+		if len(page.Logs) == 1 {
+			if page.Logs[0].EventID != activityidentity.ForkLineageEventID(materialized.ForkRunID, request.At) {
+				t.Fatal("pin replay joined a different source dispatch")
+			}
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("initial dispatch did not join before replay baseline")
+		case <-time.After(10 * time.Millisecond):
 		}
 	}
 	request.Owner.ports.contexts.mu.Lock()

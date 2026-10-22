@@ -218,9 +218,15 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 	if entityID.IsZero() || runID == "" {
 		return fmt.Errorf("workflow initial timer reconciliation requires exact run and entity identity")
 	}
-	active, err := store.listPersistedWorkflowTimerActivations(ctx, runID, entityID.String(), true)
+	retained, err := store.listPersistedWorkflowTimerActivations(ctx, runID, entityID.String(), false)
 	if err != nil {
 		return err
+	}
+	var active []WorkflowTimerActivation
+	for _, activation := range retained {
+		if activation.Status == workflowTimerStatusActive {
+			active = append(active, activation)
+		}
 	}
 	var readinessMode executionmode.Mode
 	if attempt != nil {
@@ -299,6 +305,43 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 			}
 			if found {
 				desired[inherited.Ref.ActivationID] = inherited
+				continue
+			}
+			// A committed inherited occurrence consumed this exact initial edge.
+			// Its terminal receipt is evidence, never a desired active arm.
+			consumed := false
+			for _, fired := range retained {
+				if fired.Status != workflowTimerStatusFired || fired.SourceTimerID == "" ||
+					fired.Ref.Cause != timeridentity.WorkflowTimerActivationCauseInitial ||
+					fired.Ref.DeclarationKey != declaration.SemanticKey() || fired.Ref.Generation != generation {
+					continue
+				}
+				if err := fired.Validate(); err != nil {
+					return fmt.Errorf("validate fired inherited initial timer: %w", err)
+				}
+				constructed, err := instance.ConstructionIdentity(identity)
+				if err != nil {
+					return err
+				}
+				if err := constructed.ValidateConstruction(source, runID); err != nil {
+					return err
+				}
+				revision, err := workflowTimerDeclarationRevision(source, declaration)
+				if err != nil {
+					return err
+				}
+				routing, event, err := workflowTimerDeclarationSourceEvent(source, entityID.String(), route.InstancePath, declaration)
+				if err != nil {
+					return err
+				}
+				if consumed || fired.RunID != runID || fired.Route != route || fired.EntityID != constructed.EntityID ||
+					fired.Ref.DeclarationRevision != revision || fired.RoutingSource != routing || fired.ExecutionMode != initialMode ||
+					fired.EventType != string(event) || fired.OwnerAgent != strings.TrimSpace(declaration.Owner) {
+					return fmt.Errorf("fired inherited initial timer crosses its exact declaration, owner, or receipt")
+				}
+				consumed = true
+			}
+			if consumed {
 				continue
 			}
 			interval := workflowTimerDuration(declaration, workflowTimerPolicy(source, declaration.OwningFlowID()))

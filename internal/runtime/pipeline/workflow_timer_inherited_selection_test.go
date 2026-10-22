@@ -184,6 +184,9 @@ func TestSelectInheritedWorkflowTimerRefusesMismatchedOwnerAndSource(t *testing.
 			{"inactive", func(_ *testing.T, _ *semanticview.Source, a *WorkflowTimerActivation, _ *WorkflowInstance) {
 				a.Status = workflowTimerStatusCancelled
 			}},
+			{"fired", func(_ *testing.T, _ *semanticview.Source, a *WorkflowTimerActivation, _ *WorkflowInstance) {
+				a.Status, a.FiredAt = workflowTimerStatusFired, a.FireAt
+			}},
 			{"invalid_arm", func(_ *testing.T, _ *semanticview.Source, a *WorkflowTimerActivation, _ *WorkflowInstance) {
 				a.SourceArmedAt = time.Time{}
 			}},

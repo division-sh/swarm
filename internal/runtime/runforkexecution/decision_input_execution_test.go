@@ -269,6 +269,7 @@ func activatePendingDecisionFork(t *testing.T, ctx context.Context, owner Select
 	if err != nil || !result.Activation.Activated {
 		t.Fatalf("activate the admitted pending-effect start cut: %+v error=%v", result, err)
 	}
+	waitSelectedRuntimeStartup(t, ctx, owner, result.Materialization.ForkRunID)
 	return result
 }
 
