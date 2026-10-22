@@ -19,6 +19,7 @@ import (
 // attachment or replaying a business event to synthesize their source history.
 func constructHistoricalSourceFixture(t *testing.T, ctx context.Context, selected agentFixtureFlowStore, req pipeline.FlowInstanceActivationRequest) pipeline.FlowInstanceActivationPlan {
 	t.Helper()
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	bundle, ok := semanticview.Bundle(req.ContractBundle)
 	if !ok {
 		t.Fatal("historical construction requires its exact admitted bundle")

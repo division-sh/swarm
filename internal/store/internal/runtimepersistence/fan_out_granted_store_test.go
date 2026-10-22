@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -50,11 +51,11 @@ func (e *captureFanOutExecutor) ReportFanOutServingError(_ context.Context, err 
 // grant binding and all mutations below use the production selected-store path.
 func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected selectedFanOutOwner, fixtures []fanOutOwnerFixture) (startupownership.ProcessCapability, []startupownership.LiveGenerationGrant, []*worklifetime.RuntimeOccurrence, agenttopology.SourceSetPlan) {
 	t.Helper()
-	store := selected.(interface {
-		AcquireProcessCapability(context.Context, startupownership.AcquireRequest) (startupownership.ProcessCapability, error)
-	})
-	request := testStartupAcquireRequest("fan-out-granted-store")
-	capability, err := store.AcquireProcessCapability(ctx, request)
+	capability, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := capability.Evidence()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 	var grants []startupownership.LiveGenerationGrant
 	var occurrences []*worklifetime.RuntimeOccurrence
 	for _, fixture := range fixtures {
-		grant, err := capability.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: fixture.bundleHash, RuntimeInstanceID: request.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
+		grant, err := capability.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: fixture.bundleHash, RuntimeInstanceID: authority.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -96,7 +97,7 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 		if _, err := grant.AdmitExecution(ctx); err != nil {
 			t.Fatal(err)
 		}
-		occurrence, err := work.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: request.RuntimeInstanceID, BundleHash: fixture.bundleHash})
+		occurrence, err := work.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authority.RuntimeInstanceID, BundleHash: fixture.bundleHash})
 		if err != nil {
 			t.Fatal(err)
 		}

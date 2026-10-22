@@ -70,7 +70,7 @@ func (*startupRecoveryFanOutSession) BindFanOutGrant(startupownership.GrantEvide
 
 func TestStartupRecoveryFanOutFixtureRefusesUnownedWork(t *testing.T) {
 	session := newRuntimeTestRetainedSession(t)
-	fixture := &startupRecoveryFanOutSession{runtimeTestRetainedSession: session, capacity: startupownership.SQLiteFanOutCapacity()}
+	fixture := startupRecoveryFanOutSessionForTest(t, startupownership.SQLiteFanOutCapacity())(session).(*startupRecoveryFanOutSession)
 	if _, present := any(session).(interface {
 		FanOutServingStore() (startupownership.FanOutServingStore, error)
 	}); present {
