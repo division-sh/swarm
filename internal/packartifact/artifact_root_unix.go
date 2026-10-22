@@ -13,10 +13,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type admittedArtifactRoot struct {
-	directory *os.File
-}
-
 func openAdmittedArtifactRoot(target string) (*admittedArtifactRoot, error) {
 	target = filepath.Clean(target)
 	if !filepath.IsAbs(target) {
@@ -76,14 +72,6 @@ func (r *admittedArtifactRoot) close() error {
 	err := r.directory.Close()
 	r.directory = nil
 	return err
-}
-
-func (r *admittedArtifactRoot) openCapturedDirectory(relative string) (*admittedArtifactRoot, error) {
-	directory, err := r.openDirectory(relative)
-	if err != nil {
-		return nil, err
-	}
-	return &admittedArtifactRoot{directory: directory}, nil
 }
 
 func (r *admittedArtifactRoot) openDirectory(relative string) (*os.File, error) {

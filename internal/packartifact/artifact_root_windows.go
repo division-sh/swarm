@@ -14,10 +14,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-type admittedArtifactRoot struct {
-	directory *os.File
-}
-
 type fileAttributeTagInfo struct {
 	attributes uint32
 	reparseTag uint32
@@ -139,14 +135,6 @@ func (r *admittedArtifactRoot) close() error {
 	err := r.directory.Close()
 	r.directory = nil
 	return err
-}
-
-func (r *admittedArtifactRoot) openCapturedDirectory(relative string) (*admittedArtifactRoot, error) {
-	directory, err := r.openDirectory(relative)
-	if err != nil {
-		return nil, err
-	}
-	return &admittedArtifactRoot{directory: directory}, nil
 }
 
 func (r *admittedArtifactRoot) openDirectory(relative string) (*os.File, error) {

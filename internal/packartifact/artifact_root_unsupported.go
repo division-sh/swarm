@@ -8,17 +8,11 @@ import (
 	"os"
 )
 
-type admittedArtifactRoot struct{}
-
 func openAdmittedArtifactRoot(target string) (*admittedArtifactRoot, error) {
 	return nil, fmt.Errorf("artifact root %q cannot be admitted safely on this platform", target)
 }
 
 func (r *admittedArtifactRoot) close() error { return nil }
-
-func (r *admittedArtifactRoot) openCapturedDirectory(relative string) (*admittedArtifactRoot, error) {
-	return nil, fmt.Errorf("artifact directory %q cannot be admitted safely on this platform", relative)
-}
 
 func (r *admittedArtifactRoot) openDirectory(relative string) (*os.File, error) {
 	return nil, fmt.Errorf("artifact directory %q cannot be admitted safely on this platform", relative)
