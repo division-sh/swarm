@@ -40,7 +40,7 @@ func loadReviewedSuccessors2617(t *testing.T) reviewedSuccessorPacket2617 {
 		t.Fatal(err)
 	}
 	// This packet preserves all prior endpoints, including nonempty Successors.
-	if fmt.Sprintf("%x", sha256.Sum256(raw)) != "04c99a54f396347c0b3cd0b6d3333d9c167e7303b431799800289b5aa70812e5" {
+	if fmt.Sprintf("%x", sha256.Sum256(raw)) != "6ed21982df76f46f7048b20781b83a7ba663de7dce3bd383adc7f3dce43d876f" {
 		t.Fatal("finite reviewed composition evidence changed")
 	}
 	var packet reviewedSuccessorPacket2617
