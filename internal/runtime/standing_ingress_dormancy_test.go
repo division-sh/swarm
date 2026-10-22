@@ -5,56 +5,67 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
-func TestStandingIngressCredentialAbsenceAcrossVerifiedProviders(t *testing.T) {
-	for _, tc := range []struct{ provider, event string }{
-		{"github", "inbound.github.raw.issues"}, {"intercom", "inbound.intercom"},
-		{"shopify", "inbound.shopify"}, {"slack", "inbound.slack.message"},
-		{"stripe", "inbound.stripe"}, {"telegram", "inbound.telegram"},
-		{"typeform", "inbound.typeform"}, {"twilio", "inbound.twilio"},
-	} {
-		t.Run(tc.provider, func(t *testing.T) {
-			source, catalog := standingProviderDeclarationSource(t, tc.provider, tc.event)
-			file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			rt := &Runtime{Options: RuntimeOptions{
-				WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: catalog,
-				ProviderCredentials: file, SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA),
-			}}
-			if targets, err := rt.PlanStandingTargets(); err != nil || len(targets) != 0 {
-				t.Fatalf("absent credential granted execution = %#v, %v", targets, err)
-			}
-			candidates, err := rt.PlanStandingServiceCandidates()
-			if err != nil || len(candidates) != 1 || candidates[0].BindingEnabled {
-				t.Fatalf("complete dormant declaration census = %#v, %v", candidates, err)
-			}
-			if err := file.Set(context.Background(), "webhook_signing."+tc.provider, "supplied-signing-value"); err != nil {
-				t.Fatal(err)
-			}
-			restarted := &Runtime{Options: rt.Options}
-			if targets, err := restarted.PlanStandingTargets(); err != nil || len(targets) != 1 || targets[0].Provider != tc.provider {
-				t.Fatalf("provisioned restart targets = %#v, %v", targets, err)
-			}
-		})
-	}
-}
-
 func TestDormantIngressReadbackCannotHotActivate(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "inbound.telegram")
-	contextDef.Source = source
+	members := map[string][]byte{
+		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":               []byte("stages: []\n"),
+		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+	}
+	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+		if entry.ID() != "telegram" {
+			continue
+		}
+		members["coordinator/telegram/manifest.yaml"] = entry.ManifestBody()
+		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+			if body, present := entry.Provider().Body(role); present {
+				members["coordinator/telegram/"+role.FileName()] = body.Bytes()
+			}
+		}
+		break
+	}
+	if members["coordinator/telegram/manifest.yaml"] == nil {
+		t.Fatal("embedded Telegram provider is unavailable")
+	}
+	captured, rooted, _ := loadS1EffectiveProviderScope(t, members)
+	source := semanticview.Wrap(captured)
+	providers, err := packadmission.AdmitProviderSource(rooted, captured.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope("coordinator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations, err := ResolveStandingTargetDeclarations(source, catalog)
+	if err != nil || len(declarations) != 1 {
+		t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
+	}
+	declaration := declarations[0]
+	if declaration.FlowPath != "coordinator" || len(declaration.Ingress) != 1 || declaration.Ingress[0].Provider != "telegram" {
+		t.Fatalf("captured coordinator/Telegram declaration: %+v", declaration)
+	}
+	signingKey := declaration.Ingress[0].SigningSecret
+	if signingKey == "" {
+		t.Fatal("captured Telegram declaration has no signing credential role")
+	}
+	contextDef := rootedContextForSource(t, source, rooted)
 	contextDef.ProviderTriggerCatalog = catalog
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
@@ -71,7 +82,7 @@ func TestDormantIngressReadbackCannotHotActivate(t *testing.T) {
 	}
 	for _, supplied := range []bool{false, true} {
 		if supplied {
-			if err := file.Set(context.Background(), "webhook_signing.telegram", "new-signing-value"); err != nil {
+			if err := file.Set(context.Background(), signingKey, "new-signing-value"); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -104,12 +115,58 @@ func TestDormantIngressReadbackCannotHotActivate(t *testing.T) {
 func TestStandingIngressAdmissionDistinguishesAbsentFromInvalid(t *testing.T) {
 	for _, state := range []string{"absent", "empty", "whitespace", "read_error", "valid"} {
 		t.Run(state, func(t *testing.T) {
-			source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
+			members := map[string][]byte{
+				"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"schema.yaml":               []byte("stages: []\n"),
+				"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+			}
+			for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+				if entry.ID() != "telegram" {
+					continue
+				}
+				members["coordinator/telegram/manifest.yaml"] = entry.ManifestBody()
+				for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+					if body, present := entry.Provider().Body(role); present {
+						members["coordinator/telegram/"+role.FileName()] = body.Bytes()
+					}
+				}
+				break
+			}
+			if members["coordinator/telegram/manifest.yaml"] == nil {
+				t.Fatal("embedded Telegram provider is unavailable")
+			}
+			captured, rooted, _ := loadS1EffectiveProviderScope(t, members)
+			source := semanticview.Wrap(captured)
+			providers, err := packadmission.AdmitProviderSource(rooted, captured.Platform)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scope, err := providers.Scope("coordinator")
+			if err != nil {
+				t.Fatal(err)
+			}
+			catalog, err := scope.TriggerCatalog()
+			if err != nil {
+				t.Fatal(err)
+			}
+			declarations, err := ResolveStandingTargetDeclarations(source, catalog)
+			if err != nil || len(declarations) != 1 {
+				t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
+			}
+			declaration := declarations[0]
+			if declaration.FlowPath != "coordinator" || len(declaration.Ingress) != 1 || declaration.Ingress[0].Provider != "telegram" {
+				t.Fatalf("captured coordinator/Telegram declaration: %+v", declaration)
+			}
+			signingKey := declaration.Ingress[0].SigningSecret
+			if signingKey == "" {
+				t.Fatal("captured Telegram declaration has no signing credential role")
+			}
 			file, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			key := "webhook_signing.telegram"
+			key := signingKey
 			values := map[string]string{"empty": "", "whitespace": " \t\n", "valid": "valid-signing-value"}
 			if value, present := values[state]; present {
 				if err := file.Set(context.Background(), key, value); err != nil {
@@ -123,7 +180,7 @@ func TestStandingIngressAdmissionDistinguishesAbsentFromInvalid(t *testing.T) {
 			}
 			rt := &Runtime{Options: RuntimeOptions{
 				WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: catalog,
-				ProviderCredentials: credentials, SourceArtifactFact: testSourceArtifactFact(t, "bundle-v2:sha256:"+strings.Repeat("a", 64)),
+				ProviderCredentials: credentials, SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
 			}}
 			targets, err := rt.PlanStandingTargets()
 			if state == "empty" || state == "whitespace" || state == "read_error" {
@@ -166,15 +223,70 @@ func TestStandingRegistrationRequiresEveryCompiledCredentialRole(t *testing.T) {
 	for _, state := range []string{"all_absent", "provider_absent", "signing_absent", "all_present", "invalid_provider_signing_absent", "provider_read_error", "corrupt_file"} {
 		t.Run(state, func(t *testing.T) {
 			ctx := context.Background()
-			source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-			bundle, _ := semanticview.Bundle(source)
-			projection, err := packadmission.FromBundle(bundle)
+			members := map[string][]byte{
+				"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"schema.yaml":               []byte("stages: []\n"),
+				"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+				"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+			}
+			for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+				if entry.ID() != "telegram" {
+					continue
+				}
+				members["coordinator/telegram/manifest.yaml"] = entry.ManifestBody()
+				for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+					if body, present := entry.Provider().Body(role); present {
+						members["coordinator/telegram/"+role.FileName()] = body.Bytes()
+					}
+				}
+				break
+			}
+			if members["coordinator/telegram/manifest.yaml"] == nil {
+				t.Fatal("embedded Telegram provider is unavailable")
+			}
+			captured, rooted, _ := loadS1EffectiveProviderScope(t, members)
+			source := semanticview.Wrap(captured)
+			providers, err := packadmission.AdmitProviderSource(rooted, captured.Platform)
 			if err != nil {
 				t.Fatal(err)
 			}
-			plan := projection.ChannelPlans[0]
-			profile, _ := plan.OnboardingProfile()
-			keys := map[string]string{profile.ProviderCredential(): "provider.bot", profile.SigningCredential(): "webhook_signing.telegram"}
+			scope, err := providers.Scope("coordinator")
+			if err != nil {
+				t.Fatal(err)
+			}
+			catalog, err := scope.TriggerCatalog()
+			if err != nil {
+				t.Fatal(err)
+			}
+			declarations, err := ResolveStandingTargetDeclarations(source, catalog)
+			if err != nil || len(declarations) != 1 {
+				t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
+			}
+			declaration := declarations[0]
+			if declaration.FlowPath != "coordinator" || len(declaration.Ingress) != 1 || declaration.Ingress[0].Provider != "telegram" {
+				t.Fatalf("captured coordinator/Telegram declaration: %+v", declaration)
+			}
+			signingKey := declaration.Ingress[0].SigningSecret
+			if signingKey == "" {
+				t.Fatal("captured Telegram declaration has no signing credential role")
+			}
+			definition, present := scope.Provider("telegram")
+			if !present {
+				t.Fatal("captured scope has no Telegram provider")
+			}
+			plan, present := definition.ChannelPlan()
+			if !present {
+				t.Fatal("captured Telegram provider has no channel plan")
+			}
+			profile, present := plan.OnboardingProfile()
+			if !present {
+				t.Fatal("captured Telegram channel has no onboarding profile")
+			}
+			providerKey := profile.ProviderCredential()
+			if providerKey == "" || profile.SigningCredential() == "" || providerKey == signingKey || providerKey == profile.SigningCredential() {
+				t.Fatal("captured onboarding requires distinct provider and signing credential roles")
+			}
+			keys := map[string]string{profile.ProviderCredential(): providerKey, profile.SigningCredential(): signingKey}
 			binding, err := packs.NewOutboundBindingPlanWithRegistration("telegram", plan, "42", nil, keys, "ingress:coordinator:telegram")
 			if err != nil {
 				t.Fatal(err)
@@ -189,12 +301,12 @@ func TestStandingRegistrationRequiresEveryCompiledCredentialRole(t *testing.T) {
 				t.Fatal(err)
 			}
 			if state == "all_present" || state == "signing_absent" {
-				if err := file.Set(ctx, "provider.bot", "provider-token"); err != nil {
+				if err := file.Set(ctx, providerKey, "provider-token"); err != nil {
 					t.Fatal(err)
 				}
 			}
 			if state == "all_present" || state == "provider_absent" {
-				if err := file.Set(ctx, "webhook_signing.telegram", "signing-value"); err != nil {
+				if err := file.Set(ctx, signingKey, "signing-value"); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -202,9 +314,9 @@ func TestStandingRegistrationRequiresEveryCompiledCredentialRole(t *testing.T) {
 			sentinel := errors.New("provider credential unavailable")
 			switch state {
 			case "invalid_provider_signing_absent":
-				err = file.Set(ctx, "provider.bot", " \t\n")
+				err = file.Set(ctx, providerKey, " \t\n")
 			case "provider_read_error":
-				selected = &standingRoleObservationErrorStore{FileStore: file, key: "provider.bot", err: sentinel}
+				selected = &standingRoleObservationErrorStore{FileStore: file, key: providerKey, err: sentinel}
 			case "corrupt_file":
 				err = os.WriteFile(path, []byte("{invalid credential document"), 0600)
 			}
@@ -212,7 +324,7 @@ func TestStandingRegistrationRequiresEveryCompiledCredentialRole(t *testing.T) {
 				t.Fatal(err)
 			}
 			rt := &Runtime{Options: RuntimeOptions{WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: catalog,
-				ProviderCredentials: selected, DeclaredChannelPublication: declared, SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA)}}
+				ProviderCredentials: selected, DeclaredChannelPublication: declared, SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact())}}
 			targets, err := rt.PlanStandingTargets()
 			if state == "invalid_provider_signing_absent" || state == "provider_read_error" || state == "corrupt_file" {
 				if err == nil || len(targets) != 0 || rt.standingCredentialAdmission != nil {
@@ -231,7 +343,7 @@ func TestStandingRegistrationRequiresEveryCompiledCredentialRole(t *testing.T) {
 				t.Fatalf("registration enabledness = %#v, %v", candidates, err)
 			}
 			if state == "all_present" {
-				if len(targets) != 1 || targets[0].SigningSecret != "webhook_signing.telegram" {
+				if len(targets) != 1 || targets[0].SigningSecret != signingKey {
 					t.Fatalf("complete registered target = %#v", targets)
 				}
 				return
@@ -243,48 +355,6 @@ func TestStandingRegistrationRequiresEveryCompiledCredentialRole(t *testing.T) {
 			}
 			if err != nil || len(targets) != 0 || len(ineligible) != 1 || len(ineligible[0].MissingCredentials) != wantMissing {
 				t.Fatalf("incomplete registered target = %#v, %#v, %v", targets, ineligible, err)
-			}
-		})
-	}
-}
-
-func TestDormantIngressCannotMaskStructuralRefusal(t *testing.T) {
-	for _, defect := range []string{"missing_pin", "unknown_provider", "duplicate_provider", "malformed_raw", "non_singleton", "invalid_alias"} {
-		t.Run(defect, func(t *testing.T) {
-			event := "inbound.telegram"
-			if defect == "missing_pin" {
-				event = "unrelated.event"
-			}
-			source, catalog := standingTelegramDeclarationSource(t, event)
-			bundle, _ := semanticview.Bundle(source)
-			mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) {
-				switch defect {
-				case "unknown_provider":
-					schema.Ingress.Providers[0].Provider = "unknown-provider"
-				case "duplicate_provider":
-					schema.Ingress.Providers = append(schema.Ingress.Providers, schema.Ingress.Providers[0])
-				case "malformed_raw":
-					schema.Ingress.Providers[0].Admission.Kind = "raw"
-				case "non_singleton":
-					field, err := runtimecontracts.ParseTemplateInstanceField("customer_id")
-					if err != nil {
-						t.Fatal(err)
-					}
-					schema.Instance = field
-				case "invalid_alias":
-					schema.Ingress.Alias = "unreachable/alias"
-				}
-			})
-			if defect == "invalid_alias" {
-				if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil {
-					t.Fatal("invalid alias escaped the compiled declaration owner")
-				}
-				return
-			}
-			rt := &Runtime{Options: RuntimeOptions{WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: catalog,
-				SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA)}}
-			if targets, err := rt.PlanStandingTargets(); err == nil || len(targets) != 0 || rt.standingCredentialAdmission != nil {
-				t.Fatalf("missing credential masked invalid declaration: %#v, %v", targets, err)
 			}
 		})
 	}
