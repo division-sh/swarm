@@ -48,7 +48,7 @@ func selectedMaterializationProcessForTest(t testing.TB, work *storeTestWorkFixt
 	return capability
 }
 
-func selectedPreparationForTest(t testing.TB, capability startupownership.ProcessCapability, sourceRun, forkRun, eventID string, declarations agenttopology.SelectedDeclarationPlan) runfork.SelectedForkPreparationBinding {
+func selectedPreparationForTest(t testing.TB, capability startupownership.ProcessCapability, sourceRun, forkRun string, point runfork.RunForkPoint, declarations agenttopology.SelectedDeclarationPlan) runfork.SelectedForkPreparationBinding {
 	t.Helper()
 	evidence, err := capability.Evidence()
 	if err != nil {
@@ -59,7 +59,7 @@ func selectedPreparationForTest(t testing.TB, capability startupownership.Proces
 		SelectedForkPreparation: runfork.SelectedForkPreparation{
 			DeclarationPlanFingerprint: declarations.Revision,
 			PreparationID:              uuid.NewString(), ProcessGeneration: evidence.AuthorityGeneration,
-			SourceRunID: sourceRun, ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID}, ForkEventID: eventID,
+			SourceRunID: sourceRun, ForkPoint: point, ForkEventID: point.EventID,
 			Coordinates: managedcapabilities.SelectedForkPreparationCoordinates{
 				ProcessAuthorityID: evidence.AuthorityID, ProcessOwnerID: evidence.OwnerID, ProcessBootID: evidence.BootID,
 				BundleHash: declarations.BundleHash, SourceFingerprint: strings.Repeat("a", 64), AdmittedPlanFingerprint: strings.Repeat("b", 64),

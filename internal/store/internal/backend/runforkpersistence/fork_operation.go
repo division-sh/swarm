@@ -12,11 +12,67 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
+
+type selectedForkOperationReplay struct {
+	operationID string
+	forkRunID   string
+}
+
+func (e *selectedForkOperationReplay) Error() string {
+	return "selected materialization observed a durable fork operation"
+}
+
+func requireFreshForkOperationTx(ctx context.Context, tx *sql.Tx, request *runfork.ForkOperationRequest, postgres bool) error {
+	if request == nil {
+		return nil
+	}
+	canonical, semanticHash, err := request.Canonical()
+	if err != nil {
+		return err
+	}
+	var record runfork.ForkOperationRecord
+	var found bool
+	if canonical.IdempotencyKey != "" {
+		record, found, err = lookupForkOperationTx(ctx, tx, canonical.Actor, canonical.IdempotencyKey, canonical.TransportHash, postgres, true)
+		if err != nil {
+			return err
+		}
+		if found && (record.Request.SourceRunID != canonical.SourceRunID || record.Request.ForkEventID != canonical.ForkEventID || record.Request.AtStart != canonical.AtStart) {
+			return fmt.Errorf("fork operation key disagrees with original source coordinates")
+		}
+		if found && record.Request.OperationID != canonical.OperationID {
+			return &selectedForkOperationReplay{operationID: record.Request.OperationID, forkRunID: record.ForkRunID}
+		}
+	}
+	if !found {
+		record, found, err = loadForkOperationByIDTx(ctx, tx, canonical.OperationID, postgres)
+		if err != nil || !found {
+			return err
+		}
+	}
+	if record.Request.Actor != canonical.Actor || record.Request.IdempotencyKey != canonical.IdempotencyKey ||
+		record.Request.TransportHash != canonical.TransportHash || record.SemanticHash != semanticHash ||
+		(canonical.ResolvedPoint != nil && (!sameSelectedForkPointIdentity(*record.Request.ResolvedPoint, *canonical.ResolvedPoint) ||
+			record.Request.ResolvedPoint.Input != canonical.ResolvedPoint.Input)) {
+		return fmt.Errorf("fork invocation disagrees with its durable operation")
+	}
+	return &selectedForkOperationReplay{operationID: record.Request.OperationID, forkRunID: record.ForkRunID}
+}
+
+func selectedForkOperationReplayAfterAbort(ctx context.Context, committed bool, err error, replay *selectedForkOperationReplay) error {
+	// The exact callback refusal settled before COMMIT. An unknown outcome or
+	// an independent cancellation/cleanup failure must not authorize continuation.
+	if !committed && replay != nil && ctx.Err() == nil && failures.OnlyBranches(err, func(branch error) bool { return branch == replay }) {
+		return &runfork.ForkOperationReplayRequiredError{OperationID: replay.operationID, ForkRunID: replay.forkRunID}
+	}
+	return err
+}
 
 func requireForkOperationMaterializationRequest(operation *runfork.ForkOperationRequest, sourceRunID string, point runfork.RunForkPoint, targetBundleHash string, selection runfork.RunForkContractSelection, overrides []durabledata.ExplicitPin) error {
 	if operation == nil {
@@ -53,6 +109,17 @@ func bindResolvedForkOperation(operation *runfork.ForkOperationRequest, point ru
 // this before source resolution, but materialization must recheck it under its
 // own transaction before writing child state.
 func lookupForkOperationTx(ctx context.Context, tx *sql.Tx, actor, key, transportHash string, postgres, lock bool) (runfork.ForkOperationRecord, bool, error) {
+	record, found, err := readForkOperationKeyTx(ctx, tx, actor, key, transportHash, postgres, lock)
+	if err != nil || !found {
+		return record, found, err
+	}
+	if err := requireForkLiveParentsTx(ctx, tx, record.Request.OperationID, false); err != nil {
+		return runfork.ForkOperationRecord{}, false, err
+	}
+	return record, true, nil
+}
+
+func readForkOperationKeyTx(ctx context.Context, tx *sql.Tx, actor, key, transportHash string, postgres, lock bool) (runfork.ForkOperationRecord, bool, error) {
 	if tx == nil || strings.TrimSpace(actor) == "" || strings.TrimSpace(key) == "" || strings.TrimSpace(transportHash) == "" {
 		return runfork.ForkOperationRecord{}, false, fmt.Errorf("keyed fork operation lookup requires transaction, actor, key and request hash")
 	}
@@ -75,6 +142,23 @@ func lookupForkOperationTx(ctx context.Context, tx *sql.Tx, actor, key, transpor
 	return record, true, nil
 }
 
+func observeForkOperationTx(ctx context.Context, tx *sql.Tx, actor, key, hash string, postgres bool) (runfork.ForkOperationRecord, bool, error) {
+	record, found, err := readForkOperationKeyTx(ctx, tx, actor, key, hash, postgres, false)
+	if err != nil || !found {
+		return record, found, err
+	}
+	detached, err := readDetachedSelectedHistoryTx(ctx, tx, record.ForkRunID)
+	if err != nil {
+		return runfork.ForkOperationRecord{}, false, err
+	}
+	if !detached {
+		if err := requireForkLiveParentsTx(ctx, tx, record.Request.OperationID, false); err != nil {
+			return runfork.ForkOperationRecord{}, false, err
+		}
+	}
+	return record, true, nil
+}
+
 func loadForkOperationByIDTx(ctx context.Context, tx *sql.Tx, operationID string, lock bool) (runfork.ForkOperationRecord, bool, error) {
 	if tx == nil || strings.TrimSpace(operationID) == "" {
 		return runfork.ForkOperationRecord{}, false, fmt.Errorf("fork operation lookup requires transaction and operation ID")
@@ -86,7 +170,14 @@ func loadForkOperationByIDTx(ctx context.Context, tx *sql.Tx, operationID string
 	if lock {
 		query += ` FOR SHARE`
 	}
-	return decodeForkOperationRow(tx.QueryRowContext(ctx, query, operationID))
+	record, found, err := decodeForkOperationRow(tx.QueryRowContext(ctx, query, operationID))
+	if err != nil || !found {
+		return record, found, err
+	}
+	if err := requireForkLiveParentsTx(ctx, tx, operationID, false); err != nil {
+		return runfork.ForkOperationRecord{}, false, err
+	}
+	return record, true, nil
 }
 
 func decodeForkOperationRow(row *sql.Row) (runfork.ForkOperationRecord, bool, error) {
@@ -153,7 +244,7 @@ func (s *RunForkPostgresOwner) LoadForkOperation(ctx context.Context, actor, key
 		return runfork.ForkOperationRecord{}, false, err
 	}
 	defer tx.Rollback()
-	return lookupForkOperationTx(ctx, tx, actor, key, transportHash, true, false)
+	return observeForkOperationTx(ctx, tx, actor, key, transportHash, true)
 }
 
 func (s *RunForkSQLiteOwner) LoadForkOperation(ctx context.Context, actor, key, transportHash string) (runfork.ForkOperationRecord, bool, error) {
@@ -167,7 +258,7 @@ func (s *RunForkSQLiteOwner) LoadForkOperation(ctx context.Context, actor, key, 
 	var found bool
 	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		record, found, err = lookupForkOperationTx(txctx, tx, actor, key, transportHash, false, false)
+		record, found, err = observeForkOperationTx(txctx, tx, actor, key, transportHash, false)
 		return err
 	})
 	return record, found, err
@@ -255,6 +346,9 @@ func bindForkOperationTx(ctx context.Context, tx *sql.Tx, request runfork.ForkOp
 		return runfork.ForkOperationRecord{}, false, err
 	}
 	if inserted == 1 {
+		if err := insertForkOperationLiveParentsTx(ctx, tx, canonical.OperationID); err != nil {
+			return runfork.ForkOperationRecord{}, false, err
+		}
 		return record, false, nil
 	}
 	if canonical.IdempotencyKey == "" {

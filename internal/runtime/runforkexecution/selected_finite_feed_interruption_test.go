@@ -22,9 +22,9 @@ func (s *selectedInterruptionExecutionStore) FailRunForkSelectedContractRuntimeE
 	return nil
 }
 
-func (s *selectedInterruptionExecutionStore) CloseRunForkSelectedContractRuntimeExecution(context.Context, string) error {
+func (s *selectedInterruptionExecutionStore) CloseRunForkSelectedContractRuntimeExecution(context.Context, string) (bool, error) {
 	s.closes++
-	return nil
+	return true, nil
 }
 
 func TestSelectedFiniteFeedProcessRetirementPreservesRecoverablePredecessor(t *testing.T) {
@@ -37,7 +37,8 @@ func TestSelectedFiniteFeedProcessRetirementPreservesRecoverablePredecessor(t *t
 	}{
 		{"deployment-retired", runfork.RunForkPointDeploymentRevision, worklifetime.ErrRetired, 0, 0},
 		{"deployment-failed", runfork.RunForkPointDeploymentRevision, errors.New("business failure"), 1, 1},
-		{"event-retired", runfork.RunForkPointEvent, worklifetime.ErrRetired, 1, 1},
+		{"event-retired", runfork.RunForkPointEvent, worklifetime.ErrRetired, 0, 0},
+		{"event-failed", runfork.RunForkPointEvent, errors.New("business failure"), 1, 1},
 	} {
 		t.Run(cell.name, func(t *testing.T) {
 			store := &selectedInterruptionExecutionStore{}
@@ -45,7 +46,10 @@ func TestSelectedFiniteFeedProcessRetirementPreservesRecoverablePredecessor(t *t
 				proof: SelectedContractForkLocalRuntimeContainer{ForkPoint: runfork.RunForkPoint{Kind: cell.kind}},
 				ports: &selectedContractExecutionPorts{runtimeExecution: store},
 			}
-			err := container.Fail(context.Background(), cell.cause)
+			acknowledged, err := container.Fail(context.Background(), cell.cause)
+			if acknowledged != (cell.wantCloses == 1) {
+				t.Fatalf("failure close acknowledgment=%t, want closes=%d", acknowledged, cell.wantCloses)
+			}
 			if cell.wantFailures == 0 {
 				if !errors.Is(err, worklifetime.ErrRetired) {
 					t.Fatalf("retirement was not retained for recovery: %v", err)

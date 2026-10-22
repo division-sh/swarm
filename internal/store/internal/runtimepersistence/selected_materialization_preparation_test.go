@@ -86,8 +86,14 @@ func selectedStorePreparationOwnerForTest(t testing.TB, selected any) runforkexe
 	return selectedStorePreparationOwnerWithForkForTest(t, selected, selected.(runforkexecution.SelectedContractForkLifecycle))
 }
 
-func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fork runforkexecution.SelectedContractForkLifecycle) runforkexecution.SelectedContractExecutionOwner {
+func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fork runforkexecution.SelectedContractForkLifecycle, observed ...runforkexecution.SelectedContractRuntimeExecutionLifecycle) runforkexecution.SelectedContractExecutionOwner {
 	t.Helper()
+	execution := selected.(runforkexecution.SelectedContractRuntimeExecutionLifecycle)
+	if len(observed) == 1 {
+		execution = observed[0]
+	} else if len(observed) != 0 {
+		t.Fatal("selected execution fixture requires one original lifecycle observer")
+	}
 	switch selected := selected.(type) {
 	case *PostgresStore:
 		workflow := runtimepipeline.NewWorkflowPersistence(selected)
@@ -105,9 +111,10 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 			StandingRestarts: selected,
 		}
 		owner, err := runforkexecution.NewSelectedContractExecutionOwner(
-			workflow, fork, selected, selected,
+			workflow, fork, execution, selected,
 			selected, durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 		if err != nil {
 			t.Fatal(err)
@@ -129,9 +136,10 @@ func selectedStorePreparationOwnerWithForkForTest(t testing.TB, selected any, fo
 			StandingRestarts: selected,
 		}
 		owner, err := runforkexecution.NewSelectedContractExecutionOwner(
-			workflow, fork, selected, selected,
+			workflow, fork, execution, selected,
 			selected, durable, selected.PipelineObligations(), selected, roles,
 			selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 		if err != nil {
 			t.Fatal(err)

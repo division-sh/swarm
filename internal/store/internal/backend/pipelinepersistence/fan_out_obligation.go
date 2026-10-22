@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -37,6 +38,9 @@ func commitFanOutIntentTx(
 	}
 	if request.Key.RunID != strings.TrimSpace(stateRunID) {
 		return fmt.Errorf("fan-out intent run disagrees with engine mutation")
+	}
+	if request.Capsule.Context.ReplyContextID() != events.DeliveryContextFromContext(ctx).ReplyContextID() {
+		return fmt.Errorf("fan-out continuation differs from the admitted handler input")
 	}
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		return insertFanOutIntentSQL(ctx, tx, postgres, resourceData, attempt, request, stateFields, triggerEventID, createdAt)

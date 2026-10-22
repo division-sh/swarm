@@ -13,7 +13,7 @@ import (
 
 func TestActivityDuplicateStartKeepsOriginalExecutionReference(t *testing.T) {
 	for _, dialect := range []Dialect{DialectSQLite, DialectPostgres} {
-		for _, cell := range []string{"exact", "grant", "version", "missing"} {
+		for _, cell := range []string{"exact", "grant", "version", "missing", "unpaired", "unpaired_other_grant"} {
 			t.Run(dialectName(dialect)+"/"+cell, func(t *testing.T) {
 				db, mock, err := sqlmock.New()
 				if err != nil {
@@ -28,7 +28,7 @@ func TestActivityDuplicateStartKeepsOriginalExecutionReference(t *testing.T) {
 				original := executionIdentityRecord(t)
 				candidate := original
 				switch cell {
-				case "grant":
+				case "grant", "unpaired_other_grant":
 					candidate.ExecutionBinding.GrantID = uuid.NewString()
 				case "version":
 					candidate.ExecutionBinding.StateVersion++
@@ -37,12 +37,16 @@ func TestActivityDuplicateStartKeepsOriginalExecutionReference(t *testing.T) {
 				}
 				mock.ExpectExec("INSERT INTO activity_attempts .* ON CONFLICT ").WillReturnResult(sqlmock.NewResult(0, 0))
 				mock.ExpectQuery("SELECT .* FROM activity_attempts WHERE request_event_id").WithArgs(original.RequestEventID).
-					WillReturnRows(executionIdentityRows(t, original))
+					WillReturnRows(executionIdentityRows(t, original, cell != "unpaired" && cell != "unpaired_other_grant"))
 				story := &routeSettlementDraftRecorder{}
 				got, inserted, err := Start(context.Background(), tx, dialect, func(context.Context, string) error { return nil }, story, candidate)
 				if cell == "exact" {
 					if err != nil || inserted || got.ExecutionBinding != original.ExecutionBinding {
 						t.Fatalf("exact duplicate changed reference: %+v inserted=%t err=%v", got, inserted, err)
+					}
+				} else if cell == "unpaired" || cell == "unpaired_other_grant" {
+					if err == nil || inserted || got.RequestEventID != "" {
+						t.Fatalf("duplicate repaired missing live parents or returned usable evidence: %+v inserted=%t err=%v", got, inserted, err)
 					}
 				} else {
 					failure, ok := runtimefailures.EnvelopeFromError(err)

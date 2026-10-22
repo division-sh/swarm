@@ -20,9 +20,18 @@ import (
 
 // The historical owner selects provenance from durable lineage and a fixed cut,
 // before the native reader checks any constructor or readiness companions.
+type HistoricalFlowInstanceConstructionResult struct {
+	Construction pipeline.HistoricalFlowInstanceConstruction
+	Found        bool
+}
+
 type HistoricalFlowInstanceReader interface {
+	WithHistoricalFlowInstancePlanningTx(context.Context, *sql.Tx, semanticview.Source, runlifecycle.Snapshot, func(context.Context) error) error
 	ReadHistoricalFlowInstanceConstructionTx(context.Context, *sql.Tx, semanticview.Source, runlifecycle.Snapshot, pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error)
+	ReadHistoricalFlowInstanceConstructionBatchTx(context.Context, *sql.Tx, semanticview.Source, runlifecycle.Snapshot, []pipeline.WorkflowInstance) ([]HistoricalFlowInstanceConstructionResult, error)
 	ReadHistoricalFlowInstanceConstructionEvidenceTx(context.Context, *sql.Tx, runlifecycle.Snapshot, pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error)
+	ReadHistoricalFlowInstanceConstructionEvidenceBatchTx(context.Context, *sql.Tx, runlifecycle.Snapshot, []pipeline.WorkflowInstance) ([]HistoricalFlowInstanceConstructionResult, error)
+	ReadProjectedReceiverConstructionReceiptTx(context.Context, *sql.Tx, runlifecycle.Snapshot, pipeline.WorkflowInstance) (pipeline.FlowConstructionReceipt, bool, error)
 }
 
 func (s *PipelinePostgresOwner) BindHistoricalFlowInstanceReader(owner HistoricalFlowInstanceReader) error {
@@ -59,8 +68,10 @@ func (s *PipelinePostgresOwner) LookupFlowInstance(ctx context.Context, request 
 			return err
 		}
 		snapshot := flowInstanceIndexSnapshot{tx: tx, postgres: true, source: request.Source(), run: run, historical: s.historicalInstances, observed: make(map[string]pipeline.FlowInstanceObservation)}
-		observation, found, err = snapshot.lookup(ctx, request)
-		return err
+		return snapshot.withHistoricalReconstruction(ctx, func(ctx context.Context) error {
+			observation, found, err = snapshot.lookup(ctx, request)
+			return err
+		})
 	})
 	if err != nil {
 		return pipeline.FlowInstanceObservation{}, false, err
@@ -86,8 +97,10 @@ func (s *PipelineSQLiteOwner) LookupFlowInstance(ctx context.Context, request pi
 			return err
 		}
 		snapshot := flowInstanceIndexSnapshot{tx: tx, source: request.Source(), run: run, historical: s.historicalInstances, observed: make(map[string]pipeline.FlowInstanceObservation)}
-		observation, found, err = snapshot.lookup(ctx, request)
-		return err
+		return snapshot.withHistoricalReconstruction(ctx, func(ctx context.Context) error {
+			observation, found, err = snapshot.lookup(ctx, request)
+			return err
+		})
 	})
 	if err != nil {
 		return pipeline.FlowInstanceObservation{}, false, err
@@ -112,8 +125,10 @@ func (s *PipelinePostgresOwner) ListFlowInstances(ctx context.Context, scope pip
 			return err
 		}
 		snapshot := flowInstanceIndexSnapshot{tx: tx, postgres: true, source: scope.Source(), run: run, historical: s.historicalInstances, observed: make(map[string]pipeline.FlowInstanceObservation)}
-		observations, err = snapshot.list(ctx, scope)
-		return err
+		return snapshot.withHistoricalReconstruction(ctx, func(ctx context.Context) error {
+			observations, err = snapshot.list(ctx, scope)
+			return err
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -138,8 +153,10 @@ func (s *PipelineSQLiteOwner) ListFlowInstances(ctx context.Context, scope pipel
 			return err
 		}
 		snapshot := flowInstanceIndexSnapshot{tx: tx, source: scope.Source(), run: run, historical: s.historicalInstances, observed: make(map[string]pipeline.FlowInstanceObservation)}
-		observations, err = snapshot.list(ctx, scope)
-		return err
+		return snapshot.withHistoricalReconstruction(ctx, func(ctx context.Context) error {
+			observations, err = snapshot.list(ctx, scope)
+			return err
+		})
 	})
 	if err != nil {
 		return nil, err
@@ -191,17 +208,23 @@ func (s *flowInstanceIndexSnapshot) withPlanningReader(ctx context.Context, scop
 	if err := validateFlowInstanceIndexSnapshot(scope.Source(), scope.SourceFact().BundleHash(), s.run, s.historical); err != nil {
 		return err
 	}
-	reader := &flowInstanceIndexPlanningReader{snapshot: s, scope: scope}
-	defer func() {
-		reader.mu.Lock()
-		defer reader.mu.Unlock()
-		reader.snapshot = nil
-	}()
-	bounded, err := pipeline.WithFlowInstancePlanningInitialTimerReader(ctx, reader)
-	if err != nil {
-		return err
-	}
-	return prepare(bounded, reader)
+	return s.withHistoricalReconstruction(ctx, func(ctx context.Context) error {
+		reader := &flowInstanceIndexPlanningReader{snapshot: s, scope: scope}
+		defer func() {
+			reader.mu.Lock()
+			defer reader.mu.Unlock()
+			reader.snapshot = nil
+		}()
+		bounded, err := pipeline.WithFlowInstancePlanningInitialTimerReader(ctx, reader)
+		if err != nil {
+			return err
+		}
+		return prepare(bounded, reader)
+	})
+}
+
+func (s *flowInstanceIndexSnapshot) withHistoricalReconstruction(ctx context.Context, read func(context.Context) error) error {
+	return s.historical.WithHistoricalFlowInstancePlanningTx(ctx, s.tx, s.source, s.run, read)
 }
 
 func (r *flowInstanceIndexPlanningReader) ListFlowInstancePlanningInitialTimers(ctx context.Context, owner flowidentity.RunScopedFlowInstance, entityID string) ([]pipeline.WorkflowTimerActivation, error) {
@@ -422,6 +445,13 @@ func (s *flowInstanceIndexSnapshot) observe(ctx context.Context, request pipelin
 	if err != nil {
 		return pipeline.FlowInstanceObservation{}, err
 	}
+	return s.observeConstruction(ctx, request, header, HistoricalFlowInstanceConstructionResult{Construction: historical, Found: projected})
+}
+
+func (s *flowInstanceIndexSnapshot) observeConstruction(ctx context.Context, request pipeline.FlowInstanceLookupRequest, header pipeline.WorkflowInstance, history HistoricalFlowInstanceConstructionResult) (pipeline.FlowInstanceObservation, error) {
+	if err := ctx.Err(); err != nil {
+		return pipeline.FlowInstanceObservation{}, err
+	}
 	if err := s.preloadCompanions(ctx, []pipeline.WorkflowInstance{header}); err != nil {
 		return pipeline.FlowInstanceObservation{}, err
 	}
@@ -432,12 +462,17 @@ func (s *flowInstanceIndexSnapshot) observe(ctx context.Context, request pipelin
 		return pipeline.FlowInstanceObservation{}, err
 	}
 	var observation pipeline.FlowInstanceObservation
-	if projected {
+	if history.Found {
+		if companions.constructionPresent {
+			if err := requireProjectedReceiverReceiptTx(ctx, s.tx, s.run, header, s.historical); err != nil {
+				return pipeline.FlowInstanceObservation{}, err
+			}
+		}
 		var desired *pipeline.DynamicFlowRuntimeReadiness
 		if readyFound {
 			desired = &readiness
 		}
-		observation, err = pipeline.AdmitHistoricalFlowInstanceObservation(request, header, s.run, s.revision, historical, desired)
+		observation, err = pipeline.AdmitHistoricalFlowInstanceObservation(request, header, s.run, s.revision, history.Construction, desired)
 	} else {
 		if !readyFound {
 			return pipeline.FlowInstanceObservation{}, &pipeline.FlowInstanceConstructionCorruption{RunID: request.RunID(), FlowID: request.FlowID(), InstancePath: header.StorageRef, Cause: fmt.Errorf("native instance lacks desired attachment evidence")}
@@ -571,14 +606,27 @@ func (s *flowInstanceIndexSnapshot) observeDeclaration(ctx context.Context, scop
 	if err := s.preloadCompanions(ctx, headers); err != nil {
 		return nil, err
 	}
+	var history []HistoricalFlowInstanceConstructionResult
+	if len(headers) != 0 {
+		if err := s.requireRecordedRevision(ctx); err != nil {
+			return nil, err
+		}
+		history, err = s.historical.ReadHistoricalFlowInstanceConstructionBatchTx(ctx, s.tx, s.source, s.run, headers)
+		if err != nil {
+			return nil, err
+		}
+		if len(history) != len(headers) {
+			return nil, fmt.Errorf("historical declaration batch changed its header cardinality")
+		}
+	}
 	observations := make([]pipeline.FlowInstanceObservation, 0, len(headers))
-	for _, header := range headers {
+	for index, header := range headers {
 		owner := flowidentity.RunScopedFlowInstance{RunID: s.run.RunID, Route: flowidentity.StoredRoute(flowidentity.ScopeKey(s.source, flowID), header.InstanceID, header.StorageRef)}
 		request, err := pipeline.NewExactFlowInstanceLookup(s.source, scope.SourceFact(), owner)
 		if err != nil {
 			return nil, err
 		}
-		observation, err := s.observe(ctx, request, header)
+		observation, err := s.observeConstruction(ctx, request, header, history[index])
 		if err != nil {
 			return nil, err
 		}

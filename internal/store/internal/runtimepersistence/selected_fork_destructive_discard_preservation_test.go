@@ -124,8 +124,8 @@ func TestSelectedForkRetainedDiscardPendingDeliveryTombstonesBothStores(t *testi
 			if err := store.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
 				t.Fatalf("quiesce retained execution: %v", err)
 			}
-			if err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
-				t.Fatalf("close retained execution: %v", err)
+			if acknowledged, err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); !acknowledged || err != nil {
+				t.Fatalf("close retained execution: acknowledged=%t error=%v", acknowledged, err)
 			}
 
 			eventID, deliveryID := seedSelectedForkDiscardPendingDelivery(t, ctx, store, db, fixture.forkRun)

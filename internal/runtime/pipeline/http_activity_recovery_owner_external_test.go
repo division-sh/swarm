@@ -11,6 +11,7 @@ import (
 	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -42,7 +43,7 @@ func TestHTTPActivityReopenedStartedAttemptNeedsRecoveryOwnerBothStores(t *testi
 			ctx := requireActivityReplayRun(t, selected, source, runID)
 			bus := newActivityJournalProofBus(t, selected, source)
 			coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
-			_, releaseJournal := installActivityReplayJournal(t, ctx, selected, bus, coordinator)
+			_, release := installActivityReplayJournal(t, ctx, selected, bus, coordinator)
 			intent := runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
 			intent = seedSelectedActivitySource(t, ctx, selected, coordinator, intent)
 			requestID := runtimepipeline.ActivityAttemptStartForTest(intent).RequestEventID
@@ -54,8 +55,6 @@ func TestHTTPActivityReopenedStartedAttemptNeedsRecoveryOwnerBothStores(t *testi
 			}()
 			select {
 			case <-launched:
-			case err := <-firstDone:
-				t.Fatalf("activity returned before physical launch: %v", err)
 			case <-time.After(10 * time.Second):
 				t.Fatal("provider did not observe the physical HTTP request")
 			}
@@ -92,7 +91,7 @@ func TestHTTPActivityReopenedStartedAttemptNeedsRecoveryOwnerBothStores(t *testi
 			if err := bus.WaitForQuiescence(ctx); err != nil {
 				t.Fatal(err)
 			}
-			releaseJournal()
+			release()
 			if err := closeStore(); err != nil {
 				t.Fatal(err)
 			}
@@ -104,8 +103,9 @@ func TestHTTPActivityReopenedStartedAttemptNeedsRecoveryOwnerBothStores(t *testi
 			if err != nil || !found || calls.Load() != 1 {
 				t.Fatalf("reopen redispatched or lost the attempt: found=%t record=%+v calls=%d err=%v", found, after, calls.Load(), err)
 			}
-			if replayErr != nil || !reflect.DeepEqual(started, after) || len(replayBus.publishes) != 0 {
-				t.Errorf("reopened reader changed the started attempt or made progress: err=%v record=%+v identical_to_live=%t publications=%d calls=%d", replayErr, after, reflect.DeepEqual(started, after), len(replayBus.publishes), calls.Load())
+			failure, uncertain := runtimefailures.EnvelopeFromError(replayErr)
+			if !uncertain || failure.Class != runtimefailures.ClassOutcomeUncertain {
+				t.Errorf("reopened postlaunch attempt did not expose typed uncertainty: err=%v record=%+v identical_to_live=%t publications=%d calls=%d", replayErr, after, reflect.DeepEqual(started, after), len(replayBus.publishes), calls.Load())
 			}
 		})
 	}

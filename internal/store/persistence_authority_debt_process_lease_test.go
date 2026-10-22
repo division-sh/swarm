@@ -175,7 +175,7 @@ func debtClassifyProcessLeaseCustody(root string, findings []authorityFinding) {
 	}
 }
 
-const debtProcessLeaseCustodyPin = "dc82aa61bf0ef83de303a15f9acc081376960d69871195021aca3bdb4160e583"
+const debtProcessLeaseCustodyPin = "348312ab816d3c49e214f0ccd946233463219c102c18262ea171ba641b530a42"
 
 var debtProcessLeaseSourcePins = [7][2]string{
 	{"7e75914657c1f1b2f76fccc721dec583214956a8a26921f419a076bd56df19c7", "e9bc335965128cb3d6d4d9f73e9f733150894148b5f694b594b53efab6a90d8e"},

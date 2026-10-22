@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 )
 
 func TestEventHistoryExcludesOnlyRuntimeLog(t *testing.T) {
@@ -21,7 +22,7 @@ func TestEventHistoryExcludesOnlyRuntimeLog(t *testing.T) {
 		t.Fatal("runtime log selected as fork evidence")
 	}
 	spec, ok := canonicalProjectionSpec(FamilyEvents)
-	if !ok || spec.source != "events e" || !strings.Contains(spec.query, "e.event_name <> '"+excludedEventName+"'") {
+	if !ok || spec.source != "events e "+eventrecord.SelectedForkLineageSQL || !strings.Contains(spec.query, "e.event_name <> '"+excludedEventName+"'") {
 		t.Fatal("broad and exact event projections do not consume the canonical exclusion")
 	}
 	for _, family := range []Family{FamilyCommittedReplayScopes, FamilyEventReceipts} {

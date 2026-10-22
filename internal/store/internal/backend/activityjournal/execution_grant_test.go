@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -65,6 +65,42 @@ func TestActivityInstalledGrantCaptureIsImmutable(t *testing.T) {
 			if role, err := captureActivityExecutionGrant(invalid); err == nil || role != nil {
 				t.Fatalf("nonadmitted role %s was captured", state)
 			}
+		}
+		if selected {
+			proveSelectedGrantHistoryAllowsEarlyRetirement(t)
+		}
+	}
+}
+
+func proveSelectedGrantHistoryAllowsEarlyRetirement(t *testing.T) {
+	t.Helper()
+	for _, settled := range []bool{false, true} {
+		first := activityInstalledGrantForTest(true)
+		first.State, first.StateVersion, first.ProbeSurfaceIDs = runtimeownership.GrantPrepared, 1, nil
+		facts := []SelectedGrantFact{{Evidence: first}}
+		last := first
+		if settled {
+			last.State, last.StateVersion = runtimeownership.GrantProbeSettled, 2
+			last.ProbeSurfaceIDs = []string{"original-probe"}
+			if err := validateSelectedGrantHistoryPrefix(facts, last); err != nil {
+				t.Fatal(err)
+			}
+			facts = append(facts, SelectedGrantFact{Evidence: last})
+		}
+		before, err := canonicaljson.Bytes(facts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last.State, last.StateVersion = runtimeownership.GrantRetired, last.StateVersion+1
+		if err := validateSelectedGrantHistoryPrefix(facts, last); err != nil {
+			t.Fatalf("original early retirement refused: settled=%t err=%v", settled, err)
+		}
+		after, err := canonicaljson.Bytes(facts)
+		if err != nil || string(before) != string(after) {
+			t.Fatal("history validation modified the retained predecessor")
+		}
+		if captured, err := captureActivityExecutionGrant(last); err == nil || captured != nil {
+			t.Fatal("retired history became an installed activity role")
 		}
 	}
 }
@@ -283,10 +319,8 @@ func TestActivityGrantBinderKeepsOriginalRoleAndCannotRebind(t *testing.T) {
 				foreign := prepared
 				foreign.ExecutionBinding.GrantID = uuid.NewString()
 				for _, starting := range []bool{false, true} {
-					got, err := grant.prepareRecord(context.Background(), foreign, starting)
-					failure, ok := runtimefailures.EnvelopeFromError(err)
-					if err == nil || !ok || failure.Class != runtimefailures.ClassConflictingDuplicate || failure.Detail.Code != "activity_execution_identity_conflict" || got.RequestEventID != "" {
-						t.Fatalf("grant binding lost its exact identity refusal: record=%+v err=%v", got, err)
+					if _, err := grant.prepareRecord(context.Background(), foreign, starting); err == nil {
+						t.Fatal("grant binding replaced a foreign original reference")
 					}
 				}
 				if got, err := grant.prepareRecord(context.Background(), prepared, false); err != nil || got.ExecutionBinding != prepared.ExecutionBinding {

@@ -100,6 +100,9 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 			if err != nil {
 				t.Fatalf("retained selected fork execution: %v", err)
 			}
+			if _, err := observeSelectedRetainedExecution(t, ctx, owner, selected, result.Materialization.ForkRunID); err != nil {
+				t.Fatalf("retained selected fork settlement: %v", err)
+			}
 			var outputs int
 			if err := db.QueryRowContext(ctx, `SELECT count(*) FROM events WHERE run_id=$1 AND event_name='item.processed'`, result.Materialization.ForkRunID).Scan(&outputs); err != nil || outputs != 1 {
 				t.Fatalf("selected executor settlement=%d: %v", outputs, err)

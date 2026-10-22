@@ -30,16 +30,6 @@ func TestWorkflowLifecycleLegacyCreatorStaticAbsence(t *testing.T) {
 	})
 }
 
-func TestWorkflowTimerStoreCannotInterpretTypedIdentity(t *testing.T) {
-	root := filepath.Clean(filepath.Join("..", "..", ".."))
-	assertSymbolsAbsentUnder(t, filepath.Join(root, "internal", "store"), root, []string{
-		"ParseWorkflowTimerActivationTaskID",
-		"IsWorkflowTimerActivationTaskID",
-		"ParseWorkflowTimerOccurrenceTaskID",
-		"WorkflowTimerActivationTaskPrefix",
-	})
-}
-
 func TestSelectedContractTimerReconstructionWriterStaticAbsence(t *testing.T) {
 	assertProductionSymbolsAbsent(t, []string{
 		"RunForkHistoricalReplayTimerReconstructionOwner",

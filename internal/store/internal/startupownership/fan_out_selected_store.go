@@ -21,7 +21,7 @@ func selectedFanOutAdmission(ctx context.Context, tx *sql.Tx, sqlite bool, grant
 		return nil, err
 	}
 	if grant.State != runtimeownership.GrantAdmitted || grant.SelectedFork == nil {
-		return nil, errors.New("selected deployment serving requires an admitted selected-fork grant")
+		return nil, errors.New("selected fan-out serving requires an admitted selected-fork grant")
 	}
 	backend := "postgres_retained_session"
 	if sqlite {
@@ -33,14 +33,14 @@ func selectedFanOutAdmission(ctx context.Context, tx *sql.Tx, sqlite bool, grant
 	}
 	if !exists ||
 		grant.ProcessAuthorityID != authority.AuthorityID || grant.ProcessOwnerID != authority.OwnerID || grant.ProcessBootID != authority.BootID {
-		return nil, errors.New("selected deployment grant differs from current process authority")
+		return nil, errors.New("selected fan-out grant differs from current process authority")
 	}
 	return &fanOutAdmission{session: selectedFanOutAuthoritySource{authority: authority}, sqlite: sqlite}, nil
 }
 
-func (s *StartupPostgresOwner) BindSelectedDeploymentFanOutGrant(grant runtimeownership.GrantEvidence) (owner pipeline.FanOutObligationOwner, err error) {
+func (s *StartupPostgresOwner) BindSelectedFanOutGrant(grant runtimeownership.GrantEvidence) (owner pipeline.FanOutObligationOwner, err error) {
 	if s == nil || s.fanOutPipeline == nil {
-		return nil, errors.New("selected deployment serving requires assembled PostgreSQL startup owner")
+		return nil, errors.New("selected fan-out serving requires assembled PostgreSQL startup owner")
 	}
 	err = s.backend.RunTransaction(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
 		admission, err := selectedFanOutAdmission(ctx, tx, false, grant)
@@ -54,17 +54,17 @@ func (s *StartupPostgresOwner) BindSelectedDeploymentFanOutGrant(grant runtimeow
 		if !owned {
 			return fanoutobligation.ErrStaleClaim
 		}
-		owner, err = s.fanOutPipeline.BindSelectedDeploymentFanOutGrant(admission, grant)
+		owner, err = s.fanOutPipeline.BindSelectedFanOutGrant(admission, grant)
 		return err
 	})
 	return owner, err
 }
 
-func (s *StartupSQLiteOwner) BindSelectedDeploymentFanOutGrant(grant runtimeownership.GrantEvidence) (owner pipeline.FanOutObligationOwner, err error) {
+func (s *StartupSQLiteOwner) BindSelectedFanOutGrant(grant runtimeownership.GrantEvidence) (owner pipeline.FanOutObligationOwner, err error) {
 	if s == nil || s.fanOutPipeline == nil {
-		return nil, errors.New("selected deployment serving requires assembled SQLite startup owner")
+		return nil, errors.New("selected fan-out serving requires assembled SQLite startup owner")
 	}
-	err = s.backend.RunTransaction(context.Background(), "bind selected deployment fan-out grant", func(ctx context.Context, tx *sql.Tx) error {
+	err = s.backend.RunTransaction(context.Background(), "bind selected fan-out grant", func(ctx context.Context, tx *sql.Tx) error {
 		admission, err := selectedFanOutAdmission(ctx, tx, true, grant)
 		if err != nil {
 			return err
@@ -76,7 +76,7 @@ func (s *StartupSQLiteOwner) BindSelectedDeploymentFanOutGrant(grant runtimeowne
 		if !owned {
 			return fanoutobligation.ErrStaleClaim
 		}
-		owner, err = s.fanOutPipeline.BindSelectedDeploymentFanOutGrant(admission, grant)
+		owner, err = s.fanOutPipeline.BindSelectedFanOutGrant(admission, grant)
 		return err
 	})
 	return owner, err

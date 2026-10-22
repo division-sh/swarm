@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -24,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -38,7 +40,7 @@ type selectedCompletionAuthorityStore interface {
 	ClaimRunForkSelectedContractRuntimeExecution(context.Context, runfork.SelectedContractRuntimeExecution, string, time.Duration) (runtimeeffects.Authority, error)
 	HeartbeatRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, time.Duration) error
 	QuiesceRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority) error
-	CloseRunForkSelectedContractRuntimeExecution(context.Context, string) error
+	CloseRunForkSelectedContractRuntimeExecution(context.Context, string) (bool, error)
 	FailRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, json.RawMessage) error
 	MarkTerminalRun(context.Context, runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
 }
@@ -240,8 +242,8 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 	if _, err := beginManagedCompletionForTest(t, providerCtx, "anthropic_api", []byte("new request")); err == nil {
 		t.Fatal("quiesced selected authority admitted a new provider call")
 	}
-	if err := fixture.store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
-		t.Fatalf("close selected authority: %v", err)
+	if acknowledged, err := fixture.store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); !acknowledged || err != nil {
+		t.Fatalf("close selected authority: acknowledged=%t error=%v", acknowledged, err)
 	}
 	if err := fixture.store.HeartbeatRunForkSelectedContractRuntimeExecution(ctx, authority, time.Minute); err == nil {
 		t.Fatal("closed selected authority accepted heartbeat")
@@ -309,8 +311,8 @@ func TestSelectedForkRuntimeAuthorityFinalizationAfterRunTerminalSelectedStorePa
 			if err := store.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
 				t.Fatalf("quiesce terminal fork authority: %v", err)
 			}
-			if err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
-				t.Fatalf("close terminal fork authority: %v", err)
+			if acknowledged, err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); !acknowledged || err != nil {
+				t.Fatalf("close terminal fork authority: acknowledged=%t error=%v", acknowledged, err)
 			}
 
 			failFixture := newSelectedCompletionFixtureWithProcess(t, store, db, sqlite, quiesceFixture.process)
@@ -339,8 +341,8 @@ func TestSelectedForkRuntimeAuthorityFinalizationAfterRunTerminalSelectedStorePa
 			if err := store.FailRunForkSelectedContractRuntimeExecution(ctx, authority, failure); err != nil {
 				t.Fatalf("fail terminal fork authority: %v", err)
 			}
-			if err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
-				t.Fatalf("close failed terminal fork authority: %v", err)
+			if acknowledged, err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); !acknowledged || err != nil {
+				t.Fatalf("close failed terminal fork authority: acknowledged=%t error=%v", acknowledged, err)
 			}
 		})
 	}
@@ -424,6 +426,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 		}, want: runtimeeffects.StateOutcomeUncertain},
 	}
 	handles := make(map[string]*runtimeeffects.Handle, len(cases))
+	var retainedSurface managedcapabilities.Surface
 	for _, tc := range cases {
 		attemptAuthority := authority
 		attemptAuthority.Target = selectedProviderTarget(fixture)
@@ -431,6 +434,13 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 		attemptCtx = selectedProviderClaimContext(t, attemptCtx, fixture, attemptAuthority)
 		attemptCtx = managedSelectedExecutionStoreTestContext(t, attemptCtx, attemptAuthority)
 		attemptCtx = withManagedCompletionTestSurface(t, attemptCtx, attemptAuthority, "openai_responses")
+		if tc.name == "launched" {
+			var ok bool
+			retainedSurface, ok = managedcapabilities.FromContext(attemptCtx)
+			if !ok {
+				t.Fatal("selected completion has no captured capability surface")
+			}
+		}
 		handle, err := beginManagedCompletionForTest(t, attemptCtx, "openai_responses", []byte(tc.name))
 		if err != nil {
 			t.Fatalf("authorize %s: %v", tc.name, err)
@@ -618,6 +628,18 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	if err := fixture.db.QueryRowContext(ctx, `SELECT fence_generation FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, issued.ExecutionID).Scan(&repeatedFence); err != nil || repeatedFence != fence {
 		t.Fatalf("repeat recovery mutated fence: %d -> %d %v", fence, repeatedFence, err)
 	}
+	// Reach: real recovered terminal/uncertain provider facts remain admissible
+	// as immutable history, without restoring their provider or origin authority.
+	closed := issued
+	closed.State, closed.FenceGeneration = "closed", uint64(fence)
+	beforeHistory := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
+	if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(txctx context.Context, tx *sql.Tx) error {
+		return effectpersistence.RequireClosedSelectedEffectHistoryTx(txctx, tx, closed, fixture.request.Preparation.Coordinates.BundleHash, fixture.sqlite)
+	}); err != nil {
+		t.Fatalf("closed selected provider history rejected original terminal evidence: %v", err)
+	}
+	historicalContextRequireUnchanged(t, beforeHistory, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
+	proveCompletionMembershipCannotBecomeLiveEvidence(t, ctx, fixture, issued.ExecutionID, handles["launched"].Attempt().AttemptID, retainedSurface)
 }
 
 func TestSelectedForkRecoveryInspectionWithoutProcessAcquisitionBothStores(t *testing.T) {
@@ -649,7 +671,7 @@ func TestSelectedForkRecoveryInspectionWithoutProcessAcquisitionBothStores(t *te
 			}
 			before := snapshotForkHistoricalExecutionTables(t, fixture.db, !fixture.sqlite)
 			inspection, err := reader.InspectSelectedForkRecovery(ctx, entries[0])
-			if err != nil || inspection.Plan.ExecutionID != issued.ExecutionID || inspection.ExecutionState != "prepared" || inspection.Plan.Disposition != runfork.SelectedForkRecoveryFailed {
+			if err != nil || inspection.Plan.ExecutionID != issued.ExecutionID || inspection.ExecutionState != "prepared" || inspection.Plan.Disposition != runfork.SelectedForkRecoveryControlOnly {
 				t.Fatalf("released predecessor inspection: %+v %v", inspection, err)
 			}
 			cancelled, cancel := context.WithCancel(ctx)
@@ -933,8 +955,8 @@ func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres
 	if err := store.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
 		t.Fatalf("quiesce selected completion authority: %v", err)
 	}
-	if err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
-		t.Fatalf("close selected completion authority: %v", err)
+	if acknowledged, err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); !acknowledged || err != nil {
+		t.Fatalf("close selected completion authority: acknowledged=%t error=%v", acknowledged, err)
 	}
 	matrix := runForkRevisionMatrixFixture{
 		runID:        fixture.forkRun,
@@ -1464,10 +1486,6 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	forkRun := uuid.NewString()
 	eventID := uuid.NewString()
 	bindingID := uuid.NewString()
-	forkOrigin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRun, runtimerunlifecycle.ForkOriginPointEvent, 1, eventID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	registrar, ok := any(store).(testAuthorActivityCatalogRegistrar)
 	if !ok {
 		t.Fatal("selected completion fixture store has no author activity catalog")
@@ -1477,12 +1495,9 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 		artifact := sourceArtifacts[0]
 		ctx = testAuthorActivityContextForBundle(artifact.BundleHash())
 		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, StartedAt: now})
-		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: forkRun, Origin: forkOrigin, Artifact: artifact, State: runtimerunlifecycle.StatePaused, StartedAt: now})
 	} else {
 		requireRunningRunForTest(t, ctx, store, sourceRun, now)
-		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: forkRun, Origin: forkOrigin, State: runtimerunlifecycle.StatePaused, StartedAt: now})
 	}
-	seedTestAgentRow(t, ctx, db, !sqlite, mustTestAgentIdentityForRun(forkRun, "selected-agent", "selected-test"), "active")
 	eventStore, ok := any(store).(semanticEventFixtureStore)
 	if !ok {
 		t.Fatal("selected completion fixture store has no event commit owner")
@@ -1493,12 +1508,34 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	)); err != nil {
 		t.Fatalf("seed selected event: %v", err)
 	}
+	planner, ok := any(store).(c4StartPlanner)
+	if !ok {
+		t.Fatal("selected completion fixture store has no fixed-point planner")
+	}
+	plan, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: eventID})
+	if err != nil {
+		t.Fatalf("resolve selected source event: %v", err)
+	}
+	point := plan.ForkPoint
+	if point.Kind != runfork.RunForkPointEvent || point.EventID != eventID || point.Revision <= 0 {
+		t.Fatalf("selected source event resolved to a different fixed point: %+v", point)
+	}
+	forkOrigin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRun, runtimerunlifecycle.ForkOriginPointKind(point.Kind), point.Revision, point.EventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := semanticRunFixture{RunID: forkRun, Origin: forkOrigin, State: runtimerunlifecycle.StatePaused, StartedAt: now}
+	if len(sourceArtifacts) != 0 {
+		child.Artifact = sourceArtifacts[0]
+	}
+	requireRunFixtureForTest(t, ctx, store, child)
+	seedTestAgentRow(t, ctx, db, !sqlite, mustTestAgentIdentityForRun(forkRun, "selected-agent", "selected-test"), "active")
 	if sqlite {
-		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at) VALUES (?,?,?,'event',1,?,'selected_contracts',?)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at) VALUES (?,?,?,?,?,?,'selected_contracts',?)`, bindingID, forkRun, sourceRun, point.Kind, point.Revision, point.EventID, now); err != nil {
 			t.Fatalf("seed selected binding: %v", err)
 		}
 	} else {
-		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,'event',1,$4::uuid,'selected_contracts',$5)`, bindingID, forkRun, sourceRun, eventID, now); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO run_fork_selected_contract_bindings (binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::uuid,'selected_contracts',$7)`, bindingID, forkRun, sourceRun, point.Kind, point.Revision, point.EventID, now); err != nil {
 			t.Fatalf("seed selected binding: %v", err)
 		}
 	}
@@ -1506,7 +1543,7 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	admission := runfork.RunForkSelectedContractExecutionAdmission{
 		Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
 		NonMutating: true, ExecutionSupported: false, ForkRunID: forkRun, SourceRunID: sourceRun,
-		ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: eventID}, ForkEventID: eventID,
+		ForkPoint: point, ForkEventID: point.EventID,
 		ContractSelection: selection, ContractBindingOwner: runfork.RunForkSelectedContractBindingOwner,
 		AdmissionOwner: "runtime.run_fork.frontier", AdmissionUse: runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
 		ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",
@@ -1517,7 +1554,7 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 		process: process,
 		store:   store, db: db, sqlite: sqlite, sourceRun: sourceRun, forkRun: forkRun, eventID: eventID, admission: admission,
 		request: runfork.SelectedContractRuntimeExecutionIssueRequest{
-			Preparation:     selectedPreparationForTest(t, process, sourceRun, forkRun, eventID, declarations),
+			Preparation:     selectedPreparationForTest(t, process, sourceRun, forkRun, point, declarations),
 			DeclarationPlan: declarations,
 			Admission:       admission, ContainerPlanFingerprint: "sha256:container", ActorCensusFingerprint: "sha256:actors",
 			EffectiveConfigFingerprint: "sha256:config", ExecutionMode: runtimeeffects.ExecutionModeLive, Now: now,

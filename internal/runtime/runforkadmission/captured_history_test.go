@@ -35,6 +35,10 @@ func TestCapturedHistoricalConstructionHasOneSharedAdmission(t *testing.T) {
 		projected.MaterializationMetadata.HistoricalConstruction.SourceRunID != original.SourceRunID {
 		t.Fatal("history became native or lost its immediate cut")
 	}
+	evidence, err := fixedConstructionEvidence(plan, projected)
+	if err != nil || evidence.Original.Identity != receipt.Identity || evidence.Original.RunID != original.SourceRunID || len(evidence.Lineage) != 1 || evidence.Lineage[0].SourceRevision != 7 {
+		t.Fatalf("original native evidence was relabeled or lost: %+v %v", evidence, err)
+	}
 	if instances, err := ConstructedInstances(source, plan); err != nil || len(instances) != 1 || instances[0] != identity {
 		t.Fatalf("shared constructed census: %+v %v", instances, err)
 	}
@@ -102,6 +106,15 @@ func TestCapturedHistoricalConstructionHasOneSharedAdmission(t *testing.T) {
 	plan.SourceRunID, plan.Entities = currentRun, []runfork.RunForkEntityState{currentEntity}
 	if identity, _, found, err := FixedConstructionEvidenceForRoute(plan, currentIdentity.Route()); err != nil || !found || identity != currentIdentity {
 		t.Fatalf("deep lineage lost its exact constructor: found=%t err=%v", found, err)
+	}
+	evidence, err = fixedConstructionEvidence(plan, currentEntity)
+	if err != nil || evidence.Original.RunID != original.SourceRunID || evidence.Original.Identity != receipt.Identity || len(evidence.Lineage) != 64 || evidence.Lineage[0].SourceRunID != original.SourceRunID || evidence.Lineage[63].RunID != plan.SourceRunID {
+		t.Fatalf("deep lineage replaced original provenance: %+v %v", evidence, err)
+	}
+	evidence.Original.Persisted.Control.EntityType = "changed-detached-observation"
+	fresh, err := fixedConstructionEvidence(plan, currentEntity)
+	if err != nil || fresh.Original.Persisted.Control.EntityType != receipt.Persisted.Control.EntityType {
+		t.Fatalf("returned original evidence aliases captured storage: %+v %v", fresh, err)
 	}
 }
 

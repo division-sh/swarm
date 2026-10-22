@@ -14,9 +14,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// This is a downstream admission proof, not a public selected-fork creation
-// journey. Public begin_input refuses; the retained drafts are controlled
-// negatives for the otherwise unreachable partial and final input consumers.
+// These controlled bindings have no live selected executor. They retain exact
+// downstream refusals, separate from a genuinely admitted fork's controls.
 func TestChannelSelectedForkInputBoundaryMatrix(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, mode := range []string{"plain", "quoted", "chosen", "skip"} {

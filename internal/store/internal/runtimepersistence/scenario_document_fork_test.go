@@ -69,6 +69,7 @@ connector_responses: {tool: "${{'content': '${1 + 1}', 'items': [null, 7.0]}}"}
 			captureFanOutBarrierForkRevision(t, ctx, db, fixture.runID, postgres)
 			forkOwner := owner.(interface {
 				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+				RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 				LoadScenarioExecutionProfile(context.Context, string) (scenarioexecution.Profile, bool, error)
 			})
 			request := runfork.RunForkMaterializeRequest{SourceRunID: fixture.runID, At: pointID, EffectiveSourceIdentity: identity, OriginalLoopCarriage: originalCarriageForRun(t, owner, fixture.runID)}
@@ -96,7 +97,7 @@ connector_responses: {tool: "${{'content': '${1 + 1}', 'items': [null, 7.0]}}"}
 			if !bytes.Contains(inherited.CanonicalBytes(), []byte("${1 + 1}")) {
 				t.Fatal("materialized witness rescanned")
 			}
-			if _, err := forkOwner.MaterializeRunFork(ctx, request); err != nil {
+			if _, err := forkOwner.RequireMaterializedRunFork(ctx, fork.ForkRunID, request); err != nil {
 				t.Fatalf("replay: %v", err)
 			}
 		})

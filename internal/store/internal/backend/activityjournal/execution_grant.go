@@ -23,7 +23,6 @@ type activityExecutionGrant struct {
 }
 
 var _ runtimeownership.ActivityJournalGrantBinder = (*ActivityPostgresOwner)(nil)
-
 var _ runtimeownership.ActivityJournalGrantBinder = (*ActivitySQLiteOwner)(nil)
 
 func (s *ActivityPostgresOwner) BindActivityGrant(evidence runtimeownership.GrantEvidence) (runtimepipeline.ActivityAttemptJournal, error) {

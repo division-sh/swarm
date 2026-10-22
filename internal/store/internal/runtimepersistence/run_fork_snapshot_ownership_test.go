@@ -187,7 +187,7 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 					}
 					assertSnapshotOwnershipEntity(t, f, materialized.ForkRunID, entity, 1)
 					before := snapshotOwnershipCounts(t, f, materialized.ForkRunID)
-					replayed, err := f.store.MaterializeRunFork(f.ctx, req)
+					replayed, err := f.store.RequireMaterializedRunFork(f.ctx, materialized.ForkRunID, req)
 					if err != nil || replayed.ForkRunID != materialized.ForkRunID {
 						t.Fatalf("exact replay = %#v, %v", replayed, err)
 					}
@@ -302,7 +302,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			for _, phase := range []string{"initial", "exact_replay"} {
 				t.Run(phase, func(t *testing.T) {
-					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type", "empty_import_missing_birth", "empty_import_forged_kind", "empty_import_duplicate_birth", "empty_import_missing_creation_clock", "empty_import_missing_update_clock", "empty_import_omitted_creation_clock", "empty_import_omitted_update_clock", "empty_import_zero_creation_clock", "empty_import_zero_update_clock", "empty_import_reversed_clocks", "empty_import_lifecycle_history", "empty_import_gate_history", "empty_import_bookkeeping_history", "empty_import_accumulator_history"} {
+					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type", "native_receipt_missing", "native_receipt_version", "native_birth", "native_contract", "empty_import_missing_birth", "empty_import_forged_kind", "empty_import_duplicate_birth", "empty_import_missing_creation_clock", "empty_import_missing_update_clock", "empty_import_omitted_creation_clock", "empty_import_omitted_update_clock", "empty_import_zero_creation_clock", "empty_import_zero_update_clock", "empty_import_reversed_clocks", "empty_import_lifecycle_history", "empty_import_gate_history", "empty_import_bookkeeping_history", "empty_import_accumulator_history"} {
 						t.Run(invalid, func(t *testing.T) {
 							f := newSnapshotOwnershipFixture(t, backend, false, false)
 							emptyImport := strings.HasPrefix(invalid, "empty_import_")
@@ -473,6 +473,23 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								fact["entity_type"] = "foreign_type"
 							}
 							switch invalid {
+							case "native_receipt_missing":
+								fact["initial_materialization"] = nil
+							case "native_receipt_version":
+								fact["initial_projection_version"] = 0
+							case "native_birth":
+								fact["created_at"] = f.state.CreatedAt.Add(time.Second)
+							case "native_contract":
+								receipt, err := runtimepipeline.DecodeStoredFlowConstructionReceipt(f.initialMaterialization, f.runID, f.entityID, f.state.Identity.Route.InstancePath, f.state.WorkflowName)
+								if err != nil {
+									t.Fatal(err)
+								}
+								receipt.Persisted.Control.EntityType = "foreign_type"
+								altered, err := runtimepipeline.EncodeFlowConstructionReceipt(receipt)
+								if err != nil {
+									t.Fatal(err)
+								}
+								fact["initial_materialization"] = json.RawMessage(altered)
 							case "empty_import_forged_kind":
 								fact["construction_kind"] = "constructed"
 							case "empty_import_missing_creation_clock":
@@ -556,6 +573,17 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								}
 							}
 							got, planErr := f.store.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: f.runID, At: f.eventID})
+							if strings.HasPrefix(invalid, "native_") {
+								want := "native captured constructor contradicts fixed header birth or field contract"
+								if invalid == "native_receipt_missing" {
+									want = "captured construction lacks its native receipt or proven historical origin"
+								} else if invalid == "native_receipt_version" {
+									want = "native captured header requires its immutable constructor receipt version"
+								}
+								if planErr == nil || planErr.Error() != want {
+									t.Fatalf("native corruption reached the wrong owner: got=%v want=%q", planErr, want)
+								}
+							}
 							if planErr == nil && !runForkTestHasPlanBlocker(got, runfork.RunForkBlockerEntitySnapshotMetadataUnproven) {
 								t.Fatalf("invalid historical metadata admitted: %#v", got)
 							}
