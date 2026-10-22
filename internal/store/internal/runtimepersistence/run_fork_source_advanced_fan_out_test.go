@@ -31,6 +31,7 @@ func TestRunForkSelectedSourceAdvancedFanOutConsumersBothStores(t *testing.T) {
 		for _, position := range []string{"before_frontier", "after_frontier"} {
 			t.Run(backend.name+"/"+position, func(t *testing.T) {
 				f, construction := newBranchPointDeploymentFixture(t, liveBackend, []byte("{\"body\":\"source row\"}\n"))
+				activate := selectedStoreActivationGateForTest(t, f.ctx, f.store)
 				hash := construction.bundle.SourceArtifact.BundleHash()
 				owner, candidate := captureBranchPointFanOutOwner(t, f, construction)
 				advance := func() {
@@ -82,7 +83,9 @@ func TestRunForkSelectedSourceAdvancedFanOutConsumersBothStores(t *testing.T) {
 				if err != nil || before.Intents != 1 || before.Cursor != 1 || before.SemanticRejected != 1 || before.Owed != 0 {
 					t.Fatalf("lawful source outcome: %+v err=%v", before, err)
 				}
-				activation, err := f.store.(runforkexecution.SelectedContractForkLifecycle).ActivateRunForkForSelectedContractExecution(f.ctx, request)
+				activation, err := activate(request, staged.ForkPoint, func(ctx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+					return f.store.(runforkexecution.SelectedContractForkLifecycle).ActivateRunForkForSelectedContractExecution(ctx, prepared)
+				})
 				if err != nil || !activation.Activated {
 					t.Fatalf("supported activation: %+v err=%v", activation, err)
 				}

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 const fanOutRecoveryInterval = time.Second
@@ -32,15 +33,15 @@ type fanOutServingService struct {
 	opportunity  *fanOutOpportunity
 }
 
-func StartFanOutServing(ctx context.Context, grant LiveGenerationGrant, occurrence *worklifetime.RuntimeOccurrence, workers *int, executor FanOutExecutor) (*FanOutServingRegistration, error) {
+func StartFanOutServing(ctx context.Context, grant GenerationGrant, occurrence worklifetime.Occurrence, workers *int, executor FanOutExecutor) (*FanOutServingRegistration, error) {
 	if executor == nil {
 		return nil, errors.New("fan-out serving requires an exact runtime executor")
 	}
-	live, ok := grant.(*liveGenerationGrant)
-	if !ok || live == nil || live.owner == nil {
-		return nil, errors.New("fan-out serving requires a retained live generation")
+	g, err := fanOutGenerationGrant(grant)
+	if err != nil {
+		return nil, err
 	}
-	provider, ok := live.owner.session.(fanOutServingStoreProvider)
+	provider, ok := g.owner.session.(fanOutServingStoreProvider)
 	if !ok {
 		return nil, errors.New("selected process session does not supply the fan-out serving owner")
 	}
@@ -55,9 +56,23 @@ func StartFanOutServing(ctx context.Context, grant LiveGenerationGrant, occurren
 	if err != nil {
 		return nil, err
 	}
-	p := live.owner
+	p := g.owner
 	p.mu.Lock()
 	budget := p.fanOutCapacity
+	for budget.service != nil && budget.service.ctx.Err() != nil {
+		closing := budget.service
+		p.mu.Unlock()
+		select {
+		case <-closing.done:
+		case <-ctx.Done():
+			r.Close()
+			return nil, ctx.Err()
+		}
+		p.mu.Lock()
+		if budget.service == closing {
+			budget.service = nil
+		}
+	}
 	evidence, evidenceErr := r.grant.Evidence()
 	if evidenceErr != nil || p.fanOutClosing || r.ctx.Err() != nil || r.turnsClosing || budget.registrations[evidence.GrantID] != r {
 		p.mu.Unlock()
@@ -65,8 +80,8 @@ func StartFanOutServing(ctx context.Context, grant LiveGenerationGrant, occurren
 		return nil, errors.New("process fan-out serving is closing")
 	}
 	if budget.service == nil {
-		// This standing observer outlives individual source registrations, but
-		// not retained process possession or the process work owner.
+		// One observer serves all current registrations. The last closing
+		// registration joins it; a later registration starts the next epoch.
 		standing, beginErr := budget.workProcess.BeginStanding(context.Background())
 		if beginErr != nil {
 			p.mu.Unlock()
@@ -108,6 +123,14 @@ func (r *FanOutServingRegistration) SetTestScanObserver(observer func(FanOutCand
 	r.grant.owner.mu.Lock()
 	r.testScanObserver = observer
 	r.grant.owner.mu.Unlock()
+}
+
+type fanOutChunkObserverContextKey struct{}
+
+// WithFanOutChunkObserverForTest observes a prepared turn outside SQL, while
+// its native claim is live. It neither substitutes a plan nor changes its owner.
+func WithFanOutChunkObserverForTest(ctx context.Context, observer func(context.Context, pipeline.FanOutChunkCommand)) context.Context {
+	return context.WithValue(ctx, fanOutChunkObserverContextKey{}, observer)
 }
 
 func (s *fanOutServingService) reportTestScan(registrations map[string]*FanOutServingRegistration, candidate FanOutCandidate, found bool, err error) {

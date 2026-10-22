@@ -70,10 +70,10 @@ func TestSelectedDeploymentServingRequiresExactLiveGrantBothStores(t *testing.T)
 				t.Fatal(err)
 			}
 			serving := store.(interface {
-				BindSelectedDeploymentFanOutGrant(startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error)
+				BindSelectedFanOutGrant(startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error)
 				ListSelectedDeploymentFeeds(context.Context, startupownership.GrantEvidence) ([]fanoutobligation.Intent, error)
 			})
-			owner, err := serving.BindSelectedDeploymentFanOutGrant(evidence)
+			owner, err := serving.BindSelectedFanOutGrant(evidence)
 			if err != nil || owner == nil {
 				t.Fatalf("exact selected bind: owner=%T err=%v", owner, err)
 			}
@@ -85,8 +85,14 @@ func TestSelectedDeploymentServingRequiresExactLiveGrantBothStores(t *testing.T)
 			}
 			handlerKey := fanoutobligation.IntentKey{RunID: fixture.forkRun, TriggeringDeliveryID: uuid.NewString(), ElementRef: runtimecontracts.FanOutElementRef{FlowPath: ".", Family: "fan_out", SemanticPath: "nodes.scatter"}}
 			claim.Candidate = &handlerKey
+			if _, _, found, err := owner.ClaimFanOutIntent(ctx, claim); err != nil || found {
+				t.Fatalf("exact selected handler admission without an intent: found=%v err=%v", found, err)
+			}
+			foreignHandler := handlerKey
+			foreignHandler.RunID = uuid.NewString()
+			claim.Candidate = &foreignHandler
 			if _, _, _, err := owner.ClaimFanOutIntent(ctx, claim); err == nil {
-				t.Fatal("selected serving owner admitted handler intent")
+				t.Fatal("selected serving owner admitted another run's handler")
 			}
 			feeds, err := serving.ListSelectedDeploymentFeeds(ctx, evidence)
 			if err != nil || len(feeds) != 0 {
@@ -148,14 +154,14 @@ func TestSelectedDeploymentServingRequiresExactLiveGrantBothStores(t *testing.T)
 			}
 			ordinary := evidence
 			ordinary.SelectedFork = nil
-			if _, err := serving.BindSelectedDeploymentFanOutGrant(ordinary); err == nil {
+			if _, err := serving.BindSelectedFanOutGrant(ordinary); err == nil {
 				t.Fatal("selected binder borrowed ordinary grant")
 			}
 			wrong := evidence
 			wrongBinding := *evidence.SelectedFork
 			wrongBinding.FenceGeneration++
 			wrong.SelectedFork = &wrongBinding
-			if _, err := serving.BindSelectedDeploymentFanOutGrant(wrong); err == nil {
+			if _, err := serving.BindSelectedFanOutGrant(wrong); err == nil {
 				t.Fatal("selected binder accepted wrong execution fence")
 			}
 			if _, err := serving.ListSelectedDeploymentFeeds(ctx, wrong); err == nil {
@@ -164,7 +170,7 @@ func TestSelectedDeploymentServingRequiresExactLiveGrantBothStores(t *testing.T)
 			if _, err := db.ExecContext(ctx, `UPDATE run_fork_selected_contract_runtime_executions SET fence_generation=fence_generation+1 WHERE execution_id=$1`, issued.ExecutionID); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := serving.BindSelectedDeploymentFanOutGrant(evidence); err == nil {
+			if _, err := serving.BindSelectedFanOutGrant(evidence); err == nil {
 				t.Fatal("stale selected grant retained bind authority")
 			}
 			if _, err := serving.ListSelectedDeploymentFeeds(ctx, evidence); err == nil {

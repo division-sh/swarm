@@ -89,6 +89,9 @@ func applyDestructiveResetCleanupTx(ctx context.Context, tx *sql.Tx, req destruc
 	if err := guardSourceForkDependencies(ctx, tx, runIDs, sqlite); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
+	if err := guardReplyContextDependencies(ctx, tx, runIDs, sqlite); err != nil {
+		return destructivereset.CleanupResult{}, err
+	}
 	if err := guardDestructiveResetDirectiveAuthority(ctx, tx, runIDs, now, sqlite); err != nil {
 		return destructivereset.CleanupResult{}, err
 	}
@@ -256,7 +259,14 @@ func lockDestructiveResetCleanupRuns(ctx context.Context, tx *sql.Tx, runIDs []s
 }
 
 func GuardSourceForkDependencies(ctx context.Context, tx *sql.Tx, runIDs []string) error {
-	return guardSourceForkDependencies(ctx, tx, runIDs, false)
+	if err := guardSourceForkDependencies(ctx, tx, runIDs, false); err != nil {
+		return err
+	}
+	return guardReplyContextDependencies(ctx, tx, runIDs, false)
+}
+
+func GuardReplyContextEvidenceDependencies(ctx context.Context, tx *sql.Tx, runIDs []string, sqlite bool) error {
+	return guardReplyContextDependencies(ctx, tx, runIDs, sqlite)
 }
 
 func guardSourceForkDependencies(ctx context.Context, tx *sql.Tx, runIDs []string, sqlite bool) error {
@@ -280,6 +290,29 @@ func guardSourceForkDependencies(ctx context.Context, tx *sql.Tx, runIDs []strin
 		return fmt.Errorf("inspect destructive reset fork dependencies: %w", err)
 	}
 	return fmt.Errorf("%w: cannot delete source run %s while dependent fork %s remains outside the cleanup set", destructivereset.ErrInvalidRequest, sourceRunID, forkRunID)
+}
+
+func guardReplyContextDependencies(ctx context.Context, tx *sql.Tx, runIDs []string, sqlite bool) error {
+	if len(runIDs) == 0 {
+		return nil
+	}
+	runSet, runArg := destructiveResetRunSet(runIDs, sqlite)
+	var contextID, preservedRun string
+	err := tx.QueryRowContext(ctx, fmt.Sprintf(`
+		SELECT child.reply_context_id, COALESCE(CAST(child.run_id AS TEXT), '')
+		FROM reply_contexts child
+		LEFT JOIN reply_contexts enclosing ON enclosing.reply_context_id=child.enclosing_reply_context_id
+		WHERE (child.source_run_id IN %[1]s OR enclosing.run_id IN %[1]s)
+		  AND (child.run_id IS NULL OR NOT (child.run_id IN %[1]s))
+		ORDER BY child.reply_context_id LIMIT 1
+	`, runSet), runArg).Scan(&contextID, &preservedRun)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect destructive reset reply dependencies: %w", err)
+	}
+	return fmt.Errorf("%w: cannot delete reply evidence while context %s in preserved run %q remains outside the cleanup set", destructivereset.ErrInvalidRequest, contextID, preservedRun)
 }
 
 func guardDestructiveResetDirectiveAuthority(ctx context.Context, tx *sql.Tx, runIDs []string, now time.Time, sqlite bool) error {
@@ -396,7 +429,7 @@ func destructiveResetCleanupSeverPreservedReferences(ctx context.Context, tx *sq
 			query: `
 				UPDATE managed_agent_capability_surfaces
 				SET run_id = NULL
-				WHERE run_id IN %[1]s
+				WHERE run_id IN %[1]s AND execution_kind <> 'selected_contract_fork'
 			`,
 		},
 		{
@@ -516,6 +549,15 @@ func destructiveResetCleanupTableResults(ctx context.Context, tx *sql.Tx, runIDs
 		default:
 			result.MatchedRows = count
 		}
+		if retained := selectedResetRetainedPredicate(entry.Table); retained != "" && len(runIDs) != 0 {
+			statements, err := destructiveResetCleanupStatementsForTable(entry.Table, runIDs, includeSourceArtifacts, sqlite)
+			if err != nil {
+				return nil, err
+			}
+			if err := tx.QueryRowContext(ctx, statements.preserved, statements.args...).Scan(&result.PreservedRows); err != nil {
+				return nil, fmt.Errorf("count positively retained %s: %w", entry.Table, err)
+			}
+		}
 		out = append(out, result)
 	}
 	return out, nil
@@ -553,9 +595,10 @@ func destructiveResetCleanupDeleteTable(ctx context.Context, tx *sql.Tx, table s
 }
 
 type destructiveResetCleanupStatements struct {
-	count  string
-	delete string
-	args   []any
+	count     string
+	delete    string
+	preserved string
+	args      []any
 }
 
 func destructiveResetCleanupStatementsForTable(table string, runIDs []string, includeSourceArtifacts bool, sqlite bool) (destructiveResetCleanupStatements, error) {
@@ -588,7 +631,7 @@ func destructiveResetCleanupStatementsForTable(table string, runIDs []string, in
 		predicate = "EXISTS (SELECT 1 FROM events e WHERE e.event_id = target.original_event_id AND e.run_id IN %[1]s)"
 	case "event_deliveries", "committed_replay_scopes":
 		predicate = "target.run_id IN %[1]s OR EXISTS (SELECT 1 FROM events e WHERE e.event_id = target.event_id AND e.run_id IN %[1]s)"
-	case "workflow_publication_stage_receipts", "workflow_handler_stage_receipts", "fan_out_obligation_barriers", "fan_out_outcomes", "fan_out_intents", "resource_version_pins", "author_activity_occurrences", "run_fork_fact_revisions", "run_fork_revisions", "run_fork_revision_heads", "activity_attempts", "agent_turns", "agent_conversation_audits", "agent_sessions", "agents", "flow_instances", "decision_card_route_obligations", "decision_card_changes", "decision_card_input_drafts", "proposed_effect_continuations", "human_task_continuations", "decision_cards", "entity_mutations", "entity_state", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness", "run_control_state", "reply_contexts", "run_scenario_execution_profiles", "events", "runs":
+	case "workflow_publication_stage_receipts", "workflow_handler_stage_receipts", "fan_out_obligation_barriers", "fan_out_outcomes", "fan_out_intents", "resource_version_pins", "author_activity_occurrences", "run_fork_fact_revisions", "run_fork_revisions", "run_fork_revision_heads", "activity_attempts", "agent_turns", "activity_attempt_live_parents", "agent_turn_live_parents", "agent_conversation_audits", "agent_sessions", "agents", "flow_instances", "decision_card_route_obligations", "decision_card_changes", "decision_card_input_drafts", "proposed_effect_continuations", "human_task_continuations", "decision_cards", "entity_mutations", "entity_state", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness", "run_control_state", "reply_contexts", "run_scenario_execution_profiles", "events", "runs":
 		predicate = "target.run_id IN %[1]s"
 	case "conversation_forks":
 		predicate = "target.source_run_id IN %[1]s"
@@ -609,12 +652,29 @@ func destructiveResetCleanupStatementsForTable(table string, runIDs []string, in
 	default:
 		return destructiveResetCleanupStatements{}, fmt.Errorf("destructive reset cleanup table %s is not implemented", table)
 	}
-	from := quoteIdent(table) + " AS target WHERE " + fmt.Sprintf(predicate, runSet)
+	from := quoteIdent(table) + " AS target WHERE (" + fmt.Sprintf(predicate, runSet) + ")"
 	out := destructiveResetCleanupStatements{count: "SELECT COUNT(*) FROM " + from, args: []any{runArg}}
+	if retained := selectedResetRetainedPredicate(table); retained != "" {
+		out.preserved = out.count + " AND (" + retained + ")"
+		from += " AND NOT (" + retained + ")"
+		out.count = "SELECT COUNT(*) FROM " + from
+	}
 	if table != "agent_directive_operations" {
 		out.delete = "DELETE FROM " + from
 	}
 	return out, nil
+}
+
+func selectedResetRetainedPredicate(table string) string {
+	switch table {
+	case "run_fork_operations":
+		return `EXISTS (SELECT 1 FROM run_fork_selected_contract_execution_detachments r WHERE r.binding_id=target.selected_binding_id AND r.fork_run_id=target.fork_run_id)`
+	case "activity_attempts":
+		return `EXISTS (SELECT 1 FROM run_fork_selected_contract_activity_detachments r WHERE r.request_event_id=target.request_event_id AND r.fork_run_id=target.run_id)`
+	case "agent_turns":
+		return `EXISTS (SELECT 1 FROM run_fork_selected_contract_turn_detachments r WHERE r.turn_id=target.turn_id AND r.fork_run_id=target.run_id)`
+	}
+	return ""
 }
 
 // Only run-set binding differs. The closed cleanup catalog and predicates above

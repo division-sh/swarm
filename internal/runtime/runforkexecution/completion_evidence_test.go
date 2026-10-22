@@ -46,7 +46,7 @@ func assertCompletion2270SelectedCLIReadback(t testing.TB, ctx context.Context, 
 }
 
 func TestSelectedCompletion2270EvidenceBothStores(t *testing.T) {
-	t.Run("q1_session_execution_preservation", proveSelectedQ1SessionExecutionPreservationBothStores)
+	t.Run("q1_session_sibling_refork", proveSelectedQ1SessionSiblingReforkBothStores)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, protocol := range []struct {
 			backend, credential, first, last string
@@ -138,6 +138,9 @@ func TestSelectedCompletion2270EvidenceBothStores(t *testing.T) {
 				})
 				if err != nil {
 					t.Fatal(err)
+				}
+				if _, err := observeSelectedRetainedExecution(t, ctx, owner, selected, result.Materialization.ForkRunID); err != nil {
+					t.Fatalf("retained selected completion evidence: %v", err)
 				}
 				reads := selected.(operatorread.ConversationReader)
 				list, err := reads.ListOperatorConversations(ctx, operatorread.OperatorConversationListOptions{RunID: result.Materialization.ForkRunID, AgentID: "test-agent"})

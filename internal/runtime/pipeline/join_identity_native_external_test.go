@@ -205,6 +205,10 @@ func TestRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStor
 	pipeline.VerifyNativeRootAndFlowWorkflowJoinLoopSupersessionCancelsExactGenerationOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }
 
+func TestRootAndFlowWorkflowJoinEmptyLoopSupersessionKeepsAdmissionBothStores(t *testing.T) {
+	pipeline.VerifyNativeRootAndFlowWorkflowJoinEmptyLoopSupersessionKeepsAdmissionBothStoresForTest(t, pipelineDeliveryNativeFixture)
+}
+
 func TestJoinCapturedLoopOutcomeAfterRestartBothStores(t *testing.T) {
 	pipeline.VerifyNativeJoinCapturedLoopOutcomeAfterRestartBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }

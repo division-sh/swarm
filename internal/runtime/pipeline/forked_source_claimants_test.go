@@ -105,6 +105,7 @@ func VerifyForkedSourceActivityAttemptMutationsRefuseAndPreserveJournalForTest(t
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkedPipelineBackend(t, backend, open)
 			intent := testNonIdempotentActivityIntent(fixture.runID, uuid.NewString(), uuid.NewString())
+			fixture.store.activityJournal = fixture.native.CaptureActivityJournal()
 			start := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
 			started, inserted, err := fixture.store.StartActivityAttempt(fixture.ctx, start)
 			if err != nil || !inserted {

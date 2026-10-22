@@ -1,6 +1,17 @@
 package runfork
 
-import "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+import (
+	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/google/uuid"
+)
+
+// ProjectReplayEventID is the existing fork replay coordinate. It identifies a
+// candidate only; recorded lineage and fixed-cut membership admit the event.
+func ProjectReplayEventID(forkRunID, sourceEventID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm/run-fork/delivery-event-replay/event/"+strings.TrimSpace(forkRunID)+"/"+strings.TrimSpace(sourceEventID))).String()
+}
 
 // ProjectCapturedConstructionIdentity composes the established entity, route
 // and structural-parent projections without deriving a new constructor.

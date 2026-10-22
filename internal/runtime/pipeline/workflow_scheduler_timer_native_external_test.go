@@ -14,7 +14,7 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 		t.Run(backend, func(t *testing.T) {
 			pipeline.VerifyWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRowsForTest(t, func(t *testing.T, runID string) pipeline.WorkflowSchedulerTimerNativeFixtureForTest {
 				selected, _, reopen := openTimerReplayNativeStore(t, backend)
-				native := workflowMutationNativeFixtureFromSelected(t, selected, reopen, runID, 3, 1)
+				native := workflowMutationNativeFixtureFromSelected(t, selected, reopen, runID)
 				return pipeline.WorkflowSchedulerTimerNativeFixtureForTest{
 					WorkflowProjectionNativeFixtureForTest: native.WorkflowProjectionNativeFixtureForTest,
 					AdmitSchedule:                          selected.(runtimegenericschedule.Store).AdmitGenericScheduleOutcome,

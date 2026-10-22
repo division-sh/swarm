@@ -66,6 +66,8 @@ func (f HistoricalFact) Terminal() bool {
 	return f.Status == StatusDelivered || f.Status == StatusDeadLetter || f.Status == StatusCanceled
 }
 
+func (f HistoricalFact) Validate() error { return validateHistoricalSnapshot(f) }
+
 // DecodeHistoricalSnapshot validates the single canonical fixed-cut representation.
 // Its result deliberately cannot be passed to a live Snapshot consumer.
 func DecodeHistoricalSnapshot(raw []byte) (HistoricalFact, error) {

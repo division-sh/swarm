@@ -197,7 +197,7 @@ func proveTerminalProviderOriginSettlement(t *testing.T, consumer string) {
 						t.Fatal(err)
 					}
 				}
-				h := newRuntimeHarnessWithTerminalProvider(t, root, backend, true, nil, probe)
+				h := newRuntimeHarnessWithTerminalProvider(t, root, backend, true, nil, probe, nil)
 				defer probe.once.Do(func() { close(probe.release) })
 				path := "worker-flow/worker-001"
 				entity := materializeCatalogSelectedForkSourceFlow(t, h, catalogRuntimeRunID, path, "worker.ready.requested")

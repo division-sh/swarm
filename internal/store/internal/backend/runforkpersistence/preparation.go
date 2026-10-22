@@ -12,6 +12,9 @@ import (
 )
 
 func proveSelectedExecutionPreparationTx(ctx context.Context, tx *sql.Tx, issued runfork.SelectedContractRuntimeExecution, sqlite bool) error {
+	if err := requireForkLiveParentsTx(ctx, tx, issued.ExecutionID, true); err != nil {
+		return err
+	}
 	var raw []byte
 	var fingerprint, pointKind, eventID string
 	var revision int64

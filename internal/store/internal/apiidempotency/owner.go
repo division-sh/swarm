@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	apiidempotencycontract "github.com/division-sh/swarm/internal/apiidempotency"
@@ -274,12 +272,11 @@ type SQLiteOwner struct {
 }
 
 type SQLiteRequestLease struct {
-	lock       *sync.Mutex
+	lock       *sqliteRequestLockLease
 	started    time.Time
 	req        apiidempotencycontract.Request
 	completion apiidempotencycontract.Completion
 	replay     bool
-	released   bool
 }
 
 func (l *SQLiteRequestLease) Replay() (apiidempotencycontract.Completion, bool) {
@@ -307,11 +304,10 @@ func StoreSQLiteCompletionTx(ctx context.Context, lease *SQLiteRequestLease, tx 
 }
 
 func (l *SQLiteRequestLease) Release() {
-	if l == nil || l.released || l.lock == nil {
+	if l == nil || l.lock == nil {
 		return
 	}
-	l.released = true
-	l.lock.Unlock()
+	l.lock.release()
 }
 
 func AcquireSQLiteRequest(ctx context.Context, owner *SQLiteOwner, req apiidempotencycontract.Request) (*SQLiteRequestLease, error) {
@@ -331,12 +327,17 @@ func AcquireSQLiteRequest(ctx context.Context, owner *SQLiteOwner, req apiidempo
 		return l, err
 	}
 	started := time.Now()
-	lock := sqliteLockForPath(owner.path)
-	lock.Lock()
+	lock, err := sqliteRequestLocks.acquire(ctx, sqliteRequestLockKey{
+		database: owner.path,
+		request:  apiIdempotencyLockKey(req.Method, req.Actor, req.IdempotencyKey),
+	})
+	if err != nil {
+		return nil, err
+	}
 	requestLease := &SQLiteRequestLease{lock: lock, req: req, started: started}
 	var existing apiIdempotencyRecord
 	var found bool
-	err := owner.backend.RunTransaction(ctx, "sqlite api idempotency lookup", func(txCtx context.Context, tx *sql.Tx) error {
+	err = owner.backend.RunTransaction(ctx, "sqlite api idempotency lookup", func(txCtx context.Context, tx *sql.Tx) error {
 		if err := admitPrincipalTx(txCtx, tx, req, false); err != nil {
 			return err
 		}
@@ -362,11 +363,6 @@ func AcquireSQLiteRequest(ctx context.Context, owner *SQLiteOwner, req apiidempo
 	return requestLease, nil
 }
 
-var sqliteLocks = struct {
-	sync.Mutex
-	byPath map[string]*sync.Mutex
-}{byPath: map[string]*sync.Mutex{}}
-
 func NewSQLite(backend *sqlitebackend.Backend, path string, schemaGuard func() error) (*SQLiteOwner, error) {
 	if backend == nil || !backend.Valid() {
 		return nil, fmt.Errorf("api idempotency sqlite backend is required")
@@ -374,7 +370,7 @@ func NewSQLite(backend *sqlitebackend.Backend, path string, schemaGuard func() e
 	if schemaGuard == nil {
 		return nil, fmt.Errorf("api idempotency sqlite schema guard is required")
 	}
-	return &SQLiteOwner{backend: backend, path: path, schemaGuard: schemaGuard}, nil
+	return &SQLiteOwner{backend: backend, path: sqliteIdempotencyDatabaseIdentity(path), schemaGuard: schemaGuard}, nil
 }
 
 func (s *SQLiteOwner) WithAPIIdempotency(ctx context.Context, req apiidempotencycontract.Request, execute func(context.Context) (apiidempotencycontract.Completion, error)) (apiidempotencycontract.Completion, bool, error) {
@@ -482,23 +478,6 @@ func conflictError(req apiidempotencycontract.Request, existing apiIdempotencyRe
 		OriginalRequestHash: existing.RequestHash, ConflictingRequestHash: req.RequestHash,
 		Method: req.Method, ResourceID: existing.ResourceID,
 	}
-}
-
-func sqliteLockForPath(path string) *sync.Mutex {
-	key := strings.TrimSpace(path)
-	if key == "" {
-		key = "<unknown>"
-	} else if absolute, err := filepath.Abs(filepath.Clean(key)); err == nil {
-		key = absolute
-	}
-	sqliteLocks.Lock()
-	defer sqliteLocks.Unlock()
-	lock := sqliteLocks.byPath[key]
-	if lock == nil {
-		lock = &sync.Mutex{}
-		sqliteLocks.byPath[key] = lock
-	}
-	return lock
 }
 
 func purgeExpiredSQLite(ctx context.Context, q execQueryer, now time.Time) error {

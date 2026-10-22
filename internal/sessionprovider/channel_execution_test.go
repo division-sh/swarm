@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -378,7 +377,7 @@ func TestWhatsAppChannelPrelaunchResumeAndRecoveryBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				handle, err := runtimeeffects.BeginInProcessChannelConfirmation(ctx, contracts.ToolInProcessWhatsAppSendText, fingerprint, nil)
+				handle, err := runtimeeffects.BeginInProcessChannelConfirmation(ctx, fingerprint, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

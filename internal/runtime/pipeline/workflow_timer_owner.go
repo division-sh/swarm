@@ -218,9 +218,15 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 	if entityID.IsZero() || runID == "" {
 		return fmt.Errorf("workflow initial timer reconciliation requires exact run and entity identity")
 	}
-	active, err := store.listPersistedWorkflowTimerActivations(ctx, runID, entityID.String(), true)
+	retained, err := store.listPersistedWorkflowTimerActivations(ctx, runID, entityID.String(), false)
 	if err != nil {
 		return err
+	}
+	var active []WorkflowTimerActivation
+	for _, activation := range retained {
+		if activation.Status == workflowTimerStatusActive {
+			active = append(active, activation)
+		}
 	}
 	var readinessMode executionmode.Mode
 	if attempt != nil {
@@ -293,6 +299,51 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 			if err := validateWorkflowTimerTopology(source, declaration); err != nil {
 				return err
 			}
+			inherited, found, err := inheritedInitialEntryTimer(source, instance, active, declaration.SemanticKey(), generation)
+			if err != nil {
+				return err
+			}
+			if found {
+				desired[inherited.Ref.ActivationID] = inherited
+				continue
+			}
+			// A committed inherited occurrence consumed this exact initial edge.
+			// Its terminal receipt is evidence, never a desired active arm.
+			consumed := false
+			for _, fired := range retained {
+				if fired.Status != workflowTimerStatusFired || fired.SourceTimerID == "" ||
+					fired.Ref.Cause != timeridentity.WorkflowTimerActivationCauseInitial ||
+					fired.Ref.DeclarationKey != declaration.SemanticKey() || fired.Ref.Generation != generation {
+					continue
+				}
+				if err := fired.Validate(); err != nil {
+					return fmt.Errorf("validate fired inherited initial timer: %w", err)
+				}
+				constructed, err := instance.ConstructionIdentity(identity)
+				if err != nil {
+					return err
+				}
+				if err := constructed.ValidateConstruction(source, runID); err != nil {
+					return err
+				}
+				revision, err := workflowTimerDeclarationRevision(source, declaration)
+				if err != nil {
+					return err
+				}
+				routing, event, err := workflowTimerDeclarationSourceEvent(source, entityID.String(), route.InstancePath, declaration)
+				if err != nil {
+					return err
+				}
+				if consumed || fired.RunID != runID || fired.Route != route || fired.EntityID != constructed.EntityID ||
+					fired.Ref.DeclarationRevision != revision || fired.RoutingSource != routing || fired.ExecutionMode != initialMode ||
+					fired.EventType != string(event) || fired.OwnerAgent != strings.TrimSpace(declaration.Owner) {
+					return fmt.Errorf("fired inherited initial timer crosses its exact declaration, owner, or receipt")
+				}
+				consumed = true
+			}
+			if consumed {
+				continue
+			}
 			interval := workflowTimerDuration(declaration, workflowTimerPolicy(source, declaration.OwningFlowID()))
 			if interval <= 0 {
 				return fmt.Errorf("workflow timer %s has no executable positive delay", declaration.ID)
@@ -321,6 +372,16 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 			continue
 		}
 		expected, keep := desired[activation.Ref.ActivationID]
+		if !keep && activation.SourceTimerID != "" {
+			selected, err := SelectInheritedWorkflowTimer(source, activation, instance)
+			if err != nil {
+				return err
+			}
+			if selected == nil {
+				return fmt.Errorf("active inherited workflow timer %s lacks its admitted declaration", activation.Ref.ActivationID)
+			}
+			expected, keep = *selected, true
+		}
 		if !keep && !initialEntryOpen {
 			// Source revisions are prospective after the initial-entry edge has passed.
 			declaration, found := workflowTimerDeclarationForInstance(
@@ -416,6 +477,32 @@ func (l *WorkflowTimerLifecycle) reconcileInitialEntryDeclarations(ctx context.C
 		}
 	}
 	return err
+}
+
+func inheritedInitialEntryTimer(source semanticview.Source, instance WorkflowInstance, active []WorkflowTimerActivation, declarationKey string, generation attemptgeneration.Generation) (WorkflowTimerActivation, bool, error) {
+	var inherited WorkflowTimerActivation
+	found := false
+	for _, activation := range active {
+		if activation.SourceTimerID == "" || activation.Ref.Cause != timeridentity.WorkflowTimerActivationCauseInitial ||
+			activation.Ref.DeclarationKey != declarationKey || activation.Ref.Generation != generation {
+			continue
+		}
+		if found {
+			return WorkflowTimerActivation{}, false, fmt.Errorf("initial entry has duplicate inherited timer arms for %s", declarationKey)
+		}
+		selected, err := SelectInheritedWorkflowTimer(source, activation, instance)
+		if err != nil {
+			return WorkflowTimerActivation{}, false, err
+		}
+		if selected == nil {
+			return WorkflowTimerActivation{}, false, fmt.Errorf("inherited initial timer lacks its selected declaration")
+		}
+		if err := activation.ValidateCauseReplay(*selected); err != nil {
+			return WorkflowTimerActivation{}, false, err
+		}
+		inherited, found = activation, true
+	}
+	return inherited, found, nil
 }
 
 func initialWorkflowTimerExecutionMode(ctx context.Context, readinessMode executionmode.Mode, active []WorkflowTimerActivation) (executionmode.Mode, error) {
@@ -521,6 +608,71 @@ func (l *WorkflowTimerLifecycle) initialEntryTimerActivations(ctx context.Contex
 		}
 	}
 	return initial, nil
+}
+
+// SelectInheritedWorkflowTimer selects current declaration effects without
+// rearming the fixed-cut obligation. A missing declaration is a removal decision.
+func SelectInheritedWorkflowTimer(
+	selected semanticview.Source,
+	inherited WorkflowTimerActivation,
+	fixedHeader WorkflowInstance,
+) (*WorkflowTimerActivation, error) {
+	if err := inherited.Validate(); err != nil {
+		return nil, fmt.Errorf("validate inherited workflow timer: %w", err)
+	}
+	inherited = inherited.Canonical()
+	if inherited.Status != workflowTimerStatusActive {
+		return nil, fmt.Errorf("inherited workflow timer selection requires an active obligation")
+	}
+	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(inherited.RunID, inherited.Route)
+	if err != nil {
+		return nil, err
+	}
+	constructed, err := fixedHeader.ConstructionIdentity(owner)
+	if err != nil {
+		return nil, fmt.Errorf("validate inherited workflow timer header: %w", err)
+	}
+	if constructed.EntityID != inherited.EntityID {
+		return nil, fmt.Errorf("inherited workflow timer entity differs from its fixed header")
+	}
+	if err := constructed.ValidateConstruction(selected, inherited.RunID); err != nil {
+		return nil, fmt.Errorf("validate inherited workflow timer construction: %w", err)
+	}
+	routingFlowID := "."
+	if inherited.RoutingSource.Kind() == events.RoutingSourceFlowOwnedControl {
+		routingFlowID = inherited.RoutingSource.Route().FlowID
+	}
+	if routingFlowID != constructed.TemplateID {
+		return nil, fmt.Errorf("inherited workflow timer routing source differs from its fixed header")
+	}
+	declaration, found := workflowTimerDeclarationForInstance(selected, fixedHeader, inherited.Ref.DeclarationKey)
+	if !found {
+		return nil, nil
+	}
+	if err := validateWorkflowTimerTopology(selected, declaration); err != nil {
+		return nil, err
+	}
+	revision, err := workflowTimerDeclarationRevision(selected, declaration)
+	if err != nil {
+		return nil, err
+	}
+	routingSource, eventType, err := workflowTimerDeclarationSourceEvent(
+		selected, inherited.EntityID, inherited.Route.InstancePath, declaration,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if routingSource != inherited.RoutingSource {
+		return nil, fmt.Errorf("selected workflow timer declaration changes inherited routing provenance")
+	}
+	projected := inherited
+	projected.Ref.DeclarationRevision = revision
+	projected.OwnerAgent = strings.TrimSpace(declaration.Owner)
+	projected.EventType = string(eventType)
+	if err := projected.Validate(); err != nil {
+		return nil, fmt.Errorf("validate selected inherited workflow timer: %w", err)
+	}
+	return &projected, nil
 }
 
 func validateWorkflowTimerTopology(source semanticview.Source, timer runtimecontracts.WorkflowTimerContract) error {
@@ -934,26 +1086,47 @@ func (l *WorkflowTimerLifecycle) AuthorizeAcceptedEvent(ctx context.Context, evt
 			"accepted workflow timer declaration revision is stale",
 		)
 	}
+	if _, err := activation.ValidatePublishedOccurrence(evt); err != nil {
+		return WorkflowTimerActivation{}, occurrence, true, err
+	}
+	return activation, occurrence, true, nil
+}
+
+// ValidatePublishedOccurrence proves immutable publication evidence, not fresh
+// execution authority or a current declaration. Settlement shares this owner
+// with admission rather than treating a timer producer name as lineage proof.
+func (activation WorkflowTimerActivation) ValidatePublishedOccurrence(evt events.Event) (timeridentity.WorkflowTimerOccurrenceRef, error) {
+	if err := activation.validate(); err != nil {
+		return timeridentity.WorkflowTimerOccurrenceRef{}, err
+	}
+	occurrence, valid := timeridentity.ParseWorkflowTimerOccurrenceTaskID(evt.TaskID())
+	if !valid || occurrence.Activation != activation.Ref || evt.ProducerType() != events.EventProducerPlatform || evt.SourceAgent() != "runtime.workflow_timer" {
+		return timeridentity.WorkflowTimerOccurrenceRef{}, fmt.Errorf("workflow timer publication requires its exact producer and typed occurrence")
+	}
 	if evt.ID() != timeridentity.WorkflowTimerOccurrenceEventID(occurrence) ||
 		evt.RunID() != activation.RunID ||
+		evt.ExecutionMode() != activation.ExecutionMode ||
+		evt.CreatedAt().Before(occurrence.DueAt) ||
+		evt.CreatedAt().After(activation.FiredAt) ||
+		(!activation.Recurring && !evt.CreatedAt().Equal(activation.FiredAt)) ||
 		strings.TrimSpace(string(evt.Type())) != activation.EventType ||
 		!workflowTimerJSONEqual(evt.Payload(), activation.Payload) {
-		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf(
+		return occurrence, fmt.Errorf(
 			"accepted workflow timer event does not match canonical activation: event_id=%q/%q run_id=%q/%q type=%q/%q payload_equal=%t",
 			evt.ID(), timeridentity.WorkflowTimerOccurrenceEventID(occurrence), evt.RunID(), activation.RunID,
 			strings.TrimSpace(string(evt.Type())), activation.EventType, workflowTimerJSONEqual(evt.Payload(), activation.Payload),
 		)
 	}
 	if source := evt.RoutingSource(); source != activation.RoutingSource {
-		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf(
+		return occurrence, fmt.Errorf(
 			"accepted workflow timer routing source %s/%#v does not match canonical activation %s/%#v",
 			source.Kind().StorageCode(), source.Route(), activation.RoutingSource.Kind().StorageCode(), activation.RoutingSource.Route(),
 		)
 	}
 	if !workflowTimerOccurrenceAccepted(activation, occurrence) {
-		return WorkflowTimerActivation{}, occurrence, true, fmt.Errorf("workflow timer occurrence was not durably accepted")
+		return occurrence, fmt.Errorf("workflow timer occurrence was not durably accepted")
 	}
-	return activation, occurrence, true, nil
+	return occurrence, nil
 }
 
 func (l *WorkflowTimerLifecycle) workflowTimerActivationDeclarationCurrent(
@@ -1105,7 +1278,7 @@ func workflowTimerOccurrenceAccepted(activation WorkflowTimerActivation, occurre
 	if activation.RecurrenceInterval <= 0 || !occurrence.DueAt.Before(activation.FireAt) {
 		return false
 	}
-	firstDue := canonicalWorkflowTimerTime(activation.CreatedAt.Add(activation.RecurrenceInterval))
+	firstDue := canonicalWorkflowTimerTime(activation.armedAt().Add(activation.RecurrenceInterval))
 	if occurrence.DueAt.Before(firstDue) {
 		return false
 	}

@@ -41,6 +41,9 @@ func VerifyActivityTerminalPostCommitErrorPublishesJournaledResultBothStoresForT
 				source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"channel.ops.deliver": tool}})
 				bus := &recordingPipelineBus{}
 				pc, faultCount := fixture.CleanupFaultCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}}, fault)
+				if err := pc.InstallActivityJournal(pc.workflowStore.activityJournal); err != nil {
+					t.Fatal(err)
+				}
 				dispatcher := pipelineActivityDispatcher{coordinator: pc}
 				if uncertain {
 					dispatcher.client = &http.Client{Transport: activityRoundTripFunc(func(*http.Request) (*http.Response, error) {

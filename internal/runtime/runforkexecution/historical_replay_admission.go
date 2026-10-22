@@ -26,6 +26,7 @@ type HistoricalReplayExecutionRequest struct {
 	Admission             runfork.RunForkHistoricalReplayExecutionAdmission
 	ReplayResumeAdmission runfork.RunForkReplayResumeAdmission
 	PendingWork           []runfork.RunForkPendingWork
+	SourcePlan            *runfork.RunForkPlan
 }
 
 type HistoricalReplayExecutionAdmitter struct{}
@@ -120,7 +121,10 @@ func BuildHistoricalReplayExecution(req HistoricalReplayExecutionRequest) (runfo
 	if err := validateHistoricalReplayFactMatrix(admission.FactAdmissions); err != nil {
 		return runfork.RunForkHistoricalReplayExecution{}, err
 	}
-	deliveryEventReplayWork := historicalReplayDeliveryEventReplayWork(req.PendingWork)
+	deliveryEventReplayWork, err := historicalReplayDeliveryEventReplayWork(req)
+	if err != nil {
+		return runfork.RunForkHistoricalReplayExecution{}, err
+	}
 	if len(deliveryEventReplayWork) == 0 {
 		return runfork.RunForkHistoricalReplayExecution{}, fmt.Errorf("historical replay execution requires owner-authorized delivery_event_replay_ready work")
 	}
@@ -535,12 +539,39 @@ func validateHistoricalReplayFactMatrix(admissions []runfork.RunForkHistoricalRe
 	return nil
 }
 
-func historicalReplayDeliveryEventReplayWork(pending []runfork.RunForkPendingWork) []runfork.RunForkHistoricalReplayExecutableWork {
+func historicalReplayDeliveryEventReplayWork(req HistoricalReplayExecutionRequest) ([]runfork.RunForkHistoricalReplayExecutableWork, error) {
+	pending := req.PendingWork
+	if req.SourcePlan != nil {
+		if req.SourcePlan.SourceRunID != req.Admission.SourceRunID {
+			return nil, fmt.Errorf("selected historical work disagrees with its exact source plan")
+		}
+		if err := runfork.ValidateFanOutPendingReplayAdmission(*req.SourcePlan); err != nil {
+			return nil, err
+		}
+	}
 	work := make([]runfork.RunForkHistoricalReplayExecutableWork, 0, len(pending))
+	seen := make(map[string]bool)
 	for _, item := range pending {
-		if !runfork.RunForkPendingWorkReplayableForHistoricalReplay(item) {
+		eligible := runfork.RunForkPendingWorkReplayableForHistoricalReplay(item)
+		if req.SourcePlan != nil && item.DeliveryID != "" {
+			partition, continuing, err := req.SourcePlan.FanOutPendingRecipientPartition(item.EventID)
+			if err != nil {
+				return nil, err
+			}
+			if continuing {
+				eligible = false
+				for _, id := range partition.SourceDeliveryIDs {
+					eligible = eligible || id == item.DeliveryID
+				}
+			}
+		}
+		if !eligible {
 			continue
 		}
+		if seen[item.DeliveryID] {
+			return nil, fmt.Errorf("historical work repeats source delivery %s", item.DeliveryID)
+		}
+		seen[item.DeliveryID] = true
 		work = append(work, runfork.RunForkHistoricalReplayExecutableWork{
 			Fact:             runfork.RunForkHistoricalReplayFactEventDeliveries,
 			SourceEventID:    strings.TrimSpace(item.EventID),
@@ -551,7 +582,12 @@ func historicalReplayDeliveryEventReplayWork(pending []runfork.RunForkPendingWor
 			Classification:   strings.TrimSpace(item.Classification),
 		})
 	}
-	return work
+	if req.SourcePlan != nil {
+		if err := runfork.ValidateFanOutPendingReplayExecution(*req.SourcePlan, work); err != nil {
+			return nil, err
+		}
+	}
+	return work, nil
 }
 
 func historicalReplayExecutionBlockedSiblings(items []runfork.RunForkSelectedContractExecutionBoundary) []runfork.RunForkSelectedContractExecutionBoundary {
