@@ -510,11 +510,42 @@ func TestRun_MapsMissingRuntimeExternalCredentialsToCredentialKeyExistsWarnings(
 	}
 	for _, finding := range report.Warnings() {
 		if finding.CheckID == "credential_key_exists" {
-			command := "swarm secrets set " + finding.Location
+			command := "swarm secrets set -- '" + finding.Location + "'"
 			if rendered := FormatSurfaceFinding(finding, true); !strings.Contains(rendered, "remediation:") || !strings.Contains(rendered, command) {
 				t.Fatalf("missing credential does not explain provisioning: %s", rendered)
 			}
 		}
+	}
+	for _, test := range []struct{ key, argument string }{
+		{"space key", "'space key'"},
+		{"owner's key", `'owner'"'"'s key'`},
+		{"$(printf injected);$HOME|&<>*?", "'$(printf injected);$HOME|&<>*?'"},
+		{"`printf injected`", "'`printf injected`'"},
+		{"--stdin", "'--stdin'"},
+	} {
+		t.Run(test.key, func(t *testing.T) {
+			bundle := &runtimecontracts.WorkflowContractBundle{
+				Tools: map[string]runtimecontracts.ToolSchemaEntry{
+					"email_api": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolCredentials(test.key)),
+				},
+			}
+			bundle.Platform.Platform.Name = "swarm"
+			bundle.Platform.Platform.Version = "test"
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{Credentials: bootverifyCredentialStore{}})
+			if report.HasErrors() {
+				t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+			}
+			for _, finding := range report.Warnings() {
+				if finding.CheckID == "credential_key_exists" && finding.Location == test.key {
+					want := "Provision this credential with swarm secrets set -- " + test.argument + ", then restart swarm serve."
+					if finding.Remediation != want || finding.FailureClass != failures.ClassAuthenticationNeeded {
+						t.Fatalf("unsafe or misclassified credential remedy: %#v, want %q", finding, want)
+					}
+					return
+				}
+			}
+			t.Fatal("missing exact credential warning", report.Findings)
+		})
 	}
 }
 
