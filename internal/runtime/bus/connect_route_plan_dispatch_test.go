@@ -37,6 +37,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 type connectRoutePlanTestFlow struct {
@@ -744,93 +745,102 @@ func connectRoutePlanRootProducerEvent(id string, eventType events.EventType, so
 	return eventtest.RunCreatingRootIngressWithRoutingSource(id, eventType, sourceAgent, taskID, payload, chainDepth, runID, parentEventID, envelope, source, createdAt)
 }
 
-func connectReceiverPinCollisionSource(t testing.TB, producerMode string, rootReceiver bool, subscriberType string, mixed bool) semanticview.Source {
-	inputs := []runtimecontracts.FlowInputEventPin{
-		{Event: "work.accepted"},
-		{Event: "work.audited"},
+func connectReceiverPinCollisionSource(t *testing.T, producerMode string, rootReceiver bool, subscriberType string, mixed bool) semanticview.Source {
+	t.Helper()
+	receiver := "consumer"
+	if rootReceiver {
+		receiver = "."
 	}
-	producer := connectRoutePlanTestFlow{
-		id: "producer", mode: producerMode,
-		outputs: []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}},
+	rootSchema := map[string]any{
+		"stages": []any{},
+		"connect": []map[string]string{
+			{"event": "work.ready", "from": "producer", "to": receiver, "rename": "work.accepted"},
+			{"event": "work.ready", "from": "producer", "to": receiver, "rename": "work.audited"},
+		},
 	}
-	connects := []runtimecontracts.FlowConnect{
-		{Event: "work.ready", From: "producer", To: "consumer", Rename: "work.accepted"},
-		{Event: "work.ready", From: "producer", To: "consumer", Rename: "work.audited"},
+	files := map[string]string{
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [work.ready]\n",
+		"producer/events.yaml":   "work.ready:\n",
 	}
-	consumer := connectRoutePlanTestFlow{id: "consumer", mode: "static", inputs: inputs}
-	if subscriberType == "agent" {
-		consumer.agents = map[string]runtimecontracts.AgentRegistryEntry{
-			"receiver": {ID: "receiver", Subscriptions: []string{"work.accepted", "work.audited"}},
-		}
+	if producerMode == runtimecontracts.FlowModeTemplate {
+		files["producer/schema.yaml"] += "instance: instance_key\n"
+		files["producer/entities.yaml"] = "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n"
+	}
+	receiverPrefix := "consumer"
+	if rootReceiver {
+		receiverPrefix = ""
+		rootSchema["pins"] = map[string]any{"inputs": []string{"work.accepted", "work.audited"}}
 	} else {
-		consumer.nodes = map[string]runtimecontracts.SystemNodeContract{
-			"receiver": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-				"work.accepted": existingOwnerHandlerFixture(),
-				"work.audited":  existingOwnerHandlerFixture(),
-			}},
-		}
+		files["consumer/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
+		files["consumer/schema.yaml"] = "stages: []\npins:\n  inputs: [work.accepted, work.audited]\n"
+	}
+	schema, err := yaml.Marshal(rootSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files["schema.yaml"] = string(schema)
+	if subscriberType == "agent" {
+		files[filepath.Join(receiverPrefix, "agents.yaml")] = "receiver:\n  intent: {inline: 'Observe accepted and audited work.'}\n  subscriptions: [work.accepted, work.audited]\n"
+	} else {
+		files[filepath.Join(receiverPrefix, "nodes.yaml")] = `receiver:
+  execution_type: system_node
+  event_handlers:
+    work.accepted:
+      guard: {id: selected_owner, check: _entity.id != ""}
+    work.audited:
+      guard: {id: selected_owner, check: _entity.id != ""}
+`
 		if mixed {
-			consumer.agents = map[string]runtimecontracts.AgentRegistryEntry{
-				"legal-agent": {ID: "legal-agent", Subscriptions: []string{"work.accepted"}},
-			}
+			files[filepath.Join(receiverPrefix, "agents.yaml")] = "legal-agent:\n  intent: {inline: 'Observe accepted work.'}\n  subscriptions: [work.accepted]\n"
 		}
 	}
-	if !rootReceiver {
-		return semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{producer, consumer}, connects))
-	}
-	for index := range connects {
-		connects[index].To = "."
-	}
-	bundle := connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{producer}, connects)
-	rootSchema := runtimecontracts.FlowSchemaDocument{
-		Name: "root-receiver-collision",
-
-		Pins:    runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: inputs}},
-		Connect: append([]runtimecontracts.FlowConnect(nil), bundle.FlowTree.Root.Schema.Connect...),
-	}
-	bundle.RootSchema = &rootSchema
-	bundle.Nodes = consumer.nodes
-	bundle.Agents = consumer.agents
-	bundle.FlowTree.Root.Schema = *bundle.RootSchema
-	bundle.FlowTree.Root.Nodes = consumer.nodes
-	bundle.FlowTree.Root.Agents = consumer.agents
-	for logicalID := range consumer.agents {
-		ref := runtimecontracts.ContractURIRef{
-			Kind: "agent", FlowID: ".", LocalID: logicalID, Path: ".", Full: "test://root/" + logicalID,
-		}
-		bundle.URIRegistry.Agents["./"+logicalID] = ref
-		bundle.URIRegistry.ByURI[ref.Full] = ref
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
-	}
-	return semanticview.Wrap(bundle)
+	return semanticview.Wrap(loadTargetRouteTempBundle(t, files))
 }
 
-func connectReceiverPinLegalSource(t testing.TB, shape string) semanticview.Source {
-	inputs := []runtimecontracts.FlowInputEventPin{
-		{Event: "work.accepted"},
-		{Event: "work.audited"},
+func connectReceiverPinLegalSource(t *testing.T, shape string) semanticview.Source {
+	t.Helper()
+	inputs := []string{"work.accepted", "work.audited"}
+	connects := []map[string]string{
+		{"event": "work.ready", "from": "producer", "to": "consumer", "rename": "work.accepted"},
+		{"event": "work.ready", "from": "producer", "to": "consumer", "rename": "work.audited"},
 	}
-	connects := []runtimecontracts.FlowConnect{
-		{Event: "work.ready", From: "producer", To: "consumer", Rename: "work.accepted"},
-		{Event: "work.ready", From: "producer", To: "consumer", Rename: "work.audited"},
-	}
-	nodes := map[string]runtimecontracts.SystemNodeContract{
-		"accept-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": existingOwnerHandlerFixture()}},
-		"audit-node":  {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.audited": existingOwnerHandlerFixture()}},
-	}
+	nodes := `accept-node:
+  execution_type: system_node
+  event_handlers:
+    work.accepted:
+      guard: {id: selected_owner, check: _entity.id != ""}
+`
 	if shape == "duplicate_edge" {
 		inputs = inputs[:1]
 		connects[1] = connects[0]
-		nodes = map[string]runtimecontracts.SystemNodeContract{
-			"accept-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": existingOwnerHandlerFixture()}},
-		}
+	} else {
+		nodes += `audit-node:
+  execution_type: system_node
+  event_handlers:
+    work.audited:
+      guard: {id: selected_owner, check: _entity.id != ""}
+`
 	}
-	return semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
-		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}}},
-		{id: "consumer", mode: "static", inputs: inputs, nodes: nodes},
-	}, connects))
+	rootSchema, err := yaml.Marshal(map[string]any{"stages": []any{}, "connect": connects})
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumerSchema, err := yaml.Marshal(map[string]any{"stages": []any{}, "pins": map[string]any{"inputs": inputs}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":            string(rootSchema),
+		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [work.ready]\n",
+		"producer/events.yaml":   "work.ready:\n",
+		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"consumer/schema.yaml":   string(consumerSchema),
+		"consumer/nodes.yaml":    nodes,
+	}))
 }
 
 func (s *connectRoutePlanLifecycleStore) Activate(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
