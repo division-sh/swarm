@@ -23,7 +23,7 @@ func TestClockParkingResumeCannotInventOccurrenceAcceptanceBothStores(t *testing
 			t.Run(tc.name+map[bool]string{false: "/unaccepted", true: "/accepted"}[accepted], func(t *testing.T) {
 				selected, _, seedCtx := tc.open(t)
 				runID := runtimecorrelation.RunIDFromContext(seedCtx)
-				ctx := authorGenericScheduleConsumerContext(runID)
+				ctx := originalStoreFixtureContext(t, authorGenericScheduleConsumerContext(runID), selected)
 				registerTestAuthorActivityCatalogForContext(t, selected.(testAuthorActivityCatalogRegistrar), testAuthorActivityContext())
 				publisher, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore))
 				if err != nil {

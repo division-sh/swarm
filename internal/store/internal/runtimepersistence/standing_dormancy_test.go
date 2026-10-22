@@ -162,6 +162,7 @@ func TestDormantStandingReconciliationBothStores(t *testing.T) {
 			var coordinator *runtimepipeline.PipelineCoordinator
 			if backend == "sqlite" {
 				selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				db = selected.backend.ConstructionHandle()
 				coordinator = newSQLiteWorkflowTestCoordinator(t, db, selected)
 			} else {
@@ -169,6 +170,7 @@ func TestDormantStandingReconciliationBothStores(t *testing.T) {
 				t.Cleanup(cleanup)
 				db = opened
 				selected := admitTestPostgresStore(t, opened)
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				coordinator = newPostgresWorkflowTestCoordinator(t, db, selected)
 			}
 			artifact := storeTestSourceArtifact("credential-dormancy-" + backend)

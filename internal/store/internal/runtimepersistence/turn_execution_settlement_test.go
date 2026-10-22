@@ -254,7 +254,7 @@ func TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores(t *testing.T) {
 				if transition.ProviderDrainCount != 1 {
 					t.Fatalf("captured tail missing: %+v", transition)
 				}
-				summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC()))
+				summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(time.Now().UTC()))
 				if err != nil || summary.OutcomeUncertain != 1 {
 					t.Fatalf("canceled physical recovery: %+v err=%v", summary, err)
 				}
@@ -284,8 +284,8 @@ func TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores(t *testing.T) {
 
 func settleRecoveredCanceledTurnForTest(t *testing.T, fixture completionSettlementFixture, original runtimeeffects.Attempt, clock runtimeeffects.LogicalTurnClock) {
 	t.Helper()
-	// No previous runtime/controller/handle is carried into this recovery read.
-	ctx := testAuthorActivityContext()
+	// Recovery carries native process custody, not the previous execution handle.
+	ctx := fixture.original
 	recovery := fixture.store.(runtimeeffects.CanceledTurnRecoveryStore)
 	request := liveExternalEffectRecoveryRequest(time.Now().UTC())
 	turns, err := recovery.ListCanceledTurnRecoveries(ctx, request)

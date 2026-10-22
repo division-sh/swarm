@@ -222,7 +222,7 @@ func TestForkedSourceDirectiveReservationTransitionsAndRecoveryRefuse(t *testing
 			} else {
 				surface = fixture.sqlite
 			}
-			ctx := testAuthorActivitySourceArtifactContext()
+			ctx := fixture.context
 			now := fixture.forkedAt.Add(time.Minute)
 			seedTestAgentRow(
 				t, ctx, fixture.db, fixture.postgres != nil,
@@ -361,7 +361,7 @@ func TestForkedSourceManagedExternalEffectAdmissionTransitionsAndRecoveryRefuse(
 				AgentID: token.AgentID, AgentIdentity: identity, SessionID: uuid.NewString(),
 				Memory: agentmemory.Plan{}, FlowInstance: identity.FlowInstance(),
 			}
-			ctx := runtimecorrelation.WithRunID(testAuthorActivitySourceArtifactContext(), fixture.sourceRun)
+			ctx := runtimecorrelation.WithRunID(fixture.context, fixture.sourceRun)
 			if current, err := surface.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
 				t.Fatalf("frozen external authority current=%v err=%v", current, err)
 			}

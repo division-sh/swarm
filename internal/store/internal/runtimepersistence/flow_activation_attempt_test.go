@@ -51,17 +51,21 @@ func TestFlowActivationAttemptBatchRetirementBothStores(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			hash := mustExternalStoreTestSourceArtifactFact().BundleHash()
-			requireReadinessRun(t, ctx, selected, runID, hash)
-			paths := []string{"account/batch-a", "account/batch-b"}
-			for _, path := range paths {
-				seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, hash)
-			}
 			acquire := runtimestartupownership.AcquireRequest{OwnerID: "flow-batch-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
 			process, err := selected.AcquireProcessCapability(ctx, acquire)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = process.Release(context.Background()) })
+			ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireReadinessRun(t, ctx, selected, runID, hash)
+			paths := []string{"account/batch-a", "account/batch-b"}
+			for _, path := range paths {
+				seedExactFlowInstanceDescriptorOwner(t, ctx, selected, runID, uuid.NewString(), path, hash)
+			}
 			sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -176,7 +180,7 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			runID, path := uuid.NewString(), "account/attempt"
 			hash := mustExternalStoreTestSourceArtifactFact().BundleHash()
 			requireReadinessRun(t, ctx, selected, runID, hash)
-			seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, hash)
+			seedExactFlowInstanceDescriptorOwner(t, ctx, selected, runID, uuid.NewString(), path, hash)
 			readiness, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
 			if err != nil || !found {
 				t.Fatalf("load readiness: found=%v err=%v", found, err)

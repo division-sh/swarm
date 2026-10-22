@@ -44,7 +44,7 @@ func prepareFixedForkHistoryFixture(t *testing.T, selected agentFixtureFlowStore
 	if witness == "route-timer-blocker" {
 		// Row34 is component-prepared/native-committed, not a manager or
 		// executable-attachment proof (reviewer-e 6202595494).
-		ctx := correlation.WithRunID(testAuthorActivityContext(), runID)
+		ctx := originalStoreFixtureContext(t, correlation.WithRunID(testAuthorActivityContext(), runID), selected)
 		requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: event.CreatedAt().Add(-time.Minute)})
 		command, err := flowactivationfixture.Command(ctx, pipeline.WorkflowInstance{
 			InstanceID: "1", StorageRef: "flow-a/1", EntityID: entityID, EntityType: "default",
@@ -117,7 +117,7 @@ func prepareFixedForkHistoryFixture(t *testing.T, selected agentFixtureFlowStore
 		flow + "/entities.yaml": declarations.String(),
 		flow + "/events.yaml":   eventSchema,
 	})
-	ctx := correlation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), runID)
+	ctx := originalStoreFixtureContext(t, correlation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), runID), selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: event.CreatedAt().Add(-time.Minute),
 		Artifact: bundle.SourceArtifact, BundleHash: bundle.SourceArtifact.BundleHash(),
