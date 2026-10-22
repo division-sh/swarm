@@ -35,6 +35,18 @@ func (u *SelectedDecisionCardControl) Close() error {
 	return u.err
 }
 
+// Startup must join before controls can start work, but dispatch may itself
+// wait for a control. Retirement and this handoff share the runtime mutex.
+func (r *selectedContractAgentRuntime) publishDecisionControlReadiness(ctx context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cancelExecution == nil || ctx.Err() != nil {
+		return worklifetime.ErrRetired
+	}
+	r.controlContext = ctx
+	return nil
+}
+
 func (o SelectedContractExecutionOwner) AcquireSelectedDecisionCardControl(ctx context.Context, runID string, operation runfork.SelectedControl) (*SelectedDecisionCardControl, bool, error) {
 	if ctx == nil {
 		return nil, false, fmt.Errorf("decision control requires its caller")
