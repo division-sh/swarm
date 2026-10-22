@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -13,8 +14,9 @@ import (
 )
 
 type activityFixtureJournal struct {
-	once  sync.Once
-	owner pipeline.ActivityAttemptJournal
+	once    sync.Once
+	owner   pipeline.ActivityAttemptJournal
+	binding processbinding.ActivityExecutionBinding
 }
 
 // Selected preparation must share the seeding owner's possession, rather than
@@ -48,7 +50,7 @@ func activityNativeJournalForFixture(t *testing.T, fixture authorActivityReceipt
 		t.Fatal("native activity fixture has no retained original role slot")
 	}
 	fixture.activityJournal.once.Do(func() {
-		fixture.activityJournal.owner = captureActivityFixtureJournal(fixture.activityOwner, testAuthorActivityContext(), fixture.store)
+		fixture.activityJournal.owner, fixture.activityJournal.binding = captureActivityFixtureJournalWithBinding(fixture.activityOwner, testAuthorActivityContext(), fixture.store)
 	})
 	return fixture.activityJournal.owner
 }
@@ -56,6 +58,12 @@ func activityNativeJournalForFixture(t *testing.T, fixture authorActivityReceipt
 // Reuse the fixture's original process/source owner, never a callback-time
 // lookup of a replacement or a role derived from the submitted attempt.
 func captureActivityFixtureJournal(t testing.TB, ctx context.Context, selected any) pipeline.ActivityAttemptJournal {
+	t.Helper()
+	journal, _ := captureActivityFixtureJournalWithBinding(t, ctx, selected)
+	return journal
+}
+
+func captureActivityFixtureJournalWithBinding(t testing.TB, ctx context.Context, selected any) (pipeline.ActivityAttemptJournal, processbinding.ActivityExecutionBinding) {
 	t.Helper()
 	fact, found := correlation.SourceArtifactFactFromContext(ctx)
 	if !found || fact.Validate() != nil {
@@ -100,5 +108,7 @@ func captureActivityFixtureJournal(t testing.TB, ctx context.Context, selected a
 	if err != nil {
 		t.Fatal(err)
 	}
-	return journal
+	return journal, processbinding.ActivityExecutionBinding{
+		Version: processbinding.ActivityExecutionBindingVersion, GrantID: evidence.GrantID, StateVersion: evidence.StateVersion,
+	}
 }
