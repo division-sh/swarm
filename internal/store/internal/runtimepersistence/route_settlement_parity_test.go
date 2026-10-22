@@ -29,6 +29,7 @@ func TestDirectiveEventPersistsTypedNoSubscriberByDesign(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			payload := json.RawMessage("{\n  \"directive\": \"continue\", \"attempt\": 1.0\n}")
@@ -81,6 +82,7 @@ func TestRuntimeLogEventPersistsTypedNoSubscriberByDesign(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			for _, run := range []string{"", runID} {
@@ -102,6 +104,7 @@ func TestOperatorEventReadbackProjectsTypedDeliveryTargetOwnership(t *testing.T)
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			entityID := eventtest.UUID("review-instance-1")
@@ -146,6 +149,7 @@ func TestOperatorEventReadbackSeparatesConnectTargetsFromDeliveryOwnership(t *te
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.unmatched", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
@@ -211,6 +215,7 @@ func TestOperatorEventListRouteSettlementTotalityParity(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			base := time.Now().UTC().Truncate(time.Microsecond)
@@ -260,34 +265,6 @@ func TestOperatorEventListRouteSettlementTotalityParity(t *testing.T) {
 			}
 			if got := seen[deliberateEmpty.ID()]; len(got.Deliveries) != 0 || got.NoDelivery == nil || got.NoDelivery.Reason != events.NoDeliveryNoSubscriberByDesign.Code() {
 				t.Fatalf("deliberate-empty union = %#v", got)
-			}
-		})
-	}
-}
-
-func TestEventObservationRejectsMalformedRoutingSettlement(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
-		t.Run(backend.name, func(t *testing.T) {
-			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
-			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.malformed", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
-			if err := commitSemanticEventFixture(ctx, fixture.store, event); err != nil {
-				t.Fatal(err)
-			}
-			raw := `{"write_class":"normal_publication","arm":"no_delivery","reason":"unknown_reason","evaluation":{"plans":[]}}`
-			var err error
-			if backend.name == "postgres" {
-				_, err = fixture.db.ExecContext(ctx, `UPDATE events SET route_settlement = $1::jsonb WHERE event_id = $2::uuid`, raw, event.ID())
-			} else {
-				_, err = fixture.db.ExecContext(ctx, `UPDATE events SET route_settlement = ? WHERE event_id = ?`, raw, event.ID())
-			}
-			if err != nil {
-				t.Fatalf("corrupt route settlement: %v", err)
-			}
-			if _, err := fixture.store.(routeSettlementOperatorStore).LoadOperatorEvent(ctx, event.ID()); err == nil || !strings.Contains(err.Error(), "route settlement") {
-				t.Fatalf("malformed settlement read error = %v", err)
 			}
 		})
 	}

@@ -133,6 +133,7 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 	cfg := testRuntimeConfig()
 	sourceArtifactFact := catalogSourceArtifactFact(t, bundle)
 	ctx := testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact)
+	ctx, capability := acquireCatalogRuntimeProcess(t, ctx, selected)
 	storetest.RequireBundleDataCatalog(t, ctx, selected, bundle)
 	deps := catalogSQLiteRuntimeDeps(
 		cfg,
@@ -149,7 +150,7 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 	if err != nil {
 		return nil, err
 	}
-	installCatalogRuntimeStartupGrant(t, ctx, selected, rt, false)
+	installCatalogRuntimeStartupGrant(t, ctx, capability, rt, false)
 	return rt, nil
 
 }
@@ -194,7 +195,7 @@ func startRuntimeForBootTest(t testing.TB, rt *runtime.Runtime) {
 }
 
 func startRuntimeAndReturnError(rt *runtime.Runtime) error {
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 2*time.Second)
+	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), rt.Options.SourceArtifactFact), 2*time.Second)
 	defer cancel()
 	if err := rt.Start(ctx); err != nil {
 		return err

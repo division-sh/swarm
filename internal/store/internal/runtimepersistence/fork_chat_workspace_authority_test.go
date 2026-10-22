@@ -55,7 +55,7 @@ func TestForkChatWorkspaceAuthorityBothStores(t *testing.T) {
 				t.Fatalf("executing workspace admission: current=%v err=%v", current, err)
 			}
 			settleForkChatPrelaunchFailure(t, ctx, handle, prepared, errors.New("pre-model refusal"), fixture.now.Add(time.Second))
-			if err := fixture.store.FailOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatFailureRequest{
+			if err := fixture.store.FailOperatorConversationForkChat(ctx, runfork.ConversationForkChatFailureRequest{
 				Prepared: prepared, Cause: errors.New("target refused"), Now: fixture.now.Add(2 * time.Second),
 			}); err != nil {
 				t.Fatal(err)

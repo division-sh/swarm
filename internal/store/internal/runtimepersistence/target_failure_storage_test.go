@@ -25,6 +25,7 @@ func TestTargetFailureStoragePreservesExactEventClassAndHandlerBothStores(t *tes
 				exactDeadLetterStore
 			})
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "storage.target", "runtime", "", []byte(`{}`), 0,
 				uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC))
 			if err := commitSemanticEventFixture(ctx, selected, event); err != nil {

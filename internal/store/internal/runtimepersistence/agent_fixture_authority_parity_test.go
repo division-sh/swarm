@@ -59,6 +59,7 @@ func TestAgentFixtureExactFlowAuthorityParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx, selected := newAgentFixtureAuthorityStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			runID := uuid.NewString()
 			ctx = runtimecorrelation.WithRunID(storeTestWorkContext(t, ctx), runID)
 			ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
@@ -480,6 +481,7 @@ func agentFixtureStaticRecord(t *testing.T, identity runtimeagentidentity.Identi
 
 func proveAgentFixtureMixedAuthorityRejection(t *testing.T, ctx context.Context, selected agentFixtureFlowStore) {
 	t.Helper()
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	staticIdentity := testAgentIdentity(t, "static-survivor", "global")
 	staticRecord := agentFixtureStaticRecord(t, staticIdentity)
 	if err := agentfixture.UpsertStatic(t, ctx, selected, staticRecord); err != nil {

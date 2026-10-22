@@ -21,10 +21,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// These statement/decoder units retain their independent relational oracles.
-// Run preconditions use real lifecycle writers and their canonical schema and
-// journals; this fragment does not claim full runtime-store admission.
-func bootstrapStatementRunSchema(t testing.TB, schema schemastore.SchemaBootstrapper, snapshot bool) {
+type StatementProcessFixtureForTest func(testing.TB, *sql.DB, bool, schemastore.SchemaBootstrapRequest) context.Context
+
+func statementRunSchemaRequest(t testing.TB, snapshot bool) schemastore.SchemaBootstrapRequest {
 	t.Helper()
 	spec, err := contracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "..", "..", "platform-spec.yaml"))
 	if err != nil {
@@ -37,7 +36,7 @@ func bootstrapStatementRunSchema(t testing.TB, schema schemastore.SchemaBootstra
 	var selected []schemastore.SchemaTableDDL
 	for _, plan := range plans {
 		switch plan.TableName {
-		case "runtime_store_metadata", "runs", "source_artifacts", "author_activity_order", "author_activity_occurrences",
+		case "runtime_store_metadata", "runtime_process_generation", "runs", "source_artifacts", "author_activity_order", "author_activity_occurrences",
 			"run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions":
 			selected = append(selected, plan)
 		case "events", "entity_state", "standing_services", "standing_service_generations":
@@ -46,26 +45,17 @@ func bootstrapStatementRunSchema(t testing.TB, schema schemastore.SchemaBootstra
 			}
 		}
 	}
-	want := 8
-	if snapshot {
-		want += 4
-	}
-	if len(selected) != want {
-		t.Fatalf("statement run fixture plans=%d, want %d", len(selected), want)
-	}
-	if err := schema.BootstrapSchema(context.Background(), schemastore.SchemaBootstrapRequest{
+	return schemastore.SchemaBootstrapRequest{
 		PlatformPlans: selected,
 		Origin:        schemastore.RuntimeStoreOrigin{SwarmVersion: "native-statement-run-proof", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()},
-	}); err != nil {
-		t.Fatal(err)
 	}
 }
 
-func requireStatementRun(t testing.TB, owner runlifecycle.OperationOwner, artifact interface {
+func requireStatementRun(t testing.TB, ctx context.Context, owner runlifecycle.OperationOwner, artifact interface {
 	EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
 }, ids ...string) {
 	t.Helper()
-	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
 	if _, err := artifact.EnsureSourceArtifact(ctx, sourceartifactfixture.Artifact()); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +68,7 @@ func requireStatementRun(t testing.TB, owner runlifecycle.OperationOwner, artifa
 	}
 }
 
-func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, snapshot bool, ids ...string) runlifecycle.OperationOwner {
+func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, snapshot bool, prepare StatementProcessFixtureForTest, ids ...string) (runlifecycle.OperationOwner, context.Context) {
 	t.Helper()
 	backend, err := sqlitebackend.New(db)
 	if err != nil {
@@ -88,7 +78,11 @@ func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, snapshot bool, ids
 	if err != nil {
 		t.Fatal(err)
 	}
-	bootstrapStatementRunSchema(t, schema, snapshot)
+	request := statementRunSchemaRequest(t, snapshot)
+	if err := schema.BootstrapSchema(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	ctx := prepare(t, db, false, request)
 	owner, err := runstore.NewSQLite(backend, schema.RequireCurrent, runhandoff.NewCandidateCoordinator(), time.Now)
 	if err != nil {
 		t.Fatal(err)
@@ -97,11 +91,11 @@ func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, snapshot bool, ids
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireStatementRun(t, owner, artifacts, ids...)
-	return owner
+	requireStatementRun(t, ctx, owner, artifacts, ids...)
+	return owner, ctx
 }
 
-func materializePostgresStatementRuns(t testing.TB, db *sql.DB, snapshot bool, ids ...string) runlifecycle.OperationOwner {
+func materializePostgresStatementRuns(t testing.TB, db *sql.DB, snapshot bool, prepare StatementProcessFixtureForTest, ids ...string) (runlifecycle.OperationOwner, context.Context) {
 	t.Helper()
 	backend, err := postgresbackend.New(db)
 	if err != nil {
@@ -111,7 +105,11 @@ func materializePostgresStatementRuns(t testing.TB, db *sql.DB, snapshot bool, i
 	if err != nil {
 		t.Fatal(err)
 	}
-	bootstrapStatementRunSchema(t, schema, snapshot)
+	request := statementRunSchemaRequest(t, snapshot)
+	if err := schema.BootstrapSchema(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	ctx := prepare(t, db, true, request)
 	owner, err := runstore.NewPostgres(backend, schema.RequireCurrent, runhandoff.NewCandidateCoordinator())
 	if err != nil {
 		t.Fatal(err)
@@ -120,6 +118,6 @@ func materializePostgresStatementRuns(t testing.TB, db *sql.DB, snapshot bool, i
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireStatementRun(t, owner, artifacts, ids...)
-	return owner
+	requireStatementRun(t, ctx, owner, artifacts, ids...)
+	return owner, ctx
 }

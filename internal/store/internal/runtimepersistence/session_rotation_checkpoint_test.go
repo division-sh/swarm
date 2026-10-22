@@ -30,6 +30,7 @@ func TestSelectedRotationCheckpointIsAcquiredBaseBothStores(t *testing.T) {
 				identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "checkpoint-agent", "support/instance-1"))
 				seedTestAgentRow(t, testAuthorActivityContext(), selected.db, selected.postgres, identity, "active")
 				ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+				ctx = originalStoreFixtureContext(t, ctx, selected.selected)
 				store := selected.selected.(interface {
 					sessions.Registry
 					runtimellm.LiveSessionAcquirer
@@ -132,6 +133,7 @@ func TestSelectedTurnRotationCheckpointReachesManagedHTTPBothStores(t *testing.T
 		conversation := managedConsumerWithRuntime(t, fixture, settlement, runtime)
 		conversation.SetToolExecutor(blockedProviderNoTools{})
 		ctx := runtimeeffects.WithLifecycleToken(runtimedelivery.WithClaim(testAuthorActivityContext(), fixture.origin), fixture.authority.Normal)
+		ctx = originalStoreFixtureContext(t, ctx, store)
 		ctx = managedExecutionStoreTestContext(t, ctx)
 		ctx = storeTestWorkContext(t, ctx)
 		workFixture, _ := storeTestWorkFixtures.Load(t)

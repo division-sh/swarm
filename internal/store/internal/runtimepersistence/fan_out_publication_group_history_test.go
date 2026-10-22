@@ -426,6 +426,7 @@ func seedFanOutGroupHistoryFixture(t *testing.T, backend string, count int) (*fa
 	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 25*time.Second)
 	t.Cleanup(cancel)
 	raw, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+	ctx = originalStoreFixtureContext(t, ctx, raw)
 	artifact, bundle := fanOutMixedRouteSource(t)
 	seed := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, raw, postgres, count, time.Now().UTC().Truncate(time.Microsecond), artifact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, seed.bundleHash))

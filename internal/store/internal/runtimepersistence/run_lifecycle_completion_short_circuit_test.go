@@ -21,7 +21,7 @@ func TestCompletionPendingPipelineDefersOnlyUnusedFanOutFoldBothStores(t *testin
 		for _, session := range []string{"none", "exact_expiry", "foreign_expiry"} {
 			t.Run(backend+"/"+session, func(t *testing.T) {
 				fixture := openRunLifecycleCandidateParityFixture(t, backend)
-				ctx := testAuthorActivitySourceArtifactContext()
+				ctx := originalStoreFixtureContext(t, testAuthorActivitySourceArtifactContext(), fixture.store)
 				fan, eventID, original := seedCompletionShortCircuitFanOut(t, fixture, ctx)
 				catalog := completionShortCircuitCatalog()
 				selectedNow := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
@@ -127,7 +127,7 @@ func TestCompletionPendingPipelineStillAdvancesFanOutBarriersBothStores(t *testi
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
-			ctx := testAuthorActivitySourceArtifactContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivitySourceArtifactContext(), fixture.store)
 			fan, eventID, original := seedCompletionShortCircuitFanOut(t, fixture, ctx)
 			seedFanOutDeliveryBarrier(t, ctx, fixture.db, fan, fan.createdAt)
 			writeCompletionShortCircuitSettlement(t, fixture, ctx, eventID, corruptCompletionShortCircuitSettlement(t, original))

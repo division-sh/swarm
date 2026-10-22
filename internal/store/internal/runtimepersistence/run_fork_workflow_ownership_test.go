@@ -268,6 +268,7 @@ func forkWorkflowOwnershipRequest(t *testing.T, fixture authorActivityReceiptFix
 func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorActivityReceiptFixture, postgres, seedDelivery bool) (context.Context, runforkreadiness.MaterializeRequest) {
 	t.Helper()
 	ctx := managedExecutionStoreTestContext(t, testAuthorActivityContext())
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{{Path: "sink", Policy: canonicalrouting.ForkReceiverOptionalAbsent}}, false), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {

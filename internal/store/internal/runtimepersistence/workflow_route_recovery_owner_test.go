@@ -49,7 +49,7 @@ func TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores(t *testing.T) 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, db := tc.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			retiredRunID := uuid.NewString()
 			currentRunID := uuid.NewString()
 			ambiguousRunID := uuid.NewString()
@@ -149,7 +149,7 @@ func TestEntityStateSchemaRequiresExplicitNonblankEntityContractOnBothStores(t *
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, db := tc.open(t)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			runID := uuid.NewString()
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 				Origin: storetest.ScenarioSetupOrigin(), RunID: runID, State: runtimerunlifecycle.StateRunning,

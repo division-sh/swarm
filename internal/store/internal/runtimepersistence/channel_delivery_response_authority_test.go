@@ -15,6 +15,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	"github.com/google/uuid"
@@ -22,13 +23,12 @@ import (
 
 // These are effect-owner fixtures, not public writer/ingress proof. Each
 // response variant retains a different settled intent on the same receipt path.
-func proveChannelResponseReceiptMatrix(t *testing.T, selected selectedChannelDeliveryTestStore,
+func proveChannelResponseReceiptMatrix(t *testing.T, ctx context.Context, selected selectedChannelDeliveryTestStore,
 	runTx func(func(context.Context, *sql.Tx) error) error, current func(runtimeeffects.Authority) bool,
 	template runtimeeffects.Authority, text operatorchannel.InboundText, postgres bool) {
 	t.Helper()
 	for _, family := range []string{"entry", "teaching", "chooser", "navigation"} {
 		t.Run(family, func(t *testing.T) {
-			ctx := context.Background()
 			text.PublicationID, text.ProviderEventID = uuid.NewString(), uuid.NewString()
 			var deliveryID string
 			intentTable := "operator_channel_text_intents"
@@ -108,9 +108,9 @@ func proveChannelResponseReceiptMatrix(t *testing.T, selected selectedChannelDel
 				t.Fatal("first send with missing predecessor admitted")
 			}
 			t.Run("initial", func(t *testing.T) {
-				proveResponseAuthorityNegatives(t, selected, runTx, current, authority, intentTable, text.PublicationID)
+				proveResponseAuthorityNegatives(t, ctx, selected, runTx, current, authority, intentTable, text.PublicationID)
 			})
-			effectCtx, handle := authorizeResponseTestEffect(t, selected, authority)
+			effectCtx, handle := authorizeResponseTestEffect(t, ctx, selected, authority)
 			if err := handle.MarkLaunched(effectCtx); err != nil {
 				t.Fatal(err)
 			}
@@ -142,9 +142,9 @@ func proveChannelResponseReceiptMatrix(t *testing.T, selected selectedChannelDel
 				t.Fatal("exact sent predecessor from previous render cannot authorize response edit")
 			}
 			t.Run("edit", func(t *testing.T) {
-				proveResponseAuthorityNegatives(t, selected, runTx, current, edit, intentTable, text.PublicationID)
+				proveResponseAuthorityNegatives(t, ctx, selected, runTx, current, edit, intentTable, text.PublicationID)
 			})
-			editCtx, editHandle := authorizeResponseTestEffect(t, selected, edit)
+			editCtx, editHandle := authorizeResponseTestEffect(t, ctx, selected, edit)
 			competing := edit
 			competing.ID = uuid.NewString()
 			competing.ChannelDelivery.EffectOperationID = competing.ID
@@ -206,10 +206,11 @@ func responseTestAuthority(t *testing.T, template runtimeeffects.Authority, deli
 	return template
 }
 
-func authorizeResponseTestEffect(t *testing.T, selected selectedChannelDeliveryTestStore, authority runtimeeffects.Authority) (context.Context, *runtimeeffects.Handle) {
+func authorizeResponseTestEffect(t *testing.T, original context.Context, selected selectedChannelDeliveryTestStore, authority runtimeeffects.Authority) (context.Context, *runtimeeffects.Handle) {
 	t.Helper()
 	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContextForBundle(authority.ChannelDelivery.BundleHash), authority),
 		runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
+	ctx = startupownership.CarryMutationAuthority(ctx, original)
 	handle, err := runtimeeffects.BeginChannelDelivery(ctx, []byte(authority.ID), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -217,7 +218,7 @@ func authorizeResponseTestEffect(t *testing.T, selected selectedChannelDeliveryT
 	return ctx, handle
 }
 
-func proveResponseAuthorityNegatives(t *testing.T, selected selectedChannelDeliveryTestStore,
+func proveResponseAuthorityNegatives(t *testing.T, original context.Context, selected selectedChannelDeliveryTestStore,
 	runTx func(func(context.Context, *sql.Tx) error) error, current func(runtimeeffects.Authority) bool,
 	edit runtimeeffects.Authority, intentTable, publicationID string) {
 	t.Helper()
@@ -253,6 +254,7 @@ func proveResponseAuthorityNegatives(t *testing.T, selected selectedChannelDeliv
 				t.Fatal("contradictory response authority admitted")
 			}
 			ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContextForBundle(edit.ChannelDelivery.BundleHash), foreign), runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
+			ctx = startupownership.CarryMutationAuthority(ctx, original)
 			if _, err := runtimeeffects.BeginChannelDelivery(ctx, []byte("forbidden edit"), nil); err == nil {
 				t.Fatal("contradictory response acquired managed authorization")
 			}

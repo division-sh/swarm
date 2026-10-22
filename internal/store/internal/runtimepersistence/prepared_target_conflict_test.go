@@ -16,6 +16,7 @@ func TestPreparedTargetConflictUsesOriginalWriterAndReadBothStores(t *testing.T)
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/one", EntityID: uuid.NewString()}.Normalized()
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "prepared.target.fixture", "runtime", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 			original := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("original")), Target: events.MustExistingEntityTarget(target)}

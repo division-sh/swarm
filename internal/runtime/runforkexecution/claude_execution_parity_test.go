@@ -22,6 +22,7 @@ import (
 
 func seedSelectedClaudeExecutionSource(t *testing.T, ctx context.Context, selected startupownership.Store, loaded LoadedSelectedContractSource, runID, eventID string, at time.Time) {
 	t.Helper()
+	ctx = originalSelectedFixtureContext(t, ctx, selected)
 	seedSelectedAgentExecutionSource(t, ctx, selected, loaded, runID, eventID, at, executionmode.Live)
 }
 

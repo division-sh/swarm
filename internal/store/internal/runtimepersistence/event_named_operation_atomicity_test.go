@@ -82,6 +82,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				t.Run("rollback_"+failure.name, func(t *testing.T) {
 					fixture := backend.open(t)
 					ctx := testAuthorActivityContext()
+					ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 					withSource := failure.name != "lineage"
 					req := newSelectedForkAtomicityRequest(t, ctx, fixture, withSource)
 					failure.mutate(&req)
@@ -96,6 +97,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 			t.Run("exact_duplicate_stops_whole_operation", func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				store := fixture.store.(eventRecordContractStore)
 				req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
 				req.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, req.Commit.Event.Event().RunID(), "worker", "fixture/worker")}
@@ -150,6 +152,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 func TestCommitSelectedForkEventHostileRepeatPostgres(t *testing.T) {
 	fixture := openPostgresAuthorActivityReceiptFixture(t)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	store := fixture.store.(eventRecordContractStore)
 	req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
 	req.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, req.Commit.Event.Event().RunID(), "worker", "fixture/worker")}
@@ -199,6 +202,7 @@ func TestCommitSelectedForkEventHostileRepeatPostgres(t *testing.T) {
 func TestSQLiteCommitSelectedForkEventSerializesWithClaimAbandonment(t *testing.T) {
 	fixture := openSQLiteAuthorActivityReceiptFixture(t)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	selected := fixture.store.(*SQLiteRuntimeStore)
 	owner := selected.PipelineObligations()
 	req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)

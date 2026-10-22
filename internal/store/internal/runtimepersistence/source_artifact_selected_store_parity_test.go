@@ -97,6 +97,7 @@ func TestSourceArtifactStartupIntegrityParityPreservesRunHistory(t *testing.T) {
 				placeholder = "$1"
 			}
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			for i, condition := range []string{"valid", "missing", "corrupt", "hash mismatch"} {
 				t.Run(condition, func(t *testing.T) {
 					root := t.TempDir()
@@ -198,6 +199,7 @@ func TestSourceArtifactSelectedStoreParity(t *testing.T) {
 		t.Run(fixture.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			selected, db := fixture.open(t)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 
 			first, err := selected.EnsureSourceArtifact(ctx, artifact)
 			if err != nil || !first.Created || first.Artifact.BundleHash != artifact.BundleHash() {

@@ -109,9 +109,9 @@ func mutateRunForkSessionExcludedColumns(t *testing.T, db *sql.DB, runID, sessio
 	}
 }
 
-func exerciseRunForkSessionExcludedWriters(t *testing.T, store *PostgresStore, runID, agentID, sessionID string) {
+func exerciseRunForkSessionExcludedWriters(t *testing.T, ctx context.Context, store *PostgresStore, runID, agentID, sessionID string) {
 	t.Helper()
-	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
 	identity := testAgentMemoryIdentity(t, runID, agentID, runForkRevisionFlowInstance)
 	lease, _, err := store.AcquireLiveSession(ctx, identity, "revision-writer")
 	if err != nil {

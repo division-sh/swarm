@@ -38,6 +38,11 @@ func TestW5ToolsPinnedModuleRunsThroughSelectedForkBothStores(t *testing.T) {
 				selected, capabilityStore, owner = s, s, selectedContractExecutionOwnerForTest(t, s)
 			}
 			ctx := runForkTestContext(t)
+			capability := selectedContractTestProcessCapability(t, ctx, capabilityStore)
+			ctx, bindErr := startupownership.WithProcessMutationAuthority(ctx, capability)
+			if bindErr != nil {
+				t.Fatal(bindErr)
+			}
 			repo := runForkExecutionRepoRoot(t)
 			root := filepath.Join(t.TempDir(), "contracts")
 			if err := os.CopyFS(root, os.DirFS(filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"))); err != nil {
@@ -78,7 +83,7 @@ func TestW5ToolsPinnedModuleRunsThroughSelectedForkBothStores(t *testing.T) {
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-				AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: selectedContractTestProcessCapability(t, ctx, capabilityStore)},
+				AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: capability},
 			})
 			if err != nil {
 				t.Fatalf("selected module execution: %v", err)

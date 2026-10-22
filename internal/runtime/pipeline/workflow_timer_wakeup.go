@@ -91,14 +91,14 @@ func (l *WorkflowTimerLifecycle) handleWakeup(ctx context.Context, wakeup Workfl
 	if outcome == WorkflowTimerFireRetry {
 		// Only an uncommitted occurrence retries via the active timer selector.
 		// A published occurrence remains reachable through its pipeline obligation.
-		l.startWakeupRecovery(wakeup.Occurrence().Activation)
+		l.startWakeupRecovery(callbackCtx, wakeup.Occurrence().Activation)
 		return
 	}
 	if outcome == WorkflowTimerFireCommitted && recurrenceCommitted {
 		ref := wakeup.Occurrence().Activation
 		if err := l.ReconcileWakeup(context.WithoutCancel(callbackCtx), ref); err != nil {
 			l.logFailure(callbackCtx, "workflow_timer_recurrence_reconcile_failed", ref, err)
-			l.startWakeupRecovery(ref)
+			l.startWakeupRecovery(callbackCtx, ref)
 		}
 	}
 }

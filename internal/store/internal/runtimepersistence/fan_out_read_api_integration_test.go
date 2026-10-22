@@ -22,6 +22,7 @@ func TestFanOutReadAPILiveSelectedStores(t *testing.T) {
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 20*time.Second)
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 64, time.Now().UTC())
 			process, grants, occurrences, _ := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{fixture})
 			executor := &captureFanOutExecutor{turns: make(chan capturedFanOutTurn, 1), errors: make(chan error, 8), done: make(chan struct{})}
@@ -90,7 +91,7 @@ func TestFanOutReadAPILiveSelectedStores(t *testing.T) {
 			control := selected.(interface {
 				PauseRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
 			})
-			if outcome, err := control.PauseRunControlOutcome(testAuthorActivityContextForBundle(fixture.bundleHash), runcontrol.TransitionRequest{
+			if outcome, err := control.PauseRunControlOutcome(startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(fixture.bundleHash), ctx), runcontrol.TransitionRequest{
 				RunID: fixture.runID, Now: time.Now().UTC(), Reason: "read-api-proof", ControlledBy: "test",
 			}); err != nil || !outcome.Acknowledged {
 				t.Fatalf("pause outcome=%+v err=%v", outcome, err)

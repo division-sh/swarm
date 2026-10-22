@@ -76,6 +76,7 @@ func TestIssue2589StagedEventFixturesMaintainPhysicalCountersBothStores(t *testi
 	eachExactFactStore(t, func(t *testing.T, s exactFactStore) {
 		f := newExactFactFixture(t, s)
 		ctx := testAuthorActivityContext()
+		ctx = originalStoreFixtureContext(t, ctx, s.selected)
 		dialect := authoractivity.DialectSQLite
 		if s.postgres {
 			dialect = authoractivity.DialectPostgres

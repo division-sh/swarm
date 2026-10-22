@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
@@ -382,6 +383,7 @@ func TestSelectedCanceledOriginRecoveryCommitsReactionBothStores(t *testing.T) {
 			selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			f := newSelectedProviderCompletionFixture(t, selected, db, sqlite)
 			ctx := testAuthorActivityContextForBundle(f.request.DeclarationPlan.BundleHash)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			issued, err := selected.IssueRunForkSelectedContractRuntimeExecution(ctx, f.request)
 			if err != nil {
 				t.Fatal(err)
@@ -409,7 +411,12 @@ func TestSelectedCanceledOriginRecoveryCommitsReactionBothStores(t *testing.T) {
 			if err := f.process.Release(ctx); err != nil {
 				t.Fatal(err)
 			}
-			process, err := selectedPreparationProcessForTest(t, selected).Evidence()
+			recoveryProcess := selectedPreparationProcessForTest(t, selected)
+			process, err := recoveryProcess.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err = startupownership.WithProcessMutationAuthority(testAuthorActivityContextForBundle(f.request.DeclarationPlan.BundleHash), recoveryProcess)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -554,7 +561,12 @@ func TestSelectedCanceledOriginRecoveryRetainsPendingIntentBothStores(t *testing
 			if err := f.process.Release(ctx); err != nil {
 				t.Fatal(err)
 			}
-			process, err := selectedPreparationProcessForTest(t, selected).Evidence()
+			recoveryProcess := selectedPreparationProcessForTest(t, selected)
+			process, err := recoveryProcess.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err = startupownership.WithProcessMutationAuthority(testAuthorActivityContextForBundle(f.request.DeclarationPlan.BundleHash), recoveryProcess)
 			if err != nil {
 				t.Fatal(err)
 			}

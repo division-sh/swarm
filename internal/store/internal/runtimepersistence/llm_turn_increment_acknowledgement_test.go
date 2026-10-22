@@ -30,6 +30,7 @@ func TestSessionTurnIncrementAcknowledgesPostcommitHandoffAndSurvivesRestartBoth
 			}
 			fixture := newCompletionSettlementFixture(t, store, db, sqlite)
 			ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			identity := fixture.authority.Target.AgentIdentity
 			bundleHash := releaseTestBundleHash(t, ctx, db, sqlite, identity.RunID)
 			injected := errors.New("injected session turn postcommit handoff failure")

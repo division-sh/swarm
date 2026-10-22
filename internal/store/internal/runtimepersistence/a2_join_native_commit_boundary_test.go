@@ -71,6 +71,7 @@ func TestA2JoinNativeCommitBoundaryOnBothStores(t *testing.T) {
 			t.Run(backend+"/"+cell, func(t *testing.T) {
 				selected, db, connector := newStopCommitStore(t, backend)
 				ctx, cancel := context.WithTimeout(storeTestWorkContext(t, testAuthorActivityContext()), time.Minute)
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				defer cancel()
 				fixture := seedA2NativeJoinFixture(t, ctx, backend, db, selected)
 				ctx = correlation.WithRunID(ctx, fixture.command.State.Identity.RunID)

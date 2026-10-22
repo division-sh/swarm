@@ -31,6 +31,7 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(activeRunDeliveryQuiescenceReadStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			now := time.Date(2026, 7, 22, 18, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
 			eventID := uuid.NewString()

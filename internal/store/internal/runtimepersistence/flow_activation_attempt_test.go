@@ -8,8 +8,10 @@ import (
 	"time"
 
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprocessbinding "github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -51,17 +53,21 @@ func TestFlowActivationAttemptBatchRetirementBothStores(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			hash := mustExternalStoreTestSourceArtifactFact().BundleHash()
-			requireReadinessRun(t, ctx, selected, runID, hash)
-			paths := []string{"account/batch-a", "account/batch-b"}
-			for _, path := range paths {
-				seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, hash)
-			}
 			acquire := runtimestartupownership.AcquireRequest{OwnerID: "flow-batch-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
 			process, err := selected.AcquireProcessCapability(ctx, acquire)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = process.Release(context.Background()) })
+			ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireReadinessRun(t, ctx, selected, runID, hash)
+			paths := []string{"account/batch-a", "account/batch-b"}
+			for _, path := range paths {
+				seedExactFlowInstanceDescriptorOwner(t, ctx, selected, runID, uuid.NewString(), path, hash)
+			}
 			sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -173,21 +179,27 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, db, sqlite := tc.open(t)
 			ctx := testAuthorActivityContext()
-			runID, path := uuid.NewString(), "account/attempt"
-			hash := mustExternalStoreTestSourceArtifactFact().BundleHash()
-			requireReadinessRun(t, ctx, selected, runID, hash)
-			seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, hash)
-			readiness, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
-			if err != nil || !found {
-				t.Fatalf("load readiness: found=%v err=%v", found, err)
-			}
-
 			acquire := runtimestartupownership.AcquireRequest{OwnerID: "flow-attempt-test", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
+			hash := mustExternalStoreTestSourceArtifactFact().BundleHash()
+			ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, acquire.RuntimeInstanceID)
+			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(acquire.RuntimeInstanceID, hash))
 			process, err := selected.AcquireProcessCapability(ctx, acquire)
 			if err != nil {
 				t.Fatalf("acquire process: %v", err)
 			}
 			t.Cleanup(func() { _ = process.Release(context.Background()) })
+			ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, process)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runID, path := uuid.NewString(), "account/attempt"
+			requireReadinessRun(t, ctx, selected, runID, hash)
+			seedExactFlowInstanceDescriptorOwner(t, ctx, selected, runID, uuid.NewString(), path, hash)
+			readiness, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
+			if err != nil || !found {
+				t.Fatalf("load readiness: found=%v err=%v", found, err)
+			}
+
 			sourceSet, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -374,11 +386,17 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 				t.Fatalf("release predecessor process: %v", err)
 			}
 			successorRequest := runtimestartupownership.AcquireRequest{OwnerID: "flow-attempt-successor", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
+			ctx = runtimecorrelation.WithRuntimeInstanceID(testAuthorActivityContext(), successorRequest.RuntimeInstanceID)
+			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(successorRequest.RuntimeInstanceID, hash))
 			successorProcess, err := selected.AcquireProcessCapability(ctx, successorRequest)
 			if err != nil {
 				t.Fatalf("acquire successor process: %v", err)
 			}
 			t.Cleanup(func() { _ = successorProcess.Release(context.Background()) })
+			ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, successorProcess)
+			if err != nil {
+				t.Fatal(err)
+			}
 			successorGrant, err := successorProcess.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{BundleHash: hash, RuntimeInstanceID: successorRequest.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: sourceSet.Revision})
 			if err != nil {
 				t.Fatalf("issue successor grant: %v", err)

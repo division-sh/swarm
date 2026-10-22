@@ -54,6 +54,7 @@ func TestLifecycleDiagnosticDisjointSourcesIgnoreAmbientAuthority(t *testing.T) 
 			}
 			// Caller facts name neither subject, and must not choose attribution or mode.
 			foreign := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(authorActivityTestBundleHash), uuid.NewString())
+			foreign = originalStoreFixtureContext(t, foreign, selected)
 			if _, err := projectDiagnosticTestBatch(foreign, selected, 100); err != nil {
 				t.Fatal(err)
 			}

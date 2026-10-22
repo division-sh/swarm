@@ -69,12 +69,17 @@ func newOperatorSnapshotFixture(t *testing.T, postgres bool) operatorSnapshotFix
 			t.Fatalf("concurrent fixture must use real WAL: mode=%q err=%v", mode, err)
 		}
 	}
-	// A helper escaping to the reader pool cannot silently get another connection.
-	db.SetMaxOpenConns(1)
+	// One retained process connection leaves exactly one reader connection;
+	// a helper escaping its snapshot still cannot get another connection.
+	db.SetMaxOpenConns(2)
 	db.SetMaxIdleConns(1)
 	writer.SetMaxOpenConns(1)
 	if err := writer.PingContext(ctx); err != nil {
 		t.Fatal(err)
+	}
+	ctx = originalStoreFixtureContext(t, ctx, f.store)
+	if inUse := db.Stats().InUse; inUse != 1 {
+		t.Fatalf("snapshot fixture retained connections = %d, want its one process owner", inUse)
 	}
 	runID := uuid.NewString()
 	seedAuthorActivityReceiptRun(t, f.authorActivityReceiptFixture, ctx, runID)
@@ -165,6 +170,7 @@ func TestOperatorEventSnapshotInterleavingBothStores(t *testing.T) {
 				f := newOperatorSnapshotFixture(t, postgres)
 				store := f.store.(routeSettlementOperatorStore)
 				ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 15*time.Second)
+				ctx = originalStoreFixtureContext(t, ctx, f.store)
 				defer cancel()
 				kind := "event"
 				if operation == "list" {
@@ -238,6 +244,7 @@ func TestOperatorEventSnapshotFailureReleaseBothStores(t *testing.T) {
 				for _, mode := range []string{"cancel", "read_failure", "commit_failure"} {
 					t.Run(operation+"/"+mode, func(t *testing.T) {
 						ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 15*time.Second)
+						ctx = originalStoreFixtureContext(t, ctx, f.store)
 						defer cancel()
 						kind, occurrence := "deadletter", 1
 						if operation == "list" {

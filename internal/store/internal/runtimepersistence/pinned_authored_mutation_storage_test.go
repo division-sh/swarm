@@ -17,6 +17,7 @@ func TestPinnedAuthoredMutationStoragePreservesExactSourceAndPhysicalBytesBothSt
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx, runID, otherRun := testAuthorActivityContext(), uuid.NewString(), uuid.NewString()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			for _, run := range []string{runID, otherRun} {
 				seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 			}

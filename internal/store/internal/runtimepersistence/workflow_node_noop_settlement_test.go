@@ -193,6 +193,7 @@ func TestSelectedWorkflowNodeNoopSettlementBothStores(t *testing.T) {
 					fixture = newSelectedCompletionFixture(t, admitTestPostgresStore(t, db), db, false)
 				}
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				store := fixture.store.(interface {
 					delivery.Store
 					selectedForkEventFixtureStore

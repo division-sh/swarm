@@ -149,7 +149,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 			entityID := uuid.NewString()
 			seedSelectedExecutionSourceRunWithPrimaryRoute(
 				t,
-				db,
+				pg,
 				sourceRunID,
 				entityID,
 				sourceEventID,
@@ -528,12 +528,13 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 				}
 				command := selectedExecutionSourceFlowCommand(t, ctx, loaded, event, child, test.eventName)
 				writeCtx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), sourceRunID)
+				writeCtx = originalSelectedFixtureContext(t, writeCtx, pg)
 				committed, err := pg.CommitFlowInstanceActivation(writeCtx, command)
 				if err != nil || !committed.Acknowledged || !committed.Created {
 					t.Fatalf("construct state-only joined receiver: %+v %v", committed, err)
 				}
 			} else if test.stateOnly {
-				seedSelectedExecutionStateOnlySourceRun(t, db, sourceRunID, sourceEventID, test.eventName, at, loaded.SourceArtifactFact)
+				seedSelectedExecutionStateOnlySourceRun(t, pg, sourceRunID, sourceEventID, test.eventName, at, loaded.SourceArtifactFact)
 			} else {
 				route := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", sourceRunID)
 				route.Target = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: sourceRunID, EntityID: sourceRunID})
@@ -762,6 +763,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		t.Fatalf("retired process refusal = %v", err)
 	}
 	assertNoSelectedContractExecutionMutationForSource(t, db, sourceRunID, sourceEventID)
+	ctx = runForkTestContext(t)
 	request.AgentRuntime.ProcessCapability = selectedContractTestProcessCapability(t, ctx, pg)
 	// A successor process gets a new owner; a retired owner's binding is immutable.
 	request.Owner = newSelectedContractExecutionOwnerForTest(t, pg)
@@ -1061,6 +1063,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	}
 	t.Cleanup(lease.Release)
 
+	ctx = originalSelectedFixtureContext(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID,
@@ -2765,6 +2768,7 @@ func (selectedForkStartupVisibleSurfaceProbe) ProbeStartupVisibleToolSurface(ctx
 func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.DB) selectedContractForkLocalRuntimeContainer {
 	t.Helper()
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx = originalSelectedFixtureContext(t, ctx, selected)
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -2915,6 +2919,10 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	effectCtx = runtimeeffects.WithController(effectCtx, liveTestEffectController(storetest.AdmitPostgresRuntimeStore(t, db)))
 	effectCtx = managedexecution.WithAdmission(effectCtx, container.admission)
 	effectCtx = managedcapabilities.WithContext(effectCtx, surface)
+	effectCtx, err = selectedFixtureEntryContext(effectCtx, container.req.Owner)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, definition := range executor.ToolDefinitionsForActorInContext(effectCtx, actor) {
 		if definition.Name == "compute_only" {
 			t.Fatal("module entered selected-fork tools/list")
@@ -3104,6 +3112,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	dsn, db, _ := testutil.StartPostgres(t)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	ctx = originalSelectedFixtureContext(t, ctx, selected)
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()
@@ -3131,6 +3140,11 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	`, bindingID, forkRunID, sourceRunID, revision, forkEventID, now); err != nil {
 		t.Fatalf("seed selected-contract container competition binding: %v", err)
 	}
+	seedProcess := selectedContractTestProcessCapability(t, ctx, selected)
+	if err := seedProcess.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ctx = runForkTestContext(t)
 
 	servedDB, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -3151,6 +3165,10 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	servedStore := storetest.AdmitPostgresRuntimeStore(t, servedDB)
 	standaloneStore := storetest.AdmitPostgresRuntimeStore(t, standaloneDB)
 	processCapability := selectedContractTestProcessCapability(t, ctx, servedStore)
+	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, processCapability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	fixtureValue, _ := runForkTestWorkFixtures.Load(t)
 	process := fixtureValue.(*runForkTestWorkFixture).process
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, servedStore)
@@ -3577,7 +3595,7 @@ func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntimeGateway: %v", err)
 	}
@@ -3632,7 +3650,7 @@ func TestStartSelectedContractAgentRuntimeGatewayDoesNotConsumeAmbientToken(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3914,6 +3932,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 
 func persistRunForkManagedTurn(t testing.TB, ctx context.Context, selected *store.PostgresStore, event events.Event, identity agentidentity.Identity, runID, sessionID, turnID, entityID string, at time.Time) {
 	t.Helper()
+	ctx = originalSelectedFixtureContext(t, ctx, selected)
 	storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 		Store: selected, Selected: selected, Identity: identity,
 		RunID: runID, SessionID: sessionID, TurnID: turnID, Memory: agentmemory.Plan{Enabled: true},
@@ -4027,6 +4046,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	ctx = originalSelectedFixtureContext(t, ctx, pg)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4521,6 +4541,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	ctx = originalSelectedFixtureContext(t, ctx, pg)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -5138,6 +5159,7 @@ func materializeSelectedExecutionForkForTest(
 	sourceEventID string,
 ) runfork.RunForkMaterialization {
 	t.Helper()
+	ctx = originalSelectedFixtureContext(t, ctx, pg)
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: sourceEventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
@@ -5304,7 +5326,7 @@ func selectedExecutionFixtureAgentConfig(t testing.TB, identity agentidentity.Id
 
 func seedSelectedExecutionStateOnlySourceRun(
 	t *testing.T,
-	db *sql.DB,
+	selected *store.PostgresStore,
 	sourceRunID, sourceEventID, eventName string,
 	at time.Time,
 	sourceFacts ...runtimecorrelation.SourceArtifactFact,
@@ -5320,8 +5342,12 @@ func seedSelectedExecutionStateOnlySourceRun(
 		ctx,
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()),
 	)
+	db := storetest.Database(selected)
 	admitSelectedExecutionSourceArtifact(t, ctx, db, sourceFact.BundleHash())
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, selectedContractTestProcessCapability(t, ctx, selected))
+	if err != nil {
+		t.Fatal(err)
+	}
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: sourceFact.BundleHash(),
 	})
@@ -5350,7 +5376,7 @@ func selectedExecutionEntitylessNodeRoute(nodeID string) events.DeliveryRoute {
 
 func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	t *testing.T,
-	db *sql.DB,
+	selected *store.PostgresStore,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
 	entityType string,
@@ -5363,7 +5389,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	routingSource := events.NoRoutingSource()
 	envelope := events.EventEnvelope{}
 	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
-		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
+		t, selected, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
 		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, selectedExecutionInputFixture{}, sourceFacts...,
 	)
 }
@@ -5375,7 +5401,7 @@ type selectedExecutionInputFixture struct {
 
 func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	t *testing.T,
-	db *sql.DB,
+	selected *store.PostgresStore,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
 	entityType string,
@@ -5402,12 +5428,13 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		ctx,
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()),
 	)
+	db := storetest.Database(selected)
 	admitSelectedExecutionSourceArtifact(t, ctx, db, sourceFact.BundleHash())
 	payload, _ := json.Marshal(map[string]any{"entity_id": entityID})
 	if len(input.payload) != 0 {
 		payload = input.payload
 	}
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	ctx = originalSelectedFixtureContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: sourceFact.BundleHash(),
 	})
@@ -5518,7 +5545,7 @@ func seedSourceOutcomeThatMustNotSuppressFork(t *testing.T, db *sql.DB, sourceEv
 
 func seedSelectedExecutionDiagnosticPlatformDeadLetter(t *testing.T, db *sql.DB, sourceRunID, diagnosticEventID string, at time.Time) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := originalSelectedFixtureContext(t, runForkTestContext(t), storetest.AdmitPostgresRuntimeStore(t, db))
 	payload, _ := json.Marshal(map[string]any{
 		"level":   "info",
 		"message": "diagnostic platform row must remain lineage-only",
@@ -5561,7 +5588,8 @@ func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sour
 
 func seedSelectedExecutionPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, entityID string, at time.Time) {
 	t.Helper()
-	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, authoractivityfixture.DialectPostgres, sourceEventID, sourceRunID, "source.after",
+	ctx := originalSelectedFixtureContext(t, runForkTestContext(t), storetest.AdmitPostgresRuntimeStore(t, db))
+	storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, sourceEventID, sourceRunID, "source.after",
 		eventtest.Producer(events.EventProducerExternal, "source-runtime"), []byte(`{}`),
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
 }
@@ -5683,6 +5711,7 @@ func TestSelectedContractForkEventRejectsMissingOrInvalidHistoricalPayload(t *te
 
 func commitRunForkTestEvent(t testing.TB, ctx context.Context, pg *store.PostgresStore, event events.Event, routes []events.DeliveryRoute) {
 	t.Helper()
+	ctx = originalSelectedFixtureContext(t, ctx, pg)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, event, routes, runtimepipelineobligation.ScopeSubscribed)
 }
 

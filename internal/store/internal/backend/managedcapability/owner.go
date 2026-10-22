@@ -57,7 +57,7 @@ func (s *ManagedCapabilityPostgresOwner) SaveManagedCapabilitySurface(ctx contex
 	if err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.backend.RunAdmittedTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		_, err := InsertPostgres(txctx, tx, raw)
 		return err
 	})
@@ -67,7 +67,7 @@ func (s *ManagedCapabilitySQLiteOwner) SaveManagedCapabilitySurface(ctx context.
 	if s == nil || s.backend == nil {
 		return fmt.Errorf("sqlite store is required for managed capability persistence")
 	}
-	return s.backend.RunTransaction(ctx, "sqlite save managed capability surface", func(txctx context.Context, tx *sql.Tx) error {
+	return s.backend.RunAdmittedTransaction(ctx, "sqlite save managed capability surface", func(txctx context.Context, tx *sql.Tx) error {
 		raw, err := json.Marshal(surface)
 		if err != nil {
 			return err

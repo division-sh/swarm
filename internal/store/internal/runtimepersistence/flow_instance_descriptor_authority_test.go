@@ -58,11 +58,11 @@ func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T)
 			sourceB := sourceartifactfixture.FactFor(sourceBArtifact)
 			hashB := sourceB.BundleHash()
 			runA, runB := uuid.NewString(), uuid.NewString()
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runA, BundleHash: hashA})
 			storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runB, Artifact: sourceBArtifact})
-			seedExactFlowInstanceDescriptorOwner(t, store, runA, uuid.NewString(), "account/a", hashA)
-			seedExactFlowInstanceDescriptorOwner(t, store, runB, uuid.NewString(), "account/b", hashB)
+			seedExactFlowInstanceDescriptorOwner(t, ctx, store, runA, uuid.NewString(), "account/a", hashA)
+			seedExactFlowInstanceDescriptorOwner(t, ctx, store, runB, uuid.NewString(), "account/b", hashB)
 			setReadinessCoordinate(t, db, sqlite, runA, "account/a", "phase", time.Now().UTC())
 			projection, err := store.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceA)
 			if err != nil {
@@ -112,7 +112,7 @@ func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothSto
 			foreignArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  foreign: {}\n"))
 			foreign := sourceartifactfixture.FactFor(foreignArtifact)
 			foreignHash := foreign.BundleHash()
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			type seeded struct {
 				runID, path, planHash string
 				complete              bool
@@ -129,7 +129,7 @@ func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothSto
 				} else {
 					requireReadinessRun(t, ctx, selected, row.runID, currentHash)
 				}
-				seedExactFlowInstanceDescriptorOwner(t, selected, row.runID, uuid.NewString(), row.path, row.planHash)
+				seedExactFlowInstanceDescriptorOwner(t, ctx, selected, row.runID, uuid.NewString(), row.path, row.planHash)
 				if row.planHash == predecessorHash {
 					setReadinessRunSource(t, selected, ctx, row.runID, current, sourceartifactfixture.Artifact())
 				}
@@ -139,7 +139,7 @@ func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothSto
 			}
 			foreignRun := uuid.NewString()
 			requireReadinessRun(t, ctx, selected, foreignRun, foreignHash, foreignArtifact)
-			seedExactFlowInstanceDescriptorOwner(t, selected, foreignRun, uuid.NewString(), "account/foreign-malformed", foreignHash)
+			seedExactFlowInstanceDescriptorOwner(t, ctx, selected, foreignRun, uuid.NewString(), "account/foreign-malformed", foreignHash)
 			setReadinessPlanRaw(t, db, sqlite, foreignRun, "account/foreign-malformed", `{}`)
 
 			projection, err := selected.InspectDynamicFlowRuntimeReadinessForSource(ctx, current)
@@ -210,8 +210,9 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 					runID := uuid.NewString()
 					path := "account/guard-" + race + "-" + uuid.NewString()
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
+					ctx = originalStoreFixtureContext(t, ctx, selected)
 					requireReadinessRun(t, ctx, selected, runID, bundleHash)
-					seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, bundleHash)
+					seedExactFlowInstanceDescriptorOwner(t, ctx, selected, runID, uuid.NewString(), path, bundleHash)
 					observed, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
 					if err != nil || !found {
 						t.Fatalf("load observation: found=%v err=%v", found, err)
@@ -288,8 +289,9 @@ func TestDynamicFlowRuntimeReadinessRejectsABAObservationBothStores(t *testing.T
 			runID := uuid.NewString()
 			path := "account/aba-" + uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireReadinessRun(t, ctx, selected, runID, source.BundleHash())
-			seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, source.BundleHash())
+			seedExactFlowInstanceDescriptorOwner(t, ctx, selected, runID, uuid.NewString(), path, source.BundleHash())
 			load := func() runtimepipeline.DynamicFlowRuntimeReadiness {
 				t.Helper()
 				item, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
@@ -350,11 +352,12 @@ func TestDynamicFlowRuntimeReadinessPlanBatchIsAtomicBothStores(t *testing.T) {
 				t.Helper()
 				runID := uuid.NewString()
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				requireReadinessRun(t, ctx, selected, runID, bundleHash)
 				requests := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, 0, 2)
 				for index := range 2 {
 					path := fmt.Sprintf("account/%s-%d-%s", label, index, uuid.NewString())
-					seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, bundleHash)
+					seedExactFlowInstanceDescriptorOwner(t, ctx, selected, runID, uuid.NewString(), path, bundleHash)
 					observed, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
 					if err != nil || !found {
 						t.Fatalf("load batch observation %s: found=%v err=%v", path, found, err)
@@ -442,14 +445,15 @@ type nativeReadinessFixtureStore interface {
 }
 
 // These are prepared attachment-component fixtures, not public constructor eligibility proofs.
-func seedExactFlowInstanceDescriptorOwner(t *testing.T, selected nativeReadinessFixtureStore, runID, entityID, instancePath, bundleHash string) {
+func seedExactFlowInstanceDescriptorOwner(t *testing.T, ctx context.Context, selected nativeReadinessFixtureStore, runID, entityID, instancePath, bundleHash string) {
 	t.Helper()
 	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(testAuthorActivityContext(), runID), fact)
+	ctx = runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, runID), fact)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("11111111-1111-1111-1111-111111111111", bundleHash))
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	rootOwner := runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(".", runID, runID)}
 	root, found, err := selected.LoadWorkflowInstance(ctx, rootOwner)
 	if err != nil {

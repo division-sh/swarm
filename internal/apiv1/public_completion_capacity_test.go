@@ -150,7 +150,7 @@ func TestPublicCompletionCapacityNativeMixedBothStores(t *testing.T) {
 		})
 		for range 2 {
 			options := runStartTestEventBusOptions(source)
-			options.RuntimeInstanceID = uuid.NewString()
+			options.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 			owner, err := process.NewRuntime(t.Context(), worklifetime.RuntimeIdentity{RuntimeInstanceID: options.RuntimeInstanceID, BundleHash: hash})
 			if err != nil {
 				t.Fatal(err)

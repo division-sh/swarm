@@ -11,6 +11,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -20,6 +21,7 @@ func TestSelectedSameOwnerReplacementFencesEverySessionWriterBothStores(t *testi
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "grant-agent", "support/instance-1"))
 		seedTestAgentRow(t, testAuthorActivityContext(), selected.db, selected.postgres, identity, "active")
 		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		ctx = originalStoreFixtureContext(t, ctx, selected.selected)
 		store := selected.selected.(interface {
 			sessions.Registry
 			runtimellm.ConversationPersistence
@@ -259,6 +261,8 @@ func TestPostgresSessionAcquireChecksExpiryAfterRowLock(t *testing.T) {
 		t.Fatal("selected store has no session registry")
 	}
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+	ctx = startupownership.CarryMutationAuthority(ctx, fixture.original)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	identity := agentmemory.Identity(fixture.authority.Normal.Identity)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -333,6 +337,7 @@ func TestSelectedLeaseHeartbeatCannotRenewReplacementBothStores(t *testing.T) {
 				identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "grant-agent", "support/instance-1"))
 				seedTestAgentRow(t, testAuthorActivityContext(), selected.db, selected.postgres, identity, "active")
 				ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+				ctx = originalStoreFixtureContext(t, ctx, selected.selected)
 				registry, ok := selected.selected.(sessions.Registry)
 				if !ok {
 					t.Fatal("selected store has no session registry")

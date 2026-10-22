@@ -14,17 +14,17 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/google/uuid"
 )
 
 // This controls retirement between a refused mutation and its terminal write;
 // the chooser itself is produced by the normal selected-store owners.
-func proveUnsupportedChooserRetirement(t *testing.T, cards decisioncard.Store, selected selectedChannelDeliveryTestStore,
+func proveUnsupportedChooserRetirement(t *testing.T, ctx context.Context, cards decisioncard.Store, selected selectedChannelDeliveryTestStore,
 	runTx func(func(context.Context, *sql.Tx) error) error, authority runtimeeffects.Authority,
 	card decisioncard.Card, text operatorchannel.InboundText, now time.Time, postgres bool) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
 	delivery := cards.(render.Store)
 	deliver := func(id string, messageID int) render.PreparedRender {
 		t.Helper()
@@ -42,7 +42,7 @@ func proveUnsupportedChooserRetirement(t *testing.T, cards decisioncard.Store, s
 		copy.ChannelDelivery.RenderID = prepared.RenderID
 		copy.ChannelDelivery.RenderHash = prepared.Frozen.Hash
 		effectCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(
-			testAuthorActivityContextForBundle(copy.ChannelDelivery.BundleHash), copy),
+			startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(copy.ChannelDelivery.BundleHash), ctx), copy),
 			runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
 		handle, err := runtimeeffects.BeginChannelDelivery(effectCtx, []byte(id), nil)
 		if err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -26,6 +27,11 @@ func TestWorkflowFinalInitialTimersRemainUnarmedAcrossRestartBothStores(t *testi
 				runID := uuid.NewString()
 				entityID := flowidentity.EntityID(runID)
 				ctx := testAuthorActivityContext(t, context.Background())
+				ctx = originalPipelineFixtureContext(t, ctx, selected)
+				original, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+				if err != nil {
+					t.Fatal(err)
+				}
 				storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
 				ctx = withLiveGateExecution(correlation.WithRunID(ctx, runID))
 				var finals []string
@@ -134,10 +140,14 @@ func TestWorkflowFinalInitialTimersRemainUnarmedAcrossRestartBothStores(t *testi
 					}
 					stop()
 					if generation == 0 {
+						if err := original.Release(context.Background()); err != nil {
+							t.Fatal(err)
+						}
 						if err := closeStore(); err != nil {
 							t.Fatal(err)
 						}
 						selected = reopen()
+						ctx = originalPipelineFixtureContext(t, withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)), selected)
 					}
 				}
 			})

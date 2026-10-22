@@ -36,11 +36,12 @@ func rotationLeaseWithIdentity(lease *sessions.Lease, identity agentmemory.Ident
 
 func TestSelectedManagedRotationRequiresLifecycleAuthorityBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		original := originalStoreFixtureContext(t, testAuthorActivityContext(), selected.selected)
 		fixture := newExactFactFixture(t, selected)
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "managed-agent", "support/instance-1"))
-		seedTestAgentRow(t, testAuthorActivityContext(), selected.db, selected.postgres, identity, "active")
+		seedTestAgentRow(t, original, selected.db, selected.postgres, identity, "active")
 		token := runtimeeffects.LifecycleToken{Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: 1, Generation: 1}
-		base := agentmemory.WithExecution(runtimeeffects.WithLifecycleToken(testAuthorActivityContext(), token), agentmemory.Plan{Enabled: true}, identity)
+		base := agentmemory.WithExecution(runtimeeffects.WithLifecycleToken(original, token), agentmemory.Plan{Enabled: true}, identity)
 		ctx, cancel := context.WithTimeout(base, 20*time.Second)
 		defer cancel()
 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
@@ -62,7 +63,7 @@ func TestSelectedManagedRotationRequiresLifecycleAuthorityBothStores(t *testing.
 		}
 		stale := token
 		stale.Generation++
-		staleCtx := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(), stale)
+		staleCtx := runtimeeffects.WithLifecycleToken(original, stale)
 		beforeRows, beforeFacts := rotationCounts(t, ctx, selected.db, fixture.runID)
 		_, err = owner.Rotate(staleCtx, acquired, sessions.RotationMetadata{OperationID: "lifecycle-replay"})
 		if err == nil {
@@ -194,9 +195,10 @@ func requireRotationEffectsUnchanged(t *testing.T, before, after rotationEffectS
 
 func TestSelectedRotationReceiptBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		original := originalStoreFixtureContext(t, testAuthorActivityContext(), selected.selected)
 		fixture := newExactFactFixture(t, selected)
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
-		ctx, cancel := context.WithTimeout(runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure), 20*time.Second)
+		ctx, cancel := context.WithTimeout(runtimeeffects.WithDifferentOwner(original, runtimeeffects.OwnerBuildTestInfrastructure), 20*time.Second)
 		defer cancel()
 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
 		acquired, _, err := owner.AcquireLiveSession(ctx, identity, "receipt-worker")
@@ -267,7 +269,7 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 		}
 		requireRotationEffectsUnchanged(t, beforeReplay, snapshotRotationEffects(t, ctx, selected.db, fixture.runID))
 		other := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "other-agent", ""))
-		seedTestAgentRow(t, testAuthorActivityContext(), selected.db, selected.postgres, other, "active")
+		seedTestAgentRow(t, original, selected.db, selected.postgres, other, "active")
 		otherSource, _, err := owner.AcquireLiveSession(ctx, other, "receipt-worker")
 		if err != nil {
 			t.Fatal(err)
@@ -275,18 +277,18 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 		beforeRows, beforeFacts = rotationCounts(t, ctx, selected.db, fixture.runID)
 		refuseWithoutEffects(fixture.runID, otherSource, request, sessions.RotationRequestConflict)
 		flow := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", "support/instance-1"))
-		seedTestAgentRow(t, testAuthorActivityContext(), selected.db, selected.postgres, flow, "active")
+		seedTestAgentRow(t, original, selected.db, selected.postgres, flow, "active")
 		flowSource, _, err := owner.AcquireLiveSession(ctx, flow, "receipt-worker")
 		if err != nil {
 			t.Fatal(err)
 		}
 		refuseWithoutEffects(fixture.runID, flowSource, request, sessions.RotationRequestConflict)
 		otherRunID := uuid.NewString()
-		requireRunFixtureForTest(t, testAuthorActivityContext(), selected.selected, semanticRunFixture{
+		requireRunFixtureForTest(t, original, selected.selected, semanticRunFixture{
 			Origin: semanticScenarioSetupRunOriginForTest(), RunID: otherRunID, StartedAt: time.Now().UTC(),
 		})
 		otherRun := agentmemory.Identity(mustTestAgentIdentityForRun(otherRunID, "revision-matrix-agent", ""))
-		seedTestAgentRow(t, testAuthorActivityContext(), selected.db, selected.postgres, otherRun, "active")
+		seedTestAgentRow(t, original, selected.db, selected.postgres, otherRun, "active")
 		otherRunSource, _, err := owner.AcquireLiveSession(ctx, otherRun, "receipt-worker")
 		if err != nil {
 			t.Fatal(err)
@@ -375,11 +377,13 @@ func TestSelectedRotationReceiptBothStores(t *testing.T) {
 
 func TestSelectedRotationSameKeyConcurrentBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		original := originalStoreFixtureContext(t, testAuthorActivityContext(), selected.selected)
+		fixtureTest := t
 		for _, mode := range []string{"same", "changed"} {
 			t.Run(mode, func(t *testing.T) {
-				fixture := newExactFactFixture(t, selected)
+				fixture := newExactFactFixture(fixtureTest, selected)
 				identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
-				ctx, cancel := context.WithTimeout(runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure), 20*time.Second)
+				ctx, cancel := context.WithTimeout(runtimeeffects.WithDifferentOwner(original, runtimeeffects.OwnerBuildTestInfrastructure), 20*time.Second)
 				defer cancel()
 				first := selected.selected.(llmSessionAttemptJourneyOwner)
 				predecessor, _, err := first.AcquireLiveSession(ctx, identity, "concurrent-worker")
@@ -446,9 +450,10 @@ func TestSelectedRotationSameKeyConcurrentBothStores(t *testing.T) {
 
 func TestSelectedRotationReceiptPrecisionBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		original := originalStoreFixtureContext(t, testAuthorActivityContext(), selected.selected)
 		fixture := newExactFactFixture(t, selected)
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
-		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		ctx := runtimeeffects.WithDifferentOwner(original, runtimeeffects.OwnerBuildTestInfrastructure)
 		selected.selected.(interface{ SetSessionLockTTL(time.Duration) }).SetSessionLockTTL(time.Minute + 123*time.Nanosecond)
 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
 		predecessor, _, err := owner.AcquireLiveSession(ctx, identity, "precision-worker")
@@ -475,9 +480,10 @@ func TestSelectedRotationReceiptPrecisionBothStores(t *testing.T) {
 
 func TestSelectedRotationElapsedExpiryBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		original := originalStoreFixtureContext(t, testAuthorActivityContext(), selected.selected)
 		fixture := newExactFactFixture(t, selected)
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
-		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		ctx := runtimeeffects.WithDifferentOwner(original, runtimeeffects.OwnerBuildTestInfrastructure)
 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
 		predecessor, _, err := owner.AcquireLiveSession(ctx, identity, "expiry-worker")
 		if err != nil {
@@ -514,9 +520,10 @@ func TestSelectedRotationElapsedExpiryBothStores(t *testing.T) {
 
 func TestSelectedUnkeyedRotationUsesCanonicalNormalBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		original := originalStoreFixtureContext(t, testAuthorActivityContext(), selected.selected)
 		fixture := newExactFactFixture(t, selected)
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
-		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		ctx := runtimeeffects.WithDifferentOwner(original, runtimeeffects.OwnerBuildTestInfrastructure)
 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
 		initial, _, err := owner.AcquireLiveSession(ctx, identity, "unkeyed-worker")
 		if err != nil {
@@ -551,12 +558,13 @@ func TestSelectedUnkeyedRotationUsesCanonicalNormalBothStores(t *testing.T) {
 
 func TestSelectedRotationReceiptResetAndDiscardBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
-		ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+		original := originalStoreFixtureContext(t, testAuthorActivityContext(), selected.selected)
+		ctx := runtimeeffects.WithDifferentOwner(original, runtimeeffects.OwnerBuildTestInfrastructure)
 		fixture := newExactFactFixture(t, selected)
 		identity := agentmemory.Identity(mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""))
 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
 		reset := selected.selected.(interface {
-			ResetAll(sessions.ResetMetadata) (sessions.ResetSummary, error)
+			ResetAll(context.Context, sessions.ResetMetadata) (sessions.ResetSummary, error)
 		})
 		predecessor, _, err := owner.AcquireLiveSession(ctx, identity, "reset-worker")
 		if err != nil {
@@ -567,7 +575,7 @@ func TestSelectedRotationReceiptResetAndDiscardBothStores(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := reset.ResetAll(sessions.ResetMetadata{Source: "rotation-receipt-test"}); err != nil {
+		if _, err := reset.ResetAll(ctx, sessions.ResetMetadata{Source: "rotation-receipt-test"}); err != nil {
 			t.Fatal(err)
 		}
 		var status, retainedKey string
@@ -594,7 +602,7 @@ func TestSelectedRotationReceiptResetAndDiscardBothStores(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := reset.ResetAll(sessions.ResetMetadata{Source: "prepare-discard"}); err != nil {
+		if _, err := reset.ResetAll(ctx, sessions.ResetMetadata{Source: "prepare-discard"}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := transitionRunForTest(ctx, selected.selected, runlifecycle.ActiveTransitionRequest{RunID: fixture.runID, State: runlifecycle.StatePaused}); err != nil {
@@ -621,10 +629,11 @@ func TestSelectedRotationReceiptResetAndDiscardBothStores(t *testing.T) {
 
 func TestPostgresRotationReciprocalKeysConflictWithoutDeadlock(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		original := originalStoreFixtureContext(t, testAuthorActivityContext(), selected.selected)
 		if !selected.postgres {
 			t.Skip("PostgreSQL row-lock ordering")
 		}
-		ctx, cancel := context.WithTimeout(runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure), 20*time.Second)
+		ctx, cancel := context.WithTimeout(runtimeeffects.WithDifferentOwner(original, runtimeeffects.OwnerBuildTestInfrastructure), 20*time.Second)
 		defer cancel()
 		owner := selected.selected.(llmSessionAttemptJourneyOwner)
 		var identities [2]agentmemory.Identity

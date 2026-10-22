@@ -27,7 +27,7 @@ type retryDecisionFixture struct {
 
 func newRetryDecisionFixture(t *testing.T, backend string, store authorActivityReceiptStore) retryDecisionFixture {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	runID := uuid.NewString()
 	requireRunningRunForTest(t, ctx, store, runID, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC))
 	event := eventtest.PersistedProjection(uuid.NewString(), "retry.decision", "gateway", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())

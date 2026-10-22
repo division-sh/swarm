@@ -13,6 +13,7 @@ func TestFanOutRetryWaitYieldsPreservesRestartAndCancelsOnBothStores(t *testing.
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, restarted, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			old := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 64, time.Now().UTC().Add(-time.Minute))
 			healthy := seedFanOutOwnerIntent(t, ctx, db, old, 1, time.Now().UTC().Add(-time.Second))
 			request := pipeline.FanOutClaimRequest{Owner: "retry-test", BundleHash: old.bundleHash, Now: time.Now().UTC(), Lease: time.Minute}

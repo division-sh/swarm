@@ -28,11 +28,13 @@ func TestPostgresRuntimeSessionRotationPreservesCommittedHandoffOutcome(t *testi
 				_, db, _ := testutil.StartPostgres(t)
 				store := admitTestPostgresStore(t, db)
 				base := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+				base = originalStoreFixtureContext(t, base, store)
 				seedSpecAgent(t, base, store, "a1", "", "")
 				seedSpecMemoryRun(t, base, db)
 				identity := specMemoryIdentity("a1", "global")
 				memory := agentmemory.Plan{Enabled: true}
 				ctx := agentmemory.WithExecution(base, memory, identity)
+				ctx = originalStoreFixtureContext(t, ctx, store)
 				lease, err := store.Acquire(ctx, identity, "worker-1")
 				if err != nil {
 					t.Fatal(err)

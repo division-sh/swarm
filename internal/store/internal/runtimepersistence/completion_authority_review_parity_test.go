@@ -40,7 +40,7 @@ func TestCompletionAuthorityReviewFindingParity(t *testing.T) {
 func proveSelectedCurrentAuthorityTransition(t *testing.T, sqlite bool) {
 	t.Helper()
 	fixture := newSelectedReviewFixture(t, sqlite)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 	issued, err := fixture.store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 	if err != nil {
 		t.Fatalf("issue selected authority: %v", err)
@@ -126,14 +126,14 @@ func proveForkChatCurrentAuthorityTransition(t *testing.T, sqlite bool) {
 	launchAndObserveForkChatCompletion(t, providerCtx, handle, "review-expiry")
 	settleForkChatCompletionAttempt(t, providerCtx, handle, prepared, runtimeeffects.StateSettled, nil, fixture.now.Add(2*time.Second))
 	expireForkChatGroupLease(t, fixture, prepared.ForkTurnID)
-	if err := fixture.store.HeartbeatOperatorConversationForkChat(testAuthorActivityContext(), prepared, time.Now().UTC()); err == nil {
+	if err := fixture.store.HeartbeatOperatorConversationForkChat(fixture.context, prepared, time.Now().UTC()); err == nil {
 		t.Fatal("forkchat heartbeat resurrected an expired group authority")
 	}
-	if _, err := fixture.store.RecordOperatorConversationForkChat(testAuthorActivityContext(), successfulForkChatRecord(prepared, "review expiry", time.Now().UTC())); err == nil {
+	if _, err := fixture.store.RecordOperatorConversationForkChat(fixture.context, successfulForkChatRecord(prepared, "review expiry", time.Now().UTC())); err == nil {
 		t.Fatal("forkchat success accepted an expired group authority")
 	}
 	requireForkChatGroupState(t, fixture, prepared.ForkTurnID, "executing", false)
-	if err := fixture.store.FailOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatFailureRequest{
+	if err := fixture.store.FailOperatorConversationForkChat(fixture.context, runfork.ConversationForkChatFailureRequest{
 		Prepared: prepared, Cause: context.DeadlineExceeded, OutcomeUncertain: true, Now: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("terminalize expired forkchat authority outcome-uncertain: %v", err)
@@ -145,7 +145,7 @@ func proveForkChatCurrentAuthorityTransition(t *testing.T, sqlite bool) {
 	launchAndObserveForkChatCompletion(t, firstCtx, first, "review-live-child-1")
 	settleForkChatCompletionAttempt(t, firstCtx, first, live, runtimeeffects.StateSettled, nil, time.Now().UTC())
 	_, _ = beginForkChatCompletionAttempt(t, fixture, live, 2, "review-live-child-2")
-	if _, err := fixture.store.RecordOperatorConversationForkChat(testAuthorActivityContext(), successfulForkChatRecord(live, "review live child", time.Now().UTC())); err == nil {
+	if _, err := fixture.store.RecordOperatorConversationForkChat(fixture.context, successfulForkChatRecord(live, "review live child", time.Now().UTC())); err == nil {
 		t.Fatal("forkchat success accepted a live child attempt")
 	}
 	requireForkChatGroupState(t, fixture, live.ForkTurnID, "executing", false)
@@ -183,7 +183,7 @@ func proveClaudeRetryGenerationAuthority(t *testing.T, sqlite bool) {
 	if _, err := beginManagedCompletionForTest(t, nextCtx, "claude_cli", []byte("retry-generation")); err == nil {
 		t.Fatal("generation-2 authority retried a generation-1 operation")
 	}
-	if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute))); err != nil {
+	if _, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute))); err != nil {
 		t.Fatalf("reconcile cross-generation Claude retry evidence: %v", err)
 	}
 	var attempts, generation int

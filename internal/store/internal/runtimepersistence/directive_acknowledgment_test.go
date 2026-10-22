@@ -25,6 +25,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -243,7 +244,7 @@ func TestDirectiveFailureFinalizationAcknowledgmentMatrix(t *testing.T) {
 					if _, err := h.manager.SendDirective(h.workContext(t), h.request); !errors.Is(err, runtimeagentcontrol.ErrDirectiveExecutionFailed) {
 						t.Fatalf("same-key committed-failure replay = %v, want execution failed", err)
 					}
-					if err := h.manager.ReconcileDirectiveOperations(testAuthorActivityContext()); err != nil {
+					if err := h.manager.ReconcileDirectiveOperations(h.original); err != nil {
 						t.Fatalf("startup reconciliation: %v", err)
 					}
 				}
@@ -272,7 +273,7 @@ func TestDirectiveResultRecordingAcknowledgmentMatrix(t *testing.T) {
 						assertDirectiveOperationEvidence(t, op, runtimeagentcontrol.DirectiveOperationExecuting, false, false)
 						h.expireLease(t, op.OperationID)
 						if convergence == "startup" {
-							if err := h.manager.ReconcileDirectiveOperations(testAuthorActivityContext()); err != nil {
+							if err := h.manager.ReconcileDirectiveOperations(h.original); err != nil {
 								t.Fatalf("startup reconciliation: %v", err)
 							}
 						} else if _, err := h.manager.SendDirective(h.workContext(t), h.request); !errors.Is(err, runtimeagentcontrol.ErrDirectiveOutcomeIndeterminate) {
@@ -289,7 +290,7 @@ func TestDirectiveResultRecordingAcknowledgmentMatrix(t *testing.T) {
 						assertDirectiveSuccessSettlement(t, backend.db, op)
 						if convergence == "startup" {
 							h.restartManager(t)
-							if err := h.manager.ReconcileDirectiveOperations(testAuthorActivityContext()); err != nil {
+							if err := h.manager.ReconcileDirectiveOperations(h.original); err != nil {
 								t.Fatalf("startup reconciliation: %v", err)
 							}
 						}
@@ -335,7 +336,7 @@ func TestDirectiveSuccessFinalizationAcknowledgmentMatrix(t *testing.T) {
 					}
 					if convergence == "startup" {
 						h.restartManager(t)
-						if err := h.manager.ReconcileDirectiveOperations(testAuthorActivityContext()); err != nil {
+						if err := h.manager.ReconcileDirectiveOperations(h.original); err != nil {
 							t.Fatalf("startup reconciliation: %v", err)
 						}
 					} else {
@@ -373,7 +374,7 @@ func TestDirectiveReconciliationAcknowledgmentMatrix(t *testing.T) {
 						op = h.reserveKeylessPrepared(t)
 					}
 					h.faults.setFault(directiveFaultReconcile, mode)
-					if err := h.manager.ReconcileDirectiveOperations(testAuthorActivityContext()); !errors.Is(err, errInjectedDirectivePersistence) {
+					if err := h.manager.ReconcileDirectiveOperations(h.original); !errors.Is(err, errInjectedDirectivePersistence) {
 						t.Fatalf("first reconciliation error = %v, want injected failure", err)
 					}
 					persisted := h.loadOperationID(t, op.OperationID)
@@ -387,7 +388,7 @@ func TestDirectiveReconciliationAcknowledgmentMatrix(t *testing.T) {
 					} else {
 						assertReconciledDirectiveProducer(t, backend.db, producer, persisted)
 					}
-					if err := h.manager.ReconcileDirectiveOperations(testAuthorActivityContext()); err != nil {
+					if err := h.manager.ReconcileDirectiveOperations(h.original); err != nil {
 						t.Fatalf("second reconciliation: %v", err)
 					}
 					persisted = h.loadOperationID(t, op.OperationID)
@@ -449,6 +450,7 @@ func TestDirectiveMalformedTypedBoardStepFailureCanonicalizesBeforePersistence(t
 
 func TestDirectiveOperationDatabaseEnforcesStateEvidenceEquivalence(t *testing.T) {
 	forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
+		ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), backend.store)
 		runID := "00000000-0000-0000-0000-000000001000"
 		seedDirectiveAmbiguityRun(t, backend, runID)
 		seedTestAgentRow(t, testAuthorActivityContext(), backend.db, backend.name == "postgres", mustTestAgentIdentityForRun(runID, "agent-1", "directive/instance-1"), "active")
@@ -479,7 +481,7 @@ func TestDirectiveOperationDatabaseEnforcesStateEvidenceEquivalence(t *testing.T
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
 				req := directiveOperationReservationForTest(t, uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), time.Now().UTC())
-				reserved, err := backend.store.ReserveDirectiveOperation(testAuthorActivityContext(), req)
+				reserved, err := backend.store.ReserveDirectiveOperation(ctx, req)
 				if err != nil {
 					t.Fatalf("reserve directive: %v", err)
 				}
@@ -503,11 +505,19 @@ type directiveAmbiguityHarness struct {
 	agent       *directiveAmbiguityAgent
 	request     runtimeagentcontrol.SendDirectiveRequest
 	agentRecord runtimemanager.PersistedAgent
+	original    context.Context
 }
 
 func (h *directiveAmbiguityHarness) workContext(t *testing.T) context.Context {
 	t.Helper()
-	return storeTestWorkContext(t, testAuthorActivityContext())
+	return storeTestWorkContext(t, h.original)
+}
+
+func (h *directiveAmbiguityHarness) mutationContext(ctx context.Context) (context.Context, error) {
+	if !startupownership.HasMutationAuthority(ctx) {
+		ctx = startupownership.CarryMutationAuthority(ctx, h.original)
+	}
+	return startupownership.FreezeMutationAuthority(ctx)
 }
 
 func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBackend, agent *directiveAmbiguityAgent) *directiveAmbiguityHarness {
@@ -517,12 +527,14 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 
 func newDirectiveAmbiguityHarnessInFlow(t *testing.T, backend directiveAmbiguityBackend, agent *directiveAmbiguityAgent, flowInstance string) *directiveAmbiguityHarness {
 	t.Helper()
+	h := &directiveAmbiguityHarness{original: originalStoreFixtureContext(t, testAuthorActivityContext(), backend.store)}
 	runID := uuid.NewString()
 	identity := mustTestAgentIdentityForRun(runID, agent.id, flowInstance)
 	seedDirectiveAmbiguityRun(t, backend, runID)
 	faults := &faultingDirectiveIntegrationStore{directiveIntegrationStore: backend.store}
 	bus, err := newStoreTestEventBus(t, faults, runtimebus.EventBusOptions{
 		PipelineObligations: pipelineObligationOwnerForFixture(backend.store),
+		MutationContext:     h.mutationContext,
 	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -531,8 +543,9 @@ func newDirectiveAmbiguityHarnessInFlow(t *testing.T, backend directiveAmbiguity
 		return agent, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
-		LifecycleStore:   agentfixture.Lifecycle(t, backend.store),
-		WorkOwner:        storeTestWorkOwner(t),
+		BaseContext:      h.original, MutationContext: h.mutationContext, CarryMutationContext: startupownership.CarryMutationAuthority,
+		LifecycleStore: agentfixture.Lifecycle(t, backend.store),
+		WorkOwner:      storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			LifecycleState:      backend.store,
 			LifecycleOutcome:    backend.store,
@@ -563,7 +576,7 @@ func newDirectiveAmbiguityHarnessInFlow(t *testing.T, backend directiveAmbiguity
 		t.Fatalf("select directive fixture execution: %v", err)
 	}
 	rec.Config = descriptor.Actor
-	if err := agentfixture.UpsertStatic(t, testAuthorActivityContext(), backend.store, rec); err != nil {
+	if err := agentfixture.UpsertStatic(t, h.original, backend.store, rec); err != nil {
 		t.Fatalf("persist agent: %v", err)
 	}
 	state, found, err := backend.store.LoadAgentLifecycleState(testAuthorActivityContext(), identity)
@@ -572,11 +585,12 @@ func newDirectiveAmbiguityHarnessInFlow(t *testing.T, backend directiveAmbiguity
 	}
 	rec.LifecycleEpoch, rec.LifecycleGeneration, rec.LifecyclePhase = state.RuntimeEpoch, state.Generation, state.Phase
 	rec.LifecycleRunMode, rec.ProcessBinding, rec.Topology = state.RunMode, state.ProcessBinding, state.Topology
-	materializationCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
+	materializationCtx := runtimecorrelation.WithRunID(h.original, runID)
 	if err := manager.MaterializeAdmittedAgentForExecution(materializationCtx, rec); err != nil {
 		t.Fatalf("register agent: %v", err)
 	}
 	return &directiveAmbiguityHarness{
+		original:    h.original,
 		backend:     backend,
 		faults:      faults,
 		manager:     manager,
@@ -602,6 +616,7 @@ func (h *directiveAmbiguityHarness) restartManager(t *testing.T) {
 	}
 	bus, err := newStoreTestEventBus(t, h.faults, runtimebus.EventBusOptions{
 		PipelineObligations: pipelineObligationOwnerForFixture(h.backend.store),
+		MutationContext:     h.mutationContext,
 	})
 	if err != nil {
 		t.Fatalf("restart directive event bus: %v", err)
@@ -610,8 +625,9 @@ func (h *directiveAmbiguityHarness) restartManager(t *testing.T) {
 		return h.agent, nil
 	}, runtimemanager.AgentManagerOptions{
 		ExecutionPosture: executionposture.Live,
-		LifecycleStore:   agentfixture.Lifecycle(t, h.backend.store),
-		WorkOwner:        storeTestWorkOwner(t),
+		BaseContext:      h.original, MutationContext: h.mutationContext, CarryMutationContext: startupownership.CarryMutationAuthority,
+		LifecycleStore: agentfixture.Lifecycle(t, h.backend.store),
+		WorkOwner:      storeTestWorkOwner(t),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
 			LifecycleState: h.backend.store, LifecycleOutcome: h.backend.store,
 			EventExistence: h.faults, DirectiveOperations: h.faults, DirectiveTargets: h.faults,
@@ -624,7 +640,7 @@ func (h *directiveAmbiguityHarness) restartManager(t *testing.T) {
 	}
 	h.agentRecord.LifecycleEpoch, h.agentRecord.LifecycleGeneration, h.agentRecord.LifecyclePhase = state.RuntimeEpoch, state.Generation, state.Phase
 	h.agentRecord.LifecycleRunMode, h.agentRecord.ProcessBinding, h.agentRecord.Topology = state.RunMode, state.ProcessBinding, state.Topology
-	materializationCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(), h.request.RunID)
+	materializationCtx := runtimecorrelation.WithRunID(h.original, h.request.RunID)
 	if err := h.manager.MaterializeAdmittedAgentForExecution(materializationCtx, h.agentRecord); err != nil {
 		t.Fatalf("restart directive agent: %v", err)
 	}
@@ -665,7 +681,7 @@ func (h *directiveAmbiguityHarness) reserveKeylessPrepared(t *testing.T) runtime
 		t, h.request.RunID, h.request.AgentID, h.request.FlowInstance,
 		uuid.NewString(), uuid.NewString(), "", uuid.NewString(), now, executionposture.Live,
 	)
-	reserved, err := h.backend.store.ReserveDirectiveOperation(testAuthorActivityContext(), req)
+	reserved, err := h.backend.store.ReserveDirectiveOperation(h.original, req)
 	if err != nil {
 		t.Fatalf("reserve keyless directive: %v", err)
 	}
@@ -674,7 +690,7 @@ func (h *directiveAmbiguityHarness) reserveKeylessPrepared(t *testing.T) runtime
 
 func seedDirectiveAmbiguityRun(t *testing.T, backend directiveAmbiguityBackend, runID string) {
 	t.Helper()
-	requireRunFixtureForTest(t, testAuthorActivityContext(), backend.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	requireRunFixtureForTest(t, originalStoreFixtureContext(t, testAuthorActivityContext(), backend.store), backend.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 }
 
 func installDirectiveRejectStateTrigger(t *testing.T, backend directiveAmbiguityBackend, state runtimeagentcontrol.DirectiveOperationState) func() {

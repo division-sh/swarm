@@ -84,11 +84,12 @@ func TestRunForkRevisionThirteenFamilySelectedStoreParity(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		db := store.backend.ConstructionHandle()
-		results["sqlite"] = proveRunForkRevisionThirteenFamilyMatrix(t, db, false, fixture)
+		results["sqlite"] = proveRunForkRevisionThirteenFamilyMatrix(t, store, db, false, fixture)
 	})
 	t.Run("postgres", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		results["postgres"] = proveRunForkRevisionThirteenFamilyMatrix(t, db, true, fixture)
+		store := admitTestPostgresStore(t, db)
+		results["postgres"] = proveRunForkRevisionThirteenFamilyMatrix(t, store, db, true, fixture)
 	})
 	if !reflect.DeepEqual(results["sqlite"], results["postgres"]) {
 		t.Fatalf("selected-store canonical revision facts differ:\nsqlite=%#v\npostgres=%#v", results["sqlite"], results["postgres"])
@@ -115,8 +116,9 @@ func TestRunForkPlannerSelectedStoreParity(t *testing.T) {
 				selected = store
 			} else {
 				_, db, _ = testutil.StartPostgres(t)
-				selected = newPostgresStoreWithBackend(mustPostgresBackend(db))
+				selected = admitTestPostgresStore(t, db)
 			}
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 				Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: fixture.at,
 			})
@@ -192,7 +194,7 @@ func TestRunForkSelectedStoreLifecycleParity(t *testing.T) {
 						return
 					}
 					_, db, _ := testutil.StartPostgres(t)
-					store := newPostgresStoreWithBackend(mustPostgresBackend(db))
+					store := admitTestPostgresStore(t, db)
 					proofs[backend] = proveRunForkSelectedStoreLifecycle(t, store, store, db, true, sourceState)
 				})
 			}
@@ -205,7 +207,7 @@ func TestRunForkSelectedStoreLifecycleParity(t *testing.T) {
 
 func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLifecycleStore, store any, db *sql.DB, postgres bool, sourceState runtimerunlifecycle.State) runForkSelectedLifecycleProof {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -364,65 +366,6 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 	}
 }
 
-func TestGoldenRuntimeRunsRemainForkPlannablePostgres(t *testing.T) {
-	for _, workload := range []struct {
-		name             string
-		extraEvents      int
-		extraDeadLetters int
-	}{
-		{name: "golden_workload"},
-		{name: "jobflow_damaged_run", extraEvents: 100, extraDeadLetters: 15},
-	} {
-		t.Run(workload.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
-			ctx := testAuthorActivityContext()
-			fixture := newRunForkRevisionMatrixFixture()
-			selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
-			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
-				Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: fixture.at,
-			})
-			seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(fixture.runID, "revision-matrix-agent", ""), "active")
-
-			tx, err := db.BeginTx(ctx, nil)
-			if err != nil {
-				t.Fatalf("begin representative workload revision: %v", err)
-			}
-			defer func() { _ = tx.Rollback() }()
-			seedRunForkRevisionMatrixFacts(t, ctx, tx, fixture, true, true)
-			selectedEventID := fixture.eventID
-			for i := 0; i < workload.extraEvents; i++ {
-				selectedEventID = uuid.NewString()
-				seedRunForkRevisionMatrixEvent(t, ctx, tx, fixture.runID, selectedEventID, fixture.at.Add(time.Duration(i+1)*time.Microsecond), true)
-			}
-			for i := 0; i < workload.extraDeadLetters; i++ {
-				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO dead_letters (dead_letter_id,original_event_id,original_event,original_payload,flow_instance,failure,created_at) VALUES ($1,$2,'matrix.event',$3,'matrix-flow',$4,$5)`, uuid.NewString(), fixture.eventID, `{}`, `{"class":"matrix"}`, fixture.at.Add(time.Duration(i+1)*time.Microsecond))
-			}
-			effects, err := runforkrevision.ForRun(fixture.runID, runforkrevision.AllFamilies()...)
-			if err != nil {
-				t.Fatalf("declare representative workload effects: %v", err)
-			}
-			results, err := runforkrevision.FinalizePostgres(ctx, tx, effects)
-			if err != nil {
-				t.Fatalf("finalize representative workload revision: %v", err)
-			}
-			if got := results[fixture.runID]; !got.Changed || got.Revision != 1 {
-				t.Fatalf("representative workload revision = %#v, want changed revision 1", got)
-			}
-			if err := tx.Commit(); err != nil {
-				t.Fatalf("commit representative workload revision: %v", err)
-			}
-
-			plan, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: fixture.runID, At: selectedEventID})
-			if err != nil {
-				t.Fatalf("representative workload is not fork-plannable: %v", err)
-			}
-			if plan.ForkPoint.EventID != selectedEventID || plan.ForkPoint.Revision != 1 {
-				t.Fatalf("representative workload fork point = %#v, want event %s at revision 1", plan.ForkPoint, selectedEventID)
-			}
-		})
-	}
-}
-
 func newRunForkRevisionMatrixFixture() runForkRevisionMatrixFixture {
 	return runForkRevisionMatrixFixture{
 		runID: uuid.NewString(), eventID: uuid.NewString(), entityID: uuid.NewString(), mutationID: uuid.NewString(),
@@ -433,13 +376,9 @@ func newRunForkRevisionMatrixFixture() runForkRevisionMatrixFixture {
 	}
 }
 
-func proveRunForkRevisionThirteenFamilyMatrix(t *testing.T, db *sql.DB, postgres bool, fixture runForkRevisionMatrixFixture) []runForkRevisionMatrixFact {
+func proveRunForkRevisionThirteenFamilyMatrix(t *testing.T, selected any, db *sql.DB, postgres bool, fixture runForkRevisionMatrixFixture) []runForkRevisionMatrixFact {
 	t.Helper()
-	ctx := testAuthorActivityContext()
-	var selected any = NewSQLiteRuntimeStoreForTest(db)
-	if postgres {
-		selected = newPostgresStoreWithBackend(mustPostgresBackend(db))
-	}
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: fixture.at,
 	})

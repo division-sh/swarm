@@ -80,6 +80,7 @@ func TestLifecycleDiagnosticIndependentHandlesAndReopen(t *testing.T) {
 					return admitTestPostgresStore(t, db), db, func() { _ = db.Close() }
 				}
 			}
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), first)
 			origin := runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}
 			left := enqueueDiagnosticTestIdentity(t, first, mustTestAgentIdentityForRun(uuid.NewString(), "same-worker", "left/one"), origin, executionmode.Live)
 			right := enqueueDiagnosticTestIdentity(t, first, mustTestAgentIdentityForRun(uuid.NewString(), "same-worker", "right/two"), origin, executionmode.Live)
@@ -90,7 +91,7 @@ func TestLifecycleDiagnosticIndependentHandlesAndReopen(t *testing.T) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					_, err := projectDiagnosticTestBatch(context.Background(), owner, 100)
+					_, err := projectDiagnosticTestBatch(ctx, owner, 100)
 					errors <- err
 				}()
 			}
@@ -112,28 +113,28 @@ func TestLifecycleDiagnosticIndependentHandlesAndReopen(t *testing.T) {
 			// hide missing admission on the losing handle.
 			for index, owner := range []diagnosticProjectionTestStore{first, second} {
 				item := enqueueDiagnosticTestAgent(t, first, fmt.Sprintf("forced-handle-%d", index))
-				if err := runtimepkg.NewRuntimeLogger(owner, executionposture.Live, nil).ProjectLifecycleDiagnostic(context.Background(), item); err != nil {
+				if err := runtimepkg.NewRuntimeLogger(owner, executionposture.Live, nil).ProjectLifecycleDiagnostic(ctx, item); err != nil {
 					t.Fatalf("handle %d projection: %v", index, err)
 				}
 				assertDiagnosticCounts(t, db, item.OutboxID, 1, 0)
 			}
 			closeSecond()
 			later := enqueueDiagnosticTestAgent(t, first, "lost-response-worker")
-			if _, err := (diagnosticLostResult{first}).ProjectAgentLifecycleDiagnostics(context.Background(), 100); err == nil {
+			if _, err := (diagnosticLostResult{first}).ProjectAgentLifecycleDiagnostics(ctx, 100); err == nil {
 				t.Fatal("missing committed-but-error control")
 			}
 			// Discard the successful result as a caller with a lost acknowledgement
 			// would; a fresh connection must observe the atomic pair, not append again.
 			reopened, db, closeReopened := open()
 			defer closeReopened()
-			if n, err := projectDiagnosticTestBatch(context.Background(), reopened, 100); err != nil || n != 0 {
+			if n, err := projectDiagnosticTestBatch(ctx, reopened, 100); err != nil || n != 0 {
 				t.Fatalf("reopened replay n=%d err=%v", n, err)
 			}
 			for _, item := range []diaglog.LifecycleDiagnostic{left, right, later} {
 				assertDiagnosticCounts(t, db, item.OutboxID, 1, 0)
 			}
 			pending := enqueueDiagnosticTestAgent(t, first, "reopened-handle-winner")
-			if err := runtimepkg.NewRuntimeLogger(reopened, executionposture.Live, nil).ProjectLifecycleDiagnostic(context.Background(), pending); err != nil {
+			if err := runtimepkg.NewRuntimeLogger(reopened, executionposture.Live, nil).ProjectLifecycleDiagnostic(ctx, pending); err != nil {
 				t.Fatalf("reopened pending projection: %v", err)
 			}
 			assertDiagnosticCounts(t, db, pending.OutboxID, 1, 0)
@@ -200,11 +201,12 @@ func TestLifecycleDiagnosticBatchCardinality(t *testing.T) {
 						}
 					}
 				}
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 				want := min(size, 100)
-				if n, err := projectDiagnosticTestBatch(context.Background(), selected, 100); err != nil || n != want {
+				if n, err := projectDiagnosticTestBatch(ctx, selected, 100); err != nil || n != want {
 					t.Fatalf("first batch n=%d want=%d err=%v", n, want, err)
 				}
-				if n, err := projectDiagnosticTestBatch(context.Background(), selected, 100); err != nil || n != size-want {
+				if n, err := projectDiagnosticTestBatch(ctx, selected, 100); err != nil || n != size-want {
 					t.Fatalf("tail n=%d want=%d err=%v", n, size-want, err)
 				}
 				var events, acks int
@@ -242,6 +244,7 @@ func TestLifecycleDiagnosticCausalOrigin(t *testing.T) {
 				}
 				first := enqueueDiagnosticTestAgent(t, selected, "causal-worker")
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				parent, runID := uuid.NewString(), first.Identity.RunID
 				if scenario == "foreign_parent" {
 					runID = uuid.NewString()
@@ -276,7 +279,7 @@ func TestLifecycleDiagnosticCausalOrigin(t *testing.T) {
 				if result.DiagnosticProvenance.ActorMode != executionmode.Live || result.DiagnosticProvenance.EventMode != executionmode.Mock {
 					t.Fatalf("collapsed actor and causal modes: %+v", result.DiagnosticProvenance)
 				}
-				if n, err := projectDiagnosticTestBatch(context.Background(), selected, 100); err != nil || n != 2 {
+				if n, err := projectDiagnosticTestBatch(ctx, selected, 100); err != nil || n != 2 {
 					t.Fatalf("causal projection n=%d err=%v", n, err)
 				}
 				var mode, source string
@@ -350,7 +353,7 @@ func proveLifecycleDiagnosticProjection(t *testing.T, selected diagnosticProject
 		mode = executionmode.Mock
 	}
 	first := enqueueDiagnosticTestIdentity(t, selected, testAgentIdentity(t, "diagnostic-worker", "global"), runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation}, mode)
-	ctx := context.Background()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 	var cleanup func()
 	switch scenario {
 	case "concurrent":

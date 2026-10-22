@@ -16,7 +16,7 @@ import (
 
 func TestPostgresDeliveryRenewalRetainsIndependentMutationFences(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), admitTestPostgresStore(t, db))
 	for _, statement := range []string{
 		`CREATE FUNCTION test_renewal_suppress() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$`,
 		`CREATE FUNCTION test_renewal_refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'renewal storage failure'; END $$`,
@@ -36,7 +36,7 @@ func TestPostgresDeliveryRenewalRetainsIndependentMutationFences(t *testing.T) {
 		{name: "storage_failure", table: "event_deliveries", function: "test_renewal_refuse", wantError: "renewal storage failure"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := seedNormalRunCompletionFixture(t, db, "active", "renewal/instance", "renewal")
+			fixture := seedNormalRunCompletionFixture(t, ctx, db, "active", "renewal/instance", "renewal")
 			route := testAgentDeliveryRoute(t, fixture.RunID, "renewal-agent", "fixture/renewal-agent")
 			event := commitPostgresDeliveryFixture(t, ctx, db, fixture.EventID, route)
 			claimed := claimPostgresDeliveryFixture(t, ctx, db, event, route)

@@ -20,7 +20,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -102,10 +101,16 @@ func TestScanFanOutIntentPreservesCapsuleNumberLexemesOnBothStores(t *testing.T)
 	}
 }
 
-func TestFanOutEntitySourceRevisionWriterPreservesNumberKindsOnBothStores(t *testing.T) {
+func VerifyFanOutEntitySourceRevisionWriterPreservesNumberKindsForTest(t *testing.T, prepare StatementProcessFixtureForTest) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			db := fanOutReadbackTestDB(t, backend)
+			db := openFanOutReadbackTestDB(t, backend)
+			var ctx context.Context
+			if backend == "postgres" {
+				_, ctx = materializePostgresStatementRuns(t, db, false, prepare)
+			} else {
+				_, ctx = materializeSQLiteStatementRuns(t, db, false, prepare)
+			}
 			newValueType := "TEXT"
 			if backend == "postgres" {
 				newValueType = "JSONB"
@@ -146,13 +151,13 @@ func TestFanOutEntitySourceRevisionWriterPreservesNumberKindsOnBothStores(t *tes
 				if err != nil {
 					t.Fatal(err)
 				}
-				result = mutationprotocol.RunPostgres(context.Background(), store, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
+				result = mutationprotocol.RunPostgres(ctx, store, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
 			} else {
 				store, err := sqlitebackend.New(db)
 				if err != nil {
 					t.Fatal(err)
 				}
-				result = mutationprotocol.RunSQLite(context.Background(), store, "fan-out source encoding", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
+				result = mutationprotocol.RunSQLite(ctx, store, "fan-out source encoding", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, write)
 			}
 			if !errors.Is(result.Err(), rollback) {
 				t.Fatalf("source revision attempt = %v, want isolated rollback", result.Err())
@@ -182,7 +187,7 @@ func persistFanOutReadbackChunk(t *testing.T, db *sql.DB, command runtimepipelin
 	}
 }
 
-func fanOutReadbackTestDB(t *testing.T, backend string, pausedRun ...string) *sql.DB {
+func openFanOutReadbackTestDB(t *testing.T, backend string) *sql.DB {
 	t.Helper()
 	var db *sql.DB
 	if backend == "postgres" {
@@ -195,20 +200,18 @@ func fanOutReadbackTestDB(t *testing.T, backend string, pausedRun ...string) *sq
 		}
 		t.Cleanup(func() { _ = db.Close() })
 	}
-	if len(pausedRun) > 1 {
-		t.Fatal("fan-out readback fixture accepts one exact paused run")
-	}
-	if len(pausedRun) == 1 {
-		var owner runlifecycle.OperationOwner
-		if backend == "postgres" {
-			owner = materializePostgresStatementRuns(t, db, true, pausedRun[0])
-		} else {
-			owner = materializeSQLiteStatementRuns(t, db, true, pausedRun[0])
-		}
-		if _, err := owner.TransitionActiveRun(context.Background(), runlifecycle.ActiveTransitionRequest{RunID: pausedRun[0], State: runlifecycle.StatePaused}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	return db
+}
+
+func fanOutReadbackTestDB(t *testing.T, backend string) *sql.DB {
+	t.Helper()
+	db := openFanOutReadbackTestDB(t, backend)
+	initializeFanOutReadbackTestDB(t, db, backend)
+	return db
+}
+
+func initializeFanOutReadbackTestDB(t *testing.T, db *sql.DB, backend string) {
+	t.Helper()
 	statements := []string{
 		`CREATE TABLE fan_out_intents (
 			run_id TEXT NOT NULL, origin_kind TEXT NOT NULL DEFAULT 'handler', deployment_feed_id TEXT, deployment_schema_digest TEXT,
@@ -238,7 +241,6 @@ func fanOutReadbackTestDB(t *testing.T, backend string, pausedRun ...string) *sq
 			t.Fatal(err)
 		}
 	}
-	return db
 }
 
 func seedFanOutReadbackClaim(t *testing.T, db *sql.DB, runIDs ...string) runtimepipeline.FanOutChunkCommand {
