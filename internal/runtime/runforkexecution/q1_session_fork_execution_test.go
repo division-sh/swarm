@@ -166,7 +166,7 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 					}
 					sessionIDs[page.Conversation.SessionID] = true
 					for _, turn := range page.Turns {
-						if turn.TurnID == "" || turnIDs[turn.TurnID] || turn.TriggerEventID != inputID || turn.CompletionEvidence.Request.RequestedModel != "request-A" || turn.ResolvedModel != "reported-Q1" || !turn.ParseOK || turn.Failure != nil {
+						if turn.TurnID == "" || turnIDs[turn.TurnID] || turn.CompletedAt.IsZero() || turn.TriggerEventID != inputID || turn.CompletionEvidence.Request.RequestedModel != "request-A" || turn.ResolvedModel != "reported-Q1" || !turn.ParseOK || turn.Failure != nil {
 							t.Fatalf("fork reused or misattributed completion: %+v", turn)
 						}
 						turnIDs[turn.TurnID] = true

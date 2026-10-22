@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -83,12 +84,13 @@ type serveLifecyclePresenter struct {
 	verbose bool
 	waiting func(string) string
 
-	bootEvents       map[int]runtime.BootProgressEvent
-	store            *storebackend.Selection
-	workspaces       []serveLifecycleWorkspaceFact
-	warnings         []runtimebootverify.Finding
-	operatorWarnings []string
-	notices          []serveLifecycleNotice
+	bootEvents        map[int]runtime.BootProgressEvent
+	store             *storebackend.Selection
+	workspaces        []serveLifecycleWorkspaceFact
+	credentialSources []runtimecredentials.SourceFact
+	warnings          []runtimebootverify.Finding
+	operatorWarnings  []string
+	notices           []serveLifecycleNotice
 
 	ready              bool
 	failed             bool
@@ -129,6 +131,15 @@ func (p *serveLifecyclePresenter) runtimeSink() func(runtime.BootProgressEvent) 
 		return nil
 	}
 	return p.observeBoot
+}
+
+func (p *serveLifecyclePresenter) recordCredentialSources(facts []runtimecredentials.SourceFact) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.credentialSources = append(p.credentialSources, facts...)
 }
 
 func (p *serveLifecyclePresenter) boot(step int, name, status, detail string) {
@@ -294,6 +305,16 @@ func (p *serveLifecyclePresenter) recordIneligibleIngress(bindings []runtime.Sta
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, binding := range bindings {
+		if binding.BlockReason == runtimerunlifecycle.StandingBindingSessionRequired {
+			if binding.Provider == "whatsapp" {
+				p.operatorWarnings = append(p.operatorWarnings, "Not linked: run swarm channel connect whatsapp")
+				continue
+			}
+			p.operatorWarnings = append(p.operatorWarnings, fmt.Sprintf(
+				"DORMANT ingress %s/%s (%s): session admission required; no business target, route or standing retention. Run swarm channel connect %s and complete pairing and the authenticated operator ceremony, or resume the exact pending operation.",
+				binding.FlowPath, binding.Provider, binding.SourcePath, binding.Provider))
+			continue
+		}
 		if binding.BlockReason == runtimerunlifecycle.StandingBindingRecoveryRequired {
 			missing := ""
 			if len(binding.MissingCredentials) > 0 {
@@ -634,6 +655,9 @@ func (p *serveLifecyclePresenter) writeConciseReadyLocked(facts serveLifecycleRe
 }
 
 func (p *serveLifecyclePresenter) writeResolvedFactsLocked(facts serveLifecycleReadyFacts) {
+	for _, line := range cliapp.CredentialSourceLines(p.credentialSources) {
+		fmt.Fprintln(p.out, line)
+	}
 	if p.store != nil {
 		if p.store.Backend == storebackend.BackendSQLite {
 			p.writeResolvedFactLocked("store", "sqlite · "+strings.TrimSpace(p.store.SQLitePath))
@@ -752,7 +776,11 @@ func (p *serveLifecyclePresenter) writeStandingIngressLocked(facts []serveLifecy
 		return sorted[i].BundleHash < sorted[j].BundleHash
 	})
 	for _, fact := range sorted {
-		fmt.Fprintf(p.out, "  %-27s %s\n", strings.TrimSpace(fact.Provider)+" webhook", strings.TrimSpace(fact.URL))
+		label := " webhook"
+		if sessionIngressFact(fact) {
+			label = " session"
+		}
+		fmt.Fprintf(p.out, "  %-27s %s\n", strings.TrimSpace(fact.Provider)+label, strings.TrimSpace(fact.URL))
 		fmt.Fprintf(p.out, "  %-27s %s\n", "capability", packs.RenderEffectiveTriggerReadiness(fact.Subject))
 	}
 }

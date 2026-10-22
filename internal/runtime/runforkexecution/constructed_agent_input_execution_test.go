@@ -162,7 +162,7 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 	if nested {
 		root = canonicalrouting.CopySelectedNestedConstructedAgentInput(t, fields)
 	}
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err != nil {
 		t.Fatal(err)
@@ -317,7 +317,7 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		}
 		selectedBundle, _ := semanticview.Bundle(loaded.Source)
 		sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), selectedBundle.SourceArtifact)
-		sourceLoader = SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)}
+		sourceLoader = SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
 	}
 	var scanProof chan error
 	if proof.scan {

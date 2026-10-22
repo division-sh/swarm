@@ -88,10 +88,13 @@ func (a providerRawSettlementAdmission) authorizes(projected, inbound events.Eve
 // publication operation. The selected store receives only CommitCommands;
 // PreparedPublications remain EventBus-owned for post-commit dispatch.
 type InboundDeliveryPlan struct {
-	events   []InboundDeliveryEvent
-	prepared []PreparedPublish
-	commands []PublicationCommand
+	admission providertriggers.PublicationAdmission
+	events    []InboundDeliveryEvent
+	prepared  []PreparedPublish
+	commands  []PublicationCommand
 }
+
+func (p InboundDeliveryPlan) Admission() providertriggers.PublicationAdmission { return p.admission }
 
 func (p InboundDeliveryPlan) PreparedPublications() []PreparedPublish {
 	return append([]PreparedPublish(nil), p.prepared...)
@@ -213,7 +216,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 			return InboundDeliveryPlan{}, err
 		}
 	}
-	plan := InboundDeliveryPlan{events: append([]InboundDeliveryEvent(nil), validated.Events...)}
+	plan := InboundDeliveryPlan{admission: validated.Admission, events: append([]InboundDeliveryEvent(nil), validated.Events...)}
 	activationOwners := make(map[runtimeflowidentity.Route]int)
 	var runProposal pipeline.FlowInstanceRunProposal
 	release := func(cause error) (InboundDeliveryPlan, error) {
@@ -222,7 +225,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		}
 		return InboundDeliveryPlan{}, cause
 	}
-	for _, item := range validated.Events {
+	for index, item := range validated.Events {
 		itemCtx := context.WithValue(ctx, authenticatedProviderPublicationKey{}, authenticatedProviderPublication{
 			eventID: item.Event.ID(), source: item.Event.RoutingSource().Route(), kind: item.Kind,
 		})
@@ -233,7 +236,7 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		}
 		preparedCtx, admitted, err := eb.admitPublishEvent(itemCtx, item.Event)
 		if err != nil {
-			return release(err)
+			return release(markSubmittedInboundValidation(err))
 		}
 		runProposal, err = eb.preparePublicationRunProposal(preparedCtx, admitted, runProposal)
 		if err != nil {
@@ -260,7 +263,13 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 			ownedActivations = append(ownedActivations, activation)
 		}
 		command.Activations = ownedActivations
-		if err := command.Validate(); err != nil {
+		command.Commit.inbound = &preparedInboundPublication{
+			admission: validated.Admission, eventID: command.Commit.Event.ID(),
+			authenticated: item.Event.Clone(), normalized: admitted.Event().Clone(),
+			bundleHash: eb.sourceArtifactFact.BundleHash(), provider: validated.Provider,
+			ordinal: index, count: len(validated.Events), kind: item.Kind, authorization: item.Authorization,
+		}
+		if err := command.ValidateInbound(validated.Admission); err != nil {
 			return release(fmt.Errorf("canonicalize inbound activation ownership: %w", err))
 		}
 		plan.prepared = append(plan.prepared, prepared)

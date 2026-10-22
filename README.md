@@ -113,6 +113,15 @@ absent; `--config` wins when both are set. Swarm does not discover root
 For contract credentials, use `swarm secrets set` and validate with
 `swarm secrets check`.
 
+The credential file defaults to `os.UserConfigDir()/swarm/credentials.json`,
+independently of the project and `--swarm-dir` runtime-state directory. Set
+`SWARM_CREDENTIALS_FILE` to a different file for each instance that needs a
+separate file tier, for both `swarm secrets` and `swarm serve`. This override
+does not isolate ambient environment credentials or managed/OAuth stores:
+tool credentials retain their environment-over-file precedence, while
+provider/channel consumers retain their file-only policy. At boot, `serve`
+names each required credential's effective source without printing its value.
+
 For local webhook development, `swarm serve --dev --expose` owns a temporary
 public callback URL and reconciles registration declared by a configured channel
 binding. Managed exposure requires `cloudflared` 2021.7.0 or newer (`brew install

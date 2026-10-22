@@ -35,7 +35,7 @@ type LocalRuntimeStateResolution struct {
 
 type LocalRuntimeStateOptions struct {
 	RepoRoot      string
-	ResolvedPaths CLISourcePlatformSpecPaths
+	ResolvedPaths CLISourcePaths
 	SwarmDir      CLISwarmDirResolution
 	Config        *config.Config
 
@@ -104,7 +104,7 @@ func ResolveDevScratch(state LocalRuntimeStateResolution) (DevScratchResolution,
 	return DevScratchResolution{Coordinate: coordinate, Selection: selection}, nil
 }
 
-func resolveLocalRuntimeStateProject(RepoRoot string, resolvedPaths CLISourcePlatformSpecPaths) localRuntimeStateProject {
+func resolveLocalRuntimeStateProject(RepoRoot string, resolvedPaths CLISourcePaths) localRuntimeStateProject {
 	selectedRoot := strings.TrimSpace(resolvedPaths.SourceRoot)
 	if selectedRoot == "" {
 		return localRuntimeStateProject{Status: "no_project", Detail: "no selected source root"}

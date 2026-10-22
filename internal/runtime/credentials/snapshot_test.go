@@ -2,6 +2,7 @@ package credentials
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -160,6 +161,11 @@ func TestSecretBindingProjectionFrozenReadNeverObservesOrAddsAuthority(t *testin
 	}
 	if _, err := projection.FrozenSecretBinding("sibling"); err == nil || store.calls != 1 {
 		t.Fatalf("sibling read err=%v calls=%d, want refusal without observation", err, store.calls)
+	}
+	_ = projection.SourceFacts()
+	_ = owner.SourceFacts()
+	if store.calls != 1 {
+		t.Fatal("source readback observed credentials or added authority")
 	}
 	var stale *SecretBindingProjectionStaleError
 	if err := projection.ValidateCurrent(ctx); !errors.As(err, &stale) || stale.Key != key || store.calls != 2 {
@@ -358,4 +364,118 @@ func TestCredentialSnapshotOverlayPreservesSourcePrecedenceAtomically(t *testing
 	if snapshot.CredentialValue() != "environment-token" || snapshot.Source != SourceEnv || snapshot.Writable || !snapshot.Shadowed {
 		t.Fatalf("overlay snapshot = %#v", snapshot.Metadata())
 	}
+	t.Run("source_locator_is_not_authority", func(t *testing.T) {
+		const key = "provenance.key-name"
+		const value = "same-observed-value"
+		candidates := []string{key, "provenance_key_name", "PROVENANCE_KEY_NAME"}
+		for _, candidate := range candidates {
+			t.Setenv(candidate, value)
+		}
+		if err := writable.Set(ctx, key, value); err != nil {
+			t.Fatal(err)
+		}
+		owner, err := NewSnapshotOwner(overlay)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projection := owner.BeginSecretBindingProjection()
+		frozen, err := projection.ObserveActivationCredential(ctx, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reference := func(snapshot AtomicSnapshot) string {
+			t.Helper()
+			projection, ok := any(snapshot).(interface{ SourceReference() string })
+			if !ok {
+				t.Fatal("credential observation lacks its winning source reference")
+			}
+			return projection.SourceReference()
+		}
+		originalMetadata, err := json.Marshal(frozen.Metadata())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, candidate := range candidates {
+			observed, err := owner.Observe(ctx, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if reference(observed.AtomicSnapshot) != "env:"+candidate {
+				t.Fatalf("winning source = %q, want env:%s", reference(observed.AtomicSnapshot), candidate)
+			}
+			facts := owner.SourceFacts()
+			if len(facts) != 1 || facts[0].Key != key || facts[0].Reference != "env:"+candidate {
+				t.Fatalf("retained source facts=%v, want env:%s", facts, candidate)
+			}
+			metadata, err := json.Marshal(observed.Metadata())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(metadata) != string(originalMetadata) || observed.ObservationToken() != frozen.ObservationToken() {
+				t.Fatal("source-name-only change altered existing authority metadata or token")
+			}
+			if err := projection.ValidateCurrent(ctx); err != nil {
+				t.Fatalf("same-value source-name change invalidated frozen binding: %v", err)
+			}
+			if reference(frozen.AtomicSnapshot) != "env:"+key {
+				t.Fatal("frozen binding adopted a later source observation")
+			}
+			frozenFacts := projection.SourceFacts()
+			if len(frozenFacts) != 1 || frozenFacts[0].Key != key || frozenFacts[0].Reference != "env:"+key {
+				t.Fatalf("frozen projection adopted later source facts: %v", frozenFacts)
+			}
+			if err := os.Unsetenv(candidate); err != nil {
+				t.Fatal(err)
+			}
+		}
+		file, err := owner.Observe(ctx, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reference(file.AtomicSnapshot) != "file:"+writable.path || file.ObservationToken() == frozen.ObservationToken() {
+			t.Fatal("file fallback lost its source or existing tier-change currentness")
+		}
+		if err := projection.ValidateCurrent(ctx); err == nil {
+			t.Fatal("frozen environment binding accepted a tier change")
+		}
+		if err := writable.Set(ctx, key, "changed-value"); err != nil {
+			t.Fatal(err)
+		}
+		changed, err := owner.Observe(ctx, key)
+		if err != nil || changed.ObservationToken() == file.ObservationToken() {
+			t.Fatalf("real value change did not change currentness: %v", err)
+		}
+	})
+	t.Run("absent_empty_refused_and_corrupt_sources", func(t *testing.T) {
+		file, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		absent, err := file.Snapshot(ctx, "not_present")
+		if err != nil || absent.Present || absent.SourceReference() != "" {
+			t.Fatalf("absence fabricated source provenance: %v", err)
+		}
+		if err := file.Set(ctx, "empty_provenance", "file-value"); err != nil {
+			t.Fatal(err)
+		}
+		for _, value := range []string{"", " \t"} {
+			t.Setenv("EMPTY_PROVENANCE", value)
+			observed, err := NewOverlayStore(EnvStore{}, file).Snapshot(ctx, "empty_provenance")
+			if err != nil || !observed.Present || observed.Source != SourceEnv || observed.SourceReference() != "" || observed.CredentialValue() != value {
+				t.Fatalf("unusable environment fabricated success or changed file-shadowing behavior: %v", err)
+			}
+		}
+		t.Setenv("SWARM_PROVENANCE", "private-refused-value")
+		refused, err := (EnvStore{}).Snapshot(ctx, "SWARM_PROVENANCE")
+		if err == nil || refused.SourceReference() != "" || refused.Present {
+			t.Fatal("refused source acquired successful provenance")
+		}
+		if err := os.WriteFile(file.path, []byte("invalid private-corrupt-value"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		corrupt, err := file.Snapshot(ctx, "empty_provenance")
+		if err == nil || corrupt.SourceReference() != "" || corrupt.Present {
+			t.Fatal("corrupt file acquired successful provenance")
+		}
+	})
 }

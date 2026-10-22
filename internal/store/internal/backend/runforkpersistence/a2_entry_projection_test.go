@@ -18,6 +18,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
@@ -42,7 +43,7 @@ func a2ForkEntity(t *testing.T, entry timeridentity.StageEntryRef, accumulator m
 	if err := workflowlifecycle.StoreStageEntry(bookkeeping, entry); err != nil {
 		t.Fatal(err)
 	}
-	return runfork.RunForkEntityState{EntityID: entry.EntityID, CurrentState: entry.Stage, Bookkeeping: bookkeeping, Accumulator: accumulator}
+	return runfork.RunForkEntityState{EntityID: entry.EntityID, CurrentState: mutationlog.PresentLifecycleState(entry.Stage), Bookkeeping: bookkeeping, Accumulator: accumulator}
 }
 
 func a2ForkJoinRef(t *testing.T, entry timeridentity.StageEntryRef, generation attemptgeneration.Generation) timeridentity.JoinRef {
@@ -234,7 +235,7 @@ func TestA2ForkEntryProjectionPreservesExactOldClosedArm(t *testing.T) {
 				delete(entity.Bookkeeping, "stage_entry")
 			}
 			if hostile == "current_state" {
-				entity.CurrentState = "different"
+				entity.CurrentState = mutationlog.PresentLifecycleState("different")
 			}
 			projection, err := runfork.ProjectEntityOwnership("source", "child", "source", "source")
 			if err != nil {

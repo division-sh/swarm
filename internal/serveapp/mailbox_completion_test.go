@@ -92,7 +92,7 @@ func gateCompletionRead(t *testing.T, rt servedControlProofRuntime, phase, runID
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = rt.DB.QueryRow(`SELECT e.current_state, CAST(e.accumulator AS TEXT), CAST(f.config AS TEXT) FROM entity_state e JOIN flow_instances f ON e.run_id=f.run_id AND e.flow_instance=f.instance_path WHERE e.run_id=$1`, runID).Scan(&out.State, &out.Accumulator, &out.History)
+	err = rt.DB.QueryRow(`SELECT f.current_state, CAST(f.accumulator AS TEXT), CAST(f.config AS TEXT) FROM entity_state e JOIN flow_instances f ON e.run_id=f.run_id AND e.entity_id=f.entity_id AND e.flow_instance=f.instance_path WHERE e.run_id=$1`, runID).Scan(&out.State, &out.Accumulator, &out.History)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func gateCompletionHarness(t *testing.T, backend, root string) (*cliapp.ServeOpt
 	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
-	opts := &cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
+	opts := &cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 	var db *sql.DB
 	var selectedPG *store.PostgresStore
 	var selectedSQLite *store.SQLiteRuntimeStore

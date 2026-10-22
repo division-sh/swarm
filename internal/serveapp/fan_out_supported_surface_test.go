@@ -202,8 +202,7 @@ func TestIssue2566ReporterFiniteFixtureCanCloseBothStores(t *testing.T) {
 			root := issue2394ServedReporterSource(t)
 			unsetStoreSelectorEnv(t)
 			stubServeRuntimeWorkspaceLifecycle(t)
-			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath,
-				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
+			opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
 				TestLLMRuntime: servedNoopLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			if backend == "sqlite" {
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend, filepath.Join(t.TempDir(), "reporter.sqlite"))

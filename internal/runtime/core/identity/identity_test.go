@@ -13,21 +13,3 @@ func TestNormalizeIDs(t *testing.T) {
 		t.Fatalf("flow id = %q, want flow/root", got)
 	}
 }
-
-func TestWorkflowURIResolve(t *testing.T) {
-	base := MustParseWorkflowURI("root/child")
-	got, err := base.Resolve("../sibling/node")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if got.String() != "root/sibling/node" {
-		t.Fatalf("resolved uri = %q, want root/sibling/node", got.String())
-	}
-}
-
-func TestWorkflowURIParent(t *testing.T) {
-	uri := MustParseWorkflowURI("root/child/node")
-	if got := uri.Parent().String(); got != "root/child" {
-		t.Fatalf("parent = %q, want root/child", got)
-	}
-}

@@ -17,7 +17,7 @@ ingress:
 `), &doc); err != nil {
 		t.Fatalf("Unmarshal standing ingress: %v", err)
 	}
-	if doc.Ingress == nil || doc.Ingress.Alias != "support" {
+	if doc.Ingress == nil || doc.Ingress.Alias == nil || *doc.Ingress.Alias != "support" {
 		t.Fatalf("standing flow = %#v", doc)
 	}
 	providers := doc.Ingress.Providers

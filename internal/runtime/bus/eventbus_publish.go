@@ -1131,7 +1131,7 @@ func (eb *EventBus) AdmitSelectedForkPublishInput(ctx context.Context, evt event
 	if eb.payloadAdmitter != nil {
 		evt, err = eb.admitEventPayload(ctx, evt)
 		if err != nil {
-			return ctx, events.AdmittedEvent{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
+			return ctx, events.AdmittedEvent{}, fmt.Errorf("%w for %s: %w", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
 	admitted, err := events.AdmitForPersistence(evt, events.AdmissionOptions{
@@ -1254,7 +1254,7 @@ func (eb *EventBus) admitPublicationEventFacts(ctx context.Context, evt events.E
 	if eb.payloadAdmitter != nil {
 		evt, err = eb.admitEventPayload(ctx, evt)
 		if err != nil {
-			return ctx, events.AdmittedEvent{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
+			return ctx, events.AdmittedEvent{}, fmt.Errorf("%w for %s: %w", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
 	admitted, err := events.AdmitForPersistence(evt, events.AdmissionOptions{Now: time.Now(), RequirePersistentUUIDIdentity: true})
@@ -2221,7 +2221,7 @@ func (eb *EventBus) admitDeferredEvents(ctx context.Context, out []events.Event)
 		var err error
 		d, err = eb.admitEventPayload(ctx, d)
 		if err != nil {
-			return nil, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(d.Type())), err)
+			return nil, fmt.Errorf("%w for %s: %w", ErrPayloadValidation, strings.TrimSpace(string(d.Type())), err)
 		}
 		_, admitted, err := admitEventForPublish(ctx, d, time.Now())
 		if err != nil {
@@ -2262,7 +2262,7 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 	var admitted events.AdmittedEvent
 	evt, err = eb.admitEventPayload(ctx, evt)
 	if err != nil {
-		return fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
+		return fmt.Errorf("%w for %s: %w", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 	}
 	ctx, admitted, err = admitEventForPublish(ctx, evt, time.Now())
 	if err != nil {
@@ -2716,7 +2716,7 @@ func (eb *EventBus) CheckDirectRoutes(ctx context.Context, evt events.Event, rou
 		var err error
 		evt, err = eb.admitEventPayload(ctx, evt)
 		if err != nil {
-			return status, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
+			return status, fmt.Errorf("%w for %s: %w", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
 	ctx = events.WithDeliveryContext(ctx, evt.DeliveryContext())
@@ -2778,7 +2778,7 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 		var err error
 		evt, err = eb.admitEventPayload(ctx, evt)
 		if err != nil {
-			return PublishRecipientPlan{}, fmt.Errorf("%w for %s: %v", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
+			return PublishRecipientPlan{}, fmt.Errorf("%w for %s: %w", ErrPayloadValidation, strings.TrimSpace(string(evt.Type())), err)
 		}
 	}
 	ictx, admitted, err := admitEventForPublish(ctx, evt, time.Now())

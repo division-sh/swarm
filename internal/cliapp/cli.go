@@ -128,7 +128,7 @@ Use default 'swarm verify' to observe admission for an explicitly configured dep
 	}
 	cmd.SetOut(out)
 	cmd.SetErr(errOut)
-	cmd.PersistentFlags().Var(&trackedRootStringFlag{value: &opts.rootFlags.swarmDir, changed: &opts.rootFlags.swarmDirSet}, "swarm-dir", "Path to the Swarm user/global state directory")
+	cmd.PersistentFlags().Var(&trackedRootStringFlag{value: &opts.rootFlags.swarmDir, changed: &opts.rootFlags.swarmDirSet}, "swarm-dir", "Path to Swarm runtime state (not credential scope; SWARM_CREDENTIALS_FILE selects the credential file tier)")
 	cmd.PersistentFlags().Var(&trackedRootStringFlag{value: &opts.rootFlags.configPath, changed: &opts.rootFlags.configPathSet}, "config", deploymentConfigFlagHelp)
 	cmd.AddGroup(
 		&cobra.Group{ID: commandGroupStart, Title: "Getting started:"},

@@ -20,7 +20,7 @@ func TestWorkspaceDockerProofsHaveProvisionedHostedOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, mutation := range map[string]struct{ old, replacement string }{
-		"missing image":       {"docker build -t swarm-workspace:latest -f Dockerfile.workspace .", "echo image omitted"},
+		"missing image":       {`docker build -t swarm-workspace:latest --build-arg WORKSPACE_GOLANG_BASE="$base_ref" -f Dockerfile.workspace .`, "echo image omitted"},
 		"missing opt-in":      {`SWARM_TEST_WORKSPACE_MCP_DOCKER: "1"`, `SWARM_TEST_WORKSPACE_MCP_DOCKER: "0"`},
 		"lost worker leaves":  {"'^TestWorkerRealDocker'", "'^TestWorkerRealDockerHTTPDeadlineJoinsGatewayRequest$'"},
 		"lost release leaves": {"'^TestWorkspaceMCPCompiledDocker(Conformance|DoctorAndLiveBootRefusal)$'", "'^TestWorkspaceMCPCompiledDockerConformance$'"},
@@ -58,6 +58,9 @@ func validateWorkspaceDockerHostedProof(raw []byte) error {
 	if err := yaml.Unmarshal(raw, &workflow); err != nil {
 		return err
 	}
+	if err := validateWorkspaceImageCache(raw); err != nil {
+		return err
+	}
 	job, exists := workflow.Jobs["sqlite-local-dev"]
 	if !exists || job.RunsOn != "ubuntu-latest" {
 		return fmt.Errorf("missing native Ubuntu workspace proof job")
@@ -68,7 +71,7 @@ func validateWorkspaceDockerHostedProof(raw []byte) error {
 		if step.If != "" {
 			continue
 		}
-		if strings.Contains(step.Run, "docker build -t swarm-workspace:latest -f Dockerfile.workspace .") {
+		if strings.Contains(step.Run, `docker build -t swarm-workspace:latest --build-arg WORKSPACE_GOLANG_BASE="$base_ref" -f Dockerfile.workspace .`) {
 			imageBuilt = true
 		}
 		if !imageBuilt || step.Env["SWARM_TEST_WORKSPACE_MCP_DOCKER"] != "1" {

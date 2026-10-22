@@ -43,7 +43,7 @@ func TestIssue2655EventSelectorsKeepPreparedRevisionBothStores(t *testing.T) {
 				prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 					SourceRunID: sourceRun, At: at, ExpectedBundleHash: f.runtime.sourceArtifactFact.BundleHash(),
 					ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
-					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: f.selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)},
+					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: f.selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)},
 					AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: f.topology.capability},
 				})
 				if err != nil {
@@ -86,12 +86,8 @@ func issue2655EventSource(t *testing.T, backend string) (*deploymentResourceFixt
 	root := canonicalrouting.CopySelectedDeploymentResource(t, "root", true)
 	schemaPath := filepath.Join(root, "schema.yaml")
 	schema, err := os.ReadFile(schemaPath)
-	if err != nil || strings.Count(string(schema), "inputs: [fixture.close.requested]") != 1 {
+	if err != nil || strings.Count(string(schema), "inputs: [root.ready, fixture.close.requested]") != 1 {
 		t.Fatalf("event-origin control requires the exact root fixture: %v", err)
-	}
-	schema = []byte(strings.Replace(string(schema), "inputs: [fixture.close.requested]", "inputs: [root.ready, fixture.close.requested]", 1))
-	if err := os.WriteFile(schemaPath, schema, 0o600); err != nil {
-		t.Fatal(err)
 	}
 	repo := conformanceRepoRoot(t)
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
@@ -174,7 +170,7 @@ func TestIssue2655EventOperationSelectorCorrespondenceBothStores(t *testing.T) {
 				repo := conformanceRepoRoot(t)
 				prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 					ForkOperation: &operation, SourceRunID: sourceRun, At: at, ExpectedBundleHash: operation.TargetBundleHash, ContractSelection: selection,
-					SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: f.selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)},
+					SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: f.selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)},
 					AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: f.topology.capability},
 				})
 				if err != nil {

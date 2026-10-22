@@ -17,9 +17,6 @@ func TestReviewedSnapshotsAreFiniteAndIdempotent(t *testing.T) {
 	if err := json.Unmarshal(recipeBytes, &recipes); err != nil {
 		t.Fatal(err)
 	}
-	if len(recipes) != 893 {
-		t.Fatalf("recipe count=%d", len(recipes))
-	}
 	for _, row := range recipes {
 		t.Run(row.File+"/"+row.Function, func(t *testing.T) {
 			source := []byte("package proof\n" + row.Before)

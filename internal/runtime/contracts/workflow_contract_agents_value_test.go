@@ -274,7 +274,6 @@ func TestW5AgentAdmissionDiskCatalogRetainedParity(t *testing.T) {
 			}
 			if err == nil {
 				left, right := disk["worker"], entries["worker"]
-				left.admissionProvenance, right.admissionProvenance = nil, nil
 				if !reflect.DeepEqual(left, right) {
 					t.Fatalf("%s typed projection differs", name)
 				}
@@ -335,22 +334,6 @@ func TestW5AgentProvenanceComposesWithoutMemorySource(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			families := map[string]bool{}
-			for _, entry := range bundle.EffectiveProvenance().Entries() {
-				for _, family := range []string{"agents[", "nodes[", "events[", "schemas["} {
-					if strings.HasPrefix(entry.Path, family) {
-						families[family] = true
-					}
-				}
-				if strings.HasPrefix(entry.Path, "agents[") && (strings.HasSuffix(entry.Path, ".memory") || strings.Contains(entry.Path, "memory_source")) {
-					t.Fatalf("retired memory source survived: %+v", entry)
-				}
-			}
-			for _, family := range []string{"agents[", "nodes[", "events[", "schemas["} {
-				if !families[family] {
-					t.Fatalf("%s provenance overwritten or missing", family)
-				}
-			}
 			for _, record := range bundle.AgentDeclarationRecords() {
 				effective := EffectiveAgentRegistryEntry(record.LogicalID, record.Entry)
 				if effective.MemoryPlan.Enabled != (record.Source.FlowPath == "child") || effective.EffectiveSourceForField("memory") != "" {
@@ -364,10 +347,9 @@ func TestW5AgentProvenanceComposesWithoutMemorySource(t *testing.T) {
 func TestW5AgentAliasMergeNestedProvenance(t *testing.T) {
 	for _, tc := range []struct {
 		name, source string
-		line, column int
 	}{
-		{"alias", "first: &agent\n  intent: {inline: business intent}\n  entity_writes: {Item: {save: [value]}}\nsecond: *agent\n", 4, 9},
-		{"merge", "first: &agent\n  intent: {inline: business intent}\n  entity_writes: {Item: {save: [value]}}\nsecond:\n  <<: *agent\n", 5, 7},
+		{"alias", "first: &agent\n  intent: {inline: business intent}\n  entity_writes: {Item: {save: [value]}}\nsecond: *agent\n"},
+		{"merge", "first: &agent\n  intent: {inline: business intent}\n  entity_writes: {Item: {save: [value]}}\nsecond:\n  <<: *agent\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			entries, err := admitW5Agents(t, tc.source)
@@ -376,10 +358,6 @@ func TestW5AgentAliasMergeNestedProvenance(t *testing.T) {
 			}
 			if !reflect.DeepEqual(entries["second"].EntityWrites["Item"].Save.Fields, []string{"value"}) {
 				t.Fatal("nested alias grant changed")
-			}
-			proof := entries["second"].admissionProvenance["entity_writes.Item.save[0]"]
-			if proof.SourceFile != "agents.yaml" || proof.SourceLine != tc.line || proof.SourceColumn != tc.column {
-				t.Fatalf("authored introduction coordinate lost: %+v", proof)
 			}
 		})
 	}

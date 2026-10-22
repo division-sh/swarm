@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
@@ -24,8 +23,8 @@ import (
 func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 	repo := repoRootForTest()
 	root := canonicalrouting.ExampleRoot(t, canonicalrouting.RootIngress)
-	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePlatformSpecPaths{
-		SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
+	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePaths{
+		SourceRoot: root,
 	}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundle: %v", err)

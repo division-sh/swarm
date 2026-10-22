@@ -2,7 +2,9 @@ package cliapp
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -12,6 +14,28 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
+
+func TestChannelPlatformSpecExplicitLoaderRefusesInvalidSources(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"missing", "", "read platform spec:"},
+		{"malformed", "platform: [unfinished\n", "unmarshal platform spec:"},
+		{"draft", "platform: {name: draft}\n", "platform.version missing or duplicated"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "explicit-spec.yaml")
+			if tc.name != "missing" {
+				if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := loadChannelPlatformSpecDocument(path); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("explicit %s spec error = %v, want %q", tc.name, err, tc.want)
+			}
+		})
+	}
+}
 
 func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *testing.T) {
 	repo := RepoRoot()
@@ -36,15 +60,22 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 	if err != nil {
 		t.Fatalf("LoadConfiguredChannelPacks without credential: %v", err)
 	}
-	if len(withoutCredential.Plans) != 1 || len(withoutCredential.Bindings) != 1 {
-		t.Fatalf("channel load = %#v, want one plan and one binding", withoutCredential)
+	if len(withoutCredential.Plans) != 2 || len(withoutCredential.Bindings) != 1 {
+		t.Fatalf("channel load = %#v, want both installed plans and one configured binding", withoutCredential)
 	}
-	structural, err := withoutCredential.Plans[0].CapabilitySubject()
-	if err != nil || structural.Kind != packs.SubjectChannelPack || structural.Status != packs.StatusAvailable {
-		t.Fatalf("structural subject = %#v, err=%v", structural, err)
+	wantPlans := map[string]bool{"provider.telegram.hitl_channel": true, "provider.whatsapp.hitl_channel": true}
+	for _, plan := range withoutCredential.Plans {
+		structural, err := plan.CapabilitySubject()
+		if err != nil || !wantPlans[structural.ID] || structural.Kind != packs.SubjectChannelPack || structural.Status != packs.StatusAvailable {
+			t.Fatalf("structural subject = %#v, err=%v", structural, err)
+		}
+		delete(wantPlans, structural.ID)
+	}
+	if len(wantPlans) != 0 {
+		t.Fatalf("missing installed channel plans: %v", wantPlans)
 	}
 	outbound, err := withoutCredential.Bindings[0].CapabilitySubject()
-	if err != nil || outbound.Kind != packs.SubjectChannelOutbound || outbound.Status != packs.StatusNotReady {
+	if err != nil || outbound.ID != "ops" || outbound.Provider != "telegram" || outbound.Kind != packs.SubjectChannelOutbound || outbound.Status != packs.StatusNotReady {
 		t.Fatalf("outbound subject without credential = %#v, err=%v", outbound, err)
 	}
 
@@ -60,9 +91,36 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 
 	report := LocalPreflightReport{}
 	appendChannelCapabilitySubjects(&report, ready)
-	if len(report.CapabilitySubjects) != 2 {
-		t.Fatalf("preflight channel subjects = %#v, want structural and outbound", report.CapabilitySubjects)
+	if len(report.CapabilitySubjects) != 3 {
+		t.Fatalf("preflight channel subjects = %#v, want both structural plans and one configured outbound", report.CapabilitySubjects)
 	}
+	t.Run("source_projects_the_mapped_native_observation", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "channel-credentials.json")
+		file, err := runtimecredentials.NewFileStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := file.Set(t.Context(), "exact.channel.key", "private-channel-token"); err != nil {
+			t.Fatal(err)
+		}
+		binding := cfg.Channels.Bindings["ops"]
+		binding.Credentials = map[string]string{"telegram_bot_token": "exact.channel.key"}
+		mappedConfig := *cfg
+		mappedConfig.Channels.Bindings = map[string]config.ChannelBindingConfig{"ops": binding}
+		mapped, err := LoadConfiguredChannelPacks(t.Context(), RuntimeConfigLoadResult{Config: &mappedConfig}, projection, file, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		facts := mapped.CredentialSources()
+		if len(facts) == 0 {
+			t.Fatal("mapped native channel observation lost source provenance")
+		}
+		for _, fact := range facts {
+			if fact.Key != "exact.channel.key" || fact.Reference != "file:"+path {
+				t.Fatalf("channel invented a logical key or a different source: %+v", fact)
+			}
+		}
+	})
 
 	connectorDescriptors := projection.ProviderConnectors.PackDescriptors()
 	for index := range connectorDescriptors {
@@ -86,7 +144,7 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 	if err != nil {
 		t.Fatalf("CompileChannelInventory: %v", err)
 	}
-	if _, err := compileChannelBindings(context.Background(), cfg, conflicting, nil, nil); err == nil {
+	if _, _, err := compileChannelBindings(context.Background(), cfg, conflicting, nil, nil); err == nil {
 		t.Fatal("incompatible same-key channel credential requirements were accepted")
 	}
 }

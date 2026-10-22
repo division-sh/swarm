@@ -81,8 +81,12 @@ accounts:
 			"priority": 3,
 		},
 	})
-	if changed, err := storetest.SetEntityProjectionPrivateBookkeeping(ctx, sqliteStore, entityToolTestRunID, entityID); err != nil || changed != 1 {
-		t.Fatalf("inject sqlite hostile bookkeeping: rows=%d err=%v", changed, err)
+	if changed, err := storetest.SetWorkflowProjectionPlatformBookkeeping(ctx, sqliteStore, entityToolTestRunID, "review/inst-1"); err != nil || changed != 1 {
+		t.Fatalf("inject sqlite header bookkeeping: rows=%d err=%v", changed, err)
+	}
+	private, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, sqliteStore, entityToolTestRunID, entityID)
+	if err != nil || private.CurrentState == nil || *private.CurrentState != "queued" || string(private.Bookkeeping) != `{"platform_fact":"preserve"}` {
+		t.Fatalf("sqlite privacy witness lacks exact header state/bookkeeping: %+v err=%v", private, err)
 	}
 	getOut, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
 	if err != nil {
@@ -153,6 +157,9 @@ accounts:
 	mutationCount := len(projection.Mutations)
 	if mutationCount < 2 {
 		t.Fatalf("sqlite entity mutation count = %d, want create and update mutations", mutationCount)
+	}
+	if string(projection.Bookkeeping) != string(private.Bookkeeping) {
+		t.Fatalf("sqlite tool write changed private header bookkeeping: got=%s want=%s", projection.Bookkeeping, private.Bookkeeping)
 	}
 }
 
@@ -238,8 +245,12 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 		"flow_instance": "validation/inst-1",
 		"fields":        map[string]any{"status": "open", "business_brief": map[string]any{"summary": "before", "confidence": int64(1)}},
 	})
-	if changed, err := storetest.SetEntityProjectionPrivateBookkeeping(ctx, sqliteStore, entityToolTestRunID, entityID); err != nil || changed != 1 {
-		t.Fatalf("inject sqlite role-scoped hostile bookkeeping: rows=%d err=%v", changed, err)
+	if changed, err := storetest.SetWorkflowProjectionPlatformBookkeeping(ctx, sqliteStore, entityToolTestRunID, "validation/inst-1"); err != nil || changed != 1 {
+		t.Fatalf("inject sqlite role-scoped header bookkeeping: rows=%d err=%v", changed, err)
+	}
+	private, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, sqliteStore, entityToolTestRunID, entityID)
+	if err != nil || private.CurrentState == nil || *private.CurrentState != "queued" || string(private.Bookkeeping) != `{"platform_fact":"preserve"}` {
+		t.Fatalf("sqlite role privacy witness lacks exact header state/bookkeeping: %+v err=%v", private, err)
 	}
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:       sqliteStore,
@@ -283,6 +294,10 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	brief, ok := got.(map[string]any)
 	if !ok || strings.TrimSpace(asString(brief["summary"])) != "after" {
 		t.Fatalf("sqlite role-scoped brief = %#v, want updated summary", got)
+	}
+	projection, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, sqliteStore, entityToolTestRunID, entityID)
+	if err != nil || string(projection.Bookkeeping) != string(private.Bookkeeping) {
+		t.Fatalf("sqlite role tool write changed private header bookkeeping: got=%s want=%s err=%v", projection.Bookkeeping, private.Bookkeeping, err)
 	}
 }
 

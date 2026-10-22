@@ -55,6 +55,7 @@ import (
 	timerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	tools "github.com/division-sh/swarm/internal/runtime/tools"
 	workflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
+	authority "github.com/division-sh/swarm/internal/sessionprovider/authority"
 	runhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	time "time"
 )
@@ -735,6 +736,10 @@ func (s *PostgresStore) LoadOperatorAgentUsage(ctx context.Context, identity age
 	return s.operatorAgentPostgres.LoadOperatorAgentUsage(ctx, identity, opts)
 }
 
+func (s *PostgresStore) LoadOperatorChannelClaimReceipt(ctx context.Context, id string) (operatorchannel.ClaimReceipt, bool, error) {
+	return s.operatorChannelPostgresOwner.LoadOperatorChannelClaimReceipt(ctx, id)
+}
+
 func (s *PostgresStore) LoadOperatorConversationFork(ctx context.Context, forkID string) (runfork.OperatorConversationForkSession, error) {
 	return s.runForkPostgresOwner.LoadOperatorConversationFork(ctx, forkID)
 }
@@ -821,10 +826,6 @@ func (s *PostgresStore) LoadRunTestQuiescence(ctx context.Context, runID string,
 
 func (s *PostgresStore) LoadRuntimeIngressState(ctx context.Context) (ingress.State, error) {
 	return s.runtimeIngressPostgresOwner.LoadRuntimeIngressState(ctx)
-}
-
-func (s *PostgresStore) LoadWorkflowEntityState(ctx context.Context, identity flowidentity.RunScopedFlowInstance, entityID identity.EntityID) (pipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
-	return s.pipelinePostgresOwner.LoadWorkflowEntityState(ctx, identity, entityID)
 }
 
 func (s *PostgresStore) LoadWorkflowInstance(ctx context.Context, identity flowidentity.RunScopedFlowInstance) (pipeline.WorkflowInstance, bool, error) {
@@ -1027,6 +1028,10 @@ func (s *PostgresStore) RecoverSelectedFork(ctx context.Context, req runcontrol.
 	return s.runForkPostgresOwner.RecoverSelectedFork(ctx, req)
 }
 
+func (s *PostgresStore) RecoverUnlaunchedChannelLogout(ctx context.Context, id string, revision int64, now time.Time) (channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingPostgresOwner.RecoverUnlaunchedChannelLogout(ctx, id, revision, now)
+}
+
 func (s *PostgresStore) RegisterAuthorActivityEventCatalog(scope authoractivity.Scope, descriptors []authoractivity.EventDescriptor) (*authoractivity.EventCatalogLease, error) {
 	return s.activityPostgresOwner.RegisterAuthorActivityEventCatalog(scope, descriptors)
 }
@@ -1199,6 +1204,10 @@ func (s *PostgresStore) ScanDeliveryContinuations(ctx context.Context, authority
 	return s.deliveryPostgresOwner.ScanDeliveryContinuations(ctx, authority, cursor, limit)
 }
 
+func (s *PostgresStore) SessionStandingBindingCurrent(ctx context.Context, expected channelonboarding.Operation) (bool, error) {
+	return s.channelOnboardingPostgresOwner.SessionStandingBindingCurrent(ctx, expected)
+}
+
 func (s *PostgresStore) SetChannelClientLocale(ctx context.Context, req channelonboarding.SetClientLocaleRequest) (channelonboarding.Operation, error) {
 	return s.channelOnboardingPostgresOwner.SetChannelClientLocale(ctx, req)
 }
@@ -1221,6 +1230,10 @@ func (s *PostgresStore) SettleExternalAttempt(ctx context.Context, settlement ef
 
 func (s *PostgresStore) SettleFailure(ctx context.Context, claim deliverylifecycle.Claim, settlement deliverylifecycle.Settlement) (deliverylifecycle.Snapshot, error) {
 	return s.deliveryPostgresOwner.SettleFailure(ctx, claim, settlement)
+}
+
+func (s *PostgresStore) SettleSessionChannelClaim(ctx context.Context, fact authority.Claim) (operatorchannel.ClaimSettlement, error) {
+	return s.operatorChannelPostgresOwner.SettleSessionChannelClaim(ctx, fact)
 }
 
 func (s *PostgresStore) SettleSuccess(ctx context.Context, claim deliverylifecycle.Claim, sideEffects []string, duration time.Duration, selection deliverylifecycle.HandlerRuleSelectionFact) (deliverylifecycle.Snapshot, error) {
@@ -1967,6 +1980,10 @@ func (s *SQLiteRuntimeStore) LoadOperatorAgentUsage(ctx context.Context, identit
 	return s.operatorAgentSQLite.LoadOperatorAgentUsage(ctx, identity, opts)
 }
 
+func (s *SQLiteRuntimeStore) LoadOperatorChannelClaimReceipt(ctx context.Context, id string) (operatorchannel.ClaimReceipt, bool, error) {
+	return s.operatorChannelSQLiteOwner.LoadOperatorChannelClaimReceipt(ctx, id)
+}
+
 func (s *SQLiteRuntimeStore) LoadOperatorConversationFork(ctx context.Context, forkID string) (runfork.OperatorConversationForkSession, error) {
 	return s.runForkSQLiteOwner.LoadOperatorConversationFork(ctx, forkID)
 }
@@ -2049,10 +2066,6 @@ func (s *SQLiteRuntimeStore) LoadRunTestQuiescence(ctx context.Context, runID st
 
 func (s *SQLiteRuntimeStore) LoadRuntimeIngressState(ctx context.Context) (ingress.State, error) {
 	return s.runtimeIngressSQLiteOwner.LoadRuntimeIngressState(ctx)
-}
-
-func (s *SQLiteRuntimeStore) LoadWorkflowEntityState(ctx context.Context, identity flowidentity.RunScopedFlowInstance, entityID identity.EntityID) (pipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
-	return s.pipelineSQLiteOwner.LoadWorkflowEntityState(ctx, identity, entityID)
 }
 
 func (s *SQLiteRuntimeStore) LoadWorkflowInstance(ctx context.Context, identity flowidentity.RunScopedFlowInstance) (pipeline.WorkflowInstance, bool, error) {
@@ -2255,6 +2268,10 @@ func (s *SQLiteRuntimeStore) RecoverSelectedFork(ctx context.Context, req runcon
 	return s.runForkSQLiteOwner.RecoverSelectedFork(ctx, req)
 }
 
+func (s *SQLiteRuntimeStore) RecoverUnlaunchedChannelLogout(ctx context.Context, id string, revision int64, now time.Time) (channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingSQLiteOwner.RecoverUnlaunchedChannelLogout(ctx, id, revision, now)
+}
+
 func (s *SQLiteRuntimeStore) RegisterAuthorActivityEventCatalog(scope authoractivity.Scope, descriptors []authoractivity.EventDescriptor) (*authoractivity.EventCatalogLease, error) {
 	return s.activitySQLiteOwner.RegisterAuthorActivityEventCatalog(scope, descriptors)
 }
@@ -2427,6 +2444,10 @@ func (s *SQLiteRuntimeStore) ServeAbandonDeliveryQuiesced(ctx context.Context, e
 	return s.runLifecycleSQLiteOwner.ServeAbandonDeliveryQuiesced(ctx, eventID, subscriberType, subscriberID)
 }
 
+func (s *SQLiteRuntimeStore) SessionStandingBindingCurrent(ctx context.Context, expected channelonboarding.Operation) (bool, error) {
+	return s.channelOnboardingSQLiteOwner.SessionStandingBindingCurrent(ctx, expected)
+}
+
 func (s *SQLiteRuntimeStore) SetChannelClientLocale(ctx context.Context, req channelonboarding.SetClientLocaleRequest) (channelonboarding.Operation, error) {
 	return s.channelOnboardingSQLiteOwner.SetChannelClientLocale(ctx, req)
 }
@@ -2449,6 +2470,10 @@ func (s *SQLiteRuntimeStore) SettleExternalAttempt(ctx context.Context, settleme
 
 func (s *SQLiteRuntimeStore) SettleFailure(ctx context.Context, claim deliverylifecycle.Claim, settlement deliverylifecycle.Settlement) (deliverylifecycle.Snapshot, error) {
 	return s.deliverySQLiteOwner.SettleFailure(ctx, claim, settlement)
+}
+
+func (s *SQLiteRuntimeStore) SettleSessionChannelClaim(ctx context.Context, fact authority.Claim) (operatorchannel.ClaimSettlement, error) {
+	return s.operatorChannelSQLiteOwner.SettleSessionChannelClaim(ctx, fact)
 }
 
 func (s *SQLiteRuntimeStore) SettleSuccess(ctx context.Context, claim deliverylifecycle.Claim, sideEffects []string, duration time.Duration, selection deliverylifecycle.HandlerRuleSelectionFact) (deliverylifecycle.Snapshot, error) {

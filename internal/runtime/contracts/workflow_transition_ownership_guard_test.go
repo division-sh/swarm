@@ -429,7 +429,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.PipelineCoordinator.publishDirect::call internal/runtime/correlation.InboundEventFromContext":                      1,
 		"internal/runtime/pipeline.PipelineCoordinator.claimAndServeFanOutTurn::call internal/runtime/correlation.WithInboundEvent":                   1,
 		"internal/runtime/pipeline.pipelineActivityDispatcher.logActivityRuntime::call internal/runtime/correlation.InboundEventFromContext":          1,
-		"internal/store/internal/backend/mutationlog.Insert::call internal/runtime/correlation.InboundEventFromContext":                               1,
+		"internal/store/internal/backend/mutationlog.insertPostgresAt::call internal/runtime/correlation.InboundEventFromContext":                     1,
 		"internal/store/internal/backend/mutationlog.insertSQLiteAt::call internal/runtime/correlation.InboundEventFromContext":                       1,
 		"internal/store/storetest.PersistManagedAgentTurnFixture::call internal/runtime/correlation.WithInboundEvent":                                 1,
 
@@ -639,8 +639,10 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.validateWorkflowTransitionHistoryFlow::call internal/runtime/pipeline.validateWorkflowTransitionRecord":                         1,
 		"internal/runtime/pipeline.validateWorkflowTransitionHistoryFlow::history evidence fields":                                                                 2,
 		"internal/runtime/pipeline.validateWorkflowTransitionRecord::history evidence fields":                                                                      11,
-		"internal/runtime/pipeline.workflowInstancePersistedProjectionFromInstance::call internal/runtime/pipeline.validateWorkflowTransitionHistoryFlow":          1,
-		"internal/runtime/pipeline.workflowInstanceTransitionHistoryFromConfig::call internal/runtime/pipeline.validateWorkflowTransitionRecord":                   1,
+		// Current-entry causal validation reads its own committed transition.
+		"internal/runtime/pipeline.WorkflowTimerLifecycle.stageTimerEntryCurrent::history evidence fields":                                                11,
+		"internal/runtime/pipeline.workflowInstancePersistedProjectionFromInstance::call internal/runtime/pipeline.validateWorkflowTransitionHistoryFlow": 1,
+		"internal/runtime/pipeline.workflowInstanceTransitionHistoryFromConfig::call internal/runtime/pipeline.validateWorkflowTransitionRecord":          1,
 		// Validated lifecycle evidence construction and round-trip.
 		"internal/runtime/workflowlifecycle.NewCompiledTransition::call internal/runtime/workflowlifecycle.finishTransition":                          1,
 		"internal/runtime/workflowlifecycle.NewCompiledTransition::carrier fields":                                                                    2,

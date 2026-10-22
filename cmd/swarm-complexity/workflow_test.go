@@ -31,8 +31,34 @@ func TestWorkflowUnconditionalGateAndExecutableAggregate(t *testing.T) {
 		t.Fatal(err)
 	}
 	job, ok := workflow.Jobs["complexity"]
-	if !ok || job.If != "" || !slices.Equal(job.Needs, []string{"ci-preflight"}) {
-		t.Fatal("complexity must depend only on cheap admission, never proof profile/expensive plan")
+	// Setup cannot run or attest a proof tier (#2718, Gate E 6248763428).
+	// Every ordinary event retains the unconditional cheap-admission gate.
+	const setupExclusion = "github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true"
+	admitsComplexity := func(condition string, needs []string) bool {
+		return condition == setupExclusion && slices.Equal(needs, []string{"ci-preflight"})
+	}
+	if !ok || !admitsComplexity(job.If, job.Needs) {
+		t.Fatal("complexity must depend only on cheap admission, excluding only isolated workspace-base setup, never proof profile/expensive plan")
+	}
+	for _, hostile := range []struct {
+		name, condition string
+		needs           []string
+	}{
+		{"setup also executes", "", []string{"ci-preflight"}},
+		{"tier gate", "(" + setupExclusion + ") && needs.ci-plan.outputs.profile == 'full'", []string{"ci-preflight"}},
+		{"draft gate", "(" + setupExclusion + ") && !github.event.pull_request.draft", []string{"ci-preflight"}},
+		{"bypassed exclusion", setupExclusion + " || true", []string{"ci-preflight"}},
+		{"missing admission", setupExclusion, nil},
+		{"duplicate admission", setupExclusion, []string{"ci-preflight", "ci-preflight"}},
+		{"proof plan dependency", setupExclusion, []string{"ci-preflight", "ci-plan"}},
+		{"image dependency", setupExclusion, []string{"ci-preflight", "sqlite-local-dev"}},
+		{"setup dependency", setupExclusion, []string{"ci-preflight", "workspace-base-setup"}},
+	} {
+		t.Run(hostile.name, func(t *testing.T) {
+			if admitsComplexity(hostile.condition, hostile.needs) {
+				t.Fatal("changed complexity gate or dependency was admitted")
+			}
+		})
 	}
 	for _, event := range []string{"pull_request", "push", "workflow_dispatch", "schedule"} {
 		if _, ok := workflow.On[event]; !ok {
@@ -61,7 +87,7 @@ func TestWorkflowUnconditionalGateAndExecutableAggregate(t *testing.T) {
 			found = true
 		}
 	}
-	if !found || aggregate.If != "always()" {
+	if !found || aggregate.If != "always() && ("+setupExclusion+")" {
 		t.Fatal("missing required complexity result")
 	}
 	var summary string

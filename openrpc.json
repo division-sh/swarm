@@ -2373,6 +2373,216 @@
       ]
     },
     {
+      "name": "channel.logout",
+      "description": "Explicitly unlink one original paired session connection selected by its retained onboarding operation and exact revision. The authenticated stable principal owns the durable teardown, which fences business use without disconnecting the transport needed for the effect. The existing effect journal owns launch and outcome; launched or uncertain logout is never automatically resent, re-paired or adopted by a successor. Ordinary unbind, reset and source retirement retain pairing. Readback exposes no raw account, session path, pairing secret or SDK handle. The CLI reads channel.onboarding_get then delegates to this method.",
+      "params": [
+        {
+          "name": "operation_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/OpaqueId"
+          }
+        },
+        {
+          "name": "expected_revision",
+          "required": true,
+          "schema": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/ChannelLogoutResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32015,
+          "message": "Application error: CHANNEL_OPERATION_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "CHANNEL_OPERATION_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32011,
+          "message": "Application error: CHANNEL_BINDING_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "CHANNEL_BINDING_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32018,
+          "message": "Application error: CHANNEL_REVISION_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "CHANNEL_REVISION_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32041,
+          "message": "Application error: IDEMPOTENCY_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "IDEMPOTENCY_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "conflicting_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_request_hash": {
+                    "$ref": "#/components/schemas/Sha256Fingerprint"
+                  },
+                  "original_response_ref": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "resource_id": {
+                        "$ref": "#/components/schemas/OpaqueId"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "resource_id"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "original_request_hash",
+                  "conflicting_request_hash",
+                  "original_response_ref"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "channel.onboarding_get",
       "description": "Read one durable onboarding operation, its nested identity state, and its exact-current connected readiness without advancing or replaying effects.",
       "params": [
@@ -2466,6 +2676,14 @@
           "schema": {
             "minimum": 1,
             "type": "integer"
+          }
+        },
+        {
+          "name": "checkpoint_only",
+          "required": false,
+          "description": "Freeze a genuinely paired account for rejection/logout without beginning identity",
+          "schema": {
+            "type": "boolean"
           }
         },
         {
@@ -2698,6 +2916,202 @@
       ]
     },
     {
+      "name": "channel.onboarding_select",
+      "description": "Resolve one exact onboarding declaration and its provider credential requirement without reservation, credential observation or writes, SDK state, or effects. Start must revalidate the transient selection fence before mutation.",
+      "params": [
+        {
+          "name": "verb",
+          "required": true,
+          "schema": {
+            "enum": [
+              "connect",
+              "reconnect",
+              "rebind"
+            ],
+            "type": "string"
+          }
+        },
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "bundle",
+          "required": false,
+          "schema": {
+            "pattern": "^bundle-v2:sha256:[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        {
+          "name": "interface",
+          "required": false,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "target",
+          "required": false,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "save_proof",
+          "required": false,
+          "schema": {
+            "default": true,
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "client_language",
+          "required": false,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "name": "idempotency_key",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/ChannelOnboardingSelection"
+        }
+      },
+      "errors": [
+        {
+          "code": -32014,
+          "message": "Application error: CHANNEL_INTERFACE_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "CHANNEL_INTERFACE_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32013,
+          "message": "Application error: CHANNEL_INTERFACE_AMBIGUOUS",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "CHANNEL_INTERFACE_AMBIGUOUS",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32011,
+          "message": "Application error: CHANNEL_BINDING_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "CHANNEL_BINDING_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
       "name": "channel.onboarding_start",
       "description": "Reserve and advance one durable exact-context connected-channel connect, reconnect, or rebind journey. Provider secret material is transient write-only input and is absent from request identity, durable rows, logs, errors, and readback.",
       "params": [
@@ -2752,6 +3166,14 @@
             "minLength": 1,
             "type": "string",
             "writeOnly": true
+          }
+        },
+        {
+          "name": "expected_selection",
+          "required": false,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
           }
         },
         {
@@ -14978,6 +15400,106 @@
         ],
         "type": "object"
       },
+      "ChannelLogoutResult": {
+        "additionalProperties": false,
+        "properties": {
+          "effect_operation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "expected_revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "operation_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
+          "teardown": {
+            "additionalProperties": false,
+            "properties": {
+              "completed_at": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "failure_code": {
+                "type": "string"
+              },
+              "failure_message": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "logout"
+                ],
+                "type": "string"
+              },
+              "phase": {
+                "enum": [
+                  "reserved",
+                  "authority_retired",
+                  "succeeded",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              "principal_id": {
+                "$ref": "#/components/schemas/OpaqueId"
+              },
+              "requested_at": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "retired_activations": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "retired_operations": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "scope": {
+                "additionalProperties": false,
+                "properties": {
+                  "interface": {
+                    "$ref": "#/components/schemas/OperatorChannelInterface"
+                  }
+                },
+                "required": [
+                  "interface"
+                ],
+                "type": "object"
+              },
+              "teardown_id": {
+                "$ref": "#/components/schemas/OpaqueId"
+              },
+              "updated_at": {
+                "$ref": "#/components/schemas/Timestamp"
+              }
+            },
+            "required": [
+              "teardown_id",
+              "kind",
+              "principal_id",
+              "scope",
+              "phase",
+              "revision",
+              "retired_operations",
+              "retired_activations",
+              "requested_at",
+              "updated_at"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "operation_id",
+          "expected_revision",
+          "effect_operation_id",
+          "teardown"
+        ],
+        "type": "object"
+      },
       "ChannelOnboardingCandidate": {
         "additionalProperties": false,
         "properties": {
@@ -15003,7 +15525,8 @@
           },
           "identity_ceremony": {
             "enum": [
-              "authenticated_text_challenge"
+              "authenticated_text_challenge",
+              "account_link"
             ],
             "type": "string"
           },
@@ -15136,7 +15659,6 @@
             "items": {
               "$ref": "#/components/schemas/ChannelCredentialReservation"
             },
-            "minItems": 1,
             "type": "array"
           },
           "failure_code": {
@@ -15147,7 +15669,8 @@
           },
           "identity_ceremony": {
             "enum": [
-              "authenticated_text_challenge"
+              "authenticated_text_challenge",
+              "account_link"
             ],
             "type": "string"
           },
@@ -15241,11 +15764,62 @@
           "candidate": {
             "$ref": "#/components/schemas/ChannelOnboardingCandidate"
           },
+          "connection": {
+            "$ref": "#/components/schemas/ChannelSessionConnection"
+          },
           "identity_operation": {
             "$ref": "#/components/schemas/OperatorChannelOperation"
           },
+          "logout": {
+            "$ref": "#/components/schemas/ChannelLogoutResult"
+          },
           "operation": {
             "$ref": "#/components/schemas/ChannelOnboardingOperation"
+          },
+          "pairing": {
+            "additionalProperties": false,
+            "properties": {
+              "account_name": {
+                "type": "string"
+              },
+              "account_presentation": {
+                "type": "string"
+              },
+              "code": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              "connected": {
+                "type": "boolean"
+              },
+              "expires_at": {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              "paired": {
+                "type": "boolean"
+              },
+              "status": {
+                "enum": [
+                  "preparing",
+                  "not_started",
+                  "awaiting_qr",
+                  "qr_expired",
+                  "paired",
+                  "connected",
+                  "failed",
+                  "stopped",
+                  "recovery_required"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "paired",
+              "connected"
+            ],
+            "type": "object"
           },
           "readiness": {
             "$ref": "#/components/schemas/ConnectedChannelReadiness"
@@ -15253,6 +15827,24 @@
         },
         "required": [
           "operation"
+        ],
+        "type": "object"
+      },
+      "ChannelOnboardingSelection": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "$ref": "#/components/schemas/ChannelOnboardingCandidate"
+          },
+          "selection_fence": {
+            "description": "Transient exact-selection comparison only; no persisted or credential-write authority.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate",
+          "selection_fence"
         ],
         "type": "object"
       },
@@ -15283,7 +15875,7 @@
             "$ref": "#/components/schemas/OpaqueId"
           },
           "target_generation": {
-            "description": "Zero is declaration-only discovery/reservation; executable phases and connected activations require a positive exact generation.",
+            "description": "Zero is declaration-only discovery/reservation and session pairing/operator claim before publishing_activation; executable phases and connected activations require a positive exact generation.",
             "minimum": 0,
             "type": "integer"
           }
@@ -15296,6 +15888,39 @@
           "context_publication_generation",
           "plan_generation",
           "target_generation"
+        ],
+        "type": "object"
+      },
+      "ChannelSessionConnection": {
+        "additionalProperties": false,
+        "properties": {
+          "account_name": {
+            "type": "string"
+          },
+          "account_presentation": {
+            "type": "string"
+          },
+          "linked": {
+            "description": "Retained paired account exists; not operator identity or execution authority.",
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "Display-only finite SDK disconnect reason; not execution or retry authority.",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pairing",
+              "connecting",
+              "connected",
+              "disconnected"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "linked"
         ],
         "type": "object"
       },
@@ -15726,6 +16351,9 @@
         "properties": {
           "activation": {
             "$ref": "#/components/schemas/ConnectedChannelActivation"
+          },
+          "connection": {
+            "$ref": "#/components/schemas/ChannelSessionConnection"
           },
           "identity": {
             "$ref": "#/components/schemas/OperatorChannelReadback"
@@ -18684,6 +19312,11 @@
       "EntityAggregateResult": {
         "additionalProperties": false,
         "properties": {
+          "absent_count": {
+            "description": "SQL-null groups, separate from every real string bucket including unknown. Sum of counts plus absent_count conserves admitted data membership.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "counts": {
             "additionalProperties": {
               "minimum": 0,
@@ -18694,23 +19327,38 @@
           }
         },
         "required": [
-          "counts"
+          "counts",
+          "absent_count"
         ],
         "type": "object"
       },
       "EntityFull": {
         "additionalProperties": false,
-        "description": "Entity-native operator shape from the canonical typed entity-read owner: entity identity, authored fields, platform bookkeeping, gates and accumulator state. The v1 entity.get reader returns this decomposition directly; retired dashboard instance projections are not an alternate owner.",
+        "description": "Entity-native operator shape from the canonical typed entity-read owner: admitted data identity/fields and optional exact header lifecycle. Imports have explicit null bookkeeping/gates/accumulated/loops, never empty fabricated lifecycle maps. Constructed members retain valid maps and typed loop arrays. Retired projections are not an alternate owner.",
         "properties": {
           "accumulated": {
-            "additionalProperties": true,
             "description": "Accumulator state. Map of accumulator key → JSON value; values may be scalars, objects, or arrays depending on accumulate, data_accumulation, compute, or projection writers.",
-            "type": "object"
+            "oneOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "bookkeeping": {
-            "additionalProperties": true,
             "description": "Platform bookkeeping facts selected by explicit producers. Keys never classify authored fields.",
-            "type": "object"
+            "oneOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "entity": {
             "$ref": "#/components/schemas/EntitySummary"
@@ -18721,18 +19369,32 @@
             "type": "object"
           },
           "gates": {
-            "additionalProperties": {
-              "type": "boolean"
-            },
             "description": "Gate state. Map of gate_name → boolean.",
-            "type": "object"
+            "oneOf": [
+              {
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "loops": {
             "description": "Typed bounded-loop runtime projection. The reserved mutable control bucket is never returned.",
-            "items": {
-              "$ref": "#/components/schemas/BoundedLoopActivation"
-            },
-            "type": "array"
+            "oneOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/BoundedLoopActivation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -18740,18 +19402,37 @@
           "fields",
           "bookkeeping",
           "gates",
-          "accumulated"
+          "accumulated",
+          "loops"
         ],
         "type": "object"
       },
       "EntitySummary": {
         "additionalProperties": false,
+        "description": "Authored-data membership and clocks with nullable header lifecycle. Data-only imports have null for every lifecycle property. Constructed no-stage members have stage_defined false, a positive header revision and lifecycle clocks, but null current_state and entered_state_at. Staged members expose the exact declared stage. created_at and updated_at are data clocks; lifecycle-only changes do not move the data-list cursor.",
         "properties": {
           "created_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
           "current_state": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "entered_state_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "entity_id": {
             "$ref": "#/components/schemas/OpaqueId"
@@ -18762,18 +19443,55 @@
           "flow_instance": {
             "type": "string"
           },
+          "lifecycle_created_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lifecycle_updated_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "name": {
             "type": "string"
           },
           "revision": {
-            "minimum": 0,
-            "type": "integer"
+            "oneOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "run_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
           "slug": {
             "type": "string"
+          },
+          "stage_defined": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "updated_at": {
             "$ref": "#/components/schemas/Timestamp"
@@ -18784,8 +19502,12 @@
           "run_id",
           "flow_instance",
           "entity_type",
+          "stage_defined",
           "current_state",
           "revision",
+          "entered_state_at",
+          "lifecycle_created_at",
+          "lifecycle_updated_at",
           "created_at",
           "updated_at"
         ],
@@ -22524,7 +23246,8 @@
               "suspended",
               "orphaned",
               "dormant",
-              "recovery_required"
+              "recovery_required",
+              "session_required"
             ],
             "type": "string"
           },
@@ -22603,8 +23326,16 @@
             "type": "string"
           },
           "current_state": {
-            "minLength": 1,
-            "type": "string"
+            "description": "Setup imports have no lifecycle; only a constructed member with named stages has a stage name.",
+            "oneOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "entity_id": {
             "$ref": "#/components/schemas/OpaqueId"

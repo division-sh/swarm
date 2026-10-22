@@ -450,9 +450,9 @@ func installA2NativeJoinCommitRejection(t *testing.T, ctx context.Context, backe
 	if backend == "postgres" {
 		statements = append(statements,
 			`CREATE FUNCTION a2_commit_violation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN INSERT INTO a2_commit_child(id) VALUES (1); RETURN NEW; END $$`,
-			`CREATE TRIGGER a2_commit_violation AFTER UPDATE ON entity_state FOR EACH ROW WHEN (NEW.current_state='awaiting') EXECUTE FUNCTION a2_commit_violation()`)
+			`CREATE TRIGGER a2_commit_violation AFTER UPDATE ON flow_instances FOR EACH ROW WHEN (NEW.current_state='awaiting') EXECUTE FUNCTION a2_commit_violation()`)
 	} else {
-		statements = append(statements, `CREATE TRIGGER a2_commit_violation AFTER UPDATE ON entity_state WHEN NEW.current_state='awaiting' BEGIN INSERT INTO a2_commit_child(id) VALUES (1); END`)
+		statements = append(statements, `CREATE TRIGGER a2_commit_violation AFTER UPDATE ON flow_instances WHEN NEW.current_state='awaiting' BEGIN INSERT INTO a2_commit_child(id) VALUES (1); END`)
 	}
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
@@ -463,7 +463,7 @@ func installA2NativeJoinCommitRejection(t *testing.T, ctx context.Context, backe
 
 func a2NativeJoinTriggerRelation(backend string) string {
 	if backend == "postgres" {
-		return " ON entity_state"
+		return " ON flow_instances"
 	}
 	return ""
 }

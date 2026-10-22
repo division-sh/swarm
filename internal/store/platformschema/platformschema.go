@@ -161,15 +161,6 @@ func Flatten(plans []TableDDL) []string {
 	return out
 }
 
-func IncludesPlatformTables(plans []TableDDL) bool {
-	for _, plan := range plans {
-		if strings.TrimSpace(plan.SchemaKind) == "platform_spec" {
-			return true
-		}
-	}
-	return false
-}
-
 func ExtractTableName(statement string) string {
 	statement = strings.TrimSpace(statement)
 	matches := createTableName.FindStringSubmatch(statement)
@@ -177,16 +168,6 @@ func ExtractTableName(statement string) string {
 		return ""
 	}
 	return strings.TrimSpace(matches[1])
-}
-
-func PlanColumnNames(plan TableDDL) []string {
-	for _, statement := range plan.Statements {
-		if ExtractTableName(statement) == "" {
-			continue
-		}
-		return createTableColumnNames(statement)
-	}
-	return nil
 }
 
 func platformTableOrder(name string) int {
@@ -481,49 +462,6 @@ func columnCount(statements []string) int {
 		return count
 	}
 	return 0
-}
-
-func createTableColumnNames(statement string) []string {
-	start := strings.Index(statement, "(")
-	end := strings.LastIndex(statement, ")")
-	if start < 0 || end <= start {
-		return nil
-	}
-	seen := map[string]struct{}{}
-	out := make([]string, 0)
-	for _, line := range strings.Split(statement[start+1:end], "\n") {
-		line = strings.TrimSpace(strings.TrimSuffix(line, ","))
-		if line == "" || createTableLineIsConstraint(line) {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		columnName := strings.Trim(fields[0], `"`)
-		if columnName == "" {
-			continue
-		}
-		if _, exists := seen[columnName]; exists {
-			continue
-		}
-		seen[columnName] = struct{}{}
-		out = append(out, columnName)
-	}
-	return out
-}
-
-func createTableLineIsConstraint(line string) bool {
-	fields := strings.Fields(strings.ToUpper(strings.TrimSpace(line)))
-	if len(fields) == 0 {
-		return false
-	}
-	switch fields[0] {
-	case "PRIMARY", "FOREIGN", "UNIQUE", "CHECK", "CONSTRAINT", "EXCLUDE":
-		return true
-	default:
-		return false
-	}
 }
 
 func quoteIdent(v string) string {

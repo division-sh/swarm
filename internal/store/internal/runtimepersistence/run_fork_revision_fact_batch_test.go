@@ -24,7 +24,7 @@ func revisionBatchEntities(t *testing.T, ctx context.Context, tx *sql.Tx, f runF
 	sort.Strings(ids)
 	effects := runforkrevision.NewEffects()
 	for _, id := range ids {
-		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,slug,name,current_state,fields,created_at,updated_at) VALUES ($1,$2,'batch/1','fork_entity','batch-slug','Original','ready','{}',$3,$3)`, f.runID, id, f.at)
+		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,slug,name,fields,created_at,updated_at) VALUES ($1,$2,'batch/1','fork_entity','batch-slug','Original','{}',$3,$3)`, f.runID, id, f.at)
 		if err := effects.AddFact(f.runID, runforkrevision.FamilyEntityMetadata, id); err != nil {
 			t.Fatal(err)
 		}
@@ -69,10 +69,11 @@ func TestRunForkRevisionFactBatchBothStores(t *testing.T) {
 			}
 			for _, id := range ids {
 				initial = append(initial, exactLedgerRow{Revision: 1, Family: string(runforkrevision.FamilyEntityMetadata), Key: id, Present: true, Body: map[string]any{
-					"entity_id": id, "flow_instance": "batch/1", "entity_type": "fork_entity", "slug": "batch-slug", "name": "Original", "created_at": f.at.UTC().Format(time.RFC3339Nano), "flow_config": nil,
+					"entity_id": id, "flow_instance": "batch/1", "entity_type": "fork_entity", "slug": "batch-slug", "name": "Original", "created_at": nil, "flow_config": nil,
 					"construction_kind": "imported_state", "stage_defined": false, "flow_template": nil, "mode": nil,
 					"status": nil, "current_state": nil, "entered_state_at": nil, "updated_at": nil, "terminated_at": nil,
 					"parent_instance": nil, "instance_key": nil, "initial_materialization": nil,
+					"data_created_at": f.at.UTC().Format(time.RFC3339Nano), "data_updated_at": f.at.UTC().Format(time.RFC3339Nano),
 				}})
 			}
 			if ledger := exactLedger(t, ctx, tx, f.runID); !reflect.DeepEqual(ledger, initial) {
@@ -80,7 +81,7 @@ func TestRunForkRevisionFactBatchBothStores(t *testing.T) {
 			}
 		})
 		exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
-			mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE entity_state SET current_state='excluded' WHERE run_id=$1`, f.runID)
+			mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE entity_state SET fields='{"excluded":true}' WHERE run_id=$1`, f.runID)
 			got, err := revisionBatchFinalizeObserved(t, ctx, tx, s, effects, 1)
 			if err != nil || got[f.runID] != (runforkrevision.Result{Revision: 1}) || !reflect.DeepEqual(initial, exactLedger(t, ctx, tx, f.runID)) {
 				t.Fatalf("excluded-field/no-op changed history: result=%v err=%v", got, err)
@@ -95,10 +96,11 @@ func TestRunForkRevisionFactBatchBothStores(t *testing.T) {
 					mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE entity_state SET name='Changed' WHERE run_id=$1 AND entity_id=$2`, f.runID, id)
 					row.Present = true
 					row.Body = map[string]any{
-						"entity_id": id, "flow_instance": "batch/1", "entity_type": "fork_entity", "slug": "batch-slug", "name": "Changed", "created_at": f.at.UTC().Format(time.RFC3339Nano), "flow_config": nil,
+						"entity_id": id, "flow_instance": "batch/1", "entity_type": "fork_entity", "slug": "batch-slug", "name": "Changed", "created_at": nil, "flow_config": nil,
 						"construction_kind": "imported_state", "stage_defined": false, "flow_template": nil, "mode": nil,
 						"status": nil, "current_state": nil, "entered_state_at": nil, "updated_at": nil, "terminated_at": nil,
 						"parent_instance": nil, "instance_key": nil, "initial_materialization": nil,
+						"data_created_at": f.at.UTC().Format(time.RFC3339Nano), "data_updated_at": f.at.UTC().Format(time.RFC3339Nano),
 					}
 				} else {
 					mustExecRunForkRevisionMatrix(t, ctx, tx, `DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2`, f.runID, id)

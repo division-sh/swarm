@@ -97,6 +97,7 @@ type ClaimRetirement interface {
 }
 
 type Attempt struct {
+	identity               uuid.UUID
 	tx                     *sql.Tx
 	dialect                privateactivity.Dialect
 	evidence               Evidence
@@ -119,6 +120,24 @@ type Attempt struct {
 }
 
 var _ runtimeactivity.Mutation = (*Attempt)(nil)
+
+// Identity names this live attempt without lending its transaction or authority.
+// A retried or completed attempt cannot reuse an earlier attempt's evidence.
+func (a *Attempt) Identity(ctx context.Context) (uuid.UUID, error) {
+	if err := a.requireActive(); err != nil {
+		return uuid.Nil, err
+	}
+	if ctx == nil || ctx.Value(sqlAttemptKey{}) != a {
+		return uuid.Nil, errors.New("mutation identity requires its exact attempt context")
+	}
+	if err := ctx.Err(); err != nil {
+		return uuid.Nil, err
+	}
+	if a.identity == uuid.Nil {
+		a.identity = uuid.New()
+	}
+	return a.identity, nil
+}
 
 // WithSQL lends the native transaction only for the duration of a named
 // domain writer. It must not be retained or committed by the writer.
@@ -379,11 +398,29 @@ type Result[T any] struct {
 	acknowledged bool
 	err          error
 	phase        Phase
+	dialect      privateactivity.Dialect
 }
 
 func (r Result[T]) Acknowledged() bool { return r.acknowledged }
 func (r Result[T]) Err() error         { return r.err }
 func (r Result[T]) Phase() Phase       { return r.phase }
+
+// CleanCancellation accepts only the native owner's sealed, joined outcome.
+// The diagnostic phase and absence of COMMIT acknowledgement are not evidence.
+func (r Result[T]) CleanCancellation() (beforeAttempt, ok bool) {
+	if r.acknowledged {
+		return false, false
+	}
+	switch r.dialect {
+	case privateactivity.DialectSQLite:
+		return sqlitebackend.CleanCancellationBeforeCommit(r.err)
+	case privateactivity.DialectPostgres:
+		return postgresbackend.CleanCancellationBeforeCommit(r.err)
+	default:
+		return false, false
+	}
+}
+
 func (r Result[T]) Value() (T, bool) {
 	if !r.acknowledged {
 		var zero T
@@ -577,7 +614,7 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 		if nativeErr == nil {
 			nativeErr = errors.New("selected-store mutation commit was not acknowledged")
 		}
-		return Result[T]{err: nativeErr, phase: phase}
+		return Result[T]{err: nativeErr, phase: phase, dialect: dialect}
 	}
 	if previous != nil && previous.claimRetirement != nil {
 		nativeErr = errors.Join(nativeErr, previous.claimRetirement.RetireCommittedClaim(context.WithoutCancel(ctx)))

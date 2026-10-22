@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -18,8 +17,8 @@ import (
 func TestServeRejectsRetiredPinMarkersBeforeRuntime(t *testing.T) {
 	repo := repoRootForTest()
 	for _, input := range []bool{false, true} {
-		loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePlatformSpecPaths{
-			SourceRoot: canonicalrouting.CopyRetiredPinMarker(t, input), PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
+		loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePaths{
+			SourceRoot: canonicalrouting.CopyRetiredPinMarker(t, input),
 		}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 		want := "must be a scalar text"
 		if err == nil || !strings.Contains(err.Error(), want) || loaded.bundle != nil {
@@ -31,8 +30,8 @@ func TestServeRejectsRetiredPinMarkersBeforeRuntime(t *testing.T) {
 func TestBuildServeRuntimeContextFailureAfterRuntimeConstructionJoinsOccurrence(t *testing.T) {
 	repo := repoRootForTest()
 	root := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
-	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePlatformSpecPaths{
-		SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
+	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLISourcePaths{
+		SourceRoot: root,
 	}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundle: %v", err)

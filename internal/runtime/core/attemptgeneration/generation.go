@@ -103,18 +103,6 @@ func FromPayload(payload map[string]any) (Generation, bool) {
 	return g, g.Valid()
 }
 
-func FromLoopContext(loop map[string]any) (Generation, bool) {
-	g := Generation{
-		FlowID:        asString(loop["flow_id"]),
-		LoopID:        asString(loop["id"]),
-		ActivationID:  asString(loop["activation_id"]),
-		RevisionField: asString(loop["revision_field"]),
-		RevisionID:    asString(loop["revision_id"]),
-		Attempt:       asInt(loop["attempt"]),
-	}.Normalize()
-	return g, g.Valid()
-}
-
 func asString(value any) string {
 	text, _ := value.(string)
 	return strings.TrimSpace(text)

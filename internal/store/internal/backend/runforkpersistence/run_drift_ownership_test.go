@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,8 +34,7 @@ func insertRunDriftLifecycle(t *testing.T, db *sql.DB, run, entity, stage string
 func TestVerifyRunCanonicalMembershipBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			db, run, fielded := runDriftDatabase(t, backend)
-			insertRunDriftHeader(t, db, run, fielded, fielded, "company", "queued")
+			db, run, _ := runDriftDatabase(t, backend, true)
 			child := uuid.NewString()
 			for _, member := range []struct{ entity, path string }{{run, run}, {child, "worker/child"}} {
 				insertRunDriftHeader(t, db, run, member.entity, member.path, nil, "done")
@@ -75,18 +75,15 @@ func TestVerifyRunCanonicalHeaderDomainsBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			for _, domain := range []mutationlog.Domain{mutationlog.DomainLifecycleState, mutationlog.DomainBookkeeping, mutationlog.DomainGate, mutationlog.DomainAccumulator, mutationlog.DomainAuthoredField} {
 				t.Run(string(domain), func(t *testing.T) {
-					db, run, entity := runDriftDatabase(t, backend)
-					insertRunDriftHeader(t, db, run, entity, entity, "company", "queued")
-					if _, err := db.Exec(`UPDATE entity_state SET current_state='obsolete',bookkeeping='[]',gates='null',accumulator='7' WHERE run_id=$1`, run); err != nil {
-						t.Fatal(err)
+					db, run, entity := runDriftDatabase(t, backend, true)
+					for _, retired := range []string{"current_state", "bookkeeping", "gates", "accumulator"} {
+						if _, err := db.Exec(`UPDATE entity_state SET `+retired+`=NULL WHERE run_id=$1`, run); err == nil {
+							t.Fatalf("retired field-row lifecycle column %s remains writable", retired)
+						}
 					}
 					report, err := inspectRunDriftTest(t, db, run)
 					if err != nil || report.EntitiesChecked != 1 || len(report.Rows) != 0 {
-						t.Fatalf("obsolete copies overrode/vetoed canonical header: %+v %v", report, err)
-					}
-					// Restore copies to history: an unlogged header change must still win.
-					if _, err := db.Exec(`UPDATE entity_state SET current_state='queued',bookkeeping='{}',gates='{}',accumulator='{}' WHERE run_id=$1`, run); err != nil {
-						t.Fatal(err)
+						t.Fatalf("retired-column refusal damaged canonical header: %+v %v", report, err)
 					}
 					table, column, value, path := "flow_instances", "current_state", "done", ""
 					switch domain {
@@ -117,8 +114,7 @@ func TestVerifyRunConstructedPairAdmissionBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			for _, cut := range []string{"missing_fields", "fieldless_fields", "foreign_run", "wrong_entity", "wrong_path", "wrong_type", "conflicting_fields", "invalid_header_json", "invalid_fields_json", "invalid_revision", "empty_declared_type"} {
 				t.Run(cut, func(t *testing.T) {
-					db, run, entity := runDriftDatabase(t, backend)
-					insertRunDriftHeader(t, db, run, entity, entity, "company", "queued")
+					db, run, entity := runDriftDatabase(t, backend, true)
 					if cut == "foreign_run" {
 						requireHistoricalSnapshotRun(t, db, "00000000-0000-0000-0000-000000000098")
 					}
@@ -129,7 +125,7 @@ func TestVerifyRunConstructedPairAdmissionBothStores(t *testing.T) {
 						"wrong_entity":        `UPDATE entity_state SET entity_id='00000000-0000-0000-0000-000000000099' WHERE run_id=$1`,
 						"wrong_path":          `UPDATE entity_state SET flow_instance='foreign/route' WHERE run_id=$1`,
 						"wrong_type":          `UPDATE entity_state SET entity_type='foreign' WHERE run_id=$1`,
-						"conflicting_fields":  `INSERT INTO entity_state SELECT run_id,'00000000-0000-0000-0000-000000000099',current_state,fields,bookkeeping,gates,accumulator,flow_instance,entity_type FROM entity_state WHERE run_id=$1`,
+						"conflicting_fields":  `INSERT INTO entity_state SELECT run_id,'00000000-0000-0000-0000-000000000099',fields,flow_instance,entity_type FROM entity_state WHERE run_id=$1`,
 						"invalid_header_json": `UPDATE flow_instances SET bookkeeping='[]' WHERE run_id=$1`,
 						"invalid_fields_json": `UPDATE entity_state SET fields='[]' WHERE run_id=$1`,
 						"invalid_revision":    `UPDATE flow_instances SET revision=0 WHERE run_id=$1`,
@@ -165,8 +161,7 @@ func TestVerifyRunConstructedPairAdmissionBothStores(t *testing.T) {
 func TestVerifyRunSharedHeaderReadScopeBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			db, run, entity := runDriftDatabase(t, backend)
-			insertRunDriftHeader(t, db, run, entity, entity, "company", "queued")
+			db, run, entity := runDriftDatabase(t, backend, true)
 			tx, err := db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 			if err != nil {
 				t.Fatal(err)
@@ -196,10 +191,67 @@ func TestVerifyRunSharedHeaderReadScopeBothStores(t *testing.T) {
 	}
 }
 
+func TestQ10SharedHeaderPreservesNativeEntitySpellingsBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, constructed := range []bool{false, true} {
+			kind := "imported"
+			if constructed {
+				kind = "constructed"
+			}
+			for _, spelling := range []string{"canonical", "upper", "compact"} {
+				t.Run(backend+"/"+kind+"/"+spelling, func(t *testing.T) {
+					db, run, entity := runDriftDatabase(t, backend, constructed)
+					input := entity
+					switch spelling {
+					case "upper":
+						input = strings.ToUpper(entity)
+					case "compact":
+						input = strings.ReplaceAll(entity, "-", "")
+					}
+					for _, table := range []string{"entity_state", "flow_instances"} {
+						if _, err := db.Exec("UPDATE "+table+" SET entity_id=$1 WHERE run_id=$2", input, run); err != nil {
+							t.Fatal(err)
+						}
+					}
+					want := input
+					if backend == "postgres" {
+						want = entity
+					}
+					ctx := context.Background()
+					tx, err := db.BeginTx(ctx, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer tx.Rollback()
+					inventory, err := workflowheader.InventoryForRead(ctx, tx, run)
+					if err != nil {
+						t.Fatal(err)
+					}
+					members := inventory.StateOnly
+					if constructed {
+						members = inventory.Constructed
+					}
+					if len(members) != 1 || members[0].EntityID != want || len(inventory.StateOnly)+len(inventory.Constructed) != 1 {
+						t.Fatalf("native identity or membership changed: %+v, want %q constructed=%t", inventory, want, constructed)
+					}
+					read, found, err := workflowheader.LoadForRead(ctx, tx, run, want, entity)
+					if err != nil || found != constructed || (found && read.EntityID != want) {
+						t.Fatalf("native stored-coordinate read: %+v found=%t err=%v", read, found, err)
+					}
+					mutation, found, err := workflowheader.LoadForMutation(ctx, tx, backend == "postgres", run, input, entity)
+					if err != nil || found != constructed || (found && mutation.EntityID != want) {
+						t.Fatalf("native input-coordinate mutation read: %+v found=%t err=%v", mutation, found, err)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestVerifyRunStateOnlyDoesNotAcquireConstructionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			db, run, entity := runDriftDatabase(t, backend)
+			db, run, entity := runDriftDatabase(t, backend, false)
 			tx, err := db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
 			if err != nil {
 				t.Fatal(err)
@@ -224,8 +276,7 @@ func TestVerifyRunStateOnlyDoesNotAcquireConstructionBothStores(t *testing.T) {
 }
 
 func TestVerifyRunSharedHeaderReadPreservesMutationLocks(t *testing.T) {
-	db, run, entity := runDriftDatabase(t, "postgres")
-	insertRunDriftHeader(t, db, run, entity, entity, "company", "queued")
+	db, run, entity := runDriftDatabase(t, "postgres", true)
 	for _, mutation := range []bool{false, true} {
 		for _, table := range []string{"flow_instances", "entity_state"} {
 			tx, err := db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: !mutation})
@@ -243,7 +294,11 @@ func TestVerifyRunSharedHeaderReadPreservesMutationLocks(t *testing.T) {
 				t.Fatalf("load mutation=%t: found=%t err=%v", mutation, found, err)
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			_, writeErr := db.ExecContext(ctx, `UPDATE `+table+` SET current_state=current_state WHERE run_id=$1 AND entity_id=$2`, run, entity)
+			column := "current_state"
+			if table == "entity_state" {
+				column = "fields"
+			}
+			_, writeErr := db.ExecContext(ctx, `UPDATE `+table+` SET `+column+`=`+column+` WHERE run_id=$1 AND entity_id=$2`, run, entity)
 			cancel()
 			if err := tx.Rollback(); err != nil {
 				t.Fatal(err)

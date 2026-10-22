@@ -5,11 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -30,7 +31,7 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 
-	resp := rpcCall(t, handler, testSetupBody(bundleHash, runID, entityID, "waiting", "seeded", true, "idem-setup"))
+	resp := rpcCall(t, handler, testSetupBody(bundleHash, runID, entityID, "seeded", "idem-setup"))
 	if resp.Error != nil {
 		t.Fatalf("test.setup_entities error = %#v", resp.Error)
 	}
@@ -43,40 +44,40 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 		t.Fatalf("result entities len = %d, want 1", len(entities))
 	}
 	entityResult := asMap(t, entities[0])
-	if entityResult["alias"] != "subject" || entityResult["entity_id"] != entityID || entityResult["flow_instance"] != "operating" || entityResult["entity_type"] != "product" || entityResult["current_state"] != "waiting" {
+	if state, present := entityResult["current_state"]; !present || state != nil || entityResult["alias"] != "subject" || entityResult["entity_id"] != entityID || entityResult["flow_instance"] != "operating" || entityResult["entity_type"] != "product" {
 		t.Fatalf("setup entity result = %#v", entityResult)
 	}
-	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
+	assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, "seeded")
 	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
 
-	replay := rpcCall(t, handler, testSetupBody(bundleHash, runID, entityID, "waiting", "seeded", true, "idem-setup"))
+	replay := rpcCall(t, handler, testSetupBody(bundleHash, runID, entityID, "seeded", "idem-setup"))
 	if replay.Error != nil {
 		t.Fatalf("test.setup_entities replay error = %#v", replay.Error)
 	}
-	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
+	assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, "seeded")
 	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after replay = %d, want 1", count)
 	}
 
-	conflict := rpcCall(t, handler, testSetupBody(bundleHash, runID, entityID, "ready", "changed", false, "idem-setup"))
+	conflict := rpcCall(t, handler, testSetupBody(bundleHash, runID, entityID, "changed", "idem-setup"))
 	if conflict.Error == nil {
 		t.Fatal("test.setup_entities idempotency conflict error = nil")
 	}
 	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
 		t.Fatalf("test.setup_entities conflict data = %#v", data)
 	}
-	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
+	assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, "seeded")
 
 	if _, err := db.Exec(`DELETE FROM api_idempotency`); err != nil {
 		t.Fatalf("delete setup api idempotency rows: %v", err)
 	}
-	expiredReplay := rpcCall(t, handler, testSetupBody(bundleHash, runID, entityID, "waiting", "seeded", true, "idem-setup-after-expiry"))
+	expiredReplay := rpcCall(t, handler, testSetupBody(bundleHash, runID, entityID, "seeded", "idem-setup-after-expiry"))
 	if expiredReplay.Error != nil {
 		t.Fatalf("test.setup_entities replay after idempotency expiry error = %#v", expiredReplay.Error)
 	}
-	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
+	assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, "seeded")
 	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after expired replay = %d, want 1", count)
 	}
@@ -96,9 +97,11 @@ func TestOperatorTestSetupValidationFixtureDeclaresNoInputPins(t *testing.T) {
 
 func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 	cases := []struct {
-		name      string
-		edit      func(map[string]any)
-		wantField string
+		name            string
+		constructedRoot bool
+		edit            func(map[string]any)
+		wantField       string
+		wantReason      string
 	}{
 		{
 			name: "undeclared entity type",
@@ -108,11 +111,13 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 			wantField: "entities[0].entity_type",
 		},
 		{
-			name: "undeclared current state",
+			name:            "undeclared current state",
+			constructedRoot: true,
 			edit: func(entity map[string]any) {
 				entity["current_state"] = "missing"
 			},
-			wantField: "entities[0].current_state",
+			wantField:  "entities[0].current_state",
+			wantReason: "must be a declared state for the selected flow",
 		},
 		{
 			name: "undeclared field",
@@ -170,18 +175,22 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 			wantField: "entities[0].fields.review_scores",
 		},
 		{
-			name: "undeclared gate",
+			name:            "undeclared gate",
+			constructedRoot: true,
 			edit: func(entity map[string]any) {
 				entity["gates"] = map[string]any{"missing_gate": true}
 			},
-			wantField: "entities[0].gates.missing_gate",
+			wantField:  "entities[0].gates.missing_gate",
+			wantReason: "is not declared for the selected flow",
 		},
 		{
-			name: "non boolean gate",
+			name:            "non boolean gate",
+			constructedRoot: true,
 			edit: func(entity map[string]any) {
 				entity["gates"] = map[string]any{"review_ready": "yes"}
 			},
-			wantField: "entities[0].gates.review_ready",
+			wantField:  "entities[0].gates.review_ready",
+			wantReason: "must be boolean",
 		},
 		{
 			name: "flow entity mismatch",
@@ -189,6 +198,54 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 				entity["flow_instance"] = "secondary"
 			},
 			wantField: "entities[0].entity_type",
+		},
+		{
+			name: "import declared current state",
+			edit: func(entity map[string]any) {
+				entity["current_state"] = "waiting"
+			},
+			wantField:  "entities[0].current_state",
+			wantReason: "data-only imports cannot carry lifecycle inputs",
+		},
+		{
+			name: "import null current state",
+			edit: func(entity map[string]any) {
+				entity["current_state"] = nil
+			},
+			wantField:  "entities[0].current_state",
+			wantReason: "data-only imports cannot carry lifecycle inputs",
+		},
+		{
+			name: "import empty current state",
+			edit: func(entity map[string]any) {
+				entity["current_state"] = ""
+			},
+			wantField:  "entities[0].current_state",
+			wantReason: "data-only imports cannot carry lifecycle inputs",
+		},
+		{
+			name: "import declared gate",
+			edit: func(entity map[string]any) {
+				entity["gates"] = map[string]any{"review_ready": true}
+			},
+			wantField:  "entities[0].gates",
+			wantReason: "data-only imports cannot carry lifecycle inputs",
+		},
+		{
+			name: "import null gates",
+			edit: func(entity map[string]any) {
+				entity["gates"] = nil
+			},
+			wantField:  "entities[0].gates",
+			wantReason: "data-only imports cannot carry lifecycle inputs",
+		},
+		{
+			name: "import empty gates",
+			edit: func(entity map[string]any) {
+				entity["gates"] = map[string]any{}
+			},
+			wantField:  "entities[0].gates",
+			wantReason: "data-only imports cannot carry lifecycle inputs",
 		},
 	}
 
@@ -198,9 +255,21 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			bundle := testSetupValidationBundle(t)
 			handler := testSetupHandler(t, pg, semanticview.Wrap(bundle))
-			entity := validTestSetupEntity(uuid.NewString(), "waiting", "seeded", true)
+			runID := uuid.NewString()
+			entity := validTestSetupEntity(uuid.NewString(), "seeded")
+			if tc.constructedRoot {
+				entity["entity_id"], entity["flow_instance"], entity["entity_type"] = runID, "", "item"
+				entity["current_state"], entity["fields"] = "new", map[string]any{}
+			}
+			baseline, err := testSetupEntityRequestFromParam(entity, 0, runID)
+			if err != nil {
+				t.Fatalf("invalid baseline input: %v", err)
+			}
+			if err := validateTestSetupEntityAgainstBundle(bundle, baseline, 0); err != nil {
+				t.Fatalf("invalid baseline contract: %v", err)
+			}
 			tc.edit(entity)
-			resp := rpcCall(t, handler, testSetupBodyWithEntity(bundle.SourceArtifact.BundleHash(), uuid.NewString(), "idem-invalid-"+tc.name, entity))
+			resp := rpcCall(t, handler, testSetupBodyWithEntity(bundle.SourceArtifact.BundleHash(), runID, "idem-invalid-"+tc.name, entity))
 			if resp.Error == nil {
 				t.Fatal("test.setup_entities invalid setup error = nil")
 			}
@@ -211,6 +280,9 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 			details := asMap(t, data["details"])
 			if details["field"] != tc.wantField {
 				t.Fatalf("test.setup_entities invalid field = %#v, want %s; details=%#v", details["field"], tc.wantField, details)
+			}
+			if tc.wantReason != "" && details["reason"] != tc.wantReason {
+				t.Fatalf("test.setup_entities invalid reason = %#v, want %q; details=%#v", details["reason"], tc.wantReason, details)
 			}
 			if count := countAPIIdempotencyRows(t, pg); count != 0 {
 				t.Fatalf("api_idempotency rows after invalid setup = %d, want 0", count)
@@ -260,8 +332,8 @@ func testSetupHandler(t *testing.T, pg *store.PostgresStore, source semanticview
 	})
 }
 
-func testSetupBody(bundleHash, runID, entityID, currentState, note string, reviewReady bool, idempotencyKey string) string {
-	return testSetupBodyWithEntity(bundleHash, runID, idempotencyKey, validTestSetupEntity(entityID, currentState, note, reviewReady))
+func testSetupBody(bundleHash, runID, entityID, note, idempotencyKey string) string {
+	return testSetupBodyWithEntity(bundleHash, runID, idempotencyKey, validTestSetupEntity(entityID, note))
 }
 
 func testSetupBodyWithEntity(bundleHash, runID, idempotencyKey string, entity map[string]any) string {
@@ -283,80 +355,86 @@ func testSetupBodyWithEntity(bundleHash, runID, idempotencyKey string, entity ma
 	return string(raw)
 }
 
-func validTestSetupEntity(entityID, currentState, note string, reviewReady bool) map[string]any {
+func validTestSetupEntity(entityID, note string) map[string]any {
 	return map[string]any{
 		"alias":         "subject",
 		"entity_id":     entityID,
 		"flow_instance": "operating",
 		"entity_type":   "product",
-		"current_state": currentState,
 		"fields": map[string]any{
 			"note": note,
-		},
-		"gates": map[string]any{
-			"review_ready": reviewReady,
 		},
 	}
 }
 
-func assertTestSetupPersistence(t *testing.T, db *sql.DB, expectedBundleHash, runID, entityID, currentState, note string, reviewReady bool) {
+func assertTestSetupPersistence(t *testing.T, selected interface {
+	operatorread.RunReader
+	EntityReadStore
+	runtimepipeline.WorkflowInstancePersistenceReader
+}, expectedBundleHash, runID, entityID, note string) {
 	t.Helper()
-	var runStatus, originKind, bundleHash string
-	if err := db.QueryRow(`
-		SELECT status, origin_kind, bundle_hash
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&runStatus, &originKind, &bundleHash); err != nil {
+	run, err := selected.LoadRunHeader(context.Background(), runID)
+	if err != nil {
 		t.Fatalf("load setup run row: %v", err)
 	}
-	if runStatus != "running" || originKind != string(storerunlifecycle.OriginScenarioSetup) {
-		t.Fatalf("setup run row status=%q origin=%q, want running/scenario_setup", runStatus, originKind)
+	if run.Status != "running" || run.Origin.Kind() != storerunlifecycle.OriginScenarioSetup {
+		t.Fatalf("setup run row status=%q origin=%q, want running/scenario_setup", run.Status, run.Origin.Kind())
 	}
-	if bundleHash != expectedBundleHash {
-		t.Fatalf("setup run row source artifact hash = %q, want %q", bundleHash, expectedBundleHash)
-	}
-
-	var flowInstance, entityType, gotState, gotNote, gateJSON string
-	if err := db.QueryRow(`
-		SELECT flow_instance, entity_type, current_state, fields->>'note', gates->>'review_ready'
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, runID, entityID).Scan(&flowInstance, &entityType, &gotState, &gotNote, &gateJSON); err != nil {
-		t.Fatalf("load setup entity row: %v", err)
-	}
-	if flowInstance != "operating" || entityType != "product" || gotState != currentState || gotNote != note || gateJSON != fmt.Sprintf("%t", reviewReady) {
-		t.Fatalf("setup entity row = flow:%q type:%q state:%q note:%q gate:%q", flowInstance, entityType, gotState, gotNote, gateJSON)
+	if run.BundleHash != expectedBundleHash {
+		t.Fatalf("setup run row source artifact hash = %q, want %q", run.BundleHash, expectedBundleHash)
 	}
 
-	var mutations int
-	if err := db.QueryRow(`
-		SELECT COUNT(*)
-		FROM entity_mutations
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-		  AND writer_type = 'platform'
-		  AND writer_id = 'test.setup_entities'
-	`, runID, entityID).Scan(&mutations); err != nil {
-		t.Fatalf("count setup mutations: %v", err)
+	assertTestSetupImportedEntity(t, selected, runID, entityID, note)
+
+	projection, err := storetest.ReadTrackedEntityMutationProjectionStorage(context.Background(), selected, runID, entityID)
+	if err != nil {
+		t.Fatalf("read setup mutation and field storage: %v", err)
 	}
-	if mutations != 3 {
-		t.Fatalf("setup mutation rows = %d, want 3", mutations)
+	mutations := 0
+	for _, mutation := range projection.Mutations {
+		if mutation.WriterType != "platform" || mutation.WriterID != "test.setup_entities" {
+			continue
+		}
+		if mutation.Domain != "authored_field" || mutation.Path != "note" {
+			t.Fatalf("setup wrote another mutation domain/path: %+v", mutation)
+		}
+		mutations++
+	}
+	if mutations != 1 {
+		t.Fatalf("setup authored note mutation rows = %d, want one and no other mutation domain/path", mutations)
 	}
 
-	var payload json.RawMessage
-	if err := db.QueryRow(`
-		SELECT fields
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, runID, entityID).Scan(&payload); err != nil {
-		t.Fatalf("reload setup fields: %v", err)
-	}
 	decoded := map[string]any{}
-	if err := json.Unmarshal(payload, &decoded); err != nil {
+	if err := json.Unmarshal(projection.Fields, &decoded); err != nil {
 		t.Fatalf("decode setup fields: %v", err)
 	}
 	if decoded["note"] != note {
 		t.Fatalf("decoded setup fields = %#v, want note %q", decoded, note)
+	}
+}
+
+func assertTestSetupImportedEntity(t *testing.T, selected interface {
+	EntityReadStore
+	runtimepipeline.WorkflowInstancePersistenceReader
+}, runID, entityID, note string) {
+	t.Helper()
+	full, err := selected.LoadOperatorEntity(context.Background(), entityID, runID)
+	if err != nil {
+		t.Fatalf("load imported setup entity: %v", err)
+	}
+	entity := full.Entity
+	if entity.RunID != runID || entity.EntityID != entityID || entity.FlowInstance != "operating" || entity.EntityType != "product" || len(full.Fields) != 1 || full.Fields["note"] != note {
+		t.Fatalf("imported setup identity/fields = %+v", full)
+	}
+	if entity.StageDefined != nil || entity.CurrentState != nil || entity.Revision != nil || entity.EnteredStateAt != nil || entity.LifecycleCreatedAt != nil || entity.LifecycleUpdatedAt != nil || full.Gates != nil || full.Bookkeeping != nil || full.Accumulated != nil || full.Loops != nil {
+		t.Fatalf("imported setup entity acquired lifecycle: %+v", full)
+	}
+	if entity.CreatedAt.IsZero() || entity.UpdatedAt.IsZero() || !entity.CreatedAt.Equal(entity.UpdatedAt) {
+		t.Fatalf("imported setup data clocks = %+v, want unchanged birth clocks", entity)
+	}
+	instances, err := selected.ListWorkflowInstances(context.Background(), runID)
+	if err != nil || len(instances) != 0 {
+		t.Fatalf("data-only setup constructed instances = %+v, err=%v", instances, err)
 	}
 }
 

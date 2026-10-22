@@ -169,8 +169,8 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 		SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed", RetryMaxAttempts: 1, ForkPolicy: string(forkPolicy),
 		EntityID: entityID, FlowInstance: "flow_a", NodeID: fact.Owner.Key(), FlowID: "flow_a", HandlerEventKey: "review.requested", SourceEventID: initiatingID,
 		SourceRunID: sourceRun, Attempt: 1, Generation: activation.Generation(), LoopStage: "review"}
-	seedSelectedContractActivitySource(t, selected, loaded, sourceRun, entityID, requestID, at, route, source, request)
-	seedSelectedContractActivityLoop(t, selected, sourceRun, entityID, requestID, activation, at)
+	sourceEvent := seedSelectedContractActivitySource(t, selected, loaded, sourceRun, entityID, requestID, at, route, source, request)
+	seedSelectedContractActivityLoop(t, selected, loaded, sourceEvent, entityID, activation, at)
 	storetest.CaptureSelectedRunForkRevision(t, context.Background(), selected, sourceRun)
 	if !readOnly {
 		seedSelectedContractActivityAttempt(t, selected, fact, activation.Generation(), "succeeded", "flow_a/connector.succeeded", "", "", at)

@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
@@ -53,6 +54,18 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 		SQLitePathSource: storebackend.SourceProjectDefault,
 	})
 	presenter.recordWorkspace("bundle-a", cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Reasons: []cliapp.WorkspaceCapabilityReason{{Kind: cliapp.WorkspaceReasonClaudeCLI, AgentID: "phrase-completer"}}})
+	recorder, ok := any(presenter).(interface {
+		recordCredentialSources([]runtimecredentials.SourceFact)
+	})
+	if !ok {
+		t.Fatal("serve presenter omits required credential source facts")
+	}
+	recorder.recordCredentialSources([]runtimecredentials.SourceFact{
+		{Key: "telegram_bot_token", Reference: "file:/tmp/deployment/credentials.json"},
+		{Key: "telegram_bot_token", Reference: "env:TELEGRAM_BOT_TOKEN"},
+		{Key: "telegram_bot_token", Reference: "env:TELEGRAM_BOT_TOKEN"},
+		{Key: "missing", Reference: ""},
+	})
 	presenter.readyPresentation(serveLifecycleReadyFacts{
 		ProjectName: "tg-chat",
 		BundleCount: 1,
@@ -84,6 +97,8 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 		"telegram webhook",
 		"webhook_signing.telegram bound",
 		"shutdown · complete",
+		"credential telegram_bot_token · source file:/tmp/deployment/credentials.json",
+		"credential telegram_bot_token · source env:TELEGRAM_BOT_TOKEN",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("concise lifecycle output missing %q:\n%s", want, text)
@@ -94,6 +109,9 @@ func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 	}
 	if strings.Contains(text, "bundle-a") || strings.Contains(text, "bundle-b") {
 		t.Fatalf("single-bundle concise output exposed internal bundle labels:\n%s", text)
+	}
+	if strings.Count(text, "source env:TELEGRAM_BOT_TOKEN") != 1 || strings.Contains(text, "credential missing") {
+		t.Fatalf("credential facts were key-deduplicated, repeated, or fabricated:\n%s", text)
 	}
 }
 
@@ -615,10 +633,12 @@ func testServeIngressSubject(bundleHash, alias, provider, secret, status string)
 		ID: "ingress:" + bundleHash + ":" + alias + ":" + provider, Kind: packs.SubjectProviderTrigger,
 		Provider: provider, Source: "raw_declaration", Applicability: "effective",
 		TriggerAdmission: &packs.TriggerAdmission{
+			Transport:  packs.ChannelTransportWebhook,
 			BundleHash: bundleHash, FlowPath: alias, Alias: alias, CatalogGeneration: "catalog-generation",
 			PolicySource: "raw_declaration", RequestAuthentication: "HMAC_SHA256", Event: "inbound." + provider,
 		},
 		Requirements: []packs.Requirement{packs.RequirementWithStatus(packs.RequirementSecret, secret, packs.RequirementScopeTarget, status, "credential_store")},
+		Capabilities: []packs.Capability{{Code: packs.CapabilityReceiveHTTPSRoute, Target: "/webhooks/" + alias + "/" + provider}},
 	}
 }
 

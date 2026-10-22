@@ -14,24 +14,6 @@ func EntityMetadata(entityID, currentState, flowInstance string, gates map[strin
 	return out
 }
 
-func EntityMetadataFromRaw(row map[string]any) map[string]any {
-	return map[string]any{
-		"id":            row["entity_id"],
-		"current_state": row["current_state"],
-		"flow_instance": row["flow_instance"],
-		"gates":         row["gates"],
-	}
-}
-
-func EntityFieldSupported(field string) bool {
-	switch strings.TrimSpace(field) {
-	case "id", "current_state", "flow_instance", "gates":
-		return true
-	default:
-		return false
-	}
-}
-
 func EntityFieldUnsupported(field string) bool {
 	switch strings.TrimSpace(field) {
 	case "entity_id", "entity_type", "workflow_name", "workflow_version", "run_id", "fields", "accumulator", "entered_state_at", "revision", "created_at", "updated_at", "name":

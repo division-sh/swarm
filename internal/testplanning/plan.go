@@ -102,6 +102,12 @@ func BuildPlan(policy Policy, model WeightModel, packages []string, profile, rea
 	if err != nil {
 		return RunPlan{}, err
 	}
+	if composeServeappChannel(profile, option.Venue, extraUnits) {
+		unitIDs, err = policy.composeServeappChannelCanaries(unitIDs)
+		if err != nil {
+			return RunPlan{}, err
+		}
+	}
 	profileEnvironment, err := environmentForVenue(profilePolicy.EnvironmentID, profilePolicy.EnvironmentIDs, option.Venue)
 	if err != nil {
 		return RunPlan{}, fmt.Errorf("profile %s: %w", profile, err)

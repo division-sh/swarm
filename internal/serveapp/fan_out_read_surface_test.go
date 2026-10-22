@@ -19,7 +19,7 @@ func TestFanOutReadSelectedProcessCallback(t *testing.T) {
 	ctx := context.Background()
 	stores := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "fan-out-read.sqlite"), &config.Config{})
 	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
-	if _, err := initializeServePlatformStateStores(ctx, stores.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
+	if _, err := initializeServePlatformStateStores(ctx, stores.Schema()); err != nil {
 		t.Fatal(err)
 	}
 	offline, err := constructSelectedAPICapabilities(stores, selectedAPICapabilityRequest{})

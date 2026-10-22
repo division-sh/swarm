@@ -50,6 +50,7 @@ func TestReleaseEndpointHandoffConsumerCensus(t *testing.T) {
 		"TestRunStartForegroundObserverOverflowFromReleaseBinary":    1, // Foreground --api-port with blocked stdout observer.
 		"TestChannelOnboardingReleaseBinaryJourneys":                 1, // Externally registered fixed public webhook callback.
 		"TestDeclaredClockFiniteAndPublicReadbackBothStores":         2, // Local finite startup and parked-deployment startup require fixed --mcp-port.
+		"TestRootInputFeedLocalAndConnectedCLIExecuteBothStores":     1, // Only local finite startup requires fixed --mcp-port; serve API is child-owned.
 	}
 	files, err := filepath.Glob(filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/*_test.go"))
 	if err != nil {

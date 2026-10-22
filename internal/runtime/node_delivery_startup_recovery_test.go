@@ -1175,7 +1175,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			retrying, err := selected.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 				Disposition: runtimedelivery.FailureRetry,
 				Failure:     &failure.Failure,
-				RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
+				RetryBase:   time.Millisecond, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 			})
 			if err != nil || retrying.Status != runtimedelivery.StatusFailed {
 				t.Fatalf("schedule node retry = %#v, err=%v", retrying, err)
@@ -1203,7 +1203,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				t.Fatalf("claim node delivery before lease expiry: %v", err)
 			}
 			continuations := startNodeDeliveryContinuation(t, ctx, bus, deliveryOwner, selected, workOwner, eventID, route)
-			if err := storetest.MakeManagerRetryEligible(ctx, selected, event, route); err != nil {
+			if err := storetest.WaitManagerRetryDecision(ctx, selected, event, route); err != nil {
 				t.Fatalf("make exact node retry eligible: %v", err)
 			}
 			if err := storetest.ExpireExactDeliveryClaimFault(ctx, selected, expiringClaim.Claim); err != nil {

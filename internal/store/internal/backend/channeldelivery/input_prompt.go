@@ -17,11 +17,17 @@ import (
 // PlanInputPromptForActionTx belongs to the accepted input mutation transaction,
 // not an edit fallback. Process death cannot separate progress from its prompt.
 func PlanInputPromptForActionTx(ctx context.Context, tx *sql.Tx, action operatorchannel.InboundAction, cardID, draftID string, postgres bool) error {
+	// Accepted input admission already holds C/F/B. Re-discovery is only a
+	// constraint on the same parent's locking join, never a late parent lock.
+	parent, err := discoverActionParentTx(ctx, tx, action.ActionFact, postgres)
+	if err != nil {
+		return err
+	}
 	state, err := RequireActionIntentTx(ctx, tx, action, postgres, true)
 	if err != nil || state != "settled" {
 		return errors.Join(err, fmt.Errorf("input prompt requires a settled requested action"))
 	}
-	resolved, found, err := ResolveActionFactForMutationTx(ctx, tx, action.ActionFact, postgres)
+	resolved, found, err := parent.resolve(ctx, tx, action.ActionFact, postgres)
 	if err != nil {
 		return err
 	}

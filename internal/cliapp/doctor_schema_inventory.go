@@ -17,7 +17,11 @@ type doctorSchemaInventory struct {
 	Tables      []serveSchemaTableSummary `json:"tables"`
 }
 
-func buildDoctorSchemaInventory(platformSpecPath string) (doctorSchemaInventory, error) {
+func buildDoctorSchemaInventory() (doctorSchemaInventory, error) {
+	platformSpecPath, err := EmbeddedPlatformSpecPath()
+	if err != nil {
+		return doctorSchemaInventory{}, fmt.Errorf("load platform schema source: %w", err)
+	}
 	platformSpec, err := loadChannelPlatformSpecDocument(platformSpecPath)
 	if err != nil {
 		return doctorSchemaInventory{}, fmt.Errorf("load platform schema source: %w", err)

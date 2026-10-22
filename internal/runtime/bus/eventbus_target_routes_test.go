@@ -21,7 +21,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -59,7 +58,6 @@ type targetRouteMemoryStore struct {
 	active                  map[string]bool
 	targetOwners            []ActiveTargetDescriptor
 	workflowInstances       []runtimepipeline.WorkflowInstance
-	workflowStates          []runtimepipeline.WorkflowEntityStatePersistenceRecord
 }
 
 func (s *targetRouteMemoryStore) installConstructionReceipt(owner runtimeflowidentity.RunScopedFlowInstance, evidence runtimepipeline.FlowConstructionPublicationEvidence) {
@@ -121,38 +119,6 @@ func (s *targetRouteMemoryStore) ListWorkflowInstances(context.Context, string) 
 	return append([]runtimepipeline.WorkflowInstance(nil), s.workflowInstances...), nil
 }
 
-func (s *targetRouteMemoryStore) LoadWorkflowEntityState(_ context.Context, owner runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	route := owner.Route
-	for _, record := range s.workflowStates {
-		if strings.Trim(strings.TrimSpace(record.FlowInstance), "/") == route.InstancePath && runtimeidentity.NormalizeEntityID(record.EntityID) == entityID {
-			return record, true, nil
-		}
-	}
-	for _, instance := range s.workflowInstances {
-		if strings.Trim(strings.TrimSpace(instance.StorageRef), "/") == route.InstancePath && runtimeidentity.NormalizeEntityID(instance.EntityID) == entityID {
-			return targetRouteWorkflowStateRecord(instance), true, nil
-		}
-	}
-	return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, nil
-}
-
-func targetRouteWorkflowStateRecord(instance runtimepipeline.WorkflowInstance) runtimepipeline.WorkflowEntityStatePersistenceRecord {
-	marshal := func(value any) json.RawMessage {
-		raw, _ := json.Marshal(value)
-		return raw
-	}
-	return runtimepipeline.WorkflowEntityStatePersistenceRecord{
-		EntityID: instance.EntityID, FlowInstance: instance.StorageRef,
-		EntityType: instance.EntityType,
-		Slug:       instance.Slug, Name: instance.Name, CurrentState: instance.CurrentState, Revision: instance.Revision,
-		EnteredStageAt: instance.EnteredStageAt, Gates: marshal(instance.Gates), Fields: marshal(instance.Fields),
-		Bookkeeping: marshal(instance.Bookkeeping), Accumulator: marshal(instance.StateBuckets),
-		CreatedAt: instance.CreatedAt, UpdatedAt: instance.UpdatedAt,
-	}
-}
-
 func testSelectedRunTargetOwner(id, flowInstance, entitySeed string) ActiveTargetDescriptor {
 	return ActiveTargetDescriptor{
 		ID: id, FlowInstance: flowInstance, EntityID: eventtest.UUID(entitySeed),
@@ -177,6 +143,10 @@ func (s *targetRouteMemoryStore) CommitPublication(_ context.Context, command Pu
 	if err := command.Validate(); err != nil {
 		return CommittedPublication{}, err
 	}
+	return s.commitValidatedPublication(command)
+}
+
+func (s *targetRouteMemoryStore) commitValidatedPublication(command PublicationCommand) (CommittedPublication, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	event := command.Commit.Event.Event()

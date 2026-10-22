@@ -98,6 +98,8 @@ func receiverOwnershipAllowances() map[string]recipientBoundaryAllowance {
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.UpdatedAt":                      {1, "retain the fixed-revision update clock, not the live source row"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.TerminatedAt":                   {1, "retain exact terminal evidence corroborated against header status"},
 		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.EnteredStateAt":                 {1, "retain the constructed stage-entry clock from the paired revision"},
+		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.DataCreatedAt":                  {1, "retain the independently validated authored-data creation clock from fixed-revision metadata, not the lifecycle or live source clock"},
+		backend + "loadRunForkMaterializedEntitySnapshotMetadata/" + model + "RunForkMaterializedEntitySnapshotMetadata.DataUpdatedAt":                  {1, "retain the independently validated authored-data update clock from fixed-revision metadata, not the lifecycle or live source clock"},
 		backend + "loadExactRunForkMaterialization/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.FlowInstance":                  {1, "compare the canonical ProjectEntityOwnership result against exact persisted fork materialization for idempotent reuse"},
 		backend + "materializeRunForkForSelectedContractExecution/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.PreparedHeader": {1, "attach the validated selected historical header before the named atomic materialization operation; no handler construction"},
 		backend + "materializeRunForkForSelectedContractExecution/" + metadata + "RemovedArrivalRefs":                                                   {1, "carry only exact child references admitted by projectRunForkRemovedArrivalRefs into both dependent-state projections; never derive receiving ownership"},
@@ -362,6 +364,12 @@ func surprise(a e.Event) f.RunForkMaterializedEntitySnapshotMetadata {
 type runForkEntityMetadata struct { RemovedArrivalRefs bool }
 func alternate(p *runForkEntityMetadata) { p.RemovedArrivalRefs = true }
 `, []string{"alternate/write:store/internal/backend/runforkpersistence.runForkEntityMetadata.RemovedArrivalRefs"}},
+		{"data_clocks_have_only_the_fixed_revision_owner", "store/internal/backend/runforkpersistence", "run_fork_entity_snapshot_metadata.go", `package runforkpersistence
+import (f "github.com/division-sh/swarm/internal/runtime/runfork"; "time")
+func surpriseClock(at *time.Time) f.RunForkMaterializedEntitySnapshotMetadata {
+ return f.RunForkMaterializedEntitySnapshotMetadata{DataCreatedAt: at, DataUpdatedAt: at}
+}
+`, []string{"surpriseClock/write:runtime/runfork.RunForkMaterializedEntitySnapshotMetadata.DataCreatedAt", "surpriseClock/write:runtime/runfork.RunForkMaterializedEntitySnapshotMetadata.DataUpdatedAt"}},
 		{"source_carrier_reconstruction", "runtime/runforkexecution", "recipient_planning.go", `package runforkexecution
 import (f "github.com/division-sh/swarm/internal/runtime/runfork"; e "github.com/division-sh/swarm/internal/events")
 func unexpected(a e.Event) f.RunForkSelectedContractSourceEvent {

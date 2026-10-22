@@ -3,8 +3,6 @@ package bus
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -224,14 +222,6 @@ func TestIndexedPubsubConcreteRootUsesGenerationCoordinate(t *testing.T) {
 
 func TestIndexedPubsubDeploymentFeedUsesConstructedRoot(t *testing.T) {
 	root := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
-	path := filepath.Join(root, "schema.yaml")
-	schema, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, append(schema, []byte("  outputs:\n    - item.received\n")...), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	source := loadConnectRoutePlanCanonicalSource(t, root)
 	table, err := DeriveRouteTable(source)
 	if err != nil {

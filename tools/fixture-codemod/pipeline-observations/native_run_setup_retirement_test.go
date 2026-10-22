@@ -28,15 +28,23 @@ type runSetupTransition struct {
 
 func runSetupTransitions(t *testing.T) []runSetupTransition {
 	t.Helper()
-	var rows []runSetupTransition
-	if err := json.Unmarshal(runSetupTransitionBytes, &rows); err != nil {
+	rows, err := decodeRunSetupTransitions(runSetupTransitionBytes)
+	if err != nil {
 		t.Fatal(err)
+	}
+	return rows
+}
+
+func decodeRunSetupTransitions(data []byte) ([]runSetupTransition, error) {
+	var rows []runSetupTransition
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, err
 	}
 	raw, err := json.Marshal(rows)
 	if err != nil || len(rows) != 149 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "8425ffe9aa580a48e765a5da1b12ce8c8ca14ab282b6c5cc1dddf1eb29cb3c2a" {
-		t.Fatalf("finite run-setup transformation changed: %d/%v", len(rows), err)
+		return nil, fmt.Errorf("finite run-setup transformation changed: %d/%v", len(rows), err)
 	}
-	return rows
+	return rows, nil
 }
 
 func TestNativeRunSetupWholeFamilySnapshotsAndHostility(t *testing.T) {

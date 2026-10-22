@@ -105,6 +105,22 @@ func ChannelPacks(t testing.TB) []packs.LoadedChannelPack {
 	return loaded
 }
 
+func ChannelPlanByID(t testing.TB, plans []packs.SatisfactionPlan, id string) packs.SatisfactionPlan {
+	t.Helper()
+	var selected packs.SatisfactionPlan
+	count := 0
+	for _, plan := range plans {
+		if plan.ChannelIdentity().ID() == id {
+			selected = plan
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("channel inventory has %d exact members for %s", count, id)
+	}
+	return selected
+}
+
 func ConnectorTool(t testing.TB, provider, toolID string) providerconnectors.InstalledTool {
 	t.Helper()
 	registry := ConnectorRegistry(t)

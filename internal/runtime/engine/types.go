@@ -83,10 +83,6 @@ func (c StateCarrier) FieldsBucket() values.Bucket {
 	return values.Wrap(c.Fields)
 }
 
-func (c StateCarrier) BookkeepingBucket() values.Bucket {
-	return values.Wrap(c.Bookkeeping)
-}
-
 func (c StateCarrier) GatesBucket() values.Bucket {
 	return values.Wrap(boolMapToAnyMap(c.Gates))
 }
@@ -127,25 +123,11 @@ func (c *StateCarrier) SetGate(name string, value bool) {
 	c.Gates[name] = value
 }
 
-func (c *StateCarrier) EnsureGatesMap() map[string]bool {
-	if c.Gates == nil {
-		c.Gates = map[string]bool{}
-	}
-	return c.Gates
-}
-
 func (c *StateCarrier) SetField(key string, value any) {
 	if c.Fields == nil {
 		c.Fields = map[string]any{}
 	}
 	values.Wrap(c.Fields).Set(key, value)
-}
-
-func (c *StateCarrier) EnsureFieldMap(key string) values.Bucket {
-	if c.Fields == nil {
-		c.Fields = map[string]any{}
-	}
-	return values.Wrap(c.Fields).EnsureMap(key)
 }
 
 func (c *StateCarrier) SetBookkeeping(key string, value any) {
@@ -206,10 +188,6 @@ func (s StateSnapshot) GatesBucket() values.Bucket {
 	return s.StateCarrier.GatesBucket()
 }
 
-func (s StateSnapshot) StateBucketsBucket() values.Bucket {
-	return s.StateCarrier.StateBucketsBucket()
-}
-
 func (s StateSnapshot) EntityContext() map[string]any {
 	return s.StateCarrier.EntityContext(s.EntityID, s.CurrentState, s.WorkflowName, s.WorkflowVersion)
 }
@@ -222,16 +200,8 @@ func (s *StateSnapshot) SetGate(name string, value bool) {
 	s.StateCarrier.SetGate(name, value)
 }
 
-func (s *StateSnapshot) EnsureGatesMap() map[string]bool {
-	return s.StateCarrier.EnsureGatesMap()
-}
-
 func (s *StateSnapshot) SetField(key string, value any) {
 	s.StateCarrier.SetField(key, value)
-}
-
-func (s *StateSnapshot) EnsureFieldMap(key string) values.Bucket {
-	return s.StateCarrier.EnsureFieldMap(key)
 }
 
 func (s *StateSnapshot) SetBookkeeping(key string, value any) {
@@ -377,6 +347,7 @@ type ActivityIntent struct {
 	RoutingSource               events.RoutingSource
 	ActivityID                  string
 	Tool                        string
+	NativeSessionTarget         string
 	PlanGeneration              plangeneration.Generation
 	ChannelActivationGeneration channelonboarding.ChannelActivationGeneration
 	BundleHash                  string
@@ -406,6 +377,7 @@ func (i ActivityIntent) Normalized() ActivityIntent {
 	i.Context = i.Context.Normalized()
 	i.ActivityID = strings.TrimSpace(i.ActivityID)
 	i.Tool = strings.TrimSpace(i.Tool)
+	i.NativeSessionTarget = strings.TrimSpace(i.NativeSessionTarget)
 	i.BundleHash = strings.TrimSpace(i.BundleHash)
 	i.WorkflowVersion = strings.TrimSpace(i.WorkflowVersion)
 	i.SuccessEvent = strings.TrimSpace(i.SuccessEvent)
@@ -453,10 +425,6 @@ func (m StateMutation) StateBucketsBucket() values.Bucket {
 
 func (m *StateMutation) SetField(key string, value any) {
 	m.StateCarrier.SetField(key, value)
-}
-
-func (m *StateMutation) EnsureFieldMap(key string) values.Bucket {
-	return m.StateCarrier.EnsureFieldMap(key)
 }
 
 func (m *StateMutation) SetBookkeeping(key string, value any) {

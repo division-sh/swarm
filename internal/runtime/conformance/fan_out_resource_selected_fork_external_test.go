@@ -100,7 +100,7 @@ func selectedExternalForkServer(t *testing.T, f *deploymentResourceFixture, owne
 				return result, err
 			},
 			SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
-				RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: artifacts,
+				RepoRoot: repo, Store: artifacts,
 			},
 			AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{
 				Config: cfg, ProviderCredentials: credentials, ExecutionPosture: executionposture.Live,
@@ -109,7 +109,7 @@ func selectedExternalForkServer(t *testing.T, f *deploymentResourceFixture, owne
 		},
 	})
 	handler, err := apiv1.NewHandler(apiv1.Options{
-		PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), AuthTokens: []string{apiv1.DefaultLoopbackAPIToken},
+		AuthTokens:       []string{apiv1.DefaultLoopbackAPIToken},
 		ProcessWorkOwner: conformanceTestProcessOwner(t), Handlers: methods,
 	})
 	if err != nil {

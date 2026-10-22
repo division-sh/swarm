@@ -24,7 +24,7 @@ func TestRunForkRevisionProjectionPreservesSourceRouteSeparatelyFromReceiverCont
 			}),
 		}},
 		Deliveries: []runForkRevisionDelivery{{
-			Snapshot: runtimedelivery.Snapshot{
+			Snapshot: runtimedelivery.HistoricalFact{
 				DeliveryID:      "delivery-1",
 				EventID:         "event-1",
 				SubscriberClass: runtimedelivery.SubscriberNode,

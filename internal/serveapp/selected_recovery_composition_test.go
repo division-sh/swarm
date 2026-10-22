@@ -61,8 +61,7 @@ func TestSelectedRecoveryFailurePreventsServeReadiness(t *testing.T) {
 	var out lockedBuffer
 	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath: writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "recovery.db")),
-		SourceRoot: writeServedEventPublishFollowUpFixture(t), PlatformSpecPath: defaultPlatformSpecPath,
-		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true,
+		SourceRoot: writeServedEventPublishFollowUpFixture(t), APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true,
 		WorkspaceBackend: "host", WorkspaceBackendSet: true,
 		TestLLMRuntime: servedNoopLLMRuntime{}, Output: &out,
 	})

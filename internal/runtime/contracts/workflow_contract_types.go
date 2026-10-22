@@ -35,7 +35,6 @@ type WorkflowContractBundle struct {
 	connectionInputs      CompiledConnectionInputs
 	compiledEventSchemas  map[string]compiledFlowEventSchemas
 	activityToolsByFlow   map[string]map[string]ToolSchemaEntry
-	effectiveProvenance   EffectiveProvenanceLedger
 	dataDeclarations      map[string]DurableDataDeclaration
 	staticData            []durabledata.StaticData
 	staticDataAccess      map[string][]durabledata.StaticDataID
@@ -280,7 +279,6 @@ type HandlerRuleEntry struct {
 	declarationIdentity runtimeidentity.DeclarationIdentity
 	authored            bool
 	predicateDisplay    string
-	admissionProvenance map[string]EffectiveValueProvenance
 }
 
 func (r HandlerRuleEntry) Authored() bool { return r.authored }
@@ -1072,7 +1070,7 @@ type EntityFieldDecl struct {
 	UnusedReaderReason string            `yaml:"_unused_reader_reason"`
 }
 type ProjectFlowIngress struct {
-	Alias     string                       `yaml:"alias,omitempty"`
+	Alias     *string                      `yaml:"alias,omitempty"`
 	Providers []ProjectFlowIngressProvider `yaml:"providers"`
 }
 
@@ -1148,7 +1146,6 @@ type FlowSchemaDocument struct {
 	RequiredAgents         []FlowRequiredAgent      `yaml:"required_agents"`
 	RequiredAgentsDeclared bool                     `yaml:"-"`
 	AutoEmitOnCreate       AutoEmitOnCreateContract `yaml:"auto_emit_on_create"`
-	admissionProvenance    map[string]EffectiveValueProvenance
 }
 
 // EffectiveMode is derived from the admitted identity declaration, never an
@@ -1453,19 +1450,18 @@ type GuardActionEntry struct {
 	Effect          string `yaml:"effect"`
 }
 type SystemNodeContract struct {
-	Description         string                            `yaml:"description"`
-	ExecutionType       string                            `yaml:"execution_type"`
-	Implementation      string                            `yaml:"-"`
-	SubscribesTo        []string                          `yaml:"subscribes_to"`
-	Produces            []string                          `yaml:"produces"`
-	ProducesDeclared    bool                              `yaml:"-" json:"-"`
-	StateTable          string                            `yaml:"state_table"`
-	IdempotencyTable    string                            `yaml:"-"`
-	Timers              []WorkflowTimerContract           `yaml:"timers"`
-	EventHandlers       map[string]SystemNodeEventHandler `yaml:"event_handlers"`
-	StateSchema         NodeStateSchema                   `yaml:"state_schema"`
-	GateState           NodeGateStateSchema               `yaml:"gate_state"`
-	admissionProvenance map[string]EffectiveValueProvenance
+	Description      string                            `yaml:"description"`
+	ExecutionType    string                            `yaml:"execution_type"`
+	Implementation   string                            `yaml:"-"`
+	SubscribesTo     []string                          `yaml:"subscribes_to"`
+	Produces         []string                          `yaml:"produces"`
+	ProducesDeclared bool                              `yaml:"-" json:"-"`
+	StateTable       string                            `yaml:"state_table"`
+	IdempotencyTable string                            `yaml:"-"`
+	Timers           []WorkflowTimerContract           `yaml:"timers"`
+	EventHandlers    map[string]SystemNodeEventHandler `yaml:"event_handlers"`
+	StateSchema      NodeStateSchema                   `yaml:"state_schema"`
+	GateState        NodeGateStateSchema               `yaml:"gate_state"`
 }
 type SystemNodeEventHandler struct {
 	Activity         ActivitySpec             `yaml:"activity"`
@@ -1497,9 +1493,8 @@ type SystemNodeEventHandler struct {
 	Clear            *ClearSpec               `yaml:"clear"`
 }
 type EventCatalogEntry struct {
-	BusinessKeyField    string           `yaml:"key"`
-	Payload             EventPayloadSpec `yaml:"payload"`
-	admissionProvenance map[string]EffectiveValueProvenance
+	BusinessKeyField string           `yaml:"key"`
+	Payload          EventPayloadSpec `yaml:"payload"`
 }
 
 type AgentRegistryEntry struct {
@@ -1533,7 +1528,6 @@ type AgentRegistryEntry struct {
 	Implementation         string                          `yaml:"implementation"`
 	AuthoredFields         map[string]bool                 `yaml:"-" json:"-"`
 	EffectiveFieldSources  map[string]string               `yaml:"-" json:"-"`
-	admissionProvenance    map[string]EffectiveValueProvenance
 }
 
 var agentRegistryEntryFieldOptions = map[string]struct{}{

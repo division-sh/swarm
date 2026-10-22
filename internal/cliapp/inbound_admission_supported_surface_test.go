@@ -86,7 +86,6 @@ func TestVerifyLoadsSameEmbeddedInventoryOutsideCheckout(t *testing.T) {
 	opts := defaultVerifyCommandOptions()
 	opts.portable = true
 	opts.sourceRoot = root
-	opts.platformSpecPath = filepath.Join(RepoRoot(), defaultPlatformSpecPath)
 	for _, repo := range []string{RepoRoot(), t.TempDir()} {
 		var out, errOut bytes.Buffer
 		if code := runVerifyCommandWithOutput(context.Background(), repo, opts, &out, &errOut); code != 0 {
@@ -106,14 +105,13 @@ func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *test
 	opts := defaultVerifyCommandOptions()
 	opts.portable = true
 	opts.sourceRoot = root
-	opts.platformSpecPath = filepath.Join(RepoRoot(), defaultPlatformSpecPath)
 	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"))
 	emptyRepo := t.TempDir()
 	var textOut, textErr bytes.Buffer
 	if code := runVerifyCommandWithOutput(context.Background(), emptyRepo, opts, &textOut, &textErr); code != 0 {
 		t.Fatalf("verify text exit=%d stdout=%s stderr=%s", code, textOut.String(), textErr.String())
 	}
-	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"} {
+	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform", "whatsapp"} {
 		if !strings.Contains(textOut.String(), "provider."+provider) {
 			t.Fatalf("verify text omitted installed %s trigger:\n%s", provider, textOut.String())
 		}
@@ -124,7 +122,7 @@ func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *test
 		t.Fatalf("verify JSON exit=%d stdout=%s stderr=%s", code, jsonOut.String(), jsonErr.String())
 	}
 	result := decodeOutputJSON[verifyCommandResult](t, jsonOut.String())
-	if result.PackInventory.BaseMode != "embedded" || len(result.PackInventory.Packs) != 14 ||
+	if result.PackInventory.BaseMode != "embedded" || len(result.PackInventory.Packs) != 17 ||
 		result.PackInventory.BaseDigest == "" || result.PackInventory.EffectiveDigest == "" {
 		t.Fatalf("verify pack inventory = %#v", result.PackInventory)
 	}
@@ -141,7 +139,6 @@ func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.
 	opts := defaultVerifyCommandOptions()
 	opts.portable = true
 	opts.sourceRoot = writeInboundAdmissionPolicyMatrixFixture(t)
-	opts.platformSpecPath = filepath.Join(RepoRoot(), defaultPlatformSpecPath)
 	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"))
 	emptyRepo := t.TempDir()
 
@@ -232,7 +229,7 @@ func TestProviderTriggerCapabilitySubjectsPreserveInstalledEffectiveMultiplicity
 			}
 		}
 	}
-	if installed != 8 || effective != 6 || raw != 4 {
+	if installed != 9 || effective != 6 || raw != 4 {
 		t.Fatalf("subject multiplicity installed=%d effective=%d raw=%d", installed, effective, raw)
 	}
 	body, err := json.Marshal(subjects)

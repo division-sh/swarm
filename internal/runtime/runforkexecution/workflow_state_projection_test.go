@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
@@ -58,9 +59,7 @@ func selectedContractReadinessFixture(t *testing.T, declarations int) LoadedSele
 			t.Fatal(err)
 		}
 	}
-	loaded, err := (admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root,
-		PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
-	}).LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	loaded, err := (admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root}).LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +410,7 @@ func selectedContractConstructedReadinessTestEntity(t *testing.T, source semanti
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runfork.RunForkEntityState{EntityID: id, CurrentState: initial.ID(), EnteredStateAt: &entered,
+	return runfork.RunForkEntityState{EntityID: id, CurrentState: mutationlog.PresentLifecycleState(initial.ID()), EnteredStateAt: &entered,
 		MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 			InitialMaterialization: record.InitialMaterialization,
 			FlowConfig:             config,

@@ -93,7 +93,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 							"member_id": member, "values": values, "index": float64(index), "count": float64(len(tc.members)),
 						})
 						worker := requireA2PortfolioEntity(t, rt, opened.RunID, request.Deliveries[0].Target.FlowInstance)
-						if worker.Entity.CurrentState != "complete" || worker.Entity.EntityID == entity.Entity.EntityID || worker.Fields["member_id"] != member ||
+						if worker.Entity.CurrentState == nil || *worker.Entity.CurrentState != "complete" || worker.Entity.EntityID == entity.Entity.EntityID || worker.Fields["member_id"] != member ||
 							!reflect.DeepEqual(worker.Fields["values"], values) || seen[worker.Entity.EntityID] {
 							t.Fatalf("actual keyed worker construction/state/value isolation: %+v", worker)
 						}
@@ -180,7 +180,7 @@ func requireA2MapRecipeResult(t *testing.T, rt servedControlProofRuntime, opened
 	if err := json.Unmarshal(raw, &typed); err != nil {
 		t.Fatalf("public map/results do not retain integer-list types: %v", err)
 	}
-	if entity.Entity.RunID != opened.RunID || entity.Entity.EntityID != opened.RunID || entity.Entity.FlowInstance != opened.RunID || entity.Entity.CurrentState != "complete" ||
+	if entity.Entity.RunID != opened.RunID || entity.Entity.EntityID != opened.RunID || entity.Entity.FlowInstance != opened.RunID || entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != "complete" ||
 		!reflect.DeepEqual(typed.Fields.Items, items) || !reflect.DeepEqual(typed.Fields.OrderedResults, results) || len(entity.Fields) != 2 {
 		t.Fatalf("public terminal one-map/ordered-result state: entity=%+v fields=%+v want=%v", entity, typed.Fields, results)
 	}

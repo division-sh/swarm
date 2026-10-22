@@ -38,7 +38,6 @@ func TestMailboxCompletionServeProcessHelper(t *testing.T) {
 	opts := cliapp.DefaultServeOptions()
 	opts.SourceRoot, opts.ConfigPath, opts.StoreMode = request.Source, request.Config, request.Store
 	opts.StoreModeSet = true
-	opts.PlatformSpecPath = defaultPlatformSpecPath
 	opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
 	opts.WorkspaceBackend, opts.WorkspaceBackendSet = "host", true
 	opts.SelfCheck, opts.Verbose = true, true

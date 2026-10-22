@@ -23,7 +23,6 @@ type ServeOptions struct {
 	DataSource                       string
 	WorkspaceBackend                 string
 	WorkspaceBackendSet              bool
-	PlatformSpecPath                 string
 	StoreMode                        string
 	StoreModeSet                     bool
 	SwarmDir                         string

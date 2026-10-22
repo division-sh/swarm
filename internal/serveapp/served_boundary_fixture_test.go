@@ -60,9 +60,14 @@ func newServedBoundaryFixtureLifetime(t *testing.T, backend, sourceRoot string) 
 	}
 	t.Cleanup(func() { buildStoresForServe = previous })
 	opts := cliapp.ServeOptions{
-		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
-		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		SourceRoot: sourceRoot, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		TestLifecycleProbe: probe, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	}
+	// The receiver control already owns its exact publication observer. Let the
+	// existing process fixture bind it instead of replacing it with this probe.
+	if _, found := ownedMockLifecycleProbes.Load(t); found {
+		opts.TestLifecycleProbe = nil
 	}
 	if backend == "sqlite" {
 		opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend, location)

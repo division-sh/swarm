@@ -196,18 +196,6 @@ func DecodeCanonicalRuntimeLogTurnBlocks(blocks []TurnBlock) ([]TurnBlockRuntime
 	return out, nil
 }
 
-func DecodeCanonicalRuntimeLogTurnBlocksJSON(raw []byte) ([]TurnBlockRuntimeLogData, error) {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-		return nil, nil
-	}
-	var blocks []TurnBlock
-	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return nil, err
-	}
-	return DecodeCanonicalRuntimeLogTurnBlocks(blocks)
-}
-
 func DecodeCanonicalTurnSummaryBlocks(blocks []TurnBlock) (TurnSummaryTurnBlockData, bool, error) {
 	var (
 		summary      TurnSummaryTurnBlockData
@@ -240,18 +228,6 @@ func DecodeCanonicalTurnSummaryBlocks(blocks []TurnBlock) (TurnSummaryTurnBlockD
 		return TurnSummaryTurnBlockData{}, false, nil
 	}
 	return summary, true, nil
-}
-
-func DecodeCanonicalTurnSummaryJSON(raw []byte) (TurnSummaryTurnBlockData, bool, error) {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-		return TurnSummaryTurnBlockData{}, false, nil
-	}
-	var blocks []TurnBlock
-	if err := json.Unmarshal(raw, &blocks); err != nil {
-		return TurnSummaryTurnBlockData{}, false, err
-	}
-	return DecodeCanonicalTurnSummaryBlocks(blocks)
 }
 
 func normalizeTurnSummaryTurnBlockData(summary TurnSummaryTurnBlockData) TurnSummaryTurnBlockData {

@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -77,7 +76,7 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 		},
 		RetryReady: func(t *testing.T, event events.Event, route events.DeliveryRoute) {
 			t.Helper()
-			if err := storetest.MakeManagerRetryEligible(ctx, selected, event, route); err != nil {
+			if err := storetest.WaitManagerRetryDecision(ctx, selected, event, route); err != nil {
 				t.Fatal(err)
 			}
 		},
@@ -170,7 +169,7 @@ func TestManagerDeliveryStorageOnlySourceRefusesSelectedExecutionBothStores(t *t
 				t.Fatal("original native delivery owner has no retained selected source role")
 			}
 			repo := canonicalrouting.RepoRoot(t)
-			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected}
+			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected}
 			ctx := manager.TerminalPanicFixtureContext()
 			admitted, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
 				BundleHash: sourceartifactfixture.BundleHash,

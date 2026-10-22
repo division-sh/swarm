@@ -13,6 +13,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
@@ -58,7 +59,9 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 	case runtimeeffects.AuthorityChannelActionAck:
 		return channelActionAckAuthorityCurrent(ctx, q, authority, true, false)
 	case runtimeeffects.AuthorityChannelNativeSetting:
-		return channelNativeSettingAuthorityCurrent(ctx, q, authority, true, false)
+		return channelNativeSettingAuthorityCurrent(ctx, q, authority, true, false, "")
+	case runtimeeffects.AuthorityChannelLogout:
+		return channelonboarding.LogoutEffectAuthorityCurrent(ctx, q, authority, true, false)
 	default:
 		return false, nil
 	}
@@ -112,7 +115,9 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 	case runtimeeffects.AuthorityChannelActionAck:
 		return channelActionAckAuthorityCurrent(ctx, q, authority, false, false)
 	case runtimeeffects.AuthorityChannelNativeSetting:
-		return channelNativeSettingAuthorityCurrent(ctx, q, authority, false, false)
+		return channelNativeSettingAuthorityCurrent(ctx, q, authority, false, false, "")
+	case runtimeeffects.AuthorityChannelLogout:
+		return channelonboarding.LogoutEffectAuthorityCurrent(ctx, q, authority, false, false)
 	default:
 		return false, nil
 	}
@@ -160,6 +165,9 @@ func (s *EffectSQLiteOwner) RequireExternalEffectAuthorityTx(ctx context.Context
 }
 
 func externalEffectRunID(ctx context.Context, authority runtimeeffects.Authority) (string, bool, error) {
+	if authority.Kind == runtimeeffects.AuthorityChannelLogout {
+		return "", false, nil
+	}
 	if authority.Kind == runtimeeffects.AuthorityConversationForkChat || authority.Kind == runtimeeffects.AuthorityStartupProbe || authority.Kind == runtimeeffects.AuthorityServeRegistration || authority.Kind == runtimeeffects.AuthorityChannelConfirmation || authority.Kind == runtimeeffects.AuthorityChannelDelivery || authority.Kind == runtimeeffects.AuthorityChannelActionAck || authority.Kind == runtimeeffects.AuthorityChannelNativeSetting {
 		return "", false, nil
 	}
@@ -313,6 +321,8 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 		return requireChannelActionAckAuthorityTx(ctx, tx, authority, true)
 	case runtimeeffects.AuthorityChannelNativeSetting:
 		return requireChannelNativeSettingAuthorityTx(ctx, tx, authority, true)
+	case runtimeeffects.AuthorityChannelLogout:
+		return requireChannelLogoutAuthorityTx(ctx, tx, authority, true)
 	default:
 		return invalidExternalAuthority(authority, "unsupported_kind")
 	}
@@ -413,6 +423,8 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 		return requireChannelActionAckAuthorityTx(ctx, tx, authority, false)
 	case runtimeeffects.AuthorityChannelNativeSetting:
 		return requireChannelNativeSettingAuthorityTx(ctx, tx, authority, false)
+	case runtimeeffects.AuthorityChannelLogout:
+		return requireChannelLogoutAuthorityTx(ctx, tx, authority, false)
 	default:
 		return invalidExternalAuthority(authority, "unsupported_kind")
 	}
@@ -516,6 +528,8 @@ func externalEffectAttemptLeasePostgres(ctx context.Context, q schemaQueryer, au
 		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityChannelNativeSetting:
 		return authority.LeaseExpiresAt.UTC(), nil
+	case runtimeeffects.AuthorityChannelLogout:
+		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityConversationForkChat:
 		var lease time.Time
 		err := q.QueryRowContext(ctx, `
@@ -558,6 +572,8 @@ func externalEffectAttemptLeaseSQLite(ctx context.Context, q schemaQueryer, auth
 	case runtimeeffects.AuthorityChannelActionAck:
 		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityChannelNativeSetting:
+		return authority.LeaseExpiresAt.UTC(), nil
+	case runtimeeffects.AuthorityChannelLogout:
 		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityConversationForkChat:
 		var lease conversationForkTimeValue

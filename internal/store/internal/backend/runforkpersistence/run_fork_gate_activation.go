@@ -232,6 +232,9 @@ func materializeRunForkProposedEffectCards(ctx context.Context, decisions runFor
 	if len(cardIDs) == 0 {
 		return nil
 	}
+	if err := correspondence.RequireDestination(forkRunID, projection.Fork.EntityID); err != nil {
+		return err
+	}
 	for _, cardID := range cardIDs {
 		sourceCard, err := decisions.LoadTx(ctx, attempt, cardID, false)
 		if err != nil {

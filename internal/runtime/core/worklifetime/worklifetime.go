@@ -158,7 +158,11 @@ func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Leas
 	lease := &Lease{gate: g, ctx: ctx, cancel: cancel, transient: transient, publicCompletion: publicCompletion}
 	lease.ctx = context.WithValue(ctx, acceptedLeaseContextKey{}, lease)
 	lease.stop = context.AfterFunc(g.ctx, func() {
-		cancel(ErrRetired)
+		cause := error(ErrRetired)
+		if shutdown, ok := context.Cause(g.ctx).(*managerShutdownCancellation); ok && shutdown.owner.occurrence.gate == g {
+			cause = shutdown
+		}
+		cancel(cause)
 	})
 	return lease, nil
 }
@@ -278,6 +282,10 @@ func (g *gate) reopen() error {
 }
 
 func (g *gate) retire() {
+	g.retireWithCause(ErrRetired)
+}
+
+func (g *gate) retireWithCause(cause error) {
 	if g == nil {
 		return
 	}
@@ -289,7 +297,7 @@ func (g *gate) retire() {
 	g.state = gateRetired
 	cancel := g.cancel
 	g.mu.Unlock()
-	cancel(ErrRetired)
+	cancel(cause)
 }
 
 func (g *gate) wait(ctx context.Context) error {
@@ -724,6 +732,34 @@ func (m *ManagerRunOccurrence) Retire() {
 	if m != nil {
 		m.occurrence.retire()
 	}
+}
+
+type managerShutdownCancellation struct{ owner *ManagerRunOccurrence }
+
+func (*managerShutdownCancellation) Error() string        { return ErrRetired.Error() }
+func (*managerShutdownCancellation) Is(target error) bool { return target == ErrRetired }
+
+// RetireForShutdown changes only the cancellation disposition of this existing
+// occurrence. Reset and all other retirement paths retain Retire's cause.
+func (m *ManagerRunOccurrence) RetireForShutdown() {
+	if m != nil {
+		m.occurrence.gate.retireWithCause(&managerShutdownCancellation{owner: m})
+	}
+}
+
+// CancelledByShutdown accepts the exact admitted lease and its original owner,
+// not a phase observed after some other occurrence already cancelled the work.
+func (m *ManagerRunOccurrence) CancelledByShutdown(ctx context.Context) bool {
+	if m == nil || ctx == nil {
+		return false
+	}
+	cause, ok := context.Cause(ctx).(*managerShutdownCancellation)
+	if !ok || cause.owner != m {
+		return false
+	}
+	lease, _ := ctx.Value(acceptedLeaseContextKey{}).(*Lease)
+	return lease != nil && lease.gate == m.occurrence.gate &&
+		(lease.parent == nil || lease.parent.gate.ctx.Err() == nil)
 }
 
 func (m *ManagerRunOccurrence) Wait(ctx context.Context) error {

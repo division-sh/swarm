@@ -293,15 +293,21 @@ func TestRunForkRevisionRetiredEntityDiffGuardHostileControls(t *testing.T) {
 
 func revisionExactWriterContracts() []revisionExactWriterContract {
 	return []revisionExactWriterContract{
-		{"mutationlog/adapter.go", "Insert", []string{"uuid.NewString()", "attempt.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID)"}},
+		{"mutationlog/adapter.go", "Insert", []string{"insertPostgresAt(ctx, attempt, runLifecycle, rec, time.Time{})"}},
+		{"mutationlog/adapter.go", "insertPostgresAt", []string{"uuid.NewString()", "attempt.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID)"}},
 		{"mutationlog/adapter.go", "insertSQLiteAt", []string{"uuid.NewString()", "attempt.AddFact(runID, runforkrevision.FamilyEntityMutations, mutationID)"}},
 		{"pipelinepersistence/workflow_engine_mutation_commit.go", "commitWorkflowEngineMutationLog", []string{
 			"workflowEngineStateProjection(record)",
-			"insertWorkflowEngineStateDiff(ctx, attempt, store, postgres, record.EntityID, before, after, writer, record.UpdatedAt)",
+			"insertWorkflowEngineStateDiff(ctx, attempt, store, postgres, record, before, after, writer, occurrence)",
 		}},
 		{"pipelinepersistence/workflow_engine_mutation_commit.go", "insertWorkflowEngineStateDiff", []string{
-			"privatemutationlog.InsertEntityStateDiff(ctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) { return selected.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID) }), entityID, before, after, writer)",
-			"privatemutationlog.InsertSQLiteEntityStateDiff(ctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) { return selected.RunLifecycleSQLiteOwner.RequireActiveSourceTx(ctx, tx, runID) }), entityID, before, after, writer, occurredAt)",
+			"insertWorkflowEngineStateDiffWithSource(ctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) { return selected.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID) }), record, before, after, writer, occurrence, true)",
+			"insertWorkflowEngineStateDiffWithSource(ctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) { return selected.RunLifecycleSQLiteOwner.RequireActiveSourceTx(ctx, tx, runID) }), record, before, after, writer, occurrence, false)",
+		}},
+		{"pipelinepersistence/workflow_engine_mutation_commit.go", "insertWorkflowEngineStateDiffWithSource", []string{
+			"privatemutationlog.InsertConstructionEntityStateDiff(ctx, attempt, owner, record, before, after, writer, occurrence, postgres)",
+			"privatemutationlog.InsertEntityStateDiff(ctx, attempt, owner, record.EntityID, before, after, writer)",
+			"privatemutationlog.InsertSQLiteEntityStateDiff(ctx, attempt, owner, record.EntityID, before, after, writer, record.UpdatedAt)",
 		}},
 		{"mutationlog/adapter.go", "InsertEntityStateDiff", []string{"runtimemutationlog.BuildEntityStateDiffRecords(entityID, before, after, writer)", "Insert(ctx, attempt, runLifecycle, record)"}},
 		{"mutationlog/adapter.go", "InsertSQLiteEntityStateDiff", []string{"runtimemutationlog.BuildEntityStateDiffRecords(entityID, before, after, writer)", "insertSQLiteAt(ctx, attempt, runLifecycle, record, occurredAt)"}},
@@ -753,7 +759,7 @@ func validateRetainedDeliveryLifecycleCapture(fn *ast.FuncDecl) error {
 	}
 	guard, ok := fn.Body.List[0].(*ast.IfStmt)
 	if !ok || guard.Init != nil || guard.Else != nil || len(guard.Body.List) != 1 ||
-		revisionGuardNode(guard.Cond) != "before.Status == after.Status && before.ActiveSessionID == after.ActiveSessionID" ||
+		revisionGuardNode(guard.Cond) != `before.Status == after.Status && before.StartedAt.IsZero() == after.StartedAt.IsZero() && (strings.TrimSpace(before.ActiveSessionID) == "") == (strings.TrimSpace(after.ActiveSessionID) == "")` ||
 		revisionGuardNode(guard.Body.List[0]) != "return nil" ||
 		revisionGuardNode(fn.Body.List[1]) != "return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)" {
 		return fmt.Errorf("retained delivery lifecycle capture changed its exact semantic-state boundary")
@@ -761,7 +767,66 @@ func validateRetainedDeliveryLifecycleCapture(fn *ast.FuncDecl) error {
 	return nil
 }
 
+func testRunForkRevisionQ10WriterDelegationGuardHostileControls(t *testing.T) {
+	root := repoRootForRuntimeWriterGuard(t)
+	owners := map[string]bool{
+		"mutationlog/adapter.go|Insert":                                                                  true,
+		"mutationlog/adapter.go|insertPostgresAt":                                                        true,
+		"pipelinepersistence/workflow_engine_mutation_commit.go|commitWorkflowEngineMutationLog":         true,
+		"pipelinepersistence/workflow_engine_mutation_commit.go|insertWorkflowEngineStateDiff":           true,
+		"pipelinepersistence/workflow_engine_mutation_commit.go|insertWorkflowEngineStateDiffWithSource": true,
+	}
+	for _, contract := range revisionExactWriterContracts() {
+		key := contract.path + "|" + contract.symbol
+		if !owners[key] {
+			continue
+		}
+		delete(owners, key)
+		t.Run(key, func(t *testing.T) {
+			body, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend", contract.path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := validateRevisionExactWriter(string(body), contract); err != nil {
+				t.Fatal(err)
+			}
+			for _, required := range contract.calls {
+				t.Run(required, func(t *testing.T) {
+					functions, err := revisionGuardFunctions(string(body))
+					if err != nil {
+						t.Fatal(err)
+					}
+					expression, err := parser.ParseExpr(required)
+					if err != nil {
+						t.Fatal(err)
+					}
+					changed := 0
+					ast.Inspect(functions[contract.symbol].Body, func(node ast.Node) bool {
+						call, ok := node.(*ast.CallExpr)
+						if ok && revisionGuardNode(call) == revisionGuardNode(expression) {
+							call.Fun = ast.NewIdent("omittedContribution")
+							changed++
+							return false
+						}
+						return true
+					})
+					if changed != 1 {
+						t.Fatalf("counterexample changed %d calls, want one", changed)
+					}
+					if err := validateRevisionExactWriter("package p\n"+revisionGuardNode(functions[contract.symbol]), contract); err == nil {
+						t.Fatalf("missing writer contribution or delegation passed: %s", required)
+					}
+				})
+			}
+		})
+	}
+	if len(owners) != 0 {
+		t.Fatalf("missing Q10 writer contracts: %v", owners)
+	}
+}
+
 func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
+	t.Run("q10_writer_delegation", testRunForkRevisionQ10WriterDelegationGuardHostileControls)
 	contract := revisionExactWriterContract{symbol: "write", calls: []string{"effects.AddFact(runID, revision.FamilyEntityMutations, mutationID)"}}
 	valid := `package p; func write() error { return effects.AddFact(runID, revision.FamilyEntityMutations, mutationID) }`
 	for _, tc := range []struct {
@@ -791,7 +856,7 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 			source += "func (a *Adapter) " + symbol + "() {}\n"
 		}
 		capture := `func declareRetainedDeliveryLifecycle() error {
-    if before.Status == after.Status && before.ActiveSessionID == after.ActiveSessionID { return nil }
+    if before.Status == after.Status && before.StartedAt.IsZero() == after.StartedAt.IsZero() && (strings.TrimSpace(before.ActiveSessionID) == "") == (strings.TrimSpace(after.ActiveSessionID) == "") { return nil }
     return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)
 }`
 		source += capture
@@ -809,7 +874,9 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 		}
 		for _, changed := range []string{
 			strings.Replace(capture, "before.Status == after.Status && ", "", 1),
-			strings.Replace(capture, " && before.ActiveSessionID == after.ActiveSessionID", "", 1),
+			strings.Replace(capture, " && before.StartedAt.IsZero() == after.StartedAt.IsZero()", "", 1),
+			strings.Replace(capture, ` && (strings.TrimSpace(before.ActiveSessionID) == "") == (strings.TrimSpace(after.ActiveSessionID) == "")`, "", 1),
+			strings.Replace(capture, `(strings.TrimSpace(before.ActiveSessionID) == "") == (strings.TrimSpace(after.ActiveSessionID) == "")`, "before.ActiveSessionID == after.ActiveSessionID", 1),
 			strings.Replace(capture, "return nil", "return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)", 1),
 			strings.Replace(capture, "after.RunID,", "before.RunID,", 1),
 			strings.Replace(capture, "after.DeliveryID)", "before.DeliveryID)", 1),

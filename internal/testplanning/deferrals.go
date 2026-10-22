@@ -54,6 +54,7 @@ var rootDeferralReasons = map[string]map[string]string{
 		"TestOwnedMockLifecycleProcessEntry":                              "subprocess entry point, not a standalone proof",
 		"TestOwnedNumericTimerInspection":                                 "numeric lifecycle parent-owned subprocess entry point, not a standalone proof",
 		"TestResetCrashServeProcessHelper":                                "subprocess entry point, not a standalone proof",
+		"TestServedWhatsAppSDKProcessHelper":                              "subprocess entry point, not a standalone proof",
 		"TestClaudeAttemptProofProcessHelper":                             "subprocess entry point, not a standalone proof",
 		"TestResetStartupProjectionDisposalRealDocker":                    "opt-in real Docker proof",
 		"TestServePostgresLossAndRestartFromDurableState":                 "separately provisioned disposable PostgreSQL server-loss proof",

@@ -7,7 +7,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -65,7 +64,7 @@ func prepareSelectedStoreForkForTest(t *testing.T, ctx context.Context, selected
 	}
 	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: sourceRun, At: at, ContractSelection: selection, ExpectedBundleHash: hash,
-		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo), Store: sourceStore},
+		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: sourceStore},
 		AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{
 			ProcessCapability: capability, ExecutionPosture: executionposture.Live,
 			Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},

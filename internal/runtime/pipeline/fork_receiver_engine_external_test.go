@@ -165,7 +165,7 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 					defer close(done)
 					result, err := family.Execute(forkCtx, runforkexecution.SelectedContractExecutionRequest{
 						SourceRunID: runID, At: frontier, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
-						SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
+						SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 						AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture, AgentManagerOptions: runtimemanager.AgentManagerOptions{TestLifecycleProbe: probe}},
 					})
@@ -227,8 +227,11 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				committedRows := forkEngineConstructedRowCounts(t, claimedProof)
 				var before string
 				var beforeRevision int64
-				if err := db.QueryRow(`SELECT CAST(fields AS TEXT),revision FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID).Scan(&before, &beforeRevision); err != nil || forkEngineMarker(t, before) != "consumer-owned" {
-					t.Fatalf("fixed-revision receiver was not reconstructed independently of current source: %s err=%v", before, err)
+				if err := db.QueryRow(`SELECT CAST(es.fields AS TEXT), fi.revision
+FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+WHERE es.run_id=$1 AND es.entity_id=$2 AND es.flow_instance='consumer'`, claim.RunID(), target.EntityID).Scan(&before, &beforeRevision); err != nil || forkEngineMarker(t, before) != "consumer-owned" || beforeRevision != 1 {
+					t.Fatalf("fixed-revision receiver was not reconstructed independently of current source: %s header revision=%d err=%v", before, beforeRevision, err)
 				}
 				if missing {
 					result, err := db.Exec(`DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID)
@@ -617,7 +620,7 @@ func startForkEngineRuntimeOwnerAt(t *testing.T, backend, root string, probe lif
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = selected.CloseUnactivated() })
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(repo, root, filepath.Join(repo, "platform-spec.yaml"))
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repo, root)
 	if err != nil {
 		t.Fatal(err)
 	}

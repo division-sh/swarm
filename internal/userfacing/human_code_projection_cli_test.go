@@ -491,6 +491,10 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"state"},
 		Reason: "native inbox qualification is the separate missing/invalid/stale/qualified evidence taxonomy, not runtime operational state",
 	},
+	"channel_onboarding_progress.go\x00writeWhatsAppConnection": {
+		Names:  []string{"state"},
+		Reason: "L4 channel health is the separate pairing/connecting/connected/disconnected vocabulary, not a registered runtime lifecycle code family",
+	},
 	"connections.go\x00newConnectionsCallbackCommand": {
 		Names:  []string{"status"},
 		Reason: "managed-credential connection status is a separate command taxonomy",

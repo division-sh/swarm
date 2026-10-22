@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
 	"unicode/utf8"
 )
 
@@ -305,23 +304,6 @@ func (Value) MarshalJSON() ([]byte, error) {
 // value without the canonical JSON codec's lexical checks.
 func (*Value) UnmarshalJSON([]byte) error {
 	return fmt.Errorf("semanticvalue.Value must be decoded by canonicaljson")
-}
-
-func NumberString(value Value) string {
-	number, ok := value.Number()
-	if !ok {
-		return ""
-	}
-	return strconv.FormatFloat(number, 'g', -1, 64)
-}
-
-func IsJSONScalar(value Value) bool {
-	switch value.Kind() {
-	case KindNull, KindBool, KindNumber, KindString:
-		return true
-	default:
-		return false
-	}
 }
 
 var _ json.Marshaler = Value{}

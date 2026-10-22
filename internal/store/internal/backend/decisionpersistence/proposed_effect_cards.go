@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -15,6 +16,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
@@ -253,29 +255,32 @@ func (s *DecisionSQLiteOwner) LoadProposedEffectTx(ctx context.Context, attempt 
 }
 
 type proposedEffectProjection struct {
-	RequestEventID  string                       `json:"request_event_id"`
-	ActivityID      string                       `json:"activity_id"`
-	Tool            string                       `json:"tool"`
-	BundleHash      string                       `json:"bundle_hash"`
-	WorkflowVersion string                       `json:"workflow_version"`
-	SuccessEvent    string                       `json:"success_event"`
-	FailureEvent    string                       `json:"failure_event"`
-	RevisionEvent   string                       `json:"revision_event"`
-	RejectedEvent   string                       `json:"rejected_event"`
-	EntityID        string                       `json:"entity_id"`
-	NodeID          string                       `json:"node_id"`
-	FlowID          string                       `json:"flow_id"`
-	FlowInstance    string                       `json:"flow_instance"`
-	HandlerEventKey string                       `json:"handler_event_key"`
-	SourceEventID   string                       `json:"source_event_id"`
-	SourceRunID     string                       `json:"source_run_id"`
-	SourceTaskID    string                       `json:"source_task_id"`
-	ParentEventID   string                       `json:"parent_event_id"`
-	ChainDepth      int                          `json:"chain_depth"`
-	Generation      attemptgeneration.Generation `json:"loop_generation"`
-	LoopStage       string                       `json:"loop_stage"`
-	ExecutionMode   executionmode.Mode           `json:"execution_mode"`
-	ReplyContextID  string                       `json:"reply_context_id"`
+	RequestEventID              string                                        `json:"request_event_id"`
+	ActivityID                  string                                        `json:"activity_id"`
+	Tool                        string                                        `json:"tool"`
+	NativeSessionTarget         string                                        `json:"native_session_target,omitempty"`
+	PlanGeneration              plangeneration.Generation                     `json:"plan_generation,omitempty"`
+	ChannelActivationGeneration channelonboarding.ChannelActivationGeneration `json:"channel_activation_generation,omitempty"`
+	BundleHash                  string                                        `json:"bundle_hash"`
+	WorkflowVersion             string                                        `json:"workflow_version"`
+	SuccessEvent                string                                        `json:"success_event"`
+	FailureEvent                string                                        `json:"failure_event"`
+	RevisionEvent               string                                        `json:"revision_event"`
+	RejectedEvent               string                                        `json:"rejected_event"`
+	EntityID                    string                                        `json:"entity_id"`
+	NodeID                      string                                        `json:"node_id"`
+	FlowID                      string                                        `json:"flow_id"`
+	FlowInstance                string                                        `json:"flow_instance"`
+	HandlerEventKey             string                                        `json:"handler_event_key"`
+	SourceEventID               string                                        `json:"source_event_id"`
+	SourceRunID                 string                                        `json:"source_run_id"`
+	SourceTaskID                string                                        `json:"source_task_id"`
+	ParentEventID               string                                        `json:"parent_event_id"`
+	ChainDepth                  int                                           `json:"chain_depth"`
+	Generation                  attemptgeneration.Generation                  `json:"loop_generation"`
+	LoopStage                   string                                        `json:"loop_stage"`
+	ExecutionMode               executionmode.Mode                            `json:"execution_mode"`
+	ReplyContextID              string                                        `json:"reply_context_id"`
 }
 
 func projectProposedEffect(value semanticvalue.Value, out *decisioncard.ProposedEffectContinuation) error {
@@ -293,6 +298,9 @@ func projectProposedEffect(value semanticvalue.Value, out *decisioncard.Proposed
 	out.RequestEventID = dto.RequestEventID
 	out.ActivityID = dto.ActivityID
 	out.Tool = dto.Tool
+	out.NativeSessionTarget = dto.NativeSessionTarget
+	out.PlanGeneration = dto.PlanGeneration
+	out.ChannelActivationGeneration = dto.ChannelActivationGeneration
 	out.BundleHash = dto.BundleHash
 	out.WorkflowVersion = dto.WorkflowVersion
 	out.Input = input

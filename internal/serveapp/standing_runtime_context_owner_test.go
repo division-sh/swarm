@@ -104,7 +104,6 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			selectedModule, selectedBundle, err := cliapp.NewSwarmWorkflowModule(
 				repoRoot,
 				sourceRoot,
-				cliapp.ResolvePath(repoRoot, defaultPlatformSpecPath),
 			)
 			if err != nil {
 				t.Fatalf("load selected standing module: %v", err)
@@ -546,7 +545,7 @@ func openStandingRuntimeContextStore(t *testing.T, backend, suffix string) *sele
 		path := filepath.Join(t.TempDir(), suffix+".sqlite")
 		stores := openSelectedSQLiteOwner(t, path, &config.Config{})
 		t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
-		spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
+		spec, err := loadServePlatformSpecDocument()
 		if err != nil {
 			t.Fatalf("load platform spec for %s SQLite store: %v", suffix, err)
 		}

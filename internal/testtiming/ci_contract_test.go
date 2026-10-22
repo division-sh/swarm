@@ -53,8 +53,10 @@ func TestCIJobCollectionWaitsOnlyForTerminalEvidence(t *testing.T) {
 	if assertAt < 0 || fetchAt <= assertAt || evaluateAt <= fetchAt ||
 		!strings.Contains(step.Run, `-event "$GITHUB_EVENT_NAME"`) ||
 		!strings.Contains(step.Run, "attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100") ||
-		!strings.Contains(step.Run, "for check in $(seq 1 12)") ||
-		!strings.Contains(step.Run, "if [ \"$check\" -lt 12 ]; then sleep 5; fi") ||
+		!strings.Contains(step.Run, "for check in $(seq 1 60)") ||
+		!strings.Contains(step.Run, "if [ \"$check\" -eq 60 ]; then") ||
+		!strings.Contains(step.Run, "exit 1") ||
+		!strings.Contains(step.Run, "sleep 5") ||
 		strings.Count(step.Run, "-evaluate-budget") != 1 {
 		t.Fatal("job collection must be bounded, attempt-scoped, and precede one fail-closed evaluation")
 	}
@@ -116,9 +118,9 @@ func TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres(t *testing.T) {
 			continue
 		}
 		found = true
-		// Keep the mixed root's SQLite release/crash cases; only its PostgreSQL
-		// children and the four PostgreSQL-only roots require excluded resources.
-		want := "go test ./internal/store/internal/startupownership -skip '^(TestPostgresPossessionObservationUsesIndependentExactSessionAndKey|TestPostgresGenerationMonitorFencesStalledNativePhase|TestPostgresGenerationMonitorHealthyQueueAndCancellation|TestPostgresGenerationMonitorWithdrawsCapabilityBeforeNativeJoin)$|^TestPossessionObservationExternalProcessReleaseAndCrashBothStores$/^postgres$' -count=1"
+		// Keep both mixed roots' SQLite cases; only their PostgreSQL children
+		// and the four PostgreSQL-only roots require excluded resources.
+		want := "go test ./internal/store/internal/startupownership -skip '^(TestPostgresPossessionObservationUsesIndependentExactSessionAndKey|TestPostgresGenerationMonitorFencesStalledNativePhase|TestPostgresGenerationMonitorHealthyQueueAndCancellation|TestPostgresGenerationMonitorWithdrawsCapabilityBeforeNativeJoin)$|^(TestPossessionObservationExternalProcessReleaseAndCrashBothStores|TestRuntimeLogoutWithdrawalRefusesInvalidTemporalEvidenceBothStores)$/^postgres$' -count=1"
 		if strings.TrimSpace(step.Run) != want {
 			t.Fatalf("SQLite-only qualification no longer selects every SQLite package root: %s", step.Run)
 		}

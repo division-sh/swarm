@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -14,7 +15,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func admitNativeSettingScopeTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, postgres bool) (channelnative.Setting, error) {
+func admitNativeSettingScopeTx(ctx context.Context, tx *sql.Tx, admission channelnative.Admission, parentID string, postgres bool) (channelnative.Setting, error) {
 	query := `SELECT a.provider, a.principal_id, a.interface_key, a.binding_revision,
 		a.activation_revision, a.context_publication_generation, a.channel_pack_id,
 		a.channel_pack_version, a.channel_manifest_hash, a.conversation_reference,
@@ -25,7 +26,7 @@ func admitNativeSettingScopeTx(ctx context.Context, tx *sql.Tx, admission channe
 		WHERE a.activation_id=? AND a.status='current' AND o.phase='succeeded'
 		AND o.identity_operation_id=b.operation_id AND b.status='current'
 		AND b.principal_id=a.principal_id AND b.binding_revision=a.binding_revision
-		AND b.conversation_reference=a.conversation_reference`
+		AND b.conversation_reference=a.conversation_reference AND o.operation_id=?`
 	if postgres {
 		query = `SELECT a.provider, a.principal_id::text, a.interface_key, a.binding_revision,
 			a.activation_revision, a.context_publication_generation, a.channel_pack_id,
@@ -37,14 +38,14 @@ func admitNativeSettingScopeTx(ctx context.Context, tx *sql.Tx, admission channe
 			WHERE a.activation_id=$1::uuid AND a.status='current' AND o.phase='succeeded'
 			AND o.identity_operation_id=b.operation_id AND b.status='current'
 			AND b.principal_id=a.principal_id AND b.binding_revision=a.binding_revision
-			AND b.conversation_reference=a.conversation_reference
+			AND b.conversation_reference=a.conversation_reference AND o.operation_id=$2::uuid
 			FOR UPDATE OF a, o, b`
 	}
 	var provider, principalID, interfaceKey, packID, packVersion, packHash, conversation, planGeneration, accountReference, conversationScope string
 	var bindingRevision, activationRevision, contextGeneration int64
 	var clientLanguage string
 	var localeRevision int64
-	err := tx.QueryRowContext(ctx, query, admission.ActivationID).Scan(&provider, &principalID, &interfaceKey,
+	err := tx.QueryRowContext(ctx, query, admission.ActivationID, parentID).Scan(&provider, &principalID, &interfaceKey,
 		&bindingRevision, &activationRevision, &contextGeneration, &packID, &packVersion, &packHash, &conversation, &planGeneration,
 		&accountReference, &conversationScope, &clientLanguage, &localeRevision)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -100,10 +101,25 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	if err := admission.Validate(); err != nil {
 		return channelnative.Setting{}, false, err
 	}
+	// Lock only the actual parent before the principal fence and dependent rows.
+	query := `SELECT operation_id FROM channel_onboarding_operations
+		WHERE operation_id=(SELECT operation_id FROM connected_channel_activations WHERE activation_id=?)`
+	if postgres {
+		query = `SELECT operation_id::text FROM channel_onboarding_operations
+			WHERE operation_id=(SELECT operation_id FROM connected_channel_activations WHERE activation_id=$1::uuid) FOR UPDATE`
+	}
+	var parentID string
+	err := tx.QueryRowContext(ctx, query, admission.ActivationID).Scan(&parentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = fmt.Errorf("native inbox activation is not exact-current")
+	}
+	if err != nil {
+		return channelnative.Setting{}, false, err
+	}
 	if err := LockPrincipalTx(ctx, tx, admission.PrincipalID, postgres); err != nil {
 		return channelnative.Setting{}, false, err
 	}
-	setting, err := admitNativeSettingScopeTx(ctx, tx, admission, postgres)
+	setting, err := admitNativeSettingScopeTx(ctx, tx, admission, parentID, postgres)
 	if err != nil {
 		return channelnative.Setting{}, false, err
 	}
@@ -111,7 +127,7 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 	if err != nil {
 		return channelnative.Setting{}, false, err
 	}
-	query := `SELECT setting_id, principal_id, pack_id, pack_version, pack_manifest_hash,
+	query = `SELECT setting_id, principal_id, pack_id, pack_version, pack_manifest_hash,
 		entry_contract_hash, entry_command, desired_commands, generation, state, COALESCE(install_operation_id, ''), readback_hash
 		FROM channel_native_settings WHERE provider=? AND resource_slot_id=? AND conversation_reference=?
 		AND scope_kind=? AND member_reference=? AND language_code=''`
@@ -154,24 +170,20 @@ func AttachNativeInboxSettingTx(ctx context.Context, tx *sql.Tx, admission chann
 		compatible := stored.matches(admission, setting.EntryCommand, canonical, desired)
 		if unresolved && setting.State != "uncertain" {
 			setting, err = markNativeSettingUncertainTx(ctx, tx, setting, postgres)
-			if err != nil {
-				return channelnative.Setting{}, false, err
-			}
 			changed = true
 		}
+		if err != nil {
+			return channelnative.Setting{}, false, err
+		}
 		if !compatible || (setting.State == "retired" && !readbackHash.Valid) {
-			if unresolved {
-				return channelnative.Setting{}, false, fmt.Errorf("native inbox setting has unresolved or foreign provider state")
-			}
-			switch setting.State {
-			case "uncertain", "unavailable":
+			if unresolved || slices.Contains([]string{"uncertain", "unavailable"}, setting.State) {
 				return channelnative.Setting{}, false, fmt.Errorf("native inbox setting has unresolved or foreign provider state")
 			}
 			setting, err = advanceNativeSettingGenerationTx(ctx, tx, admission, setting, postgres)
-			if err != nil {
-				return channelnative.Setting{}, false, err
-			}
 			changed = true
+		}
+		if err != nil {
+			return channelnative.Setting{}, false, err
 		}
 	}
 	var consumerChanged bool

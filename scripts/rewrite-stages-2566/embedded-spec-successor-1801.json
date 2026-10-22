@@ -1,0 +1,20 @@
+{
+  "baseline": "fa5a180a213022b38c6f9ee0610ffe3546407919",
+  "scope": "https://github.com/division-sh/swarm/pull/2695#issuecomment-6201846244",
+  "changes": [
+    {
+      "file": "internal/runtime/conformance/data_text_file_journey_2456_test.go",
+      "before_hash": "39785b6de6159b06c974cc36790de6067994476159b99fc4ba84f29f3b694b7f",
+      "after_hash": "fbe92820fc80d5eb5baef88f980f6052677fd243a15565446c93b933de240afc",
+      "edits": [
+        {
+          "offset": 33059,
+          "before": "\t\tPlatformSpecPath: filepath.Join(conformanceRepoRoot(t), \"platform-spec.yaml\"),\n\t\tAuthTokens:       []string{apiv1.DefaultLoopbackAPIToken}, Handlers: methods,\n",
+          "after": "\t\tAuthTokens: []string{apiv1.DefaultLoopbackAPIToken}, Handlers: methods,\n"
+        }
+      ],
+      "equivalence": [],
+      "review": "Delete only apiv1.Options.PlatformSpecPath and gofmt-align AuthTokens. Preserve the original finite-fixtures.json decision, all three stage edits, equivalence/review text, assertions, cleanup, store cells and the other seven members."
+    }
+  ]
+}

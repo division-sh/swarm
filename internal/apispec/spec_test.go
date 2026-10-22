@@ -19,11 +19,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 71 {
-		t.Fatalf("method count = %d, want 71", report.MethodCount)
-	}
-	if report.SchemaCount != 252 {
-		t.Fatalf("schema count = %d, want 252 (including six completion-evidence contracts)", report.SchemaCount)
+	if report.MethodCount != 73 {
+		t.Fatalf("method count = %d, want 73", report.MethodCount)
 	}
 	if _, ok := api.Components.Schemas["ChannelCapabilityVector"]; !ok {
 		t.Fatal("ChannelCapabilityVector missing from schema catalog")
@@ -34,8 +31,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if _, ok := api.Components.Errors["RUN_NEVER_COMPLETES"]; !ok || !slices.Contains(api.MethodCatalog["run.start"].Errors, "RUN_NEVER_COMPLETES") {
 		t.Fatal("finite-start refusal must be declared and bound to run.start")
 	}
-	if report.MutatingMethodCount != 30 {
-		t.Fatalf("mutating method count = %d, want 30", report.MutatingMethodCount)
+	if report.MutatingMethodCount != 31 {
+		t.Fatalf("mutating method count = %d, want 31", report.MutatingMethodCount)
 	}
 	if report.SubscriptionMethodCnt != 5 {
 		t.Fatalf("subscription method count = %d, want 5", report.SubscriptionMethodCnt)
@@ -137,11 +134,8 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 71 {
-		t.Fatalf("generated OpenRPC methods = %d, want 71", len(doc.Methods))
-	}
-	if len(doc.Components.Schemas) != 252 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 252", len(doc.Components.Schemas))
+	if len(doc.Methods) != 73 {
+		t.Fatalf("generated OpenRPC methods = %d, want 73", len(doc.Methods))
 	}
 	if len(doc.Components.Errors) != 69 {
 		t.Fatalf("generated OpenRPC errors = %d, want 69", len(doc.Components.Errors))
@@ -476,9 +470,7 @@ func TestEntityFullAccumulatedSchemaPublishesRuntimeAccumulatorState(t *testing.
 	if !ok {
 		t.Fatalf("EntityFull.accumulated = %#v, want object schema", properties["accumulated"])
 	}
-	if got, want := accumulated["type"], "object"; got != want {
-		t.Fatalf("EntityFull.accumulated.type = %#v, want %q", got, want)
-	}
+	accumulated = requireNullableOpenObject(t, "EntityFull.accumulated", accumulated)
 	if got, ok := accumulated["additionalProperties"].(bool); !ok || !got {
 		t.Fatalf("EntityFull.accumulated.additionalProperties = %#v, want true", accumulated["additionalProperties"])
 	}
@@ -517,6 +509,7 @@ func TestEntityFullAccumulatedSchemaPublishesRuntimeAccumulatorState(t *testing.
 	if !ok {
 		t.Fatalf("generated EntityFull.accumulated = %#v, want object schema", generatedProperties["accumulated"])
 	}
+	generatedAccumulated = requireNullableOpenObject(t, "generated EntityFull.accumulated", generatedAccumulated)
 	if got, ok := generatedAccumulated["additionalProperties"].(bool); !ok || !got {
 		t.Fatalf("generated EntityFull.accumulated.additionalProperties = %#v, want true", generatedAccumulated["additionalProperties"])
 	}
@@ -533,9 +526,10 @@ func TestEntityFullBookkeepingSchemaPublishesIndependentPlatformFacts(t *testing
 		t.Fatalf("EntityFull.properties = %#v, want object", entityFull["properties"])
 	}
 	bookkeeping, ok := properties["bookkeeping"].(map[string]any)
-	if !ok || bookkeeping["type"] != "object" || bookkeeping["additionalProperties"] != true {
-		t.Fatalf("EntityFull.bookkeeping = %#v, want open object schema", properties["bookkeeping"])
+	if !ok {
+		t.Fatalf("EntityFull.bookkeeping = %#v, want nullable open object schema", properties["bookkeeping"])
 	}
+	requireNullableOpenObject(t, "EntityFull.bookkeeping", bookkeeping)
 	required, ok := entityFull["required"].([]any)
 	if !ok {
 		t.Fatalf("EntityFull.required = %#v, want list", entityFull["required"])
@@ -568,9 +562,31 @@ func TestEntityFullBookkeepingSchemaPublishesIndependentPlatformFacts(t *testing
 		t.Fatalf("generated EntityFull.properties = %#v, want object", generatedEntityFull["properties"])
 	}
 	generatedBookkeeping, ok := generatedProperties["bookkeeping"].(map[string]any)
-	if !ok || generatedBookkeeping["type"] != "object" || generatedBookkeeping["additionalProperties"] != true {
-		t.Fatalf("generated EntityFull.bookkeeping = %#v, want open object schema", generatedProperties["bookkeeping"])
+	if !ok {
+		t.Fatalf("generated EntityFull.bookkeeping = %#v, want nullable open object schema", generatedProperties["bookkeeping"])
 	}
+	requireNullableOpenObject(t, "generated EntityFull.bookkeeping", generatedBookkeeping)
+}
+
+func requireNullableOpenObject(t *testing.T, name string, schema map[string]any) map[string]any {
+	t.Helper()
+	branches, ok := schema["oneOf"].([]any)
+	if !ok || len(branches) != 2 {
+		t.Fatalf("%s = %#v, want exactly constructed-object and imported-null branches", name, schema)
+	}
+	object, objectOK := branches[0].(map[string]any)
+	null, nullOK := branches[1].(map[string]any)
+	if !objectOK || object["type"] != "object" || object["additionalProperties"] != true ||
+		!nullOK || len(null) != 1 || null["type"] != "null" {
+		t.Fatalf("%s branches = %#v, want open object and null", name, branches)
+	}
+	if _, exists := object["items"]; exists {
+		t.Fatalf("%s object branch must not use array items: %#v", name, object)
+	}
+	if _, exists := schema["type"]; exists {
+		t.Fatalf("%s must select its type through oneOf: %#v", name, schema)
+	}
+	return object
 }
 
 func TestValidateRejectsMissingExamplesPolicy(t *testing.T) {

@@ -1,11 +1,9 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"go/ast"
-	"go/format"
 	"go/parser"
 	"go/token"
 	"testing"
@@ -107,14 +105,6 @@ func nativeReadSetupStatements(statements []ast.Stmt) (int, ast.Stmt) {
 	}
 	expr, _ := parser.ParseExpr("storetest.StartPostgresRuntimeStoreWithReopen(t)")
 	return consumed, &ast.AssignStmt{Lhs: []ast.Expr{ast.NewIdent(owner.Name), ast.NewIdent("_")}, Tok: token.DEFINE, Rhs: []ast.Expr{expr}}
-}
-
-func formattedNativeReadNode(node ast.Node) string {
-	var out bytes.Buffer
-	if err := format.Node(&out, token.NewFileSet(), node); err != nil {
-		panic(err)
-	}
-	return out.String()
 }
 
 func TestNativeReadSetupRefusesLivePoolAndChangedConstruction(t *testing.T) {

@@ -24,6 +24,35 @@ type channelListResult struct {
 	Channels    []channelReadbackResult `json:"channels"`
 }
 
+func (r channelListResult) linkedSessionOperation(provider string) (string, error) {
+	operationID, best, matches := "", -1, 0
+	for _, row := range r.Channels {
+		if row.Operation == nil || row.Operation.Provider != provider || row.Connection == nil || !row.Connection.Linked ||
+			row.Operation.Phase == channelonboarding.PhaseFailed || row.Operation.Phase == channelonboarding.PhaseRetired {
+			continue
+		}
+		rank := 0
+		if !row.Operation.Phase.Terminal() {
+			rank = 1
+		}
+		if row.Connection.State == "connected" {
+			rank = 2
+		}
+		if rank > best {
+			operationID, best, matches = row.Operation.OperationID, rank, 1
+		} else if rank == best && operationID != row.Operation.OperationID {
+			matches++
+		}
+	}
+	if matches > 1 {
+		return "", errors.New("more than one WhatsApp connection is linked")
+	}
+	if operationID == "" {
+		return "", errors.New("Not linked: run swarm channel connect whatsapp")
+	}
+	return operationID, nil
+}
+
 type channelOperationEnvelope struct {
 	Operation channelOperationResult   `json:"operation"`
 	Binding   *operatorchannel.Binding `json:"binding,omitempty"`
@@ -43,6 +72,7 @@ type channelConnectOptions struct {
 	credentialStdin  bool
 	resumeCredential string
 	clientLanguage   string
+	waitForPairing   bool
 }
 
 type channelStatusOptions struct {
@@ -72,9 +102,83 @@ func newChannelCommand(opts rootCommandOptions) *cobra.Command {
 		newChannelListCommand(opts),
 		newChannelStatusCommand(opts),
 		newChannelUnbindCommand(opts),
+		newChannelLogoutCommand(opts),
 		newChannelProofRevokeCommand(opts),
 	)
 	return cmd
+}
+
+func newChannelLogoutCommand(opts rootCommandOptions) *cobra.Command {
+	commandOpts := opts
+	var output cliOutputOptions
+	var idempotencyKey string
+	cmd := &cobra.Command{
+		Use:   "logout <provider>",
+		Short: "Unlink one exact paired connection and delete its local pairing state.",
+		Args:  argcount.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChannelLogout(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], idempotencyKey, commandOpts, output)
+		},
+	}
+	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
+	bindCLIAPIConnectionFlagsWithClass(cmd, &commandOpts, cliAPICommandClassControl, "swarm channel logout")
+	bindCLIOutputFlags(cmd, &output)
+	return cmd
+}
+
+func runChannelLogout(ctx context.Context, out, errOut io.Writer, operationID, idempotencyKey string, opts rootCommandOptions, output cliOutputOptions) error {
+	client, err := newCLIAPIClient(opts)
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	if operationID == "whatsapp" {
+		list, err := fetchChannelList(ctx, client)
+		if err != nil {
+			return returnCLIAPIError(errOut, err, channelErrorClassifier())
+		}
+		operationID, err = list.linkedSessionOperation("whatsapp")
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
+	}
+	var retained channelOnboardingResult
+	if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": operationID}, &retained); err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	if retained.Operation.OperationID != operationID || retained.Operation.Revision < 1 {
+		return returnCLIValidationError(errOut, errors.New("channel readback does not identify the requested operation"))
+	}
+	revision := retained.Operation.Revision
+	if retained.Logout != nil {
+		if retained.Logout.OperationID != operationID || retained.Logout.ExpectedRevision < 1 {
+			return returnCLIValidationError(errOut, errors.New("channel logout readback contradicts the requested operation"))
+		}
+		revision = retained.Logout.ExpectedRevision
+	}
+	params := map[string]any{"operation_id": operationID, "expected_revision": revision}
+	if strings.TrimSpace(idempotencyKey) != "" {
+		params["idempotency_key"] = strings.TrimSpace(idempotencyKey)
+	}
+	var result channelonboarding.SessionLogoutReadback
+	if err := client.call(ctx, "channel.logout", params, &result); err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	if err := result.Validate(); err != nil || result.OperationID != operationID || result.ExpectedRevision != revision {
+		return returnCLIValidationError(errOut, errors.New("channel logout response contradicts the requested responsibility"))
+	}
+	if !output.asJSON && !output.asYAML && !output.quiet && result.Teardown.Phase != channelonboarding.TeardownSucceeded {
+		return returnCLIValidationError(errOut, errors.New("logout has not completed; the account has not been reported unlinked"))
+	}
+	human := func(w io.Writer) {
+		if result.Teardown.Phase == channelonboarding.TeardownSucceeded {
+			fmt.Fprintln(w, "Logged out; removed from Linked Devices")
+		} else {
+			fmt.Fprintln(w, "Logout has not completed; the account has not been reported unlinked.")
+		}
+	}
+	quiet := func() ([]string, error) { return []string{result.Teardown.TeardownID}, nil }
+	return renderCLIOutput(out, errOut, output, result, human, quiet)
 }
 
 func newChannelLifecycleCommand(opts rootCommandOptions, verb string) *cobra.Command {
@@ -231,12 +335,13 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if err := opts.output.validate(); err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
+	opts.waitForPairing = opts.verb == "connect" && !opts.output.asJSON && !opts.output.asYAML && !opts.output.quiet
 	provider = strings.TrimSpace(provider)
 	if provider == "" {
 		return returnCLIValidationError(errOut, errors.New("channel provider is required"))
 	}
 	if (opts.verb == "connect" || opts.verb == "rebind") && !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
-		return returnCLIValidationError(errOut, errors.New("channel claimant confirmation requires a terminal or --yes"))
+		return returnCLIValidationError(errOut, errors.New("channel account confirmation requires a terminal or --yes"))
 	}
 	bundleHash := ""
 	if opts.sourceSet {
@@ -264,17 +369,15 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if strings.TrimSpace(opts.idempotencyKey) != "" {
 		params["idempotency_key"] = strings.TrimSpace(opts.idempotencyKey)
 	}
-	if opts.verb == "connect" || opts.credentialStdin {
-		credential, readErr := readSecretValue(opts.apiOptions.input, errOut, false)
-		if readErr != nil {
-			return returnCLIValidationError(errOut, fmt.Errorf("read %s provider credential: %w", provider, readErr))
-		}
-		params["provider_credential"] = credential
-		defer delete(params, "provider_credential")
+	begun, err := startCLIChannelOnboarding(ctx, client, params, opts, errOut)
+	if err != nil {
+		return err
 	}
-	var begun channelOnboardingResult
-	if err := client.call(ctx, "channel.onboarding_start", params, &begun); err != nil {
-		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	if opts.waitForPairing && opts.apiOptions.input != nil {
+		opts.apiOptions.input = bufio.NewReader(opts.apiOptions.input)
+	}
+	if opts.waitForPairing && begun.Operation.Posture == channelonboarding.ActivationSessionConnection {
+		fmt.Fprintf(out, "Connecting to %s...\n", begun.Operation.Provider)
 	}
 	progressOut := out
 	if opts.output.asJSON || opts.output.quiet {
@@ -284,12 +387,7 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if err != nil {
 		return err
 	}
-	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
-		fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)
-		writeChannelNativeQualification(w, result)
-	}, func() ([]string, error) {
-		return []string{result.Operation.OperationID}, nil
-	})
+	return renderChannelOnboardingResult(out, errOut, opts.output, result)
 }
 
 func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID string, opts channelConnectOptions) error {
@@ -307,6 +405,9 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 	var current channelOnboardingResult
 	if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": operationID}, &current); err != nil {
 		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	if current.Operation.OperationID != operationID {
+		return returnCLIValidationError(errOut, errors.New("channel readback does not identify the requested operation"))
 	}
 	if opts.clientLanguage != "" {
 		var updated channelOnboardingResult
@@ -326,9 +427,9 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 		return returnCLIValidationError(errOut, errors.New("channel claimant confirmation requires a terminal or --yes"))
 	}
 	if opts.credentialStdin {
-		credential, readErr := readSecretValue(opts.apiOptions.input, errOut, false)
+		credential, readErr := readSelectedChannelCredential(current, opts, errOut)
 		if readErr != nil {
-			return returnCLIValidationError(errOut, fmt.Errorf("read replacement provider credential: %w", readErr))
+			return readErr
 		}
 		opts.resumeCredential = credential
 		defer func() { opts.resumeCredential = "" }()
@@ -341,12 +442,7 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 	if err != nil {
 		return err
 	}
-	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
-		fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)
-		writeChannelNativeQualification(w, result)
-	}, func() ([]string, error) {
-		return []string{result.Operation.OperationID}, nil
-	})
+	return renderChannelOnboardingResult(out, errOut, opts.output, result)
 }
 
 func writeChannelNativeQualification(out io.Writer, result channelOnboardingResult) {
@@ -362,52 +458,70 @@ func writeChannelNativeQualification(out io.Writer, result channelOnboardingResu
 	if qualification.Reason != "" {
 		fmt.Fprintln(out, qualification.Reason)
 	}
-	if result.Operation.ClientLanguage == "" {
+	if result.Operation.Provider == "telegram" && result.Operation.ClientLanguage == "" {
 		fmt.Fprintf(out, "Declare the Telegram language used on this device: swarm channel resume %s --client-language <language>.\n", result.Operation.OperationID)
 	}
 }
 
 func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer) (channelOnboardingResult, error) {
-	identityAnnounced := false
 	sharedAudienceAnnounced := false
+	acceptedAccount := ""
+	advancePending := opts.verb == "resume"
+	awaitLogin := false
+	now := time.Now
+	if opts.apiOptions.now != nil {
+		now = opts.apiOptions.now
+	}
 	for {
-		switch result.Operation.Phase {
-		case "succeeded":
-			if result.Readiness == nil || !result.Readiness.Ready {
-				reason := "connected readiness evidence is unavailable"
-				if result.Readiness != nil && strings.TrimSpace(string(result.Readiness.Reason)) != "" {
-					reason = string(result.Readiness.Reason)
-				}
-				return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding succeeded historically but the channel is not READY: %s", reason))
-			}
+		pending, err := validateCLIChannelProgress(result)
+		if err != nil {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
+		}
+		if pending && !opts.waitForPairing && !advancePending && opts.resumeCredential == "" {
 			return result, nil
-		case "failed", "retired":
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding ended in %s: %s", result.Operation.Phase, result.Operation.FailureMessage))
+		}
+		waitingForConnection := result.Operation.Phase == channelonboarding.PhaseSucceeded && result.Connection != nil && result.Connection.Linked
+		if opts.waitForPairing {
+			if pending || waitingForConnection {
+				result, err = waitForChannelOnboardingPairing(ctx, client, result, opts, awaitLogin, progressOut, errOut)
+				if err != nil {
+					return channelOnboardingResult{}, err
+				}
+			}
+			var previewPending bool
+			result, previewPending, err = confirmCLIChannelAccount(ctx, client, result, opts, progressOut, errOut, &acceptedAccount)
+			if err != nil {
+				return channelOnboardingResult{}, err
+			}
+			awaitLogin = previewPending
+			if previewPending {
+				continue
+			}
+		}
+		advancePending = false
+		switch result.Operation.Phase {
+		case "succeeded", "failed", "retired":
+			// The shared result renderer owns READY validation and terminal
+			// diagnostics for connect and explicit machine continuations.
+			return result, nil
 		}
 		if identity := result.IdentityOperation; identity != nil {
-			now := time.Now()
-			if opts.apiOptions.now != nil {
-				now = opts.apiOptions.now()
-			}
-			overdue := !identity.ExpiresAt.IsZero() && !identity.ExpiresAt.After(now) &&
-				(identity.State == "awaiting_claim" || identity.State == "awaiting_confirmation")
-			if !overdue && identity.State == "awaiting_claim" {
-				if !identityAnnounced {
-					fmt.Fprintf(progressOut, "Send this exact code through the live %s channel before %s:\n\n  %s\n\nWaiting for an authenticated claimant...\n", result.Operation.Provider, identity.ExpiresAt.Local().Format(time.RFC3339), identity.Challenge)
-					identityAnnounced = true
-				}
+			observedAt := now()
+			switch {
+			case identity.State == "awaiting_claim" && (identity.ExpiresAt.IsZero() || identity.ExpiresAt.After(observedAt)):
+				fmt.Fprintf(progressOut, "Send the code %s from your operator phone to this number before %s.\nWaiting for an authenticated claimant...\n", identity.Challenge, identity.ExpiresAt.Local().Format(time.RFC3339))
 				var err error
 				result, err = waitForChannelOnboardingClaim(ctx, client, result, opts.apiOptions)
 				if err != nil {
 					return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
 				}
 				continue
+			case channelClaimantConfirmationRequired(result, observedAt):
+				err = confirmChannelOnboardingClaim(ctx, client, result, opts, progressOut, errOut, &sharedAudienceAnnounced)
 			}
-			if channelClaimantConfirmationRequired(result, now) {
-				if err := confirmChannelOnboardingClaim(ctx, client, result, opts, progressOut, errOut, &sharedAudienceAnnounced); err != nil {
-					return channelOnboardingResult{}, err
-				}
-			}
+		}
+		if err != nil {
+			return channelOnboardingResult{}, err
 		}
 		params := map[string]any{"operation_id": result.Operation.OperationID}
 		if opts.resumeCredential != "" {
@@ -419,16 +533,153 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 		}
 		delete(params, "provider_credential")
 		opts.resumeCredential = ""
-		if next.Operation.Revision == result.Operation.Revision && next.Operation.Phase == result.Operation.Phase {
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding is blocked in %s; retry after resolving the reported prerequisite", next.Operation.Phase))
+		pending, pendingErr := validateCLIChannelContinuation(result, next, false)
+		if pendingErr != nil {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, pendingErr)
+		}
+		if pending && !opts.waitForPairing {
+			return next, nil
 		}
 		result = next
 	}
 }
 
+func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, awaitLogin bool, out, errOut io.Writer) (channelOnboardingResult, error) {
+	poll := opts.apiOptions.channelConnectPoll
+	if poll <= 0 {
+		poll = 500 * time.Millisecond
+	}
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+	lastQR := ""
+	for {
+		pending, err := validateCLIChannelProgress(current)
+		if err != nil {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
+		}
+		switch {
+		case current.Connection != nil && current.Connection.State == "disconnected" && current.Connection.Reason != "":
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("WhatsApp disconnected: %s", cliSanitizeOneLineValue(current.Connection.Reason)))
+		case !pending && (current.Operation.Phase != channelonboarding.PhaseSucceeded || current.Connection == nil || !current.Connection.Linked || current.Readiness != nil && current.Readiness.Ready):
+			return current, nil
+		case pending && current.Pairing.Code != "" && current.Pairing.Code != lastQR:
+			if lastQR != "" {
+				fmt.Fprintln(out, "QR expired, new QR:")
+			}
+			if err := renderChannelOnboardingResult(out, errOut, opts.output, current); err != nil {
+				return channelOnboardingResult{}, err
+			}
+			lastQR = current.Pairing.Code
+			awaitLogin = false
+		}
+		select {
+		case <-ctx.Done():
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel connection stopped"))
+		case <-ticker.C:
+		}
+		if pending && current.Pairing.Status != channelonboarding.PairingStatusPreparing && current.Pairing.Code == "" && (!awaitLogin || current.Pairing.Connected) {
+			break
+		}
+		var next channelOnboardingResult
+		if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": current.Operation.OperationID}, &next); err != nil {
+			return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+		}
+		if next.Operation.OperationID != current.Operation.OperationID || next.Operation.Revision < current.Operation.Revision {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel progress changed the retained operation"))
+		}
+		current = next
+	}
+	return current, nil
+}
+
+func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, bool, error) {
+	// A pairing checkpoint preserves only a preview. Account approval is
+	// required before continuing to activation or operator enrollment.
+	pending, err := validateCLIChannelProgress(current)
+	if err != nil {
+		return channelOnboardingResult{}, false, returnCLIValidationError(errOut, err)
+	}
+	if !pending {
+		switch {
+		case current.Operation.Posture != channelonboarding.ActivationSessionConnection,
+			current.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity,
+			current.Operation.ActivationRevision != 0, current.IdentityOperation != nil, current.Binding != nil:
+			return current, false, nil
+		case current.Connection == nil, !current.Connection.Linked, current.Connection.State != "connected",
+			current.Readiness != nil && current.Readiness.Ready:
+			return channelOnboardingResult{}, false, returnCLIValidationError(errOut, errors.New("the retained account preview has no connected, non-executable pairing"))
+		}
+	}
+	if pending && current.Pairing.Paired && !current.Pairing.Connected {
+		var next channelOnboardingResult
+		if err := client.call(ctx, "channel.onboarding_retry", map[string]any{
+			"operation_id": current.Operation.OperationID, "checkpoint_only": true,
+		}, &next); err != nil {
+			return channelOnboardingResult{}, false, returnCLIAPIError(errOut, err, channelErrorClassifier())
+		}
+		pending, err := validateCLIChannelContinuation(current, next, true)
+		if err != nil {
+			return channelOnboardingResult{}, false, returnCLIValidationError(errOut, err)
+		}
+		if pending {
+			return next, true, nil
+		}
+		current = next
+	}
+	account, name := "", ""
+	if current.Pairing != nil {
+		account, name = current.Pairing.AccountPresentation, current.Pairing.AccountName
+	} else if current.Connection != nil {
+		account, name = current.Connection.AccountPresentation, current.Connection.AccountName
+	}
+	if account == "" {
+		return channelOnboardingResult{}, false, returnCLIValidationError(errOut, errors.New("the linked account could not be identified; connection is not READY"))
+	}
+	if account == *acceptedAccount {
+		return current, false, nil
+	}
+	label := cliSanitizeOneLineValue(account)
+	if name != "" {
+		label += " (" + cliSanitizeOneLineValue(name) + ")"
+	}
+	fmt.Fprintf(out, "Linked to %s\n", label)
+	approve := opts.yes
+	if !approve {
+		approve, err = confirmChannelAccount(opts.apiOptions.input, errOut, "Is this the right account? [y/N] ")
+		if err != nil {
+			return channelOnboardingResult{}, false, returnCLIValidationError(errOut, err)
+		}
+	}
+	if approve {
+		*acceptedAccount = account
+		return current, false, nil
+	}
+	paired := current
+	if current.Operation.Phase == channelonboarding.PhaseActivatingProvider {
+		if err := client.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": current.Operation.OperationID, "checkpoint_only": true}, &paired); err != nil {
+			return channelOnboardingResult{}, false, returnCLIAPIError(errOut, err, channelErrorClassifier())
+		}
+	}
+	if paired.Operation.OperationID != current.Operation.OperationID || paired.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity ||
+		paired.Connection == nil || !paired.Connection.Linked {
+		return channelOnboardingResult{}, false, returnCLIValidationError(errOut, errors.New("the rejected account has no exact logout target"))
+	}
+	if err := runChannelLogout(ctx, out, errOut, current.Operation.OperationID, "", opts.apiOptions, opts.output); err != nil {
+		return channelOnboardingResult{}, false, err
+	}
+	params := map[string]any{"provider": current.Operation.Provider, "verb": "connect", "save_proof": !opts.noSave,
+		"bundle": current.Operation.Coordinate.BundleHash, "interface": current.Operation.Interface.Selector, "target": current.Operation.TargetSelector}
+	next, err := startCLIChannelOnboarding(ctx, client, params, opts, errOut)
+	return next, true, err
+}
+
 func confirmChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer, sharedAudienceAnnounced *bool) error {
 	identity := result.IdentityOperation
-	fmt.Fprintf(progressOut, "Claimed by %s in a %s conversation.\n", identity.AccountPresentation, identity.ConversationScope)
+	if result.Operation.Provider == "whatsapp" {
+		fmt.Fprintf(progressOut, "Code received from %s (%s conversation).\n", cliSanitizeOneLineValue(identity.AccountPresentation), identity.ConversationScope)
+	} else {
+		fmt.Fprintf(progressOut, "Claimed by %s in a %s conversation.\n", identity.AccountPresentation, identity.ConversationScope)
+	}
 	if identity.ConversationScope == "shared" && !*sharedAudienceAnnounced {
 		fmt.Fprintln(progressOut, "This conversation will receive future notices, decision cards, and their updates. Members of the conversation can see them.")
 		*sharedAudienceAnnounced = true
@@ -436,7 +687,7 @@ func confirmChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, re
 	approve := opts.yes
 	var err error
 	if !approve {
-		approve, err = confirmChannelClaimant(opts.apiOptions.input, errOut)
+		approve, err = confirmChannelAccount(opts.apiOptions.input, errOut, "Make them the operator? [y/N] ")
 		if err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
@@ -467,6 +718,10 @@ func channelClaimantConfirmationRequired(result channelOnboardingResult, now tim
 }
 
 func waitForChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, begun channelOnboardingResult, opts rootCommandOptions) (channelOnboardingResult, error) {
+	continuation := ""
+	if begun.Operation.Provider != "whatsapp" {
+		continuation = fmt.Sprintf("; resume operation %s with `swarm channel resume %s`", begun.Operation.OperationID, begun.Operation.OperationID)
+	}
 	wait := opts.channelConnectWait
 	if wait <= 0 {
 		wait = 2 * time.Minute
@@ -489,9 +744,9 @@ func waitForChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, be
 		}
 		select {
 		case <-ctx.Done():
-			return channelOnboardingResult{}, fmt.Errorf("%w: channel claim wait stopped; resume operation %s with `swarm channel resume %s`", ctx.Err(), begun.Operation.OperationID, begun.Operation.OperationID)
+			return channelOnboardingResult{}, fmt.Errorf("%w: stopped waiting for the operator's code%s", ctx.Err(), continuation)
 		case <-deadline.C:
-			return channelOnboardingResult{}, fmt.Errorf("timed out waiting for channel claim; resume operation %s with `swarm channel resume %s`", begun.Operation.OperationID, begun.Operation.OperationID)
+			return channelOnboardingResult{}, fmt.Errorf("timed out waiting for the operator's code%s", continuation)
 		case <-ticker.C:
 		}
 	}
@@ -602,12 +857,16 @@ func channelOperationRenderers(result channelOperationEnvelope, packID string) (
 	return human, quiet
 }
 
-func confirmChannelClaimant(input io.Reader, out io.Writer) (bool, error) {
+func confirmChannelAccount(input io.Reader, out io.Writer, prompt string) (bool, error) {
 	if input == nil {
 		input = strings.NewReader("")
 	}
-	fmt.Fprint(out, "Confirm this account? [y/N] ")
-	line, err := bufio.NewReader(input).ReadString('\n')
+	fmt.Fprint(out, prompt)
+	reader, ok := input.(*bufio.Reader)
+	if !ok {
+		reader = bufio.NewReader(input)
+	}
+	line, err := reader.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, fmt.Errorf("read claimant confirmation: %w", err)
 	}
@@ -691,7 +950,13 @@ func selectChannelActivationReadback(rows []channelReadbackResult, selector, bun
 func writeChannelList(out io.Writer, result channelListResult) {
 	rows := make([][]string, 0, len(result.Channels))
 	footers := []string{}
+	wroteSession := false
 	for _, row := range result.Channels {
+		if row.Identity.Interface.ChannelPackID == "provider.whatsapp.hitl_channel" || row.Operation != nil && row.Operation.Provider == "whatsapp" {
+			writeWhatsAppConnection(out, row.Connection, false)
+			wroteSession = true
+			continue
+		}
 		account := row.Identity.AccountPresentation
 		if account == "" {
 			account = "-"
@@ -723,6 +988,9 @@ func writeChannelList(out io.Writer, result channelListResult) {
 		if row.Identity.PendingOperation != nil {
 			footers = append(footers, fmt.Sprintf("%s pending %s: %s (expires %s)", row.Identity.Interface.ChannelPackID, row.Identity.PendingOperation.Kind, row.Identity.PendingOperation.State, row.Identity.PendingOperation.ExpiresAt.Local().Format(time.RFC3339)))
 		}
+	}
+	if wroteSession && len(rows) == 0 {
+		return
 	}
 	writeCLITable(out, cliTable{
 		Columns: []cliTableColumn{{Header: "PACK"}, {Header: "STATUS"}, {Header: "READY"}, {Header: "NATIVE INBOX"}, {Header: "ACCOUNT"}, {Header: "REVISION"}, {Header: "SCOPE"}, {Header: "REASON"}, {Header: "BUNDLE"}, {Header: "TARGET"}, {Header: "SELECTOR", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyOperatorChannel}},

@@ -204,9 +204,6 @@ func finalizeWorkflowContractBundle(bundle *WorkflowContractBundle) error {
 	if err := validateWorkflowContractBundleLoadConstraints(bundle); err != nil {
 		return err
 	}
-	if err := populateEffectiveProvenance(bundle); err != nil {
-		return err
-	}
 	if _, err := BuildDurableDataCatalog(bundle); err != nil {
 		return fmt.Errorf("compile durable data catalog: %w", err)
 	}

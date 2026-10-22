@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -226,7 +227,7 @@ func TestAdmissionRequiresPositiveSealForEmptyProjection(t *testing.T) {
 }
 
 func TestSelectedReadinessRequiresCompleteConstruction(t *testing.T) {
-	for _, change := range []string{"exact", "imported_state", "missing_config", "malformed_config", "foreign_route_config", "unknown_config_control", "missing_stage", "missing_entry_clock", "unknown_mode", "wrong_mode", "missing_flow_template", "wrong_flow_template", "missing_receipt", "wrong_parent", "wrong_instance_key", "foreign_run", "foreign_entity"} {
+	for _, change := range []string{"exact", "imported_state", "missing_config", "malformed_config", "foreign_route_config", "unknown_config_control", "missing_stage", "absent_stage", "missing_entry_clock", "unknown_mode", "wrong_mode", "missing_flow_template", "wrong_flow_template", "missing_receipt", "wrong_parent", "wrong_instance_key", "foreign_run", "foreign_entity"} {
 		t.Run(change, func(t *testing.T) {
 			req := templateAdmissionRequest(t)
 			entity := &req.Plan.Entities[0]
@@ -243,7 +244,9 @@ func TestSelectedReadinessRequiresCompleteConstruction(t *testing.T) {
 			case "unknown_config_control":
 				metadata.FlowConfig = append([]byte(`{"unknown_runtime_control":true,`), metadata.FlowConfig[1:]...)
 			case "missing_stage":
-				entity.CurrentState = ""
+				entity.CurrentState = mutationlog.PresentLifecycleState("")
+			case "absent_stage":
+				entity.CurrentState = nil
 			case "missing_entry_clock":
 				entity.EnteredStateAt = nil
 			case "unknown_mode":
@@ -409,7 +412,7 @@ func templateAdmissionRequest(t *testing.T) AdmissionRequest {
 	metadata := selectedAgentConstructionMetadata(t, effective.Source(), runID, constructed, "item", entered)
 	eventIDs := []string{uuid.NewString(), uuid.NewString()}
 	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{EventID: eventIDs[1], Revision: 7}, Entities: []runfork.RunForkEntityState{{
-		EntityID: entityID, CurrentState: initial.ID(), EnteredStateAt: &entered, MaterializationMetadata: metadata,
+		EntityID: entityID, CurrentState: mutationlog.PresentLifecycleState(initial.ID()), EnteredStateAt: &entered, MaterializationMetadata: metadata,
 	}}}
 	plan = plan.WithHistoricalEvents(7, eventIDs)
 	target, err := events.NewExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer/item", EntityID: entityID})

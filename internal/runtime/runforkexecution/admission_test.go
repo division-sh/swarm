@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -552,8 +553,7 @@ func TestSourceArtifactSelectedContractSourceLoaderPreservesImportedPackGenerati
 		record: record,
 	}
 	loader := SourceArtifactSelectedContractSourceLoader{
-		RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-		PlatformPackBases: baseGenerations, Store: artifactStore,
+		RepoRoot: repoRoot, PlatformPackBases: baseGenerations, Store: artifactStore,
 	}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 		SourceRunID: sourceRunID,
@@ -581,17 +581,32 @@ func TestSourceArtifactSelectedContractSourceLoaderUsesRunningPlatformVersionFor
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
 	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
-	record := persistedSourceArtifactForTest(t, bundle)
+	root := t.TempDir()
+	for _, entry := range bundle.SourceArtifact.Entries() {
+		body := string(entry.Bytes())
+		if entry.Label() == "manifest.yaml" {
+			body = "name: test-selected-contract-fork-execution\nversion: 1.0.0\nplatform_version: '>=99.0.0'\n"
+		}
+		writeSelectedContractFixtureFile(t, filepath.Join(root, filepath.FromSlash(entry.Label())), body)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := persistedSourceArtifactForAdmittedTest(t, artifact)
+	version, err := platform.PlatformVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
 	artifactStore := &fakeSourceArtifactSelectedContractSourceStore{
 		record: record,
 	}
 	loader := SourceArtifactSelectedContractSourceLoader{
-		RepoRoot:         repoRoot,
-		PlatformSpecPath: writeRunForkExecutionPlatformSpecVersion(t, repoRoot, "0.8.0"),
-		Store:            artifactStore,
+		RepoRoot: repoRoot,
+		Store:    artifactStore,
 	}
 
-	_, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
+	_, err = loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 		BundleHash: record.BundleHash,
 		Selection: runfork.RunForkContractSelection{
 			Mode:       runfork.RunForkContractSelectionModeBundleHash,
@@ -603,11 +618,28 @@ func TestSourceArtifactSelectedContractSourceLoaderUsesRunningPlatformVersionFor
 	}
 	for _, want := range []string{
 		runbundle.CodeBundleDataIntegrityError,
-		`platform_version range ">=0.7.0 <0.8.0" does not include running platform "0.8.0"`,
+		`platform_version range ">=99.0.0" does not include running platform "` + version + `"`,
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("LoadRunForkSelectedContractSourceForRequest error = %v, want substring %q", err, want)
 		}
+	}
+}
+
+func TestRetainedSourceCompilerExplicitSpecRemainsTestSeam(t *testing.T) {
+	repo := runForkExecutionRepoRoot(t)
+	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
+	record := persistedSourceArtifactForTest(t, bundle)
+	artifact, err := record.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact,
+		writeRunForkExecutionPlatformSpecVersion(t, repo, "0.8.0"), runtimecontracts.WorkflowContractLoadOptions{
+			AdmitPackInventory: packadmission.AdmitInventory,
+		})
+	if err == nil || !strings.Contains(err.Error(), `platform_version range ">=0.7.0 <0.8.0" does not include running platform "0.8.0"`) {
+		t.Fatalf("compiler alternate-spec compatibility error = %v", err)
 	}
 }
 

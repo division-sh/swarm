@@ -25,6 +25,8 @@ func TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles(t *testing
 				t.Fatalf("ResolveActiveBackend: %v", err)
 			}
 			resolver := testProviderCredentialResolver(t, key, "stored-"+key)
+			observation := &snapshotOnlyProviderStore{Store: resolver.Store, t: t}
+			resolver.Store = observation
 			credential, err := resolver.Resolve(context.Background(), profile)
 			if err != nil {
 				t.Fatalf("Resolve: %v", err)
@@ -38,8 +40,31 @@ func TestProviderCredentialResolver_StoreWinsOverEnvForActiveProfiles(t *testing
 			if !credential.EnvPresent || !credential.EnvShadowed {
 				t.Fatalf("credential env diagnostics = present:%v shadowed:%v, want true/true", credential.EnvPresent, credential.EnvShadowed)
 			}
+			fact := credential.SourceFact()
+			if fact.Key != key || !strings.HasPrefix(fact.Reference, "file:") || strings.Contains(fact.Reference, "stored-") {
+				t.Fatalf("provider source projection lost file custody: %+v", fact)
+			}
+			if observation.calls != 1 {
+				t.Fatalf("provider value and source used %d native observations, want 1", observation.calls)
+			}
 		})
 	}
+}
+
+type snapshotOnlyProviderStore struct {
+	runtimecredentials.Store
+	t     *testing.T
+	calls int
+}
+
+func (s *snapshotOnlyProviderStore) Get(context.Context, string) (string, bool, error) {
+	s.t.Fatal("provider value and source bypass the same atomic observation")
+	return "", false, nil
+}
+
+func (s *snapshotOnlyProviderStore) Snapshot(ctx context.Context, key string) (runtimecredentials.AtomicSnapshot, error) {
+	s.calls++
+	return s.Store.(runtimecredentials.Snapshotter).Snapshot(ctx, key)
 }
 
 func TestProviderCredentialResolverMissingPortIsUnavailableNotMissingSecret(t *testing.T) {

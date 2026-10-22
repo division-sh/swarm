@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -311,7 +310,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		return
 	}
 	root := runForkExecutionRepoRoot(t)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: filepath.Join(root, "tests/tier1-primitives/test-emits-multiple"), PlatformSpecPath: contracts.DefaultPlatformSpecFile(root)}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: filepath.Join(root, "tests/tier1-primitives/test-emits-multiple")}
 	cut := os.Getenv("SWARM_SELECTED_CRASH_CUT")
 	timerCut := strings.HasPrefix(cut, "retained_timer_")
 	joinCut := strings.HasPrefix(cut, "retained_join_")

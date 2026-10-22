@@ -105,6 +105,7 @@ type WorkflowTimerLifecycle struct {
 	scheduler    *Scheduler
 	publication  EnginePublicationPlanner
 	dispatcher   runtimeengine.PostCommitDispatcher
+	entryEvents  workflowStageEntryEventReader
 	posture      executionposture.Posture
 	recoveryCtx  context.Context
 	cancel       context.CancelFunc
@@ -137,6 +138,7 @@ func newWorkflowTimerLifecycle(store *workflowInstanceStore, source semanticview
 		wakeupCallbackTimeout: workflowTimerWakeupCallbackTimeout,
 	}
 	lifecycle.publication, _ = bus.(EnginePublicationPlanner)
+	lifecycle.entryEvents, _ = bus.(workflowStageEntryEventReader)
 	if provider, ok := bus.(interface {
 		EngineDispatcher() runtimeengine.PostCommitDispatcher
 	}); ok {

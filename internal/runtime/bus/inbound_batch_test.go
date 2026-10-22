@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -103,6 +105,31 @@ func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBef
 }
 
 func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthorizationIntoMutation(t *testing.T) {
+	t.Run("immutable_root_key_refusal_boundary", func(t *testing.T) {
+		conflict := &rootConstructorKeyConflict{key: "private-key-name"}
+		cleanup := errors.New("independent publication cleanup")
+		for _, cell := range []struct {
+			name string
+			err  error
+			want bool
+		}{
+			{"exact", conflict, true},
+			{"wrapped", fmt.Errorf("internal prefix: %w", conflict), true},
+			{"same_refusal_join", errors.Join(conflict, fmt.Errorf("wrapped: %w", conflict)), true},
+			{"cleanup_last", errors.Join(conflict, cleanup), false},
+			{"cleanup_first", errors.Join(cleanup, conflict), false},
+			{"nested_cleanup", errors.Join(fmt.Errorf("wrapped: %w", errors.Join(conflict, cleanup)), conflict), false},
+			{"lookalike_text", errors.New(conflict.Error()), false},
+			{"missing", nil, false},
+			{"typed_nil", (*rootConstructorKeyConflict)(nil), false},
+		} {
+			t.Run(cell.name, func(t *testing.T) {
+				if got := IsRootConstructorKeyConflict(cell.err); got != cell.want {
+					t.Fatalf("root constructor refusal classification=%t, want %t", got, cell.want)
+				}
+			})
+		}
+	})
 	source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
 	store := newTargetRouteMemoryStore()
 	bus, err := newScopedTestEventBus(store, EventBusOptions{
@@ -118,6 +145,126 @@ func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthori
 	}
 	if got := len(plan.CommitCommands()); got != 2 {
 		t.Fatalf("CommitCommands = %d, want 2", got)
+	}
+	for _, command := range plan.CommitCommands() {
+		if err := command.ValidateInbound(plan.Admission()); err != nil {
+			t.Fatalf("sealed inbound command: %v", err)
+		}
+		if err := command.Validate(); err == nil {
+			t.Fatal("fresh inbound command entered generic publication")
+		}
+		unsealed := command
+		unsealed.Commit.inbound = nil
+		if err := unsealed.Validate(); err == nil {
+			t.Fatal("removing the seal admitted fresh provider input")
+		}
+
+		original := command.Commit.Event.Event()
+		for _, change := range []string{"payload", "source", "run", "type", "bare receiver"} {
+			t.Run(string(original.Type())+"/post-admission/"+change, func(t *testing.T) {
+				payload, routing, runID, eventType, envelope := original.Payload(), original.RoutingSource(), original.RunID(), original.Type(), original.NormalizedEnvelope()
+				switch change {
+				case "payload":
+					payload = []byte(`{"changed":true}`)
+				case "source":
+					routing, err = events.NewExternalIngressRoutingSource("foreign", events.RoutingSourceAuthorityProviderAdmissionPlan)
+					if err != nil {
+						t.Fatal(err)
+					}
+				case "run":
+					runID = eventtest.UUID("foreign-post-admission-run")
+				case "type":
+					eventType = "changed.output"
+				case "bare receiver":
+					envelope = events.EventEnvelope{EntityID: eventtest.UUID("bare-post-admission-receiver")}
+				}
+				changed := command
+				changed.Commit.Event, err = events.AdmitForPersistence(eventtest.ExistingRunRootIngressWithRoutingSource(
+					original.ID(), eventType, "inbound-gateway", "", payload, 0, runID, envelope, routing, original.CreatedAt(),
+				), events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := changed.ValidateInbound(plan.Admission()); err == nil {
+					t.Fatal("changed post-admission publication was accepted")
+				}
+			})
+		}
+		replay := eventtest.ReplayForProducerWithRoutingSource(
+			eventtest.UUID("provider-replay-"+original.ID()), original.Type(), original.Producer(),
+			original.TaskID(), original.Payload(), original.ChainDepth(),
+			events.EventLineage{RunID: original.RunID(), ParentEventID: original.ID(), ExecutionMode: original.ExecutionMode()},
+			original.Envelope(), original.RoutingSource(), original.CreatedAt().Add(time.Second),
+		)
+		admitted, err := events.AdmitForPersistence(replay, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		replayCommand := unsealed
+		replayCommand.Commit.Event = admitted
+		replayCommand.Activations = nil
+		replayCommand.StageFeedback = nil
+		if err := replayCommand.Validate(); err != nil {
+			t.Fatalf("recorded replay keeps provider provenance without becoming fresh input: %v", err)
+		}
+		replayCommand.Commit.inbound = command.Commit.inbound
+		if err := replayCommand.Validate(); err == nil {
+			t.Fatal("replay repurposed an original inbound output seal")
+		}
+	}
+	if err := bus.AbandonInboundDeliveryPlan(context.Background(), plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, cleanupFails := range []bool{false, true} {
+		name := "submitted_validation_only"
+		if cleanupFails {
+			name = "submitted_validation_with_independent_release_failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
+			owner := newTerminalReleasePipelineOwner()
+			cleanup := errors.New("independent publication claim release")
+			if cleanupFails {
+				owner.releaseError[batch.Events[0].Event.ID()] = func(int) error { return cleanup }
+			}
+			violation := &eventschema.Violation{Path: "$.data.user_id", Detail: "required field"}
+			bus, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{
+				ContractBundle: source, ProviderOutputVerifier: catalog, PipelineObligations: owner,
+				Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+				PayloadAdmitter: func(_ context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
+					if event.ID() == batch.Events[1].Event.ID() {
+						return events.PayloadAdmission{}, violation
+					}
+					return eventtest.PayloadAdmission(event, flow, string(event.Type()))
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = bus.PrepareInboundDeliveryBatch(context.Background(), batch)
+			var typed *eventschema.Violation
+			if !errors.Is(err, ErrPayloadValidation) || !errors.As(err, &typed) || typed != violation || owner.releaseCalls[batch.Events[0].Event.ID()] != 1 {
+				t.Fatalf("validation/actual preparation release not reached: error=%v releases=%v", err, owner.releaseCalls)
+			}
+			path, permanent := SubmittedInboundValidationPath(err)
+			if permanent == cleanupFails || permanent && path != violation.Path || cleanupFails && !errors.Is(err, cleanup) {
+				t.Fatalf("input/independent release disposition: path=%q permanent=%t error=%v", path, permanent, err)
+			}
+			if !cleanupFails {
+				for _, joined := range []error{
+					errors.Join(err, cleanup), errors.Join(cleanup, err), errors.Join(fmt.Errorf("outer: %w", errors.Join(cleanup, err)), err),
+					errors.Join(err, ErrPayloadValidation), errors.Join(ErrPayloadValidation, err),
+					errors.Join(err, &eventschema.Violation{Path: "$.generated", Detail: "independent internal validation"}),
+				} {
+					if _, permanent := SubmittedInboundValidationPath(joined); permanent {
+						t.Fatalf("nested/ordered independent release was hidden: %v", joined)
+					}
+				}
+				if _, permanent := SubmittedInboundValidationPath(fmt.Errorf("validation wrapper: %w", errors.Join(err, err))); !permanent {
+					t.Fatal("validation-only nested wrapping lost its input provenance")
+				}
+			}
+		})
 	}
 }
 

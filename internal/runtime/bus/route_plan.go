@@ -602,42 +602,6 @@ func (p RoutePlan) ValidatePersistentDeliveries() error {
 	return nil
 }
 
-func (p RoutePlan) HasPersistentDeliveries() bool {
-	return len(p.PersistedRecipientIDs()) > 0 || len(p.DeliveryRoutes()) > 0
-}
-
-func (p RoutePlan) InternalDeliveryRoutes() []events.DeliveryRoute {
-	p = p.Normalized()
-	internalRecipients := p.InternalRecipientIDs()
-	if len(internalRecipients) == 0 {
-		return nil
-	}
-	known := p.DeliveryRoutes()
-	out := make([]events.DeliveryRoute, 0, len(known))
-	internalSet := make(map[string]struct{}, len(internalRecipients))
-	for _, recipient := range internalRecipients {
-		internalSet[strings.TrimSpace(recipient)] = struct{}{}
-	}
-	if _, carrier := internalSet[workflowRuntimeInternalCarrierID]; carrier {
-		for _, route := range known {
-			if route.Recipient.IsNode() && route.Recipient.LocalID() != workflowRuntimeInternalCarrierID {
-				out = append(out, route)
-			}
-		}
-		return events.NormalizeDeliveryRoutes(out)
-	}
-	for _, route := range known {
-		if _, ok := internalSet[route.Recipient.ID()]; !ok {
-			continue
-		}
-		out = append(out, route)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return events.NormalizeDeliveryRoutes(out)
-}
-
 func (p RoutePlan) InternalRecipientIDs() []string {
 	p = p.Normalized()
 	internal := make([]string, 0, len(p.LiveRecipients))

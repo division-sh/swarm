@@ -168,6 +168,11 @@ func TestTransactionExitFaultDisposition(t *testing.T) {
 				if scenario == "success" && err != nil {
 					t.Fatal(err)
 				}
+				before, clean := CleanCancellationBeforeCommit(err)
+				wantClean := scenario == "cancel_callback" || scenario == "cancel_before_acquire"
+				if clean != wantClean || (clean && before != (scenario == "cancel_before_acquire")) {
+					t.Fatalf("native cancellation fact before=%t clean=%t scenario=%s err=%v", before, clean, scenario, err)
+				}
 				want := 0
 				if scenario == "success" || scenario == "committed_error" || scenario == "cancel_committed_error" {
 					want = 1
@@ -286,6 +291,10 @@ func TestTransactionCancellationCuts(t *testing.T) {
 				}
 				if !errors.Is(err, context.Canceled) {
 					t.Fatalf("lost cancellation: %v", err)
+				}
+				before, clean := CleanCancellationBeforeCommit(err)
+				if clean != (!read && cut != "callback_error") || (clean && before != (cut == "pool_wait")) {
+					t.Fatalf("cancellation at %s: before=%t clean=%t read=%t err=%v", cut, before, clean, read, err)
 				}
 				if entered != (cut == "callback_error" || cut == "before_commit") {
 					t.Fatalf("unexpected callback entry at %s", cut)
