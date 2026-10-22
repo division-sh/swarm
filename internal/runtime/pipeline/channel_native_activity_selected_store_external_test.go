@@ -52,6 +52,7 @@ func TestNativeActivityWithoutOriginalActivationJournalsRefusalBothStores(t *tes
 				t.Fatal(err)
 			}
 			selected = reopen()
+			ctx = requireActivityReplayRun(t, selected, source, runID)
 			bus = newActivityJournalProofBus(t, selected, source)
 			pc = newGateRecoveryCoordinator(bus, selected, options)
 			if err := pipeline.ExecuteActivityIntentForTest(ctx, pc, nil, intent); err != nil {

@@ -55,7 +55,6 @@ type SessionAuthority struct {
 	pendingLeaseRetirements []*AdvisoryLockLease
 	testBeginTx             func(context.Context, *sql.Conn) (*sql.Tx, error)
 	testEndTxError          func() error
-	testInterruptionIssued  atomic.Bool
 }
 
 type sessionDiscard struct {
