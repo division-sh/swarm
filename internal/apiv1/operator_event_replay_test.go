@@ -518,7 +518,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			}
 			authority := admitOperatorReplayReceiverGeneration(t, ctx, f.store, runID)
 			bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
-				ContractBundle: semanticview.Wrap(runStartTestBundle("scan.requested")), DeliveryAuthority: authority,
+				ContractBundle: semanticview.Wrap(runStartTestBundle(t, "scan.requested")), DeliveryAuthority: authority,
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -717,7 +717,7 @@ func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *tes
 				t.Fatalf("operator reader error = %v, want ErrEventNotFound", err)
 			}
 			bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
-				ContractBundle: semanticview.Wrap(runStartTestBundle("scan.requested")),
+				ContractBundle: semanticview.Wrap(runStartTestBundle(t, "scan.requested")),
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -815,7 +815,7 @@ func completeOperatorReplayTestHandler(t *testing.T, owner completeOperatorRepla
 
 func completeOperatorReplaySource(t *testing.T) semanticview.Source {
 	t.Helper()
-	bundle := runStartTestBundle("scan.requested")
+	bundle := runStartTestBundle(t, "scan.requested")
 	producer := runtimecontracts.FlowContractView{
 		Path: "source-flow", Paths: runtimecontracts.FlowContractPaths{FlowPath: "source-flow"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
@@ -1512,7 +1512,7 @@ func TestOperatorEventReplayQueuesWhenDispatchGated(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			pg := storetest.StartPostgresRuntimeStore(t)
 			opts := tc.opts
-			opts.ContractBundle = semanticview.Wrap(runStartTestBundle("scan.requested"))
+			opts.ContractBundle = semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 			bus, err := newScopedAPITestEventBus(t, pg, opts)
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1559,7 +1559,7 @@ func (blockedRunDispatchGate) QueueableRunDispatchParked(context.Context, string
 func eventReplayTestBus(t *testing.T, pg *store.PostgresStore) *runtimebus.EventBus {
 	t.Helper()
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
-		ContractBundle: semanticview.Wrap(runStartTestBundle("scan.requested")),
+		ContractBundle: semanticview.Wrap(runStartTestBundle(t, "scan.requested")),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -1607,7 +1607,7 @@ func eventReplayTestHandlerWithPosture(t *testing.T, pg *store.PostgresStore, bu
 			AgentConversations: pg,
 			Idempotency:        pg,
 			Events:             bus,
-			Source:             semanticview.Wrap(runStartTestBundle("scan.requested")),
+			Source:             semanticview.Wrap(runStartTestBundle(t, "scan.requested")),
 			Bundle: runtimecontracts.BundleIdentity{
 				WorkflowName:    "review",
 				WorkflowVersion: "1.0.0",

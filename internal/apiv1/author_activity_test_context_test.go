@@ -122,6 +122,15 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	return newScopedAPITestEventBusWithDataCatalog(t, eventStore, nil, options...)
 }
 
+func admittedAPITestBusContext(t testing.TB, ctx context.Context, bus *runtimebus.EventBus) context.Context {
+	t.Helper()
+	admitted, err := bus.AdmitSourceArtifactFact(ctx)
+	if err != nil {
+		t.Fatalf("admit API fixture source context: %v", err)
+	}
+	return admitted
+}
+
 func retainAPITestCompiledRoot(ctx context.Context, selected runtimebus.EventStore, bundle *runtimecontracts.WorkflowContractBundle) error {
 	rooted, err := bundle.RootedSource()
 	if err != nil {

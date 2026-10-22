@@ -26,7 +26,7 @@ func TestPublicOperationSemanticCarrierParity(t *testing.T) {
 			} else {
 				selected = storetest.StartPostgresRuntimeStore(t)
 			}
-			bundle := runStartTestBundle("scan.requested")
+			bundle := runStartTestBundle(t, "scan.requested")
 			event := bundle.Events["scan.requested"]
 			event.Payload.Properties["value"] = runtimecontracts.EventFieldSpec{Type: "json"}
 			event.Payload.Properties["nested"] = runtimecontracts.EventFieldSpec{Type: "json"}

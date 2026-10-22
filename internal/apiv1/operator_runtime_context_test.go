@@ -38,11 +38,12 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 var (
-	runtimeContextTestSourceArtifactB = mustAPITestSourceArtifactNamed("runtime-context-b")
+	runtimeContextTestSourceArtifactB = runStartTestArtifact("triage.requested")
 	runtimeContextTestSourceArtifactC = mustAPITestSourceArtifactNamed("runtime-context-c")
 	runtimeContextTestBundleHashB     = runtimeContextTestSourceArtifactB.BundleHash()
 	runtimeContextTestBundleHashC     = runtimeContextTestSourceArtifactC.BundleHash()
@@ -115,7 +116,7 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
 	runID := uuid.NewString()
-	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB)
+	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, fixture.admissionB)
 	seedActiveAPIV1RuntimeBusAgentForRun(
 		t,
 		testAuthorActivityContextForSource(context.Background(), runtimeContextTestSourceFact(runtimeContextTestBundleHashB)),
@@ -188,7 +189,11 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunUnavailableSourceStates(
 					BundleHash: tt.bundleHash,
 				})
 			} else {
-				seedRuntimeContextRunBundle(t, fixture.pg, runID, tt.bundleHash)
+				rooted, _ := sourceartifactfixture.Rooted(t, "unloaded-context", runtimeContextTestSourceArtifactC)
+				if _, err := fixture.pg.EnsureRootedSource(context.Background(), rooted); err != nil {
+					t.Fatal(err)
+				}
+				seedRuntimeContextRunBundle(t, fixture.pg, runID, tt.bundleHash, rooted.Admission())
 			}
 			keyName := strings.ReplaceAll(tt.name, " ", "-")
 
@@ -239,7 +244,7 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunRequestedHashMismatch(t 
 			fixture := newOperatorRuntimeContextFixture(t)
 			handler := fixture.handler(t)
 			runID := uuid.NewString()
-			seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB)
+			seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, fixture.admissionB)
 
 			resp := rpcCall(t, handler, tt.body(runID))
 			assertRuntimeContextBundleError(t, resp, tt.method, BundleMismatchCode, "")
@@ -302,7 +307,7 @@ func TestOperatorRuntimeContextManagerRoutesRunControlByStoredBundle(t *testing.
 
 	for _, method := range []string{"run.pause", "run.continue", "run.stop"} {
 		runID := uuid.NewString()
-		seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB)
+		seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, fixture.admissionB)
 		resp := rpcCall(t, handler, runControlBody(method, runID, "idem-context-"+method))
 		if resp.Error != nil {
 			t.Fatalf("%s error = %#v", method, resp.Error)
@@ -322,8 +327,8 @@ func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *test
 	selectedAgent := &directiveIntegrationAgent{id: "agent-1"}
 	baseRunID := uuid.NewString()
 	runID := uuid.NewString()
-	seedRuntimeContextRunBundle(t, fixture.pg, baseRunID, runStartTestBundleHash)
-	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB)
+	seedRuntimeContextRunBundle(t, fixture.pg, baseRunID, runStartTestBundleHash, fixture.admissionA)
+	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, fixture.admissionB)
 	baseManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busA, fixture.ownerA, baseAgent, runtimeContextTestSourceFact(runStartTestBundleHash), baseRunID)
 	selectedManager := runtimeContextTestAgentManager(t, fixture.pg, fixture.busB, fixture.ownerB, selectedAgent, runtimeContextTestSourceFact(runtimeContextTestBundleHashB), runID)
 	manager := runtimeContextManagerWithRuntimes(t, fixture,
@@ -497,7 +502,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 	}
 
 	runID := uuid.NewString()
-	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB)
+	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB, fixture.admissionB)
 	existing := rpcCall(t, handler, eventPublishBodyWithoutBundle(runID, "triage.requested", `{"topic":"existing-deactivated"}`, "", "idem-existing-deactivated-context"))
 	if existing.Error == nil {
 		t.Fatal("event.publish deactivated run context error = nil")
@@ -654,35 +659,46 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 }
 
 type operatorRuntimeContextFixture struct {
-	db      *sql.DB
-	pg      *store.PostgresStore
-	sourceA semanticview.Source
-	sourceB semanticview.Source
-	busA    *runtimebus.EventBus
-	busB    *runtimebus.EventBus
-	ownerA  *worklifetime.RuntimeOccurrence
-	ownerB  *worklifetime.RuntimeOccurrence
-	probeA  *runtimeContextEventProbe
-	probeB  *runtimeContextEventProbe
-	manager *swruntime.RuntimeContextManager
+	db         *sql.DB
+	pg         *store.PostgresStore
+	sourceA    semanticview.Source
+	sourceB    semanticview.Source
+	admissionA sourceartifact.RootAdmission
+	admissionB sourceartifact.RootAdmission
+	busA       *runtimebus.EventBus
+	busB       *runtimebus.EventBus
+	ownerA     *worklifetime.RuntimeOccurrence
+	ownerB     *worklifetime.RuntimeOccurrence
+	probeA     *runtimeContextEventProbe
+	probeB     *runtimeContextEventProbe
+	manager    *swruntime.RuntimeContextManager
 }
 
 func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixture {
 	t.Helper()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	seedRuntimeContextSourceArtifact(t, pg, authorActivityTestSourceArtifact)
+	seedRuntimeContextSourceArtifact(t, pg, runStartTestArtifact("scan.requested"))
 	seedRuntimeContextSourceArtifact(t, pg, runtimeContextTestSourceArtifactB)
 
-	sourceA := semanticview.Wrap(runStartTestBundle("scan.requested"))
-	sourceBBundle := runStartTestBundle("triage.requested")
-	sourceBBundle.SourceArtifact = runtimeContextTestSourceArtifactB
+	sourceABundle := runStartTestBundle(t, "scan.requested")
+	sourceA := semanticview.Wrap(sourceABundle)
+	sourceBBundle := runStartTestBundle(t, "triage.requested")
 	sourceB := semanticview.Wrap(sourceBBundle)
+	rootedA, err := sourceABundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootedB, err := sourceBBundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	busA, ownerA, probeA := newRuntimeContextTestBus(t, pg, sourceA, runStartTestBundleHash)
 	busB, ownerB, probeB := newRuntimeContextTestBus(t, pg, sourceB, runtimeContextTestBundleHashB)
 	manager, err := swruntime.NewRuntimeContextManager(pg,
 		swruntime.BundleContext{
 			SourceArtifactFact: runtimeContextTestSourceFact(runStartTestBundleHash),
+			RootAdmission:      rootedA.Admission(),
 			BundleIdentity:     runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 			Source:             sourceA,
 			Runtime:            runtimeContextTestRuntime(&swruntime.Runtime{Bus: busA}, runStartTestBundleHash),
@@ -690,6 +706,7 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 		},
 		swruntime.BundleContext{
 			SourceArtifactFact: runtimeContextTestSourceFact(runtimeContextTestBundleHashB),
+			RootAdmission:      rootedB.Admission(),
 			BundleIdentity:     runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 			Source:             sourceB,
 			Runtime:            runtimeContextTestRuntime(&swruntime.Runtime{Bus: busB}, runtimeContextTestBundleHashB),
@@ -700,17 +717,19 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 	return operatorRuntimeContextFixture{
-		db:      db,
-		pg:      pg,
-		sourceA: sourceA,
-		sourceB: sourceB,
-		busA:    busA,
-		busB:    busB,
-		ownerA:  ownerA,
-		ownerB:  ownerB,
-		probeA:  probeA,
-		probeB:  probeB,
-		manager: manager,
+		db:         db,
+		pg:         pg,
+		sourceA:    sourceA,
+		sourceB:    sourceB,
+		admissionA: rootedA.Admission(),
+		admissionB: rootedB.Admission(),
+		busA:       busA,
+		busB:       busB,
+		ownerA:     ownerA,
+		ownerB:     ownerB,
+		probeA:     probeA,
+		probeB:     probeB,
+		manager:    manager,
 	}
 }
 
@@ -746,11 +765,13 @@ func (f operatorRuntimeContextFixture) handler(t *testing.T) *Handler {
 	})
 }
 
-func seedRuntimeContextRunBundle(t *testing.T, pg *store.PostgresStore, runID, bundleHash string) {
+func seedRuntimeContextRunBundle(t *testing.T, pg *store.PostgresStore, runID, bundleHash string, admission sourceartifact.RootAdmission) {
 	t.Helper()
-	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
-		RunID:      runID,
-		BundleHash: strings.TrimSpace(bundleHash),
+	ctx := runtimecorrelation.WithRootAdmission(testAuthorActivityContextForSource(context.Background(), runtimeContextTestSourceFact(bundleHash)), admission)
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+		RunID:         runID,
+		BundleHash:    strings.TrimSpace(bundleHash),
+		RootAdmission: admission,
 	})
 }
 
@@ -761,6 +782,7 @@ func runtimeContextManagerWithRuntimes(t *testing.T, fixture operatorRuntimeCont
 	manager, err := swruntime.NewRuntimeContextManager(fixture.pg,
 		swruntime.BundleContext{
 			SourceArtifactFact: runtimeContextTestSourceFact(runStartTestBundleHash),
+			RootAdmission:      fixture.admissionA,
 			BundleIdentity:     runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 			Source:             fixture.sourceA,
 			Runtime:            runtimeA,
@@ -768,6 +790,7 @@ func runtimeContextManagerWithRuntimes(t *testing.T, fixture operatorRuntimeCont
 		},
 		swruntime.BundleContext{
 			SourceArtifactFact: runtimeContextTestSourceFact(runtimeContextTestBundleHashB),
+			RootAdmission:      fixture.admissionB,
 			BundleIdentity:     runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 			Source:             fixture.sourceB,
 			Runtime:            runtimeB,

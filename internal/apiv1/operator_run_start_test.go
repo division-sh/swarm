@@ -16,16 +16,17 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimerunstart "github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-var runStartTestBundleHash = authorActivityTestSourceArtifact.BundleHash()
+var runStartTestBundleHash = runStartTestArtifact("scan.requested").BundleHash()
 
 func TestFeedOnlyRunStartRejectsIncompleteAdmissionBeforeSelectedStore(t *testing.T) {
 	data := map[string]any{"imports": []any{}, "pins": []any{map[string]any{
@@ -71,7 +72,7 @@ func runStartTestBundleHashForSource(source semanticview.Source) string {
 func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -141,7 +142,7 @@ func TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency(t *testing
 func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -162,7 +163,7 @@ func TestOperatorRunStartHandlersUseActiveEphemeralBundleScopeForCreateNewWork(t
 
 func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActiveRuntimeFact(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 	handler := runStartTestHandler(t, pg, missingRunStartBundleScopePublisher{}, source)
 	runID := uuid.NewString()
 
@@ -184,7 +185,7 @@ func TestOperatorRunStartHandlersRequireBundleScopeForCreateNewWorkWithoutActive
 func TestOperatorRunStartHandlersAcceptCanonicalBundleHashForCreateNewWork(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -227,7 +228,7 @@ func TestOperatorRunStartRejectsFlowScopedEventName(t *testing.T) {
 func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("non-routable bundle hash", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -247,7 +248,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("existing run bundle mismatch", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -276,7 +277,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("invalid canonical bundle hash", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -296,7 +297,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("invalid canonical bundle hash", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -316,7 +317,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("retired bundle input is rejected", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -331,7 +332,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("undeclared event", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -363,7 +364,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 	t.Run("declared but unroutable root input", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
 		const eventName = "scan.unroutable_requested"
-		bundle := runStartTestBundle(eventName)
+		bundle := runStartTestBundle(t, eventName)
 		bundle.Nodes, bundle.FlowTree.Root.Nodes = nil, nil
 		bundle.FlowTree.Root.Children[0].Events = map[string]runtimecontracts.EventCatalogEntry{"scan.other_requested": {}}
 		bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
@@ -403,7 +404,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("payload validation", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
 			ContractBundle:     source,
 			SourceArtifactFact: runStartTestSourceArtifactFact(),
@@ -432,7 +433,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("invalid caller run id", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -462,7 +463,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("payload entity id is not envelope authority", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 		if err != nil {
 			t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -505,7 +506,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("publish failure", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		handler := runStartTestHandler(t, pg, admittedRunStartFailurePublisher{failingRunStartPublisher{err: errors.New("simulated run.start publish failure")}}, source)
 		runID := uuid.NewString()
 
@@ -526,7 +527,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 
 	t.Run("post-validation invalid event type is a publish contradiction", func(t *testing.T) {
 		pg := storetest.StartPostgresRuntimeStore(t)
-		source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+		source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 		handler := runStartTestHandler(t, pg, admittedRunStartFailurePublisher{failingRunStartPublisher{err: runtimebus.ErrInvalidEventType}}, source)
 		runID := uuid.NewString()
 
@@ -586,7 +587,7 @@ func TestInvalidEventTypeMappersSeparateRootInputFromCatalogFailures(t *testing.
 
 func TestOperatorRunStartHandlersLeaveSplitControlMethodsUnavailable(t *testing.T) {
 	pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
-	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
+	source := semanticview.Wrap(runStartTestBundle(t, "scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -885,64 +886,56 @@ func countAllRunRows(t *testing.T, selected any) int {
 	return count
 }
 
-func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBundle {
-	const closeEvent = "fixture.close.requested"
-	flow := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
-		Path:  "discovery",
-		Schema: runtimecontracts.FlowSchemaDocument{
-			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready"}, {ID: "done", Final: true}}},
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
-			},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scan-orchestrator": {
-				ExecutionType: "system_node",
-				SubscribesTo:  []string{eventName},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: {AdvancesTo: "done"}},
-			},
-		},
+func runStartTestArtifact(eventName string) *sourceartifact.AdmittedSourceArtifact {
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml": []byte(fmt.Sprintf(`stages:
+  ready: {}
+  done: {final: true}
+pins:
+  inputs: [%s, fixture.close.requested]
+  outputs: [%s]
+connect:
+  - event: %s
+    from: .
+    to: discovery
+`, eventName, eventName, eventName)),
+		"events.yaml": []byte(fmt.Sprintf("%s:\n  topic: text\nfixture.close.requested:\n", eventName)),
+		"nodes.yaml": []byte(`run-owner:
+  execution_type: system_node
+  subscribes_to: [fixture.close.requested]
+  event_handlers:
+    fixture.close.requested:
+      advances_to: done
+`),
+		"discovery/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"discovery/schema.yaml": []byte(fmt.Sprintf(`stages:
+  ready: {}
+  done: {final: true}
+pins:
+  inputs: [%s]
+`, eventName)),
+		"discovery/nodes.yaml": []byte(fmt.Sprintf(`scan-orchestrator:
+  execution_type: system_node
+  subscribes_to: [%s]
+  event_handlers:
+    %s:
+      advances_to: done
+`, eventName, eventName)),
+	})
+	if err != nil {
+		panic(err)
 	}
-	root := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Path:  ".",
-		Schema: runtimecontracts.FlowSchemaDocument{
-			StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "ready"}, {ID: "done", Final: true}}},
-			Pins: runtimecontracts.FlowPins{
-				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}, {Event: closeEvent}}},
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: eventName}}},
-			},
-			Connect: []runtimecontracts.FlowConnect{{Event: eventName, From: ".", To: "discovery", SourceFile: "schema.yaml", SourceLine: 1}},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			eventName:  {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"topic": {Type: "text"}}}},
-			closeEvent: {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"run-owner": {ExecutionType: "system_node", SubscribesTo: []string{closeEvent}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{closeEvent: {AdvancesTo: "done"}}},
-		},
-		Children: []runtimecontracts.FlowContractView{flow},
-	}
-	root.Children[0].Parent = &root
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		SourceArtifact: authorActivityTestSourceArtifact,
-		Semantics:      runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
-		Events:         root.Events,
-		Nodes:          root.Nodes,
-		RootSchema:     &root.Schema,
-		FlowSchemas:    map[string]runtimecontracts.FlowSchemaDocument{"discovery": flow.Schema},
-		FlowSources: map[string]runtimecontracts.FlowSource{
-			".":         {FlowPath: ".", Schema: "schema.yaml", Events: "events.yaml"},
-			"discovery": {FlowPath: "discovery", Schema: "discovery/schema.yaml", Nodes: "discovery/nodes.yaml"},
-		},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{".": &root, "discovery": &root.Children[0]},
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(fmt.Sprintf("compile run-start test bundle: %v", err))
+	return artifact
+}
+
+func runStartTestBundle(t *testing.T, eventName string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	rooted, _ := sourceartifactfixture.Rooted(t, "review", runStartTestArtifact(eventName))
+	repo := repoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatalf("compile run-start test bundle: %v", err)
 	}
 	return bundle
 }

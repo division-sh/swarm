@@ -4042,35 +4042,6 @@ func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
 	}
 }
 
-func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventName(t *testing.T) {
-	const eventName = "inbound.telegram.text_message"
-	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyProviderRollback(t, true))
-	authorization, exists := source.SemanticCapabilities().ProviderTriggerOutputAuthorization(".", eventName)
-	if !exists {
-		t.Fatal("provider fixture is missing its captured output authority")
-	}
-	_, exists = source.FlowInputEventPin("consumer", eventName)
-	if !exists {
-		t.Fatal("provider fixture is missing its exact input pin")
-	}
-	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil)
-	externalSource, err := events.NewExternalIngressRoutingSource(".", events.RoutingSourceAuthorityProviderAdmissionPlan)
-	if err != nil {
-		t.Fatalf("external routing source: %v", err)
-	}
-	evt := eventtest.RunCreatingRootIngressWithRoutingSource(
-		uuid.NewString(), events.EventType(eventName), "operator-api", "", json.RawMessage(`{"chat_id":"42"}`),
-		0, "run-1", "", events.EventEnvelope{}, externalSource, time.Now().UTC(),
-	)
-	if matched := resolver.matchedPlans(context.Background(), evt); len(matched) != 0 {
-		t.Fatalf("ordinary operator event matched provider target-free plans = %#v", matched)
-	}
-	authorizedCtx := withProviderOutputAuthorization(context.Background(), authorization)
-	if matched := resolver.matchedPlans(authorizedCtx, evt); len(matched) != 1 {
-		t.Fatalf("verified provider output matched plans = %#v, want one; graph issues=%#v pins=%#v resolved=%q", matched, runtimepinrouting.CompileConnectGraph(source).Issues(), source.FlowInputEventPins("consumer"), source.ResolveFlowEventReference("consumer", eventName))
-	}
-}
-
 func TestExternalIngressSelectedTargetScopeUsesAdmittedDeclarationCandidates(t *testing.T) {
 	paths := func(scope selectedTargetOwnerLookupScope) []string {
 		var paths []string

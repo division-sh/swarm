@@ -1075,7 +1075,7 @@ func (s *mutatingRuntimeProbeState) options(t *testing.T) testOperatorCapabiliti
 	t.Helper()
 	bundle := testSetupValidationBundle(t)
 	if s.method == "run.start" || s.method == "event.publish" {
-		bundle = runStartTestBundle("scan.requested")
+		bundle = runStartTestBundle(t, "scan.requested")
 	}
 	if s.finiteService {
 		bundle.RootSchema.StageDeclarations.Entries[1].Final = false
