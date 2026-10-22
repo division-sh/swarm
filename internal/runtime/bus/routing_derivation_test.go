@@ -137,6 +137,8 @@ func loadNestedPhysicalAgentRouteSource(t *testing.T) semanticview.Source {
 	return semanticview.Wrap(loadEventBusTempBundle(t, map[string]string{
 		"manifest.yaml":                      "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":                        "stages: []\n",
+		"parent/manifest.yaml":               "version: 1.0.0\nplatform_version: '*'\n",
+		"parent/child/manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
 		"parent/child/support/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"parent/child/support/schema.yaml":   "stages:\n  active: {}\npins:\n  inputs: [work.requested]\n",
 		"parent/child/support/events.yaml":   "work.requested:\n",
@@ -251,7 +253,6 @@ shared:
 
 		eventName := strings.ReplaceAll(name, "-", "_")
 		write(filepath.Join(dir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-		write(filepath.Join(dir, "schema.yaml"), "# fixture: "+name+"\n")
 		write(filepath.Join(dir, "events.yaml"), eventName+".start:\n")
 		write(filepath.Join(dir, "nodes.yaml"), `
 shared:
