@@ -590,6 +590,7 @@ func doctorTargetCommandClasses() []doctorTargetCommandClass {
 				"swarm agent replay",
 				"swarm agent directive",
 				"swarm mailbox defer",
+				"swarm mailbox decide",
 				"swarm run fork",
 				"swarm forkchat new",
 				"swarm forkchat resume",

@@ -1204,7 +1204,7 @@ steps:
 					if !reflect.DeepEqual(req.Params, want) {
 						t.Fatalf("%s params = %#v, want %#v", action, req.Params, want)
 					}
-					writeJSONRPCResult(t, w, req.ID, map[string]any{"ok": true, "card_id": "human-card-1", "status": "pending", "change_id": 1})
+					writeJSONRPCResult(t, w, req.ID, map[string]any{"ok": true, "card_id": "human-card-1", "status": "pending", "change_id": 1, "idempotency_replayed": false})
 				default:
 					t.Fatalf("unexpected method = %s", req.Method)
 				}

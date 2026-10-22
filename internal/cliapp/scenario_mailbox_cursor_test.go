@@ -111,7 +111,7 @@ func TestScenarioMailboxConsumesCompleteMatchSet(t *testing.T) {
 								_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": rpc.ID, "error": map[string]any{"code": -32602, "message": "stale content"}})
 								return
 							}
-							writeJSONRPCResult(t, w, rpc.ID, map[string]any{"ok": true, "card_id": "selected", "change_id": 1})
+							writeJSONRPCResult(t, w, rpc.ID, map[string]any{"ok": true, "card_id": "selected", "change_id": 1, "idempotency_replayed": false})
 						default:
 							t.Errorf("unexpected method %s", rpc.Method)
 						}

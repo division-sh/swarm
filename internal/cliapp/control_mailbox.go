@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/spf13/cobra"
@@ -28,6 +29,7 @@ type mailboxDetailProjection struct {
 	Notice       *mailboxNoticeDetail `json:"notice,omitempty"`
 	DecisionCard *mailboxDecisionCard `json:"decision_card,omitempty"`
 	Effect       *mailboxEffectState  `json:"effect,omitempty"`
+	rawCard      json.RawMessage
 }
 
 type mailboxItem struct {
@@ -257,9 +259,21 @@ func runMailboxViewCommand(ctx context.Context, out, errOut io.Writer, opts root
 
 func readMailboxDetail(ctx context.Context, client *cliAPIClient, id string) (mailboxDetailProjection, error) {
 	var result mailboxDetailProjection
-	if err := client.call(ctx, "mailbox.get", map[string]any{"mailbox_id": id}, &result); err != nil {
+	var raw json.RawMessage
+	if err := client.call(ctx, "mailbox.get", map[string]any{"mailbox_id": id}, &raw); err != nil {
 		return result, err
 	}
+	if err := canonicaljson.DecodeInto(raw, &result); err != nil {
+		return result, err
+	}
+	// Map projections erase whole-valued numeric kinds; retain the admitted card.
+	var recorded struct {
+		Card json.RawMessage `json:"decision_card"`
+	}
+	if err := json.Unmarshal(raw, &recorded); err != nil {
+		return result, err
+	}
+	result.rawCard = recorded.Card
 	if err := validateMailboxDetailResult(result); err != nil {
 		return result, err
 	}
@@ -289,7 +303,7 @@ func runMailboxDecideCommand(ctx context.Context, out, errOut io.Writer, opts ma
 		return returnCLIValidationError(errOut, fmt.Errorf("%s is a notice, not a decision card", cardID))
 	}
 	if card.Status == "decided" {
-		return renderMailboxDecideResult(out, errOut, opts.output, card, fmt.Sprintf("already decided: %s at %s", card.Verdict, card.DecidedAt), cardID)
+		return renderMailboxDecideResult(out, errOut, opts.output, detail.rawCard, fmt.Sprintf("already decided: %s at %s", card.Verdict, card.DecidedAt), cardID)
 	}
 	fields, err := mailboxDecisionInputs(*card, option, opts.inputs)
 	if err != nil {
@@ -308,7 +322,7 @@ func runMailboxDecideCommand(ctx context.Context, out, errOut io.Writer, opts ma
 		case "MAILBOX_ALREADY_DECIDED":
 			current, readErr := readMailboxDetail(ctx, client, cardID)
 			if readErr == nil && current.DecisionCard != nil && current.DecisionCard.Status == "decided" {
-				return renderMailboxDecideResult(out, errOut, opts.output, current.DecisionCard, fmt.Sprintf("already decided: %s at %s", current.DecisionCard.Verdict, current.DecisionCard.DecidedAt), cardID)
+				return renderMailboxDecideResult(out, errOut, opts.output, current.rawCard, fmt.Sprintf("already decided: %s at %s", current.DecisionCard.Verdict, current.DecisionCard.DecidedAt), cardID)
 			}
 		}
 	}
@@ -332,7 +346,7 @@ func callMailboxDecide(ctx context.Context, client *cliAPIClient, cardID, conten
 	if err := client.call(ctx, "mailbox.decide", params, &result); err != nil {
 		return result, err
 	}
-	if !result.OK || result.CardID != cardID || result.ChangeID <= 0 {
+	if !result.OK || result.CardID != cardID || result.ChangeID <= 0 || result.IdempotencyReplayed == nil {
 		return result, fmt.Errorf("malformed mailbox.decide result")
 	}
 	return result, nil

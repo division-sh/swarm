@@ -94,37 +94,54 @@ func TestMailboxDecideCommitsDeclaredOption(t *testing.T) {
 
 // Invariant: an already committed card reports its recorded verdict and time,
 // without authorizing another decision, including a concurrent winning decision.
+// Recorded JSON must retain integer versus whole-valued numeric evidence.
 func TestMailboxDecideAlreadyDecided(t *testing.T) {
 	for _, raced := range []bool{false, true} {
-		t.Run(fmt.Sprint(raced), func(t *testing.T) {
-			setCLIAPITestToken(t, "test-token")
-			reads, writes := 0, 0
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var req jsonRPCRequest
-				_ = json.NewDecoder(r.Body).Decode(&req)
-				if req.Method == "mailbox.decide" {
-					writes++
-					fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%q,"error":{"code":-32000,"message":"decided","data":{"code":"MAILBOX_ALREADY_DECIDED"}}}`, req.ID)
-					return
+		for _, asJSON := range []bool{false, true} {
+			t.Run(fmt.Sprintf("raced=%v/json=%v", raced, asJSON), func(t *testing.T) {
+				setCLIAPITestToken(t, "test-token")
+				reads, writes := 0, 0
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					var req jsonRPCRequest
+					_ = json.NewDecoder(r.Body).Decode(&req)
+					if req.Method == "mailbox.decide" {
+						writes++
+						fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%q,"error":{"code":-32000,"message":"decided","data":{"code":"MAILBOX_ALREADY_DECIDED"}}}`, req.ID)
+						return
+					}
+					reads++
+					card := mailboxCardDetailResult("card-1")
+					if !raced || reads > 1 {
+						card["status"], card["verdict"], card["decided_at"] = "decided", "approve", "2026-10-22T12:00:00Z"
+					}
+					evidence := json.RawMessage(`{"integer":1,"whole_numeric":1.0,"nested":[1,1.0],"fraction":1.25}`)
+					card["snapshot"].(map[string]any)["context"] = evidence
+					card["fields"] = evidence
+					writeJSONRPCResult(t, w, req.ID, map[string]any{"kind": "decision_card", "decision_card": card})
+				}))
+				defer server.Close()
+				var out, errOut bytes.Buffer
+				args := []string{"mailbox", "decide", "card-1", "approve"}
+				if asJSON {
+					args = append(args, "--json")
 				}
-				reads++
-				card := mailboxCardDetailResult("card-1")
-				if !raced || reads > 1 {
-					card["status"], card["verdict"], card["decided_at"] = "decided", "approve", "2026-10-22T12:00:00Z"
+				code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &out, &errOut, testRootCommandOptions(server))
+				wantWrites := 0
+				if raced {
+					wantWrites = 1
 				}
-				writeJSONRPCResult(t, w, req.ID, map[string]any{"kind": "decision_card", "decision_card": card})
-			}))
-			defer server.Close()
-			var out, errOut bytes.Buffer
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"mailbox", "decide", "card-1", "approve"}, &out, &errOut, testRootCommandOptions(server))
-			wantWrites := 0
-			if raced {
-				wantWrites = 1
-			}
-			if code != 0 || writes != wantWrites || out.String() != "already decided: approve at 2026-10-22T12:00:00Z\n" {
-				t.Fatalf("code=%d writes=%d out=%q stderr=%s", code, writes, out.String(), errOut.String())
-			}
-		})
+				if code != 0 || writes != wantWrites {
+					t.Fatalf("code=%d writes=%d out=%q stderr=%s", code, writes, out.String(), errOut.String())
+				}
+				if asJSON {
+					if !json.Valid(out.Bytes()) || strings.Count(out.String(), `"whole_numeric":1.0`) != 2 || strings.Count(out.String(), `"integer":1`) != 2 || strings.Count(out.String(), `[1,1.0]`) != 2 || strings.Count(out.String(), `"fraction":1.25`) != 2 {
+						t.Fatalf("recorded snapshot/fields numeric kinds changed: %s", out.String())
+					}
+				} else if out.String() != "already decided: approve at 2026-10-22T12:00:00Z\n" {
+					t.Fatalf("unexpected recorded decision: %s", out.String())
+				}
+			})
+		}
 	}
 }
 
@@ -144,6 +161,8 @@ func TestMailboxDecideRefusesStaleAndInvalidInput(t *testing.T) {
 		{"invalid", "approve", []string{"count=no"}, "count", 0},
 		{"missing", "reject", nil, "reason", 0},
 		{"malformed", "approve", []string{"count"}, "key=value", 0},
+		{"missing_replay", "approve", nil, "malformed mailbox.decide result", 1},
+		{"null_replay", "approve", nil, "malformed mailbox.decide result", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
@@ -153,6 +172,14 @@ func TestMailboxDecideRefusesStaleAndInvalidInput(t *testing.T) {
 				_ = json.NewDecoder(r.Body).Decode(&req)
 				if req.Method == "mailbox.decide" {
 					writes++
+					if tc.name == "missing_replay" || tc.name == "null_replay" {
+						result := map[string]any{"ok": true, "card_id": "card-1", "status": "decided", "change_id": 1}
+						if tc.name == "null_replay" {
+							result["idempotency_replayed"] = nil
+						}
+						writeJSONRPCResult(t, w, req.ID, result)
+						return
+					}
 					fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%q,"error":{"code":-32000,"message":"stale","data":{"code":"MAILBOX_STALE_CARD"}}}`, req.ID)
 					return
 				}

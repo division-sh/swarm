@@ -278,6 +278,15 @@ func TestDoctorTargetJSONPreservesScriptableOutput(t *testing.T) {
 	if len(report.CommandClasses) == 0 || len(report.SplitSiblings) == 0 {
 		t.Fatalf("report missing command classes or split siblings: %#v", report)
 	}
+	var decideIsMutating bool
+	for _, class := range report.CommandClasses {
+		if class.Name == "mutating_runtime_state" && stringSliceContains(class.Commands, "swarm mailbox decide") {
+			decideIsMutating = true
+		}
+	}
+	if !decideIsMutating {
+		t.Fatalf("doctor target omitted mailbox decide's mutating classification: %#v", report.CommandClasses)
+	}
 }
 
 func TestDoctorTargetJSONReportsMissingAuthWithoutAborting(t *testing.T) {
