@@ -150,6 +150,11 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 				request := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
+				claimed := make(chan effects.Authority, 1)
+				if phase == "reconstructed" {
+					owner.ports.runtimeExecution = selectedActivitySuccessorClaim{owner.ports.runtimeExecution, claimed}
+					request.Owner = owner
+				}
 				var forkRun string
 				if phase != "executing" && phase != "executing_retirement" {
 					result, err := ExecuteSelectedContractRunFork(ctx, request)
@@ -188,6 +193,20 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 					if phase == "reconstructed" {
 						if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 							t.Fatal(err)
+						}
+						// This reach reconstructs a cleanly closed, nonterminal execution,
+						// not an interrupted running predecessor with uncertain work.
+						select {
+						case authority := <-claimed:
+							if err := owner.ports.runtimeExecution.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
+								t.Fatal(err)
+							}
+						default:
+							t.Fatal("control-only predecessor lacks its actual execution claim")
+						}
+						closed, err := owner.ports.runtimeExecution.CloseRunForkSelectedContractRuntimeExecution(ctx, result.ForkLocalRuntimeContainer.RuntimeExecutionID)
+						if err != nil || !closed {
+							t.Fatalf("close the joined control-only predecessor: acknowledged=%v err=%v", closed, err)
 						}
 						if err := capability.Release(context.Background()); err != nil {
 							t.Fatal(err)

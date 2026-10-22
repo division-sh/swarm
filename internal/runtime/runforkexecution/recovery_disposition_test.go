@@ -101,7 +101,7 @@ func TestSelectedRecoveryUsesPersistedCutIdentityNotDiagnosticMetadata(t *testin
 	result, entry := selectedRecoveryEvidence()
 	point := runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 3, EventID: uuid.NewString()}
 	entry.Binding.ForkPoint, entry.Binding.ForkEventID = point, point.EventID
-	point.Input, point.EventName, point.ProducedBy, point.Timestamp = "event selector", "item.received", "historical producer", time.Unix(1700002200, 0).UTC()
+	point.Input, point.EventName, point.ProducedBy, point.Timestamp = point.EventID, "item.received", "historical producer", time.Unix(1700002200, 0).UTC()
 	result.Operation.Request.ResolvedPoint, result.Operation.Request.ForkEventID = &point, point.EventID
 	request, hash, err := result.Operation.Request.Canonical()
 	if err != nil {
@@ -198,6 +198,7 @@ func TestSelectedRecoveryAllTypedCutsAndActivatedAcknowledgment(t *testing.T) {
 			point := runfork.RunForkPoint{Kind: kind, Revision: 4}
 			if kind == runfork.RunForkPointEvent {
 				point.EventID = uuid.NewString()
+				point.Input = point.EventID
 			}
 			entry.Binding.ForkPoint, entry.Binding.ForkEventID = point, point.EventID
 			recovered.Operation.Request.ResolvedPoint = &point

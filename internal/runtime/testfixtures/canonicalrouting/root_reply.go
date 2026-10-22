@@ -124,7 +124,7 @@ func CopyHandedOffMixedReplyRequest(t testing.TB) string {
 	root := CopyMixedReplyRequest(t)
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"request.started:\n  account_id: text\n  request_id: text\n",
-		"request.started:\n  account_id: text\n  request_id: text\n  items: '[text]'\n")
+		"request.started:\n  account_id: text\n  request_id: text\n  items: [text]\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `    request.started:
       emit:
         event: provider.requested

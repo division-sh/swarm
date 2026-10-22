@@ -62,7 +62,7 @@ func CopySelectedOperationPinnedResource(t testing.TB) string {
 	t.Helper()
 	root := CopySelectedDeploymentResource(t, "root", false)
 	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "schema.yaml"),
-		"  inputs: [fixture.close.requested]\n", "  inputs: [fixture.seed.requested, fixture.close.requested]\n")
+		"  inputs: [root.ready, fixture.close.requested]\n", "  inputs: [root.ready, fixture.seed.requested, fixture.close.requested]\n")
 	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "events.yaml"),
 		DeploymentFixtureCloseDeclaration, DeploymentFixtureCloseDeclaration+"fixture.seed.requested:\n")
 	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "nodes.yaml"),

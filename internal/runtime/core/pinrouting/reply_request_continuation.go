@@ -70,7 +70,7 @@ func (c ReplyRequestContinuation) claimTarget(acquired events.RouteIdentity) (ev
 	}
 	for _, target := range targets {
 		if materializedRouteAcceptsTarget(target, acquired) {
-			return target, nil
+			return acquired, nil
 		}
 	}
 	return events.RouteIdentity{}, fmt.Errorf("request claim contradicts its compiled fixed target")

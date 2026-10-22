@@ -12,10 +12,10 @@ func CopyPublishedFanOutReply(t testing.TB) string {
 	root := CopyRootReplyBoundary(t, true, true)
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"request.started:\n  account_id: text\n  request_id: text\n",
-		"request.started:\n  account_id: text\n  request_id: text\n  items: '[text]'\n")
+		"request.started:\n  account_id: text\n  request_id: text\n  items: [text]\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"provider.requested:\n  account_id: text\n  request_id: text\n",
-		"provider.requested:\n  account_id: text\n  request_id: text\n  items: '[text]'\n")
+		"provider.requested:\n  account_id: text\n  request_id: text\n  items: [text]\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"),
 		"          account_id: payload.account_id\n          request_id: payload.request_id\n",
 		"          account_id: payload.account_id\n          request_id: payload.request_id\n          items: payload.items\n")
@@ -108,7 +108,7 @@ pins:
 	writeClosedVariantFile(t, root, "provider/events.yaml", `t.requested:
   account_id: text
   request_id: text
-  items: '[text]'
+  items: [text]
 provider.replied:
   account_id: text
   request_id: text

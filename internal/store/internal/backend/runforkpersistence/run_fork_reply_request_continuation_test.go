@@ -64,7 +64,7 @@ func requestContinuationPartitionFixture(t *testing.T) (*runForkRevisionSnapshot
 }
 
 func TestIssue642RequestContinuationPreservesCompleteCompiledClaim(t *testing.T) {
-	for _, fault := range []string{"exact", "missing_route", "extra_route", "duplicate_route", "claim", "plan", "target", "projection", "context", "handler", "source_claim", "settled_source"} {
+	for _, fault := range []string{"exact", "missing_route", "extra_route", "duplicate_route", "claim", "plan", "target", "entity", "source_entity", "projection", "context", "handler", "source_claim", "settled_source"} {
 		t.Run(fault, func(t *testing.T) {
 			snapshot, event, child, reply, route := requestContinuationPartitionFixture(t)
 			routes := []events.DeliveryRoute{route}
@@ -79,6 +79,14 @@ func TestIssue642RequestContinuationPreservesCompleteCompiledClaim(t *testing.T)
 				reply.Plan = pinrouting.ConnectRoutePlan{}
 			case "target":
 				routes[0].Target = events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "provider", FlowInstance: "foreign"})
+			case "entity":
+				target := routes[0].Target.Route()
+				target.EntityID = uuid.NewString()
+				routes[0].Target = events.MustExistingEntityTarget(target)
+			case "source_entity":
+				target := snapshot.Deliveries[0].Snapshot.Route.Target.Route()
+				target.EntityID = uuid.NewString()
+				snapshot.Deliveries[0].Snapshot.Route.Target = events.MustExistingEntityTarget(target)
 			case "projection":
 				projection, err := events.NewDeliveryPayloadProjection(map[string]string{"x": "y"})
 				if err != nil {
@@ -105,6 +113,41 @@ func TestIssue642RequestContinuationPreservesCompleteCompiledClaim(t *testing.T)
 			}
 		})
 	}
+	t.Run("acquired_entity", func(t *testing.T) {
+		snapshot, _, _, reply, projected := requestContinuationPartitionFixture(t)
+		source := snapshot.Deliveries[0].Snapshot.Route
+		target := source.Target.Route()
+		target.EntityID = uuid.NewString()
+		source.Target = events.MustExistingEntityTarget(target)
+		node, _, found := source.ConnectClaim.NodeHandlerOwner()
+		if !found {
+			t.Fatal("missing captured handler")
+		}
+		claim, err := pinrouting.ConnectExecutionClaim(reply.Plan, pinrouting.ConnectDeliveryRoute{
+			Recipient: source.Recipient, Target: target, Context: source.Context,
+			Handler: pinrouting.MustConnectReceiverHandler(node), PayloadProjection: source.PayloadProjection,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		source.ConnectClaim = claim
+		observed, err := reply.ClaimForDelivery(source)
+		if err != nil || !observed.Equal(claim) {
+			t.Fatalf("acquired entity changed the complete captured claim: %v", err)
+		}
+		if err := bindRunForkRequestRecipientClaim(source, &projected, []pinrouting.ReplyRequestContinuation{reply}); err != nil {
+			t.Fatal(err)
+		}
+		target.EntityID = uuid.NewString()
+		source.Target = events.MustExistingEntityTarget(target)
+		before := projected
+		if err := bindRunForkRequestRecipientClaim(source, &projected, []pinrouting.ReplyRequestContinuation{reply}); err == nil {
+			t.Fatal("foreign acquired entity retained another entity's claim")
+		}
+		if !reflect.DeepEqual(before, projected) {
+			t.Fatal("foreign claim repaired the projected route")
+		}
+	})
 }
 
 func TestIssue642RequestContinuationRejectsSubstitutedCapturedRows(t *testing.T) {
