@@ -105,7 +105,7 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 					retireRuntime()
 				}
 				var bound *worklifetime.SelectedForkOccurrence
-				var interruptedSnapshot map[string][]string
+				var interruptedSnapshot map[string]storetest.SelectedForkStorageTableSnapshot
 				failure := errors.New("injected activation failure")
 				var discards int
 				activation := selectedOperationActivationProbe{SelectedContractForkLifecycle: owner.ports.fork, discards: &discards, before: func(ctx context.Context) {
@@ -115,7 +115,11 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 						t.Fatal("activation lost selected process ownership")
 					}
 					if point == "process_shutdown" {
-						interruptedSnapshot = selectedPreparationDatabaseSnapshot(t, db, backend)
+						var err error
+						interruptedSnapshot, err = storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+						if err != nil {
+							t.Fatal(err)
+						}
 						process.Retire()
 						<-ctx.Done()
 					}
@@ -154,9 +158,17 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 					if err := db.QueryRow(`SELECT s.status, f.status, e.state FROM runs s JOIN runs f ON f.forked_from_run_id=s.run_id JOIN run_fork_selected_contract_runtime_executions e ON e.fork_run_id=f.run_id WHERE s.run_id=$1`, sourceID).Scan(&sourceState, &forkState, &executionState); err != nil || sourceState != "running" || forkState != wantFork || executionState != wantExecution {
 						t.Fatalf("failure disposition source/fork/execution = %s/%s/%s: %v", sourceState, forkState, executionState, err)
 					}
+					var afterRetirement map[string]storetest.SelectedForkStorageTableSnapshot
+					if point == "process_shutdown" {
+						var err error
+						afterRetirement, err = storetest.ReadSelectedForkApplicationStorageSnapshot(context.WithoutCancel(ctx), selected)
+						if err != nil {
+							t.Fatal(err)
+						}
+					}
 					for _, table := range []string{"events", "event_deliveries", "entity_state", "entity_mutations"} {
 						if point == "process_shutdown" {
-							if after := selectedPreparationDatabaseSnapshot(t, db, backend); !reflect.DeepEqual(interruptedSnapshot[table], after[table]) {
+							if !reflect.DeepEqual(interruptedSnapshot[table], afterRetirement[table]) {
 								t.Fatalf("retired process dispatched or discarded retained %s", table)
 							}
 							continue
