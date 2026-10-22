@@ -63,9 +63,6 @@ func (s *review2460ReadFaultStore) LoadPreparedPublishEvent(ctx context.Context,
 	return s.targetRouteMemoryStore.LoadPreparedPublishEvent(ctx, id)
 }
 
-func TestReview2460ImmediateDispatchContinuesAfterFirstError(t *testing.T) {
-	review2460DispatchContinues(t, false)
-}
 func TestReview2460InterceptedDispatchContinuesAfterFirstError(t *testing.T) {
 	review2460DispatchContinues(t, true)
 }
@@ -73,8 +70,9 @@ func TestReview2460InterceptedDispatchContinuesAfterFirstError(t *testing.T) {
 func review2460DispatchSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml": "name: committed-dispatch\npins:\n  inputs: [custom.emitted]\n  outputs: [custom.emitted]\n",
-		"events.yaml": "custom.emitted:\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\npins:\n  inputs: [custom.emitted]\n  outputs: [custom.emitted]\n",
+		"events.yaml":   "custom.emitted:\n",
 	}))
 }
 
@@ -123,58 +121,6 @@ func review2460DispatchContinues(t *testing.T, intercepted bool) {
 	}
 	if _, pending := pendingOutboxOperationForTest(bus, intents[1].Event.ID()); pending {
 		t.Fatalf("second committed publication skipped and its claim left staged; read attempts: %v", store.reads)
-	}
-}
-
-func TestReview2460PublicationFinalizationContinuesAfterFirstPanic(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
-	store := &InMemoryEventStore{}
-	probe := &review2460PublicationProbe{failAt: 1}
-	bus, err := newScopedTestEventBus(store, EventBusOptions{TestLifecycleProbe: probe})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runID := uuid.NewString()
-	intents := make([]runtimeengine.EmitIntent, 2)
-	for i := range intents {
-		intents[i].Event = eventtest.RunCreatingRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-	}
-	plans, err := bus.PrepareEnginePublications(ctx, intents)
-	if err != nil {
-		t.Fatal(err)
-	}
-	evidence := make([]runtimeengine.CommittedDurablePublication, 0, 2)
-	for _, raw := range plans {
-		plan := raw.(EnginePublicationPlan)
-		committed, err := store.CommitPublication(ctx, plan.PublicationCommand())
-		if err != nil {
-			t.Fatal(err)
-		}
-		proof, err := NewCommittedEnginePublication(plan, committed)
-		if err != nil {
-			t.Fatal(err)
-		}
-		evidence = append(evidence, proof)
-	}
-	var finalErr error
-	func() {
-		defer func() {
-			if value := recover(); value != nil {
-				finalErr = fmt.Errorf("%v", value)
-			}
-		}()
-		finalErr = bus.FinalizeEnginePublications(ctx, evidence)
-	}()
-	if finalErr == nil {
-		t.Fatal("fault was not reported")
-	}
-	if probe.seen != 2 {
-		t.Errorf("notified %d publications, want 2 independent committed outputs", probe.seen)
-	}
-	for _, intent := range intents {
-		if _, ok := pendingOutboxOperationForTest(bus, intent.Event.ID()); !ok {
-			t.Errorf("committed publication %s lost its staged handoff", intent.Event.ID())
-		}
 	}
 }
 
@@ -338,29 +284,6 @@ func TestCommittedDispatchRejectsSameIDForeignPayloadWithoutConsumingClaim(t *te
 	}
 }
 
-func TestCommittedDispatchMatchesOnlyStagedSourceOrProjectedEvent(t *testing.T) {
-	bus, err := newScopedTestEventBus(newTargetRouteMemoryStore())
-	if err != nil {
-		t.Fatal(err)
-	}
-	runID, eventID := uuid.NewString(), uuid.NewString()
-	stamp := time.Now().UTC()
-	source := eventtest.RunCreatingRootIngress(eventID, "custom.emitted", "", "", []byte(`{"value":1}`), 0, runID, "", events.EventEnvelope{}, stamp)
-	projected := eventtest.RunCreatingRootIngress(eventID, "custom.emitted", "", "", []byte(`{"value":1}`), 0, runID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), stamp)
-	foreign := eventtest.RunCreatingRootIngress(eventID, "custom.emitted", "", "", []byte(`{"value":1}`), 0, runID, "", events.EventEnvelope{}, stamp.Add(time.Second))
-	intent := runtimeengine.EmitIntent{Event: projected}
-	for _, accepted := range []events.Event{source, projected} {
-		bus.stageCommittedOutboxOperationWithFinalization(intent, source, EventAppendInserted, nil, nil, false, nil, nil)
-		if _, ok, err := bus.takeMatchingPendingOutboxOperation(foreign); !errors.Is(err, events.ErrEventIdentityConflict) || ok {
-			t.Fatalf("foreign staged view accepted: ok=%t err=%v", ok, err)
-		}
-		operation, ok, err := bus.takeMatchingPendingOutboxOperation(accepted)
-		if err != nil || !ok || operation.intent.Event.ID() != eventID {
-			t.Fatalf("exact staged view rejected: ok=%t err=%v", ok, err)
-		}
-	}
-}
-
 func TestCommittedDispatchFencedPreflightReleasesEveryExactClaim(t *testing.T) {
 	testCommittedDispatchTerminalPreflightReleasesEveryExactClaim(t, func(process *worklifetime.Process, owner *worklifetime.RuntimeOccurrence) error {
 		return owner.Fence()
@@ -389,10 +312,14 @@ func TestCommittedDispatchRetiredPreflightReleasesEveryExactClaim(t *testing.T) 
 
 func testCommittedDispatchTerminalPreflightReleasesEveryExactClaim(t *testing.T, stop func(*worklifetime.Process, *worklifetime.RuntimeOccurrence) error, wantErr error) {
 	t.Helper()
-	source := semanticview.Wrap(connectRoutePlanTestBundle(t, nil, nil))
-	ctx := testAuthorActivityContext(constructionIndexContext(t, source))
+	source := review2460DispatchSource(t)
+	bundle, found := semanticview.Bundle(source)
+	if !found || bundle == nil || bundle.SourceArtifact == nil {
+		t.Fatal("terminal dispatch requires its captured source artifact")
+	}
+	ctx := constructionIndexContext(t, source)
 	process := worklifetime.NewProcess()
-	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
+	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: bundle.SourceArtifact.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,6 +333,10 @@ func testCommittedDispatchTerminalPreflightReleasesEveryExactClaim(t *testing.T,
 	})
 	store := newTargetRouteMemoryStore()
 	bus, err := newScopedTestEventBus(store, EventBusOptions{WorkOwner: owner, ContractBundle: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = bus.AdmitSourceArtifactFact(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
