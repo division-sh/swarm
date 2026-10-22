@@ -42,11 +42,12 @@ func TestRunForkProfileInheritanceRequiresExactEffectiveSourceBeforeMutation(t *
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000490, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	seedActivationReadySourceRun(t, ctx, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
 	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
@@ -452,6 +453,7 @@ func TestRunForkPlanner_FailsClosedWithoutSourceAtTEntitySnapshotMetadata(t *tes
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -509,6 +511,7 @@ func TestRunForkPlanner_FailsClosedWhenFieldEntityTypeHasNoSourceMetadataAuthori
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -576,12 +579,13 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000510, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	seedActivationReadySourceRun(t, ctx, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
 	selection := runfork.RunForkContractSelection{
@@ -651,12 +655,13 @@ func TestRunForkSelectedContractBinding_MaterializesDurableBundleHashBinding(t *
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000515, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	seedActivationReadySourceRun(t, ctx, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
 	targetArtifact := storeTestSourceArtifact("fork-selected-contract-binding")
@@ -704,6 +709,7 @@ func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidS
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	if _, err := pg.RequireRunForkSelectedContractBinding(ctx, uuid.NewString()); err == nil || !strings.Contains(err.Error(), "selected contract binding") {
 		t.Fatalf("RequireRunForkSelectedContractBinding error = %v, want missing binding failure", err)
@@ -713,7 +719,7 @@ func TestRunForkSelectedContractBinding_FailsClosedOnMissingDuplicateAndInvalidS
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000520, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	seedActivationReadySourceRun(t, ctx, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	invalidSelection := runfork.RunForkContractSelection{
 		Mode:       runfork.RunForkContractSelectionModeSelectedContracts,
@@ -866,12 +872,13 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000800, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	seedActivationReadySourceRun(t, ctx, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
@@ -1539,12 +1546,13 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 			_, db, _ := testutil.StartPostgres(t)
 			pg := newTestPostgresStore(t, db)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, pg)
 
 			sourceRunID := uuid.NewString()
 			entityID := uuid.NewString()
 			eventID := uuid.NewString()
 			at := time.Unix(1700000875, 0).UTC()
-			seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+			seedActivationReadySourceRun(t, ctx, db, sourceRunID, entityID, eventID, at)
 
 			sourceEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 			seedDeliveryStateFixture(t, ctx, pg, sourceEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("safe-agent")}, runtimedelivery.StateQueued, nil)
@@ -1630,12 +1638,13 @@ func TestRunForkActivation_IgnoresExcludedSourceSessionColumnChanges(t *testing.
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	sessionID := uuid.NewString()
 	at := time.Unix(1700000890, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	seedActivationReadySourceRun(t, ctx, db, sourceRunID, entityID, eventID, at)
 	seedRunForkSessionProjection(t, db, sourceRunID, "generic-session-agent", sessionID, "terminated", at)
 	selectedRevision := captureRunForkTestRevision(t, db, sourceRunID)
 
@@ -1665,13 +1674,14 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	afterEventID := uuid.NewString()
 	at := time.Unix(1700000900, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	seedActivationReadySourceRun(t, ctx, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
@@ -1700,7 +1710,7 @@ func TestRunForkActivation_FailsClosedForSourceAdvancedAndRepeat(t *testing.T) {
 	cleanSourceRunID := uuid.NewString()
 	cleanEntityID := uuid.NewString()
 	cleanEventID := uuid.NewString()
-	seedActivationReadySourceRun(t, db, cleanSourceRunID, cleanEntityID, cleanEventID, at.Add(time.Minute))
+	seedActivationReadySourceRun(t, ctx, db, cleanSourceRunID, cleanEntityID, cleanEventID, at.Add(time.Minute))
 	captureRunForkTestRevision(t, db, cleanSourceRunID)
 	cleanMaterialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: cleanSourceRunID, At: cleanEventID})
 	if err != nil {
@@ -1719,12 +1729,13 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLi
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700001000, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	seedActivationReadySourceRun(t, ctx, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
@@ -1744,7 +1755,7 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLi
 	orphanSourceRunID := uuid.NewString()
 	orphanEntityID := uuid.NewString()
 	orphanEventID := uuid.NewString()
-	seedActivationReadySourceRun(t, db, orphanSourceRunID, orphanEntityID, orphanEventID, at.Add(time.Minute))
+	seedActivationReadySourceRun(t, ctx, db, orphanSourceRunID, orphanEntityID, orphanEventID, at.Add(time.Minute))
 	orphanRevision := captureRunForkTestRevision(t, db, orphanSourceRunID)
 	orphanRunID := uuid.NewString()
 	orphanOrigin, err := storerunlifecycle.ForkMaterializationRunOrigin(orphanSourceRunID, storerunlifecycle.ForkOriginPointEvent, orphanRevision, orphanEventID)
@@ -1776,13 +1787,14 @@ func TestRunForkActivation_FailsClosedForForkReplayStateWithTaxonomy(t *testing.
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	forkEventID := uuid.NewString()
 	at := time.Unix(1700001050, 0).UTC()
-	seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+	seedActivationReadySourceRun(t, ctx, db, sourceRunID, entityID, eventID, at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err != nil {
@@ -1896,12 +1908,13 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			_, db, _ := testutil.StartPostgres(t)
 			pg := newTestPostgresStore(t, db)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, pg)
 
 			sourceRunID := uuid.NewString()
 			entityID := uuid.NewString()
 			eventID := uuid.NewString()
 			at := time.Unix(1700001060, 0).UTC()
-			seedActivationReadySourceRun(t, db, sourceRunID, entityID, eventID, at)
+			seedActivationReadySourceRun(t, ctx, db, sourceRunID, entityID, eventID, at)
 			captureRunForkTestRevision(t, db, sourceRunID)
 			materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 			if err != nil {
@@ -2044,9 +2057,8 @@ func (n *sqlNullTime) Scan(value any) error {
 	return nil
 }
 
-func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
+func seedActivationReadySourceRun(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
 	commitPreparedWorkflowAggregateFixture(t, ctx, selected, sourceRunID, activationReadySourceInstance(entityID, at), at)
