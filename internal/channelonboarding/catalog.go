@@ -50,6 +50,7 @@ func (t CandidateTarget) ValidateDeclaration() error {
 }
 
 type Candidate struct {
+	DeploymentRegistration bool                              `json:"deployment_registration,omitempty"`
 	SourceLabel            string                            `json:"source_label,omitempty"`
 	Provider               string                            `json:"provider"`
 	Interface              operatorchannel.InterfaceIdentity `json:"interface"`
@@ -67,6 +68,13 @@ type Candidate struct {
 
 func (c Candidate) MarshalJSON() ([]byte, error) {
 	type readback Candidate
+	if c.DeploymentRegistration {
+		return json.Marshal(struct {
+			readback
+			Coordinate *ChannelRuntimeContextCoordinate `json:"coordinate,omitempty"`
+			Target     *CandidateTarget                 `json:"target,omitempty"`
+		}{readback: readback(c)})
+	}
 	return json.Marshal(struct {
 		readback
 		Capabilities packs.ChannelCapabilityVector `json:"capabilities"`
@@ -94,6 +102,9 @@ func (c Candidate) Validate() error {
 	if err := c.ValidateDeclaration(); err != nil {
 		return err
 	}
+	if c.DeploymentRegistration {
+		return nil
+	}
 	if err := c.Coordinate.Validate(); err != nil {
 		return err
 	}
@@ -101,6 +112,18 @@ func (c Candidate) Validate() error {
 }
 
 func (c Candidate) ValidateDeclaration() error {
+	if c.DeploymentRegistration {
+		if err := c.Interface.Validate(); err != nil {
+			return err
+		}
+		if c.Target != (CandidateTarget{}) || c.Ceremony != CeremonyAccountLink ||
+			c.SigningCredentialRole != "" || c.ConfirmationOperation != "" ||
+			c.Provider == "whatsapp" && (c.Posture != ActivationSessionConnection || c.ProviderCredentialRole != "") ||
+			c.Provider == "telegram" && (c.Posture != ActivationWebhookRegistration || c.ProviderCredentialRole == "") {
+			return fmt.Errorf("%w: deployment registration has runtime activation or invalid provider inputs", ErrInvalidRequest)
+		}
+		return validateRegistrationScope(true, c.Provider, "", c.Coordinate, c.Target.Selector)
+	}
 	if strings.TrimSpace(c.Provider) == "" || strings.TrimSpace(c.ConfirmationOperation) == "" {
 		return fmt.Errorf("channel onboarding candidate requires provider and confirmation operation")
 	}

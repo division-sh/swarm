@@ -13,7 +13,7 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 )
 
-func startCLIChannelOnboarding(ctx context.Context, client *cliAPIClient, params map[string]any, opts channelConnectOptions, errOut io.Writer) (channelOnboardingResult, error) {
+func startCLIChannelOnboarding(ctx context.Context, client channelControlClient, params map[string]any, opts channelConnectOptions, errOut io.Writer) (channelOnboardingResult, error) {
 	if opts.credentialStdin {
 		return startCLIChannelWithReplacement(ctx, client, params, opts, errOut)
 	}
@@ -48,7 +48,7 @@ func startCLIChannelOnboarding(ctx context.Context, client *cliAPIClient, params
 	return admitted, nil
 }
 
-func selectedChannelCredentialReadback(ctx context.Context, client *cliAPIClient, rpc *jsonRPCError) (channelOnboardingResult, error) {
+func selectedChannelCredentialReadback(ctx context.Context, client channelControlClient, rpc *jsonRPCError) (channelOnboardingResult, error) {
 	var data struct {
 		Details struct {
 			OperationID string `json:"operation_id"`
@@ -90,6 +90,19 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 	pending, err := result.SessionPairingPending(time.Now())
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
+	}
+	if result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded {
+		if _, err := result.ProviderCredentialRequirement(); err != nil || result.Operation.ValidateSessionAccount() != nil ||
+			result.Operation.AccountReference == "" || !result.Operation.AccountConfirmed || result.Operation.ActivationRevision != 0 || result.Readiness != nil {
+			return returnCLIValidationError(errOut, errors.New("deployment registration readback is incomplete or carries runtime authority"))
+		}
+		return renderCLIOutput(out, errOut, output, result, func(w io.Writer) {
+			verb := "Registered"
+			if result.Operation.ExpectedAccount != "" {
+				verb = "Reverified"
+			}
+			fmt.Fprintf(w, "%s %s account %s.\n", verb, result.Operation.Provider, result.Operation.AccountReference)
+		}, func() ([]string, error) { return []string{result.Operation.AccountReference}, nil })
 	}
 	if !pending && (result.Operation.Phase != channelonboarding.PhaseSucceeded || result.Readiness == nil || !result.Readiness.Ready) {
 		if result.Operation.Provider == "whatsapp" {
@@ -166,6 +179,11 @@ func writeWhatsAppConnection(out io.Writer, connection *channelonboarding.Sessio
 }
 
 func validateCLIChannelProgress(result channelOnboardingResult) (bool, error) {
+	if result.Operation.DeploymentRegistration {
+		if _, err := result.ProviderCredentialRequirement(); err != nil || result.Operation.ValidateSessionAccount() != nil {
+			return false, errors.New("channel registration readback changed its deployment or account")
+		}
+	}
 	pending, err := result.SessionPairingPending(time.Now())
 	if err != nil || result.Operation.OperationID == "" || result.Operation.Revision < 1 || !result.Operation.Phase.Valid() {
 		return false, errors.New("channel onboarding response has invalid progress evidence")
@@ -176,6 +194,13 @@ func validateCLIChannelProgress(result channelOnboardingResult) (bool, error) {
 func validateCLIChannelContinuation(previous, next channelOnboardingResult, checkpointOnly bool) (bool, error) {
 	if next.Operation.OperationID != previous.Operation.OperationID || next.Operation.Revision < previous.Operation.Revision {
 		return false, errors.New("channel retry changed the retained operation")
+	}
+	if previous.Operation.DeploymentRegistration || next.Operation.DeploymentRegistration {
+		if previous.Operation.DeploymentRegistration != next.Operation.DeploymentRegistration || previous.Operation.Provider != next.Operation.Provider ||
+			previous.Operation.PrincipalID != next.Operation.PrincipalID || previous.Operation.ExpectedAccount != next.Operation.ExpectedAccount ||
+			previous.Operation.AccountReference != "" && previous.Operation.AccountReference != next.Operation.AccountReference {
+			return false, errors.New("channel continuation changed the deployment or account")
+		}
 	}
 	pending, err := validateCLIChannelProgress(next)
 	if err != nil || pending {

@@ -16713,6 +16713,7 @@ platform_tables:
         - standing_services
         - runs
       preserve:
+        - deployment_channel_operations
         - runtime_reset_operations
         - runtime_store_metadata
         - resource_declarations
@@ -17814,6 +17815,69 @@ platform_tables:
             UNIQUE INDEX idx_channel_onboarding_active_slot (slot_key) WHERE phase NOT IN ('succeeded','failed','retired'),
             INDEX idx_channel_onboarding_principal (principal_id, requested_at),
             INDEX idx_channel_onboarding_phase (phase, updated_at)
+        );
+    deployment_channel_operations:
+      description: >-
+        Deployment-only account pairing and optional operator verification. Uses the onboarding
+        phase and credential owners, with no runtime, bundle, flow, activation or standing target.
+        Native connection responsibility is reserved before opening device state. Only explicit
+        account approval can complete registration; the expected account fences re-verification.
+      ddl: |
+        CREATE TABLE deployment_channel_operations (
+            operation_id UUID PRIMARY KEY,
+            request_key_hash TEXT NOT NULL UNIQUE,
+            request_hash TEXT NOT NULL,
+            slot_key TEXT NOT NULL,
+            principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
+            verb TEXT NOT NULL CHECK (verb IN ('connect','reconnect','rebind')),
+            provider TEXT NOT NULL CHECK (provider IN ('whatsapp','telegram')),
+            interface_key TEXT NOT NULL,
+            interface_ref TEXT NOT NULL CHECK (interface_ref = 'swarm.hitl-channel/v2'),
+            channel_pack_id TEXT NOT NULL,
+            channel_pack_version TEXT NOT NULL,
+            channel_manifest_hash TEXT NOT NULL,
+            semantic_generation TEXT NOT NULL,
+            bundle_hash TEXT,
+            bundle_identity TEXT NOT NULL CHECK (bundle_identity = ''),
+            pack_inventory_generation TEXT NOT NULL CHECK (pack_inventory_generation = ''),
+            runtime_instance_id UUID,
+            context_publication_generation BIGINT NOT NULL CHECK (context_publication_generation = 0),
+            plan_generation TEXT NOT NULL CHECK (plan_generation = ''),
+            target_selector TEXT NOT NULL CHECK (target_selector = ''),
+            target_generation BIGINT NOT NULL CHECK (target_generation = 0),
+            activation_posture TEXT NOT NULL CHECK (activation_posture IN ('webhook_registration','session_connection')),
+            identity_ceremony TEXT NOT NULL CHECK (identity_ceremony IN ('authenticated_text_challenge','account_link')),
+            phase TEXT NOT NULL CHECK (phase IN ('preparing','credentials_admitted','activating_provider','awaiting_external_identity','awaiting_operator_confirmation','succeeded','failed','retired')),
+            operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
+            save_proof BOOLEAN NOT NULL,
+            client_language TEXT NOT NULL,
+            client_locale_revision BIGINT NOT NULL CHECK (client_locale_revision > 0),
+            credential_reservations TEXT NOT NULL,
+            credential_admissions TEXT NOT NULL,
+            session_connection_id UUID,
+            session_account_admission TEXT,
+            identity_operation_id UUID,
+            binding_revision BIGINT,
+            connect_fence_revision BIGINT NOT NULL DEFAULT 0,
+            activation_revision BIGINT,
+            confirmation_operation_id UUID,
+            account_reference TEXT NOT NULL DEFAULT '',
+            account_confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+            expected_account TEXT NOT NULL DEFAULT '',
+            failure_code TEXT,
+            failure_message TEXT,
+            requested_at TIMESTAMPTZ NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL,
+            completed_at TIMESTAMPTZ,
+            CHECK (bundle_hash IS NULL AND runtime_instance_id IS NULL AND activation_revision IS NULL AND confirmation_operation_id IS NULL),
+            CHECK ((phase IN ('succeeded','failed','retired')) = (completed_at IS NOT NULL)),
+            CHECK (NOT account_confirmed OR account_reference <> ''),
+            CHECK (phase <> 'succeeded' OR account_confirmed),
+            CHECK ((provider = 'whatsapp') = (activation_posture = 'session_connection')),
+            CHECK ((activation_posture = 'session_connection') = (session_connection_id IS NOT NULL)),
+            UNIQUE INDEX idx_deployment_channel_active_slot (slot_key) WHERE phase NOT IN ('succeeded','failed','retired'),
+            UNIQUE INDEX idx_deployment_channel_account (principal_id,provider,account_reference) WHERE phase = 'succeeded',
+            INDEX idx_deployment_channel_principal (principal_id,requested_at)
         );
     channel_onboarding_teardowns:
       description: >-

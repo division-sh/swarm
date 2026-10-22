@@ -19,6 +19,10 @@ import (
 type channelOperationResult = operatorchannel.Operation
 type channelReadbackResult = channelonboarding.ConnectedChannelReadback
 
+type channelControlClient interface {
+	call(context.Context, string, map[string]any, any) error
+}
+
 type channelListResult struct {
 	PrincipalID string                  `json:"principal_id"`
 	Channels    []channelReadbackResult `json:"channels"`
@@ -463,7 +467,7 @@ func writeChannelNativeQualification(out io.Writer, result channelOnboardingResu
 	}
 }
 
-func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer) (channelOnboardingResult, error) {
+func completeChannelOnboarding(ctx context.Context, client channelControlClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer) (channelOnboardingResult, error) {
 	sharedAudienceAnnounced := false
 	acceptedAccount := ""
 	advancePending := opts.verb == "resume"
@@ -544,7 +548,7 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 	}
 }
 
-func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, awaitLogin bool, out, errOut io.Writer) (channelOnboardingResult, error) {
+func waitForChannelOnboardingPairing(ctx context.Context, client channelControlClient, current channelOnboardingResult, opts channelConnectOptions, awaitLogin bool, out, errOut io.Writer) (channelOnboardingResult, error) {
 	poll := opts.apiOptions.channelConnectPoll
 	if poll <= 0 {
 		poll = 500 * time.Millisecond
@@ -592,16 +596,19 @@ func waitForChannelOnboardingPairing(ctx context.Context, client *cliAPIClient, 
 	return current, nil
 }
 
-func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, bool, error) {
+func confirmCLIChannelAccount(ctx context.Context, client channelControlClient, current channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer, acceptedAccount *string) (channelOnboardingResult, bool, error) {
 	// A pairing checkpoint preserves only a preview. Account approval is
 	// required before continuing to activation or operator enrollment.
 	pending, err := validateCLIChannelProgress(current)
 	if err != nil {
 		return channelOnboardingResult{}, false, returnCLIValidationError(errOut, err)
 	}
+	if current.Operation.DeploymentRegistration && current.Operation.AccountConfirmed {
+		return current, false, nil
+	}
 	if !pending {
 		switch {
-		case current.Operation.Posture != channelonboarding.ActivationSessionConnection,
+		case current.Operation.Posture != channelonboarding.ActivationSessionConnection && !current.Operation.DeploymentRegistration,
 			current.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity,
 			current.Operation.ActivationRevision != 0, current.IdentityOperation != nil, current.Binding != nil:
 			return current, false, nil
@@ -673,7 +680,7 @@ func confirmCLIChannelAccount(ctx context.Context, client *cliAPIClient, current
 	return next, true, err
 }
 
-func confirmChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer, sharedAudienceAnnounced *bool) error {
+func confirmChannelOnboardingClaim(ctx context.Context, client channelControlClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer, sharedAudienceAnnounced *bool) error {
 	identity := result.IdentityOperation
 	if result.Operation.Provider == "whatsapp" {
 		fmt.Fprintf(progressOut, "Code received from %s (%s conversation).\n", cliSanitizeOneLineValue(identity.AccountPresentation), identity.ConversationScope)
@@ -717,7 +724,7 @@ func channelClaimantConfirmationRequired(result channelOnboardingResult, now tim
 	return identity.ExpiresAt.IsZero() || identity.ExpiresAt.After(now)
 }
 
-func waitForChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, begun channelOnboardingResult, opts rootCommandOptions) (channelOnboardingResult, error) {
+func waitForChannelOnboardingClaim(ctx context.Context, client channelControlClient, begun channelOnboardingResult, opts rootCommandOptions) (channelOnboardingResult, error) {
 	continuation := ""
 	if begun.Operation.Provider != "whatsapp" {
 		continuation = fmt.Sprintf("; resume operation %s with `swarm channel resume %s`", begun.Operation.OperationID, begun.Operation.OperationID)
@@ -874,7 +881,7 @@ func confirmChannelAccount(input io.Reader, out io.Writer, prompt string) (bool,
 	return answer == "y" || answer == "yes", nil
 }
 
-func fetchChannelList(ctx context.Context, client *cliAPIClient) (channelListResult, error) {
+func fetchChannelList(ctx context.Context, client channelControlClient) (channelListResult, error) {
 	var result channelListResult
 	err := client.call(ctx, "channel.list", map[string]any{}, &result)
 	return result, err

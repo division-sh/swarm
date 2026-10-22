@@ -16,7 +16,7 @@ func TestSingleDeploymentConfigRejectsNullContainersBeforeProjection(t *testing.
 		"llm.openai_compatible", "llm.openai_responses", "llm.provider_limits",
 		"llm.provider_limits.anthropic", "llm.provider_limits.anthropic.models",
 		"llm.provider_limits.anthropic.models.model", "platform", "platform.packs",
-		"platform.packs.platform_dirs", "channels", "channels.bindings",
+		"platform.packs.platform_dirs", "channels", "channels.hitl", "channels.bindings",
 		"channels.bindings.hitl", "budget", "budget.human_tasks",
 		"budget.human_tasks.categories_enabled", "connection", "serve", "paths",
 	} {
@@ -59,6 +59,18 @@ func TestSingleDeploymentConfigRejectsNullContainersBeforeProjection(t *testing.
 }
 
 func TestSingleDeploymentConfigPreservesOmittedAndExplicitLeafValues(t *testing.T) {
+	t.Run("deployment_operator_account", func(t *testing.T) {
+		var got Config
+		if err := decodeConfigSourceTest("channels: {hitl: {provider: whatsapp, account: '+1 (555) 010-0123'}}", &got); err != nil {
+			t.Fatal(err)
+		}
+		if err := got.validateChannels(); err != nil {
+			t.Fatal(err)
+		}
+		if got.Channels.HITL == nil || got.Channels.HITL.Provider != "whatsapp" || got.Channels.HITL.Account != "+15550100123" {
+			t.Fatalf("deployment operator account not canonical: %+v", got.Channels.HITL)
+		}
+	})
 	for _, source := range []string{"", "{}", "runtime: {}\nllm: {session: {}}\n"} {
 		t.Run("omitted/"+source, func(t *testing.T) {
 			before := Config{Runtime: RuntimeConfig{RecoveryOnStartup: true}, LLM: LLMConfig{Backend: "anthropic", Session: LLMSessionConfig{RotateAfterTurns: 40}}}

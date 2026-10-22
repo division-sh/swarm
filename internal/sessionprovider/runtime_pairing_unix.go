@@ -59,9 +59,17 @@ func (c *RuntimeConnection) CheckpointPairing(ctx context.Context, expectedRevis
 		return result, false, errSessionAccount
 	}
 	if op.Phase == channelonboarding.PhaseActivatingProvider {
-		op, err = c.store.AdvanceChannelOnboarding(owned, channelonboarding.AdvanceRequest{OperationID: op.OperationID,
+		accountReference := ""
+		if op.DeploymentRegistration {
+			ref, err := channelonboarding.CanonicalAccount(op.Provider, "+"+device.ID.User)
+			if err != nil {
+				return result, false, err
+			}
+			accountReference = ref.Account
+		}
+		op, err = c.operations.AdvanceChannelOnboarding(owned, channelonboarding.AdvanceRequest{OperationID: op.OperationID,
 			ExpectedRevision: expectedRevision, Phase: channelonboarding.PhaseAwaitingExternalIdentity,
-			SessionAccount: &account, Now: time.Now().UTC()})
+			SessionAccount: &account, AccountReference: accountReference, Now: time.Now().UTC()})
 		if err != nil {
 			return result, false, err
 		}
@@ -112,7 +120,7 @@ func (c *RuntimeConnection) PairingReadback(ctx context.Context, principal opera
 		result = channelonboarding.PairingReadback{Status: "paired", Paired: true,
 			Connected: occurrence.ctx.Err() == nil && occurrence.client.IsConnected() && occurrence.client.IsLoggedIn()}
 	} else {
-		view, err := pairing.readAuthorized(work.Context(), principal, c.store, op.Coordinate)
+		view, err := pairing.readAuthorized(work.Context(), principal, c.operations, op.Coordinate)
 		if err != nil {
 			occurrence.mu.Lock()
 			revoked := occurrence.revoked != nil

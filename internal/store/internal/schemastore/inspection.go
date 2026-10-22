@@ -78,7 +78,7 @@ func inspectSchemaPreparation(ctx context.Context, q schemaQueryer, request Sche
 	if report.State != schemaStateFresh && report.State != schemaStateCompatible {
 		return SchemaInspection{}, fmt.Errorf("unknown %s schema compatibility state %q", dialect, report.State)
 	}
-	missing, err := inspectStatePlans(ctx, q, request.StatePlans, dialect, diagnostic)
+	missing, err := inspectStatePlans(ctx, q, append(append([]SchemaTableDDL(nil), request.StatePlans...), request.deploymentPlans...), dialect, diagnostic)
 	if err != nil {
 		return SchemaInspection{}, err
 	}

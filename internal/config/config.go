@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -90,7 +91,8 @@ type PlatformPacksConfig struct {
 }
 
 type ChannelsConfig struct {
-	Bindings map[string]ChannelBindingConfig `yaml:"bindings"`
+	HITL     *channelonboarding.AccountReference `yaml:"hitl,omitempty"`
+	Bindings map[string]ChannelBindingConfig     `yaml:"bindings"`
 }
 
 type ChannelBindingConfig struct {
@@ -376,6 +378,13 @@ func validatePlatformPackDirs(dirs []string) error {
 func (c *Config) validateChannels() error {
 	if c == nil {
 		return nil
+	}
+	if c.Channels.HITL != nil {
+		account, err := channelonboarding.CanonicalAccount(c.Channels.HITL.Provider, c.Channels.HITL.Account)
+		if err != nil {
+			return fmt.Errorf("channels.hitl: %w", err)
+		}
+		*c.Channels.HITL = account
 	}
 	for rawID, binding := range c.Channels.Bindings {
 		id := strings.TrimSpace(rawID)

@@ -176,6 +176,9 @@ const (
 type TestLifecycleBarrier func(TestLifecycleBoundary, string) error
 
 type ServiceOptions struct {
+	Deployment      bool
+	OperatorAccount *AccountReference
+	Operations      OperationStore
 	SourceArtifacts sourceartifact.Reader
 	Store           Store
 	Identities      IdentityLifecycle
@@ -191,6 +194,8 @@ type ServiceOptions struct {
 }
 
 type Service struct {
+	deployment      bool
+	operatorAccount *AccountReference
 	sourceArtifacts sourceartifact.Reader
 	store           Store
 	identities      IdentityLifecycle
@@ -214,6 +219,7 @@ type operationDriveLock struct {
 }
 
 type StartInput struct {
+	ExpectedAccount    string
 	Verb               Verb
 	Selection          CandidateSelection
 	IdempotencyKey     string
@@ -251,11 +257,13 @@ type SessionConnectionReadback struct {
 }
 
 func NewService(opts ServiceOptions) (*Service, error) {
-	if opts.Store == nil || opts.Identities == nil || opts.Credentials == nil || opts.Catalog == nil || opts.Activations == nil || opts.Confirmation == nil || opts.Readiness == nil {
+	if opts.Store == nil || opts.Identities == nil || opts.Credentials == nil || opts.Catalog == nil ||
+		!opts.Deployment && (opts.Activations == nil || opts.Confirmation == nil || opts.Readiness == nil) ||
+		opts.Deployment && (opts.Operations == nil || opts.Sessions == nil) {
 		return nil, fmt.Errorf("channel onboarding service requires store, identity, credential, catalog, activation, confirmation, and readiness owners")
 	}
 	effects, ok := opts.Confirmation.(EffectRebindReconciler)
-	if !ok {
+	if !ok && !opts.Deployment {
 		return nil, fmt.Errorf("channel onboarding confirmation owner must reconcile durable effects before retry or rebind")
 	}
 	if opts.Now == nil {
@@ -264,7 +272,18 @@ func NewService(opts ServiceOptions) (*Service, error) {
 	if opts.Secret == nil {
 		opts.Secret = randomSigningSecret
 	}
+	if opts.Deployment {
+		if opts.OperatorAccount != nil && opts.OperatorAccount.Validate() != nil {
+			return nil, ErrInvalidRequest
+		}
+		if opts.OperatorAccount != nil {
+			account := *opts.OperatorAccount
+			opts.OperatorAccount = &account
+		}
+		opts.Store = deploymentStore{Store: opts.Store, operations: opts.Operations}
+	}
 	return &Service{
+		deployment: opts.Deployment, operatorAccount: opts.OperatorAccount,
 		sourceArtifacts: opts.SourceArtifacts,
 		store:           opts.Store, identities: opts.Identities, credentials: opts.Credentials, catalog: opts.Catalog,
 		activations: opts.Activations, confirmation: opts.Confirmation, effects: effects, readiness: opts.Readiness, now: opts.Now, secret: opts.Secret,
@@ -298,15 +317,25 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 		candidate.ConnectionHealth, fmt.Sprint(input.SaveProof), input.ClientLanguage,
 		fmt.Sprint(candidate.OperatorRequired),
 	)
+	if s.deployment {
+		requestHash = operatorchannel.Hash("deployment-channel-request-v1", requestHash, input.ExpectedAccount)
+	}
 	requestKey := operatorchannel.Hash("channel-onboarding-key-v1", principal.ID, strings.TrimSpace(input.IdempotencyKey))
 	if strings.TrimSpace(input.IdempotencyKey) == "" {
 		requestKey = operatorchannel.Hash("channel-onboarding-key-v1", principal.ID, uuid.NewString())
 	}
 	start := StartRequest{
+		DeploymentRegistration: s.deployment, ExpectedAccount: input.ExpectedAccount,
 		OperationID: uuid.NewString(), RequestKeyHash: requestKey, RequestHash: requestHash, PrincipalID: principal.ID,
 		Verb: input.Verb, Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate,
 		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
 		SaveProof: input.SaveProof, ClientLanguage: input.ClientLanguage, CredentialReservations: reservations, RequestedAt: s.now().UTC(),
+	}
+	if s.deployment {
+		for index := range start.CredentialReservations {
+			reservation := &start.CredentialReservations[index]
+			reservation.StoreKey = "channel." + candidate.Provider + "." + operatorchannel.Hash("deployment-channel-credential-v1", principal.ID, start.OperationID) + "." + reservation.Role
+		}
 	}
 	if existing, found, err := findOperationByRequestKey(ctx, s.store, requestKey); err != nil {
 		return Result{}, err
@@ -322,6 +351,13 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 			return Result{Operation: existing}, err
 		}
 		return s.drive(ctx, existing, candidate, input.ProviderCredential)
+	}
+	if s.deployment {
+		op, err := s.store.ReserveChannelOnboarding(ctx, start)
+		if err != nil {
+			return Result{}, err
+		}
+		return s.drive(ctx, op, candidate, input.ProviderCredential)
 	}
 	state, fence, err := s.slotState(ctx, start)
 	if err != nil {
@@ -476,6 +512,9 @@ func (s *Service) Get(ctx context.Context, operationID string) (Result, error) {
 	}
 	candidate, err := s.currentCandidate(op)
 	if err != nil {
+		if op.DeploymentRegistration {
+			return Result{}, err
+		}
 		if errors.Is(err, ErrConflict) || errors.Is(err, ErrNotFound) {
 			return s.result(ctx, op, nil)
 		}
@@ -488,7 +527,7 @@ func (s *Service) Get(ctx context.Context, operationID string) (Result, error) {
 // current activation and active onboarding responsibility. It is the only
 // list/status projection.
 func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedChannelReadback, error) {
-	if s == nil {
+	if s == nil || s.deployment {
 		return nil, fmt.Errorf("channel onboarding service is required")
 	}
 	identities, err := s.identities.Readback(ctx)
@@ -667,6 +706,9 @@ func (s *Service) activationRecovery(identity operatorchannel.InterfaceIdentity)
 }
 
 func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
+	if s.deployment && (input.ClientLanguage != "" || input.ExpectedLocaleRevision != 0) {
+		return Result{}, ErrInvalidRequest
+	}
 	operationID := strings.TrimSpace(input.OperationID)
 	unlock, err := s.lockDrive(ctx, operationID)
 	if err != nil {
@@ -678,7 +720,7 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if input.CheckpointOnly && (op.Posture != ActivationSessionConnection || op.Phase != PhaseActivatingProvider ||
+	if input.CheckpointOnly && (op.Posture != ActivationSessionConnection && !op.DeploymentRegistration || op.Phase != PhaseActivatingProvider ||
 		input.ProviderCredential != "" || input.ClientLanguage != "" || input.ExpectedLocaleRevision != 0) {
 		return Result{}, ErrInvalidRequest
 	}
@@ -785,6 +827,9 @@ func (s *Service) ConfirmIdentity(ctx context.Context, operationID string, expec
 	if !errors.Is(confirmErr, operatorchannel.ErrCredentialStale) || identity.State != operatorchannel.StateCredentialStale {
 		return identity, binding, confirmErr
 	}
+	if parent.DeploymentRegistration {
+		return identity, binding, confirmErr
+	}
 	if parent.Phase.Terminal() {
 		return identity, binding, fmt.Errorf("%w: onboarding parent is already %s", ErrConflict, parent.Phase)
 	}
@@ -807,6 +852,9 @@ func (s *Service) ConfirmIdentity(ctx context.Context, operationID string, expec
 // deliberately performs no provider preflight, registration effect, runtime
 // publication, or confirmation delivery.
 func (s *Service) ReconcileLocal(ctx context.Context) error {
+	if s.deployment {
+		return ErrInvalidRequest
+	}
 	operations, err := s.store.ListChannelOnboardingOperations(ctx)
 	if err != nil {
 		return err
@@ -959,6 +1007,9 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 }
 
 func (s *Service) Recover(ctx context.Context) error {
+	if s.deployment {
+		return ErrInvalidRequest
+	}
 	operations, err := s.store.ListChannelOnboardingOperations(ctx)
 	if err != nil {
 		return err
@@ -974,6 +1025,9 @@ func (s *Service) Recover(ctx context.Context) error {
 // RestoreSessions restores transport ownership before retained identity proofs
 // execute. It does not drive provider effects or business target admission.
 func (s *Service) RestoreSessions(ctx context.Context) error {
+	if s.deployment {
+		return ErrInvalidRequest
+	}
 	operations, err := s.store.ListChannelOnboardingOperations(ctx)
 	if err != nil {
 		return err
@@ -1064,7 +1118,7 @@ func (s *Service) resumeSession(ctx context.Context, op Operation, candidate Can
 	if s.sessions == nil {
 		return &operatorchannel.SessionProviderUnavailableError{Provider: op.Provider}
 	}
-	if op.Phase == PhaseSucceeded {
+	if op.Phase == PhaseSucceeded && !op.DeploymentRegistration {
 		eligible, err := RetainedSessionCurrent(ctx, s.store, op)
 		if err != nil {
 			return err
@@ -1114,7 +1168,8 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 		return Result{}, fmt.Errorf("%w: onboarding operation changed before execution", ErrRevisionConflict)
 	}
 	op = current
-	if !op.Coordinate.MatchesDeclaration(candidate.Coordinate) || op.Phase.RequiresExecutableTarget(op.Posture) && candidate.Validate() != nil {
+	if op.DeploymentRegistration != candidate.DeploymentRegistration || !op.DeploymentRegistration &&
+		(!op.Coordinate.MatchesDeclaration(candidate.Coordinate) || op.Phase.RequiresExecutableTarget(op.Posture) && candidate.Validate() != nil) {
 		return Result{Operation: op, Candidate: &candidate}, fmt.Errorf("%w: onboarding operation is not fenced to the exact current runtime occurrence", ErrRevisionConflict)
 	}
 	for {
@@ -1149,7 +1204,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				op, resetErr = s.resetRejectedCredentialAdmissions(context.WithoutCancel(ctx), op)
 				return s.blockedResult(readback, op, candidate, errors.Join(err, resetErr))
 			}
-			if op.Posture == ActivationSessionConnection {
+			if op.Posture == ActivationSessionConnection || op.DeploymentRegistration {
 				next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID,
 					ExpectedRevision: op.Revision, Phase: PhaseActivatingProvider, Now: s.now().UTC()})
 				if err != nil {
@@ -1184,14 +1239,14 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			}
 			op = next
 		case PhaseActivatingProvider:
-			if op.Posture == ActivationSessionConnection {
+			if op.Posture == ActivationSessionConnection || op.DeploymentRegistration {
 				next, paired, err := s.prepareSessionPairing(caller, op, candidate)
 				if err != nil {
 					return s.blockedResult(readback, op, candidate, err)
 				}
 				if next.OperationID != op.OperationID || next.PrincipalID != op.PrincipalID ||
-					!next.Coordinate.MatchesDeclaration(op.Coordinate) || next.SessionConnectionID != op.SessionConnectionID ||
-					paired && (next.Phase != PhaseAwaitingExternalIdentity || next.SessionAccount.Validate() != nil) ||
+					next.DeploymentRegistration != op.DeploymentRegistration || !op.DeploymentRegistration && !next.Coordinate.MatchesDeclaration(op.Coordinate) || next.SessionConnectionID != op.SessionConnectionID ||
+					paired && (next.Phase != PhaseAwaitingExternalIdentity || op.Posture == ActivationSessionConnection && next.SessionAccount.Validate() != nil) ||
 					!paired && (next.Phase != op.Phase || next.Revision != op.Revision) {
 					return Result{}, fmt.Errorf("%w: session pairing changed onboarding responsibility", ErrRevisionConflict)
 				}
@@ -1219,10 +1274,23 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 		case PhaseAwaitingExternalIdentity:
 			// Start/re-entry and recovery retain the account preview. Only an
 			// explicit continuation may activate it or begin operator enrollment.
-			if !approveAccount && op.Posture == ActivationSessionConnection && op.IdentityOperationID == "" && op.ActivationRevision == 0 {
+			if op.DeploymentRegistration && !op.AccountConfirmed {
+				if !approveAccount {
+					return s.result(readback, op, &candidate)
+				}
+				op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
+					Phase: op.Phase, ConfirmAccount: true, Now: s.now().UTC()})
+				if err != nil {
+					return Result{}, err
+				}
+			} else if !op.DeploymentRegistration && !approveAccount && op.Posture == ActivationSessionConnection && op.IdentityOperationID == "" && op.ActivationRevision == 0 {
 				return s.result(readback, op, &candidate)
 			}
-			if op.AccountConnection() && !candidate.OperatorRequired && op.IdentityOperationID == "" {
+			operatorRequired := candidate.OperatorRequired
+			if op.DeploymentRegistration {
+				operatorRequired = s.operatorAccount != nil && s.operatorAccount.Provider == op.Provider && s.operatorAccount.Account == op.AccountReference
+			}
+			if (op.AccountConnection() || op.DeploymentRegistration) && !operatorRequired && op.IdentityOperationID == "" {
 				op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
 					Phase: PhaseAwaitingOperatorConfirmation, Now: s.now().UTC()})
 				if err != nil {
@@ -1251,6 +1319,37 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return result, nil
 			}
 		case PhaseAwaitingOperatorConfirmation:
+			if op.DeploymentRegistration {
+				if op.IdentityOperationID != "" {
+					identity, err := s.currentIdentityOperation(ctx, op.IdentityOperationID)
+					if err != nil {
+						return Result{}, err
+					}
+					if identity.State != operatorchannel.StateBound {
+						if identity.State.Terminal() {
+							registered, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID,
+								ExpectedRevision: op.Revision, Phase: PhaseSucceeded, Now: s.now().UTC()})
+							if err != nil {
+								return Result{}, err
+							}
+							return s.result(readback, registered, &candidate)
+						}
+						return s.result(readback, op, &candidate)
+					}
+					binding, current, err := s.identities.CurrentBindingReadiness(ctx, op.Interface)
+					authority, authorityErr := providerIdentityAuthority(op, candidate)
+					if err != nil || authorityErr != nil || !current || binding.PrincipalID != op.PrincipalID || !binding.ProviderAuthority.SameProvenance(authority) {
+						return Result{}, errors.Join(ErrRevisionConflict, err, authorityErr)
+					}
+					op.BindingRevision = binding.Revision
+				}
+				finished, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
+					Phase: PhaseSucceeded, BindingRevision: op.BindingRevision, Now: s.now().UTC()})
+				if err != nil {
+					return Result{}, err
+				}
+				return s.result(readback, finished, &candidate)
+			}
 			var identityOp operatorchannel.Operation
 			if op.IdentityOperationID != "" {
 				var identityErr error
@@ -1428,6 +1527,9 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				return Result{}, err
 			}
 		case PhaseSucceeded:
+			if op.DeploymentRegistration {
+				return s.result(readback, op, &candidate)
+			}
 			if candidate.OperatorRequired && op.AccountConnection() && op.IdentityOperationID == "" {
 				op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
 					Phase: PhaseAwaitingExternalIdentity, BeginOperatorEnrollment: true, Now: s.now().UTC()})
@@ -1750,6 +1852,9 @@ func (s *Service) ensureCredentialAdmissionsCurrent(ctx context.Context, admissi
 
 func (s *Service) currentCredentialAdmissions(ctx context.Context, slot string) (map[string]CredentialAdmission, error) {
 	out := map[string]CredentialAdmission{}
+	if s.deployment {
+		return out, nil
+	}
 	current, err := s.store.GetConnectedChannelActivation(ctx, slot)
 	if errors.Is(err, ErrNotFound) {
 		return out, nil
@@ -1845,6 +1950,11 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 		case operatorchannel.StateAwaitingClaim:
 			return op, true, nil
 		case operatorchannel.StateCredentialStale:
+			if op.DeploymentRegistration {
+				next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID,
+					ExpectedRevision: op.Revision, Phase: PhaseAwaitingOperatorConfirmation, IdentityOperationID: identityOp.OperationID, Now: s.now().UTC()})
+				return next, false, err
+			}
 			reset, err := s.resetCredentialStaleIdentity(context.WithoutCancel(ctx), op)
 			if err != nil {
 				return op, false, err
@@ -1857,6 +1967,11 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 			})
 			return next, identityOp.State != operatorchannel.StateBound, err
 		default:
+			if op.DeploymentRegistration {
+				next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID,
+					ExpectedRevision: op.Revision, Phase: PhaseAwaitingOperatorConfirmation, IdentityOperationID: identityOp.OperationID, Now: s.now().UTC()})
+				return next, false, err
+			}
 			failed, err := s.failOperation(ctx, op, "identity_"+string(identityOp.State), fmt.Sprintf("identity operation %s ended in %s", identityOp.OperationID, identityOp.State))
 			return failed, false, err
 		}
@@ -1985,6 +2100,9 @@ func (s *Service) currentIdentityOperation(ctx context.Context, operationID stri
 }
 
 func (s *Service) currentOperationActivation(ctx context.Context, op Operation) (ConnectedChannelActivation, error) {
+	if op.DeploymentRegistration {
+		return ConnectedChannelActivation{}, ErrInvalidRequest
+	}
 	activation, err := s.store.GetConnectedChannelActivation(ctx, op.SlotKey)
 	if err != nil {
 		return ConnectedChannelActivation{}, err
@@ -1999,6 +2117,9 @@ func (s *Service) failOperation(ctx context.Context, op Operation, code, message
 	failed, err := s.failOperationLocal(ctx, op, code, message)
 	if err != nil {
 		return op, err
+	}
+	if op.DeploymentRegistration {
+		return failed, nil
 	}
 	if err := s.activations.RefreshChannelActivations(context.WithoutCancel(ctx)); err != nil {
 		return failed, fmt.Errorf("refresh channel activations after terminal onboarding failure: %w", err)
@@ -2195,9 +2316,29 @@ func (s *Service) slotState(ctx context.Context, req StartRequest) (SlotState, o
 }
 
 func (s *Service) currentCandidate(op Operation) (Candidate, error) {
+	if op.DeploymentRegistration != s.deployment {
+		return Candidate{}, ErrInvalidRequest
+	}
 	catalog, err := s.catalog()
 	if err != nil {
 		return Candidate{}, err
+	}
+	if op.DeploymentRegistration {
+		principal, err := s.identities.Principal()
+		if err != nil {
+			return Candidate{}, err
+		}
+		if principal.ID != op.PrincipalID || op.ValidateSessionAccount() != nil {
+			return Candidate{}, ErrRevisionConflict
+		}
+		candidate, err := catalog.Resolve(CandidateSelection{Provider: op.Provider, InterfaceSelector: op.Interface.Selector})
+		if err != nil {
+			return Candidate{}, err
+		}
+		if !candidate.DeploymentRegistration || candidate.Interface != op.Interface || candidate.Posture != op.Posture || candidate.Ceremony != op.Ceremony {
+			return Candidate{}, ErrRevisionConflict
+		}
+		return candidate, nil
 	}
 	candidate, current := catalog.FindDurableSuccessor(op.Provider, op.Interface, op.Coordinate, op.TargetSelector, op.Posture, op.Ceremony)
 	if !current {
@@ -2213,6 +2354,9 @@ func (s *Service) bindCurrentCandidate(ctx context.Context, op Operation) (Opera
 	}
 	if err := s.qualifyProvider(candidate); err != nil {
 		return op, candidate, err
+	}
+	if op.DeploymentRegistration {
+		return op, candidate, nil
 	}
 	disposition := EffectRebindDisposition{RetryAllowed: true}
 	if phaseMayOwnExternalEffect(op.Phase) {
@@ -2272,24 +2416,31 @@ func historicalCandidate(op Operation) Candidate {
 }
 
 func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate) (Result, error) {
+	if op.DeploymentRegistration && candidate == nil {
+		current, err := s.currentCandidate(op)
+		if err != nil {
+			return Result{}, err
+		}
+		candidate = &current
+	}
 	result := Result{Operation: op, Candidate: candidate}
 	if reader, ok := s.sessions.(interface {
 		ReadSessionConnection(context.Context, Operation) (SessionConnectionReadback, error)
-	}); ok && op.Posture == ActivationSessionConnection {
+	}); ok && (op.Posture == ActivationSessionConnection || op.DeploymentRegistration) {
 		view, err := reader.ReadSessionConnection(ctx, op)
 		if err != nil {
 			return result, err
 		}
 		result.Connection = &view
 	}
-	if op.Posture == ActivationSessionConnection {
+	if op.Posture == ActivationSessionConnection && !op.DeploymentRegistration {
 		logout, err := s.sessionLogoutReadback(ctx, op)
 		if err != nil {
 			return result, err
 		}
 		result.Logout = logout
 	}
-	if op.Posture == ActivationSessionConnection && op.Phase == PhaseActivatingProvider && s.sessions != nil {
+	if (op.Posture == ActivationSessionConnection || op.DeploymentRegistration) && op.Phase == PhaseActivatingProvider && s.sessions != nil {
 		principal, err := s.identities.Principal()
 		if err != nil {
 			return result, err
@@ -2316,9 +2467,22 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 		result.IdentityOperation = &identityOp
 	}
 	if binding, err := s.identities.RetainedCurrentBinding(ctx, op.Interface); err == nil {
-		result.Binding = &binding
+		if !op.DeploymentRegistration {
+			result.Binding = &binding
+		} else if op.IdentityOperationID != "" {
+			authority, authorityErr := providerIdentityAuthority(op, *candidate)
+			if authorityErr != nil {
+				return result, authorityErr
+			}
+			if binding.PrincipalID == op.PrincipalID && binding.ProviderAuthority.SameProvenance(authority) {
+				result.Binding = &binding
+			}
+		}
 	} else if !errors.Is(err, operatorchannel.ErrNotFound) {
 		return result, err
+	}
+	if op.DeploymentRegistration {
+		return result, ctx.Err()
 	}
 	readinessCandidate := historicalCandidate(op)
 	if candidate != nil {

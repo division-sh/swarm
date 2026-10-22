@@ -77,6 +77,35 @@ func sessionProgressCLIResult(provider, role, phase string, ready bool) map[stri
 }
 
 func TestChannelCLIProgressFixturesRetainExactDeclarations(t *testing.T) {
+	t.Run("registration_is_not_runtime_readiness", func(t *testing.T) {
+		fixture := channelOnboardingCLIResult("succeeded", "", true)
+		op := fixture["operation"].(map[string]any)
+		candidate := fixture["candidate"].(map[string]any)
+		for _, row := range []map[string]any{op, candidate} {
+			row["deployment_registration"], row["identity_ceremony"] = true, "account_link"
+			delete(row, "coordinate")
+		}
+		op["account_reference"], op["account_confirmed"], op["target_selector"], op["activation_revision"] = "12345", true, "", 0
+		candidate["confirmation_operation"], candidate["signing_credential_role"] = "", ""
+		delete(candidate, "target")
+		delete(fixture, "readiness")
+		body, err := json.Marshal(fixture)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result channelOnboardingResult
+		if err := json.Unmarshal(body, &result); err != nil {
+			t.Fatal(err)
+		}
+		var out, errOut bytes.Buffer
+		if err := renderChannelOnboardingResult(&out, &errOut, cliOutputOptions{}, result); err != nil || out.String() != "Registered telegram account 12345.\n" {
+			t.Fatal("registration invented runtime readiness", out.String(), errOut.String(), err)
+		}
+		result.Operation.AccountConfirmed = false
+		if err := renderChannelOnboardingResult(io.Discard, io.Discard, cliOutputOptions{}, result); err == nil {
+			t.Fatal("an unapproved account was reported registered")
+		}
+	})
 	for _, fixture := range []map[string]any{channelOnboardingCLIResult("preparing", "", false), sessionProgressCLIResult("whatsapp", "", "activating_provider", false)} {
 		body, err := json.Marshal(fixture)
 		if err != nil {

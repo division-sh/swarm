@@ -99,6 +99,7 @@ type queryer interface {
 }
 
 type runner interface {
+	deployment() bool
 	require() error
 	mutate(context.Context, string, func(context.Context, *sql.Tx) error) error
 	mutateOutcome(context.Context, string, func(context.Context, *sql.Tx) error) (bool, error)
@@ -108,6 +109,8 @@ type runner interface {
 }
 
 type postgresRunner struct{ owner *PostgresOwner }
+
+func (r postgresRunner) deployment() bool { return false }
 
 func (r postgresRunner) require() error   { return r.owner.requireCurrent() }
 func (r postgresRunner) query() queryer   { return r.owner.backend }
@@ -125,6 +128,8 @@ func (r postgresRunner) publishChannelChange(acknowledged bool, demand render.Re
 }
 
 type sqliteRunner struct{ owner *SQLiteOwner }
+
+func (r sqliteRunner) deployment() bool { return false }
 
 func (r sqliteRunner) require() error   { return r.owner.requireCurrent() }
 func (r sqliteRunner) query() queryer   { return r.owner.backend }
@@ -155,13 +160,16 @@ func reserve(ctx context.Context, r runner, req domain.StartRequest) (domain.Ope
 	if err := req.Validate(); err != nil {
 		return domain.Operation{}, err
 	}
+	if req.DeploymentRegistration != r.deployment() {
+		return domain.Operation{}, domain.ErrInvalidRequest
+	}
 	if _, err := uuid.Parse(req.OperationID); err != nil {
 		return domain.Operation{}, fmt.Errorf("%w: operation_id must be a UUID", domain.ErrInvalidRequest)
 	}
 	req.RequestedAt = canonicalTime(req.RequestedAt)
 	var out domain.Operation
 	err := r.mutate(ctx, "reserve channel onboarding", func(txctx context.Context, tx *sql.Tx) error {
-		existing, found, err := loadOperationByRequestKey(txctx, tx, r.dialect(), req.RequestKeyHash, true)
+		existing, found, err := loadOperationByRequestKey(txctx, tx, r.dialect(), req.RequestKeyHash, true, r.deployment())
 		if err != nil {
 			return err
 		}
@@ -173,7 +181,7 @@ func reserve(ctx context.Context, r runner, req domain.StartRequest) (domain.Ope
 			return nil
 		}
 		var active string
-		err = tx.QueryRowContext(txctx, r.dialect().bind(`SELECT operation_id FROM channel_onboarding_operations WHERE slot_key=? AND phase NOT IN ('succeeded','failed','retired') LIMIT 1`), req.SlotKey()).Scan(&active)
+		err = tx.QueryRowContext(txctx, r.dialect().bind(`SELECT operation_id FROM `+operationTable(r.deployment())+` WHERE slot_key=? AND phase NOT IN ('succeeded','failed','retired') LIMIT 1`), req.SlotKey()).Scan(&active)
 		if err == nil {
 			return domain.ErrConflict
 		}
@@ -190,7 +198,7 @@ func reserve(ctx context.Context, r runner, req domain.StartRequest) (domain.Ope
 		if req.Posture == domain.ActivationSessionConnection {
 			connectionID = uuid.NewString()
 		}
-		_, err = tx.ExecContext(txctx, r.dialect().bind(`INSERT INTO channel_onboarding_operations (
+		_, err = tx.ExecContext(txctx, r.dialect().bind(`INSERT INTO `+operationTable(r.deployment())+` (
 			operation_id,request_key_hash,request_hash,slot_key,principal_id,verb,provider,
 			interface_key,interface_ref,channel_pack_id,channel_pack_version,channel_manifest_hash,semantic_generation,
 			bundle_hash,bundle_identity,pack_inventory_generation,runtime_instance_id,context_publication_generation,plan_generation,
@@ -199,13 +207,18 @@ func reserve(ctx context.Context, r runner, req domain.StartRequest) (domain.Ope
 		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,1,?,'[]',?,?,?,?)`),
 			req.OperationID, req.RequestKeyHash, req.RequestHash, req.SlotKey(), req.PrincipalID, string(req.Verb), req.Provider,
 			i.Key(), i.InterfaceRef, i.ChannelPackID, i.ChannelPackVersion, i.ChannelManifestHash, i.SemanticGeneration,
-			c.BundleHash, c.BundleIdentity, c.PackInventoryGeneration, c.RuntimeInstanceID, c.ContextPublicationGeneration, c.PlanGeneration.Diagnostic(),
+			nullable(c.BundleHash), c.BundleIdentity, c.PackInventoryGeneration, nullable(c.RuntimeInstanceID), c.ContextPublicationGeneration, c.PlanGeneration.Diagnostic(),
 			req.TargetSelector, c.TargetGeneration, string(req.Posture), string(req.Ceremony), string(domain.PhasePreparing), req.SaveProof, req.ClientLanguage, string(reservations),
 			nullable(connectionID), req.ConnectFenceRevision, req.RequestedAt, req.RequestedAt)
 		if err != nil {
 			return fmt.Errorf("insert channel onboarding operation: %w", err)
 		}
-		out, _, err = loadOperation(txctx, tx, r.dialect(), req.OperationID, false)
+		if r.deployment() {
+			if _, err := tx.ExecContext(txctx, r.dialect().bind(`UPDATE deployment_channel_operations SET expected_account=? WHERE operation_id=?`), req.ExpectedAccount, req.OperationID); err != nil {
+				return err
+			}
+		}
+		out, _, err = loadOperation(txctx, tx, r.dialect(), req.OperationID, false, r.deployment())
 		return err
 	})
 	return out, err
@@ -229,7 +242,7 @@ func listOperations(ctx context.Context, r runner) ([]domain.Operation, error) {
 	if err := r.require(); err != nil {
 		return nil, err
 	}
-	rows, err := r.query().QueryContext(ctx, operationSelect+` ORDER BY requested_at,operation_id`)
+	rows, err := r.query().QueryContext(ctx, operationQuery(r.deployment())+` ORDER BY requested_at,operation_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +262,7 @@ func getOperation(ctx context.Context, r runner, operationID string) (domain.Ope
 	if err := r.require(); err != nil {
 		return domain.Operation{}, err
 	}
-	op, found, err := loadOperation(ctx, r.query(), r.dialect(), operationID, false)
+	op, found, err := loadOperation(ctx, r.query(), r.dialect(), operationID, false, r.deployment())
 	if err != nil {
 		return domain.Operation{}, err
 	}
@@ -273,6 +286,9 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 	if strings.TrimSpace(req.OperationID) == "" || req.ExpectedRevision < 1 || !req.Phase.Valid() || req.Now.IsZero() {
 		return domain.Operation{}, domain.ErrInvalidRequest
 	}
+	if req.ConfirmAccount && !r.deployment() {
+		return domain.Operation{}, domain.ErrInvalidRequest
+	}
 	for _, admission := range req.CredentialAdmissions {
 		if err := admission.Validate(); err != nil {
 			return domain.Operation{}, err
@@ -283,7 +299,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			return domain.Operation{}, fmt.Errorf("%w: %v", domain.ErrInvalidRequest, err)
 		}
 	}
-	if req.BindingRevision > 0 && !slices.Contains([]domain.Phase{domain.PhaseAwaitingOperatorConfirmation, domain.PhasePublishingActivation}, req.Phase) {
+	if req.BindingRevision > 0 && !(r.deployment() && req.Phase == domain.PhaseSucceeded) && !slices.Contains([]domain.Phase{domain.PhaseAwaitingOperatorConfirmation, domain.PhasePublishingActivation}, req.Phase) {
 		return domain.Operation{}, domain.ErrInvalidRequest
 	}
 	if req.RebindCoordinate != nil {
@@ -297,7 +313,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 	var changed render.ReconcileDemand
 	acknowledged, err := r.mutateOutcome(ctx, "advance channel onboarding", func(txctx context.Context, tx *sql.Tx) error {
 		changed = 0
-		op, found, err := loadOperation(txctx, tx, r.dialect(), req.OperationID, true)
+		op, found, err := loadOperation(txctx, tx, r.dialect(), req.OperationID, true, r.deployment())
 		if err != nil {
 			return err
 		}
@@ -342,8 +358,25 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		} else if req.ClearConfirmationOperationID {
 			return domain.ErrInvalidRequest
 		}
-		if err := op.Coordinate.ValidateForPhase(req.Phase, op.Posture); err != nil {
-			return fmt.Errorf("%w: %v", domain.ErrInvalidRequest, err)
+		if !op.DeploymentRegistration {
+			if err := op.Coordinate.ValidateForPhase(req.Phase, op.Posture); err != nil {
+				return fmt.Errorf("%w: %v", domain.ErrInvalidRequest, err)
+			}
+		}
+		if req.AccountReference != "" {
+			ref := domain.AccountReference{Provider: op.Provider, Account: req.AccountReference}
+			if !op.DeploymentRegistration || op.Phase != domain.PhaseActivatingProvider || req.Phase != domain.PhaseAwaitingExternalIdentity ||
+				ref.Validate() != nil || op.AccountReference != "" && op.AccountReference != ref.Account ||
+				op.ExpectedAccount != "" && op.ExpectedAccount != ref.Account {
+				return domain.ErrConflict
+			}
+			op.AccountReference = ref.Account
+		}
+		if req.ConfirmAccount {
+			if op.Phase != domain.PhaseAwaitingExternalIdentity || req.Phase != op.Phase || op.AccountReference == "" {
+				return domain.ErrInvalidRequest
+			}
+			op.AccountConfirmed = true
 		}
 		if req.ReplaceCredentialAdmissions {
 			op.CredentialAdmissions = append([]domain.CredentialAdmission(nil), req.CredentialAdmissions...)
@@ -412,6 +445,15 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 }
 
 func validTransition(op domain.Operation, req domain.AdvanceRequest) bool {
+	if op.DeploymentRegistration {
+		if req.RebindCoordinate != nil || req.SourceRollover != nil || req.BeginOperatorEnrollment || req.Phase == domain.PhasePublishingActivation ||
+			req.Phase == domain.PhasePublishingProcessActivation || req.Phase == domain.PhasePromotingRegistration || req.Phase == domain.PhaseRetiringPredecessor || req.Phase == domain.PhaseDeliveringConfirmation {
+			return false
+		}
+		if req.Phase == domain.PhaseSucceeded {
+			return op.Phase == domain.PhaseAwaitingOperatorConfirmation && op.AccountReference != "" && op.AccountConfirmed
+		}
+	}
 	if req.SourceRollover != nil {
 		return true // The source-rollover transaction validates its exact admission.
 	}
@@ -943,18 +985,18 @@ const operationSelect = `SELECT operation_id,request_key_hash,request_hash,slot_
 	bundle_hash,bundle_identity,pack_inventory_generation,runtime_instance_id,context_publication_generation,plan_generation,
 	target_selector,target_generation,activation_posture,identity_ceremony,phase,operation_revision,save_proof,client_language,client_locale_revision,
 	credential_reservations,credential_admissions,session_connection_id,session_account_admission,identity_operation_id,binding_revision,connect_fence_revision,activation_revision,confirmation_operation_id,
-	failure_code,failure_message,requested_at,updated_at,completed_at FROM channel_onboarding_operations`
+	failure_code,failure_message,requested_at,updated_at,completed_at,FALSE,'','',FALSE FROM channel_onboarding_operations`
 
-func loadOperationByRequestKey(ctx context.Context, q queryer, d dialect, key string, lock bool) (domain.Operation, bool, error) {
-	query := operationSelect + ` WHERE request_key_hash=?`
+func loadOperationByRequestKey(ctx context.Context, q queryer, d dialect, key string, lock bool, deployment ...bool) (domain.Operation, bool, error) {
+	query := operationQuery(len(deployment) == 1 && deployment[0]) + ` WHERE request_key_hash=?`
 	if lock && d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
 	return scanOperationRow(q.QueryRowContext(ctx, d.bind(query), key))
 }
 
-func loadOperation(ctx context.Context, q queryer, d dialect, operationID string, lock bool) (domain.Operation, bool, error) {
-	query := operationSelect + ` WHERE operation_id=?`
+func loadOperation(ctx context.Context, q queryer, d dialect, operationID string, lock bool, deployment ...bool) (domain.Operation, bool, error) {
+	query := operationQuery(len(deployment) == 1 && deployment[0]) + ` WHERE operation_id=?`
 	if lock && d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
@@ -987,7 +1029,7 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 		&op.Interface.InterfaceRef, &op.Interface.ChannelPackID, &op.Interface.ChannelPackVersion, &op.Interface.ChannelManifestHash, &op.Interface.SemanticGeneration,
 		&op.Coordinate.BundleHash, &op.Coordinate.BundleIdentity, &op.Coordinate.PackInventoryGeneration, &op.Coordinate.RuntimeInstanceID, &op.Coordinate.ContextPublicationGeneration, &planGeneration,
 		&op.TargetSelector, &op.Coordinate.TargetGeneration, &posture, &ceremony, &phase, &op.Revision, &op.SaveProof, &op.ClientLanguage, &op.ClientLocaleRevision,
-		&reservations, &admissions, &connection, &session, &identityOp, &bindingRevision, &op.ConnectFenceRevision, &activationRevision, &confirmationOp, &failureCode, &failureMessage, &requested, &updated, &completed)
+		&reservations, &admissions, &connection, &session, &identityOp, &bindingRevision, &op.ConnectFenceRevision, &activationRevision, &confirmationOp, &failureCode, &failureMessage, &requested, &updated, &completed, &op.DeploymentRegistration, &op.AccountReference, &op.ExpectedAccount, &op.AccountConfirmed)
 	if err == sql.ErrNoRows {
 		return domain.Operation{}, false, nil
 	}
@@ -998,12 +1040,16 @@ func scanOperationRow(row rowScanner) (domain.Operation, bool, error) {
 	if op.ConnectFenceRevision < 0 || op.Verb != domain.VerbConnect && op.ConnectFenceRevision != 0 {
 		return domain.Operation{}, false, fmt.Errorf("decode channel onboarding predecessor fence: %w", domain.ErrRevisionConflict)
 	}
-	op.Coordinate.PlanGeneration, err = plangeneration.Parse(planGeneration)
-	if err != nil {
-		return domain.Operation{}, false, fmt.Errorf("decode channel onboarding plan generation: %w", err)
-	}
-	if err := op.Coordinate.ValidateForPhase(op.Phase, op.Posture); err != nil {
-		return domain.Operation{}, false, fmt.Errorf("decode channel onboarding coordinate: %w", err)
+	if !op.DeploymentRegistration {
+		op.Coordinate.PlanGeneration, err = plangeneration.Parse(planGeneration)
+		if err != nil {
+			return domain.Operation{}, false, fmt.Errorf("decode channel onboarding plan generation: %w", err)
+		}
+		if err := op.Coordinate.ValidateForPhase(op.Phase, op.Posture); err != nil {
+			return domain.Operation{}, false, fmt.Errorf("decode channel onboarding coordinate: %w", err)
+		}
+	} else if planGeneration != "" {
+		return domain.Operation{}, false, domain.ErrInvalidRequest
 	}
 	op.Interface = op.Interface.Normalized()
 	if err := json.Unmarshal([]byte(reservations), &op.CredentialReservations); err != nil {
@@ -1048,12 +1094,15 @@ func updateOperation(ctx context.Context, tx *sql.Tx, d dialect, op domain.Opera
 		return err
 	}
 	c := op.Coordinate.Normalized()
-	_, err = tx.ExecContext(ctx, d.bind(`UPDATE channel_onboarding_operations SET
+	_, err = tx.ExecContext(ctx, d.bind(`UPDATE `+operationTable(op.DeploymentRegistration)+` SET
 		bundle_hash=?,bundle_identity=?,pack_inventory_generation=?,runtime_instance_id=?,context_publication_generation=?,plan_generation=?,target_generation=?,
 		slot_key=?,phase=?,operation_revision=?,credential_admissions=?,session_account_admission=?,identity_operation_id=?,binding_revision=?,activation_revision=?,confirmation_operation_id=?,failure_code=?,failure_message=?,updated_at=?,completed_at=?
 		WHERE operation_id=?`),
-		c.BundleHash, c.BundleIdentity, c.PackInventoryGeneration, c.RuntimeInstanceID, c.ContextPublicationGeneration, c.PlanGeneration.Diagnostic(), c.TargetGeneration,
+		nullable(c.BundleHash), c.BundleIdentity, c.PackInventoryGeneration, nullable(c.RuntimeInstanceID), c.ContextPublicationGeneration, c.PlanGeneration.Diagnostic(), c.TargetGeneration,
 		op.SlotKey, string(op.Phase), op.Revision, string(admissions), session, nullable(op.IdentityOperationID), nullableInt(op.BindingRevision), nullableInt(op.ActivationRevision), nullable(op.ConfirmationOperationID), nullable(op.FailureCode), nullable(op.FailureMessage), op.UpdatedAt, nullableTime(op.CompletedAt), op.OperationID)
+	if err == nil && op.DeploymentRegistration {
+		_, err = tx.ExecContext(ctx, d.bind(`UPDATE deployment_channel_operations SET account_reference=?,account_confirmed=? WHERE operation_id=?`), op.AccountReference, op.AccountConfirmed, op.OperationID)
+	}
 	return err
 }
 

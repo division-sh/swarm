@@ -33,9 +33,9 @@ func openSDKStoreFixture(t *testing.T, path string) (*sessionstate.Fixture, *ses
 	return fixture, owner
 }
 
-func newSDKDeviceFixture(t *testing.T, container *sessionstate.Owner) *store.Device {
+func newSDKDeviceFixture(t *testing.T, container *sessionstate.Owner, account ...types.JID) *store.Device {
 	t.Helper()
-	return whatsappfixture.PairedDevice(t, container)
+	return whatsappfixture.PairedDevice(t, container, account...)
 }
 
 func TestWhatsAppPrivateSDKCapabilitiesCannotExportContainerAdministration(t *testing.T) {

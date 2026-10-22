@@ -70,6 +70,9 @@ func (c *RuntimeConnection) receive(ctx context.Context, raw any) (err error) {
 		return nil
 	}
 	if c.incoming == nil {
+		if c.operation.DeploymentRegistration {
+			return errIncomingAdmissionPending
+		}
 		return errRuntimeIngressUnavailable
 	}
 	work, err := c.begin(ctx)

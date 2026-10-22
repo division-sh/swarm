@@ -33,12 +33,19 @@ var errPairingFailed = errors.New("WhatsApp pairing failed")
 type pairingQRScope struct {
 	PrincipalID, OperationID, ConnectionID, OccurrenceID string
 	Coordinate                                           channelonboarding.ChannelRuntimeContextCoordinate
+	DeploymentRegistration                               bool
 }
 
 func (s pairingQRScope) validate() error {
 	if uuid.Validate(s.PrincipalID) != nil || uuid.Validate(s.OperationID) != nil ||
 		uuid.Validate(s.ConnectionID) != nil || uuid.Validate(s.OccurrenceID) != nil {
 		return errPairingScope
+	}
+	if s.DeploymentRegistration {
+		if s.Coordinate != (channelonboarding.ChannelRuntimeContextCoordinate{}) {
+			return errPairingScope
+		}
+		return nil
 	}
 	return s.Coordinate.ValidateContext()
 }

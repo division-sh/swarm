@@ -42,9 +42,19 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 			if strings.Contains(out.String(), "cd ./bot") {
 				t.Fatalf("output %q retains the retired nested source-root handoff", out.String())
 			}
-			for _, wrapper := range []string{"bot", "automation", "swarm.yaml", "swarm.live.yaml", ".swarm"} {
+			for _, wrapper := range []string{"bot", "automation", "swarm.yaml", "swarm.live.yaml"} {
 				if _, err := os.Stat(filepath.Join(destination, wrapper)); !os.IsNotExist(err) {
 					t.Fatalf("scaffold retains redundant %s wrapper: %v", wrapper, err)
+				}
+			}
+			loaded, err := loadUnifiedConfig(unifiedConfigLoadOptions{RepoRoot: destination})
+			if err != nil || loaded.Source != unifiedConfigSourceDeployment || loaded.Config.Store.Backend != "sqlite" {
+				t.Fatalf("scaffold lacks a valid selected deployment config: %v", err)
+			}
+			for _, private := range []string{".swarm", ".swarm/swarm.yaml", ".swarm/api-token"} {
+				info, err := os.Stat(filepath.Join(destination, private))
+				if err != nil || info.Mode().Perm()&0o077 != 0 {
+					t.Fatalf("generated deployment file is missing or not private: %s", private)
 				}
 			}
 			for _, command := range []string{"swarm verify . --portable", "swarm serve", "swarm test"} {
@@ -147,6 +157,9 @@ func assertArchetypeTreeEqual(t *testing.T, wantFS fs.FS, wantRoot, gotRoot stri
 	if err != nil {
 		t.Fatalf("read scaffolded archetype: %v", err)
 	}
+	want[".gitignore"] = append(want[".gitignore"], []byte("\n.swarm/\n")...)
+	delete(got, ".swarm/swarm.yaml")
+	delete(got, ".swarm/api-token")
 	if len(got) != len(want) {
 		t.Fatalf("scaffold file count = %d, want %d", len(got), len(want))
 	}

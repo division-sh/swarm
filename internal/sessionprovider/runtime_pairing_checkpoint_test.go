@@ -5,17 +5,20 @@ package sessionprovider
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/google/uuid"
+	"go.mau.fi/whatsmeow/types"
 )
 
 // Only the SDK's persisted paired device and authenticated transport are fixture
 // inputs. Onboarding and native account admission use the actual selected owners.
-func pairedBootstrapStateFixture(t *testing.T, f *runtimeBootstrapFixture, op channelonboarding.Operation) string {
+func pairedBootstrapStateFixture(t *testing.T, f *runtimeBootstrapFixture, op channelonboarding.Operation, expected ...types.JID) string {
 	t.Helper()
 	if err := f.connection.Close(context.Background()); err != nil {
 		t.Fatal(err)
@@ -24,7 +27,7 @@ func pairedBootstrapStateFixture(t *testing.T, f *runtimeBootstrapFixture, op ch
 	if err != nil {
 		t.Fatal(err)
 	}
-	device := newSDKDeviceFixture(t, state.database)
+	device := newSDKDeviceFixture(t, state.database, expected...)
 	account := device.ID.ToNonAD().String()
 	if err := state.close(context.Background()); err != nil {
 		t.Fatal(err)
@@ -80,6 +83,105 @@ func TestWhatsAppSessionIdentityUsesNativeAdmissionBothStores(t *testing.T) {
 
 func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend+"/deployment_invocation", func(t *testing.T) {
+			f := newRuntimeBootstrapFixture(t, backend)
+			ctx := f.peer.ctx // No runtime occurrence or source fact is carried.
+			process := worklifetime.NewProcess()
+			operations := f.store.(interface {
+				DeploymentChannelOperations() channelonboarding.OperationStore
+			}).DeploymentChannelOperations()
+			op, err := operations.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{
+				DeploymentRegistration: true, OperationID: uuid.NewString(), PrincipalID: f.principal.ID,
+				RequestKeyHash: "deployment-checkpoint-key", RequestHash: "deployment-checkpoint-request",
+				Verb: channelonboarding.VerbConnect, Provider: "whatsapp", Interface: f.candidate.Interface,
+				Posture: channelonboarding.ActivationSessionConnection, Ceremony: channelonboarding.CeremonyAccountLink,
+				RequestedAt: time.Now().UTC(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseCredentialsAdmitted, channelonboarding.PhaseActivatingProvider} {
+				op, err = operations.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: op.OperationID,
+					ExpectedRevision: op.Revision, Phase: phase, Now: time.Now().UTC()})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			opts := DeploymentConnectionOptions{Directory: f.directory, OperationID: op.OperationID, Principal: f.principal,
+				Process: process, Operations: operations, Store: f.store, Plan: f.candidate.Plan}
+			f.connection, err = OpenDeploymentConnection(ctx, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := f.connection.Close(context.Background()); err != nil {
+					t.Error(err)
+				}
+				process.Retire()
+				if _, err := process.Join(context.Background()); err != nil {
+					t.Error(err)
+				}
+			})
+			if _, err := OpenDeploymentConnection(ctx, opts); err == nil {
+				t.Fatal("a second invocation obtained the same private device")
+			}
+			f.peer.attach(t, f.connection.state.currentOccurrence().client)
+			if err := f.connection.Connect(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.connection.PairingReadback(ctx, f.principal); err != nil {
+				t.Fatal("deployment QR readback demanded runtime authority", err)
+			}
+			if _, paired, err := f.connection.CheckpointPairing(ctx, op.Revision); err != nil || paired {
+				t.Fatal("unpaired invocation created an account", paired, err)
+			}
+			if _, err := f.connection.ChannelExecution(ctx); err == nil {
+				t.Fatal("deployment pairing granted runtime execution")
+			}
+			account := pairedBootstrapStateFixture(t, f, op, types.NewJID("15550100123", types.DefaultUserServer))
+			ctx = f.peer.ctx
+			f.connection, err = OpenDeploymentConnection(ctx, opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.peer.attach(t, f.connection.state.currentOccurrence().client)
+			if err := f.connection.Connect(ctx); err != nil || !f.connection.state.currentOccurrence().client.WaitForConnection(5*time.Second) {
+				t.Fatal("retained deployment device did not authenticate", err)
+			}
+			checkpoint, paired, err := f.connection.CheckpointPairing(ctx, op.Revision)
+			if err != nil || !paired || checkpoint.AccountReference != "+"+strings.TrimSuffix(account, "@s.whatsapp.net") ||
+				checkpoint.Phase != channelonboarding.PhaseAwaitingExternalIdentity || checkpoint.ActivationRevision != 0 ||
+				checkpoint.AccountConfirmed || checkpoint.Coordinate != (channelonboarding.ChannelRuntimeContextCoordinate{}) {
+				t.Fatal("deployment checkpoint lost account identity or manufactured activation", paired, err)
+			}
+			candidate := f.candidate
+			candidate.DeploymentRegistration, candidate.Ceremony = true, channelonboarding.CeremonyAccountLink
+			candidate.Coordinate, candidate.Target = channelonboarding.ChannelRuntimeContextCoordinate{}, channelonboarding.CandidateTarget{}
+			candidate.ConfirmationOperation = ""
+			catalog, err := channelonboarding.NewCandidateCatalog([]channelonboarding.Candidate{candidate})
+			if err != nil {
+				t.Fatal(err)
+			}
+			service, err := channelonboarding.NewService(channelonboarding.ServiceOptions{Deployment: true, Store: f.store,
+				Operations: operations, Identities: f.channels, Credentials: f.writer, Sessions: f,
+				Catalog: func() (*channelonboarding.CandidateCatalog, error) { return catalog, nil }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			preview, err := service.Get(ctx, checkpoint.OperationID)
+			if err != nil || preview.Operation.AccountConfirmed || preview.Operation.Revision != checkpoint.Revision {
+				t.Fatal("readback approved the retained preview", err)
+			}
+			registered, err := service.Retry(ctx, channelonboarding.RetryInput{OperationID: checkpoint.OperationID})
+			if err != nil || registered.Operation.Phase != channelonboarding.PhaseSucceeded || !registered.Operation.AccountConfirmed ||
+				registered.Readiness != nil || registered.Binding != nil || registered.Operation.ActivationRevision != 0 {
+				t.Fatal("registration required or fabricated runtime activation", err)
+			}
+			replay, err := service.Retry(ctx, channelonboarding.RetryInput{OperationID: checkpoint.OperationID})
+			if err != nil || replay.Operation.Revision != registered.Operation.Revision {
+				t.Fatal("registered replay restarted the ceremony", err)
+			}
+		})
 		t.Run(backend, func(t *testing.T) {
 			f := newRuntimeBootstrapFixture(t, backend)
 			started, err := f.service.Start(f.ctx, channelonboarding.StartInput{Verb: channelonboarding.VerbConnect,
