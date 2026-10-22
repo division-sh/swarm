@@ -412,6 +412,7 @@ component_scaffold.spawn_requested:
 func CopyProviderRollback(t testing.TB, withHandler bool) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectOrCreate)
+	removeClosedVariantFiles(t, root, "events.yaml")
 	nodes := ""
 	if withHandler {
 		nodes = "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    inbound.telegram.text_message: {}\n"
@@ -424,7 +425,8 @@ platform_version: ">=0.7.0 <0.8.0"
 		"schema.yaml": `# fixture: provider-rollback-proof
 pins:
   inputs:
-    - inbound.telegram
+    - inbound.telegram.raw
+    - inbound.telegram.text_message
   outputs:
     - inbound.telegram.text_message
 connect:
@@ -433,7 +435,15 @@ connect:
     to: consumer
     resolution: select-or-create
 `,
-		"events.yaml": "inbound.telegram:\n  raw: boolean\ninbound.telegram.text_message:\n  chat_id: text\n",
+		"telegram/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n",
+		"telegram/trigger.yaml": `secret: {required: true}
+signature: {type: token_equality, header: X-Telegram-Token}
+event_name: {literal: raw}
+normalized_events:
+  - event: text_message
+    fields:
+      chat_id: {from: chat_id, schema: {type: string}}
+`,
 		"consumer/schema.yaml": `# fixture: consumer
 instance: chat_id
 pins:
@@ -458,18 +468,17 @@ func CopyProviderRollbackRenamedSource(t testing.TB, withCarrier bool) string {
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"),
 		"    resolution: select-or-create\n",
 		"    resolution: select-or-create\n    key_from: payload.external_chat_id\n")
-	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
-		"inbound.telegram.text_message:\n  chat_id: text\n",
-		"inbound.telegram.text_message:\n  chat_id: text\n  external_chat_id: text\n")
+	applyClosedReplacement(t, filepath.Join(root, "telegram", "trigger.yaml"),
+		"      chat_id: {from: chat_id, schema: {type: string}}\n",
+		"      chat_id: {from: chat_id, schema: {type: string}}\n      external_chat_id: {from: external_chat_id, schema: {type: string}}\n")
 	return root
 }
 
 func CopyProviderRollbackInvalidSourceType(t testing.TB) string {
 	t.Helper()
 	root := CopyProviderRollback(t, true)
-	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
-		"inbound.telegram.text_message:\n  chat_id: text\n",
-		"inbound.telegram.text_message:\n  chat_id: integer\n")
+	applyClosedReplacement(t, filepath.Join(root, "telegram", "trigger.yaml"),
+		"schema: {type: string}", "schema: {type: integer}")
 	return root
 }
 
@@ -490,16 +499,17 @@ func CopyProviderRollbackSyntheticCollision(t testing.TB, mint CreateMint) strin
 		"    resolution: create\n    key_from: "+source+"\n")
 	applyClosedReplacement(t, filepath.Join(root, "consumer", "entities.yaml"),
 		"    type: text", "    type: uuid")
-	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
-		"  chat_id: text", "  chat_id: uuid")
+	applyClosedReplacement(t, filepath.Join(root, "telegram", "trigger.yaml"),
+		"schema: {type: string}", "schema: {type: string, format: uuid}")
 	return root
 }
 
 func CopyProviderRollbackSyntheticProjection(t testing.TB, mint CreateMint) string {
 	t.Helper()
 	root := CopyProviderRollbackSyntheticCollision(t, mint)
-	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
-		"  chat_id: uuid", "  message: text")
+	applyClosedReplacement(t, filepath.Join(root, "telegram", "trigger.yaml"),
+		"      chat_id: {from: chat_id, schema: {type: string, format: uuid}}",
+		"      message: {from: message, schema: {type: string}}")
 	return root
 }
 

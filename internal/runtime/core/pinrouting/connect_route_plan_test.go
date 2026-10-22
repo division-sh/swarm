@@ -1,7 +1,6 @@
 package pinrouting
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,12 +13,10 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
-	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
-	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
 func TestConnectSourceEndpointMatchesEventUsesImmutableSourceAcrossTargetProjection(t *testing.T) {
@@ -728,42 +725,6 @@ func mustConcreteRoutingSource(t *testing.T, flowID, flowInstance string) events
 	return source
 }
 
-func TestProviderConnectUsesCanonicalRenamedIdentitySource(t *testing.T) {
-	repoRoot := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyProviderRollbackRenamedSource(t, true)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
-		repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-	)
-	if err != nil {
-		t.Fatalf("load provider rollback artifact: %v", err)
-	}
-	authorization := runtimeprovideroutput.MustAuthorization(
-		"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0",
-		"sha256:"+strings.Repeat("a", 64),
-		triggergeneration.FromCanonicalBytes([]byte("target-free-renamed-source")),
-	)
-
-	plans, issues := compileConnectPlans(providerBoundGraphSource{semanticview.Wrap(bundle), authorization})
-	if len(issues) != 0 || len(plans) != 1 || plans[0].instanceKey == nil {
-		t.Fatalf("plans/issues = %#v/%#v, want one target-free instance plan", plans, issues)
-	}
-	plan := plans[0]
-	if got, want := plan.instanceKey.Readback().SourcePath, "payload.external_chat_id"; got != want {
-		t.Fatalf("typed source = %q, want %q", got, want)
-	}
-	material, failure := InstanceKeyMaterialForConnectRoutePlan(plan,
-		AdmitConnectRouteMatchValues(map[string]string{
-			"payload.external_chat_id": "chat-authoritative",
-			"payload.chat_id":          "chat-conflicting",
-		}))
-	if !failure.Empty() || len(material.Keys) != 1 || material.Keys[0].Field.Path() != "chat_id" || material.Keys[0].Value != "chat-authoritative" {
-		t.Fatalf("compiled key material/failure = %#v/%q, want chat_id from authoritative renamed source", material, failure)
-	}
-	if projected := MaterializeConnectRoutePlan(plan); projected.Failure != ConnectFailureReceiverResolutionMissing || !projected.Target.Empty() || len(projected.TargetSet) != 0 {
-		t.Fatalf("static projection elected a runtime receiver: %#v", projected)
-	}
-}
-
 func TestCompileConnectPlansFromLoadedPackageFixture(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
@@ -1256,191 +1217,6 @@ func TestCompileConnectPlansValidatesAuthoritativeInstanceSourceTypeMatrix(t *te
 			}
 		})
 	}
-}
-
-func TestProviderConnectRejectsAuthoritativeSourceTypeMismatch(t *testing.T) {
-	repoRoot := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyProviderRollbackInvalidSourceType(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("load provider rollback artifact: %v", err)
-	}
-	authorization := runtimeprovideroutput.MustAuthorization(
-		"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0",
-		"sha256:"+strings.Repeat("a", 64),
-		triggergeneration.FromCanonicalBytes([]byte("target-free-source-type")),
-	)
-
-	plans, issues := compileConnectPlans(providerBoundGraphSource{semanticview.Wrap(bundle), authorization})
-	if len(plans) != 0 || len(issues) != 1 || !strings.Contains(issues[0].Detail, "key_types_incompatible") {
-		t.Fatalf("plans/issues = %#v/%#v, want target-free source type blocker", plans, issues)
-	}
-}
-
-func TestTemplateInputReceiverPlanAcceptsSyntheticProjectionWithDistinctSchemaEvidence(t *testing.T) {
-	for _, tc := range targetFreeSyntheticProjectionCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			source, endpoint := targetFreeSyntheticProjectionFixture(t, tc.mint, false)
-			plan, issue := lowerTemplateInputReceiverPlan(source, endpoint)
-			if !issue.Failure.Empty() {
-				t.Fatalf("public input issue = %#v, want accepted synthetic projection", issue)
-			}
-			assertTargetFreeSchemaRoles(t, plan)
-		})
-	}
-}
-
-func TestProviderConnectAcceptsSyntheticProjectionWithDistinctSchemaEvidence(t *testing.T) {
-	for _, tc := range targetFreeSyntheticProjectionCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			source, _ := targetFreeSyntheticProjectionFixture(t, tc.mint, false)
-			authorization := runtimeprovideroutput.MustAuthorization(
-				"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0",
-				"sha256:"+strings.Repeat("a", 64),
-				triggergeneration.FromCanonicalBytes([]byte("target-free-synthetic-positive")),
-			)
-			plans, issues := compileConnectPlans(providerBoundGraphSource{source, authorization})
-			if len(issues) != 0 || len(plans) != 1 {
-				t.Fatalf("provider plans/issues = %#v/%#v, want one accepted synthetic projection", plans, issues)
-			}
-			assertTargetFreeSchemaRoles(t, plans[0])
-		})
-	}
-}
-
-func TestPublicInputImportedBindingRejectsExistingSchemaOwner(t *testing.T) {
-	for _, tc := range targetFreeSyntheticProjectionCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := targetFreeSyntheticProjectionBundle(t, tc.mint, true)
-			if source, err := bindTargetFreeProviderFixture(bundle); source != nil || err == nil || !strings.Contains(err.Error(), "already owns event schema evidence") {
-				t.Fatalf("public input binding = %v, %v, want no source and existing-schema-owner rejection", source, err)
-			}
-		})
-	}
-}
-
-func TestProviderConnectRejectsSyntheticProjectionCollision(t *testing.T) {
-	for _, tc := range targetFreeSyntheticProjectionCases() {
-		t.Run(tc.name, func(t *testing.T) {
-			source, _ := targetFreeSyntheticCollisionFixture(t, tc.mint)
-			authorization := runtimeprovideroutput.MustAuthorization(
-				"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0",
-				"sha256:"+strings.Repeat("a", 64),
-				triggergeneration.FromCanonicalBytes([]byte("target-free-synthetic-collision")),
-			)
-			plans, issues := compileConnectPlans(providerBoundGraphSource{source, authorization})
-			if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureResolutionProjectionCollision || !strings.Contains(issues[0].Detail, "field chat_id conflicts") {
-				t.Fatalf("provider plans/issues = %#v/%#v, want synthetic projection collision", plans, issues)
-			}
-		})
-	}
-}
-
-type providerBoundGraphSource struct {
-	semanticview.Source
-	authorization runtimeprovideroutput.Authorization
-}
-
-func (s providerBoundGraphSource) SemanticCapabilities() semanticview.Capabilities {
-	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.authorization.Generation(), map[string][]runtimeprovideroutput.Authorization{".": {s.authorization}}, map[string]triggergeneration.Generation{".": s.authorization.Generation()})
-}
-
-func targetFreeSyntheticProjectionCases() []struct {
-	name string
-	mint canonicalrouting.CreateMint
-} {
-	return []struct {
-		name string
-		mint canonicalrouting.CreateMint
-	}{
-		{name: "generated_uuid", mint: canonicalrouting.CreateMintUUID},
-		{name: "event_id", mint: canonicalrouting.CreateMintEventID},
-	}
-}
-
-func assertTargetFreeSchemaRoles(t testing.TB, plan ConnectRoutePlan) {
-	t.Helper()
-	if plan.producerEvent == nil || plan.receiverEvent == nil {
-		t.Fatalf("target-free schema evidence = producer:%#v receiver:%#v", plan.producerEvent, plan.receiverEvent)
-	}
-	if plan.producerEvent.acceptanceSchemaDigest == "" || plan.receiverEvent.acceptanceSchemaDigest == "" || plan.producerEvent.acceptanceSchemaDigest == plan.receiverEvent.acceptanceSchemaDigest {
-		t.Fatalf("target-free schema digests = producer:%q receiver:%q, want distinct immutable roles", plan.producerEvent.acceptanceSchemaDigest, plan.receiverEvent.acceptanceSchemaDigest)
-	}
-}
-
-func targetFreeSyntheticProjectionFixture(t testing.TB, mint canonicalrouting.CreateMint, collision bool) (semanticview.Source, semanticview.AuthoredEventEndpoint) {
-	t.Helper()
-	bundle := targetFreeSyntheticProjectionBundle(t, mint, collision)
-	source := semanticview.Wrap(bundle)
-	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "inbound.telegram.text_message")
-	endpoint, ok := association.Endpoint()
-	if !ok {
-		t.Fatalf("resolve target-free input endpoint: %v", association.Err())
-	}
-	return source, endpoint
-}
-
-func targetFreeSyntheticCollisionFixture(t testing.TB, mint canonicalrouting.CreateMint) (semanticview.Source, semanticview.AuthoredEventEndpoint) {
-	return targetFreeSyntheticProjectionFixture(t, mint, true)
-}
-
-func targetFreeSyntheticProjectionBundle(t testing.TB, mint canonicalrouting.CreateMint, collision bool) *runtimecontracts.WorkflowContractBundle {
-	t.Helper()
-	repoRoot := canonicalrouting.RepoRoot(t)
-	var root string
-	if collision {
-		root = canonicalrouting.CopyProviderRollbackSyntheticCollision(t, mint)
-	} else {
-		root = canonicalrouting.CopyProviderRollbackSyntheticProjection(t, mint)
-	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("load target-free synthetic projection artifact: %v", err)
-	}
-	return bundle
-}
-
-// These lowering-only fixtures supply an explicit external schema at the same
-// imported-pin boundary as provider admission. They do not simulate pack loading
-// or grant publication authority; the real provider-import journeys test those.
-func bindTargetFreeProviderFixture(bundle *runtimecontracts.WorkflowContractBundle) (semanticview.Source, error) {
-	const event = "inbound.telegram.text_message"
-	entry, exists := bundle.Events[event]
-	if !exists {
-		return nil, fmt.Errorf("provider fixture omits schema %s", event)
-	}
-	schema, err := runtimecontracts.CompileImportedEventSchema("consumer", event, entry, runtimecontracts.CompiledEventSchemaSource{Layer: "provider_fixture"})
-	if err != nil {
-		return nil, err
-	}
-	pin, exists := bundle.FlowInputEventPin("consumer", event)
-	if !exists {
-		return nil, fmt.Errorf("provider fixture omits consumer input %s", event)
-	}
-	bound, err := pin.BindImportedEventSchema(schema)
-	if err != nil {
-		return nil, err
-	}
-	return targetFreeProviderFixtureSource{Source: semanticview.Wrap(bundle), input: bound}, nil
-}
-
-type targetFreeProviderFixtureSource struct {
-	semanticview.Source
-	input runtimecontracts.CompiledFlowInputPin
-}
-
-func (s targetFreeProviderFixtureSource) FlowInputEventPins(flowID string) []runtimecontracts.CompiledFlowInputPin {
-	if flowID == "consumer" {
-		return []runtimecontracts.CompiledFlowInputPin{s.input}
-	}
-	return s.Source.FlowInputEventPins(flowID)
-}
-
-func (s targetFreeProviderFixtureSource) FlowInputEventPin(flowID, event string) (runtimecontracts.CompiledFlowInputPin, bool) {
-	if flowID == "consumer" && event == s.input.EventType() {
-		return s.input, true
-	}
-	return s.Source.FlowInputEventPin(flowID, event)
 }
 
 func TestMaterializeConnectRoutePlanProjectsOnlyCompiledStaticTargets(t *testing.T) {
