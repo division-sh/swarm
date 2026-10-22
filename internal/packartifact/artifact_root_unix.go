@@ -78,6 +78,14 @@ func (r *admittedArtifactRoot) close() error {
 	return err
 }
 
+func (r *admittedArtifactRoot) openCapturedDirectory(relative string) (*admittedArtifactRoot, error) {
+	directory, err := r.openDirectory(relative)
+	if err != nil {
+		return nil, err
+	}
+	return &admittedArtifactRoot{directory: directory}, nil
+}
+
 func (r *admittedArtifactRoot) openDirectory(relative string) (*os.File, error) {
 	if r == nil || r.directory == nil {
 		return nil, fmt.Errorf("artifact root is closed")

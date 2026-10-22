@@ -45,10 +45,8 @@ func LoadDevelopmentPlatformPackInventory(runningVersion string, dirs []string, 
 			selected, readErr = selectProviderDirectory(entries, key)
 		}
 		if readErr == nil {
-			var directory *os.File
-			directory, readErr = root.openDirectory(key)
+			captured, readErr = root.openCapturedDirectory(key)
 			if readErr == nil {
-				captured = &admittedArtifactRoot{directory: directory}
 				entries, readErr = captured.readDir(".")
 			}
 		}
