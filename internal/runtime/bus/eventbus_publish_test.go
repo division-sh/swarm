@@ -414,6 +414,7 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 	markTerminal func() error,
 ) {
 	t.Helper()
+	ctx := originalEventBusFixtureContext(t, testAuthorActivityContext(context.Background()), eventStore)
 	eb, err := newScopedTestEventBus(eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -433,7 +434,7 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 		if err != nil {
 			t.Fatalf("load state before duplicate preflight: %v", err)
 		}
-		if _, err := eb.CheckPublishRecipientPlan(testAuthorActivityContext(context.Background()), evt); err != nil {
+		if _, err := eb.CheckPublishRecipientPlan(ctx, evt); err != nil {
 			t.Fatalf("preflight exact duplicate: %v", err)
 		}
 		afterPreflight, err := loadState()
@@ -450,7 +451,7 @@ func assertEventBusExactDuplicateIsOperationNoOp(
 				if err != nil {
 					t.Fatalf("load state before duplicate: %v", err)
 				}
-				if err := publish(testAuthorActivityContext(context.Background()), evt); err != nil {
+				if err := publish(ctx, evt); err != nil {
 					t.Fatalf("publish exact duplicate: %v", err)
 				}
 				after, err := loadState()
@@ -2388,6 +2389,9 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 			if _, err := newScopedTestEventBus(seedStore); err != nil {
 				t.Fatalf("prepare replay seed author activity catalog: %v", err)
 			}
+			if err := storetest.LimitPostgresPublicationFixturePool(context.Background(), seedStore); err != nil {
+				t.Fatal(err)
+			}
 			eventIDs := make([]string, poolSize)
 			runIDs := make([]string, poolSize)
 			seedCtx := originalEventBusFixtureContext(t, testAuthorActivityContext(context.Background()), seedStore)
@@ -2397,15 +2401,11 @@ func TestEventBusPostgresReplayClaimsDoNotExhaustPersistencePool(t *testing.T) {
 				storetest.RequireRun(t, seedCtx, seedStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runIDs[i], BundleHash: authorActivityTestBundleHash})
 				eventIDs[i] = seedReplayPoolEvent(t, seedStore, runIDs[i], decisionRoute)
 			}
-			if err := storetest.LimitPostgresPublicationFixturePool(context.Background(), seedStore); err != nil {
-				t.Fatal(err)
-			}
-
 			claimed := make(chan struct{}, poolSize)
 			release := make(chan struct{})
 			start := make(chan struct{})
 			errs := make(chan error, poolSize)
-			workerContext, cancelWorkers := context.WithCancel(context.Background())
+			workerContext, cancelWorkers := context.WithCancel(seedCtx)
 			var workers sync.WaitGroup
 			var releaseOnce sync.Once
 			defer func() {
@@ -3291,6 +3291,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersis
 }
 
 func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalReceipt(t *testing.T) {
+	fixtureOwner := t
 	pg := storetest.StartPostgresRuntimeStore(t)
 	source := busRuntimeControlSource(t)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
@@ -3354,7 +3355,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 				RunID:      tc.runID,
 				BundleHash: testSourceArtifactFact(source).BundleHash(),
 			})
-			agentIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, tc.runID, agentID, testSourceArtifactFact(source))
+			agentIdentity := seedActiveRuntimeBusAgentForSource(fixtureOwner, ctx, pg, tc.runID, agentID, testSourceArtifactFact(source))
 			subscriptions := []string{string(tc.eventType)}
 			admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
 				AgentID: agentID, LocalEvents: testLocalSubscriptionEvents(subscriptions), Subscriptions: subscriptions,

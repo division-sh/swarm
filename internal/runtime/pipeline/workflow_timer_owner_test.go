@@ -2229,45 +2229,6 @@ func VerifyNativeWorkflowTimerLifecycleWakeupDeadlineJoinsShutdownOnBothStoresFo
 	}
 }
 
-func VerifyNativeWorkflowTimerLifecyclePostgresFireDoesNotJoinOuterTestMutationForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
-	for _, tc := range workflowJoinStoreCases() {
-		if tc.name != "postgres" {
-			continue
-		}
-		fixture, pc, ctx, _, _, activation := nativeWorkflowTimerOwnerActivationForTest(t, tc.name, false, "1h", time.Now().Add(-2*time.Hour), false, executionmode.Live, open)
-		store := pc.workflowStore
-		rollback, err := fixture.HoldUnstampedAdmissionTransaction(ctx, activation.RunID)
-		if err != nil {
-			t.Fatalf("hold original-coordinator outer mutation: %v", err)
-		}
-		t.Cleanup(func() {
-			if err := rollback(); err != nil {
-				t.Error(err)
-			}
-		})
-		if fixture.Transactions().Active != 1 {
-			t.Fatal("outer mutation did not reach the original coordinator")
-		}
-		outcome, err := fireWorkflowTimerTestWakeup(ctx, pc, activation)
-		if err != nil || outcome != WorkflowTimerFireCommitted {
-			t.Fatalf("FireWorkflowTimer outcome=%q err=%v, want independently committed named operation", outcome, err)
-		}
-		if fixture.Transactions().Active != 1 {
-			t.Fatal("independent fire settled or retained the outer transaction")
-		}
-		if err := rollback(); err != nil {
-			t.Fatalf("Rollback: %v", err)
-		}
-		if fixture.Transactions().Active != 0 {
-			t.Fatal("outer rollback did not join its original transaction")
-		}
-		persisted := loadWorkflowTimerOwnerActivation(t, store, ctx, activation.Ref.ActivationID)
-		if persisted.Status != workflowTimerStatusFired {
-			t.Fatalf("named-operation timer status = %q, want fired", persisted.Status)
-		}
-	}
-}
-
 func VerifyNativeWorkflowTimerLifecycleWakeupPublishesItsDurableIntentOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {

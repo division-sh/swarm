@@ -37,6 +37,7 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -130,9 +131,11 @@ func selectedContractTestProcessCapability(
 			return capability
 		}
 	}
-	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "selected-contract-test", BootID: uuid.NewString(), RuntimeInstanceID: runForkTestRuntimeInstanceID,
-	})
+	native, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("selected-contract fixture requires its native lifecycle owner: %T", selected)
+	}
+	capability, err := agentfixture.ProcessCapability(t, runtimecorrelation.WithRuntimeInstanceID(ctx, runForkTestRuntimeInstanceID), native)
 	if err != nil {
 		t.Fatalf("acquire selected-contract process capability: %v", err)
 	}
