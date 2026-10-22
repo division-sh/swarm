@@ -5457,7 +5457,7 @@
     "owner": "internal/store/internal/backend/channelonboarding/logout.go::prepareTeardownReservationTx",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
-    "body_sha256": "490db79a2bd02fed6e20a25a876556c5c5c1f8ae9c81f784a47d3f6b30af6997"
+    "body_sha256": "d3f6731fd7cb65172c8f4c931262732fba3d365b4b8a32bf63656f1ff37cf84a"
   },
   {
     "owner": "internal/store/internal/backend/channelonboarding/logout.go::requireNoConflictingLogoutTx",
@@ -5481,7 +5481,7 @@
     "owner": "internal/store/internal/backend/channelonboarding/logout_effect.go::LogoutEffectAuthorityCurrent",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
-    "body_sha256": "83f50a42120364c28c0d2c21660d4cf0b1cd37495cd0b0db675769cb8b76fff6"
+    "body_sha256": "8970465217aac5b04224e7f540cf4be02ed0512a64024477e880449e38145a62"
   },
   {
     "owner": "internal/store/internal/backend/channelonboarding/logout_effect.go::SettleLogoutEffectTx",
@@ -5529,7 +5529,7 @@
     "owner": "internal/store/internal/backend/channelonboarding/logout_recovery.go::logoutOriginalWithdrawnWithoutAuthorizationTx",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-live-authorizer,2577-logout-authorization-race,2577-logout-successor",
-    "body_sha256": "aa67c024d0afe3763718f75108f1050a6d51bba247c4f2037942ed805a8c6420"
+    "body_sha256": "65a699920811b99adb464d75cb223f60764290a0e78dfa799c197dd0ceeff112"
   },
   {
     "owner": "internal/store/internal/backend/channelonboarding/logout_recovery.go::recoverUnlaunchedLogout",
@@ -5566,6 +5566,24 @@
     "audit_rows": "A10,A27",
     "proof_families": "2577-native-confirmed-retention,2577-native-withdrawal,P08,P10,P21",
     "body_sha256": "3195ec41cde025e5e4218234a903088984466cd89236dfa5b771630274c24847"
+  },
+  {
+    "owner": "internal/store/internal/backend/generationauthority/logout_binding.go::FreezeLogoutProcessTx",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "db3aac40c8ccba1807d2eda6632236cb210827bd3dcac1e01617133f443be798"
+  },
+  {
+    "owner": "internal/store/internal/backend/generationauthority/logout_binding.go::admitLogoutGrantTx",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
+    "body_sha256": "5611452c0c9fe174d47cfdb3adbc314b67da7f20293016cc20a120d1912909e1"
+  },
+  {
+    "owner": "internal/store/internal/backend/generationauthority/withdrawn_runtime.go::RuntimeAuthorityWithdrawnTx",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-original-withdrawal,2577-logout-successor",
+    "body_sha256": "d1f84bd1216c5002b2b382cbb439b49b8fee0ed8f33e6f97fe9f9426d53affd4"
   },
   {
     "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.BeginTx",
@@ -5937,7 +5955,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::admitSelectedRecoveryTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "f43f6854de2bf026d810e1c79f16f035760cbf800b903d79e38d033c1424f5ff"
+    "body_sha256": "26c4e5460a5c18f7e00213e17ae779827837e6d6fc2eb8f36fd28d840da29e6d"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::failedSelectedRecovery",
@@ -5997,7 +6015,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::recoverSelectedForkTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "bc2f81e33c29cba577368f2e7b227e8e0edf60e3d420d4d6141455d583de1d3b"
+    "body_sha256": "aaf166dcc8806aee084d2f6b685ac45fb9522a10f5665ae68038a7664efcb1ea"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::requireSelectedRecoveryDeclarations",
@@ -6090,18 +6108,6 @@
     "body_sha256": "26130a14d5a57f8c405eae90c51a06e2a1e636bfa39587cbb4d650c2fcbd841d"
   },
   {
-    "owner": "internal/store/internal/startupownership/logout_binding.go::FreezeLogoutProcessTx",
-    "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
-    "body_sha256": "6a807573cd270ca456dfc6a56543da97ac4bd2d258ee6a806bfbc54698d4fea5"
-  },
-  {
-    "owner": "internal/store/internal/startupownership/logout_binding.go::admitLogoutGrantTx",
-    "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor",
-    "body_sha256": "5611452c0c9fe174d47cfdb3adbc314b67da7f20293016cc20a120d1912909e1"
-  },
-  {
     "owner": "internal/store/internal/startupownership/possession_observation.go::*StartupPostgresOwner.ProbePossession",
     "audit_rows": "A20,A28",
     "proof_families": "P19,P22,P24",
@@ -6118,12 +6124,6 @@
     "audit_rows": "A19,A28",
     "proof_families": "2567-P07,P08",
     "body_sha256": "e1031c6e422808ee24d095f5b91aab937feb28e0f6baf0389e064e2992af8f87"
-  },
-  {
-    "owner": "internal/store/internal/startupownership/withdrawn_runtime.go::RuntimeAuthorityWithdrawnTx",
-    "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-logout-reservation-recovery,2577-logout-original-withdrawal,2577-logout-successor",
-    "body_sha256": "69350606842fffe1021260a095bbe2431dcd4e1146f73860c227c6f69db45fd8"
   },
   {
     "owner": "internal/store/selected/admission.go::*AbsentSQLiteStore.Error",
