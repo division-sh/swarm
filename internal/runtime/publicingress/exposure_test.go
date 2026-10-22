@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -64,14 +65,26 @@ func TestPublicIngressListenerProvesNonceAndExposesOnlyWebhookRoutes(t *testing.
 		}
 	})
 
-	for _, route := range []string{"/v1/health", "/readyz", "/mcp", "/rpc", "/tools", "/webhooks/_swarm_probe/not-the-nonce"} {
-		response, requestErr := client.Get("https://hooks.example.test" + route)
-		if requestErr != nil {
-			t.Fatalf("GET %s: %v", route, requestErr)
-		}
-		response.Body.Close()
-		if response.StatusCode != http.StatusNotFound {
-			t.Fatalf("GET %s status = %d, want 404", route, response.StatusCode)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	for _, route := range []string{
+		"/v1/health", "/readyz", "/mcp", "/rpc", "/tools", "/webhooks/_swarm_probe/not-the-nonce",
+		"/webhooks/support%2ftelegram", "/webhooks/support%2Ftelegram", "/webhooks/support/telegram/",
+		"//webhooks/support/telegram", "/webhooks/../v1/rpc", "/webhooks/support/../telegram",
+		"/webhooks/support/.", "/webhooks/support/..", "/webhooks//telegram", "/webhooks/support/",
+	} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			request, err := http.NewRequest(method, "https://hooks.example.test"+route, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, requestErr := client.Do(request)
+			if requestErr != nil {
+				t.Fatalf("%s %s: %v", method, route, requestErr)
+			}
+			response.Body.Close()
+			if response.StatusCode != http.StatusNotFound || response.Header.Get("Location") != "" {
+				t.Fatalf("%s %s status = %d, want 404 without redirect", method, route, response.StatusCode)
+			}
 		}
 	}
 	response, err := client.Post("https://hooks.example.test/webhooks/support/telegram", "application/json", strings.NewReader(`{}`))
@@ -224,38 +237,84 @@ func TestManagedGenerationFailureStopsChildBeforeRetry(t *testing.T) {
 }
 
 func TestManagedQuickTunnelRetriesPublicRouteWhileHostnamePropagates(t *testing.T) {
-	launcher := &fakeManagedLauncher{}
-	var routeAttempts atomic.Int64
-	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		switch request.URL.Path {
-		case "/ready":
-			return testHTTPResponse(http.StatusOK, ""), nil
-		case "/quicktunnel":
-			return testHTTPResponse(http.StatusOK, `{"hostname":"unit.trycloudflare.com"}`), nil
-		default:
-			if routeAttempts.Add(1) < 3 {
-				return nil, &net.DNSError{Err: "no such host", Name: "unit.trycloudflare.com", IsNotFound: true}
+	for _, mode := range []string{ModeManagedQuickTunnel, ModeExternalOrigin} {
+		t.Run(mode, func(t *testing.T) {
+			launcher := &fakeManagedLauncher{}
+			var routeAttempts atomic.Int64
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				switch request.URL.Path {
+				case "/ready":
+					return testHTTPResponse(http.StatusOK, ""), nil
+				case "/quicktunnel":
+					return testHTTPResponse(http.StatusOK, `{"hostname":"unit.trycloudflare.com"}`), nil
+				default:
+					if routeAttempts.Add(1) < 3 {
+						return nil, &net.DNSError{Err: "no such host", Name: "unit.trycloudflare.com", IsNotFound: true}
+					}
+					return testHTTPResponse(http.StatusNoContent, ""), nil
+				}
+			})}
+			opts := Options{Mode: mode, Handler: http.NotFoundHandler(), HTTPClient: client, Launcher: launcher}
+			if mode == ModeExternalOrigin {
+				opts.PublicOrigin, opts.ListenAddress = "https://hooks.example.test", "127.0.0.1:8443"
 			}
-			return testHTTPResponse(http.StatusNoContent, ""), nil
+			controller, err := NewController(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			controller.waitRetry = func(context.Context, time.Duration) error { return nil }
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			controller.listener = listener
+			controller.nonce = "probe"
+			if err := controller.establish(context.Background()); err != nil {
+				t.Fatalf("establish after propagation retries: %v", err)
+			}
+			if routeAttempts.Load() != 3 || controller.Generation().ID == "" {
+				t.Fatalf("route attempts=%d generation=%#v", routeAttempts.Load(), controller.Generation())
+			}
+		})
+	}
+}
+
+func TestPublicRouteProbeRetainsDualStackFailuresWithinRetryBound(t *testing.T) {
+	ipv6Err, ipv4Err := errors.New("IPv6: no route to host"), errors.New("IPv4: connection refused")
+	var attempts int
+	controller := &Controller{opts: Options{HTTPClient: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		attempts++
+		trace := httptrace.ContextClientTrace(request.Context())
+		if trace != nil {
+			trace.ConnectStart("tcp", "[2001:db8::1]:443")
+			trace.ConnectStart("tcp", "192.0.2.1:443")
+			trace.ConnectDone("tcp", "[2001:db8::1]:443", ipv6Err)
+			trace.ConnectDone("tcp", "192.0.2.1:443", ipv4Err)
 		}
-	})}
-	controller, err := NewController(Options{Mode: ModeManagedQuickTunnel, Handler: http.NotFoundHandler(), HTTPClient: client, Launcher: launcher})
-	if err != nil {
-		t.Fatal(err)
+		return nil, ipv6Err // net.Dialer's returned error hides the fallback's error.
+	})}}}
+	var waits []time.Duration
+	controller.waitRetry = func(_ context.Context, delay time.Duration) error {
+		waits = append(waits, delay)
+		return nil
 	}
-	controller.waitRetry = func(context.Context, time.Duration) error { return nil }
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	err := controller.probePublicRouteWithRetry(context.Background(), "https://hooks.example.test")
+	if err == nil || !errors.Is(err, ipv6Err) || attempts != 4 || len(waits) != 3 || waits[0] != time.Second || waits[1] != 2*time.Second || waits[2] != 4*time.Second {
+		t.Fatalf("bounded retries: attempts=%d waits=%v error=%v", attempts, waits, err)
 	}
-	defer listener.Close()
-	controller.listener = listener
-	controller.nonce = "probe"
-	if err := controller.establish(context.Background()); err != nil {
-		t.Fatalf("establish after propagation retries: %v", err)
+	for _, detail := range []string{"[2001:db8::1]:443: " + ipv6Err.Error(), "192.0.2.1:443: " + ipv4Err.Error(), "attempt 1", "attempt 4", "Check the origin's A/AAAA records"} {
+		if !strings.Contains(err.Error(), detail) {
+			t.Errorf("missing %q in diagnostic: %v", detail, err)
+		}
 	}
-	if routeAttempts.Load() != 3 || controller.Generation().ID == "" {
-		t.Fatalf("route attempts=%d generation=%#v", routeAttempts.Load(), controller.Generation())
+	if strings.Count(err.Error(), "Check the origin's A/AAAA records") != 1 {
+		t.Fatalf("expected one remediation line: %v", err)
+	}
+	controller.waitRetry = func(context.Context, time.Duration) error { return context.Canceled }
+	attempts = 0
+	if err := controller.probePublicRouteWithRetry(context.Background(), "https://hooks.example.test"); !errors.Is(err, context.Canceled) || attempts != 1 {
+		t.Fatalf("cancellation did not stop retries: attempts=%d error=%v", attempts, err)
 	}
 }
 
