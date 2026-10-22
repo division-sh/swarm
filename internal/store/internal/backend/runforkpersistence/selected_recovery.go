@@ -241,21 +241,7 @@ func loadSelectedRecoveryExecutionTx(ctx context.Context, tx *sql.Tx, snapshot r
 		&execution.ExecutableCoordinateFingerprint, &execution.AdmissionFingerprint, &execution.ContainerPlanFingerprint,
 		&execution.ActorCensusFingerprint, &execution.EffectiveConfigFingerprint, &execution.DeclarationPlanFingerprint, &declarationRaw)
 	if err == sql.ErrNoRows {
-		result.Disposition = runfork.SelectedForkRecoveryStaged
-		if snapshot.State.Terminal() {
-			result.Disposition = runfork.SelectedForkRecoveryTerminal
-		} else if result.Operation != nil && result.Operation.Status == runfork.ForkOperationMaterialized {
-			if snapshot.State != runlifecycle.StatePaused {
-				return result, fmt.Errorf("materialized selected recovery child is not paused")
-			}
-			result.Disposition = runfork.SelectedForkRecoveryResume
-		} else if result.Operation != nil && result.Operation.Status == runfork.ForkOperationActivated {
-			return result, fmt.Errorf("activated selected recovery lacks execution evidence")
-		}
-		if snapshot.State == runlifecycle.StateRunning {
-			return result, fmt.Errorf("selected running fork lacks execution evidence")
-		}
-		return result, nil
+		return selectedRecoveryWithoutExecution(snapshot, result)
 	}
 	if err != nil {
 		return result, err
@@ -309,6 +295,24 @@ func loadSelectedRecoveryExecutionTx(ctx context.Context, tx *sql.Tx, snapshot r
 	}
 	result.binding, result.preparation = binding, preparation
 	result.state, result.failure, result.hasExecution = state, failure, true
+	return result, nil
+}
+
+func selectedRecoveryWithoutExecution(snapshot runlifecycle.Snapshot, result selectedRecoveryRecord) (selectedRecoveryRecord, error) {
+	result.Disposition = runfork.SelectedForkRecoveryStaged
+	if snapshot.State.Terminal() {
+		result.Disposition = runfork.SelectedForkRecoveryTerminal
+	} else if result.Operation != nil && result.Operation.Status == runfork.ForkOperationMaterialized {
+		if snapshot.State != runlifecycle.StatePaused {
+			return result, fmt.Errorf("materialized selected recovery child is not paused")
+		}
+		result.Disposition = runfork.SelectedForkRecoveryResume
+	} else if result.Operation != nil && result.Operation.Status == runfork.ForkOperationActivated {
+		return result, fmt.Errorf("activated selected recovery lacks execution evidence")
+	}
+	if snapshot.State == runlifecycle.StateRunning {
+		return result, fmt.Errorf("selected running fork lacks execution evidence")
+	}
 	return result, nil
 }
 

@@ -69,6 +69,10 @@ func (a runForkSourceStateAdmission) activityRequestOriginAtCut(ctx context.Cont
 		origin := semanticview.ActivityRequestOrigin{Request: request, Cuts: []semanticview.ActivityRequestCut{step}}
 		return origin, origin.Validate()
 	}
+	return a.inheritedActivityRequestOriginAtCut(ctx, tx, cut, request, step, visiting)
+}
+
+func (a runForkSourceStateAdmission) inheritedActivityRequestOriginAtCut(ctx context.Context, tx *sql.Tx, cut runForkReplayCut, request events.Event, step semanticview.ActivityRequestCut, visiting map[string]bool) (semanticview.ActivityRequestOrigin, error) {
 	if _, err := pipeline.SelectedActivityRequestLineage(request); err != nil {
 		return semanticview.ActivityRequestOrigin{}, err
 	}

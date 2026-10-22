@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	managedcapabilitystore "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
@@ -55,14 +56,29 @@ func captureSelectedResetHistoryTx(ctx context.Context, tx *sql.Tx, req destruct
 		}
 		prepared[item.Binding.ForkRunID] = true
 	}
-	for _, run := range runs {
-		detached, err := readDetachedSelectedHistoryTx(ctx, tx, run)
+	if err := validateSelectedResetPlanCoverageTx(ctx, tx, runs, prepared); err != nil {
+		return nil, err
+	}
+	cohorts := make([]selectedResetCohort, 0, len(req.SelectedHistory))
+	for _, item := range req.SelectedHistory {
+		cohort, err := captureSelectedResetCohortTx(ctx, tx, item, sqlite)
 		if err != nil {
 			return nil, err
 		}
+		cohorts = append(cohorts, cohort)
+	}
+	return cohorts, ctx.Err()
+}
+
+func validateSelectedResetPlanCoverageTx(ctx context.Context, tx *sql.Tx, runs []string, prepared map[string]bool) error {
+	for _, run := range runs {
+		detached, err := readDetachedSelectedHistoryTx(ctx, tx, run)
+		if err != nil {
+			return err
+		}
 		if detached {
 			if prepared[run] {
-				return nil, errors.New("detached selected history conflicts with live reset preparation")
+				return errors.New("detached selected history conflicts with live reset preparation")
 			}
 			continue
 		}
@@ -70,44 +86,45 @@ func captureSelectedResetHistoryTx(ctx context.Context, tx *sql.Tx, req destruct
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
 			SELECT 1 FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1
 			UNION ALL SELECT 1 FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1)`, run).Scan(&attached); err != nil {
-			return nil, err
+			return err
 		}
 		if attached != prepared[run] {
-			return nil, errors.New("selected reset preparation does not cover the exact planned child set")
+			return errors.New("selected reset preparation does not cover the exact planned child set")
 		}
 	}
-	cohorts := make([]selectedResetCohort, 0, len(req.SelectedHistory))
-	for _, item := range req.SelectedHistory {
-		if err := ValidateSelectedResetPreparationTx(ctx, tx, item, sqlite); err != nil {
-			return nil, err
-		}
-		permanent, err := ReadClosedSelectedPermanentForkCohortTx(ctx, tx, item.Binding.ForkRunID, sqlite)
-		if err != nil {
-			return nil, err
-		}
-		journals, err := ReadClosedSelectedInstalledJournalCohortTx(ctx, tx, item.Binding.ForkRunID, sqlite, item.Original)
-		if err != nil {
-			return nil, err
-		}
-		for _, generation := range permanent.Generations {
-			if err := managedcapabilitystore.InspectSelectedPreparationHistoryTx(ctx, tx, generation.Preparation.SelectedForkPreparation); err != nil {
-				return nil, err
-			}
-			if err := effectpersistence.RequireClosedSelectedEffectHistoryTx(ctx, tx, generation.Execution, generation.Preparation.Coordinates.BundleHash, sqlite); err != nil {
-				return nil, err
-			}
-		}
-		manifest, err := readSelectedRetainedManifestTx(ctx, tx, item.Binding.ForkRunID)
-		if err != nil {
-			return nil, err
-		}
-		cohort := selectedResetCohort{Permanent: permanent, Journals: journals, Manifest: manifest}
-		if err := captureSelectedRetainedMembershipsTx(ctx, tx, &cohort); err != nil {
-			return nil, err
-		}
-		cohorts = append(cohorts, cohort)
+	return ctx.Err()
+}
+
+func captureSelectedResetCohortTx(ctx context.Context, tx *sql.Tx, item runfork.SelectedResetPreparation, sqlite bool) (selectedResetCohort, error) {
+	var absent selectedResetCohort
+	if err := ValidateSelectedResetPreparationTx(ctx, tx, item, sqlite); err != nil {
+		return absent, err
 	}
-	return cohorts, ctx.Err()
+	permanent, err := ReadClosedSelectedPermanentForkCohortTx(ctx, tx, item.Binding.ForkRunID, sqlite)
+	if err != nil {
+		return absent, err
+	}
+	journals, err := ReadClosedSelectedInstalledJournalCohortTx(ctx, tx, item.Binding.ForkRunID, sqlite, item.Original)
+	if err != nil {
+		return absent, err
+	}
+	for _, generation := range permanent.Generations {
+		if err := managedcapabilitystore.InspectSelectedPreparationHistoryTx(ctx, tx, generation.Preparation.SelectedForkPreparation); err != nil {
+			return absent, err
+		}
+		if err := effectpersistence.RequireClosedSelectedEffectHistoryTx(ctx, tx, generation.Execution, generation.Preparation.Coordinates.BundleHash, sqlite); err != nil {
+			return absent, err
+		}
+	}
+	manifest, err := readSelectedRetainedManifestTx(ctx, tx, item.Binding.ForkRunID)
+	if err != nil {
+		return absent, err
+	}
+	cohort := selectedResetCohort{Permanent: permanent, Journals: journals, Manifest: manifest}
+	if err := captureSelectedRetainedMembershipsTx(ctx, tx, &cohort); err != nil {
+		return absent, err
+	}
+	return cohort, ctx.Err()
 }
 
 func captureSelectedRetainedMembershipsTx(ctx context.Context, tx *sql.Tx, cohort *selectedResetCohort) error {
