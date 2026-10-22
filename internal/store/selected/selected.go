@@ -80,6 +80,7 @@ type requiredPorts struct {
 	authorActivity         runtimeauthoractivity.Reader
 	operatorChannels       operatorchannel.Store
 	channelOnboarding      channelonboarding.Store
+	deploymentChannels     channelonboarding.OperationStore
 	channelDelivery        runtimechanneldelivery.Store
 	channelNative          runtimechannelnative.Store
 	startupOwnership       runtimestartupownership.Store
@@ -367,7 +368,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 		},
 		required: requiredPorts{
 			schema: selected, pinger: selected, authorActivity: selected,
-			operatorChannels: selected, channelOnboarding: selected, channelDelivery: selected, channelNative: selected, startupOwnership: selected, runQuiescence: selected,
+			operatorChannels: selected, channelOnboarding: selected, deploymentChannels: selected.DeploymentChannelOperations(), channelDelivery: selected, channelNative: selected, startupOwnership: selected, runQuiescence: selected,
 			mailboxAPI: selected, mailboxNoticeAck: selected, observability: selected,
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,
 			runs: selected, entities: selected, agents: selected, conversations: selected,
@@ -424,7 +425,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 		},
 		required: requiredPorts{
 			schema: selected, pinger: selected, authorActivity: selected,
-			operatorChannels: selected, channelOnboarding: selected, channelDelivery: selected, channelNative: selected, startupOwnership: selected, runQuiescence: selected,
+			operatorChannels: selected, channelOnboarding: selected, deploymentChannels: selected.DeploymentChannelOperations(), channelDelivery: selected, channelNative: selected, startupOwnership: selected, runQuiescence: selected,
 			mailboxAPI: selected, mailboxNoticeAck: selected, observability: selected,
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,
 			runs: selected, entities: selected, agents: selected, conversations: selected,

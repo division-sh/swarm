@@ -565,7 +565,11 @@ func requireActiveOnboardingParent(ctx context.Context, tx *sql.Tx, d dialect, o
 	if parentID == "" {
 		return nil
 	}
-	query := `SELECT phase,identity_operation_id FROM channel_onboarding_operations WHERE operation_id=?`
+	table, err := onboardingParentTable(op.ProviderAuthority.Scope)
+	if err != nil {
+		return err
+	}
+	query := `SELECT phase,identity_operation_id FROM ` + table + ` WHERE operation_id=?`
 	if d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}

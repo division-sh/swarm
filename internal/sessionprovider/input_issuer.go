@@ -26,16 +26,17 @@ type SessionInputReference struct {
 }
 
 type sessionInputOwner struct {
-	store     channelonboarding.Store
-	native    *sessionInputReader
-	operation string
+	store      channelonboarding.Store
+	operations channelonboarding.OperationStore
+	native     *sessionInputReader
+	operation  string
 }
 
-func newSessionInputOwner(store channelonboarding.Store, native *sessionInputReader, operation string) (*sessionInputOwner, error) {
-	if store == nil || native == nil || operation == "" {
+func newSessionInputOwner(store channelonboarding.Store, operations channelonboarding.OperationStore, native *sessionInputReader, operation string) (*sessionInputOwner, error) {
+	if store == nil || operations == nil || native == nil || operation == "" {
 		return nil, fmt.Errorf("native input requires its owned SDK/capture and exact declared responsibility")
 	}
-	return &sessionInputOwner{store: store, native: native, operation: operation}, nil
+	return &sessionInputOwner{store: store, operations: operations, native: native, operation: operation}, nil
 }
 
 func (o *sessionInputOwner) admit(ctx context.Context, reference SessionInputReference) (input.Admission, error) {
@@ -88,7 +89,7 @@ func (o *sessionInputOwner) admitRetainedInput(ctx context.Context, reference Se
 		native.ReceivedAt.IsZero() || !native.ReceivedAt.Equal(native.ReceivedAt.Truncate(time.Microsecond)) {
 		return input.Admission{}, fmt.Errorf("native capture is outside its original occurrence")
 	}
-	op, err := o.store.GetChannelOnboarding(ctx, o.operation)
+	op, err := o.operations.GetChannelOnboarding(ctx, o.operation)
 	if err != nil {
 		return input.Admission{}, err
 	}
@@ -142,7 +143,8 @@ func (v capturedRequestVerifier) ValidatePublicationRequest(raw []byte) error {
 
 func (o *sessionInputOwner) inputResponsibility(ctx context.Context, native nativeSessionInput, op channelonboarding.Operation, recovery bool) (channelonboarding.AdmissionResponsibility, error) {
 	original := channelonboarding.AdmissionResponsibility{OperationID: native.OperationID, OperationRevision: native.OperationRevision,
-		ActivationRevision: native.ActivationRevision, Coordinate: native.SourceContext.Coordinate, TargetSelector: native.TargetSelector,
+		DeploymentRegistration: native.DeploymentRegistration,
+		ActivationRevision:     native.ActivationRevision, Coordinate: native.SourceContext.Coordinate, TargetSelector: native.TargetSelector,
 		Provider: native.Account.Provider, SessionAccount: native.Account}
 	if !recovery {
 		if !native.matchesOriginalOperation(op, native.SourceContext.Coordinate) {

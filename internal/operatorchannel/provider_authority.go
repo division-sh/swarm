@@ -24,6 +24,7 @@ type SessionAccountAdmission = authority.Account
 // ProviderAuthority is one closed private identity authority. A session may
 // additionally require a real credential (Discord), but never a dummy token.
 type ProviderAuthority struct {
+	Scope      authority.ParentScope
 	Kind       ProviderAuthorityKind
 	Credential runtimecredentials.ValueEvidence
 	Session    SessionAccountAdmission
@@ -53,6 +54,9 @@ func CredentialProviderAuthority(evidence runtimecredentials.ValueEvidence) (Pro
 }
 
 func (a ProviderAuthority) Validate() error {
+	if err := a.Scope.Validate(); err != nil {
+		return err
+	}
 	switch a.Kind {
 	case ProviderAuthorityCredential:
 		if a.Session != (SessionAccountAdmission{}) || !a.session.Empty() {
@@ -85,6 +89,12 @@ func (a ProviderAuthority) RequireExecutable() error {
 		return err
 	}
 	if a.Kind == ProviderAuthoritySession {
+		if a.session.Empty() {
+			return &SessionProviderUnavailableError{Provider: a.Session.Provider}
+		}
+		if a.session.Scope() != a.Scope {
+			return fmt.Errorf("session admission belongs to a different connect scope")
+		}
 		if err := a.session.Validate(context.Background(), a.Session); err != nil {
 			return &SessionProviderUnavailableError{Provider: a.Session.Provider}
 		}
@@ -118,6 +128,10 @@ func (a ProviderAuthority) AdmitExecution(ctx context.Context, owner CredentialC
 			admission.Close()
 			return ProviderAuthority{}, false, err
 		}
+		if admission.Scope() != a.Scope {
+			admission.Close()
+			return ProviderAuthority{}, false, fmt.Errorf("session admission belongs to a different connect scope")
+		}
 		a.session = admission
 		if a.Credential == (runtimecredentials.ValueEvidence{}) {
 			return a, true, nil
@@ -149,7 +163,7 @@ func (a ProviderAuthority) CloseExecution() { a.session.Close() }
 func (a ProviderAuthority) SessionParent() (string, int64) { return a.session.Parent() }
 
 func (a ProviderAuthority) SameProvenance(other ProviderAuthority) bool {
-	return a.Kind == other.Kind && a.Credential == other.Credential && a.Session == other.Session
+	return a.Scope == other.Scope && a.Kind == other.Kind && a.Credential == other.Credential && a.Session == other.Session
 }
 
 func (a ProviderAuthority) RequireExecutableFor(expected ProviderAuthority) error {
@@ -162,6 +176,7 @@ func (a ProviderAuthority) RequireExecutableFor(expected ProviderAuthority) erro
 // ProviderAuthorityRecord is the private durable codec, never a public DTO.
 // Record decoding is structural; executable admission remains a separate gate.
 type ProviderAuthorityRecord struct {
+	Scope          authority.ParentScope   `json:"parent_scope,omitempty"`
 	Kind           ProviderAuthorityKind   `json:"kind"`
 	CredentialKey  string                  `json:"credential_key,omitempty"`
 	CredentialSeal string                  `json:"credential_value_seal,omitempty"`
@@ -172,12 +187,12 @@ func (a ProviderAuthority) PrivateRecord() (ProviderAuthorityRecord, error) {
 	if err := a.Validate(); err != nil {
 		return ProviderAuthorityRecord{}, err
 	}
-	return ProviderAuthorityRecord{Kind: a.Kind, CredentialKey: a.Credential.Key,
+	return ProviderAuthorityRecord{Scope: a.Scope, Kind: a.Kind, CredentialKey: a.Credential.Key,
 		CredentialSeal: a.Credential.Seal.String(), Session: a.Session}, nil
 }
 
 func (r ProviderAuthorityRecord) Admit() (ProviderAuthority, error) {
-	authority := ProviderAuthority{Kind: r.Kind, Session: r.Session}
+	authority := ProviderAuthority{Scope: r.Scope, Kind: r.Kind, Session: r.Session}
 	if r.CredentialKey != "" || r.CredentialSeal != "" {
 		seal, err := runtimecredentials.ParseValueSeal(r.CredentialSeal)
 		if err != nil {

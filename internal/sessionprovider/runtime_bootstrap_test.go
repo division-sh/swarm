@@ -40,6 +40,7 @@ type runtimeBootstrapFixture struct {
 	owner       *worklifetime.RuntimeOccurrence
 	directory   string
 	candidate   channelonboarding.Candidate
+	trigger     providertriggers.InboundAdmissionPlan
 	principal   operatorchannel.Principal
 	service     *channelonboarding.Service
 	channels    *operatorchannel.Service
@@ -67,6 +68,10 @@ func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapF
 		t.Fatal(err)
 	}
 	plan := activeInputChannelFixture(t, catalog)
+	f.trigger, err = catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "whatsapp", Provider: "whatsapp"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	identity, err := plan.InterfaceIdentity()
 	if err != nil {
 		t.Fatal(err)

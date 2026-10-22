@@ -49,7 +49,7 @@ func settleSessionClaim(ctx context.Context, runner transactionRunner, fact auth
 			settlement = domain.ClaimSettlement{Consumed: true, Disposition: receipt.Disposition}
 			return nil
 		}
-		if err := requireSessionClaimParent(txctx, tx, runner.dialect(), claim, parentID, parentRevision); err != nil {
+		if err := requireSessionClaimParent(txctx, tx, runner.dialect(), claim, parentID, parentRevision, fact.Scope()); err != nil {
 			return err
 		}
 		var err error
@@ -64,12 +64,16 @@ func settleSessionClaim(ctx context.Context, runner transactionRunner, fact auth
 	return settlement, err
 }
 
-func requireSessionClaimParent(ctx context.Context, tx *sql.Tx, d dialect, claim domain.InboundClaim, parentID string, parentRevision int64) error {
+func requireSessionClaimParent(ctx context.Context, tx *sql.Tx, d dialect, claim domain.InboundClaim, parentID string, parentRevision int64, scope authority.ParentScope) error {
+	table, err := onboardingParentTable(scope)
+	if err != nil {
+		return err
+	}
 	op, found, err := loadOperationByChallenge(ctx, tx, d, claim.Challenge, true)
 	if err != nil {
 		return err
 	}
-	query := `SELECT operation_revision,phase FROM channel_onboarding_operations WHERE operation_id=?`
+	query := `SELECT operation_revision,phase FROM ` + table + ` WHERE operation_id=?`
 	if d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
@@ -84,7 +88,7 @@ func requireSessionClaimParent(ctx context.Context, tx *sql.Tx, d dialect, claim
 	if !found {
 		return nil
 	}
-	if op.OnboardingOperationID != parentID {
+	if op.OnboardingOperationID != parentID || op.ProviderAuthority.Scope != scope {
 		return domain.ErrConflict
 	}
 	return requireActiveOnboardingParent(ctx, tx, d, op)
@@ -138,7 +142,11 @@ func requireSessionParent(ctx context.Context, tx *sql.Tx, d dialect, parentID s
 	if originalID != parentID || parentID == "" {
 		return domain.ErrRevisionConflict
 	}
-	query := `SELECT operation_revision,phase FROM channel_onboarding_operations WHERE operation_id=?`
+	table, err := onboardingParentTable(admitted.Scope)
+	if err != nil {
+		return err
+	}
+	query := `SELECT operation_revision,phase FROM ` + table + ` WHERE operation_id=?`
 	if d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
@@ -151,4 +159,15 @@ func requireSessionParent(ctx context.Context, tx *sql.Tx, d dialect, parentID s
 		return domain.ErrRevisionConflict
 	}
 	return admitted.RequireExecutable()
+}
+
+func onboardingParentTable(scope authority.ParentScope) (string, error) {
+	switch scope {
+	case authority.RuntimeParent:
+		return "channel_onboarding_operations", nil
+	case authority.DeploymentParent:
+		return "deployment_channel_operations", nil
+	default:
+		return "", domain.ErrInvalidRequest
+	}
 }

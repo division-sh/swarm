@@ -18,27 +18,42 @@ import (
 type sessionAuthorityOwner struct {
 	mu          sync.Mutex
 	releaseErr  error
-	parent      *worklifetime.RuntimeOccurrence
+	parent      sessionWorkParent
 	state       *sessionState
 	store       channelonboarding.Store
+	operations  channelonboarding.OperationStore
 	operation   channelonboarding.Operation
 	credentials operatorchannel.CredentialCurrentness
 }
 
-func newSessionAuthorityOwner(state *sessionState, store channelonboarding.Store, operation channelonboarding.Operation, credentials operatorchannel.CredentialCurrentness) (*sessionAuthorityOwner, error) {
+type sessionWorkParent interface {
+	Begin(context.Context) (*worklifetime.Lease, error)
+}
+
+func newSessionAuthorityOwner(state *sessionState, store channelonboarding.OperationStore, operation channelonboarding.Operation, credentials operatorchannel.CredentialCurrentness, invocation sessionWorkParent) (*sessionAuthorityOwner, error) {
 	if state == nil || state.directory == nil || store == nil || operation.Provider != "whatsapp" || operation.ValidateSessionAccount() != nil ||
-		operation.SessionAccount.ConnectionID != state.directory.connectionID || operation.Coordinate.ValidateContext() != nil {
+		operation.SessionAccount.ConnectionID != state.directory.connectionID || !operation.DeploymentRegistration && operation.Coordinate.ValidateContext() != nil {
 		return nil, fmt.Errorf("session authority requires its original declared operation and private state")
 	}
 	occurrence := state.currentOccurrence()
 	if occurrence == nil {
 		return nil, errClientOccurrenceFenced
 	}
+	if operation.DeploymentRegistration {
+		if invocation == nil || !operation.AccountConfirmed {
+			return nil, errSessionAccount
+		}
+		return &sessionAuthorityOwner{state: state, operations: store, operation: operation, credentials: credentials, parent: invocation}, nil
+	}
+	runtimeStore, ok := store.(channelonboarding.Store)
+	if !ok {
+		return nil, errRuntimeConnection
+	}
 	parent, ok := worklifetime.RuntimeOccurrenceFromContext(occurrence.ctx)
 	if !ok || parent.Identity().RuntimeInstanceID != operation.Coordinate.RuntimeInstanceID || parent.Identity().BundleHash != operation.Coordinate.BundleHash {
 		return nil, fmt.Errorf("session authority requires its owning runtime occurrence")
 	}
-	return &sessionAuthorityOwner{state: state, store: store, operation: operation, credentials: credentials, parent: parent}, nil
+	return &sessionAuthorityOwner{state: state, store: runtimeStore, operations: store, operation: operation, credentials: credentials, parent: parent}, nil
 }
 
 func (o *sessionAuthorityOwner) CurrentValueMatchesSeal(ctx context.Context, expected runtimecredentials.ValueEvidence) (bool, error) {
@@ -69,14 +84,15 @@ func (o *sessionAuthorityOwner) AdmitSessionAccount(ctx context.Context, expecte
 		}
 	}()
 	ctx = work.Context()
-	op, err := o.store.GetChannelOnboarding(ctx, o.operation.OperationID)
+	op, err := o.operations.GetChannelOnboarding(ctx, o.operation.OperationID)
 	if err != nil {
 		return authority.Admission{}, err
 	}
 	if op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired ||
 		op.SessionAccount != expected || op.Posture != channelonboarding.ActivationSessionConnection ||
 		op.Provider != expected.Provider || op.PrincipalID != o.operation.PrincipalID ||
-		op.TargetSelector != o.operation.TargetSelector || !op.Coordinate.MatchesDeclaration(o.operation.Coordinate) {
+		op.TargetSelector != o.operation.TargetSelector || op.DeploymentRegistration != o.operation.DeploymentRegistration ||
+		!op.DeploymentRegistration && !op.Coordinate.MatchesDeclaration(o.operation.Coordinate) || op.DeploymentRegistration && !op.AccountConfirmed {
 		return authority.Admission{}, errCaptureScopeChanged
 	}
 	occurrence := o.state.currentOccurrence()
@@ -108,7 +124,11 @@ func (o *sessionAuthorityOwner) AdmitSessionAccount(ctx context.Context, expecte
 	}
 	retained = true
 	retainedRuntime = true
-	return authorityfact.SealOwnedAccount(expected, op.OperationID, op.Revision, workCtx, current, func() {
+	scope := authority.RuntimeParent
+	if op.DeploymentRegistration {
+		scope = authority.DeploymentParent
+	}
+	return authorityfact.SealOwnedAccount(expected, op.OperationID, op.Revision, scope, workCtx, current, func() {
 		release()
 		o.releaseRuntime(work)
 	}), nil

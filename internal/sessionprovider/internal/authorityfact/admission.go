@@ -27,6 +27,7 @@ func (s Account) Validate() error {
 }
 
 type ownedAuthority struct {
+	scope          ParentScope
 	account        Account
 	parentID       string
 	parentRevision int64
@@ -41,17 +42,24 @@ type Admission struct{ value *ownedAuthority }
 func (a Admission) Empty() bool { return a.value == nil }
 
 // SealOwnedAccount is restricted to the native subtree and its single issuer.
-func SealOwnedAccount(account Account, parentID string, parentRevision int64, ctx context.Context, current func() bool, release func()) Admission {
-	return Admission{value: &ownedAuthority{account: account, parentID: parentID, parentRevision: parentRevision, ctx: ctx, current: current, release: release}}
+func SealOwnedAccount(account Account, parentID string, parentRevision int64, scope ParentScope, ctx context.Context, current func() bool, release func()) Admission {
+	return Admission{value: &ownedAuthority{scope: scope, account: account, parentID: parentID, parentRevision: parentRevision, ctx: ctx, current: current, release: release}}
 }
 
 func (a Admission) Validate(ctx context.Context, expected Account) error {
-	if a.value == nil || ctx == nil || ctx.Err() != nil || expected.Validate() != nil ||
+	if a.value == nil || a.value.scope.Validate() != nil || ctx == nil || ctx.Err() != nil || expected.Validate() != nil ||
 		a.value.account != expected || a.value.parentID == "" || a.value.parentRevision < 1 || a.value.ctx == nil || a.value.ctx.Err() != nil ||
 		a.value.release == nil || a.value.current == nil || !a.value.current() || ctx.Err() != nil || a.value.ctx.Err() != nil {
 		return fmt.Errorf("exact current owned session authority is required")
 	}
 	return nil
+}
+
+func (a Admission) Scope() ParentScope {
+	if a.value == nil {
+		return RuntimeParent
+	}
+	return a.value.scope
 }
 
 func (a Admission) Close() {

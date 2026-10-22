@@ -15,6 +15,7 @@ import (
 )
 
 type nativeSessionInput struct {
+	DeploymentRegistration     bool
 	Scope                      channelonboarding.SessionInputScope
 	Account                    operatorchannel.SessionAccountAdmission
 	OperationID                string
@@ -39,6 +40,15 @@ type nativeSessionInput struct {
 }
 
 func (input nativeSessionInput) matchesOriginalOperation(op channelonboarding.Operation, coordinate channelonboarding.ChannelRuntimeContextCoordinate) bool {
+	if input.DeploymentRegistration != op.DeploymentRegistration {
+		return false
+	}
+	if op.DeploymentRegistration {
+		return input.Scope == channelonboarding.SessionInputOnboarding && input.OperationID == op.OperationID &&
+			op.AccountConfirmed && op.SessionAccount == input.Account && op.PrincipalID == input.PrincipalID &&
+			op.Revision == input.OperationRevision && (op.Phase == channelonboarding.PhaseAwaitingExternalIdentity || op.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation) &&
+			coordinate == (channelonboarding.ChannelRuntimeContextCoordinate{}) && input.ActivationRevision == 0 && input.TargetSelector == ""
+	}
 	activationCurrent := op.ActivationRevision == input.ActivationRevision
 	if input.Scope == channelonboarding.SessionInputOnboarding && input.ActivationRevision == 0 && op.AccountConnection() &&
 		op.IdentityOperationID != "" && (op.Phase == channelonboarding.PhaseAwaitingExternalIdentity || op.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation) {
@@ -134,8 +144,9 @@ func (r *sessionInputReader) readRetainedInput(ctx context.Context, reference Se
 			return r.state.ownsConnectedOccurrence(workContext, occurrence)
 		}
 		return nativeSessionInput{Scope: event.Scope.Kind, Account: event.Scope.Session, OperationID: event.Scope.OnboardingOperation,
-			AccountOnly:       event.Scope.AccountOnly,
-			OperationRevision: event.Scope.OperationRevision, ActivationID: event.Scope.ActivationID, ActivationRevision: event.Scope.ActivationRevision, TargetSelector: event.Scope.TargetSelector,
+			DeploymentRegistration: event.Scope.DeploymentRegistration,
+			AccountOnly:            event.Scope.AccountOnly,
+			OperationRevision:      event.Scope.OperationRevision, ActivationID: event.Scope.ActivationID, ActivationRevision: event.Scope.ActivationRevision, TargetSelector: event.Scope.TargetSelector,
 			PrincipalID: event.Scope.PrincipalID, Source: event.Scope.Source, BindingRevision: event.Scope.BindingRevision,
 			PublicationBinding:         event.Scope.PublicationBinding,
 			SourceContext:              event.Source,
