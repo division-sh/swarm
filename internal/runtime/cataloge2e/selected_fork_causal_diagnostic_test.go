@@ -47,6 +47,14 @@ type causalSelectedGrant struct {
 	probe *causalSelectedProcess
 }
 
+func (g causalSelectedGrant) BindSelectedForkMutationContext(ctx context.Context) (context.Context, error) {
+	owner, ok := g.GenerationGrant.(startupownership.SelectedForkMutationContextOwner)
+	if !ok {
+		return nil, fmt.Errorf("causal proof requires the actual selected context owner")
+	}
+	return owner.BindSelectedForkMutationContext(ctx)
+}
+
 func (g causalSelectedGrant) CommitAgentLifecycleTransition(ctx context.Context, req manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, error) {
 	if req.OperationKind != "self_release" || req.Trigger != "self_release" || req.TargetPhase != manager.AgentLifecycleRegistered {
 		return g.GenerationGrant.CommitAgentLifecycleTransition(ctx, req)

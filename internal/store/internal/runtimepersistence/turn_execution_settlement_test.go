@@ -272,7 +272,7 @@ func TestCanceledCapturedTurnRecoveryNeverReadmitsWorkBothStores(t *testing.T) {
 						t.Fatalf("recovered canceled directive: %+v found=%t err=%v", op, found, err)
 					}
 				}
-				again, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC()))
+				again, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(time.Now().UTC()))
 				if err != nil || again != (runtimeeffects.RecoverySummary{}) {
 					t.Fatalf("repeated recovery admitted work: %+v err=%v", again, err)
 				}

@@ -422,7 +422,7 @@ func seedForkedExternalEffectAttempt(t *testing.T, fixture *forkedConsumerTestBa
 	if fixture.postgres != nil {
 		capabilityStore = fixture.postgres
 	}
-	if err := capabilityStore.SaveManagedCapabilitySurface(context.Background(), capabilitySurface); err != nil {
+	if err := capabilityStore.SaveManagedCapabilitySurface(fixture.context, capabilitySurface); err != nil {
 		t.Fatalf("seed frozen external-effect capability surface: %v", err)
 	}
 	capabilityPlanFingerprint, err := capabilitySurface.PlanFingerprint()

@@ -918,9 +918,9 @@ func currentPlatformPayloadAdmitterForStoreTest(t testing.TB) runtimebus.Payload
 func TestPostgresStore_RunTerminalOwnersPersistCanonicalLifecycle(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 
-	completedFixture := seedNormalRunCompletionFixture(t, db, "done", "review/inst-1", "review")
+	completedFixture := seedNormalRunCompletionFixture(t, ctx, db, "done", "review/inst-1", "review")
 	completedRunID := completedFixture.RunID
 	if err := acknowledgePipelineEventFixture(ctx, pg, completedFixture.EventID); err != nil {
 		t.Fatalf("seed completed run receipt: %v", err)

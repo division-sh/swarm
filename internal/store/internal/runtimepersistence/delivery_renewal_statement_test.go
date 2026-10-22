@@ -36,7 +36,7 @@ func TestPostgresDeliveryRenewalRetainsIndependentMutationFences(t *testing.T) {
 		{name: "storage_failure", table: "event_deliveries", function: "test_renewal_refuse", wantError: "renewal storage failure"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := seedNormalRunCompletionFixture(t, db, "active", "renewal/instance", "renewal")
+			fixture := seedNormalRunCompletionFixture(t, ctx, db, "active", "renewal/instance", "renewal")
 			route := testAgentDeliveryRoute(t, fixture.RunID, "renewal-agent", "fixture/renewal-agent")
 			event := commitPostgresDeliveryFixture(t, ctx, db, fixture.EventID, route)
 			claimed := claimPostgresDeliveryFixture(t, ctx, db, event, route)
