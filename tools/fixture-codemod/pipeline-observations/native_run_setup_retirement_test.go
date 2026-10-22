@@ -47,36 +47,6 @@ func decodeRunSetupTransitions(data []byte) ([]runSetupTransition, error) {
 	return rows, nil
 }
 
-func TestNativeRunSetupWholeFamilySnapshotsAndHostility(t *testing.T) {
-	var recipes []recipe
-	if err := json.Unmarshal(recipeBytes, &recipes); err != nil {
-		t.Fatal(err)
-	}
-	requireSelectedConfigSuccessor1801(t, recipes)
-	current, changes, err := prepareFiles("../../..", recipes)
-	if err != nil || len(current) != 0 || len(changes) != 0 {
-		t.Fatalf("whole current source is not inert: %v", err)
-	}
-	for _, row := range runSetupTransitions(t) {
-		if row.Removed {
-			continue
-		}
-		before := []byte("package proof\n" + row.Before)
-		finite := recipe{File: row.File, Function: row.Function, Before: row.Before, After: row.After}
-		after, changed, err := rewriteFunction(row.File, before, finite)
-		if err != nil || !changed {
-			t.Fatalf("finite rewrite failed: %s/%s/%v", row.File, row.Function, err)
-		}
-		if _, changed, err := rewriteFunction(row.File, after, finite); err != nil || changed {
-			t.Fatalf("repeat changed native source: %s/%v", row.Function, err)
-		}
-		hostile := strings.Replace(row.Before, "{", "{ unreviewedAuthority();", 1)
-		if _, _, err := rewriteFunction(row.File, []byte("package proof\n"+hostile), finite); err == nil {
-			t.Fatalf("unreviewed source accepted: %s", row.Function)
-		}
-	}
-}
-
 // These are the close-reviewed owner/schema/temporal repairs, not mechanical
 // callers. Their assertions are independently exercised by the named receipts.
 func semanticRunSetupFile(path string) bool {

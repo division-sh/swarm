@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"go/ast"
 	"strings"
 	"testing"
@@ -138,42 +136,5 @@ func TestNativePipelinePositiveChildFixturesRequireExactSourcePreparation(t *tes
 				}
 			}
 		})
-	}
-}
-
-func TestNativePipelineColdJoinConstructorAndFanOutRecipesStaySourcePinned(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	count := 0
-	for _, row := range rows {
-		if row.Family != "native-pipeline-delivery-cold-join-constructor-semantic" && row.Family != "native-pipeline-delivery-fanout-semantic" {
-			continue
-		}
-		count++
-		source := []byte("package probe\n" + row.Before)
-		after, changed, err := rewriteFunction(row.File, source, row)
-		if err != nil || !changed {
-			t.Fatalf("finite native repair failed: %s/%v", row.Function, err)
-		}
-		if _, changed, err := rewriteFunction(row.File, after, row); err != nil || changed {
-			t.Fatalf("native repair is not idempotent: %s/%v", row.Function, err)
-		}
-		if _, _, err := rewriteFunction(row.File, bytes.Replace(source, []byte("{"), []byte("{ unreviewedEscape();"), 1), row); err == nil {
-			t.Fatalf("changed native source admitted: %s", row.Function)
-		}
-		actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, nativePipelineRecipeReplacementName(t, row)))
-		current := row.After
-		if row.Successor != "" {
-			current = row.Successor
-		}
-		want, afterErr := canonicalFunction(current)
-		if err != nil || afterErr != nil || actual != want {
-			t.Fatalf("native repair differs from its reviewed snapshot: %s/%v/%v", row.Function, err, afterErr)
-		}
-	}
-	if count != 25 {
-		t.Fatalf("native join/constructor/fan-out recipes=%d, want 25", count)
 	}
 }

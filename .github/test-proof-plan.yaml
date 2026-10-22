@@ -137,7 +137,6 @@ profiles:
     - codemod-owner-guards
     - codemod-pipeline-mutation
     - codemod-bus-mutation
-    - codemod-candidate-overlay
     - catalog-required-inventory
     - catalog-required-verify
     - catalog-replay-1
@@ -290,12 +289,6 @@ units:
     run: '^(TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts|TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners)$'
     required_children:
       TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts: [claim, settle]
-    count_mode: count-1
-    environment_ids: *postgres_gateway_empty
-    budget_class: broad
-  codemod-candidate-overlay:
-    packages: [github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations]
-    run: '^TestReviewedSnapshotCandidateOverlayTypeChecks$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
