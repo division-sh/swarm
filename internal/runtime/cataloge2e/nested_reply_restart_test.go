@@ -87,7 +87,7 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 		t.Fatal(err)
 	}
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootFromCatalogE2E(t),
-		PlatformSpecPath: platformSpecPathFromCatalogE2E(t), Store: selected}
+		Store: selected}
 	prepared, err := selectedContractExecutionOwnerForCatalogHarness(t, h).Prepare(h.ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: operation.SourceRunID, At: operation.ForkEventID, ForkOperation: &operation, AllowSourceFreeze: operation.AllowSourceFreeze,
 		SourceLoader: loader, ContractSelection: operation.ContractSelection, AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig()),
@@ -145,7 +145,7 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 		t.Fatalf("ordinary restart executed or changed the selected open replies: %+v error=%v", persisted, err)
 	}
 	loader = runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootFromCatalogE2E(t),
-		PlatformSpecPath: platformSpecPathFromCatalogE2E(t), Store: selected}
+		Store: selected}
 	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 	if err != nil {
 		t.Fatal(err)

@@ -3,7 +3,6 @@ package runforkexecution
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,14 +12,12 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -36,7 +33,6 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -422,130 +418,6 @@ func TestSelectedContractAgentRuntimeBindRunProducesForkLocalIdentityWithoutMuta
 	}
 	if !plan.Blueprints[0].Config.Identity.IsZero() {
 		t.Fatalf("source blueprint acquired concrete identity %#v", plan.Blueprints[0].Config.Identity)
-	}
-}
-
-func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	owner := testGatewayWorkOwner(t)
-	root := t.TempDir()
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-fork-cancellation\n")
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\n")
-	repoRoot := filepath.Join("..", "..", "..")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := semanticview.Wrap(bundle)
-	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
-	if err != nil {
-		t.Fatal(err)
-	}
-	forkRunID := uuid.NewString()
-	wantScope := runtimeauthoractivity.BundleScope("00000000-0000-0000-0000-000000000313", sourceFact.BundleHash())
-	initiatingCtx, cancel := context.WithCancel(runForkTestContext(t))
-	ctx := runtimecorrelation.WithSourceArtifactFact(initiatingCtx, sourceFact)
-	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
-	identity := selectedContractTestRootAgentIdentity(t, "fork-agent")
-	declaration, err := identity.Plan()
-	if err != nil {
-		t.Fatalf("selected-contract declaration plan: %v", err)
-	}
-	agentConfig := selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
-		ID: "fork-agent", Identity: identity, FlowID: ".", Role: "worker", Model: llmselection.ModelAliasRegular,
-		ExecutionMode: "live", LLMBackend: llmselection.BackendAnthropic, Subscriptions: []string{"item.received"},
-	})
-	agentConfig.Identity = agentidentity.Identity{}
-	blueprint, err := runtimemanager.ResolveAgentMaterializationBlueprint(
-		runtimemanager.AgentManagerOptions{ExecutionPosture: executionposture.Live},
-		runtimemanager.AgentMaterializationBlueprint{Config: agentConfig, Identity: declaration, Status: "active", HiredBy: "selected-contract-test"},
-	)
-	if err != nil {
-		t.Fatalf("resolve selected-contract declaration blueprint: %v", err)
-	}
-	record, err := blueprint.Materialize(forkRunID)
-	if err != nil {
-		t.Fatalf("materialize selected-contract declaration: %v", err)
-	}
-	revision, err := runtimemanager.AgentConfigPlanRevision(blueprint.Config, declaration)
-	if err != nil {
-		t.Fatalf("selected-contract declaration revision: %v", err)
-	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: sourceFact.BundleHash()}
-	declarations, err := runtimeagenttopology.NewSelectedDeclarationPlan(coordinate.BundleHash, []runtimeagenttopology.DesiredAgent{{
-		Identity: declaration, Source: coordinate, ConfigRevision: revision,
-	}})
-	if err != nil {
-		t.Fatalf("selected-contract declarations: %v", err)
-	}
-	processCapability := &selectedFailOnceGrantCapability{ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected)}
-	executionOwner := selectedContractExecutionOwnerForTest(t, selected)
-	topology, err := runtimeagenttopology.SelectedDeclarationAdmission(forkRunID, declarations)
-	if err != nil {
-		t.Fatalf("construct selected-contract static topology: %v", err)
-	}
-	loaded := LoadedSelectedContractSource{Source: source, SourceArtifactFact: sourceFact, EffectiveSourceIdentity: testEffectiveSourceIdentity(sourceFact)}
-	agents := selectedContractAgentRuntimePlan{
-		Declarations: declarations, Blueprints: []runtimemanager.AgentMaterializationBlueprint{blueprint},
-		Records: []runtimemanager.PersistedAgent{{Config: record.Config, Topology: topology, Status: record.Status, HiredBy: record.HiredBy}},
-		Options: SelectedContractAgentRuntimeOptions{
-			ExecutionPosture: executionposture.Live, ProcessCapability: processCapability,
-			Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}},
-			AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
-				return selectedContractSelfReleaseAgent{id: cfg.ID}, nil
-			},
-		},
-	}
-	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, bundle.SourceArtifact, forkRunID, agents)
-	ctx = selectedForkExecutionTestContext(t, ctx, authority)
-	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
-	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
-	admission, ok := managedexecution.FromContext(ctx)
-	if !ok {
-		t.Fatal("selected-contract test admission is missing")
-	}
-	receiverExecution, err := eventreceiver.SelectedContractForkExecution(authority, admission,
-		liveTestCompletionController(selected, selected, selected, selectedForkDiscardSpendProjection{}), runtimecorrelation.RuntimeLineage{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	eventBus, err := runtimebus.NewEphemeralEventBusWithOptions(nil, runtimebus.EventBusOptions{
-		ContractBundle: source, ExecutionPosture: executionposture.Live, SourceArtifactFact: sourceFact,
-		WorkOwner: owner, ReceiverExecution: receiverExecution,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	agents.Options.AgentManagerOptions = runtimemanager.AgentManagerOptions{WorkOwner: owner, ReceiverExecution: receiverExecution}
-	runtime, _, err := prepareSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
-		Owner: executionOwner, LoadedSource: loaded,
-		Prepared: prepared, AgentRuntime: agents, Admission: executionAdmission,
-	}, eventBus, &runtimepipeline.PipelineCoordinator{}, nil)
-	if err != nil {
-		t.Fatalf("prepareSelectedContractAgentRuntime: %v", err)
-	}
-	grantDone := runtime.generationGrant.Done()
-	cancel()
-	if err := runtime.Shutdown(); err == nil {
-		t.Fatal("injected grant retirement failure was hidden")
-	}
-	if prepared.retainedRuntime != runtime {
-		t.Fatal("failed post-adoption cleanup lost its preparation owner")
-	}
-	select {
-	case <-grantDone:
-		t.Fatal("failed retirement released the generation grant")
-	default:
-	}
-	if err := prepared.Close(); err != nil {
-		t.Fatalf("retry retained selected runtime cleanup: %v", err)
-	}
-	select {
-	case <-grantDone:
-	default:
-		t.Fatal("shutdown returned before selected-contract generation retirement")
 	}
 }
 

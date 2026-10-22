@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/activityresult"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -21,7 +20,7 @@ func receiverPublishedActivity(t *testing.T, runID string) activityresult.Publis
 		Owner:           activityidentity.MustNodeOwner(identitytest.RootNode(t, "receiver")),
 		ExecutionFlowID: ".", HandlerEventKey: "work.started", ActivityID: "compute", Tool: "compute", Attempt: 1,
 	}, uuid.NewString(), "compute.succeeded", []byte(`{"result":"recorded"}`), executionmode.Live,
-		contracts.ActivityEffectClassNonIdempotentWrite, "exact-input", "", time.Now().UTC())
+		"exact-input", "", time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}

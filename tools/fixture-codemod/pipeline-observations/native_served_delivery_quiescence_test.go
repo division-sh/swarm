@@ -97,7 +97,6 @@ func TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork(t *
 				}
 			}
 		}
-		currentPin, pinErr := canonicalFunction(current)
 		activeName := row.Function
 		if row.File == forkProofTruthFile && row.Function == forkProofTruthOldName && row.Successor != "" {
 			activeName = forkProofTruthNewName

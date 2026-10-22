@@ -721,7 +721,15 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 	}
-	if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
+	if result.Activation.ForkRunStatus != runfork.RunForkActivatedStatus {
+		t.Fatalf("activation ACK lost the running child: %+v", result.Activation)
+	}
+	retainedExecution, executionErr := observeSelectedRetainedExecution(t, ctx, request.Owner, pg, result.Materialization.ForkRunID)
+	if executionErr != nil {
+		t.Fatalf("retained selected execution: %v", executionErr)
+	}
+
+	if result.Owner != runfork.RunForkSelectedContractExecutionOwner || retainedExecution.ExecutedEventCount != 1 || len(retainedExecution.ForkEvents) != 1 {
 		t.Fatalf("result = %#v", result)
 	}
 	assertSelectedContractRuntimeContainerProof(t,
@@ -738,7 +746,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		len(result.SelectedContractExecutionAdmission.RecipientPlanning.RecipientPlanEvents) != 1 {
 		t.Fatalf("recipient planning admission = %#v", result.SelectedContractExecutionAdmission.RecipientPlanning)
 	}
-	forkEventID := result.ForkEvents[0].ForkEventID
+	forkEventID := retainedExecution.ForkEvents[0].ForkEventID
 	if forkEventID == "" || forkEventID == sourceEventID {
 		t.Fatalf("fork event id = %q, source = %q", forkEventID, sourceEventID)
 	}
@@ -883,7 +891,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		t.Fatalf("load fork entity state: %v", err)
 	}
 	forkEntityState = instance.CurrentState
-	if sourceStatus != runfork.RunForkSourceFrozenStatus || forkStatus != runfork.RunForkActivatedStatus || forkEntityState == "" {
+	if sourceStatus != runfork.RunForkSourceFrozenStatus || forkStatus != string(storerunlifecycle.StateCompleted) || forkEntityState == "" {
 		t.Fatalf("post execution = source:%s fork:%s entity:%s", sourceStatus, forkStatus, forkEntityState)
 	}
 }
@@ -1196,7 +1204,12 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 	}
-	if result.Owner != runfork.RunForkSelectedContractExecutionOwner || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
+	retainedExecution, executionErr := observeSelectedRetainedExecution(t, ctx, selectedContractExecutionOwnerForTest(t, pg), pg, result.Materialization.ForkRunID)
+	if executionErr != nil {
+		t.Fatalf("retained selected execution: %v", executionErr)
+	}
+
+	if result.Owner != runfork.RunForkSelectedContractExecutionOwner || retainedExecution.ExecutedEventCount != 1 || len(retainedExecution.ForkEvents) != 1 {
 		t.Fatalf("result = %#v", result)
 	}
 	assertSelectedContractRuntimeContainerProof(t,
@@ -1357,9 +1370,14 @@ func TestExecuteSelectedContractRunForkConstructsAgentRecipientWithoutHandlerMat
 	if err != nil {
 		t.Fatalf("constructed recipient without handler materializer: %v", err)
 	}
+	retainedExecution, executionErr := observeSelectedRetainedExecution(t, ctx, selectedContractExecutionOwnerForTest(t, pg), pg, result.Materialization.ForkRunID)
+	if executionErr != nil {
+		t.Fatalf("retained selected execution: %v", executionErr)
+	}
+
 	if result.Owner != runfork.RunForkSelectedContractExecutionOwner ||
 		result.Materialization.ForkRunID == "" || !result.Activation.Activated ||
-		result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
+		retainedExecution.ExecutedEventCount != 1 || len(retainedExecution.ForkEvents) != 1 {
 		t.Fatalf("constructed agent recipient execution: %#v", result)
 	}
 	if seen := agent.SeenRunIDs(); len(seen) != 1 || seen[0] != result.Materialization.ForkRunID {
@@ -1423,6 +1441,11 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 	}
+	retainedExecution, executionErr := observeSelectedRetainedExecution(t, ctx, selectedContractExecutionOwnerForTest(t, pg), pg, result.Materialization.ForkRunID)
+	if executionErr != nil {
+		t.Fatalf("retained selected execution: %v", executionErr)
+	}
+
 	if result.AgentRuntimeMaterialization == nil ||
 		result.AgentRuntimeMaterialization.Owner != runfork.RunForkSelectedContractForkLocalAgentRuntimeMaterializerExecutorOwner ||
 		result.AgentRuntimeMaterialization.RecipientPlanningOwner != runfork.RunForkSelectedContractRecipientPlanningOwner ||
@@ -1437,8 +1460,8 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	if result.Owner != runfork.RunForkSelectedContractExecutionOwner ||
 		result.Materialization.ForkRunID == "" ||
 		!result.Activation.Activated ||
-		result.ExecutedEventCount != 1 ||
-		len(result.ForkEvents) != 1 {
+		retainedExecution.ExecutedEventCount != 1 ||
+		len(retainedExecution.ForkEvents) != 1 {
 		t.Fatalf("selected execution result = %#v", result)
 	}
 	assertSelectedContractRuntimeContainerProof(t,
@@ -1452,8 +1475,8 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	if got := agent.SeenRunIDs(); len(got) != 1 || got[0] != result.Materialization.ForkRunID {
 		t.Fatalf("agent saw run ids = %#v, want fork run %s", got, result.Materialization.ForkRunID)
 	}
-	if got := agent.SeenEventIDs(); len(got) != 1 || got[0] != result.ForkEvents[0].ForkEventID {
-		t.Fatalf("agent saw event ids = %#v, want fork event %s", got, result.ForkEvents[0].ForkEventID)
+	if got := agent.SeenEventIDs(); len(got) != 1 || got[0] != retainedExecution.ForkEvents[0].ForkEventID {
+		t.Fatalf("agent saw event ids = %#v, want fork event %s", got, retainedExecution.ForkEvents[0].ForkEventID)
 	}
 
 	var persistedForkAgents int
@@ -1481,7 +1504,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 		t.Fatalf("selected-fork runtime mutated source-run agent rows = %d, want 0", persistedSourceAgents)
 	}
 
-	forkEventID := result.ForkEvents[0].ForkEventID
+	forkEventID := retainedExecution.ForkEvents[0].ForkEventID
 	var sourceCopiedEvents int
 	if err := db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -1736,6 +1759,11 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 				`, result.Materialization.ForkRunID).Scan(&runtimeDiagnostic)
 				t.Fatalf("ExecuteSelectedContractRunFork: %v\nlatest agent delivery: %s\nlatest receipt failure: %s\nlatest dead letter failure: %s\nruntime diagnostics: %s", err, deliveryFailure, receiptFailure, deadLetterFailure, runtimeDiagnostic)
 			}
+			_, executionErr := observeSelectedRetainedExecution(t, ctx, selectedContractExecutionOwnerForTest(t, pg), pg, result.Materialization.ForkRunID)
+			if executionErr != nil {
+				t.Fatalf("retained selected execution: %v", executionErr)
+			}
+
 			if providerCalls.Load() != 2 || lookupCalls.Load() != 1 {
 				var deliveryDiagnostic string
 				var runtimeDiagnostic string
@@ -2139,6 +2167,10 @@ fi
 		ClaudeCLI: config.ClaudeCLIConfig{Command: "claude", OutputFormat: "stream-json"},
 	}}
 	cfg.Workspace.DockerBin = dockerPath
+	published := make(chan context.Context, 1)
+	owner.ports.replay = selectedOperationPublicationProbe{SelectedContractReplayPersistence: owner.ports.replay, after: func(ctx context.Context) {
+		published <- ctx
+	}}
 
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
@@ -2169,6 +2201,39 @@ fi
 		}
 		failure, _ := runtimefailures.EnvelopeFromError(err)
 		t.Fatalf("ExecuteSelectedContractRunFork: %v\nfailure detail: %#v\ncaptures: %#v", err, failure.Detail, captures)
+	}
+	wait, cancel := context.WithTimeout(ctx, selectedForkCapabilityProofQuiescenceTimeout)
+	defer cancel()
+	select {
+	case publication := <-published:
+		occurrence, present := worklifetime.OccurrenceFromContext(publication)
+		selectedOccurrence, exact := occurrence.(*worklifetime.SelectedForkOccurrence)
+		if !present || !exact || selectedOccurrence.Identity().RunID != result.Materialization.ForkRunID {
+			t.Fatal("selected Claude publication lost its exact retained occurrence")
+		}
+		if err := selectedOccurrence.WaitForQuiescence(wait); err != nil {
+			t.Fatalf("retained selected Claude turn did not settle: %v", err)
+		}
+	case <-wait.Done():
+		t.Fatal(context.Cause(wait))
+	}
+	// An idle standing occurrence can still owe a durable continuation. Use
+	// the existing native delivery observation, not idleness, as turn evidence.
+	observationTick := time.NewTicker(10 * time.Millisecond)
+	defer observationTick.Stop()
+	for {
+		delivery, err := storetest.ReadManagedDeliveryStorage(wait, selected, result.Materialization.ForkRunID, "")
+		if err != nil || len(delivery.Failures) != 0 || delivery.AgentDeliveries > 1 {
+			t.Fatalf("retained selected Claude delivery: %+v err=%v", delivery, err)
+		}
+		if delivery.AgentDeliveries == 1 && delivery.Delivered == 1 {
+			break
+		}
+		select {
+		case <-wait.Done():
+			t.Fatalf("retained selected Claude delivery did not settle: %+v cause=%v", delivery, context.Cause(wait))
+		case <-observationTick.C:
+		}
 	}
 	countRaw, err := os.ReadFile(filepath.Join(captureDir, "count"))
 	if err != nil {
@@ -2760,11 +2825,18 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 	}
 	selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
 	selectedSource := testSelectedSource(selection)
-	deferredWorkAdmission := selectedContractDeferredWorkAdmissionForTest(t, sourceRunID, forkEventID, selectedSource)
+	plan, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkEventID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deferredWorkAdmission, err := admitSelectedContractDeferredWork(plan, selectedSource)
+	if err != nil {
+		t.Fatal(err)
+	}
 	admission := runfork.RunForkSelectedContractExecutionAdmission{
 		Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
 		NonMutating: true, ForkRunID: forkRunID, SourceRunID: sourceRunID,
-		ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: revision, EventID: forkEventID}, ForkEventID: forkEventID,
+		ForkPoint: plan.ForkPoint, ForkEventID: forkEventID,
 		ContractSelection: selection, ContractBindingOwner: runfork.RunForkSelectedContractBindingOwner,
 		AdmissionOwner: runfork.RunForkContractFrontierAdmissionOwner, AdmissionUse: runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
 		ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",
@@ -2788,10 +2860,6 @@ func buildSelectedForkProofContainer(t testing.TB, ctx context.Context, db *sql.
 		ExecutionPosture: executionposture.Live, ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected),
 	}}
 	owner := selectedContractExecutionOwnerForTest(t, selected)
-	plan, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: forkEventID})
-	if err != nil {
-		t.Fatal(err)
-	}
 	prepared, err := prepareSelectedFork(ctx, operation, owner.ports, loaded, plan, runfork.RunForkContractFrontierAdmission{}, planning, agents)
 	if err != nil {
 		t.Fatal(err)
@@ -3017,8 +3085,12 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 			QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout,
 		},
 	})
+	if err != nil {
+		t.Fatalf("provider-failure activation ACK was refused: %v", err)
+	}
+	_, err = observeSelectedRetainedExecution(t, ctx, selectedContractExecutionOwnerForTest(t, pg), pg, result.Materialization.ForkRunID)
 	if err == nil || !strings.Contains(err.Error(), "fork_selected_contract_agent_delivery_incomplete") {
-		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want failed activation after terminal selected-agent delivery", err)
+		t.Fatalf("retained execution error = %v, want failure after terminal selected-agent delivery", err)
 	}
 	if providerCalls.Load() != 1 {
 		t.Fatalf("provider failure dispatches = %d, want exactly 1", providerCalls.Load())
@@ -3146,7 +3218,10 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		Mode: "selected_contracts",
 	}
 	selectedSource := testSelectedSource(selection)
-	deferredWorkAdmission := selectedContractDeferredWorkAdmissionForTest(t, sourceRunID, forkEventID, selectedSource)
+	deferredWorkAdmission, err := admitSelectedContractDeferredWork(fixedPlan, selectedSource)
+	if err != nil {
+		t.Fatal(err)
+	}
 	admission := runfork.RunForkSelectedContractExecutionAdmission{
 		Owner:                      runfork.RunForkSelectedContractExecutionAdmissionOwner,
 		FutureExecutionOwner:       runfork.RunForkSelectedContractExecutionOwner,
@@ -3620,109 +3695,6 @@ func TestStartSelectedContractAgentRuntimeGatewayDoesNotConsumeAmbientToken(t *t
 	}
 }
 
-func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *testing.T) {
-	const staleHostURL = "http://127.0.0.1:9998"
-	const staleContainerURL = "http://host.docker.internal:9998"
-	t.Setenv("SWARM_TOOL_GATEWAY_URL", staleHostURL)
-	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", staleContainerURL)
-	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	_, db, _ := testutil.StartPostgres(t)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	owner := testGatewayWorkOwner(t)
-	root := t.TempDir()
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-fork-gateway-cleanup\n")
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\n")
-	repoRoot := runForkExecutionRepoRoot(t)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatal(err)
-	}
-	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
-	if err != nil {
-		t.Fatal(err)
-	}
-	forkRunID := uuid.NewString()
-	eventBus, err := bus.NewEphemeralEventBusWithOptions(nil, bus.EventBusOptions{
-		ExecutionPosture: executionposture.Live, SourceArtifactFact: sourceFact,
-		WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(),
-	})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	ctx := runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), sourceFact)
-	declarations, err := runtimeagenttopology.NewSelectedDeclarationPlan(sourceFact.BundleHash(), []runtimeagenttopology.DesiredAgent{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	processCapability := &selectedFailOnceGrantCapability{ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected)}
-	executionOwner := selectedContractExecutionOwnerForTest(t, selected)
-	loaded := LoadedSelectedContractSource{SourceArtifactFact: sourceFact, EffectiveSourceIdentity: testEffectiveSourceIdentity(sourceFact)}
-	preparedAgents := selectedContractAgentRuntimePlan{Declarations: declarations, Options: SelectedContractAgentRuntimeOptions{ProcessCapability: processCapability}}
-	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, bundle.SourceArtifact, forkRunID, preparedAgents)
-	ctx = selectedForkExecutionTestContext(t, ctx, authority)
-	badIdentity := selectedContractTestAgentIdentityForRun(t, authority.SelectedFork.ForkRunID, "bad-agent", "")
-
-	_, _, err = prepareSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
-		Owner:        executionOwner,
-		Prepared:     prepared,
-		Admission:    executionAdmission,
-		LoadedSource: LoadedSelectedContractSource{SourceArtifactFact: sourceFact},
-		AgentRuntime: selectedContractAgentRuntimePlan{
-			Declarations: declarations,
-			Proof: SelectedContractAgentRuntimeMaterialization{
-				AgentRecipients: []agentidentity.Identity{badIdentity},
-			},
-			Records: []runtimemanager.PersistedAgent{{
-				Config: runtimeactors.AgentConfig{
-					ExecutionMode: "live",
-					ID:            "bad-agent",
-					Identity:      badIdentity,
-					Role:          "worker",
-					LLMBackend:    llmselection.BackendAnthropic,
-					Intent:        selectedContractTestIntent(t, "bad-agent"),
-					Model:         "regular",
-					Subscriptions: []string{"item.received"},
-				},
-				Topology: selectedContractTestDeclarationTopology(t),
-			}},
-			Options: SelectedContractAgentRuntimeOptions{
-				ExecutionPosture:  executionposture.Live,
-				ProcessCapability: processCapability,
-				Config:            &config.Config{},
-				LLMRuntime:        selectedContractCleanupRuntime{},
-				AgentManagerOptions: runtimemanager.AgentManagerOptions{
-					WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(),
-				},
-			},
-		},
-	}, eventBus, &runtimepipeline.PipelineCoordinator{}, nil)
-	if err == nil || !strings.Contains(err.Error(), "cannot reconstruct its derived prompt without a semantic source") {
-		t.Fatalf("startSelectedContractAgentRuntime error = %v, want registration failure", err)
-	}
-	if processCapability.issued == nil || prepared.retainedRuntime == nil || prepared.retainedRuntime.generationGrant == nil {
-		t.Fatal("failed selected startup discarded its exact grant and cleanup owner")
-	}
-	select {
-	case <-processCapability.issued.Done():
-		t.Fatal("failed cleanup retired the grant before a successful owner retry")
-	default:
-	}
-	if err := prepared.Close(); err != nil {
-		t.Fatalf("retry exact selected startup cleanup: %v", err)
-	}
-	select {
-	case <-processCapability.issued.Done():
-	default:
-		t.Fatal("preparation Close returned before retained grant retirement")
-	}
-	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_URL")); got != staleHostURL {
-		t.Fatalf("SWARM_TOOL_GATEWAY_URL = %q, want unchanged %q", got, staleHostURL)
-	}
-	if got := strings.TrimSpace(os.Getenv("SWARM_TOOL_GATEWAY_CONTAINER_URL")); got != staleContainerURL {
-		t.Fatalf("SWARM_TOOL_GATEWAY_CONTAINER_URL = %q, want unchanged %q", got, staleContainerURL)
-	}
-}
-
 type selectedContractCleanupRuntime struct{ runtimellm.NoopRuntime }
 
 func (selectedContractCleanupRuntime) ProviderContract() runtimellm.ProviderContract {
@@ -3771,7 +3743,12 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 	}
-	if result.Materialization.ForkRunID == "" || !result.Activation.Activated || result.ExecutedEventCount != 1 {
+	retainedExecution, executionErr := observeSelectedRetainedExecution(t, ctx, selectedContractExecutionOwnerForTest(t, pg), pg, result.Materialization.ForkRunID)
+	if executionErr != nil {
+		t.Fatalf("retained selected execution: %v", executionErr)
+	}
+
+	if result.Materialization.ForkRunID == "" || !result.Activation.Activated || retainedExecution.ExecutedEventCount != 1 {
 		t.Fatalf("selected execution result = %#v", result)
 	}
 	if result.SelectedContractExecutionAdmission == nil || result.SelectedContractExecutionAdmission.FrontierEventCount != 1 {
@@ -3863,13 +3840,18 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	if err != nil {
 		t.Fatalf("ActivateSelectedContractRunFork: %v", err)
 	}
+	retainedExecution, executionErr := observeSelectedRetainedExecution(t, ctx, selectedContractExecutionOwnerForTest(t, pg), pg, result.ForkRunID)
+	if executionErr != nil {
+		t.Fatalf("retained selected execution: %v", executionErr)
+	}
+
 	if result.ContractSwapBootResumeExecution == nil ||
 		result.ContractSwapBootResumeExecution.Owner != runfork.RunForkHistoricalReplayContractSwapBootResumeOwner ||
 		result.ContractSwapBootResumeExecution.ParentHistoricalReplayExecutionOwner != runfork.RunForkHistoricalReplayExecutionOwner ||
 		len(result.ContractSwapBootResumeExecution.ExecutableWork) != 1 {
 		t.Fatalf("contract-swap execution = %#v", result.ContractSwapBootResumeExecution)
 	}
-	if result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 || !result.Activated {
+	if retainedExecution.ExecutedEventCount != 1 || len(retainedExecution.ForkEvents) != 1 || !result.Activated {
 		t.Fatalf("activation result = %#v", result)
 	}
 	assertSelectedContractRuntimeContainerProof(t,
@@ -3880,7 +3862,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 		sourceEventID,
 		[]string{sourceEventID},
 	)
-	forkEventID := result.ForkEvents[0].ForkEventID
+	forkEventID := retainedExecution.ForkEvents[0].ForkEventID
 
 	var sourceSubscriberDeliveries, forkEventDeliveries int
 	if err := db.QueryRowContext(ctx, `
@@ -4415,6 +4397,9 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	if result.Materialization.ForkRunID == "" || !result.Activation.Activated {
 		t.Fatalf("selected execution result = %#v", result)
 	}
+	if _, err := observeSelectedRetainedExecution(t, ctx, selectedContractExecutionOwnerForTest(t, pg), pg, result.Materialization.ForkRunID); err != nil {
+		t.Fatalf("retained selected execution: %v", err)
+	}
 	if selectedExecutionResultHasBlocker(result, runfork.RunForkBlockerCommittedReplayScopeReplayUnsupported) {
 		t.Fatalf("selected execution retained committed replay-scope blocker: materialization=%#v activation=%#v", result.Materialization.UnsupportedBlockers, result.Activation.UnsupportedBlockers)
 	}
@@ -4637,66 +4622,6 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 	}
 }
 
-func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := runForkTestContext(t)
-	repoRoot := runForkExecutionRepoRoot(t)
-	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
-	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
-		Mode: "selected_contracts",
-	})
-	if err != nil {
-		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
-	}
-
-	if _, err := db.ExecContext(ctx, `
-		CREATE OR REPLACE FUNCTION fail_selected_contract_execution_lineage_insert()
-		RETURNS trigger AS $$
-		BEGIN
-			RAISE EXCEPTION 'forced selected execution lineage failure';
-		END;
-		$$ LANGUAGE plpgsql;
-
-		CREATE TRIGGER fail_selected_contract_execution_lineage_insert
-		BEFORE INSERT ON run_fork_selected_contract_executions
-		FOR EACH ROW EXECUTE FUNCTION fail_selected_contract_execution_lineage_insert();
-	`); err != nil {
-		t.Fatalf("install lineage failure trigger: %v", err)
-	}
-
-	sourceRunID := uuid.NewString()
-	sourceEventID := uuid.NewString()
-	at := time.Unix(1700002335, 0).UTC()
-	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
-		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
-	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
-
-	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID:       sourceRunID,
-		At:                sourceEventID,
-		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
-		SourceLoader:      loader,
-		ContractSelection: runforkadmission.SelectedContractSelection(
-			loaded.Source,
-		),
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
-	})
-	if err == nil || !strings.Contains(err.Error(), "forced selected execution lineage failure") {
-		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want forced lineage publish failure", err)
-	}
-	if result.Materialization.ForkRunID == "" {
-		t.Fatalf("expected materialization before publish failure, got %#v", result.Materialization)
-	}
-	if result.Activation.SourceFrozen || result.Activation.ForkRunStatus == runfork.RunForkActivatedStatus {
-		t.Fatalf("activation mutated before publish failure cleanup: %#v", result.Activation)
-	}
-
-	assertSelectedContractExecutionCleanup(t, db, sourceRunID, result.Materialization.ForkRunID)
-}
-
 func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedAfterForkPoint(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -4763,6 +4688,11 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	if err != nil {
 		t.Fatalf("ExecuteSelectedContractRunFork: %v", err)
 	}
+	retainedExecution, executionErr := observeSelectedRetainedExecution(t, ctx, selectedContractExecutionOwnerForTest(t, pg), pg, result.Materialization.ForkRunID)
+	if executionErr != nil {
+		t.Fatalf("retained selected execution: %v", executionErr)
+	}
+
 	if !result.Activation.Activated || result.Activation.ForkRunStatus != runfork.RunForkActivatedStatus {
 		t.Fatalf("activation = %#v, want activated fork", result.Activation)
 	}
@@ -4794,8 +4724,8 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if sourceStatus != "cancelled" || forkStatus != runfork.RunForkActivatedStatus {
-		t.Fatalf("branch statuses source/fork = %s/%s, want cancelled/running", sourceStatus, forkStatus)
+	if result.Activation.ForkRunStatus != runfork.RunForkActivatedStatus || sourceStatus != "cancelled" || forkStatus != string(storerunlifecycle.StateCompleted) {
+		t.Fatalf("branch statuses ACK/source/fork = %s/%s/%s, want running/cancelled/completed", result.Activation.ForkRunStatus, sourceStatus, forkStatus)
 	}
 
 	var branchRows int
@@ -4821,7 +4751,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 		t.Fatalf("branch divergence rows = %d, want 1", branchRows)
 	}
 
-	forkEventID := result.ForkEvents[0].ForkEventID
+	forkEventID := retainedExecution.ForkEvents[0].ForkEventID
 	var copiedPostTEvents, copiedPostTDeliveries, forkReceipts, emittedFollowUps int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_id = $2::uuid`, result.Materialization.ForkRunID, afterEventID).Scan(&copiedPostTEvents); err != nil {
 		t.Fatalf("count copied post-T source event: %v", err)

@@ -139,6 +139,9 @@ func TestSelectedCompletion2270EvidenceBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if _, err := observeSelectedRetainedExecution(t, ctx, owner, selected, result.Materialization.ForkRunID); err != nil {
+					t.Fatalf("retained selected completion evidence: %v", err)
+				}
 				reads := selected.(operatorread.ConversationReader)
 				list, err := reads.ListOperatorConversations(ctx, operatorread.OperatorConversationListOptions{RunID: result.Materialization.ForkRunID, AgentID: "test-agent"})
 				if err != nil || len(list.Conversations) != 1 {

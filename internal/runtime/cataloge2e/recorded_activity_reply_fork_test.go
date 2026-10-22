@@ -339,7 +339,7 @@ func runCopiedActivityReplyReturnOutcome(t *testing.T, backend catalogRuntimeBac
 		if err != nil {
 			t.Fatal(err)
 		}
-		loader = runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootFromCatalogE2E(t), PlatformSpecPath: platformSpecPathFromCatalogE2E(t), Store: selected}
+		loader = runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootFromCatalogE2E(t), Store: selected}
 		options = selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
 	} else {
 		executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{

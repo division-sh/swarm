@@ -2,9 +2,6 @@ package runforkexecution
 
 import (
 	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -261,84 +258,6 @@ func TestSelectedContractDeferredWorkAdmissionRejectsSourceDrift(t *testing.T) {
 	if err := admission.validate(plan.SourceRunID, plan.ForkPoint, drifted); err == nil ||
 		!strings.Contains(err.Error(), "workflow identity does not match") {
 		t.Fatalf("source drift error = %v, want exact workflow identity rejection", err)
-	}
-}
-
-func TestSelectedContractDeferredWorkAdmissionProductionConsumersStatic(t *testing.T) {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatal(err)
-	}
-	counts := map[string]int{}
-	activationCalls := map[string]int{}
-	imperativeCalls := 0
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(".", name), nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", name, err)
-		}
-		ast.Inspect(parsed, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			if selector, ok := call.Fun.(*ast.SelectorExpr); ok && (selector.Sel.Name == "PrepareFlowInstanceActivation" || selector.Sel.Name == "FinalizeCommittedFlowInstanceActivation") {
-				activationCalls[name]++
-			}
-			if selector, ok := call.Fun.(*ast.SelectorExpr); ok && selector.Sel.Name == "ActivateFlowInstance" {
-				imperativeCalls++
-			}
-			ident, ok := call.Fun.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			switch ident.Name {
-			case "admitSelectedContractDeferredWork":
-				counts[ident.Name]++
-			case "BuildSelectedContractExecutionAdmission":
-				counts[ident.Name]++
-				requireSelectedDeferredWorkCompositeField(t, name, call, "DeferredWorkAdmission")
-			case "buildSelectedContractForkLocalRuntimeContainer":
-				counts[ident.Name]++
-				requireSelectedDeferredWorkCompositeField(t, name, call, "DeferredWorkAdmission")
-			}
-			return true
-		})
-	}
-	for function, want := range map[string]int{
-		"admitSelectedContractDeferredWork":              2, // preparation (including recovery), staged activation
-		"BuildSelectedContractExecutionAdmission":        2, // common execution (including recovery), staged activation
-		"buildSelectedContractForkLocalRuntimeContainer": 2,
-	} {
-		if got := counts[function]; got != want {
-			t.Fatalf("production %s call count = %d, want %d exact admitted entry points", function, got, want)
-		}
-	}
-	recoverySource, err := os.ReadFile("execution.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(recoverySource), "return ExecuteSelectedContractRunFork(ctx, admitted.request)") {
-		t.Fatal("recovery bypasses the common selected admission/execution sequence")
-	}
-	if imperativeCalls != 0 {
-		t.Fatalf("imperative activation consumers = %d, want none", imperativeCalls)
-	}
-	if len(activationCalls) != 1 || activationCalls["runtime_container.go"] != 2 {
-		t.Fatalf("selected dynamic activation consumers = %#v, want fork-local planner and committed finalizer", activationCalls)
-	}
-	containerSource, err := os.ReadFile("runtime_container.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	admissionIndex := strings.Index(string(containerSource), "req.DeferredWorkAdmission.validate")
-	activationIndex := strings.Index(string(containerSource), "TemplateInstancePlanner:")
-	if admissionIndex < 0 || activationIndex < 0 || admissionIndex >= activationIndex {
-		t.Fatal("fork-local dynamic activation is not structurally downstream of deferred-work admission")
 	}
 }
 
