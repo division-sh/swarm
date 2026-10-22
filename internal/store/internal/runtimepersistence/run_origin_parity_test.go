@@ -16,6 +16,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -118,7 +119,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 					disposition != runtimerunlifecycle.MutationApplied {
 					t.Fatalf("revise scenario source = %s/%v", disposition, err)
 				}
-				ctx = originalStoreFixtureContext(t, testAuthorActivityContextForBundle(runLifecycleCandidateParityReplacementHash), fixture.store)
+				ctx = startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(runLifecycleCandidateParityReplacementHash), ctx)
 				requireRunOriginHeader(t, ctx, reader, runID, want, 1)
 				for _, state := range []runtimerunlifecycle.State{
 					runtimerunlifecycle.StatePaused,
