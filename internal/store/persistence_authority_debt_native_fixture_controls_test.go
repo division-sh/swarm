@@ -21,7 +21,7 @@ const debtNativeFixtureCollectorTo = "0bd1ab5a0b812a4ec0868c453f4a7ac572726261f9
 // #642/6207897765: exactly two additional native second-result reopen calls.
 // Current owner pins compose the approved binders and landed fixture models;
 // the classified identities, multiplicities and baseline are unchanged.
-const debtQ1ReopenCollectorTo = "76091eeb63054dce808d7733e52836436a98a49340bfa3ef6ca420b4623b5649"
+const debtQ1ReopenCollectorTo = "4a683b60cf5147aece5eabc4e8f044555f64a15623f9e7106ddb4d9726961f9a"
 
 func TestPersistenceAuthorityDebtNativeFixtureExactClassificationDelta(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
