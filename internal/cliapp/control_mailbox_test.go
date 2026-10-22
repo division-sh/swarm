@@ -17,9 +17,25 @@ func TestMailboxListUsesTaggedNoticeAndDecisionCardProjection(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	var captured jsonRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Fatalf("decode request: %v", err)
 		}
+		if req.Method == "mailbox.get" {
+			id, _ := req.Params["mailbox_id"].(string)
+			card := mailboxCardDetailResult(id)
+			result := map[string]any{"kind": "decision_card"}
+			if id == "human-card-1" {
+				card = mailboxHumanTaskCardDetailResult(id)
+			} else if id == "effect-card-1" {
+				card = mailboxProposedEffectCardDetailResult(id)
+				result["effect"] = mailboxProposedEffectStateResult()
+			}
+			result["decision_card"] = card
+			writeJSONRPCResult(t, w, req.ID, result)
+			return
+		}
+		captured = req
 		writeJSONRPCResult(t, w, captured.ID, map[string]any{
 			"unread_informational_notices": 3,
 			"items": []any{
@@ -47,7 +63,7 @@ func TestMailboxListUsesTaggedNoticeAndDecisionCardProjection(t *testing.T) {
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	for _, want := range []string{"⚠ 3 unread operator notices", "MAILBOX_ID", "notice-1", "notice", "card-1", "decision_card", "launch_review", "human-card-1", "human_task:strategic_decision", "effect-card-1", "proposed_effect:support_reply", "next_cursor=cursor-2"} {
+	for _, want := range []string{"⚠ 3 unread operator notices", "MAILBOX_ID", "notice-1", "notice", "card-1", "decision_card", "launch_review", "human-card-1", "human_task:strategic_decision", "effect-card-1", "proposed_effect:support_reply", "next_cursor=cursor-2", "Option: approve", "qa", "passed"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -272,7 +288,9 @@ func mailboxCardSummaryResult(id string) map[string]any {
 func mailboxCardDetailResult(id string) map[string]any {
 	out := mailboxCardSummaryResult(id)
 	out["card_content_hash"] = "content-hash"
-	out["snapshot"] = map[string]any{"decision": "launch_review", "context": map[string]any{"qa": "passed"}, "outcomes": map[string]any{"approve": map[string]any{"advances_to": "done"}}}
+	out["snapshot"] = map[string]any{"decision": "launch_review", "title": "Launch review", "context": map[string]any{"qa": "passed"}, "outcomes": map[string]any{
+		"approve": map[string]any{"Verdict": "approve", "Label": "Approve", "Input": map[string]any{}, "InputOrder": []string{}},
+	}}
 	return out
 }
 
@@ -292,10 +310,7 @@ func mailboxHumanTaskCardSummaryResult(id string) map[string]any {
 func mailboxHumanTaskCardDetailResult(id string) map[string]any {
 	out := mailboxHumanTaskCardSummaryResult(id)
 	out["card_content_hash"] = "human-content-hash"
-	out["snapshot"] = map[string]any{
-		"description": "Choose the launch market",
-		"outcomes":    map[string]any{"approve": map[string]any{}, "reject": map[string]any{}},
-	}
+	out["snapshot"] = mailboxCardDetailResult(id)["snapshot"]
 	return out
 }
 
@@ -316,8 +331,12 @@ func mailboxProposedEffectCardDetailResult(id string) map[string]any {
 	out := mailboxProposedEffectCardSummaryResult(id)
 	out["card_content_hash"] = "effect-card-content-hash"
 	out["snapshot"] = map[string]any{
-		"decision": "support_reply", "context": map[string]any{"input": map[string]any{"text": "Exact reply"}},
-		"outcomes": map[string]any{"approve": map[string]any{}, "revise": map[string]any{}, "reject": map[string]any{}},
+		"decision": "support_reply", "title": "Send support reply", "context": map[string]any{"input": map[string]any{"text": "Exact reply"}},
+		"outcomes": map[string]any{
+			"approve": map[string]any{"Verdict": "approve", "Label": "Approve", "Input": map[string]any{}, "InputOrder": []string{}},
+			"revise":  map[string]any{"Verdict": "revise", "Label": "Revise", "Input": map[string]any{}, "InputOrder": []string{}},
+			"reject":  map[string]any{"Verdict": "reject", "Label": "Reject", "Input": map[string]any{}, "InputOrder": []string{}},
+		},
 	}
 	return out
 }

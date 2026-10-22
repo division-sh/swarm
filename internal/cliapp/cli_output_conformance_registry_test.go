@@ -36,6 +36,7 @@ type cliOutputSharedOwnerProof struct {
 }
 
 var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
+	"swarm mailbox decide":    {Constructor: "newMailboxDecideCommand", Runner: "renderMailboxDecideResult"},
 	"swarm version":           {Constructor: "newVersionCommand", Runner: "runVersionCommand"},
 	"swarm import":            {Constructor: "newImportPackCommand", Runner: "newImportPackCommand"},
 	"swarm packs list":        {Constructor: "newPacksListCommand", Runner: "newPacksListCommand"},

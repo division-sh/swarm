@@ -3,13 +3,16 @@ package cliapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/spf13/cobra"
 )
 
@@ -93,6 +96,7 @@ type mailboxDecisionCard struct {
 	Snapshot        map[string]any `json:"snapshot"`
 	Verdict         string         `json:"verdict,omitempty"`
 	Fields          map[string]any `json:"fields,omitempty"`
+	DecidedAt       string         `json:"decided_at,omitempty"`
 }
 
 type mailboxListResult struct {
@@ -128,6 +132,13 @@ type mailboxDeferCommandOptions struct {
 	idempotencyKey string
 }
 
+type mailboxDecideCommandOptions struct {
+	apiOptions     rootCommandOptions
+	output         cliOutputOptions
+	inputs         []string
+	idempotencyKey string
+}
+
 func newControlCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{Use: "control", Short: "Pause, continue, stop, or reset runs (operator actions).", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
 	cmd.AddCommand(newControlPauseCommand(opts), newControlContinueCommand(opts), newControlStopCommand(opts), newControlNukeCommand(opts))
@@ -136,7 +147,7 @@ func newControlCommand(opts rootCommandOptions) *cobra.Command {
 
 func newMailboxCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{Use: "mailbox", Short: "Inspect notices and typed decision cards.", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
-	cmd.AddCommand(newMailboxListCommand(opts), newMailboxViewCommand(opts), newMailboxDeferCommand(opts))
+	cmd.AddCommand(newMailboxListCommand(opts), newMailboxViewCommand(opts), newMailboxDeferCommand(opts), newMailboxDecideCommand(opts))
 	return cmd
 }
 func newMailboxListCommand(opts rootCommandOptions) *cobra.Command {
@@ -180,6 +191,20 @@ func newMailboxDeferCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
+func newMailboxDecideCommand(opts rootCommandOptions) *cobra.Command {
+	actionOpts := mailboxDecideCommandOptions{apiOptions: opts}
+	cmd := &cobra.Command{Use: "decide <card-id> <option>", Short: "Answer a decision card with an authored option.", Args: argcount.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
+		return runMailboxDecideCommand(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), actionOpts, args[0], args[1])
+	}}
+	argcount.SetDiscoveryHint(cmd, "Find card ids and option tokens with `swarm mailbox list` and `swarm mailbox view <card-id>`.")
+	cmd.Flags().StringArrayVar(&actionOpts.inputs, "input", nil, "Declared option input as key=value (repeatable)")
+	cmd.Flags().StringVar(&actionOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key")
+	_ = cmd.Flags().MarkHidden("idempotency-key")
+	bindCLIAPIConnectionFlagsWithClass(cmd, &actionOpts.apiOptions, cliAPICommandClassMutating, "swarm mailbox decide")
+	bindCLIOutputFlags(cmd, &actionOpts.output)
+	return cmd
+}
+
 func runMailboxListCommand(ctx context.Context, out, errOut io.Writer, opts mailboxListCommandOptions) error {
 	params, err := opts.params()
 	if err != nil {
@@ -196,7 +221,20 @@ func runMailboxListCommand(ctx context.Context, out, errOut io.Writer, opts mail
 	if err := validateMailboxListResult(result); err != nil {
 		return returnCLIAPIError(errOut, err, mailboxListAPIErrorClassifier())
 	}
+	var details []mailboxDetailProjection
+	for _, item := range result.Items {
+		if item.Kind == "decision_card" {
+			detail, err := readMailboxDetail(ctx, client, item.DecisionCard.CardID)
+			if err != nil {
+				return returnCLIAPIError(errOut, err, mailboxReadAPIErrorClassifier())
+			}
+			details = append(details, detail)
+		}
+	}
 	writeMailboxListResult(out, result)
+	for _, detail := range details {
+		writeMailboxDetailResult(out, detail)
+	}
 	return nil
 }
 
@@ -209,15 +247,130 @@ func runMailboxViewCommand(ctx context.Context, out, errOut io.Writer, opts root
 	if err != nil {
 		return returnCLIAPIError(errOut, err, mailboxReadAPIErrorClassifier())
 	}
-	var result mailboxDetailProjection
-	if err := client.call(ctx, "mailbox.get", map[string]any{"mailbox_id": id}, &result); err != nil {
-		return returnCLIAPIError(errOut, err, mailboxReadAPIErrorClassifier())
-	}
-	if err := validateMailboxDetailResult(result); err != nil {
+	result, err := readMailboxDetail(ctx, client, id)
+	if err != nil {
 		return returnCLIAPIError(errOut, err, mailboxReadAPIErrorClassifier())
 	}
 	writeMailboxDetailResult(out, result)
 	return nil
+}
+
+func readMailboxDetail(ctx context.Context, client *cliAPIClient, id string) (mailboxDetailProjection, error) {
+	var result mailboxDetailProjection
+	if err := client.call(ctx, "mailbox.get", map[string]any{"mailbox_id": id}, &result); err != nil {
+		return result, err
+	}
+	if err := validateMailboxDetailResult(result); err != nil {
+		return result, err
+	}
+	if result.DecisionCard != nil && result.DecisionCard.CardID != id {
+		return result, fmt.Errorf("mailbox.get returned a different card")
+	}
+	return result, nil
+}
+
+func runMailboxDecideCommand(ctx context.Context, out, errOut io.Writer, opts mailboxDecideCommandOptions, cardID, option string) error {
+	if strings.TrimSpace(cardID) == "" || strings.TrimSpace(option) == "" {
+		return returnCLIValidationError(errOut, fmt.Errorf("card id and option are required"))
+	}
+	if err := opts.output.validate(); err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	client, err := newCLIAPIClient(opts.apiOptions)
+	if err != nil {
+		return returnCLIAPIError(errOut, err, mailboxDecisionAPIErrorClassifier())
+	}
+	detail, err := readMailboxDetail(ctx, client, cardID)
+	if err != nil {
+		return returnCLIAPIError(errOut, err, mailboxDecisionAPIErrorClassifier())
+	}
+	card := detail.DecisionCard
+	if card == nil {
+		return returnCLIValidationError(errOut, fmt.Errorf("%s is a notice, not a decision card", cardID))
+	}
+	if card.Status == "decided" {
+		return renderMailboxDecideResult(out, errOut, opts.output, card, fmt.Sprintf("already decided: %s at %s", card.Verdict, card.DecidedAt), cardID)
+	}
+	fields, err := mailboxDecisionInputs(*card, option, opts.inputs)
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	params := map[string]any{"verdict": option, "fields": fields.Interface()}
+	if opts.idempotencyKey != "" {
+		params["idempotency_key"] = opts.idempotencyKey
+	}
+	result, err := callMailboxDecide(ctx, client, cardID, card.CardContentHash, params)
+	var rpcErr *jsonRPCError
+	if errors.As(err, &rpcErr) {
+		switch applicationErrorCode(rpcErr.Data) {
+		case "MAILBOX_STALE_CARD":
+			err = fmt.Errorf("the card changed, view it again with `swarm mailbox view %s`: %w", cardID, err)
+		case "MAILBOX_ALREADY_DECIDED":
+			current, readErr := readMailboxDetail(ctx, client, cardID)
+			if readErr == nil && current.DecisionCard != nil && current.DecisionCard.Status == "decided" {
+				return renderMailboxDecideResult(out, errOut, opts.output, current.DecisionCard, fmt.Sprintf("already decided: %s at %s", current.DecisionCard.Verdict, current.DecisionCard.DecidedAt), cardID)
+			}
+		}
+	}
+	if err != nil {
+		return returnCLIAPIError(errOut, err, mailboxDecisionAPIErrorClassifier())
+	}
+	if result.Status != "decided" {
+		return returnCLIAPIError(errOut, fmt.Errorf("decision not committed: card status %s", result.Status), mailboxDecisionAPIErrorClassifier())
+	}
+	return renderMailboxDecideResult(out, errOut, opts.output, result, fmt.Sprintf("Decided: %s (card %s)", option, cardID), cardID)
+}
+
+func renderMailboxDecideResult(out, errOut io.Writer, opts cliOutputOptions, result any, line, cardID string) error {
+	return renderCLIOutput(out, errOut, opts, result, func(w io.Writer) { writeCLITitle(w, line) }, func() ([]string, error) { return []string{cardID}, nil })
+}
+
+// The public verb and scenario runner share the exact mutation request/response path.
+func callMailboxDecide(ctx context.Context, client *cliAPIClient, cardID, contentHash string, params map[string]any) (mailboxMutationResult, error) {
+	params["card_id"], params["observed_content_hash"] = cardID, contentHash
+	var result mailboxMutationResult
+	if err := client.call(ctx, "mailbox.decide", params, &result); err != nil {
+		return result, err
+	}
+	if !result.OK || result.CardID != cardID || result.ChangeID <= 0 {
+		return result, fmt.Errorf("malformed mailbox.decide result")
+	}
+	return result, nil
+}
+
+func mailboxDecisionInputs(card mailboxDecisionCard, option string, inputs []string) (semanticvalue.Value, error) {
+	raw, err := json.Marshal(card.Snapshot)
+	if err != nil {
+		return semanticvalue.Value{}, err
+	}
+	snapshot, err := decisioncard.DecodeSnapshot(raw)
+	if err != nil {
+		return semanticvalue.Value{}, err
+	}
+	outcome, ok := snapshot.Outcomes[option]
+	if !ok {
+		return semanticvalue.Value{}, fmt.Errorf("option %q is not authored; view the card's option tokens", option)
+	}
+	fields := semanticvalue.EmptyObject()
+	for _, input := range inputs {
+		name, text, ok := strings.Cut(input, "=")
+		declaration, declared := outcome.Input[name]
+		if !ok || !declared {
+			return fields, fmt.Errorf("--input %q must be a declared key=value for option %s", input, option)
+		}
+		if _, duplicate := fields.Lookup(name); duplicate {
+			return fields, fmt.Errorf("--input %s is repeated", name)
+		}
+		value, err := decisioncard.ParseInputFieldText(declaration.Type, text)
+		if err != nil {
+			return fields, fmt.Errorf("--input %s: %w", name, err)
+		}
+		fields, err = fields.With(name, value)
+		if err != nil {
+			return fields, err
+		}
+	}
+	return fields, decisioncard.ValidateDecision(decisioncard.Card{Snapshot: snapshot}, option, fields)
 }
 
 func runMailboxDeferCommand(ctx context.Context, out, errOut io.Writer, opts mailboxDeferCommandOptions, cardID string) error {
@@ -253,7 +406,7 @@ func mailboxReadAPIErrorClassifier() cliAPIErrorClassifier {
 	return cliAPIErrorClassifier{notFoundCodes: []string{"MAILBOX_NOT_FOUND"}}
 }
 func mailboxDecisionAPIErrorClassifier() cliAPIErrorClassifier {
-	return cliAPIErrorClassifier{notFoundCodes: []string{"MAILBOX_NOT_FOUND"}, conflictCodes: []string{"MAILBOX_ALREADY_DECIDED", "MAILBOX_CARD_SUPERSEDED", "IDEMPOTENCY_CONFLICT"}}
+	return cliAPIErrorClassifier{notFoundCodes: []string{"MAILBOX_NOT_FOUND"}, conflictCodes: []string{"MAILBOX_ALREADY_DECIDED", "MAILBOX_STALE_CARD", "MAILBOX_CARD_SUPERSEDED", "IDEMPOTENCY_CONFLICT"}}
 }
 
 func (o mailboxListCommandOptions) params() (map[string]any, error) {
@@ -380,6 +533,9 @@ func validateMailboxDetailResult(result mailboxDetailProjection) error {
 		if err := validateMailboxDecisionCardAnchor(result.DecisionCard.mailboxDecisionCardSummary); err != nil {
 			return err
 		}
+		if result.DecisionCard.Status == "decided" && (result.DecisionCard.Verdict == "" || result.DecisionCard.DecidedAt == "") {
+			return fmt.Errorf("malformed mailbox.get decided card: verdict and decided_at are required")
+		}
 		if result.DecisionCard.AnchorKind == string(decisioncard.AnchorKindProposedEffect) {
 			if result.Effect == nil || result.Effect.RequestEventID == "" || result.Effect.ActivityID == "" || result.Effect.DispatchState == "" {
 				return fmt.Errorf("malformed mailbox.get proposed_effect dispatch state")
@@ -440,7 +596,41 @@ func writeMailboxDetailResult(out io.Writer, result mailboxDetailProjection) {
 		fmt.Fprintf(out, "activity_request_id=%s\n", result.Effect.RequestEventID)
 	}
 	fmt.Fprintf(out, "card_content_hash=%s\n", card.CardContentHash)
+	writeCLIFieldLine(out, cliDetailField{Key: "question", Value: card.Title}, cliDetailField{Key: "run", Value: card.RunID}, cliDetailField{Key: "flow", Value: card.Anchor.FlowID}, cliDetailField{Key: "instance", Value: card.Scope.FlowInstance})
+	if created, err := time.Parse(time.RFC3339Nano, card.CreatedAt); err == nil {
+		writeCLIFieldLine(out, cliDetailField{Key: "age", Value: time.Since(created).Round(time.Second).String()})
+	}
+	writeMailboxOptions(out, card.Snapshot)
 	writeMailboxObject(out, "snapshot", card.Snapshot)
+}
+
+func writeMailboxOptions(out io.Writer, snapshot map[string]any) {
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return
+	}
+	decoded, err := decisioncard.DecodeSnapshot(raw)
+	if err != nil {
+		return
+	}
+	writeMailboxObject(out, "context", decoded.Context.Interface().(map[string]any))
+	names := make([]string, 0, len(decoded.Outcomes))
+	for name := range decoded.Outcomes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		outcome := decoded.Outcomes[name]
+		fmt.Fprintf(out, "Option: %s - %s\n", name, outcome.Label)
+		for _, key := range outcome.InputOrder {
+			input := outcome.Input[key]
+			presence := "optional"
+			if input.Required {
+				presence = "required"
+			}
+			fmt.Fprintf(out, "  --input %s=<%s> (%s)\n", key, input.Type, presence)
+		}
+	}
 }
 
 func mailboxDecisionCardListLabels(card mailboxDecisionCardSummary) (string, string) {

@@ -837,6 +837,7 @@ func cliIdentifierStructuralRowCovers(command, selector string) bool {
 }
 
 var cliIdentifierNonResourcePositionals = map[string]bool{
+	cliIdentifierRegistryKey("swarm mailbox decide", "arg:option"):     true,
 	cliIdentifierRegistryKey("swarm agent directive", "arg:message"):   true,
 	cliIdentifierRegistryKey("swarm describe", "arg:directory"):        true,
 	cliIdentifierRegistryKey("swarm describe routes", "arg:directory"): true,
@@ -932,6 +933,7 @@ var cliIdentifierNonResourceStringFlags = map[string]bool{
 	cliIdentifierRegistryKey("swarm standing resume", "flag:reason"):                true,
 	cliIdentifierRegistryKey("swarm standing reset", "flag:reason"):                 true,
 	cliIdentifierRegistryKey("swarm mailbox defer", "flag:until"):                   true,
+	cliIdentifierRegistryKey("swarm mailbox decide", "flag:input"):                  true,
 	cliIdentifierRegistryKey("swarm mailbox list", "flag:cursor"):                   true,
 	cliIdentifierRegistryKey("swarm mailbox list", "flag:priority"):                 true,
 	cliIdentifierRegistryKey("swarm mailbox list", "flag:status"):                   true,
