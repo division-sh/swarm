@@ -102,7 +102,8 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 							local, wantCalls := "send.succeeded", int32(1)
 							switch outcome {
 							case "exhausted":
-								local, wantCalls = "send.failed", 3
+								// #2700 retires policy-driven retries for authored HTTP calls.
+								local, wantCalls = "send.failed", 1
 							case "revise":
 								local, wantCalls = "send.revision_requested", 0
 							case "reject":
