@@ -295,6 +295,11 @@ func debtPartialExcludedAuthorityInfo(file *ast.File, fset *token.FileSet, base 
 
 func debtExcludedSourceFindings(t *testing.T, path string, file *ast.File, info *types.Info) []authorityFinding {
 	t.Helper()
+	return debtClassifyReviewedExcludedFixtures(t, debtExcludedSourceUncertainty(t, path, file, info))
+}
+
+func debtExcludedSourceUncertainty(t *testing.T, path string, file *ast.File, info *types.Info) []authorityFinding {
+	t.Helper()
 	var context []string
 	for _, imported := range file.Imports {
 		name := ""
@@ -909,6 +914,7 @@ func (scan *debtAuthorityTypeScan) debtContainsRawCallbackInput(valueType types.
 func (scan *debtAuthorityTypeScan) debtCollectFixtureStoreConstruction(path string, file *ast.File, info *types.Info) []authorityFinding {
 	var findings []authorityFinding
 	counts := map[string]int{}
+	reopened := debtReviewedNativeReopenCalls(path, file, info)
 	ast.Inspect(file, func(node ast.Node) bool {
 		var result types.Type
 		var inputs []ast.Expr
@@ -941,7 +947,7 @@ func (scan *debtAuthorityTypeScan) debtCollectFixtureStoreConstruction(path stri
 			for _, input := range inputs {
 				raw = raw || scan.debtContainsRawSQLType(info.TypeOf(input))
 			}
-			if !raw && debtOwnedNativeFixtureConstruction(path, node, info) {
+			if !raw && (debtOwnedNativeFixtureConstruction(path, node, info) || reopened[node.Pos()]) {
 				return true
 			}
 			identity := enclosing + ":" + debtResolvedTypeString(result)

@@ -374,10 +374,18 @@ func stageCatalogSelectedContractFork(
 	selection runfork.RunForkContractSelection,
 	options forkexecution.SelectedContractAgentRuntimeOptions,
 	sourceRunID, eventID string,
+	operations ...runfork.ForkOperationRequest,
 ) runfork.RunForkMaterialization {
 	t.Helper()
+	if len(operations) > 1 {
+		t.Fatal("direct staging accepts at most one exact durable fork operation")
+	}
+	var operation *runfork.ForkOperationRequest
+	if len(operations) == 1 {
+		operation = &operations[0]
+	}
 	prepared, err := owner.Prepare(ctx, forkexecution.SelectedContractExecutionRequest{
-		SourceRunID: sourceRunID, At: eventID, AllowSourceFreeze: true,
+		SourceRunID: sourceRunID, At: eventID, AllowSourceFreeze: true, ForkOperation: operation,
 		SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 	})
 	if err != nil {

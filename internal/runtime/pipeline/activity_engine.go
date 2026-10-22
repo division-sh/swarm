@@ -335,6 +335,12 @@ func (d pipelineActivityDispatcher) reuseExistingNonIdempotentActivityAttempt(ct
 	if err := validateActivityAttemptClaimIdentity(existing, expected); err != nil {
 		return true, err
 	}
+	if existing.Status == ActivityAttemptStatusStarted && d.coordinator.activityJournalRole.Load() == nil {
+		if err := ctx.Err(); err != nil {
+			return true, err
+		}
+		return true, runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "activity_provider_outcome_uncertain", "activity-runtime", "reconcile_activity_attempt", map[string]any{"request_event_id": existing.RequestEventID})
+	}
 	if existing.Status != ActivityAttemptStatusStarted {
 		d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{"result_event_id": existing.ResultEventID})
 	}
@@ -736,6 +742,10 @@ func (pc *PipelineCoordinator) ExecuteDurableActivity(ctx context.Context, inten
 }
 
 func activityRequestEmitIntentFromAdmittedSource(intent runtimeengine.ActivityIntent) (runtimeengine.EmitIntent, error) {
+	return activityRequestEmitIntentWithParent(intent, firstNonEmptyString(intent.SourceEventID, intent.ParentEventID))
+}
+
+func activityRequestEmitIntentWithParent(intent runtimeengine.ActivityIntent, parentEventID string) (runtimeengine.EmitIntent, error) {
 	intent = intent.Normalized()
 	if err := validateSessionActivityRequestSelection(intent); err != nil {
 		return runtimeengine.EmitIntent{}, err
@@ -772,7 +782,7 @@ func activityRequestEmitIntentFromAdmittedSource(intent runtimeengine.ActivityIn
 		},
 		Lineage: events.EventLineage{
 			RunID:         intent.SourceRunID,
-			ParentEventID: firstNonEmptyString(intent.SourceEventID, intent.ParentEventID),
+			ParentEventID: parentEventID,
 			TaskID:        intent.SourceTaskID,
 			ExecutionMode: intent.ExecutionMode,
 		},
@@ -1512,7 +1522,11 @@ func (d pipelineActivityDispatcher) publishJournaledActivityResult(ctx context.C
 	if rec.CompletedAt == nil || rec.CompletedAt.IsZero() {
 		return fmt.Errorf("activity attempt %s has no valid terminal completion timestamp", rec.RequestEventID)
 	}
+	if owned, err := selectedActivityPublicationOwnsResult(ctx, intent, rec); err != nil || owned {
+		return err
+	}
 	intent.Generation = rec.Generation
+	intent.Context = events.DeliveryContext{}
 	if id := strings.TrimSpace(rec.ReplyContextID); id != "" {
 		intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: id}}
 	}

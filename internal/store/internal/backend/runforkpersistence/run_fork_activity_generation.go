@@ -13,16 +13,20 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 )
 
@@ -60,6 +64,7 @@ type runForkActivityAttemptEvidence struct {
 	ResultPayload   json.RawMessage
 	Failure         json.RawMessage
 	InputHash       string
+	ReplyContextID  string
 	StartedAt       time.Time
 	CompletedAt     time.Time
 	UpdatedAt       time.Time
@@ -70,7 +75,20 @@ type runForkSourceStateAdmission struct {
 	forkRunID string
 	snapshot  *runForkRevisionSnapshot
 	postgres  bool
+	firstTurn *runfork.InputPublication
+	point     runfork.RunForkPoint
 	sourceAt  func(context.Context, *sql.Tx, string) (correlation.SourceArtifactFact, error)
+}
+
+func (a runForkSourceStateAdmission) projectReplyReference(replyID string) (string, error) {
+	if a.snapshot == nil {
+		return "", fmt.Errorf("activity reply carrier requires fixed-cut source admission")
+	}
+	captured := make([]replycontext.Record, 0, len(a.snapshot.ReplyContexts))
+	for _, reply := range a.snapshot.ReplyContexts {
+		captured = append(captured, reply.Record)
+	}
+	return projectRunForkReplyReference(a.snapshot.RunID, a.forkRunID, captured, replyID)
 }
 
 type runForkProjectedSourceState struct {
@@ -88,18 +106,22 @@ func loadRunForkSourceStateAdmission(ctx context.Context, tx *sql.Tx, forkRunID 
 	if err := validate(ctx, tx, binding.SourceRunID); err != nil {
 		return runForkSourceStateAdmission{}, err
 	}
-	point, err := resolveFixedRunForkRevisionPoint(ctx, tx, binding.SourceRunID, binding.ForkPoint, resolve)
+	_, err = resolveFixedRunForkRevisionPoint(ctx, tx, binding.SourceRunID, binding.ForkPoint, resolve)
 	if err != nil {
 		return runForkSourceStateAdmission{}, err
 	}
-	snapshot, err := loadRunForkRevisionSnapshot(ctx, tx, binding.SourceRunID, point.Revision)
+	snapshot, err := loadRunForkPointSnapshot(ctx, tx, binding.SourceRunID, binding.ForkPoint)
 	if err != nil {
 		return runForkSourceStateAdmission{}, err
 	}
 	if err := validateRunForkEntityMetadataOwners(snapshot); err != nil {
 		return runForkSourceStateAdmission{}, err
 	}
-	return runForkSourceStateAdmission{forkRunID: forkRunID, snapshot: snapshot, postgres: postgres}, nil
+	firstTurn, err := loadRunForkStartFirstTurn(ctx, tx, snapshot)
+	if err != nil {
+		return runForkSourceStateAdmission{}, err
+	}
+	return runForkSourceStateAdmission{forkRunID: forkRunID, snapshot: snapshot, postgres: postgres, firstTurn: firstTurn, point: binding.ForkPoint}, nil
 }
 
 // Presence comes only from the bound source snapshot. Neither a producer root
@@ -108,26 +130,41 @@ func (a runForkSourceStateAdmission) project(event runfork.RunForkSelectedContra
 	if a.snapshot == nil || a.snapshot.Revision <= 0 || a.forkRunID == "" {
 		return event, nil, fmt.Errorf("source event preparation requires fixed-revision source-state admission")
 	}
-	found := false
-	for _, historical := range a.snapshot.Events {
-		if historical.EventID == event.SourceEventID {
-			if historical.RoutingSource != event.RoutingSource || historical.EventName != event.EventName {
-				return event, nil, fmt.Errorf("source event %s disagrees with bound revision producer evidence", event.SourceEventID)
-			}
-			if !bytes.Equal(historical.Payload, event.Payload) {
-				return event, nil, fmt.Errorf("source event %s payload disagrees with bound revision evidence", event.SourceEventID)
-			}
-			found = true
-			break
-		}
-	}
-	if !found {
-		return event, nil, fmt.Errorf("source event %s is outside the bound fork revision", event.SourceEventID)
+	if err := a.requireEventAtCut(event); err != nil {
+		return event, nil, err
 	}
 	projected, err := runfork.ProjectSelectedContractSourceEvent(a.snapshot.RunID, a.forkRunID, event)
 	if err != nil {
 		return event, nil, err
 	}
+	return a.projectSourceState(event, projected)
+}
+
+func (a runForkSourceStateAdmission) requireEventAtCut(event runfork.RunForkSelectedContractSourceEvent) error {
+	for _, historical := range a.snapshot.Events {
+		if historical.EventID == event.SourceEventID {
+			if historical.RoutingSource != event.RoutingSource || historical.EventName != event.EventName {
+				return fmt.Errorf("source event %s disagrees with bound revision producer evidence", event.SourceEventID)
+			}
+			if !bytes.Equal(historical.Payload, event.Payload) {
+				return fmt.Errorf("source event %s payload disagrees with bound revision evidence", event.SourceEventID)
+			}
+			return nil
+		}
+	}
+	if a.firstTurn == nil {
+		return fmt.Errorf("source event %s is outside the bound fork revision", event.SourceEventID)
+	}
+	original, present := a.firstTurn.Event()
+	if !present || original.ID() != event.SourceEventID || original.RunID() != a.snapshot.RunID ||
+		string(original.Type()) != event.EventName || original.RoutingSource() != event.RoutingSource ||
+		!bytes.Equal(original.Payload(), event.Payload) || original.ExecutionMode() != event.ExecutionMode {
+		return fmt.Errorf("source event %s contradicts the exact original first turn", event.SourceEventID)
+	}
+	return nil
+}
+
+func (a runForkSourceStateAdmission) projectSourceState(event, projected runfork.RunForkSelectedContractSourceEvent) (runfork.RunForkSelectedContractSourceEvent, *runForkProjectedSourceState, error) {
 	entityID := event.RoutingSource.Route().EntityID
 	for _, meta := range a.snapshot.EntityMetadata {
 		if meta.EntityID != entityID {
@@ -193,23 +230,7 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		}
 	}
 	if strings.TrimSpace(event.EventName) != runForkActivityRequestEvent {
-		role, found, err := admission.eventRole(sourceEvent.SourceEventID)
-		if err != nil {
-			return event, err
-		}
-		if !found {
-			event.Payload = append(json.RawMessage(nil), sourceEvent.Payload...)
-			return event, nil
-		}
-		if state == nil {
-			return event, fmt.Errorf("declared revision event requires exact source state")
-		}
-		payload, err := projectDeclaredForkPayload(sourceEvent.Payload, role, state.correspondence, actual)
-		if err != nil {
-			return event, fmt.Errorf("project original event %s: %w", event.SourceEventID, err)
-		}
-		event.Payload = payload
-		return event, nil
+		return admission.prepareNonActivitySourceEvent(ctx, tx, sourceEvent, event, state, actual)
 	}
 	var sourceRequest runForkActivityRequestPayload
 	if err := json.Unmarshal(sourceEvent.Payload, &sourceRequest); err != nil {
@@ -219,6 +240,14 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		return event, fmt.Errorf("activity request requires admitted source ownership")
 	}
 	owner, err := activityidentity.ParseOwnerKey(sourceRequest.NodeID)
+	if err != nil {
+		return event, err
+	}
+	sourceFact, err := runForkActivityFact(sourceRequest)
+	if err != nil {
+		return event, err
+	}
+	requestID, _, err := admitRunForkActivitySourceIdentity(ctx, tx, admission, sourceEvent, sourceFact)
 	if err != nil {
 		return event, err
 	}
@@ -276,8 +305,7 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if err != nil {
 		return event, err
 	}
-	evidence, err := loadRunForkActivityAttemptEvidence(ctx, tx, event.SourceEventID)
-	// An unissued request has neither an attempt nor issued work at the cut.
+	evidence, err := loadRunForkActivityAttemptEvidence(ctx, tx, requestID)
 	if errors.Is(err, sql.ErrNoRows) &&
 		!slices.ContainsFunc(admission.snapshot.Deliveries, func(delivery runForkRevisionDelivery) bool {
 			return delivery.Snapshot.EventID == event.SourceEventID
@@ -296,13 +324,90 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if evidence.ExecutionMode != event.ExecutionMode {
 		return event, fmt.Errorf("approved proposed effect %s execution mode %q conflicts with source event mode %q", event.SourceEventID, evidence.ExecutionMode, event.ExecutionMode)
 	}
-	if err := validateSourceActivityEvidence(evidence, sourceRequest, state, event.SourceEventID); err != nil {
+	if err := validateSourceActivityEvidence(evidence, sourceRequest, state, requestID); err != nil {
 		return event, err
 	}
-	if err := copyRunForkActivityAttemptEvidence(ctx, tx, story, forkRunID, flowInstance, request, reference, evidence); err != nil {
+	replyID, err := admission.projectReplyReference(evidence.ReplyContextID)
+	if err != nil {
 		return event, err
 	}
-	return event, nil
+	if err := copyRunForkActivityAttemptEvidence(ctx, tx, story, forkRunID, flowInstance, request, reference, evidence, replyID); err != nil {
+		return event, err
+	}
+	event.PublishedActivityResult, err = admission.publishedActivityResult(ctx, tx, sourceEvent.SourceEventID, evidence, request, reference, replyID)
+	return event, err
+}
+
+func (a runForkSourceStateAdmission) prepareNonActivitySourceEvent(ctx context.Context, tx *sql.Tx, source, projected runfork.RunForkSelectedContractSourceEvent, state *runForkProjectedSourceState, actual []loopruntime.Activation) (runfork.RunForkSelectedContractSourceEvent, error) {
+	var err error
+	projected.ContinuedReplyRequests, err = a.projectRequestReplies(ctx, tx, source.SourceEventID)
+	if err != nil {
+		return projected, err
+	}
+	projected.ContinuedRecipientRoutes, err = projectContinuedSourceRecipientRoutes(ctx, tx, a.snapshot, source.SourceEventID, a.forkRunID, projected.ContinuedReplyRequests)
+	if err != nil {
+		return projected, err
+	}
+	projected.ContinuedReplyReturn, err = a.projectReplyReturn(ctx, tx, source.SourceEventID)
+	if err != nil {
+		return projected, err
+	}
+	if projected.ContinuedReplyReturn != nil {
+		if len(projected.ContinuedReplyRequests) != 0 {
+			return projected, fmt.Errorf("source publication has competing request and accepted-return ownership")
+		}
+		projected.ContinuedRecipientRoutes, err = projectReplyReturnRoutes(a.snapshot, source.SourceEventID, a.forkRunID)
+		if err != nil {
+			return projected, err
+		}
+	}
+	activityRoutes, activityResult, err := a.publishedActivityResultRoutes(ctx, tx, source.SourceEventID)
+	if err != nil {
+		return projected, err
+	}
+	if activityResult {
+		if len(projected.ContinuedRecipientRoutes) != 0 {
+			if err := requireExactRunForkRequestRoutes(projected.ContinuedRecipientRoutes, activityRoutes); err != nil {
+				return projected, fmt.Errorf("activity result has competing recipient continuation ownership: %w", err)
+			}
+		}
+		projected.ContinuedRecipientRoutes = activityRoutes
+	}
+	if projected.EventName == "platform.join_complete" || projected.EventName == "platform.join_timeout" {
+		payload, err := canonicaljson.Decode(source.Payload)
+		if err != nil {
+			return projected, err
+		}
+		object, valid := payload.Interface().(map[string]any)
+		if !valid {
+			return projected, fmt.Errorf("published join requires its typed payload")
+		}
+		_, ref, valid := timeridentity.ParseJoinHandle(object)
+		if !valid {
+			return projected, fmt.Errorf("published join requires its exact typed handle")
+		}
+		if ref.Mode() == timeridentity.JoinRefModeFanOutDelivery {
+			return a.publishedBarrier(ctx, tx, projected, state, actual, ref)
+		}
+		return a.publishedArrival(projected, state)
+	}
+	role, found, err := a.eventRole(source.SourceEventID)
+	if err != nil {
+		return projected, err
+	}
+	if !found {
+		projected.Payload = append(json.RawMessage(nil), source.Payload...)
+		return projected, nil
+	}
+	if state == nil {
+		return projected, fmt.Errorf("declared revision event requires exact source state")
+	}
+	payload, err := projectDeclaredForkPayload(source.Payload, role, state.correspondence, actual)
+	if err != nil {
+		return projected, fmt.Errorf("project original event %s: %w", projected.SourceEventID, err)
+	}
+	projected.Payload = payload
+	return projected, nil
 }
 
 func bindRunForkActivitySourceEvent(raw json.RawMessage, forkRunID, sourceRequestEventID, entityID string, reference *loopruntime.ForkChildReference) (json.RawMessage, error) {
@@ -341,11 +446,18 @@ func bindRunForkActivitySourceEvent(raw json.RawMessage, forkRunID, sourceReques
 	payload["source_event_id"], _ = json.Marshal(activityidentity.ForkLineageEventID(forkRunID, sourceRequestEventID))
 	return json.Marshal(payload)
 }
-func loadRunForkEntityActivations(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID, entityID, instancePath, flowID string) ([]loopruntime.Activation, error) {
+func loadRunForkEntityActivations(ctx context.Context, tx *sql.Tx, lockPostgres bool, forkRunID, entityID, instancePath, flowID string) ([]loopruntime.Activation, error) {
 	if strings.TrimSpace(entityID) == "" {
 		return nil, nil
 	}
-	header, found, err := workflowheader.LoadForMutation(ctx, tx, postgres, forkRunID, entityID, instancePath)
+	var header workflowheader.Projection
+	var found bool
+	var err error
+	if lockPostgres {
+		header, found, err = workflowheader.LoadForMutation(ctx, tx, true, forkRunID, entityID, instancePath)
+	} else {
+		header, found, err = workflowheader.LoadForRead(ctx, tx, forkRunID, entityID, instancePath)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load fork-local loop state for entity %s disagrees with exact child route/type: %w", entityID, err)
 	}
@@ -421,6 +533,12 @@ func projectDeclaredForkPayload(raw json.RawMessage, role semanticview.LoopRevis
 }
 
 func (a runForkSourceStateAdmission) eventRole(eventID string) (semanticview.LoopRevisionRole, bool, error) {
+	if a.firstTurn != nil {
+		original, present := a.firstTurn.Event()
+		if present && original.ID() == eventID {
+			return a.carriage.ResolveEvent(original.RoutingSource(), string(original.Type()), identity.ExecutableNode{}, "")
+		}
+	}
 	for _, event := range a.snapshot.Events {
 		if event.EventID != eventID {
 			continue
@@ -458,18 +576,21 @@ func loadRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, request
 		       CAST(run_id AS TEXT), COALESCE(CAST(source_event_id AS TEXT), ''), COALESCE(CAST(parent_event_id AS TEXT), ''),
 		       COALESCE(CAST(entity_id AS TEXT), ''), COALESCE(flow_instance, ''), node_id, handler_event_key,
 		       activity_id, tool, attempt, success_event, failure_event,
-		       COALESCE(CAST(result_event_id AS TEXT), ''), loop_generation, COALESCE(loop_stage, '')
+		       COALESCE(CAST(result_event_id AS TEXT), ''), loop_generation, COALESCE(loop_stage, ''), COALESCE(reply_context_id, '')
 		FROM activity_attempts WHERE request_event_id = $1
 	`, requestEventID).Scan(&evidence.Status, &evidence.ExecutionMode, &evidence.ResultEventType, &resultPayload, &failure, &evidence.InputHash, &startedRaw, &completedRaw, &updatedRaw,
 		&evidence.SourceRequest.SourceRunID, &evidence.SourceRequest.SourceEventID, &evidence.SourceRequest.ParentEventID,
 		&evidence.SourceRequest.EntityID, &evidence.FlowInstance, &evidence.SourceRequest.NodeID, &evidence.SourceRequest.HandlerEventKey,
 		&evidence.SourceRequest.ActivityID, &evidence.SourceRequest.Tool, &evidence.Attempt,
-		&evidence.SourceRequest.SuccessEvent, &evidence.SourceRequest.FailureEvent, &evidence.ResultEventID, &generation, &evidence.SourceRequest.LoopStage)
+		&evidence.SourceRequest.SuccessEvent, &evidence.SourceRequest.FailureEvent, &evidence.ResultEventID, &generation, &evidence.SourceRequest.LoopStage, &evidence.ReplyContextID)
 	if err == sql.ErrNoRows {
 		return evidence, fmt.Errorf("activity request %s has no recorded attempt evidence for fork reuse: %w", requestEventID, err)
 	}
 	if err != nil {
 		return evidence, fmt.Errorf("load activity request %s fork evidence: %w", requestEventID, err)
+	}
+	if err := activityjournal.RequireLiveAttemptParentsTx(ctx, tx, requestEventID); err != nil {
+		return evidence, err
 	}
 	if evidence.Status != "succeeded" && evidence.Status != "failed" && evidence.Status != "uncertain" {
 		return evidence, fmt.Errorf("activity request %s recorded evidence is not terminal: %s", requestEventID, evidence.Status)
@@ -549,7 +670,7 @@ func runForkActivityFact(request runForkActivityRequestPayload) (activityidentit
 		ActivityID: request.ActivityID, Tool: request.Tool, Attempt: 1, RevisionID: request.Generation.RevisionID}, nil
 }
 
-func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, forkRunID, flowInstance string, request runForkActivityRequestPayload, reference *loopruntime.ForkChildReference, evidence runForkActivityAttemptEvidence) error {
+func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, forkRunID, flowInstance string, request runForkActivityRequestPayload, reference *loopruntime.ForkChildReference, evidence runForkActivityAttemptEvidence, replyID string) error {
 	if story == nil {
 		return fmt.Errorf("run fork activity evidence requires private story ownership")
 	}
@@ -588,24 +709,78 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 			node_id, handler_event_key, activity_id, tool, attempt, status,
 			success_event, failure_event, result_event_id, result_event_type, result_payload,
 			failure, input_hash, loop_generation, loop_stage, reply_context_id,
-			started_at, completed_at, updated_at, execution_binding
+			started_at, completed_at, updated_at, execution_binding, reply_context_present
 		) VALUES (
 			$1, $2, $24, $3, $4, $5, $23,
 			$6, $7, $8, $9, 1, $10,
 			$11, $12, $13, $14, $15,
-			$16, $17, $18, $19, NULL,
-			$20, $21, $22, NULL
+			$16, $17, $18, $19, $25,
+			$20, $21, $22, NULL, $26
 		) ON CONFLICT (request_event_id) DO NOTHING
 	`, requestEventID, forkRunID, nullableRunForkString(request.SourceEventID), nullableRunForkString(request.ParentEventID), nullableRunForkString(request.EntityID),
 		request.NodeID, request.HandlerEventKey, request.ActivityID, request.Tool, evidence.Status,
 		request.SuccessEvent, request.FailureEvent, resultEventID, evidence.ResultEventType, string(resultPayload),
 		failure, evidence.InputHash, string(generationJSON), nullableRunForkString(request.LoopStage),
-		evidence.StartedAt.UTC().Format(time.RFC3339Nano), evidence.CompletedAt.UTC().Format(time.RFC3339Nano), evidence.UpdatedAt.UTC().Format(time.RFC3339Nano), nullableRunForkString(flowInstance), evidence.ExecutionMode)
+		evidence.StartedAt.UTC().Format(time.RFC3339Nano), evidence.CompletedAt.UTC().Format(time.RFC3339Nano), evidence.UpdatedAt.UTC().Format(time.RFC3339Nano), nullableRunForkString(flowInstance), evidence.ExecutionMode, nullableRunForkString(replyID), replyID != "")
 	if err != nil {
 		return fmt.Errorf("copy fork-local activity evidence %s: %w", request.ActivityID, err)
 	}
 	inserted, err := rowsAffected(result)
 	if err != nil {
+		return err
+	}
+	if inserted {
+		if err := insertCopiedActivityLiveParentsTx(ctx, tx, requestEventID); err != nil {
+			return err
+		}
+	}
+	if err := confirmCopiedActivityEvidenceTx(ctx, tx, forkRunID, flowInstance, request, reference, evidence, replyID); err != nil {
+		return err
+	}
+	if !inserted {
+		return nil
+	}
+	var canonicalFailure *runtimefailures.Envelope
+	if raw := strings.TrimSpace(string(evidence.Failure)); raw != "" && raw != "null" {
+		var decoded runtimefailures.Envelope
+		if err := json.Unmarshal(evidence.Failure, &decoded); err != nil {
+			return fmt.Errorf("decode fork-local activity failure %s: %w", request.ActivityID, err)
+		}
+		canonicalFailure = &decoded
+	}
+	attempt := 1
+	return story.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindActivityLifecycle, Transition: evidence.Status,
+		SourceOwner: "activity_attempts", SourceIdentity: requestEventID + ":" + evidence.Status,
+		DedupKey:   "activity:" + requestEventID + ":" + evidence.Status,
+		OccurredAt: evidence.CompletedAt.UTC(), RunID: forkRunID, EntityID: request.EntityID, FlowID: strings.TrimSpace(flowInstance),
+		Projection: runtimeauthoractivity.Projection{
+			SubjectType: "activity", SubjectID: request.ActivityID, NodeID: request.NodeID, Activity: request.ActivityID,
+			Tool: request.Tool, Attempt: &attempt, EventType: evidence.ResultEventType, ExecutionMode: string(evidence.ExecutionMode),
+		},
+		Failure: canonicalFailure,
+	})
+}
+
+// The copier and closed-cohort reader share the exact native readback check;
+// the latter never inserts, records a story, or grants an execution binding.
+func confirmCopiedActivityEvidenceTx(ctx context.Context, tx *sql.Tx, forkRunID, flowInstance string, request runForkActivityRequestPayload, reference *loopruntime.ForkChildReference, evidence runForkActivityAttemptEvidence, replyID string) error {
+	fact, err := runForkActivityFact(request)
+	if err != nil {
+		return err
+	}
+	requestEventID := activityidentity.RequestEventID(fact)
+	resultEventID := activityidentity.ResultEventID(fact, evidence.ResultEventType)
+	generation := request.Generation
+	generationJSON, err := json.Marshal(generation)
+	if err != nil {
+		return err
+	}
+	resultPayload, err := projectForkRevisionPayload(evidence.ResultPayload, reference)
+	if err != nil {
+		return err
+	}
+	if err := activityjournal.RequireLiveAttemptParentsTx(ctx, tx, requestEventID); err != nil {
 		return err
 	}
 	var gotRunID, gotStatus, gotResultID string
@@ -645,7 +820,7 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 		gotRequest.Tool != request.Tool || gotAttempt != 1 ||
 		gotRequest.SuccessEvent != request.SuccessEvent || gotRequest.FailureEvent != request.FailureEvent ||
 		gotResultType != evidence.ResultEventType || gotInputHash != evidence.InputHash || gotRequest.LoopStage != request.LoopStage ||
-		gotReplyContext != "" || gotExecutionBinding != nil || !workflowCommitJSONEqual(gotGeneration, generationJSON) || !workflowCommitJSONEqual(gotResultPayload, resultPayload) {
+		gotReplyContext != replyID || gotExecutionBinding != nil || !workflowCommitJSONEqual(gotGeneration, generationJSON) || !workflowCommitJSONEqual(gotResultPayload, resultPayload) {
 		return fmt.Errorf("fork-local activity evidence %s conflicts with canonical fork identity", request.ActivityID)
 	}
 	expectedFailure := evidence.Failure
@@ -666,29 +841,7 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 			return fmt.Errorf("fork-local activity evidence %s conflicts with canonical fork timestamps", request.ActivityID)
 		}
 	}
-	if !inserted {
-		return nil
-	}
-	var canonicalFailure *runtimefailures.Envelope
-	if raw := strings.TrimSpace(string(evidence.Failure)); raw != "" && raw != "null" {
-		var decoded runtimefailures.Envelope
-		if err := json.Unmarshal(evidence.Failure, &decoded); err != nil {
-			return fmt.Errorf("decode fork-local activity failure %s: %w", request.ActivityID, err)
-		}
-		canonicalFailure = &decoded
-	}
-	attempt := 1
-	return story.Record(ctx, runtimeauthoractivity.Draft{
-		Kind: runtimeauthoractivity.KindActivityLifecycle, Transition: evidence.Status,
-		SourceOwner: "activity_attempts", SourceIdentity: requestEventID + ":" + evidence.Status,
-		DedupKey:   "activity:" + requestEventID + ":" + evidence.Status,
-		OccurredAt: evidence.CompletedAt.UTC(), RunID: forkRunID, EntityID: request.EntityID, FlowID: strings.TrimSpace(flowInstance),
-		Projection: runtimeauthoractivity.Projection{
-			SubjectType: "activity", SubjectID: request.ActivityID, NodeID: request.NodeID, Activity: request.ActivityID,
-			Tool: request.Tool, Attempt: &attempt, EventType: evidence.ResultEventType, ExecutionMode: string(evidence.ExecutionMode),
-		},
-		Failure: canonicalFailure,
-	})
+	return nil
 }
 
 func nullableRunForkString(value string) any {

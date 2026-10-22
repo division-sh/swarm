@@ -500,6 +500,34 @@ func debtCollectorDigest(root string) (string, error) {
 		return "", err
 	}
 	fmt.Fprintf(hash, "%s\x00%s\x00", rolePath, canonical.Bytes())
+	prior := hex.EncodeToString(hash.Sum(nil))
+	const nativePath = "internal/store/persistence_authority_debt_native_fixture_test.go"
+	file, err = parser.ParseFile(token.NewFileSet(), filepath.Join(root, nativePath), nil, parser.AllErrors)
+	if os.IsNotExist(err) && (prior == debtFixtureRoleCollectorTo || prior == debtForkProofCollectorTo || prior == debtProcessLeaseCollectorTo) {
+		return prior, nil // Exact immutable predecessors predate this classification.
+	}
+	if err != nil {
+		return "", err
+	}
+	canonical.Reset()
+	if err := format.Node(&canonical, token.NewFileSet(), file); err != nil {
+		return "", err
+	}
+	fmt.Fprintf(hash, "%s\x00%s\x00", nativePath, canonical.Bytes())
+	prior = hex.EncodeToString(hash.Sum(nil))
+	const excludedPath = "internal/store/persistence_authority_debt_excluded_fixture_test.go"
+	file, err = parser.ParseFile(token.NewFileSet(), filepath.Join(root, excludedPath), nil, parser.AllErrors)
+	if os.IsNotExist(err) && prior == debtNativeFixtureCollectorTo {
+		return prior, nil // Exact immutable predecessor of #642/6202173993.
+	}
+	if err != nil {
+		return "", err
+	}
+	canonical.Reset()
+	if err := format.Node(&canonical, token.NewFileSet(), file); err != nil {
+		return "", err
+	}
+	fmt.Fprintf(hash, "%s\x00%s\x00", excludedPath, canonical.Bytes())
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
@@ -863,6 +891,24 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
+	if current == debtQ1ReopenCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
+		prior := head
+		prior.Collector = debtExcludedFixtureCollectorTo
+		if debtValidateCollectorIdentity(base, prior.Collector, trusted, prior, "") == nil {
+			return nil // #642/6207897765: two exact reopen calls, no baseline edit.
+		}
+	}
+	if current == debtExcludedFixtureCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
+		prior := head
+		prior.Collector = debtNativeFixtureCollectorTo
+		if debtValidateCollectorIdentity(base, prior.Collector, trusted, prior, "") == nil {
+			return nil // Exact three-row classification; baseline sites are immutable.
+		}
+	}
+	if base == debtProcessLeaseCollectorTo && trusted.Collector == base &&
+		current == debtNativeFixtureCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #642/6190983544 + 6191476293: exact fixture/custody policy, no baseline edit.
+	}
 	if base == debtForkProofCollectorFrom && current == debtForkProofCollectorTo &&
 		trusted.Collector == base && head.Collector == current &&
 		debtForkProofCollectorTransition(trusted.Sites, head.Sites) {
@@ -1013,7 +1059,7 @@ func debtSelectedBoundarySource(path string, file *ast.File) []authorityFinding 
 		imports[alias] = name
 		switch name {
 		case "github.com/division-sh/swarm/internal/store/selected":
-			if !selectedConsumer {
+			if !selectedConsumer && !debtReviewedNativeSelectedImport(path, alias, file) {
 				add(file.Name.Name, "import:"+name, "selected owner outside process construction/inspection roles")
 			}
 		case "github.com/division-sh/swarm/internal/store/construction":

@@ -125,7 +125,7 @@ func verifyActivityResultHandlerNativeCASRetry(t *testing.T, ruleActivity bool) 
 				{Node: externalPipelineSourceNode(t, source, ".", "consumer"), Subscriptions: []events.EventType{events.EventType(resultEvents.SuccessEvent)}, ExecutionType: contracts.SystemNodeExecutionType},
 			}}
 			pc := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module})
-			_, releaseJournal := installActivityReplayJournal(t, ctx, selected, bus, pc)
+			_, releaseActivityJournal := installActivityReplayJournal(t, ctx, selected, bus, pc)
 			commitKeylessConstructorComponent(t, ctx, selected, pc, source)
 			bus.SetInterceptors(pc)
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "source.requested", "operator", "", []byte(`{"url":"https://example.com/m25"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
@@ -192,7 +192,7 @@ func verifyActivityResultHandlerNativeCASRetry(t *testing.T, ruleActivity bool) 
 			}
 			issue2564M25AssertReceipt(t, selected, runID, eventID, claim)
 			if ruleActivity {
-				releaseJournal()
+				releaseActivityJournal()
 				if err := closeStore(); err != nil {
 					t.Fatal(err)
 				}

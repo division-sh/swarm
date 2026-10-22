@@ -20,7 +20,7 @@ type deploymentFactRecorder struct {
 	refs  []runforkrevision.FactRef
 }
 
-func (r *deploymentFactRecorder) AddFacts(runID string, refs ...runforkrevision.FactRef) error {
+func (r *deploymentFactRecorder) AddRunStartFacts(_ context.Context, runID string, refs ...runforkrevision.FactRef) error {
 	r.runID = runID
 	r.refs = append(r.refs, refs...)
 	return nil

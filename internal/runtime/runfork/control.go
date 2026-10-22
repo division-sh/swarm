@@ -5,10 +5,11 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/google/uuid"
 )
 
-// SelectedControl names controls that would require deferred selected execution.
+// SelectedControl names controls requiring an exact execution owner.
 // Stop has a separate terminal-disposition operation and is not in this set.
 type SelectedControl string
 
@@ -35,6 +36,34 @@ func (c SelectedControl) Validate() error {
 	default:
 		return fmt.Errorf("unknown selected-fork execution control %q", c)
 	}
+}
+
+func (c SelectedControl) IsDecisionCardControl() bool {
+	switch c {
+	case ControlMailboxDecide, ControlMailboxDefer, ControlMailboxBeginInput, ControlMailboxCancelInput:
+		return true
+	default:
+		return false
+	}
+}
+
+// The admission identifies an already-running child, not permission from its
+// historical binding. The native control owner must reprove its current grant.
+func RequireDecisionControlForBinding(runID string, operation SelectedControl, binding RunForkSelectedContractBinding, exists bool, admission managedexecution.Admission) error {
+	err := RequireNormalControlForBinding(runID, operation, binding, exists)
+	if err == nil {
+		if admission.Kind == managedexecution.KindSelectedContractFork {
+			return fmt.Errorf("selected decision control cannot act on a run without its own selected binding")
+		}
+		return err
+	}
+	if _, unsupported := err.(*SelectedForkControlUnsupported); !unsupported {
+		return err
+	}
+	if !operation.IsDecisionCardControl() || admission.Validate() != nil || admission.Kind != managedexecution.KindSelectedContractFork || admission.RunID != runID {
+		return err
+	}
+	return nil
 }
 
 type SelectedForkControlUnsupported struct {

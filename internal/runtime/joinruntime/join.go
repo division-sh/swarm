@@ -27,10 +27,11 @@ const (
 type CloseReason string
 
 const (
-	CloseReasonComplete  CloseReason = "complete"
-	CloseReasonDeadline  CloseReason = "deadline"
-	CloseReasonUntil     CloseReason = "until"
-	CloseReasonStageExit CloseReason = "stage_exit"
+	CloseReasonComplete    CloseReason = "complete"
+	CloseReasonDeadline    CloseReason = "deadline"
+	CloseReasonUntil       CloseReason = "until"
+	CloseReasonStageExit   CloseReason = "stage_exit"
+	CloseReasonRuleRemoved CloseReason = "rule_removed"
 )
 
 type MemberOutput struct {
@@ -39,33 +40,35 @@ type MemberOutput struct {
 }
 
 type Activation struct {
-	handle         timeridentity.TimerHandle
-	Members        []string                `json:"members"`
-	MemberCount    *int                    `json:"member_count,omitempty"`
-	Outputs        map[string]MemberOutput `json:"outputs"`
-	Status         Status                  `json:"status"`
-	CloseReason    CloseReason             `json:"close_reason,omitempty"`
-	ArmedAt        time.Time               `json:"armed_at"`
-	FireAt         time.Time               `json:"fire_at"`
-	DeadlineAt     time.Time               `json:"deadline_at,omitempty"`
-	TimerCancelled bool                    `json:"timer_cancelled,omitempty"`
-	OutcomePending bool                    `json:"outcome_pending,omitempty"`
-	OutcomeFired   bool                    `json:"outcome_fired,omitempty"`
+	handle                 timeridentity.TimerHandle
+	Members                []string                `json:"members"`
+	MemberCount            *int                    `json:"member_count,omitempty"`
+	Outputs                map[string]MemberOutput `json:"outputs"`
+	Status                 Status                  `json:"status"`
+	CloseReason            CloseReason             `json:"close_reason,omitempty"`
+	ArmedAt                time.Time               `json:"armed_at"`
+	FireAt                 time.Time               `json:"fire_at"`
+	DeadlineAt             time.Time               `json:"deadline_at,omitempty"`
+	TimerCancelled         bool                    `json:"timer_cancelled,omitempty"`
+	OutcomePending         bool                    `json:"outcome_pending,omitempty"`
+	OutcomeFired           bool                    `json:"outcome_fired,omitempty"`
+	TransferredPublication *TransferredPublication `json:"transferred_publication,omitempty"`
 }
 
 type activationJSON struct {
-	Handle         timeridentity.TimerHandle `json:"timer_handle"`
-	Members        []string                  `json:"members"`
-	MemberCount    *int                      `json:"member_count,omitempty"`
-	Outputs        map[string]MemberOutput   `json:"outputs"`
-	Status         Status                    `json:"status"`
-	CloseReason    CloseReason               `json:"close_reason,omitempty"`
-	ArmedAt        time.Time                 `json:"armed_at"`
-	FireAt         time.Time                 `json:"fire_at"`
-	DeadlineAt     time.Time                 `json:"deadline_at,omitempty"`
-	TimerCancelled bool                      `json:"timer_cancelled,omitempty"`
-	OutcomePending bool                      `json:"outcome_pending,omitempty"`
-	OutcomeFired   bool                      `json:"outcome_fired,omitempty"`
+	Handle                 timeridentity.TimerHandle `json:"timer_handle"`
+	Members                []string                  `json:"members"`
+	MemberCount            *int                      `json:"member_count,omitempty"`
+	Outputs                map[string]MemberOutput   `json:"outputs"`
+	Status                 Status                    `json:"status"`
+	CloseReason            CloseReason               `json:"close_reason,omitempty"`
+	ArmedAt                time.Time                 `json:"armed_at"`
+	FireAt                 time.Time                 `json:"fire_at"`
+	DeadlineAt             time.Time                 `json:"deadline_at,omitempty"`
+	TimerCancelled         bool                      `json:"timer_cancelled,omitempty"`
+	OutcomePending         bool                      `json:"outcome_pending,omitempty"`
+	OutcomeFired           bool                      `json:"outcome_fired,omitempty"`
+	TransferredPublication *TransferredPublication   `json:"transferred_publication,omitempty"`
 }
 
 type AddDisposition string
@@ -113,6 +116,11 @@ func (a Activation) Validate() error {
 	if !a.handle.Valid() || a.handle.Kind() != timeridentity.TimerHandleJoinTimeout && a.handle.Kind() != timeridentity.TimerHandleJoinComplete {
 		return fmt.Errorf("join activation requires one valid typed timer handle")
 	}
+	if a.TransferredPublication != nil {
+		if err := a.TransferredPublication.Validate(a.JoinRef().StageEntry().RunID, a.JoinRef()); err != nil {
+			return err
+		}
+	}
 	if a.Status != StatusOpen && a.Status != StatusClosed {
 		return fmt.Errorf("join activation status %q is invalid", a.Status)
 	}
@@ -155,6 +163,9 @@ func (a Activation) validateOutputEvidence() error {
 }
 
 func (a Activation) validateClosureEvidence() error {
+	if a.CloseReason == CloseReasonRuleRemoved && !a.TimerCancelled {
+		return fmt.Errorf("removed join rule requires canceled dependent timer evidence")
+	}
 	if a.Status == StatusOpen && a.CloseReason != "" {
 		return fmt.Errorf("open join activation has close reason %q", a.CloseReason)
 	}
@@ -166,12 +177,12 @@ func (a Activation) validateClosureEvidence() error {
 	}
 	if a.Status == StatusClosed {
 		switch a.CloseReason {
-		case CloseReasonComplete, CloseReasonUntil, CloseReasonDeadline, CloseReasonStageExit:
+		case CloseReasonComplete, CloseReasonUntil, CloseReasonDeadline, CloseReasonStageExit, CloseReasonRuleRemoved:
 		default:
 			return fmt.Errorf("join activation has invalid close reason %q", a.CloseReason)
 		}
 	}
-	if a.OutcomePending && a.OutcomeFired || (a.OutcomePending || a.OutcomeFired) && (a.Status != StatusClosed || a.CloseReason == CloseReasonStageExit) {
+	if a.OutcomePending && a.OutcomeFired || (a.OutcomePending || a.OutcomeFired) && (a.Status != StatusClosed || a.CloseReason == CloseReasonStageExit || a.CloseReason == CloseReasonRuleRemoved) {
 		return fmt.Errorf("join outcome evidence contradicts its lifecycle")
 	}
 	return nil
@@ -314,6 +325,15 @@ func (a Activation) HasMember(member string) bool {
 }
 
 func (a Activation) Completed() int { return len(a.Outputs) }
+
+// EmptyCompletionWasArmed identifies the original schedule membership, not its
+// current outcome. Stage exit can cancel this completion without ever admitting
+// a timeout; Validate checks the current lifecycle independently.
+func (a Activation) EmptyCompletionWasArmed() bool {
+	return a.Expected() == 0 &&
+		a.TimerHandle().Kind() == timeridentity.TimerHandleJoinComplete && a.FireAt.Equal(a.ArmedAt)
+}
+
 func (a Activation) Expected() int {
 	if a.MemberCount != nil {
 		return *a.MemberCount
@@ -403,6 +423,23 @@ func (a *Activation) CloseForStageExit() bool {
 	return true
 }
 
+func (a *Activation) CancelForRuleRemoval() error {
+	if a == nil || a.OutcomeFired || a.Status == StatusClosed && !a.OutcomePending {
+		return fmt.Errorf("rule removal cannot replace a settled join outcome")
+	}
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	canceled := *a
+	canceled.Status, canceled.CloseReason = StatusClosed, CloseReasonRuleRemoved
+	canceled.OutcomePending, canceled.OutcomeFired, canceled.TimerCancelled = false, false, true
+	if err := canceled.Validate(); err != nil {
+		return err
+	}
+	*a = canceled
+	return nil
+}
+
 func Load(stateBuckets map[string]map[string]any, nodeRef runtimeidentity.ExecutableNode, key string) (Activation, bool, error) {
 	if !nodeRef.Valid() {
 		return Activation{}, false, fmt.Errorf("join load requires exact executable node identity")
@@ -462,7 +499,7 @@ func (a Activation) MarshalJSON() ([]byte, error) {
 		Handle: a.handle, Members: a.Members, MemberCount: a.MemberCount, Outputs: a.Outputs, Status: a.Status,
 		CloseReason: a.CloseReason, ArmedAt: a.ArmedAt, FireAt: a.FireAt, DeadlineAt: a.DeadlineAt,
 		TimerCancelled: a.TimerCancelled, OutcomePending: a.OutcomePending,
-		OutcomeFired: a.OutcomeFired,
+		OutcomeFired: a.OutcomeFired, TransferredPublication: a.TransferredPublication,
 	})
 }
 
@@ -479,7 +516,7 @@ func (a *Activation) UnmarshalJSON(raw []byte) error {
 		Status: persisted.Status, CloseReason: persisted.CloseReason,
 		ArmedAt: persisted.ArmedAt, FireAt: persisted.FireAt, DeadlineAt: persisted.DeadlineAt,
 		TimerCancelled: persisted.TimerCancelled, OutcomePending: persisted.OutcomePending,
-		OutcomeFired: persisted.OutcomeFired,
+		OutcomeFired: persisted.OutcomeFired, TransferredPublication: persisted.TransferredPublication,
 	}
 	return nil
 }

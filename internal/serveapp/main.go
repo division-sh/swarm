@@ -43,6 +43,8 @@ import (
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -81,12 +83,28 @@ type serveReadiness interface {
 }
 
 type processOwnedDestructiveResetStore struct {
-	capability runtimestartupownership.ProcessCapability
+	capability     runtimestartupownership.ProcessCapability
+	prepareHistory func(context.Context, []string) ([]runfork.SelectedResetPreparation, error)
 }
 
 func (s processOwnedDestructiveResetStore) ApplyDestructiveResetCleanup(ctx context.Context, req runtimedestructivereset.CleanupRequest) (runtimedestructivereset.CleanupResult, error) {
 	if s.capability == nil {
 		return runtimedestructivereset.CleanupResult{}, errors.New("destructive reset requires the process topology capability")
+	}
+	if s.prepareHistory != nil {
+		ids := make([]string, 0, len(req.Result.Plan.CleanupRuns))
+		seen := make(map[string]bool)
+		for _, run := range req.Result.Plan.CleanupRuns {
+			if !seen[run.RunID] {
+				ids = append(ids, run.RunID)
+				seen[run.RunID] = true
+			}
+		}
+		var err error
+		req.SelectedHistory, err = s.prepareHistory(ctx, ids)
+		if err != nil {
+			return runtimedestructivereset.CleanupResult{}, err
+		}
 	}
 	if req.Result.DryRun || !req.Result.IncludeSourceArtifacts {
 		return s.capability.ApplyDestructiveResetCleanup(ctx, req, nil)
@@ -1119,7 +1137,9 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	supervisor.resetStartup = true
 	supervisor.resetContainerRuntime = workspace.NewDockerManager()
 	supervisor.shutdownOptions = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
-	if coordinator := buildSelectedResetCoordinator(stores, processCapability, supervisor); coordinator != nil {
+	if coordinator := buildSelectedResetCoordinator(stores, processCapability, supervisor, runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{
+		RepoRoot: repo, Store: stores.SourceArtifactStore(), PlatformPackBases: platformPackBases,
+	}); coordinator != nil {
 		resetRecovery, err = coordinator.RecoverPending(ctx)
 		if err != nil {
 			presenter.fail(5, "pending_reset_recovery", err)
@@ -1903,11 +1923,16 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			}
 		}
 	}
+	var channelSelectedDecisions selectedChannelDecisionOwner
+	if supervisor.selected != nil {
+		channelSelectedDecisions = supervisor.selected
+	}
 	if err := startServeChannelDelivery(ctx, processWorkOwner, &serveChannelDeliveryDispatcher{
 		store: stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
 		mailbox: stores.MailboxAPI(), proposedEffects: storeDeps.ProposedEffects,
 		activations: channelOnboardingStore, manager: runtimeContextManager,
-		sessions: sessionBootstrap, onboarding: channelOnboarding, output: opts.Output,
+		selectedDecisions: channelSelectedDecisions,
+		sessions:          sessionBootstrap, onboarding: channelOnboarding, output: opts.Output,
 		sessionStates: map[string]string{}, sessionAttempts: map[string]int{}, sessionNextAttempt: map[string]time.Time{},
 		ingress: ready,
 		effects: stores.Effects(), credentials: providerCredentialOwner,

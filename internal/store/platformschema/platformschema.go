@@ -240,6 +240,8 @@ func platformTableOrder(name string) int {
 		return 15
 	case "activity_attempts":
 		return 16
+	case "activity_attempt_live_parents":
+		return 17
 	case "run_fork_selected_contract_bindings":
 		return 17
 	case "run_fork_operations":
@@ -248,6 +250,12 @@ func platformTableOrder(name string) int {
 		return 18
 	case "run_fork_selected_contract_executions":
 		return 19
+	case "run_fork_selected_contract_execution_live_parents", "run_fork_operation_live_parents":
+		return 19
+	case "run_fork_selected_contract_execution_detachments":
+		return 1001
+	case "run_fork_selected_contract_activity_detachments", "run_fork_selected_contract_turn_detachments":
+		return 1002
 	case "run_fork_selected_contract_branch_divergences":
 		return 20
 	case "run_fork_selected_contract_route_recoveries":
@@ -292,6 +300,8 @@ func platformTableOrder(name string) int {
 		return 65
 	case "agent_turns":
 		return 65
+	case "agent_turn_live_parents":
+		return 66
 	case "conversation_fork_turn_completions":
 		return 68
 	case "event_deliveries":

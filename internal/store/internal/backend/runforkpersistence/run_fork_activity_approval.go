@@ -43,8 +43,8 @@ func (a runForkSourceStateAdmission) requireOriginalActivityApproval(ctx context
 	if !found {
 		return false, fmt.Errorf("approved original activity is missing its exact proposed effect")
 	}
-	// Physical event history has no delivery context. The validated original
-	// continuation owns the released request's durable reply binding.
+	// Physical history has no delivery context; the validated original
+	// continuation owns the released request's reply binding, including absence.
 	deliveryContext := events.DeliveryContext{}
 	if continuation.ReplyContextID != "" {
 		deliveryContext.Reply = &events.ReplyContextRef{ID: continuation.ReplyContextID}

@@ -13,7 +13,7 @@ func TestWorkflowEngineCompleteCarrierPreservesBookkeepingOnBothStores(t *testin
 		t.Run(backend, func(t *testing.T) {
 			pipeline.VerifyWorkflowEngineCompleteCarrierPreservesBookkeepingForTest(t, func(t *testing.T, runID string) pipeline.WorkflowBookkeepingNativeFixtureForTest {
 				selected, _, reopen := openTimerReplayNativeStore(t, backend)
-				native := workflowMutationNativeFixtureFromSelected(t, selected, reopen, runID, 3, 1)
+				native := workflowMutationNativeFixtureFromSelected(t, selected, reopen, runID)
 				return pipeline.WorkflowBookkeepingNativeFixtureForTest{
 					WorkflowProjectionNativeFixtureForTest: native.WorkflowProjectionNativeFixtureForTest,
 					SetPlatformBookkeeping: func(ctx context.Context, run, path string) (int64, error) {

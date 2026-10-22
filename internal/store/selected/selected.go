@@ -5,11 +5,13 @@ package selected
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/durabledata"
@@ -152,6 +154,7 @@ func (o StartupRecovery) Availability() runbundle.ActiveAvailabilityReader {
 type runForkPlannerMaterializer interface {
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+	RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 }
 
 // RunFork is the opaque selected-contract runtime family owner.
@@ -225,6 +228,14 @@ func (o RunFork) RequireNormalControl(ctx context.Context, runID string, operati
 	return o.executionOwner.RequireNormalControl(ctx, runID, operation)
 }
 
+func (o RunFork) CommitSelectedDecisionCardMutation(ctx context.Context, runID string, request apiidempotency.Request, mutation runtimepipeline.DecisionCardMutation) (json.RawMessage, bool, bool, error) {
+	return o.executionOwner.CommitSelectedDecisionCardMutation(ctx, runID, request, mutation)
+}
+
+func (o RunFork) AcquireSelectedDecisionCardControl(ctx context.Context, runID string, operation runfork.SelectedControl) (*runtimerunforkexecution.SelectedDecisionCardControl, bool, error) {
+	return o.executionOwner.AcquireSelectedDecisionCardControl(ctx, runID, operation)
+}
+
 func (o RunFork) RetireSelectedContexts(ctx context.Context) error {
 	return o.executionOwner.RetireSelectedContexts(ctx)
 }
@@ -248,6 +259,10 @@ func (o RunFork) Plan(ctx context.Context, req runfork.RunForkPlanRequest) (runf
 	return o.planner.PlanRunFork(ctx, req)
 }
 
+func (o RunFork) PrepareResetHistory(ctx context.Context, runIDs []string, loader runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader) ([]runfork.SelectedResetPreparation, error) {
+	return o.executionOwner.PrepareResetHistory(ctx, runIDs, loader)
+}
+
 func (o RunFork) Prepare(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (*runtimerunforkexecution.PreparedSelectedFork, error) {
 	return o.executionOwner.Prepare(ctx, req)
 }
@@ -257,6 +272,13 @@ func (o RunFork) Materialize(ctx context.Context, req runfork.RunForkMaterialize
 		return runfork.RunForkMaterialization{}, errors.New("selected run.fork runtime owner is required")
 	}
 	return o.planner.MaterializeRunFork(ctx, req)
+}
+
+func (o RunFork) RequireMaterialized(ctx context.Context, forkRunID string, req runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error) {
+	if o.planner == nil {
+		return runfork.RunForkMaterialization{}, errors.New("selected run.fork runtime owner is required")
+	}
+	return o.planner.RequireMaterializedRunFork(ctx, forkRunID, req)
 }
 
 func (o RunFork) Activate(ctx context.Context, req runtimerunforkexecution.SelectedContractActivationGateRequest) (runtimerunforkexecution.SelectedContractActivationGateResult, error) {
@@ -471,6 +493,7 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 		workflow, selected, selected, selected, selected, durable, selected.PipelineObligations(),
 		selected, managerRoles(selected), selected, selected, selected, selected, selected,
 		selected, selected, selected, selected, selected, selected, selected,
+		selected, selected,
 	)
 	if err != nil {
 		return RunFork{}, err
@@ -493,6 +516,7 @@ func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipe
 		workflow, selected, selected, selected, selected, durable, selected.PipelineObligations(),
 		selected, sqliteManagerRoles(selected), selected, selected, selected, selected, selected,
 		selected, selected, selected, selected, selected, selected, selected,
+		selected, selected,
 	)
 	if err != nil {
 		return RunFork{}, err

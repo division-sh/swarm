@@ -16,8 +16,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// These are controlled downstream negatives, not public draft-creation journeys:
-// public selected-fork begin_input already refuses before a draft can be created.
+// These controlled bindings have no current selected execution grant. Public
+// controls on a genuinely active fork have separate whole-operation coverage.
 func TestDecisionCardSelectedControlMutationBoundariesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, control := range []string{"decide", "defer", "begin_input", "cancel_input", "partial_text", "final_text", "partial_skip", "final_skip"} {

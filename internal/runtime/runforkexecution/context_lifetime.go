@@ -27,13 +27,14 @@ type selectedForkContexts struct {
 }
 
 type selectedForkContext struct {
-	operation *selectedContractOperation
-	binding   runfork.RunForkSelectedContractBinding
-	retained  *PreparedSelectedFork
-	retiring  bool
-	done      chan struct{}
-	closed    bool
-	err       error
+	operation        *selectedContractOperation
+	binding          runfork.RunForkSelectedContractBinding
+	retained         *PreparedSelectedFork
+	retiring         bool
+	recoveryReserved bool
+	done             chan struct{}
+	closed           bool
+	err              error
 }
 
 func (o SelectedContractExecutionOwner) beginPreparation(ctx context.Context) (*selectedContractOperation, error) {
@@ -141,7 +142,9 @@ func (contexts *selectedForkContexts) bindStagedPreparationLocked(op *selectedCo
 		return worklifetime.ErrRetired
 	}
 	if entry.binding.BindingID != "" {
-		return errors.New("selected preparation already has a binding")
+		if !entry.recoveryReserved || entry.binding != binding {
+			return errors.New("selected preparation already has a binding")
+		}
 	}
 	for _, other := range contexts.entries {
 		if other != entry && other.binding.ForkRunID == binding.ForkRunID {
@@ -149,6 +152,7 @@ func (contexts *selectedForkContexts) bindStagedPreparationLocked(op *selectedCo
 		}
 	}
 	entry.binding = binding
+	entry.recoveryReserved = false
 	return nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -128,6 +129,20 @@ func proveCompletionOperationOwnsExactAgentFrame(t *testing.T, fixture completio
 	}
 	settlement = completionSettlementForTest(t, retry.Attempt().Authority.Target, fixture, adapter, "", "")
 	settlement.ProviderHead = nil
+	// Fail the coupled insert after the canonical turn writer has run. The
+	// provider response remains observed, with no partial turn, spend or pair.
+	if _, err := fixture.db.Exec(`ALTER TABLE agent_turn_live_parents RENAME TO completion_pair_unavailable`); err != nil {
+		t.Fatal(err)
+	}
+	beforePairFailure := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
+	_, pairErr := retry.SettleCompletion(ctx, settlement)
+	historicalContextRequireUnchanged(t, beforePairFailure, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
+	if _, err := fixture.db.Exec(`ALTER TABLE completion_pair_unavailable RENAME TO agent_turn_live_parents`); err != nil {
+		t.Fatal(err)
+	}
+	if pairErr == nil || !strings.Contains(pairErr.Error(), "pair exact completion turn live parents") {
+		t.Fatalf("late pair-insert failure did not reach its exact native write: %v", pairErr)
+	}
 	if _, err := retry.SettleCompletion(ctx, settlement); err != nil {
 		t.Fatalf("settle byte-identical retry completion: %v", err)
 	}
@@ -303,10 +318,28 @@ func proveCompletionResponseSuccessorCheckpointMatrix(t *testing.T, store comple
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := settled.ProjectCompletionConversation(ctx, runtimeeffects.CompletionConversationProjection{
+				projection := runtimeeffects.CompletionConversationProjection{
 					Payload: snapshot.Payload, SessionID: fixture.sessionID, Identity: settlement.AgentTurn.Identity,
 					Memory: settlement.AgentTurn.Memory, ExpectedTurnCount: 0, TurnCount: 1, Messages: projectionMessages,
-				}); err != nil {
+				}
+				// A real settled audit without its exact live association is not
+				// a missing response or permission to project the conversation.
+				if _, err := db.ExecContext(ctx, `DELETE FROM agent_turn_live_parents WHERE turn_id=$1`, settlement.AgentTurn.TurnID); err != nil {
+					t.Fatal(err)
+				}
+				beforeMissingPair := historicalContextDatabaseRows(t, db, !sqlite)
+				if _, found, err := controller.RecoverCompletionContinuation(recoveryCtx, fixture.sessionID, settlement.AgentTurn.Memory); err == nil || found || !strings.Contains(err.Error(), "lacks its exact live-parent association") {
+					t.Fatalf("unpaired audit became ordinary missing response or usable continuation: found=%t error=%v", found, err)
+				}
+				if err := settled.ProjectCompletionConversation(ctx, projection); err == nil || !strings.Contains(err.Error(), "lacks its exact live-parent association") {
+					t.Fatalf("unpaired audit did not refuse at the exact projection boundary: %v", err)
+				}
+				historicalContextRequireUnchanged(t, beforeMissingPair, historicalContextDatabaseRows(t, db, !sqlite))
+				if _, err := db.ExecContext(ctx, `INSERT INTO agent_turn_live_parents (turn_id,run_id,completion_attempt_id,capability_surface_id)
+					SELECT turn_id,run_id,completion_attempt_id,capability_surface_id FROM agent_turns WHERE turn_id=$1`, settlement.AgentTurn.TurnID); err != nil {
+					t.Fatal(err)
+				}
+				if err := settled.ProjectCompletionConversation(ctx, projection); err != nil {
 					t.Fatalf("project completion: %v", err)
 				}
 				projected, found, err := controller.RecoverCompletionContinuation(recoveryCtx, fixture.sessionID, settlement.AgentTurn.Memory)
@@ -323,6 +356,18 @@ func proveCompletionResponseSuccessorCheckpointMatrix(t *testing.T, store comple
 				}
 				successor, err := agentframe.NewToolContinuation(frameID, toolResult)
 				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.ExecContext(ctx, `DELETE FROM agent_turn_live_parents WHERE turn_id=$1`, settlement.AgentTurn.TurnID); err != nil {
+					t.Fatal(err)
+				}
+				beforeMissingPair = historicalContextDatabaseRows(t, db, !sqlite)
+				if err := projected.ConsumeCompletionResponse(ctx, &successor); err == nil || !strings.Contains(err.Error(), "lacks its exact live-parent association") {
+					t.Fatalf("unpaired audit did not refuse actual ready-to-consume response: %v", err)
+				}
+				historicalContextRequireUnchanged(t, beforeMissingPair, historicalContextDatabaseRows(t, db, !sqlite))
+				if _, err := db.ExecContext(ctx, `INSERT INTO agent_turn_live_parents (turn_id,run_id,completion_attempt_id,capability_surface_id)
+					SELECT turn_id,run_id,completion_attempt_id,capability_surface_id FROM agent_turns WHERE turn_id=$1`, settlement.AgentTurn.TurnID); err != nil {
 					t.Fatal(err)
 				}
 				if err := projected.ConsumeCompletionResponse(ctx, &successor); err != nil {
@@ -1723,6 +1768,13 @@ func requireCompletionRecoveryRows(t *testing.T, fixture completionSettlementFix
 		t.Fatalf("completion recovery rows turns=%d spend=%d reservations=%d, want %d/%d/%d", turns, spend, reservations, wantTurns, wantSpend, wantReservations)
 	}
 	if wantTurns > 0 {
+		var paired int
+		if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM agent_turns t
+			JOIN agent_turn_live_parents p ON p.turn_id=t.turn_id AND p.run_id=t.run_id
+			AND p.completion_attempt_id=t.completion_attempt_id AND p.capability_surface_id=t.capability_surface_id
+			WHERE t.completion_attempt_id=$1`, attemptID).Scan(&paired); err != nil || paired != turns {
+			t.Fatalf("completion audit lost its exact live-parent pair: pairs=%d turns=%d error=%v", paired, turns, err)
+		}
 		requireCompletion2270FrozenNativeEvidence(t, fixture, attemptID)
 	}
 }

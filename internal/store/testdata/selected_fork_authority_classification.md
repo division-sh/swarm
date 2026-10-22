@@ -83,3 +83,22 @@ predecessor recovery tests must retain their both-store assertions. Passing
 this registry does not prove P01-P24, supported public journeys, race closure,
 or full-suite success. A's history/projection rulings and #642 refusals remain
 separate and are not decided by this accounting.
+
+## C4 One-Shot And Native Constraint Leaves
+
+The #642 C4 update classifies 14 exact new signatures as `private-backend`
+and removes three obsolete `admitTx` call signatures. These are the already
+authorized native owners, not new runtime SQL access or path exemptions:
+
+| File / responsibility | New findings | Retired findings | Boundary |
+| --- | ---: | ---: | --- |
+| backend/genericschedule/fork_one_shot.go / RestoreForkOneShotTx | 5 | 0 | Existing mutation frame, fresh child source admission, shared insertion and exact native readback; no source-state adoption |
+| backend/genericschedule/owner.go / admitWithRestorationTx and admitTx | 6 | 3 | The same insertion/idempotency decisions serve ordinary and authenticated restored rows; the SQL carrier and clock callback remain private |
+| backend/pipelinepersistence/test_c4_typed_start_timer_constraints.go | 2 | 0 | Existing Attempt.WithSQL and native timer INSERT exercise real CHECK/FK refusal with rollback, not test-side raw SQL |
+| backend/runforkpersistence/run_fork_one_shot_materializer.go | 1 | 0 | Typed private cross-owner restoration request; no arbitrary callback or raw handle |
+
+The three retired entries are insertActivationTx and the two loadByKeyTx calls
+moved from admitTx to admitWithRestorationTx. The finding registry guard,
+effective-method guard and persistence debt ratchet are unchanged. Neither
+the raw test-debt baseline nor a guard allowlist is expanded. This accounting
+does not close C4 or give the required SQLite T17 first-request row credit.

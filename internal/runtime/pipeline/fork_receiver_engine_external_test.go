@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -27,8 +29,10 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -36,8 +40,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -47,6 +53,11 @@ import (
 type forkEngineObservation struct {
 	ctx context.Context
 	id  string
+}
+
+type forkEngineAcknowledgment struct {
+	result runforkexecution.SelectedContractExecutionResult
+	err    error
 }
 
 type forkEngineProbe struct {
@@ -116,12 +127,12 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				ctx = worklifetime.WithProcess(ctx, rt.Options.ProcessWorkOwner)
 				runID := uuid.NewString()
 				seed := eventtest.RunCreatingRootIngress(uuid.NewString(), "start.seeded", "fork-engine-proof", "", []byte(`{"token":"engine-proof"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
-				if err := rt.Bus.Publish(ctx, seed); err != nil {
+				if err := rt.Bus.PublishAndWait(ctx, seed); err != nil {
 					t.Fatal(err)
 				}
 				waitForkEngineCompletion(t, db, runID)
 				requestEvent := eventtest.ExistingRunRootIngress(uuid.NewString(), "start.requested", "fork-engine-proof", "", []byte(`{"token":"engine-proof"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
-				if err := rt.Bus.Publish(ctx, requestEvent); err != nil {
+				if err := rt.Bus.PublishAndWait(ctx, requestEvent); err != nil {
 					t.Fatal(err)
 				}
 				waitForkEngineCompletion(t, db, runID)
@@ -149,17 +160,17 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				resumeSettled := func() { resumeSettledOnce.Do(func() { close(probe.resumeSettled) }) }
 				forkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				defer cancel()
-				finished := make(chan error, 1)
+				acknowledged := make(chan forkEngineAcknowledgment, 1)
 				done := make(chan struct{})
 				go func() {
 					defer close(done)
-					_, err := family.Execute(forkCtx, runforkexecution.SelectedContractExecutionRequest{
+					result, err := family.Execute(forkCtx, runforkexecution.SelectedContractExecutionRequest{
 						SourceRunID: runID, At: frontier, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
 						SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 						AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture, AgentManagerOptions: runtimemanager.AgentManagerOptions{TestLifecycleProbe: probe}},
 					})
-					finished <- err
+					acknowledged <- forkEngineAcknowledgment{result: result, err: err}
 				}()
 				t.Cleanup(func() {
 					cancel()
@@ -168,20 +179,38 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 					select {
 					case <-done:
 					case <-time.After(10 * time.Second):
-						t.Error("fork engine proof did not join")
+						t.Error("fork activation acknowledgment did not join")
 					}
 				})
-				var observed forkEngineObservation
+				// Execute acknowledges activation, not the retained engine's outcome.
+				var result runforkexecution.SelectedContractExecutionResult
 				select {
-				case observed = <-probe.claimed:
-				case err := <-finished:
-					t.Fatalf("real fork did not reach engine claim: %v", err)
+				case ack := <-acknowledged:
+					if ack.err != nil {
+						t.Fatalf("real fork did not acknowledge activation: %v", ack.err)
+					}
+					result = ack.result
 				case <-forkCtx.Done():
 					t.Fatal(forkCtx.Err())
 				}
+				proof := result.ForkLocalRuntimeContainer
+				if result.Owner != runfork.RunForkSelectedContractExecutionOwner || !result.Activation.Activated ||
+					result.Activation.SourceRunID != runID || result.Materialization.ForkRunID == "" ||
+					result.Materialization.ForkRunID == runID || result.Activation.ForkRunID != result.Materialization.ForkRunID ||
+					proof == nil || proof.ForkRunID != result.Activation.ForkRunID || proof.SourceRunID != runID ||
+					proof.Owner != runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner || proof.RuntimeExecutionID == "" {
+					t.Fatalf("activation acknowledgment lacks exact fresh-child execution evidence: %+v", result)
+				}
+				var observed forkEngineObservation
+				select {
+				case observed = <-probe.claimed:
+				case <-forkCtx.Done():
+					t.Fatalf("acknowledged fork did not reach engine claim: %v", forkCtx.Err())
+				}
 				claim, ok := runtimedelivery.ClaimFromContext(observed.ctx)
 				admission, admitted := managedexecution.FromContext(observed.ctx)
-				if !ok || !admitted || admission.Kind != managedexecution.KindSelectedContractFork || admission.RunID != claim.RunID() || claim.RunID() == runID {
+				if !ok || !admitted || !admission.AuthorizesSelected(proof.RuntimeExecutionID, proof.ForkRunID, proof.RuntimeGeneration) ||
+					admission.RunID != claim.RunID() || claim.RunID() == runID || claim.RunID() != result.Activation.ForkRunID || observed.id == frontier {
 					t.Fatal("engine lacks actual fresh-child fork authority")
 				}
 				deps := selected.RuntimeDeps()
@@ -189,7 +218,14 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if snapshot.EventID != observed.id || snapshot.RunID != claim.RunID() || snapshot.Status != runtimedelivery.StatusInProgress || snapshot.ClaimVersion != claim.Version() {
+					t.Fatalf("engine claim does not match the exact selected delivery: %+v", snapshot)
+				}
 				target := snapshot.Route.Target.Route()
+				proofRequest := forkEngineExecutionProofRequest(t, result, frontier, observed.id, claim)
+				claimedProof := readForkEngineExecutionProof(t, forkCtx, selected, proofRequest)
+				assertForkEngineCommittedEvidence(t, claimedProof, result, frontier)
+				committedRows := forkEngineConstructedRowCounts(t, claimedProof)
 				var before string
 				var beforeRevision int64
 				if err := db.QueryRow(`SELECT CAST(es.fields AS TEXT), fi.revision
@@ -199,60 +235,210 @@ WHERE es.run_id=$1 AND es.entity_id=$2 AND es.flow_instance='consumer'`, claim.R
 					t.Fatalf("fixed-revision receiver was not reconstructed independently of current source: %s header revision=%d err=%v", before, beforeRevision, err)
 				}
 				if missing {
-					result, err := db.Exec(`DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID)
-					if err != nil {
-						t.Fatal(err)
+					dialect := authoractivityfixture.DialectSQLite
+					if backend == "postgres" {
+						dialect = authoractivityfixture.DialectPostgres
 					}
-					if count, err := result.RowsAffected(); err != nil || count != 1 {
-						t.Fatalf("remove exact required child: %d %v", count, err)
+					if err := eventfixture.RunMutation(forkCtx, db, dialect, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+						return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+							result, err := tx.ExecContext(ctx, `DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID)
+							if err != nil {
+								return err
+							}
+							if count, err := result.RowsAffected(); err != nil || count != 1 {
+								return fmt.Errorf("remove exact required child: %d %v", count, err)
+							}
+							return nil
+						})
+					}).Err(); err != nil {
+						t.Fatal(err)
 					}
 				}
 				resume()
-				select {
-				case signal := <-probe.settled:
-					if signal.EventID != observed.id {
-						t.Fatalf("settlement changed the claimed event: %s != %s", signal.EventID, observed.id)
-					}
-				case err := <-finished:
-					t.Fatalf("fork finished without exact delivery settlement: %v", err)
-				case <-forkCtx.Done():
-					t.Fatal(forkCtx.Err())
-				}
-				current, err := deps.DeliveryStore.Snapshot(ctx, claim.DeliveryID())
 				want := runtimedelivery.StatusDelivered
 				if missing {
 					want = runtimedelivery.StatusDeadLetter
 				}
-				if err != nil || current.Status != want || current.ClaimVersion != claim.Version() {
-					t.Fatalf("bridge exact settlement status=%s reason=%s failure=%+v claim=%d want=%s err=%v diagnostics=%v", current.Status, current.ReasonCode, current.Failure, current.ClaimVersion, want, err, forkEngineHandlerErrors(t, db, claim.RunID()))
-				}
-				assertForkEngineRows(t, selected.RuntimeDeps().EventStore, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
-				resumeSettled()
 				select {
-				case err := <-finished:
-					if missing {
-						if err == nil || !strings.Contains(err.Error(), "constructed header projection disagrees with its declared field row") {
-							t.Fatalf("corrupt constructed receiver did not refuse activation: %v", err)
-						}
-					} else if err != nil {
-						t.Fatalf("bridge fork did not finish: %v", err)
+				case signal := <-probe.settled:
+					if signal.EventID != observed.id || signal.SubscriberType != snapshot.Route.Recipient.Code() ||
+						signal.SubscriberID != claim.SubscriberID() || signal.Status != string(want) {
+						t.Fatalf("settlement changed the claimed recipient or outcome: %+v", signal)
 					}
 				case <-forkCtx.Done():
 					t.Fatal(forkCtx.Err())
 				}
+				current, err := deps.DeliveryStore.Snapshot(ctx, claim.DeliveryID())
+				if err != nil || current.Status != want || current.EventID != observed.id || !current.MatchesSettlementClaim(claim) {
+					t.Fatalf("bridge exact settlement status=%s reason=%s failure=%+v claim=%d want=%s err=%v diagnostics=%v", current.Status, current.ReasonCode, current.Failure, current.ClaimVersion, want, err, forkEngineHandlerErrors(t, db, claim.RunID()))
+				}
+				settledProof := readForkEngineExecutionProof(t, forkCtx, selected, proofRequest)
+				assertForkEngineCommittedEvidence(t, settledProof, result, frontier)
 				if missing {
-					for _, table := range []string{"flow_instances", "flow_instance_runtime_readiness", "workflow_instance_initial_materializations", "entity_state", "event_deliveries", "events"} {
-						var remaining int
-						if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE run_id=$1`, claim.RunID()).Scan(&remaining); err != nil || remaining != 0 {
-							t.Fatalf("failed fork retained %s rows: count=%d err=%v", table, remaining, err)
-						}
+					if current.Failure == nil || runtimefailures.ValidateEnvelope(*current.Failure) != nil ||
+						current.Failure.Class != runtimefailures.ClassTargetUnreachable || current.Failure.Detail.Code != "workflow_target_unconstructed" ||
+						current.Failure.Component != "workflow-runtime" || current.Failure.Operation != "execute_handler" || current.ReasonCode != "handler_terminal_failure" {
+						t.Fatalf("required-state refusal lacks the actual workflow handler failure owner: %+v", current.Failure)
 					}
-					if err := db.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='consumer'`, runID).Scan(&sourceConsumer); err != nil || forkEngineMarker(t, sourceConsumer) != "consumer-engine" {
-						t.Fatalf("failed fork cleanup changed the source receiver: %s err=%v", sourceConsumer, err)
+					if settledProof.DeadLetterCount != 1 {
+						t.Fatalf("required-state refusal lost exact dead-letter settlement: count=%d", settledProof.DeadLetterCount)
 					}
+				} else if current.Failure != nil {
+					t.Fatalf("successful receiving engine retained failure: %+v", current.Failure)
+				}
+				settlement := current
+				assertForkEngineRows(t, ctx, selected, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
+				resumeSettled()
+				if missing {
+					committedRows["entity_state"]--
+				}
+				pipelineSettlement := waitForkEnginePipelineSettlement(t, forkCtx, selected, proofRequest, settlement)
+				cancel()
+				// Delivery terminality is not run failure. Explicit process retirement
+				// joins the retained owner and leaves its predecessor for fenced recovery.
+				cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+				defer cleanupCancel()
+				retired := make(chan error, 1)
+				go func() { retired <- family.RetireSelectedContexts(cleanupCtx) }()
+				select {
+				case err := <-retired:
+					if err != nil {
+						t.Fatalf("join actual selected fork cleanup owner: %v", err)
+					}
+				case <-cleanupCtx.Done():
+					t.Fatalf("selected fork resource retirement did not join: %v", cleanupCtx.Err())
+				}
+				if err := family.RetireSelectedContexts(cleanupCtx); err != nil {
+					t.Fatalf("empty retired selected ownership did not remain joined: %v", err)
+				}
+				retiredProof := readForkEngineExecutionProof(t, cleanupCtx, selected, proofRequest)
+				assertForkEngineCommittedEvidence(t, retiredProof, result, frontier)
+				if retiredProof.ExecutionState != "running" || retiredProof.RunStatus != "running" || len(retiredProof.Failure) != 0 {
+					t.Fatalf("process retirement changed the recoverable predecessor into business failure: %+v", retiredProof)
+				}
+				assertForkEnginePipelineSettlement(t, retiredProof, settlement)
+				if retiredProof.DeadLetterCount != settledProof.DeadLetterCount ||
+					retiredProof.DeliveryHandoff != pipelineSettlement.DeliveryHandoff ||
+					retiredProof.PipelineOutcome != pipelineSettlement.PipelineOutcome || retiredProof.PipelineReason != pipelineSettlement.PipelineReason ||
+					!reflect.DeepEqual(retiredProof.PipelineFailure, pipelineSettlement.PipelineFailure) {
+					t.Fatalf("process retirement changed pipeline/delivery settlement evidence: before=%+v after=%+v", pipelineSettlement, retiredProof)
+				}
+				retainedRows := forkEngineConstructedRowCounts(t, retiredProof)
+				for table, want := range committedRows {
+					if got := retainedRows[table]; got != want {
+						t.Fatalf("postactivation retirement changed committed %s rows: %d != %d", table, got, want)
+					}
+				}
+				assertForkEngineRows(t, ctx, selected, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
+				current, err = deps.DeliveryStore.Snapshot(ctx, claim.DeliveryID())
+				if err != nil || current.EventID != observed.id || current.Status != want || !current.MatchesSettlementClaim(claim) ||
+					current.ReasonCode != settlement.ReasonCode || !reflect.DeepEqual(current.Failure, settlement.Failure) {
+					t.Fatalf("postactivation cleanup lost exact settlement: %+v err=%v", current, err)
 				}
 			})
 		}
+	}
+}
+
+func forkEngineExecutionProofRequest(t *testing.T, result runforkexecution.SelectedContractExecutionResult, sourceEvent, childEvent string, claim runtimedelivery.Claim) storetest.SelectedForkReceiverExecutionProofRequest {
+	t.Helper()
+	binding := result.Materialization.SelectedContractBinding
+	proof := result.ForkLocalRuntimeContainer
+	if binding == nil || proof == nil || result.Activation.SelectedContractBinding == nil ||
+		binding.BindingID != result.Activation.SelectedContractBinding.BindingID ||
+		binding.ForkRunID != result.Activation.SelectedContractBinding.ForkRunID ||
+		binding.SourceRunID != result.Activation.SelectedContractBinding.SourceRunID ||
+		binding.ForkPoint.Kind != result.Activation.SelectedContractBinding.ForkPoint.Kind ||
+		binding.ForkPoint.Revision != result.Activation.SelectedContractBinding.ForkPoint.Revision ||
+		binding.ForkEventID != result.Activation.SelectedContractBinding.ForkEventID ||
+		binding.ContractSelection != result.Activation.SelectedContractBinding.ContractSelection {
+		t.Fatal("activation lost its exact materialized selected binding")
+	}
+	return storetest.SelectedForkReceiverExecutionProofRequest{
+		SourceRunID: proof.SourceRunID, ChildRunID: proof.ForkRunID, SourceEventID: sourceEvent, ChildEventID: childEvent,
+		BindingID: binding.BindingID, ExecutionID: proof.RuntimeExecutionID, Generation: proof.RuntimeGeneration,
+		DeliveryID: claim.DeliveryID(), ClaimVersion: uint64(claim.Version()), AuthorityStamp: result.Owner,
+	}
+}
+
+func readForkEngineExecutionProof(t *testing.T, ctx context.Context, selected *storeselected.Owner, request storetest.SelectedForkReceiverExecutionProofRequest) storetest.SelectedForkReceiverExecutionProof {
+	t.Helper()
+	if selected == nil || selected.RuntimeDeps().DeliveryStore == nil {
+		t.Fatal("receiver execution proof requires its original native delivery store")
+	}
+	observation, err := storetest.ReadSelectedForkReceiverExecutionProof(ctx, selected.RuntimeDeps().DeliveryStore, request)
+	if err != nil {
+		t.Fatalf("read exact selected fork receiver execution proof: %v", err)
+	}
+	return observation
+}
+
+func assertForkEngineCommittedEvidence(t *testing.T, observation storetest.SelectedForkReceiverExecutionProof, result runforkexecution.SelectedContractExecutionResult, sourceEvent string) {
+	t.Helper()
+	if observation.SourceRunID != result.Activation.SourceRunID || observation.SourceEventID != sourceEvent ||
+		observation.BindingID != result.Materialization.SelectedContractBinding.BindingID || observation.CutKind != string(result.Activation.ForkPoint.Kind) ||
+		observation.CutRevision != result.Activation.ForkPoint.Revision || observation.Mode != result.Materialization.SelectedContractBinding.ContractSelection.Mode {
+		t.Fatalf("committed activation/binding lineage changed: %+v", observation)
+	}
+	if observation.ExecutionCount != 1 {
+		t.Fatalf("committed selected execution lost its exact owner: count=%d", observation.ExecutionCount)
+	}
+	if observation.PublicationCount != 1 {
+		t.Fatalf("committed child event/publication lineage changed: count=%d", observation.PublicationCount)
+	}
+}
+
+func forkEngineConstructedRowCounts(t *testing.T, observation storetest.SelectedForkReceiverExecutionProof) map[string]int {
+	t.Helper()
+	counts := make(map[string]int)
+	for _, table := range []string{"flow_instances", "flow_instance_runtime_readiness", "workflow_instance_initial_materializations", "entity_state"} {
+		count, found := observation.ConstructedRows[table]
+		if !found {
+			t.Fatalf("selected receiver proof omitted constructed %s row count", table)
+		}
+		counts[table] = count
+	}
+	return counts
+}
+
+func waitForkEnginePipelineSettlement(t *testing.T, ctx context.Context, selected *storeselected.Owner, request storetest.SelectedForkReceiverExecutionProofRequest, settlement runtimedelivery.Snapshot) storetest.SelectedForkReceiverExecutionProof {
+	t.Helper()
+	var observation storetest.SelectedForkReceiverExecutionProof
+	for {
+		next, err := storetest.ReadSelectedForkReceiverExecutionProof(ctx, selected.RuntimeDeps().DeliveryStore, request)
+		if err != nil {
+			t.Fatalf("read child terminal pipeline settlement: handoff=%t outcome=%s reason=%s failure=%s err=%v", observation.DeliveryHandoff, observation.PipelineOutcome, observation.PipelineReason, observation.PipelineFailure, err)
+		}
+		observation = next
+		if observation.PipelineOutcome != "" {
+			assertForkEnginePipelineSettlement(t, observation, settlement)
+			return observation
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("child terminal pipeline receipt did not settle: handoff=%t outcome=%s reason=%s failure=%s err=%v", observation.DeliveryHandoff, observation.PipelineOutcome, observation.PipelineReason, observation.PipelineFailure, ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func assertForkEnginePipelineSettlement(t *testing.T, observation storetest.SelectedForkReceiverExecutionProof, settlement runtimedelivery.Snapshot) {
+	t.Helper()
+	switch settlement.Status {
+	case runtimedelivery.StatusDelivered:
+		if !observation.DeliveryHandoff || observation.PipelineOutcome != "success" || len(observation.PipelineFailure) != 0 {
+			t.Fatalf("successful delivery lost exact successful pipeline receipt/handoff: %+v", observation)
+		}
+	case runtimedelivery.StatusDeadLetter:
+		if observation.DeliveryHandoff || observation.PipelineOutcome != "dead_letter" || observation.PipelineReason != "handler_terminal_failure" {
+			t.Fatalf("dead-letter pipeline receipt changed disposition or invented a success handoff: %+v", observation)
+		}
+		failure, err := runtimefailures.UnmarshalEnvelope(observation.PipelineFailure)
+		if err != nil || settlement.Failure == nil || !reflect.DeepEqual(failure, *settlement.Failure) {
+			t.Fatalf("dead-letter pipeline receipt changed the exact canonical delivery failure: failure=%s delivery=%+v err=%v", observation.PipelineFailure, settlement.Failure, err)
+		}
+	default:
+		t.Fatalf("receiver proof requires a delivered or dead-letter settlement: %s", settlement.Status)
 	}
 }
 
@@ -271,15 +457,19 @@ func forkEngineHandlerErrors(t *testing.T, db *sql.DB, runID string) []string {
 		}
 		var entry struct {
 			Details struct {
-				Action string
-				Error  string
+				Action  string
+				Failure *runtimefailures.Envelope
 			}
 		}
 		if err := json.Unmarshal(raw, &entry); err != nil {
 			t.Fatal(err)
 		}
 		if entry.Details.Action == "handler_error" {
-			failures = append(failures, entry.Details.Error)
+			encoded, err := json.Marshal(entry.Details.Failure)
+			if err != nil {
+				t.Fatal(err)
+			}
+			failures = append(failures, string(encoded))
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -297,81 +487,73 @@ func forkEngineMarker(t *testing.T, raw string) any {
 	return fields["marker"]
 }
 
-func assertForkEngineRows(t *testing.T, selected any, sourceRun, childRun, receiver, sourceBefore string, wantRevision int64, missing bool) {
+func forkFixtureEntityRevision(t testing.TB, revision *int64) int {
 	t.Helper()
-	child, err := storetest.ReadSelectedForkRecoveredStorageSnapshot(context.Background(), selected, childRun)
+	if revision == nil {
+		t.Fatal("fork fixture requires a present entity revision")
+	}
+	return int(*revision)
+}
+
+func assertForkEngineRows(t *testing.T, ctx context.Context, selected *storeselected.Owner, sourceRun, childRun, receiver, sourceBefore string, wantRevision int64, missing bool) {
+	t.Helper()
+	child, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, childRun)
 	if err != nil {
 		t.Fatal(err)
 	}
-	source, err := storetest.ReadSelectedForkRecoveredStorageSnapshot(context.Background(), selected, sourceRun)
+	source, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, sourceRun)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fieldRow := func(snapshot map[string]storetest.SelectedForkStorageTableSnapshot, path, entity string) (string, int) {
-		t.Helper()
+	state := func(snapshot map[string]storetest.SelectedForkStorageTableSnapshot, path, entity string) (fields string, found bool) {
 		rows, err := storetest.DecodeSelectedForkSnapshotRows(snapshot["entity_state"])
 		if err != nil {
 			t.Fatal(err)
 		}
-		fields, count := "", 0
 		for _, row := range rows {
-			storedPath, err := row["flow_instance"].Text()
+			flow, err := row["flow_instance"].Text()
 			if err != nil {
 				t.Fatal(err)
 			}
-			storedEntity, err := row["entity_id"].Text()
+			id, err := row["entity_id"].Text()
 			if err != nil {
 				t.Fatal(err)
 			}
-			if storedPath != path || entity != "" && storedEntity != entity {
+			if flow != path || entity != "" && id != entity {
 				continue
+			}
+			if found {
+				t.Fatalf("receiver state is not unique: flow=%s entity=%s", path, entity)
 			}
 			fields, err = row["fields"].Text()
 			if err != nil {
 				t.Fatal(err)
 			}
-			count++
+			found = true
 		}
-		return fields, count
+		return fields, found
 	}
-	fields, count := fieldRow(child, "consumer", receiver)
+	fields, found := state(child, "consumer", receiver)
+	var revision int64
+	if found {
+		readback, err := selected.Entities().LoadOperatorEntity(ctx, receiver, childRun)
+		if err != nil || readback.Entity.EntityID != receiver || readback.Entity.FlowInstance != "consumer" {
+			t.Fatalf("receiver header did not match its field companion: %+v err=%v", readback, err)
+		}
+		revision = int64(forkFixtureEntityRevision(t, readback.Entity.Revision))
+	}
 	if missing {
-		// A missing header must not hide a recreated data row before cleanup.
-		if count != 0 {
-			t.Fatalf("required-state failure recreated the receiver: rows=%d fields=%s", count, fields)
+		if found {
+			t.Fatalf("required-state failure recreated the receiver: %s", fields)
 		}
-	} else {
-		var revision int64
-		headers, err := storetest.DecodeSelectedForkSnapshotRows(child["flow_instances"])
-		if err != nil {
-			t.Fatal(err)
-		}
-		headerCount := 0
-		for _, row := range headers {
-			path, err := row["instance_path"].Text()
-			if err != nil {
-				t.Fatal(err)
-			}
-			entity, err := row["entity_id"].Text()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if path == "consumer" && entity == receiver {
-				if err := json.Unmarshal(row["revision"].Value, &revision); err != nil {
-					t.Fatal(err)
-				}
-				headerCount++
-			}
-		}
-		if count != 1 || headerCount != 1 || forkEngineMarker(t, fields) != "consumer-engine" || revision != wantRevision {
-			t.Fatalf("engine did not write receiving entity exactly once: field rows=%d header rows=%d fields=%s revision=%d want=%d", count, headerCount, fields, revision, wantRevision)
-		}
+	} else if !found || forkEngineMarker(t, fields) != "consumer-engine" || revision != wantRevision {
+		t.Fatalf("engine did not write receiving entity exactly once: %s revision=%d want=%d found=%t", fields, revision, wantRevision, found)
 	}
-	if fields, count := fieldRow(child, "producer", ""); count != 1 || forkEngineMarker(t, fields) != "producer-owned" {
-		t.Fatalf("engine borrowed producer state: rows=%d fields=%s", count, fields)
+	if fields, found := state(child, "producer", ""); !found || forkEngineMarker(t, fields) != "producer-owned" {
+		t.Fatalf("engine borrowed producer state: %s found=%t", fields, found)
 	}
-	if fields, count := fieldRow(source, "consumer", ""); count != 1 || fields != sourceBefore {
-		t.Fatalf("engine mutated source receiver: rows=%d fields=%s", count, fields)
+	if fields, found := state(source, "consumer", ""); !found || fields != sourceBefore {
+		t.Fatalf("engine mutated source receiver: %s found=%t", fields, found)
 	}
 }
 
@@ -393,6 +575,21 @@ func waitForkEngineCompletion(t *testing.T, db *sql.DB, runID string) {
 
 func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.Runtime, *storeselected.Owner, *sql.DB, string, startupownership.ProcessCapability) {
 	t.Helper()
+	rt, selected, repo, capability, driver, address := startForkEngineRuntimeOwner(t, backend, root, nil)
+	db, err := sql.Open(driver, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return rt, selected, db, repo, capability
+}
+
+func startForkEngineRuntimeOwner(t *testing.T, backend, root string, probe lifecycleprobe.Observer) (*swarmruntime.Runtime, *storeselected.Owner, string, startupownership.ProcessCapability, string, string) {
+	return startForkEngineRuntimeOwnerAt(t, backend, root, probe, "")
+}
+
+func startForkEngineRuntimeOwnerAt(t *testing.T, backend, root string, probe lifecycleprobe.Observer, requestedAddress string) (*swarmruntime.Runtime, *storeselected.Owner, string, startupownership.ProcessCapability, string, string) {
+	t.Helper()
 	repo, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -404,23 +601,27 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	dir := t.TempDir()
 	sqlitePath := filepath.Join(dir, "runtime.db")
+	if backend == "sqlite" && requestedAddress != "" {
+		sqlitePath = requestedAddress
+	}
 	config := map[string]any{
 		"runtime": map[string]any{"recovery_on_startup": false},
 		"store":   map[string]any{"backend": backend, "sqlite": map[string]any{"path": sqlitePath}},
 		"llm":     map[string]any{"backend": "anthropic", "session": map[string]any{"lock_ttl": "10s", "rotate_after_turns": 40, "rotate_on_parse_failures": 3}},
 	}
-	var db *sql.DB
 	var dsn string
+	driver, address := "sqlite", sqlitePath
 	selection := storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: sqlitePath}
 	if backend == "postgres" {
-		var cleanup func()
-		dsn, db, cleanup = testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		connection, err := testpostgres.ParseConnection(dsn)
+		dsn = requestedAddress
+		if dsn == "" {
+			dsn = testutil.StartPostgresDSN(t)
+		}
+		driver, address = "postgres", dsn
+		p, err := testpostgres.ParseConnectionParameters(dsn)
 		if err != nil {
 			t.Fatal(err)
 		}
-		p := connection.Parameters()
 		t.Setenv("FORK_ENGINE_DB_PASSWORD", p.Password)
 		config["database"] = map[string]any{"host": p.Host, "port": p.Port, "name": p.Database, "user": p.User, "password_env": "FORK_ENGINE_DB_PASSWORD", "sslmode": p.SSLMode}
 		selection = storebackend.Selection{Backend: storebackend.BackendPostgres}
@@ -480,7 +681,7 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 	}
 	deps := selected.RuntimeDeps()
 	deps.Config = cfgResult.Config
-	deps.Options = swarmruntime.RuntimeOptions{ExecutionPosture: executionposture.Live, WorkflowModule: module, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID, ProcessWorkOwner: process, ProviderTriggerCatalog: catalog, ProviderCredentials: credentials}
+	deps.Options = swarmruntime.RuntimeOptions{ExecutionPosture: executionposture.Live, WorkflowModule: module, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID, ProcessWorkOwner: process, ProviderTriggerCatalog: catalog, ProviderCredentials: credentials, TestLifecycleProbe: probe}
 	rt, err := swarmruntime.NewRuntime(ctx, deps)
 	if err != nil {
 		t.Fatal(err)
@@ -541,12 +742,5 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 	if err := rt.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if db == nil {
-		db, err = sql.Open("sqlite", sqlitePath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = db.Close() })
-	}
-	return rt, selected, db, repo, capability
+	return rt, selected, repo, capability, driver, address
 }
