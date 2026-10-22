@@ -285,6 +285,21 @@ func TestOperatorRunForkHandlersFailClosedOnBundleAvailability(t *testing.T) {
 }
 
 func TestOperatorRunForkHandlersMapSourceAndEventErrors(t *testing.T) {
+	t.Run("existing fork is a typed refusal", func(t *testing.T) {
+		executor := &recordingRunForkExecutor{err: fmt.Errorf("materialization: %w", &runfork.RunForkMaterializationConflictError{ForkRunID: runForkTestForkRunID})}
+		handler := runForkTestHandler(t, &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
+			runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+		}}, executor)
+		resp := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"existing-fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"allow_source_freeze":true}}`, runForkTestSourceRunID, runForkTestEventID))
+		if resp.Error == nil || resp.Error.Code != codeInvalidParams || executor.calls != 1 {
+			t.Fatalf("existing fork returned an internal error: error=%#v calls=%d", resp.Error, executor.calls)
+		}
+		details := asMap(t, asMap(t, resp.Error.Data)["details"])
+		if details["fork_run_id"] != runForkTestForkRunID || !strings.Contains(fmt.Sprint(details["reason"]), runForkTestForkRunID) {
+			t.Fatalf("typed refusal lost its existing fork identity: %#v", details)
+		}
+	})
+
 	t.Run("source run missing", func(t *testing.T) {
 		handler := runForkTestHandler(t, &recordingRunForkAvailability{err: fmt.Errorf("run %s not found: %w", runForkTestSourceRunID, runbundle.ErrRunNotFound)}, &recordingRunForkExecutor{})
 		resp := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q}}`, runForkTestSourceRunID))

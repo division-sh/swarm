@@ -91,10 +91,11 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 }
 
 type pipelineActivityDispatcher struct {
-	coordinator *PipelineCoordinator
-	client      *http.Client
-	emissions   *pipelineEmissionPlan
-	journal     ActivityAttemptJournal
+	coordinator              *PipelineCoordinator
+	client                   *http.Client
+	emissions                *pipelineEmissionPlan
+	publicationParentEventID string
+	journal                  ActivityAttemptJournal
 }
 
 func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, intent runtimeengine.ActivityIntent) (decisioncard.Card, decisioncard.ProposedEffectContinuation, error) {
@@ -261,6 +262,9 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 }
 
 func (d pipelineActivityDispatcher) executeAdmittedActivityTool(ctx context.Context, intent runtimeengine.ActivityIntent, source semanticview.Source, tool runtimecontracts.ToolSchemaEntry) error {
+	if _, published, err := selectedActivityInputPublication(ctx, intent); err != nil || published {
+		return err
+	}
 	var profile scenarioexecution.Profile
 	var profiled bool
 	if intent.ExecutionMode == runtimeeffects.ExecutionModeMock {
@@ -625,7 +629,8 @@ func (pc *PipelineCoordinator) handleActivityRequestEventWithEmissionPlan(ctx co
 	if err != nil {
 		return true, runtimepipelineobligation.Continue(), err
 	}
-	dispatcher := pipelineActivityDispatcher{coordinator: pc, emissions: emissions}
+	intent.Context = events.DeliveryContextFromContext(ctx).ReplyOnly()
+	dispatcher := pipelineActivityDispatcher{coordinator: pc, emissions: emissions, publicationParentEventID: evt.ParentEventID()}
 	if failure := dispatcher.activityContractPinFailure(ctx, intent, pc.SemanticSource()); failure != nil {
 		if failure.Class == runtimefailures.ClassDependencyUnavailable {
 			return true, runtimepipelineobligation.ReleaseForRetry(failure.Detail.Code, failure), nil
@@ -1455,7 +1460,7 @@ func (d pipelineActivityDispatcher) publishActivityResult(ctx context.Context, i
 }
 
 func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Context, intent runtimeengine.ActivityIntent, eventID, eventType string, payload map[string]any, createdAt time.Time) error {
-	ctx = events.WithDeliveryContext(ctx, intent.Context)
+	ctx = events.WithDeliveryContext(events.WithoutDeliveryContext(ctx), intent.Context)
 	raw, err := canonicaljson.MarshalPreservingNumberKinds(payload)
 	if err != nil {
 		return err
@@ -1476,7 +1481,7 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 		},
 		Lineage: events.EventLineage{
 			RunID:         intent.SourceRunID,
-			ParentEventID: firstNonEmptyString(intent.SourceEventID, intent.ParentEventID),
+			ParentEventID: firstNonEmptyString(d.publicationParentEventID, intent.SourceEventID, intent.ParentEventID),
 			TaskID:        intent.SourceTaskID,
 			ExecutionMode: intent.ExecutionMode,
 		},
@@ -1485,7 +1490,7 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 		return fmt.Errorf("construct activity result event: %w", err)
 	}
 	if d.emissions != nil {
-		d.emissions.appendEvent(evt)
+		d.emissions.appendIntents([]runtimeengine.EmitIntent{{Event: evt, Context: intent.Context.ReplyOnly()}})
 		d.logActivityRuntime(ctx, intent, "result_published", map[string]any{
 			"activity_id":       intent.ActivityID,
 			"tool":              intent.Tool,

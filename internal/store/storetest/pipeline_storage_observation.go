@@ -3,6 +3,7 @@ package storetest
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
