@@ -164,10 +164,20 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 	}
 	registrationContext := context.Background()
 	if _, native := eventStore.(agentfixture.Store); native {
-		registrationContext = originalAPIFixtureContext(t, testAuthorActivityContextForRuntime(registrationContext, opts.RuntimeInstanceID, opts.SourceArtifactFact), eventStore)
+		registrationContext = testAuthorActivityContextForRuntime(registrationContext, opts.RuntimeInstanceID, opts.SourceArtifactFact)
 		if opts.MutationContext == nil {
+			registrationContext = originalAPIFixtureContext(t, registrationContext, eventStore)
 			opts.MutationContext = func(ctx context.Context) (context.Context, error) {
+				if startupownership.HasMutationAuthority(ctx) {
+					return startupownership.FreezeMutationAuthority(ctx)
+				}
 				return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(ctx, registrationContext))
+			}
+		} else {
+			var err error
+			registrationContext, err = opts.MutationContext(registrationContext)
+			if err != nil {
+				return nil, err
 			}
 		}
 	}

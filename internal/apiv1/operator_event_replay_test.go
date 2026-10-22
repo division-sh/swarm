@@ -1619,6 +1619,7 @@ func eventReplayTestHandlerWithPosture(t *testing.T, pg *store.PostgresStore, bu
 
 func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.PostgresStore, eventName string, subscribers []string, status runtimedelivery.Status) operatorread.OperatorEventFull {
 	t.Helper()
+	ctx = originalAPIFixtureContext(t, ctx, pg)
 	eventID := uuid.NewString()
 	runID := operatorReplayRunID
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})

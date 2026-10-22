@@ -40,6 +40,7 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
@@ -792,6 +793,7 @@ func TestOperatorEventPublishReturnsStoredCompletionWithoutPostCommitReadback(t 
 
 func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
+	original := originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg)
 	failing := &failStandalonePipelineReceiptOnceStore{
 		PostgresStore: pg,
 		obligations: &failAPIPipelineSettlementOnceStore{
@@ -803,11 +805,14 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
 	opts := runStartTestEventBusOptions(source)
 	opts.TestLifecycleProbe = probe
+	opts.MutationContext = func(work context.Context) (context.Context, error) {
+		return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, original))
+	}
 	bus, err := newScopedAPITestEventBus(t, failing, opts)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	ctx, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, context.Background(), pg, "scan-orchestrator")
+	ctx, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, original, pg, "scan-orchestrator")
 	ch := runtimebustest.SubscribeForRun(t, bus, targetRunID, "scan-orchestrator", events.EventType("scan.requested"))
 	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandlerWithStores(t, failing, failing, failing, bus, source)
@@ -861,6 +866,7 @@ func TestOperatorEventPublishPostCommitReceiptFailureReplaysWithoutDuplicate(t *
 
 func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
+	original := originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg)
 	failing := &failNormalRunCompletionStore{
 		PostgresStore: pg,
 		err:           errors.New("simulated normal-run completion failure"),
@@ -869,11 +875,14 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(5*time.Second))
 	opts := runStartTestEventBusOptions(source)
 	opts.TestLifecycleProbe = probe
+	opts.MutationContext = func(work context.Context) (context.Context, error) {
+		return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, original))
+	}
 	bus, err := newScopedAPITestEventBus(t, failing, opts)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
-	ctx, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, context.Background(), pg, "scan-orchestrator")
+	ctx, targetRunID := seedActiveAPIV1RuntimeBusAgentNewRun(t, original, pg, "scan-orchestrator")
 	ch := runtimebustest.SubscribeForRun(t, bus, targetRunID, "scan-orchestrator", events.EventType("scan.requested"))
 	defer runtimebustest.Unsubscribe(bus, "scan-orchestrator")
 	handler := eventPublishTestHandlerWithStores(t, failing, failing, failing, bus, source)

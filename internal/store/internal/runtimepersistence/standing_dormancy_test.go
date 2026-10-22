@@ -125,6 +125,7 @@ func TestDormantStandingRestorationPreservesSuspendedOverrideBothStores(t *testi
 		t.Run(backend, func(t *testing.T) {
 			f := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, f.selected)
 			candidate := f.candidate("credential-loss-suspended")
 			created, err := f.workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {

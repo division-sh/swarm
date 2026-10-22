@@ -1805,7 +1805,7 @@ func VerifyNativeWorkflowTimerLifecycleStopFencesRestoreAndRecoveryOnBothStoresF
 				case "restore":
 					go func() { operationErr <- pc.RestoreWorkflowTimers(ctx) }()
 				case "recovery":
-					if !pc.workflowTimers.startWakeupRecovery(activation.Ref) {
+					if !pc.workflowTimers.startWakeupRecovery(ctx, activation.Ref) {
 						t.Fatal("start workflow timer recovery")
 					}
 				default:
@@ -1876,7 +1876,7 @@ func VerifyNativeWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoinsForTest(t
 				<-release
 			}
 			for attempt := 0; attempt < 3; attempt++ {
-				if !pc.workflowTimers.startWakeupRecovery(activation.Ref) {
+				if !pc.workflowTimers.startWakeupRecovery(ctx, activation.Ref) {
 					t.Fatalf("start coalesced recovery attempt %d", attempt+1)
 				}
 			}
@@ -1915,7 +1915,7 @@ func VerifyNativeWorkflowTimerRecoveryCoalescesTypedOccurrencesAndJoinsForTest(t
 			if err := pc.workflowTimers.retireWakeup(activation.Ref); err != nil {
 				t.Fatalf("retire initial workflow timer wakeup: %v", err)
 			}
-			if !pc.workflowTimers.startWakeupRecovery(activation.Ref) {
+			if !pc.workflowTimers.startWakeupRecovery(ctx, activation.Ref) {
 				t.Fatal("start pending recovery")
 			}
 			stopCtx, cancel := context.WithTimeout(ctx, 2*time.Second)

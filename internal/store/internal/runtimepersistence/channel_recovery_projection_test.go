@@ -17,6 +17,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/google/uuid"
 )
@@ -38,7 +39,7 @@ func channelRecoveryProofModes() []string {
 
 // This is a selected-store state matrix, not public producer or OS-death proof.
 // It reuses the admitted binding/render fixture and actual managed effect owner.
-func proveChannelRecoveryProjection(t *testing.T, mode string, selected selectedChannelDeliveryTestStore,
+func proveChannelRecoveryProjection(t *testing.T, ctx context.Context, mode string, selected selectedChannelDeliveryTestStore,
 	db interface {
 		QueryRowContext(context.Context, string, ...any) *sql.Row
 	},
@@ -47,7 +48,6 @@ func proveChannelRecoveryProjection(t *testing.T, mode string, selected selected
 	t.Helper()
 	parts := strings.Split(mode, "_")
 	source, operation, cut := parts[1], parts[2], parts[3]
-	ctx := context.Background()
 	bounds := packs.PresentationBounds{Actions: 8, TextRunes: 4096, LabelRunes: 64}
 	exec := func(query string, args ...any) {
 		t.Helper()
@@ -94,7 +94,7 @@ func proveChannelRecoveryProjection(t *testing.T, mode string, selected selected
 		delivery.ChannelDelivery.PreviousReceiptOperationID = previous
 	}
 	if operation == "edit" {
-		effectCtx, first := authorizeResponseTestEffect(t, selected, delivery)
+		effectCtx, first := authorizeResponseTestEffect(t, ctx, selected, delivery)
 		if err := first.MarkLaunched(effectCtx); err != nil {
 			t.Fatal(err)
 		}
@@ -109,6 +109,7 @@ func proveChannelRecoveryProjection(t *testing.T, mode string, selected selected
 	}
 	effectCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContextForBundle(delivery.ChannelDelivery.BundleHash), authority),
 		runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
+	effectCtx = startupownership.CarryMutationAuthority(effectCtx, ctx)
 	var handle *runtimeeffects.Handle
 	var err error
 	if source == "native" {
@@ -130,7 +131,7 @@ func proveChannelRecoveryProjection(t *testing.T, mode string, selected selected
 		if err := db.QueryRowContext(ctx, `SELECT authority_evidence FROM runtime_external_effect_operations WHERE operation_id=$1`, authority.ID).Scan(&originalEvidence); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := recovery.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().Add(time.Hour))); err != nil {
+		if _, err := recovery.ReconcileExternalEffectAttempts(ctx, liveExternalEffectRecoveryRequest(time.Now().Add(time.Hour))); err != nil {
 			t.Fatal(err)
 		}
 		authority.ExecutionOwner = "admitted-retry-owner"
@@ -233,7 +234,7 @@ func proveChannelRecoveryProjection(t *testing.T, mode string, selected selected
 			t.Fatal(err)
 		}
 	}
-	_, err = recovery.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().Add(time.Hour)))
+	_, err = recovery.ReconcileExternalEffectAttempts(ctx, liveExternalEffectRecoveryRequest(time.Now().Add(time.Hour)))
 	conflict := strings.HasSuffix(cut, "conflict")
 	if conflict != (err != nil) {
 		t.Fatalf("recovery cut=%s error=%v, want conflict=%t", cut, err, conflict)
@@ -330,7 +331,7 @@ func proveChannelRecoveryProjection(t *testing.T, mode string, selected selected
 		}
 	}
 	if !conflict {
-		summary, err := recovery.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().Add(2*time.Hour)))
+		summary, err := recovery.ReconcileExternalEffectAttempts(ctx, liveExternalEffectRecoveryRequest(time.Now().Add(2*time.Hour)))
 		if err != nil || summary != (runtimeeffects.RecoverySummary{}) {
 			t.Fatalf("repeat recovery changed terminal evidence: %#v %v", summary, err)
 		}

@@ -257,6 +257,13 @@ func admitRetainedResetCleanupProof(t *testing.T, capability startupownership.Pr
 
 func admitRetainedResetCleanupProofWithContext(t *testing.T, ctx context.Context, capability startupownership.ProcessCapability, quiescer destructivereset.QuiescenceStore, runID string, includeSources bool, additionalRunIDs ...string) destructivereset.CleanupRequest {
 	t.Helper()
+	if !startupownership.HasMutationAuthority(ctx) {
+		var err error
+		ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	now := time.Now().UTC().Add(time.Minute)
 	operation, err := capability.AdmitResetOperation(ctx, destructivereset.Request{
 		OperationID: uuid.NewString(), ActorTokenID: "operator-token", RequestHash: "cleanup-guard",

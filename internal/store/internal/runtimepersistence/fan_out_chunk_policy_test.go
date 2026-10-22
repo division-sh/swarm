@@ -18,6 +18,7 @@ func TestFanOutRetrySQLPolicyAndRestartRecoveryBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, restarted, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 33, at)
 			// The SQL operation must implement exactly the shared retry policy

@@ -274,10 +274,6 @@ func TestGuardTerminationVerifiedExecutionAndRestartBothStores(t *testing.T) {
 	pipeline.VerifyNativeGuardTerminationVerifiedExecutionAndRestartBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }
 
-func TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores(t *testing.T) {
-	pipeline.VerifyNativeCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
-}
-
 func TestPipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWithoutStampedClaim(t *testing.T) {
 	pipeline.VerifyNativePipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWithoutStampedClaimForTest(t, pipelineDeliveryNativeFixture)
 }

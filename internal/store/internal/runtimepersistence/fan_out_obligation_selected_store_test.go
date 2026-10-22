@@ -1211,6 +1211,7 @@ func TestFanOutTwoLevelRestartResumesParentPrefixAndNestedPendingOnBothStores(t 
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			firstOwner, restartedOwner, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, firstOwner)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			parent := seedFanOutOwnerFixture(t, ctx, db, firstOwner, postgres, 9, base)
 			nested := seedFanOutOwnerChildFixture(t, ctx, db, firstOwner, postgres, parent, 3, base.Add(time.Second))
@@ -1262,6 +1263,7 @@ func TestFanOutCancellationPreservesParentPrefixAndCancelsClaimedNestedSuffixOnB
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, secondOwner, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			base := time.Now().UTC().Add(-2 * time.Second).Truncate(time.Microsecond)
 			parent := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 9, base)
 			nested := seedFanOutOwnerChildFixture(t, ctx, db, owner, postgres, parent, 3, base.Add(time.Second))
