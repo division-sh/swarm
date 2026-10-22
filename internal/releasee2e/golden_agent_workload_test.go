@@ -1832,8 +1832,9 @@ func waitForGoldenRetainedIdleAgents(t *testing.T, ctx context.Context, rpc *rel
 func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string, events []goldenEvent, entities goldenEntitySet, candidateIDs []string, replayed map[string]goldenEvent) {
 	t.Helper()
 	type turnExpectation struct {
-		agentID   string
-		eventName string
+		agentID     string
+		eventName   string
+		interrupted bool
 	}
 	wantByTrigger := map[string]turnExpectation{}
 	addTrigger := func(event goldenEvent, agentID string) {
@@ -1847,33 +1848,16 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 	for _, candidateID := range candidateIDs {
 		addTrigger(goldenSingleNamedEvent(t, events, entities.candidates[candidateID].FlowInstance+"/candidate.work.requested"), "candidate-worker")
 	}
+	for _, before := range replayed {
+		addTrigger(before, before.Deliveries[0].SubscriberID)
+		expectation := wantByTrigger[before.EventID]
+		expectation.interrupted = true
+		wantByTrigger[before.EventID] = expectation
+	}
 
 	conversations := listGoldenConversations(t, ctx, rpc, runID)
-	if len(replayed) > 0 {
-		var completed []goldenConversation
-		interrupted := map[string]int{}
-		expectedInterrupted := map[string]int{}
-		for _, before := range replayed {
-			expectedInterrupted[before.Deliveries[0].SubscriberID]++
-		}
-		for _, conversation := range conversations {
-			if conversation.TurnCount != 0 {
-				completed = append(completed, conversation)
-				continue
-			}
-			if expectedInterrupted[conversation.AgentID] == 0 || conversation.SessionID == "" || conversation.RunID != runID ||
-				conversation.ExecutionMode != "mock" || conversation.MessageCount != 0 || len(listGoldenTurns(t, ctx, rpc, conversation.SessionID)) != 0 {
-				t.Fatalf("interrupted provider conversation contains an unaccounted turn: %#v", conversation)
-			}
-			interrupted[conversation.AgentID]++
-		}
-		if !reflect.DeepEqual(interrupted, expectedInterrupted) {
-			t.Fatalf("interrupted empty conversation counts = %v, want %v", interrupted, expectedInterrupted)
-		}
-		conversations = completed
-	}
-	if len(conversations) != len(candidateIDs)+1 {
-		t.Fatalf("conversation.list count = %d, want one scout and %d candidate conversations: %#v", len(conversations), len(candidateIDs), conversations)
+	if len(conversations) != len(wantByTrigger) {
+		t.Fatalf("conversation.list count = %d, want exactly %d original/replayed trigger conversations: %#v", len(conversations), len(wantByTrigger), conversations)
 	}
 	seenSessions := map[string]bool{}
 	seenTriggers := map[string]int{}
@@ -1883,8 +1867,8 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 		}
 		seenSessions[conversation.SessionID] = true
 		turns := listGoldenTurns(t, ctx, rpc, conversation.SessionID)
-		if len(turns) != 1 || !turns[0].ParseOK || turns[0].ExecutionMode != "mock" || turns[0].Ordinal != 1 {
-			t.Errorf("conversation %s turns = %#v, want one successful mock turn", conversation.SessionID, turns)
+		if len(turns) != 1 || turns[0].ExecutionMode != "mock" || turns[0].Ordinal != 1 {
+			t.Errorf("conversation %s turns = %#v, want one exact mock turn", conversation.SessionID, turns)
 			continue
 		}
 		var exact struct {
@@ -1894,12 +1878,19 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 		if err := rpc.call(ctx, "conversation.get_turn", map[string]any{"session_id": conversation.SessionID, "turn_id": turns[0].TurnID}, &exact); err != nil {
 			t.Fatal(err)
 		}
-		if exact.Session != conversation || exact.Turn != turns[0] {
+		if exact.Session != conversation || !reflect.DeepEqual(exact.Turn, turns[0]) {
 			t.Fatalf("conversation.get_turn differs from full-session list/page: list=%+v page=%+v exact=%+v", conversation, turns, exact)
 		}
 		expectation, ok := wantByTrigger[turns[0].TriggerEventID]
 		if !ok || conversation.AgentID != expectation.agentID || turns[0].TriggerEventType != expectation.eventName {
 			t.Errorf("conversation %s turn = %#v agent=%q, want exact routed trigger %#v", conversation.SessionID, turns[0], conversation.AgentID, expectation)
+		}
+		if turns[0].ParseOK == expectation.interrupted || (turns[0].Failure != nil) != expectation.interrupted {
+			t.Errorf("conversation %s turn = %#v, want interrupted=%t", conversation.SessionID, turns[0], expectation.interrupted)
+		}
+		if expectation.interrupted && turns[0].Failure != nil &&
+			(turns[0].Failure.Class != failures.ClassOutcomeUncertain || turns[0].Failure.Detail.Code != "effect_recovery_outcome_unconfirmed") {
+			t.Errorf("interrupted conversation lost its canonical recovery failure: %#v", turns[0])
 		}
 		seenTriggers[turns[0].TriggerEventID]++
 	}
@@ -1940,12 +1931,13 @@ func listGoldenConversations(t *testing.T, ctx context.Context, rpc *releaseRPCC
 }
 
 type goldenTurn struct {
-	TurnID           string `json:"turn_id"`
-	ExecutionMode    string `json:"execution_mode"`
-	Ordinal          int    `json:"ordinal"`
-	TriggerEventID   string `json:"trigger_event_id"`
-	TriggerEventType string `json:"trigger_event_type"`
-	ParseOK          bool   `json:"parse_ok"`
+	TurnID           string             `json:"turn_id"`
+	ExecutionMode    string             `json:"execution_mode"`
+	Ordinal          int                `json:"ordinal"`
+	TriggerEventID   string             `json:"trigger_event_id"`
+	TriggerEventType string             `json:"trigger_event_type"`
+	ParseOK          bool               `json:"parse_ok"`
+	Failure          *failures.Envelope `json:"failure"`
 }
 
 func listGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient, sessionID string) []goldenTurn {
