@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -542,6 +543,6 @@ func t17AddConstructor(t *testing.T, plan *runfork.RunForkPlan, source semanticv
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan.Entities = append(plan.Entities, runfork.RunForkEntityState{EntityID: instance.EntityID, CurrentState: initial.ID(), EnteredStateAt: &at, Fields: fields,
+	plan.Entities = append(plan.Entities, runfork.RunForkEntityState{EntityID: instance.EntityID, CurrentState: mutationlog.PresentLifecycleState(initial.ID()), EnteredStateAt: &at, Fields: fields,
 		MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowTemplate: instance.TemplateID, FlowInstance: instance.InstancePath, ParentInstance: instance.ParentRoute.FlowInstance, InstanceKey: key, Mode: scope.Mode, EntityType: contract.EntityType, FlowConfig: record.Config, InitialMaterialization: record.InitialMaterialization}})
 }

@@ -158,7 +158,10 @@ func fanOutRecipientPartitionPlan(t *testing.T, runID string, slots []fanOutReci
 		if index < unfinished {
 			state := states[index%len(states)]
 			pending.Classification, pending.Status = state.classification, state.status
-			pending.ClaimVersion, pending.RetryCount, pending.ActiveSessionID, pending.StartedAt = 7, 2, uuid.NewString(), &now
+			pending.ClaimVersion, pending.RetryCount = 7, 2
+			pending.SourceExecution = deliverylifecycle.SourceExecutionAtCut{
+				InProgress: state.status == "in_progress", Started: true, SessionBound: state.status == "in_progress",
+			}
 			replay.SourceDeliveryIDs = append(replay.SourceDeliveryIDs, id)
 		} else {
 			state := terminal[(index-unfinished)%len(terminal)]

@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -143,7 +144,7 @@ func TestAdmissionInheritedTimerSelectionPreservesLoopCorrespondence(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	activation, err := loopruntime.New(source.RunID, source.EntityID, "consumer", "loop", "revision", "loop-start", req.Plan.Entities[0].CurrentState, 3, source.CreatedAt)
+	activation, err := loopruntime.New(source.RunID, source.EntityID, "consumer", "loop", "revision", "loop-start", *req.Plan.Entities[0].CurrentState, 3, source.CreatedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +285,7 @@ func inheritedTimerAdmissionRequest(t *testing.T, flowID string, recurring bool)
 		entered := *req.Plan.Entities[0].EnteredStateAt
 		contract, _ := entityruntime.ResolveForFlow(req.Source, ".")
 		req.Plan.Entities = append(req.Plan.Entities, runfork.RunForkEntityState{
-			EntityID: root.EntityID, CurrentState: stage.ID(), EnteredStateAt: &entered,
+			EntityID: root.EntityID, CurrentState: mutationlog.PresentLifecycleState(stage.ID()), EnteredStateAt: &entered,
 			MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 				Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 				FlowTemplate: ".", FlowInstance: root.InstancePath, Mode: "static", EntityType: contract.EntityType,
@@ -328,7 +329,7 @@ func inheritedTimerAdmissionRequest(t *testing.T, flowID string, recurring bool)
 	req.Plan.WorkflowTimers = []pipeline.WorkflowTimerActivationPersistenceRecord{timer.PersistenceRecord()}
 	bundle, _ := semanticview.Bundle(req.Source)
 	bundle.Semantics.Timers = append(bundle.Semantics.Timers, contracts.WorkflowTimerContract{
-		ID: "timeout", FlowID: flowID, StageOwned: true, Stage: entity.CurrentState,
+		ID: "timeout", FlowID: flowID, StageOwned: true, Stage: *entity.CurrentState,
 		Owner: "selected-timer-owner", Event: "timer.selected", Delay: "2h", Recurring: recurring,
 	})
 	view := bundle.FlowTree.ByID[flowID]

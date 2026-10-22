@@ -35,7 +35,7 @@ func TestSelectedRecordedRootAttachmentWithoutDispatch(t *testing.T) {
 	source, runID := semanticview.Wrap(bundle), uuid.NewString()
 	root := flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
 	entered := time.Now().UTC()
-	entity := runfork.RunForkEntityState{EntityID: runID, CurrentState: "waiting", EnteredStateAt: &entered,
+	entity := runfork.RunForkEntityState{EntityID: runID, CurrentState: mutationlog.PresentLifecycleState("waiting"), EnteredStateAt: &entered,
 		MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 			Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 			Mode: "static", EntityType: "test_entity", FlowTemplate: root.TemplateID, FlowInstance: runID,
