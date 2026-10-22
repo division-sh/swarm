@@ -27120,8 +27120,8 @@ cli_specification:
         classification: removed_surface
         reason: >
           `swarm control mailbox *` is not registered. Typed mailbox notices and decision cards use
-          `swarm mailbox list|view|defer`; generic terminal decisions are API-owned until the
-          separately tracked controller lands. Fixed approve/reject spellings do not survive.
+          `swarm mailbox list|view|defer|decide` over the authenticated mailbox API.
+          Fixed approve/reject command spellings do not survive; decide takes the authored option token.
       fork_fail_closed_stub:
         classification: superseded_by_multi_source_artifact_authority
         reason: >
@@ -27889,6 +27889,7 @@ cli_specification:
           forkchat_delete_fork: {command: swarm forkchat delete, selector: 'arg:fork-id', family: fork, mode: full_only, safety: mutating}
           mailbox_view_mailbox: {command: swarm mailbox view, selector: 'arg:mailbox-id', family: mailbox, mode: split}
           mailbox_defer_mailbox: {command: swarm mailbox defer, selector: 'arg:card-id', family: mailbox, mode: full_only, safety: mutating}
+          mailbox_decide_mailbox: {command: swarm mailbox decide, selector: 'arg:card-id', family: mailbox, mode: full_only, safety: mutating}
           entity_list_flow: {command: swarm entity list, selector: 'flag:flow', family: flow_instance, mode: split}
           event_publish_flow: {command: swarm event publish, selector: 'flag:target-flow-instance', family: flow_instance, mode: full_only, safety: mutating}
           agent_list_flow: {command: swarm agent list, selector: 'flag:flow', family: none, mode: different_concept, scope_rule: authored canonical flow path}
@@ -28509,6 +28510,13 @@ cli_specification:
               classification: split
               owner_issue: '#1712'
               reason: mailbox decision output is implemented but not routed through the shared output-mode owner.
+            mailbox_decide:
+              command: swarm mailbox decide
+              classification: shared_output
+              fact_owner: /v1/rpc mailbox.decide and mailbox.get
+              json_shape: mailbox.decide result object, or the recorded decision card when already decided
+              quiet_values:
+              - card_id
             health:
               command: swarm health
               classification: shared_output
@@ -29063,6 +29071,7 @@ cli_specification:
             - swarm agent replay
             - swarm agent directive
             - swarm mailbox defer
+            - swarm mailbox decide
             - swarm run fork
             - swarm forkchat new
             - swarm forkchat resume
@@ -31007,6 +31016,24 @@ cli_specification:
       - exact /v1/rpc mailbox.defer call with card_id, until, and optional idempotency_key params only
       - success rendering consumes only typed mutation result fields from /v1/rpc mailbox.defer
       - invalid args and missing explicit token for non-loopback API targets make zero API calls
+    mailbox_decide:
+      command: swarm mailbox decide <card-id> <option> [--input key=value ...]
+      group: run_operate
+      tier: must_have
+      implementation_status: implemented
+      owner: /v1/rpc mailbox.get and mailbox.decide
+      behavior: >
+        The CLI is always an available HITL channel, without a chat account.
+        Read the current card hash through mailbox.get, parse repeated --input
+        against the selected option's declared types, and submit the verdict and
+        typed fields through mailbox.decide. List and view show the existing
+        snapshot's question, context, option tokens, and required inputs.
+        A stale card refuses without retry; an already decided card reports its
+        recorded verdict and time without another mutation.
+      output:
+        success: 'Decided: <option> (card <id>)'
+        already_decided: 'already decided: <verdict> at <time>'
+        stale: The card changed, view it again.
     health:
       command: swarm health
       group: observe_debug
@@ -32223,6 +32250,7 @@ cli_specification:
     - swarm mailbox list
     - swarm mailbox view
     - swarm mailbox defer
+    - swarm mailbox decide
     - swarm control pause
     - swarm control continue
     - swarm control stop

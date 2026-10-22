@@ -1518,10 +1518,11 @@ func (r scenarioRunner) runMailboxStep(ctx context.Context, evaluator *scenarioE
 	if err != nil {
 		return err
 	}
-	params["card_id"] = cardID
 	if step.Action == "mailbox.decide" {
-		params["observed_content_hash"] = contentHash
+		_, err := callMailboxDecide(ctx, r.client, cardID, contentHash, params)
+		return err
 	}
+	params["card_id"] = cardID
 	var result mailboxMutationResult
 	if err := r.client.call(ctx, step.Action, params, &result); err != nil {
 		return err
