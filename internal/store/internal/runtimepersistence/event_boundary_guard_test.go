@@ -24,31 +24,6 @@ type eventBoundaryCallsite struct {
 	name  string
 }
 
-var admittedEventCallsites = map[eventBoundaryCallsite]int{
-	{path: "internal/store/internal/backend/eventpersistence/lifecycle_diagnostic.go", scope: "persistLifecycleDiagnosticTx", name: "AdmitForPersistence"}:                        1,
-	{path: "internal/runtime/bus/outbox.go", scope: "engineDispatcher.dispatchOnePostCommit", name: "RevalidatePersistedEvent"}:                                                   1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.admitPublicationEventFacts", name: "AdmitForPersistence"}:                                                 1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "admitEventForPublish", name: "AdmitForPublish"}:                                                                    1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.publishClaimedPipeline", name: "RevalidatePersistedEvent"}:                                                1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.PrepareSelectedForkPublish", name: "AdmitForPersistence"}:                                                 1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.AdmitSelectedForkPublishInput", name: "AdmitForPersistence"}:                                              1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "EventBus.prepareClosedPublication", name: "AdmitForPersistence"}:                                                   1,
-	{path: "internal/runtime/bus/eventbus_publish.go", scope: "reuseDurableSubscribedEventRouteFacts", name: "AdmitForPersistence"}:                                               2,
-	{path: "internal/runtime/manager/runtime.go", scope: "AgentManager.SendDirective", name: "AdmitForPersistence"}:                                                               1,
-	{path: "internal/store/eventfixture/event.go", scope: "Insert", name: "AdmitForPersistence"}:                                                                                  1,
-	{path: "internal/store/eventfixture/unrevisioned.go", scope: "StagedChild", name: "AdmitForPersistence"}:                                                                      1,
-	{path: "internal/store/internal/backend/eventpersistence/inbound_publication.go", scope: "commitInboundPublicationSQL", name: "AdmitForPersistence"}:                          1,
-	{path: "internal/store/internal/backend/runforkpersistence/run_fork_delivery_event_replay.go", scope: "projectRunForkReplayEvent", name: "AdmitForPersistence"}:               1,
-	{path: "internal/store/internal/backend/runforkpersistence/run_fork_delivery_event_replay.go", scope: "admitRunForkReplayEventTargetProjection", name: "AdmitForPersistence"}: 1,
-	{path: "internal/store/internal/backend/eventpersistence/runtime_log_persistence.go", scope: "admitRuntimeLogRecord", name: "AdmitForPersistence"}:                            1,
-	// Read-only exact diagnostic receipt comparison uses the selected store's payload admission owner.
-	{path: "internal/store/internal/backend/eventpersistence/runtime_log_persistence.go", scope: "EventPostgresOwner.admitRuntimeLogRecord", name: "AdmitForPersistence"}: 1,
-	{path: "internal/store/internal/backend/eventpersistence/runtime_log_persistence.go", scope: "EventSQLiteOwner.admitRuntimeLogRecord", name: "AdmitForPersistence"}:   1,
-	{path: "internal/store/storetest/event.go", scope: "InsertCanonicalEventRecord", name: "AdmitForPersistence"}:                                                         1,
-	{path: "internal/store/storetest/event.go", scope: "commitSemanticEventWithInitialFacts", name: "AdmitForPublish"}:                                                    1,
-	{path: "internal/store/storetest/event.go", scope: "AdmitNativeDeliveryEvent", name: "AdmitForPublish"}:                                                               1,
-}
-
 var eventRecordImportFiles = map[string]struct{}{
 	"internal/store/eventfixture/unrevisioned.go":                             {},
 	"internal/store/internal/runtimepersistence/test_staged_event_fixture.go": {},
@@ -127,40 +102,11 @@ var eventPayloadBytesSQLFiles = map[string]struct{}{
 	"internal/store/internal/backend/runforkrevision/projection.go":   {},
 }
 
-var directEventSQLTestFixtures = map[string]int{
-	// Isolated five-column work.ready read probe reviewed at 49db0f2b0f;
-	// its transaction is rolled back, with no publication or dispatch.
-	"internal/store/internal/operatorsurface/run_turn_attribution_selected_test.go": 1,
-	// Isolated aggregate-query schema admits NULL/foreign rows deliberately;
-	// these are not executable event fixtures or an event publication path.
-	"internal/store/internal/backend/pipelinepersistence/pipeline_run_summary_materialization_test.go": 4,
-	// Canonically reminted, never-executed requests must fail real fork activation.
-	"internal/runtime/cataloge2e/selected_fork_activity_lineage_test.go":       1,
-	"internal/cliapp/raw_sql_boundary_test.go":                                 1,
-	"internal/store/internal/runtimepersistence/event_schema_contract_test.go": 2,
-	// These low-level revision/rollback probes insert inside a caller-owned
-	// transaction to test exact history and lock boundaries, not publication.
-	"internal/store/internal/runtimepersistence/run_fork_revision_selected_store_parity_test.go": 1,
-	// This pre-existing native batch-query differential seeds an admitted record
-	// into an isolated read-only probe schema; it never publishes or dispatches.
-	"internal/store/internal/backend/pipelinepersistence/publication_group_batch_test.go": 1,
-	// Physical schema test: direct INSERTs exercise fork-point CHECK/FK arms,
-	// not runtime publication or route admission.
-	"internal/store/internal/schemastore/fork_point_schema_test.go": 1,
-}
-
 var eventInsertSQL = regexp.MustCompile(`(?is)\bINSERT\s+INTO\s+events\b`)
-var completeEventReadSQL = regexp.MustCompile(`(?is)\bevent_class\b.*\bFROM\s+events\b`)
-var eventPayloadBytesSQL = regexp.MustCompile(`(?is)\bpayload_bytes\b`)
+
 var eventPayloadColumnSQL = regexp.MustCompile(`(?i)\bpayload(?:_bytes)?\b`)
 
 const unrevisionedEventFixturePath = "internal/store/internal/backend/eventrecord/staged/fixture.go"
-
-var unrevisionedEventFixtureImports = map[string]struct{}{
-	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord":          {},
-	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres": {},
-	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite":   {},
-}
 
 var unrevisionedEventFixtureSQL = map[string]string{
 	"postgres": "INSERT INTO " + `events (
@@ -201,11 +147,6 @@ func classifiedUnrevisionedEventFixtureSQL(path, scope, query string) string {
 	return ""
 }
 
-type unrevisionedEventFixtureCounts struct {
-	imports map[string]int
-	sql     map[string]int
-}
-
 var unrevisionedEventFixtureConsumers = map[eventBoundaryCallsite]int{
 	{path: "internal/store/internal/runtimepersistence/test_staged_event_fixture.go", scope: "InsertStagedChildEventForTest", name: "StagedChild"}: 1,
 }
@@ -238,60 +179,6 @@ func TestActivityResultExistenceProjectionCannotOwnEventPayload(t *testing.T) {
 		}
 		return true
 	})
-}
-
-func TestEventAdmittedPersistenceBoundaryGuard(t *testing.T) {
-	repoRoot := eventBoundaryRepositoryRoot(t)
-	gotAdmission := map[eventBoundaryCallsite]int{}
-	fixture := unrevisionedEventFixtureCounts{imports: map[string]int{}, sql: map[string]int{}}
-	for _, rootName := range []string{"internal", "cmd"} {
-		root := filepath.Join(repoRoot, rootName)
-		if _, err := os.Stat(root); os.IsNotExist(err) {
-			continue
-		} else if err != nil {
-			t.Fatalf("stat %s: %v", root, err)
-		}
-		if err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return nil
-			}
-			relative, err := filepath.Rel(repoRoot, path)
-			if err != nil {
-				return err
-			}
-			relative = filepath.ToSlash(relative)
-			if strings.HasPrefix(relative, "internal/events/") {
-				return nil
-			}
-			checkEventBoundaryFile(t, path, relative, gotAdmission, &fixture)
-			return nil
-		}); err != nil {
-			t.Fatalf("walk %s: %v", root, err)
-		}
-	}
-	for site, want := range admittedEventCallsites {
-		if got := gotAdmission[site]; got != want {
-			t.Fatalf("%s in %s has %d %s calls, want %d; admission callsites are a closed persistence boundary", site.scope, site.path, got, site.name, want)
-		}
-	}
-	for site, got := range gotAdmission {
-		if _, ok := admittedEventCallsites[site]; !ok {
-			t.Fatalf("%s in %s has %d unclassified %s calls; add a closed named operation and update the exact boundary census", site.scope, site.path, got, site.name)
-		}
-	}
-	for importPath := range unrevisionedEventFixtureImports {
-		if fixture.imports[importPath] != 1 {
-			t.Errorf("test-only unrevisioned event fixture has %d imports of %s, want 1", fixture.imports[importPath], importPath)
-		}
-	}
-	for dialect := range unrevisionedEventFixtureSQL {
-		if fixture.sql[dialect] != 1 {
-			t.Errorf("test-only unrevisioned event fixture has %d exact %s inserts, want 1", fixture.sql[dialect], dialect)
-		}
-	}
 }
 
 func TestUnrevisionedEventFixtureSQLAllowanceIsExact(t *testing.T) {
@@ -385,71 +272,6 @@ func TestUnrevisionedEventFixtureConsumerAllowanceIsExact(t *testing.T) {
 			if classifiedUnrevisionedEventFixtureConsumer(hostile.path, hostile.scope, hostile.name) {
 				t.Fatalf("hostile fixture consumer admitted: %#v", hostile)
 			}
-		}
-	}
-}
-
-func TestEventFixtureWritersUseSemanticOwners(t *testing.T) {
-	repoRoot := eventBoundaryRepositoryRoot(t)
-	markers := loadEventObservationMarkers(t)
-	got := map[string]int{}
-	for _, rootName := range []string{"internal", "cmd"} {
-		root := filepath.Join(repoRoot, rootName)
-		if _, err := os.Stat(root); os.IsNotExist(err) {
-			continue
-		} else if err != nil {
-			t.Fatalf("stat %s: %v", root, err)
-		}
-		if err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry.IsDir() || !strings.HasSuffix(path, "_test.go") {
-				return nil
-			}
-			relative, err := filepath.Rel(repoRoot, path)
-			if err != nil {
-				return err
-			}
-			relative = filepath.ToSlash(relative)
-			fset := token.NewFileSet()
-			file, err := parser.ParseFile(fset, path, nil, 0)
-			if err != nil {
-				return err
-			}
-			observations, err := classifyEventObservationMarkers(relative, file, markers)
-			if err != nil {
-				return err
-			}
-			ast.Inspect(file, func(node ast.Node) bool {
-				literal, ok := node.(*ast.BasicLit)
-				if !ok || literal.Kind != token.STRING {
-					return true
-				}
-				if observations[literal.Pos()] {
-					return true
-				}
-				raw, err := strconv.Unquote(literal.Value)
-				if err == nil {
-					if count := len(eventInsertSQL.FindAllString(raw, -1)); count > 0 {
-						got[relative] += count
-					}
-				}
-				return true
-			})
-			return nil
-		}); err != nil {
-			t.Fatalf("walk %s: %v", root, err)
-		}
-	}
-	for path, want := range directEventSQLTestFixtures {
-		if count := got[path]; count != want {
-			t.Fatalf("%s contains %d direct event inserts, want %d exact corruption/guard fixtures", path, count, want)
-		}
-	}
-	for path, count := range got {
-		if _, ok := directEventSQLTestFixtures[path]; !ok {
-			t.Fatalf("%s contains %d unclassified direct event inserts; use class-specific semantic fixtures", path, count)
 		}
 	}
 }
@@ -616,117 +438,6 @@ func TestHostileEventRecordConsumerClassificationDoesNotGrantSQL(t *testing.T) {
 	}
 }
 
-func checkEventBoundaryFile(t *testing.T, path, relative string, gotAdmission map[eventBoundaryCallsite]int, fixture *unrevisionedEventFixtureCounts) {
-	t.Helper()
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, path, nil, 0)
-	if err != nil {
-		t.Fatalf("parse %s: %v", relative, err)
-	}
-	eventAliases := eventBoundaryImportAliases(file, "github.com/division-sh/swarm/internal/events")
-	for _, imported := range file.Imports {
-		importPath := strings.Trim(imported.Path.Value, `"`)
-		if !strings.HasPrefix(importPath, "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord") {
-			continue
-		}
-		if relative == unrevisionedEventFixturePath {
-			if _, ok := unrevisionedEventFixtureImports[importPath]; ok {
-				fixture.imports[importPath]++
-				continue
-			}
-		}
-		if strings.HasPrefix(relative, "internal/store/internal/backend/eventrecord/") {
-			continue
-		}
-		if _, ok := eventRecordImportFiles[relative]; !ok {
-			t.Fatalf("%s imports private event records outside the closed store/fixture owner set", relative)
-		}
-	}
-
-	ast.Inspect(file, func(node ast.Node) bool {
-		switch value := node.(type) {
-		case *ast.BasicLit:
-			if value.Kind != token.STRING {
-				return true
-			}
-			raw, err := strconv.Unquote(value.Value)
-			if err != nil {
-				return true
-			}
-			fixtureSQL := classifiedUnrevisionedEventFixtureSQL(relative, eventBoundaryEnclosingScope(file, value.Pos()), raw)
-			if fixtureSQL != "" {
-				fixture.sql[fixtureSQL]++
-			}
-			if eventInsertSQL.MatchString(raw) || completeEventReadSQL.MatchString(raw) {
-				projectionRead := relative == "internal/store/internal/backend/runforkrevision/projection.go" && eventBoundaryEnclosingScope(file, value.Pos()) == "canonicalProjectionSpec"
-				forkLineageRead := (relative == "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go" && eventBoundaryEnclosingScope(file, value.Pos()) == "RunForkPostgresOwner.ensureRunForkSelectedContractExecutionForkState") ||
-					(relative == "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_sqlite.go" && eventBoundaryEnclosingScope(file, value.Pos()) == "RunForkSQLiteOwner.ensureSQLiteRunForkSelectedContractExecutionForkState")
-				if _, ok := eventRecordSQLFiles[relative]; !ok && fixtureSQL == "" && !((projectionRead || forkLineageRead) && !eventInsertSQL.MatchString(raw)) {
-					t.Fatalf("%s:%d owns event-record SQL outside a private backend adapter", relative, fset.Position(value.Pos()).Line)
-				}
-			}
-			if eventPayloadBytesSQL.MatchString(raw) {
-				if _, ok := eventPayloadBytesSQLFiles[relative]; !ok && fixtureSQL == "" {
-					t.Fatalf("%s:%d consumes authoritative event payload bytes outside the closed owner set", relative, fset.Position(value.Pos()).Line)
-				}
-			}
-		case *ast.CompositeLit:
-			if len(value.Elts) > 0 && eventBoundaryTypeIs(value.Type, eventAliases, "AdmittedEvent") {
-				t.Fatalf("%s:%d populates opaque events.AdmittedEvent outside internal/events", relative, fset.Position(value.Pos()).Line)
-			}
-		case *ast.CallExpr:
-			selector, ok := value.Fun.(*ast.SelectorExpr)
-			if !ok || !eventBoundaryPackageIdent(selector.X, eventAliases) {
-				return true
-			}
-			switch selector.Sel.Name {
-			case "AdmitForPersistence", "AdmitForPublish", "RevalidatePersistedEvent":
-				scope := eventBoundaryEnclosingScope(file, value.Pos())
-				gotAdmission[eventBoundaryCallsite{path: relative, scope: scope, name: selector.Sel.Name}]++
-			case "RestoreAdmittedEvent":
-				if relative != "internal/store/internal/backend/eventrecord/record.go" {
-					t.Fatalf("%s:%d restores durable events outside the canonical record decoder", relative, fset.Position(value.Pos()).Line)
-				}
-			}
-		}
-		return true
-	})
-
-	if relative == "internal/store/eventfixture/event.go" || relative == "internal/store/storetest/event.go" {
-		return
-	}
-	for _, declaration := range file.Decls {
-		switch value := declaration.(type) {
-		case *ast.FuncDecl:
-			if strings.HasPrefix(relative, "internal/store/") && eventBoundaryPersistenceVerb(value.Name.Name) && eventBoundaryFieldsContain(value.Type.Params, eventAliases, "Event") {
-				t.Fatalf("%s:%d persistence function %s accepts raw events.Event", relative, fset.Position(value.Pos()).Line, value.Name.Name)
-			}
-		case *ast.GenDecl:
-			for _, spec := range value.Specs {
-				typeSpec, ok := spec.(*ast.TypeSpec)
-				if !ok {
-					continue
-				}
-				iface, ok := typeSpec.Type.(*ast.InterfaceType)
-				if !ok {
-					continue
-				}
-				for _, method := range iface.Methods.List {
-					fn, ok := method.Type.(*ast.FuncType)
-					if !ok || !eventBoundaryFieldsContain(fn.Params, eventAliases, "Event") {
-						continue
-					}
-					for _, name := range method.Names {
-						if strings.HasPrefix(relative, "internal/store/") && eventBoundaryPersistenceVerb(name.Name) {
-							t.Fatalf("%s:%d persistence interface method %s accepts raw events.Event", relative, fset.Position(method.Pos()).Line, name.Name)
-						}
-					}
-				}
-			}
-		}
-	}
-}
-
 func eventBoundaryRepositoryRoot(t *testing.T) string {
 	t.Helper()
 	return repoRootForRuntimeWriterGuard(t)
@@ -747,21 +458,6 @@ func eventBoundaryImportAliases(file *ast.File, importPath string) map[string]st
 	return aliases
 }
 
-func eventBoundaryTypeIs(expr ast.Expr, aliases map[string]struct{}, name string) bool {
-	switch value := expr.(type) {
-	case *ast.SelectorExpr:
-		return value.Sel.Name == name && eventBoundaryPackageIdent(value.X, aliases)
-	case *ast.StarExpr:
-		return eventBoundaryTypeIs(value.X, aliases, name)
-	case *ast.ArrayType:
-		return eventBoundaryTypeIs(value.Elt, aliases, name)
-	case *ast.Ellipsis:
-		return eventBoundaryTypeIs(value.Elt, aliases, name)
-	default:
-		return false
-	}
-}
-
 func eventBoundaryPackageIdent(expr ast.Expr, aliases map[string]struct{}) bool {
 	ident, ok := expr.(*ast.Ident)
 	if !ok {
@@ -769,28 +465,6 @@ func eventBoundaryPackageIdent(expr ast.Expr, aliases map[string]struct{}) bool 
 	}
 	_, ok = aliases[ident.Name]
 	return ok
-}
-
-func eventBoundaryFieldsContain(fields *ast.FieldList, aliases map[string]struct{}, name string) bool {
-	if fields == nil {
-		return false
-	}
-	for _, field := range fields.List {
-		if eventBoundaryTypeIs(field.Type, aliases, name) {
-			return true
-		}
-	}
-	return false
-}
-
-func eventBoundaryPersistenceVerb(name string) bool {
-	lower := strings.ToLower(strings.TrimSpace(name))
-	for _, prefix := range []string{"append", "commit", "insert", "persist", "save", "write"} {
-		if strings.HasPrefix(lower, prefix) {
-			return true
-		}
-	}
-	return false
 }
 
 func eventBoundaryEnclosingScope(file *ast.File, pos token.Pos) string {

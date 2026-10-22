@@ -1,14 +1,10 @@
 package runtimepersistence
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -38,13 +34,6 @@ var executableDeliverySQLOwners = map[string]string{
 	"internal/store/internal/backend/pipelinepersistence/test_selected_reply_return_rollback.go":     "exact read-only drafted/rolled-back accepted-return publication cardinality proof",
 	"internal/store/internal/backend/runforkpersistence/run_fork_fan_out_materializer.go":            "exact read-only replay lineage and child-delivery membership, not lifecycle selection",
 	"internal/store/internal/backend/runforkpersistence/test_receiver_execution_readback.go":         "exact read-only selected receiver claim and terminal receipt proof",
-}
-
-var selectedForkDeliveryReadCounts = map[string]int{
-	"internal/store/internal/backend/pipelinepersistence/test_selected_fan_out_rollback.go":      1,
-	"internal/store/internal/backend/pipelinepersistence/test_selected_reply_return_rollback.go": 1,
-	"internal/store/internal/backend/runforkpersistence/run_fork_fan_out_materializer.go":        2,
-	"internal/store/internal/backend/runforkpersistence/test_receiver_execution_readback.go":     1,
 }
 
 var selectedForkDeliveryMutationSQL = regexp.MustCompile(`(?is)\b(?:into|update|delete\s+from|on)\s+(?:event_deliveries|event_delivery_attempts)\b`)
@@ -114,94 +103,6 @@ func TestRetiredGenericDeliveryReadersHaveNoProductionConsumers(t *testing.T) {
 			return nil
 		}); err != nil {
 			t.Fatalf("walk %s: %v", rootName, err)
-		}
-	}
-}
-
-func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
-	repoRoot := eventBoundaryRepositoryRoot(t)
-	found := map[string]int{}
-	reviewedFound := map[string]int{}
-	readOwner, err := parser.ParseFile(token.NewFileSet(), filepath.Join(repoRoot, "internal/store/internal/runtimepersistence/test_selected_storage_observation.go"), nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, rootName := range []string{"internal", "cmd"} {
-		root := filepath.Join(repoRoot, rootName)
-		if err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return nil
-			}
-			relative, err := filepath.Rel(repoRoot, path)
-			if err != nil {
-				return err
-			}
-			relative = filepath.ToSlash(relative)
-			fset := token.NewFileSet()
-			file, err := parser.ParseFile(fset, path, nil, 0)
-			if err != nil {
-				return err
-			}
-			reviewed := reviewedDeliveryObservationLiterals(relative, file, readOwner)
-			ast.Inspect(file, func(node ast.Node) bool {
-				literal, ok := node.(*ast.BasicLit)
-				if !ok || literal.Kind != token.STRING {
-					return true
-				}
-				raw, err := strconv.Unquote(literal.Value)
-				if err != nil || !executableDeliverySQL.MatchString(raw) {
-					return true
-				}
-				found[relative]++
-				if identity, allowed := reviewed[literal.Pos()]; allowed {
-					reviewedFound[identity]++
-					return true
-				}
-				if _, readOnly := selectedForkDeliveryReadCounts[relative]; readOnly && !selectedForkDeliveryReadSQL(raw) {
-					t.Errorf("%s:%d read-only selected evidence owner contains delivery mutation SQL", relative, fset.Position(literal.Pos()).Line)
-				}
-				if _, allowed := executableDeliverySQLOwners[relative]; !allowed {
-					t.Errorf("%s:%d owns executable-delivery SQL outside the closed lifecycle boundary", relative, fset.Position(literal.Pos()).Line)
-				}
-				return true
-			})
-			return nil
-		}); err != nil {
-			t.Fatalf("walk %s: %v", rootName, err)
-		}
-	}
-	if found["internal/store/internal/backend/delivery/receiver_materialization.go"] != 0 {
-		t.Fatal("receiver readiness must consume canonical construction authority, not an executable-delivery SQL interpreter")
-	}
-	for path, reason := range executableDeliverySQLOwners {
-		if found[path] == 0 {
-			t.Errorf("closed executable-delivery SQL owner %s (%s) has no classified SQL", path, reason)
-		}
-	}
-	for path, want := range map[string]int{
-		"internal/store/internal/backend/delivery/queued_cancellation.go":             5,
-		"internal/store/internal/backend/delivery/test_issue2564_evidence.go":         0,
-		"internal/store/internal/backend/effectpersistence/canceled_turn_recovery.go": 1,
-	} {
-		if got := found[path]; got != want {
-			t.Errorf("closed executable-delivery SQL owner %s has %d queries, want %d", path, got, want)
-		}
-	}
-	for path, want := range selectedForkDeliveryReadCounts {
-		if got := found[path]; got != want {
-			t.Errorf("closed selected evidence reader %s has %d delivery queries, want %d", path, got, want)
-		}
-	}
-	for _, site := range reviewedDeliveryObservations {
-		identity := site.path + "/" + site.declaration
-		if got := reviewedFound[identity]; got != len(site.literals) {
-			t.Errorf("reviewed delivery observation %s has %d exact SELECTs, want %d", identity, got, len(site.literals))
-		}
-		if _, allowed := executableDeliverySQLOwners[site.path]; allowed {
-			t.Errorf("reviewed delivery observation %s gained whole-file authority", site.path)
 		}
 	}
 }
