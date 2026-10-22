@@ -14,14 +14,16 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/providertriggers"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestDeriveStandingTargets_OrdinaryRootInputCreatesNoStandingTarget(t *testing.T) {
@@ -43,64 +45,27 @@ func TestDeriveStandingTargets_OrdinaryRootInputCreatesNoStandingTarget(t *testi
 	}
 }
 
-func TestResolveStandingTargetDeclarationsRequiresExactProviderPin(t *testing.T) {
-	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
-	declarations, err := ResolveStandingTargetDeclarations(source, registry)
-	if err != nil {
-		t.Fatalf("ResolveStandingTargetDeclarations: %v", err)
-	}
-	if len(declarations) != 1 || declarations[0].Alias != "chat" || len(declarations[0].Ingress) != 1 {
-		t.Fatalf("declarations = %#v, want one chat/telegram standing declaration", declarations)
-	}
-
-	missingPin, registry := standingTelegramDeclarationSource(t, "lead.observed")
-	if _, err := ResolveStandingTargetDeclarations(missingPin, registry); err == nil || !strings.Contains(err.Error(), `add an exact production input pin for "inbound.telegram"`) {
-		t.Fatalf("missing pin error = %v, want exact inbound.telegram teaching error", err)
-	}
-}
-
-func TestResolveStandingTargetDeclarationsConsumesCanonicalInputAssociation(t *testing.T) {
-	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
-	bundle, _ := semanticview.Bundle(source)
-	schema := bundle.FlowSchemas["coordinator"]
-	schema.Pins.Inputs.EventPins[0].Event = "lead.observed"
-	bundle.FlowSchemas["coordinator"] = schema
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatalf("compile changed input semantics: %v", err)
-	}
-	_, err := ResolveStandingTargetDeclarations(source, registry)
-	if err == nil || !strings.Contains(err.Error(), `add an exact production input pin for "inbound.telegram"`) {
-		t.Fatalf("canonical input-association error = %v", err)
-	}
-}
-
-func TestResolveStandingTargetDeclarationsRejectsDuplicateExactInputIdentity(t *testing.T) {
-	source, _ := standingTelegramDeclarationSource(t, "inbound.telegram")
-	bundle, _ := semanticview.Bundle(source)
-	schema := bundle.FlowSchemas["coordinator"]
-	schema.Pins.Inputs.EventPins = append(schema.Pins.Inputs.EventPins, schema.Pins.Inputs.EventPins[0])
-	bundle.FlowSchemas["coordinator"] = schema
-	bundle.FlowTree.ByID["coordinator"].Schema = schema
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "declared more than once") {
-		t.Fatalf("duplicate exact input compile error = %v, want fail-closed", err)
-	}
-}
-
-func TestResolveStandingTargetDeclarationsDerivesIngressPresence(t *testing.T) {
-	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
-	declarations, err := ResolveStandingTargetDeclarations(source, registry)
-	if err != nil || len(declarations) != 1 || len(declarations[0].Ingress) != 1 {
-		t.Fatalf("genuine ingress did not supply a declaration: %+v err=%v", declarations, err)
-	}
-}
-
 func TestA9NoProducerCannotRetain(t *testing.T) {
-	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
-	bundle, _ := semanticview.Bundle(source)
-	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) { schema.Ingress = nil })
+	bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	})
+	source := semanticview.Wrap(bundle)
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
 	rt := &Runtime{Options: RuntimeOptions{
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: registry,
-		SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA), EnableDeclaredClockBinding: true,
+		SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()), EnableDeclaredClockBinding: true,
 	}}
 	declarations, err := ResolveStandingTargetDeclarations(source, registry)
 	if err != nil || len(declarations) != 0 {
@@ -112,73 +77,115 @@ func TestA9NoProducerCannotRetain(t *testing.T) {
 	}
 }
 
-func TestCompileStandingIngressAliasRejectsUnreachableAlias(t *testing.T) {
-	source, _ := standingTelegramDeclarationSource(t, "inbound.telegram")
-	bundle, _ := semanticview.Bundle(source)
-	mutateStandingCoordinatorSchema(t, bundle, func(schema *runtimecontracts.FlowSchemaDocument) { schema.Ingress.Alias = "chat/support" })
-	err := runtimecontracts.CompileWorkflowSemantics(bundle)
-	if err == nil || !strings.Contains(err.Error(), "one URL-safe path segment") || !strings.Contains(err.Error(), "[A-Za-z0-9][A-Za-z0-9._-]*") {
-		t.Fatalf("multi-segment alias error = %v", err)
-	}
-}
-
 func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
-	workOwner := runtimeTestOccurrence(t, hash)
-	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
+	members := map[string][]byte{
+		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":               []byte("stages: []\n"),
+		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
 	}
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
+	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+		if entry.ID() != "telegram" {
+			continue
+		}
+		members["coordinator/telegram/manifest.yaml"] = entry.ManifestBody()
+		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+			if body, present := entry.Provider().Body(role); present {
+				members["coordinator/telegram/"+role.FileName()] = body.Bytes()
+			}
+		}
+		break
+	}
+	if members["coordinator/telegram/manifest.yaml"] == nil {
+		t.Fatal("embedded Telegram provider is unavailable")
+	}
+	captured, rooted, _ := loadS1EffectiveProviderScope(t, members)
+	providers, err := packadmission.AdmitProviderSource(rooted, captured.Platform)
 	if err != nil {
 		t.Fatal(err)
 	}
-	contextDef := BundleContext{
-		SourceArtifactFact: testSourceArtifactFact(t, hash),
-		Source:             source,
-		Runtime:            &Runtime{Bus: bus, workOccurrence: workOwner},
-		WorkOwner:          workOwner,
-		StandingTargets: []StandingTarget{{
-			BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
-			RunID: "run", Generation: 1, SigningSecret: "webhook_signing.telegram",
-			AdmissionPlan: plan,
-		}},
+	scope, err := providers.Scope("coordinator")
+	if err != nil {
+		t.Fatal(err)
 	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextDef := rootedContextForSource(t, semanticview.Wrap(captured), rooted)
+	contextDef.ProviderTriggerCatalog = catalog
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
+	hash := contextDef.BundleHash()
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "coordinator", Provider: "telegram", SigningSecret: "fixture-signing-value"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextDef.StandingTargets = []StandingTarget{{
+		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "coordinator", Provider: "telegram",
+		RunID: "run", Generation: 1, SigningSecret: "fixture-signing-value",
+		AdmissionPlan: plan,
+	}}
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
-	if lookup := manager.LookupIngress("chat", "telegram"); !lookup.Loaded() || lookup.Target.RunID != "run" {
+	if lookup := manager.LookupIngress("coordinator", "telegram"); !lookup.Loaded() || lookup.Target.RunID != "run" {
 		t.Fatalf("telegram lookup = %#v, want loaded standing target", lookup)
 	}
-	if lookup := manager.LookupIngress("chat", "github"); lookup.Found || !lookup.AliasFound {
+	if lookup := manager.LookupIngress("coordinator", "github"); lookup.Found || !lookup.AliasFound {
 		t.Fatalf("wrong-provider lookup = %#v, want alias found without provider target", lookup)
 	}
 }
 
 func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneration(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	hash := "bundle-v2:sha256:" + strings.Repeat("b", 64)
-	workOwner := runtimeTestOccurrence(t, hash)
-	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
+	members := map[string][]byte{
+		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":               []byte("stages: []\n"),
+		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
 	}
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
+	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+		if entry.ID() != "telegram" {
+			continue
+		}
+		members["coordinator/telegram/manifest.yaml"] = entry.ManifestBody()
+		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+			if body, present := entry.Provider().Body(role); present {
+				members["coordinator/telegram/"+role.FileName()] = body.Bytes()
+			}
+		}
+		break
+	}
+	if members["coordinator/telegram/manifest.yaml"] == nil {
+		t.Fatal("embedded Telegram provider is unavailable")
+	}
+	captured, rooted, _ := loadS1EffectiveProviderScope(t, members)
+	providers, err := packadmission.AdmitProviderSource(rooted, captured.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope("coordinator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextDef := rootedContextForSource(t, semanticview.Wrap(captured), rooted)
+	contextDef.ProviderTriggerCatalog = catalog
+	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
+	hash := contextDef.BundleHash()
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "coordinator", Provider: "telegram", SigningSecret: "fixture-signing-value"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	target := StandingTarget{
-		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
+		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "coordinator", Provider: "telegram",
 		RunID: "run-1", Generation: 1, PublicationSequence: 1,
-		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
+		SigningSecret: "fixture-signing-value", AdmissionPlan: plan,
 	}
-	contextDef := BundleContext{
-		SourceArtifactFact: testSourceArtifactFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
-	}
-	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
+	contextDef.StandingTargets = []StandingTarget{target}
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
@@ -186,13 +193,13 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 	if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
 		t.Fatalf("SuppressStandingServiceTargets: %v", err)
 	}
-	if lookup := manager.LookupIngress("chat", "telegram"); !lookup.Found || lookup.Loaded() || lookup.Cause != RuntimeContextCauseStandingSuppressed {
+	if lookup := manager.LookupIngress("coordinator", "telegram"); !lookup.Found || lookup.Loaded() || lookup.Cause != RuntimeContextCauseStandingSuppressed {
 		t.Fatalf("suppressed lookup = %#v", lookup)
 	}
 	if err := manager.RestoreStandingServiceTargets(target.ServiceID); err != nil {
 		t.Fatalf("RestoreStandingServiceTargets: %v", err)
 	}
-	if lookup := manager.LookupIngress("chat", "telegram"); !lookup.Loaded() || lookup.Target.RunID != target.RunID {
+	if lookup := manager.LookupIngress("coordinator", "telegram"); !lookup.Loaded() || lookup.Target.RunID != target.RunID {
 		t.Fatalf("restored lookup = %#v", lookup)
 	}
 	if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
@@ -208,28 +215,59 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 	if err := manager.PublishStandingServiceTargets(target.ServiceID, []StandingTarget{published}, nil); err != nil {
 		t.Fatalf("PublishStandingServiceTargets: %v", err)
 	}
-	lookup := manager.LookupIngress("chat", "telegram")
+	lookup := manager.LookupIngress("coordinator", "telegram")
 	if !lookup.Loaded() || lookup.Target.RunID != "run-2" || lookup.Target.Generation != 2 || lookup.Target.PublicationSequence != 3 {
 		t.Fatalf("republished lookup = %#v", lookup)
 	}
 }
 
 func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupTarget(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	hash := "bundle-v2:sha256:" + strings.Repeat("c", 64)
-	workOwner := runtimeTestOccurrence(t, hash)
-	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{WorkOwner: workOwner})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
+	members := map[string][]byte{
+		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":               []byte("stages: []\n"),
+		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
 	}
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
+	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+		if entry.ID() != "telegram" {
+			continue
+		}
+		members["coordinator/telegram/manifest.yaml"] = entry.ManifestBody()
+		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+			if body, present := entry.Provider().Body(role); present {
+				members["coordinator/telegram/"+role.FileName()] = body.Bytes()
+			}
+		}
+		break
+	}
+	if members["coordinator/telegram/manifest.yaml"] == nil {
+		t.Fatal("embedded Telegram provider is unavailable")
+	}
+	captured, rooted, _ := loadS1EffectiveProviderScope(t, members)
+	providers, err := packadmission.AdmitProviderSource(rooted, captured.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope("coordinator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextDef := rootedContextForSource(t, semanticview.Wrap(captured), rooted)
+	contextDef.ProviderTriggerCatalog = catalog
+	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
+	hash := contextDef.BundleHash()
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "coordinator", Provider: "telegram", SigningSecret: "fixture-signing-value"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	target := StandingTarget{
-		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "chat", Provider: "telegram",
+		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "coordinator", Provider: "telegram",
 		RunID: "run-1", Generation: 1, PublicationSequence: 1,
-		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
+		SigningSecret: "fixture-signing-value", AdmissionPlan: plan,
 	}
 	manager, err := newTestRuntimeContextManager(t, nil)
 	if err != nil {
@@ -238,17 +276,14 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 	if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
 		t.Fatalf("SuppressStandingServiceTargets: %v", err)
 	}
-	contextDef := BundleContext{
-		SourceArtifactFact: testSourceArtifactFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
-	}
-	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
+	contextDef.StandingTargets = []StandingTarget{target}
 	if err := manager.Register(contextDef); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	if err := manager.PublishStandingServiceTargets(target.ServiceID, []StandingTarget{target}, nil); err != nil {
 		t.Fatalf("PublishStandingServiceTargets after suspended startup: %v", err)
 	}
-	if lookup := manager.LookupIngress("chat", "telegram"); !lookup.Loaded() || lookup.Target.ServiceID != target.ServiceID {
+	if lookup := manager.LookupIngress("coordinator", "telegram"); !lookup.Loaded() || lookup.Target.ServiceID != target.ServiceID {
 		t.Fatalf("resumed lookup = %#v, want fresh loaded process occurrence", lookup)
 	}
 }

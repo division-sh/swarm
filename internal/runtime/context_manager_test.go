@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -40,6 +41,20 @@ func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
 			"events.yaml":   []byte(event + ":\n"),
 		})
 		contexts[i] = rootedContextForSource(t, semanticview.Wrap(bundle), rooted)
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := providers.Scope(".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		contexts[i].ProviderTriggerCatalog = catalog
+		applyRuntimeAdmissionCatalog(t, &contexts[i], catalog)
 	}
 	a, b := contexts[0], contexts[1]
 	availability := fakeRunBundleAvailability{
