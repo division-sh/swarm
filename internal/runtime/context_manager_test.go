@@ -102,9 +102,9 @@ func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
 }
 
 func TestRuntimeContextManagerRejectsDuplicateBundleHashes(t *testing.T) {
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	if _, err := newTestRuntimeContextManager(t, nil,
-		testBundleContext(t, runtimeContextTestHashA, "alpha.requested"),
-		testBundleContext(t, runtimeContextTestHashA, "alpha.requested"),
+		contextDef, contextDef,
 	); err == nil {
 		t.Fatal("NewRuntimeContextManager duplicate error = nil")
 	}
@@ -198,23 +198,28 @@ func TestRuntimeContextManagerAllowsDistinctAgentSlugs(t *testing.T) {
 }
 
 func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
+	contextA := capturedOrdinaryRuntimeContext(t, "alpha.requested")
+	contextB := capturedOrdinaryRuntimeContext(t, "beta.requested")
+	if contextA.BundleHash() == contextB.BundleHash() {
+		t.Fatal("deactivation fixture requires distinct captured sources")
+	}
 	availability := fakeRunBundleAvailability{
 		rows: map[string]runbundle.Availability{
 			"run-b": {
 				RunID:                 "run-b",
-				BundleHash:            runtimeContextTestHashB,
+				BundleHash:            contextB.BundleHash(),
+				RootReference:         contextB.RootAdmission.Reference(),
+				RootAdmissionPresent:  true,
 				SourceArtifactPresent: true,
 			},
 		},
 	}
-	contextA := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
-	contextB := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
 	manager, err := newTestRuntimeContextManager(t, availability, contextA, contextB)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 
-	result := manager.DeactivateBundleHash(runtimeContextTestHashB, RuntimeContextCauseUnloaded)
+	result := manager.DeactivateBundleHash(contextB.BundleHash(), RuntimeContextCauseUnloaded)
 	if !result.Found || !result.Changed || result.State != RuntimeContextStateUnloaded || result.Cause != RuntimeContextCauseUnloaded {
 		t.Fatalf("DeactivateBundleHash result = %#v, want changed unloaded", result)
 	}
@@ -224,36 +229,39 @@ func TestRuntimeContextManagerDeactivatesPinnedContextFailClosed(t *testing.T) {
 	if manager.Len() != 2 || !manager.MultiContext() {
 		t.Fatalf("manager Len/MultiContext after deactivation = %d/%v, want 2/true", manager.Len(), manager.MultiContext())
 	}
-	if _, ok := manager.LookupBundleHash(runtimeContextTestHashB); ok {
+	if _, ok := manager.LookupBundleHash(contextB.BundleHash()); ok {
 		t.Fatal("LookupBundleHash loaded deactivated bundle = true")
 	}
-	lookup := manager.LookupBundleHashStatus(runtimeContextTestHashB)
+	lookup := manager.LookupBundleHashStatus(contextB.BundleHash())
 	if lookup.Loaded() || !lookup.Found || lookup.State != RuntimeContextStateUnloaded || lookup.Cause != RuntimeContextCauseUnloaded {
 		t.Fatalf("LookupBundleHashStatus = %#v, want found unloaded", lookup)
 	}
 	primary, ok := manager.Primary()
-	if !ok || primary.BundleHash() != runtimeContextTestHashA {
-		t.Fatalf("Primary after deactivation = %#v/%v, want %s", primary, ok, runtimeContextTestHashA)
+	if !ok || primary.BundleHash() != contextA.BundleHash() {
+		t.Fatalf("Primary after deactivation = %#v/%v, want %s", primary, ok, contextA.BundleHash())
 	}
-	runLookup, availabilityResult, err := manager.LookupRunStatus(testAuthorActivityContext(context.Background()), "run-b")
+	lookupCtx := testAuthorActivityContextForBundle(context.Background(), contextB.BundleHash())
+	lookupCtx = runtimecorrelation.WithSourceArtifactFact(lookupCtx, contextB.SourceArtifactFact)
+	lookupCtx = runtimecorrelation.WithRootAdmission(lookupCtx, contextB.RootAdmission)
+	runLookup, availabilityResult, err := manager.LookupRunStatus(lookupCtx, "run-b")
 	if err != nil {
 		t.Fatalf("LookupRunStatus: %v", err)
 	}
 	if runLookup.Loaded() || runLookup.Cause != RuntimeContextCauseUnloaded {
 		t.Fatalf("LookupRunStatus lookup = %#v, want unloaded", runLookup)
 	}
-	if availabilityResult.BundleHash != runtimeContextTestHashB || !availabilityResult.Available() {
-		t.Fatalf("LookupRunStatus availability = %#v, want available %s", availabilityResult, runtimeContextTestHashB)
+	if availabilityResult.BundleHash != contextB.BundleHash() || !availabilityResult.Available() {
+		t.Fatalf("LookupRunStatus availability = %#v, want available %s", availabilityResult, contextB.BundleHash())
 	}
 
-	second := manager.DeactivateBundleHash(runtimeContextTestHashB, RuntimeContextCauseUnavailable)
+	second := manager.DeactivateBundleHash(contextB.BundleHash(), RuntimeContextCauseUnavailable)
 	if !second.Found || second.Changed || second.Cause != RuntimeContextCauseUnloaded {
 		t.Fatalf("second DeactivateBundleHash result = %#v, want idempotent original cause", second)
 	}
 }
 
 func TestRuntimeContextManagerDeactivationClosesAdmissionBeforeWithdrawingVisibility(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	release, admitted := contextDef.Runtime.shutdownGate.Begin()
 	if !admitted {
 		t.Fatal("runtime admission unexpectedly closed")
@@ -264,7 +272,7 @@ func TestRuntimeContextManagerDeactivationClosesAdmissionBeforeWithdrawingVisibi
 	}
 	done := make(chan RuntimeContextDeactivationResult, 1)
 	go func() {
-		done <- manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded)
+		done <- manager.DeactivateBundleHash(contextDef.BundleHash(), RuntimeContextCauseUnloaded)
 	}()
 	select {
 	case <-done:
@@ -279,17 +287,17 @@ func TestRuntimeContextManagerDeactivationClosesAdmissionBeforeWithdrawingVisibi
 }
 
 func TestRuntimeContextUseOwnsOneIngressFrameUntilDone(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, _, err := manager.AcquireBundleHash(t.Context(), runtimeContextTestHashA)
+	first, _, err := manager.AcquireBundleHash(t.Context(), contextDef.BundleHash())
 	if err != nil || first == nil {
 		t.Fatalf("first context admission: %v", err)
 	}
 	t.Cleanup(func() { _ = first.Done() })
-	second, _, err := manager.AcquireBundleHash(t.Context(), runtimeContextTestHashA)
+	second, _, err := manager.AcquireBundleHash(t.Context(), contextDef.BundleHash())
 	if err != nil || second == nil {
 		t.Fatalf("second context admission: %v", err)
 	}
@@ -308,14 +316,14 @@ func TestRuntimeContextUseOwnsOneIngressFrameUntilDone(t *testing.T) {
 	if err := second.Done(); err != nil || !gate.closedAndDrained() || contextDef.WorkOwner.ActiveCount() != 0 {
 		t.Fatalf("last context use did not settle exact ingress and work ownership: %v", err)
 	}
-	use, _, err := manager.AcquireBundleHash(t.Context(), runtimeContextTestHashA)
+	use, _, err := manager.AcquireBundleHash(t.Context(), contextDef.BundleHash())
 	if use != nil || !errors.Is(err, worklifetime.ErrAdmissionFenced) {
 		t.Fatalf("closed ingress admitted a new context use: %v", err)
 	}
 }
 
 func TestRuntimeContextUseOwnerRefusalReleasesIngressFrame(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
@@ -323,7 +331,7 @@ func TestRuntimeContextUseOwnerRefusalReleasesIngressFrame(t *testing.T) {
 	if err := contextDef.WorkOwner.Fence(); err != nil {
 		t.Fatal(err)
 	}
-	use, _, err := manager.AcquireBundleHash(t.Context(), runtimeContextTestHashA)
+	use, _, err := manager.AcquireBundleHash(t.Context(), contextDef.BundleHash())
 	if use != nil || !errors.Is(err, worklifetime.ErrAdmissionFenced) {
 		t.Fatalf("fenced occurrence acquired execution ownership: %v", err)
 	}
@@ -334,27 +342,27 @@ func TestRuntimeContextUseOwnerRefusalReleasesIngressFrame(t *testing.T) {
 }
 
 func TestRuntimeContextManagerResolvedRequestCannotAdmitAfterDeactivation(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
-	resolved := manager.LookupBundleHashStatus(runtimeContextTestHashA)
+	resolved := manager.LookupBundleHashStatus(contextDef.BundleHash())
 	if !resolved.Loaded() || resolved.Context == nil || resolved.Context.Runtime != nil {
 		t.Fatalf("pre-deactivation lookup = %#v, want non-executable loaded metadata", resolved)
 	}
-	result := manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded)
+	result := manager.DeactivateBundleHash(contextDef.BundleHash(), RuntimeContextCauseUnloaded)
 	if !result.Changed {
 		t.Fatalf("DeactivateBundleHash = %#v, want changed", result)
 	}
-	use, lookup, err := manager.AcquireBundleHash(context.Background(), runtimeContextTestHashA)
+	use, lookup, err := manager.AcquireBundleHash(context.Background(), contextDef.BundleHash())
 	if err != nil || use != nil || lookup.Loaded() || lookup.Cause != RuntimeContextCauseUnloaded {
 		t.Fatalf("post-deactivation acquire = use=%#v lookup=%#v err=%v, want unavailable", use, lookup, err)
 	}
 }
 
 func TestRuntimeContextManagerDeactivationBoundsStuckAdmissionByConfiguredGrace(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	admissionCtx, release, admitted := contextDef.Runtime.shutdownGate.BeginContext(testAuthorActivityContext(context.Background()))
 	if !admitted {
 		t.Fatal("runtime admission unexpectedly closed")
@@ -366,7 +374,7 @@ func TestRuntimeContextManagerDeactivationBoundsStuckAdmissionByConfiguredGrace(
 	grace := 20 * time.Millisecond
 	done := make(chan RuntimeContextDeactivationResult, 1)
 	go func() {
-		done <- manager.DeactivateBundleHashWithOptions(runtimeContextTestHashA, RuntimeContextCauseUnloaded, ShutdownOptions{Grace: grace})
+		done <- manager.DeactivateBundleHashWithOptions(contextDef.BundleHash(), RuntimeContextCauseUnloaded, ShutdownOptions{Grace: grace})
 	}()
 	select {
 	case <-admissionCtx.Done():
@@ -393,21 +401,18 @@ func TestRuntimeContextManagerDeactivationBoundsStuckAdmissionByConfiguredGrace(
 	}
 }
 
-func TestRuntimeContextManagerDeactivationPropagatesShutdownOptions(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
-	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
-	if err != nil {
-		t.Fatalf("NewRuntimeContextManager: %v", err)
-	}
-	result := manager.DeactivateBundleHashWithOptions(runtimeContextTestHashA, RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})
-	if result.ShutdownErr == nil || !strings.Contains(result.ShutdownErr.Error(), "shutdown grace") {
-		t.Fatalf("configured shutdown option error = %v", result.ShutdownErr)
-	}
-}
-
 func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *testing.T) {
-	first := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
-	second := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	first := capturedOrdinaryRuntimeContext(t, "alpha.requested")
+	second := capturedOrdinaryRuntimeContext(t, "beta.requested")
+	if first.BundleHash() == second.BundleHash() {
+		t.Fatal("aggregate drain requires distinct captured sources")
+	}
+	secondEvent := events.EventType("beta.requested")
+	// DeactivateAll drains in hash order; hold its actual first source.
+	if first.BundleHash() > second.BundleHash() {
+		first, second = second, first
+		secondEvent = "alpha.requested"
+	}
 	manager, err := newTestRuntimeContextManager(t, nil, first, second)
 	if err != nil {
 		t.Fatal(err)
@@ -420,7 +425,7 @@ func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *
 			close(dispatcher.release)
 		}
 	}()
-	event := eventtest.RunCreatingRootIngress(eventtest.UUID("sibling-shutdown-event"), "beta.requested", "", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	event := eventtest.RunCreatingRootIngress(eventtest.UUID("sibling-shutdown-event"), secondEvent, "", "", []byte(`{}`), 0, agentidentitytest.DefaultRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("beta"), AgentIdentity: agentidentitytest.RootRuntime(t, "beta", "sibling-shutdown")}
 	id, err := runtimedelivery.DeliveryID(event.ID(), route)
 	if err != nil {
@@ -463,13 +468,13 @@ func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *
 	case <-time.After(5 * time.Second):
 		t.Fatal("first context never reached drain")
 	}
-	if !second.Runtime.shutdownAdmissionClosed() || manager.LookupBundleHashStatus(runtimeContextTestHashB).Loaded() {
+	if !second.Runtime.shutdownAdmissionClosed() || manager.LookupBundleHashStatus(second.BundleHash()).Loaded() {
 		t.Fatal("later context remains executable while predecessor is draining")
 	}
 	if !errors.Is(dispatcher.ctx.Err(), context.Canceled) {
 		t.Fatal("sibling continuation admission survives whole-set withdrawal until its individual join")
 	}
-	use, lookup, err := manager.AcquireBundleHash(context.Background(), runtimeContextTestHashB)
+	use, lookup, err := manager.AcquireBundleHash(context.Background(), second.BundleHash())
 	if use != nil {
 		_ = use.Done()
 	}
@@ -490,20 +495,20 @@ func TestRuntimeContextManagerDeactivateAllFencesCompleteSetBeforeFirstDrain(t *
 }
 
 func TestRuntimeContextManagerRetriesShutdownAfterPriorFailure(t *testing.T) {
-	contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
-	first := manager.DeactivateBundleHashWithOptions(runtimeContextTestHashA, RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})
+	first := manager.DeactivateBundleHashWithOptions(contextDef.BundleHash(), RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})
 	if first.ShutdownErr == nil || !first.Changed {
 		t.Fatalf("first deactivation = %#v, want changed shutdown failure", first)
 	}
-	entry := manager.contexts[runtimeContextTestHashA]
+	entry := manager.contexts[contextDef.BundleHash()]
 	if entry == nil || entry.shutdownComplete {
 		t.Fatal("failed shutdown was marked complete")
 	}
-	second := manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded)
+	second := manager.DeactivateBundleHash(contextDef.BundleHash(), RuntimeContextCauseUnloaded)
 	if second.ShutdownErr != nil || second.Changed {
 		t.Fatalf("retry deactivation = %#v, want successful retry without visibility transition", second)
 	}
@@ -515,7 +520,7 @@ func TestRuntimeContextManagerRetriesShutdownAfterPriorFailure(t *testing.T) {
 func TestRuntimeContextManagerRejectedDrainJoinsRetiredStandingChildren(t *testing.T) {
 	for _, aggregate := range []bool{false, true} {
 		t.Run(fmt.Sprintf("aggregate_%t", aggregate), func(t *testing.T) {
-			contextDef := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+			contextDef := capturedOrdinaryRuntimeContext(t, "alpha.requested")
 			manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 			if err != nil {
 				t.Fatal(err)
@@ -524,7 +529,7 @@ func TestRuntimeContextManagerRejectedDrainJoinsRetiredStandingChildren(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			entry := manager.contexts[runtimeContextTestHashA]
+			entry := manager.contexts[contextDef.BundleHash()]
 			entry.standing = map[string]*worklifetime.StandingOccurrence{"service": standing}
 			lease, err := standing.Begin(t.Context())
 			if err != nil {
@@ -536,7 +541,7 @@ func TestRuntimeContextManagerRejectedDrainJoinsRetiredStandingChildren(t *testi
 				if aggregate {
 					done <- manager.DeactivateAllWithOptions(RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})[0]
 				} else {
-					done <- manager.DeactivateBundleHashWithOptions(runtimeContextTestHashA, RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})
+					done <- manager.DeactivateBundleHashWithOptions(contextDef.BundleHash(), RuntimeContextCauseUnloaded, ShutdownOptions{Grace: -1})
 				}
 			}()
 			select {
@@ -559,15 +564,27 @@ func TestRuntimeContextManagerRejectedDrainJoinsRetiredStandingChildren(t *testi
 }
 
 func TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeSet(t *testing.T) {
-	first := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
-	second := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	first := capturedOrdinaryRuntimeContext(t, "alpha.requested")
+	second := capturedOrdinaryRuntimeContext(t, "beta.requested")
+	if first.BundleHash() == second.BundleHash() {
+		t.Fatal("terminal drain requires distinct captured sources")
+	}
+	if first.BundleHash() > second.BundleHash() {
+		first, second = second, first
+	}
 	manager, err := newTestRuntimeContextManager(t, nil, first, second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{
-		{BundleHash: runtimeContextTestHashA}, {BundleHash: runtimeContextTestHashB},
-	}, nil)
+	firstCoordinate, err := agenttopology.NewSourceCoordinate(first.RootAdmission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondCoordinate, err := agenttopology.NewSourceCoordinate(second.RootAdmission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{firstCoordinate, secondCoordinate}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -576,7 +593,7 @@ func TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeS
 		t.Fatal(err)
 	}
 	manager.pendingSourceSetTransition = admission
-	if result := manager.DeactivateBundleHash(runtimeContextTestHashA, RuntimeContextCauseUnloaded); result.ShutdownErr == nil {
+	if result := manager.DeactivateBundleHash(first.BundleHash(), RuntimeContextCauseUnloaded); result.ShutdownErr == nil {
 		t.Fatal("individual retirement bypassed aggregate transition ownership")
 	}
 	active, release, admitted := first.Runtime.shutdownGate.BeginContext(testAuthorActivityContext(context.Background()))
@@ -641,6 +658,28 @@ func TestRuntimeContextManagerTerminalDrainKeepsRefreshIncompleteAndFencesWholeS
 		t.Fatal("retirement joins falsely completed the refresh")
 	default:
 	}
+}
+
+func capturedOrdinaryRuntimeContext(t *testing.T, eventName string) BundleContext {
+	t.Helper()
+	bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+		"events.yaml":   []byte(eventName + ":\n"),
+	})
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runtimeAdmissionTestContext(t, semanticview.Wrap(bundle), catalog, "")
 }
 
 func testBundleContext(t *testing.T, bundleHash, eventName string) BundleContext {

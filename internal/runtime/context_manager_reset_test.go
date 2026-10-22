@@ -67,8 +67,11 @@ func TestRecoveredRuntimeContextsStayFencedUntilExactPublicationRelease(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
-	b := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	a := capturedOrdinaryRuntimeContext(t, "alpha.requested")
+	b := capturedOrdinaryRuntimeContext(t, "beta.requested")
+	if a.BundleHash() == b.BundleHash() {
+		t.Fatal("recovered publication requires distinct captured sources")
+	}
 	if err := manager.StageRecoveredRuntimeContexts(a, b); err != nil {
 		t.Fatal(err)
 	}
