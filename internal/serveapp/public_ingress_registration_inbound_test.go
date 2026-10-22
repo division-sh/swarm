@@ -376,6 +376,11 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 			t.Fatal(err)
 		}
 		defer func() {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			if err := workOwner.WaitForQuiescence(ctx); err != nil {
+				t.Error(err)
+			}
 			if err := workOwner.Reopen(); err != nil {
 				t.Error(err)
 			}
