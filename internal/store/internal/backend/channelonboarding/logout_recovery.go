@@ -9,7 +9,6 @@ import (
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
-	startupowner "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	"github.com/google/uuid"
 )
 
@@ -71,7 +70,7 @@ func recoverUnlaunchedLogout(ctx context.Context, r runner, id string, revision 
 }
 
 func logoutOriginalWithdrawnWithoutAuthorizationTx(ctx context.Context, tx *sql.Tx, d dialect, op domain.TeardownOperation) (bool, error) {
-	withdrawn, err := startupowner.RuntimeAuthorityWithdrawnTx(ctx, tx, op.Logout.ProcessStamp, d == dialectSQLite)
+	withdrawn, err := generationauthority.RuntimeAuthorityWithdrawnTx(ctx, tx, op.Logout.ProcessStamp, d == dialectSQLite)
 	if err != nil || !withdrawn {
 		return false, err
 	}

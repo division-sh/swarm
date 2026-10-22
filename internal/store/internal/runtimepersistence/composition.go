@@ -315,9 +315,6 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := startupOwner.BindActivityJournalRole(activityJournal); err != nil {
 		return nil, err
 	}
-	if err := storestartupownership.BindPostgresSelectedResetHistory(startupOwner, storerunfork.ApplySelectedResetHistoryTx); err != nil {
-		return nil, err
-	}
 	store.startupPostgresOwner = startupOwner
 	if err := effectOwner.BindPreparedProcessOwner(startupOwner); err != nil {
 		return nil, err
@@ -548,9 +545,6 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	if err := startupOwner.BindActivityJournalRole(activityJournal); err != nil {
-		return nil, err
-	}
-	if err := storestartupownership.BindSQLiteSelectedResetHistory(startupOwner, storerunfork.ApplySelectedResetHistoryTx); err != nil {
 		return nil, err
 	}
 	store.startupSQLiteOwner = startupOwner

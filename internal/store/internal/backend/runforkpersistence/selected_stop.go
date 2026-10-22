@@ -12,9 +12,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	generationauthority "github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
-	storestartup "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
 
 func (s *RunForkPostgresOwner) StopSelectedFork(ctx context.Context, req runcontrol.SelectedStopRequest) (runcontrol.State, error) {
@@ -74,7 +74,7 @@ func (s *RunForkSQLiteOwner) StopSelectedFork(ctx context.Context, req runcontro
 }
 
 func requireSelectedStopTx(ctx context.Context, tx *sql.Tx, req runcontrol.SelectedStopRequest, sqlite bool) error {
-	current, err := storestartup.ProcessAuthorityCurrent(ctx, tx, req.Process, sqlite, true)
+	current, err := generationauthority.ProcessAuthorityCurrent(ctx, tx, req.Process, sqlite, true)
 	if err != nil {
 		return err
 	}

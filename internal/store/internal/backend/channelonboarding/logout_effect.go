@@ -10,7 +10,6 @@ import (
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
-	startupowner "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
 
 // LogoutEffectAuthorityCurrent consumes the existing strict teardown codec.
@@ -40,7 +39,7 @@ func LogoutEffectAuthorityCurrent(ctx context.Context, q interface {
 	if !logoutEffectMatches(op, a) || op.Phase != domain.TeardownAuthorityRetired || op.Revision != a.ChannelLogout.TeardownRevision {
 		return false, nil
 	}
-	if current, err := startupowner.ProcessAuthorityCurrent(ctx, q, op.Logout.ProcessStamp, !postgres, lock); err != nil || !current {
+	if current, err := generationauthority.ProcessAuthorityCurrent(ctx, q, op.Logout.ProcessStamp, !postgres, lock); err != nil || !current {
 		return false, err
 	}
 	retained, found, err := loadOperation(ctx, q, d, op.Logout.OperationID, false)
