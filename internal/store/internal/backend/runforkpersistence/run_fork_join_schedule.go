@@ -6,7 +6,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -113,11 +112,7 @@ func runForkArrivalArmScheduleKeys(join joinruntime.Activation) ([]runForkJoinSc
 	if join.FireAt.IsZero() {
 		return nil, nil
 	}
-	command, err := genericschedule.WorkflowJoinAdmission(join, executionmode.Live)
-	if err != nil {
-		return nil, err
-	}
-	scope, err := command.ScopeKey()
+	scope, err := genericschedule.WorkflowJoinScopeKey(join)
 	if err != nil {
 		return nil, err
 	}
