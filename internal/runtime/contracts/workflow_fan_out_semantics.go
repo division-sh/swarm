@@ -68,10 +68,6 @@ type FanOutCompiledPlan struct {
 	Emit                 EmitSpec             `json:"emit"`
 }
 
-func (p FanOutCompiledPlan) EmittedEventType() string {
-	return p.Emit.EventType()
-}
-
 // FanOutPlanSemantics is the digest witness retained with a handler source.
 // Store readers can reject contradictory evidence without live compilation.
 type FanOutPlanSemantics struct {

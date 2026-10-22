@@ -62,10 +62,6 @@ func (r deliveryRouteResolver) Resolve(ctx context.Context, evt events.Event) (d
 	return r.resolve(ctx, evt, ordinaryPublicationSource{}, nil)
 }
 
-func (r deliveryRouteResolver) ResolveIndependentPubsub(ctx context.Context, evt events.Event, source ordinaryPublicationSource) (deliveryRoutingResult, error) {
-	return r.resolve(ctx, evt, source, independentPubsubSubscriber)
-}
-
 func (r deliveryRouteResolver) resolve(ctx context.Context, evt events.Event, source ordinaryPublicationSource, include func(Subscriber) bool) (deliveryRoutingResult, error) {
 	eventKeys := pubsubEventKeys(evt, source)
 	routedRecipients, err := r.resolveRoutedSubscribers(ctx, evt, eventKeys, source)

@@ -729,10 +729,6 @@ func projectPublicConversationTurn(record conversationTurnRecord) (operatorread.
 	return turn, nil
 }
 
-func ProjectPublicConversationTurn(record ConversationTurnRecord) (operatorread.OperatorPublicConversationTurn, error) {
-	return projectPublicConversationTurn(record)
-}
-
 func projectPublicConversationTurnListItem(record conversationTurnRecord) (operatorread.OperatorConversationTurnListItem, error) {
 	turn, err := projectPublicConversationTurn(record)
 	if err != nil {

@@ -5,7 +5,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
 type genericAgent struct {
@@ -45,10 +44,4 @@ func (a *genericAgent) Type() string                      { return a.agentType }
 func (a *genericAgent) Subscriptions() []events.EventType { return a.subscriptions }
 func (a *genericAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
 	return nil, nil
-}
-
-func (am *AgentManager) SetWorkspaceLifecycle(workspaces workspace.Lifecycle) {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-	am.workspaces = workspaces
 }

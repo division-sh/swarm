@@ -177,13 +177,6 @@ func (t ExecutionTool) MCPServerName() string {
 	}
 	return t.value.mcp.Server()
 }
-func (t ExecutionTool) MCPRemoteName() string {
-	if t.value == nil {
-		return ""
-	}
-	return t.value.mcp.Remote()
-}
-
 func toolDefinitionsForRuntime(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) ([]llm.ToolDefinition, error) {
 	entries, err := executionToolsForRuntime(source, discovered)
 	if err != nil {

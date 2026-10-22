@@ -10364,12 +10364,6 @@ engine:
         invalid (parse failure). Or a condition string lacks a required context prefix (entity., payload., policy., accumulated.,
         fan_out.).
       when: boot-only
-    - id: transition_ownership_validation
-      severity: error
-      scope: per-flow
-      trigger: A system node declares ownership of a transition but the flow schema does not include the transition's target
-        state. Or a node owns a transition whose trigger event is not in its subscribes_to list.
-      when: boot-only
     - id: event_runtime_wiring_validation
       severity: error
       scope: per-flow

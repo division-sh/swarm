@@ -299,11 +299,6 @@ func Registry() []Definition {
 	return out
 }
 
-func DefinitionFor(class Class) (Definition, bool) {
-	def, ok := definitions[class]
-	return def, ok
-}
-
 func SelectorMembers(selector string) ([]Class, bool) {
 	switch strings.TrimSpace(selector) {
 	case SelectorAny:

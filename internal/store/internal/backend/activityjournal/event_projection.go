@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -320,11 +319,4 @@ func firstString(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func EventOccurredAt(evt events.Event) time.Time {
-	if at := evt.CreatedAt(); !at.IsZero() {
-		return at.UTC()
-	}
-	return time.Now().UTC()
 }

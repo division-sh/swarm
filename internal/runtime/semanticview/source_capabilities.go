@@ -186,17 +186,6 @@ type ConnectorPackProvenance struct {
 	Source       string
 }
 
-func NewConnectorPackProvenance(packID, version, manifestHash, source string) (ConnectorPackProvenance, error) {
-	provenance := ConnectorPackProvenance{
-		PackID: strings.TrimSpace(packID), Version: strings.TrimSpace(version),
-		ManifestHash: strings.TrimSpace(manifestHash), Source: strings.TrimSpace(source),
-	}
-	if !provenance.Valid() {
-		return ConnectorPackProvenance{}, fmt.Errorf("connector pack provenance requires pack id, version, manifest hash, and source")
-	}
-	return provenance, nil
-}
-
 func (p ConnectorPackProvenance) Valid() bool {
 	return p.PackID != "" && p.Version != "" && p.ManifestHash != "" && p.Source != ""
 }

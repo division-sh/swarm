@@ -11,9 +11,6 @@ type GuardKey string
 func NormalizeEntityID(raw string) EntityID { return EntityID(strings.TrimSpace(raw)) }
 func NormalizeNodeID(raw string) NodeID     { return NodeID(strings.TrimSpace(raw)) }
 func NormalizeFlowID(raw string) FlowID     { return FlowID(strings.TrimSpace(raw)) }
-func NormalizeActionKey(raw string) ActionKey {
-	return ActionKey(strings.TrimSpace(raw))
-}
 func NormalizeGuardKey(raw string) GuardKey {
 	return GuardKey(strings.TrimSpace(raw))
 }

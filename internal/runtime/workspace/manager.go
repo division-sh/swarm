@@ -1372,20 +1372,6 @@ func (m *DockerManager) EnsureContainerNetwork(ctx context.Context, name string)
 	return nil
 }
 
-func (m *DockerManager) StopContainer(ctx context.Context, name string) error {
-	exists, running, err := m.InspectContainer(ctx, name)
-	if err != nil {
-		return err
-	}
-	if !exists || !running {
-		return nil
-	}
-	if _, err := m.RunDocker(ctx, "stop", name); err != nil {
-		return err
-	}
-	return nil
-}
-
 func (m *DockerManager) StopManagedContainer(ctx context.Context, target runtimedestructivereset.ContainerRef) error {
 	expected := target.Identity()
 	if err := expected.Validate(); err != nil {

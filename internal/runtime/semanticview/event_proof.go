@@ -161,26 +161,6 @@ func (p FlowEventProof) IsAuthored(source Source) bool {
 	return false
 }
 
-func (p FlowEventProof) CrossesDeclaredOutputBoundary(source Source) bool {
-	if source == nil {
-		return false
-	}
-	canonical := strings.TrimSpace(p.Canonical)
-	if canonical == "" {
-		return false
-	}
-	flowID := strings.TrimSpace(p.FlowID)
-	if flowID == "" {
-		return false
-	}
-	for _, output := range source.FlowOutputEvents(flowID) {
-		if source.ResolveFlowEventReference(flowID, output) == canonical {
-			return true
-		}
-	}
-	return false
-}
-
 func localizeFlowEventForProof(source Source, flowID, canonical string) string {
 	if source == nil {
 		return ""
