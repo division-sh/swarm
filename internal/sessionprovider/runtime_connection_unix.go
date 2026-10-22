@@ -42,8 +42,10 @@ type RuntimeConnectionOptions struct {
 // RuntimeConnection owns the actual SDK state and socket, not a registration
 // promise. Neither its zero value nor its readback can manufacture execution.
 type RuntimeConnection struct {
-	lifecycle      chan struct{}
-	parent         *worklifetime.RuntimeOccurrence
+	lifecycle chan struct{}
+	parent    interface {
+		Begin(context.Context) (*worklifetime.Lease, error)
+	}
 	work           *worklifetime.Lease
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -53,6 +55,7 @@ type RuntimeConnection struct {
 	captures       *captureStore
 	directory      string
 	store          channelonboarding.Store
+	operations     channelonboarding.OperationStore
 	operation      channelonboarding.Operation
 	account        atomic.Pointer[operatorchannel.SessionAccountAdmission]
 	incoming       *runtimeIncoming
@@ -99,7 +102,7 @@ func openRuntimeConnection(ctx context.Context, opts RuntimeConnectionOptions, b
 		}
 	}
 	owned, cancel := context.WithCancel(work.Context())
-	c := &RuntimeConnection{parent: parent, work: work, ctx: owned, cancel: cancel, closed: make(chan struct{}), lifecycle: make(chan struct{}, 1),
+	c := &RuntimeConnection{parent: parent, work: work, ctx: owned, cancel: cancel, closed: make(chan struct{}), lifecycle: make(chan struct{}, 1), operations: opts.Store,
 		store: opts.Store, operation: op, plan: opts.Plan, credentials: opts.Credentials, directory: opts.Directory, processBinding: opts.ProcessBinding}
 	c.account.Store(&op.SessionAccount)
 	go c.joinRetirement()
@@ -220,7 +223,7 @@ func (c *RuntimeConnection) open(incoming *RuntimeIncomingOptions) error {
 	if c.operation.SessionAccount == (operatorchannel.SessionAccountAdmission{}) && occurrence.client.Store.ID == nil {
 		if _, err := occurrence.bindPairing(pairingQRScope{PrincipalID: c.operation.PrincipalID,
 			OperationID: c.operation.OperationID, ConnectionID: c.operation.SessionConnectionID,
-			OccurrenceID: occurrence.occurrenceID, Coordinate: c.operation.Coordinate}); err != nil {
+			OccurrenceID: occurrence.occurrenceID, Coordinate: c.operation.Coordinate, DeploymentRegistration: c.operation.DeploymentRegistration}); err != nil {
 			return err
 		}
 	}
@@ -254,7 +257,7 @@ func (c *RuntimeConnection) sessionAccount() operatorchannel.SessionAccountAdmis
 }
 
 func (c *RuntimeConnection) currentOperationScope(ctx context.Context) (channelonboarding.Operation, error) {
-	op, err := c.store.GetChannelOnboarding(ctx, c.operation.OperationID)
+	op, err := c.operations.GetChannelOnboarding(ctx, c.operation.OperationID)
 	if err != nil {
 		return op, err
 	}
@@ -264,7 +267,9 @@ func (c *RuntimeConnection) currentOperationScope(ctx context.Context) (channelo
 		op.PrincipalID != c.operation.PrincipalID || op.Interface.Normalized() != c.operation.Interface.Normalized() ||
 		op.TargetSelector != c.operation.TargetSelector ||
 		op.SessionConnectionID != c.operation.SessionConnectionID ||
-		!op.Coordinate.MatchesRuntimeContext(c.operation.Coordinate) ||
+		op.DeploymentRegistration != c.operation.DeploymentRegistration ||
+		op.DeploymentRegistration && (op.Coordinate != c.operation.Coordinate || op.ExpectedAccount != c.operation.ExpectedAccount) ||
+		!op.DeploymentRegistration && !op.Coordinate.MatchesRuntimeContext(c.operation.Coordinate) ||
 		op.Phase == channelonboarding.PhaseFailed || op.Phase == channelonboarding.PhaseRetired || op.ValidateSessionAccount() != nil {
 		return op, errRuntimeConnection
 	}
@@ -362,7 +367,9 @@ func (c *RuntimeConnection) CheckSessionReuse(ctx context.Context, expected chan
 	if c == nil || c.ctx == nil || c.ctx.Err() != nil || c.state == nil ||
 		expected.OperationID != c.operation.OperationID || expected.PrincipalID != c.operation.PrincipalID ||
 		expected.SessionConnectionID != c.operation.SessionConnectionID || expected.SessionAccount != c.sessionAccount() ||
-		!expected.Coordinate.MatchesRuntimeContext(c.operation.Coordinate) {
+		expected.DeploymentRegistration != c.operation.DeploymentRegistration ||
+		expected.DeploymentRegistration && expected.Coordinate != c.operation.Coordinate ||
+		!expected.DeploymentRegistration && !expected.Coordinate.MatchesRuntimeContext(c.operation.Coordinate) {
 		return false, nil
 	}
 	err := c.CheckBootstrap(ctx)
@@ -387,7 +394,7 @@ func (c *RuntimeConnection) CheckSessionReuse(ctx context.Context, expected chan
 		if pairing != nil {
 			view, err := pairing.read(pairingQRScope{PrincipalID: expected.PrincipalID,
 				OperationID: expected.OperationID, ConnectionID: expected.SessionConnectionID,
-				OccurrenceID: occurrence.occurrenceID, Coordinate: expected.Coordinate})
+				OccurrenceID: occurrence.occurrenceID, Coordinate: expected.Coordinate, DeploymentRegistration: expected.DeploymentRegistration})
 			if err != nil {
 				return false, err
 			}
@@ -445,7 +452,7 @@ func (c *RuntimeConnection) AdmitSessionAccount(ctx context.Context, expected op
 }
 
 func (c *RuntimeConnection) ChannelExecution(ctx context.Context) (execution.Channel, error) {
-	if c == nil {
+	if c == nil || c.operation.DeploymentRegistration {
 		return execution.Channel{}, errRuntimeConnection
 	}
 	admitted, err := c.AdmitSessionAccount(ctx, c.sessionAccount())
@@ -479,6 +486,9 @@ func (c *RuntimeConnection) ObserveSession(ctx context.Context) (operatorchannel
 }
 
 func (c *RuntimeConnection) ExecuteChannelWrite(ctx context.Context, operation, toolID string, tool contracts.ToolSchemaEntry, input map[string]any, lineage map[string]string, kind effects.AuthorityKind) (result registration.DeliveryResult, err error) {
+	if c == nil || c.operation.DeploymentRegistration {
+		return result, errRuntimeConnection
+	}
 	work, err := c.begin(ctx)
 	if err != nil {
 		return result, err
@@ -496,6 +506,9 @@ func (c *RuntimeConnection) ExecuteChannelWrite(ctx context.Context, operation, 
 }
 
 func (c *RuntimeConnection) ExecuteChannelActivity(ctx context.Context, operation, toolID string, tool contracts.ToolSchemaEntry, input map[string]any) (result any, err error) {
+	if c == nil || c.operation.DeploymentRegistration {
+		return nil, errRuntimeConnection
+	}
 	work, err := c.begin(ctx)
 	if err != nil {
 		return nil, err

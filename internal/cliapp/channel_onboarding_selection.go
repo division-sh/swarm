@@ -8,7 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 )
 
-func startCLIChannelWithReplacement(ctx context.Context, client *cliAPIClient, params map[string]any, opts channelConnectOptions, errOut io.Writer) (channelOnboardingResult, error) {
+func startCLIChannelWithReplacement(ctx context.Context, client channelControlClient, params map[string]any, opts channelConnectOptions, errOut io.Writer) (channelOnboardingResult, error) {
 	var selected channelonboarding.StartSelection
 	var result channelOnboardingResult
 	if err := client.call(ctx, "channel.onboarding_select", params, &selected); err != nil {

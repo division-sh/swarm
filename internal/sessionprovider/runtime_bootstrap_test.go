@@ -45,6 +45,7 @@ type runtimeBootstrapFixture struct {
 	channels    *operatorchannel.Service
 	connection  *RuntimeConnection
 	credentials *credentials.SnapshotOwner
+	writer      *channelonboarding.CredentialWriter
 }
 
 func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapFixture {
@@ -127,6 +128,7 @@ func newRuntimeBootstrapFixture(t *testing.T, backend string) *runtimeBootstrapF
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.writer = writer
 	candidates, err := channelonboarding.NewCandidateCatalog([]channelonboarding.Candidate{f.candidate})
 	if err != nil {
 		t.Fatal(err)

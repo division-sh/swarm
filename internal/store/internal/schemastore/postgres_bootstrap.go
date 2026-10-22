@@ -54,6 +54,9 @@ func (s *Postgres) BootstrapSchema(ctx context.Context, request SchemaBootstrapR
 		if err := ensurePostgresStatePlans(sqlCtx, tx, request.StatePlans, diagnostic); err != nil {
 			return err
 		}
+		if err := ensurePostgresStatePlans(sqlCtx, tx, request.deploymentPlans, diagnostic); err != nil {
+			return err
+		}
 		return nil
 	}
 	var committed bool

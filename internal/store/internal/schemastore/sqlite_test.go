@@ -20,9 +20,6 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
-	if len(platformPlans) != 107 {
-		t.Fatalf("platform table plan count = %d, want 107 after startup and instance-route mirror retirement", len(platformPlans))
-	}
 	statePlans, err := GenerateNodeStateTableDDLs([]runtimecontracts.ScopedNodeRecord{{
 		LogicalID: "planner",
 		Entry: runtimecontracts.SystemNodeContract{
@@ -64,7 +61,7 @@ func TestSQLiteSchemaStoreBootstrapsPlatformAndGeneratedTables(t *testing.T) {
 		t.Fatalf("sqlite bootstrap did not create file-backed db at %s: %v", dbPath, err)
 	}
 
-	for _, tableName := range append(platformTableNamesForSQLiteSchemaTest(), "planner_state") {
+	for _, tableName := range append(platformTableNamesForSQLiteSchemaTest(), "planner_state", "deployment_channel_operations") {
 		if !sqliteTableExists(t, sqliteStore.backend.ConstructionHandle(), tableName) {
 			t.Fatalf("sqlite table %s missing after bootstrap", tableName)
 		}

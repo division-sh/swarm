@@ -78,6 +78,9 @@ func (s *SQLite) BootstrapSchema(ctx context.Context, request SchemaBootstrapReq
 	if err := ensureSQLiteStatePlans(ctx, conn, request.StatePlans, diagnostic); err != nil {
 		return err
 	}
+	if err := ensureSQLiteStatePlans(ctx, conn, request.deploymentPlans, diagnostic); err != nil {
+		return err
+	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		discard = true
 		return fmt.Errorf("commit sqlite schema bootstrap: %w", err)

@@ -34,9 +34,14 @@ func (p *PairingReadback) UnmarshalJSON(raw []byte) error {
 func (r Result) ProviderCredentialRequirement() (string, error) {
 	c := r.Candidate
 	o := r.Operation
+	sameScope := c != nil && c.Coordinate.MatchesDeclaration(o.Coordinate)
+	if c != nil && (c.DeploymentRegistration || o.DeploymentRegistration) {
+		sameScope = c.DeploymentRegistration && o.DeploymentRegistration && c.Coordinate == o.Coordinate &&
+			validateRegistrationScope(true, o.Provider, o.ExpectedAccount, o.Coordinate, o.TargetSelector) == nil
+	}
 	if c == nil || c.ValidateDeclaration() != nil || o.OperationID == "" || o.Revision < 1 ||
 		!o.Phase.Valid() || c.Provider != o.Provider || c.Interface != o.Interface ||
-		!c.Coordinate.MatchesDeclaration(o.Coordinate) || c.Target.Selector != o.TargetSelector ||
+		!sameScope || c.Target.Selector != o.TargetSelector ||
 		c.Posture != o.Posture || c.Ceremony != o.Ceremony ||
 		c.ProviderCredentialRole != strings.TrimSpace(c.ProviderCredentialRole) {
 		return "", fmt.Errorf("%w: onboarding readback lacks its selected credential declaration", ErrInvalidRequest)

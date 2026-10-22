@@ -11,6 +11,31 @@ import (
 )
 
 func TestOnboardingSelectedProviderRequirementSurvivesReadback(t *testing.T) {
+	t.Run("deployment_readback_has_no_runtime_authority", func(t *testing.T) {
+		candidate := testCandidate(strings.Repeat("a", 64), "support")
+		candidate.DeploymentRegistration, candidate.Ceremony = true, CeremonyAccountLink
+		candidate.Coordinate, candidate.Target = ChannelRuntimeContextCoordinate{}, CandidateTarget{}
+		candidate.SigningCredentialRole, candidate.ConfirmationOperation = "", ""
+		view := Result{Candidate: &candidate, Operation: Operation{DeploymentRegistration: true,
+			OperationID: "deployment-operation", Revision: 1, Provider: "telegram", AccountReference: "12345", AccountConfirmed: true, Interface: candidate.Interface,
+			Posture: ActivationWebhookRegistration, Ceremony: CeremonyAccountLink, Phase: PhaseSucceeded}}
+		body, err := json.Marshal(view)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded Result
+		if err := json.Unmarshal(body, &decoded); err != nil || decoded.Operation.ValidateSessionAccount() != nil ||
+			strings.Contains(string(body), `"coordinate"`) || strings.Contains(string(body), `"target"`) || decoded.Readiness != nil {
+			t.Fatalf("deployment readback acquired runtime scope: %s, %v", body, err)
+		}
+		if role, err := decoded.ProviderCredentialRequirement(); err != nil || role != candidate.ProviderCredentialRole {
+			t.Fatal("deployment readback lost its exact credential requirement", role, err)
+		}
+		decoded.Operation.DeploymentRegistration = false
+		if _, err := decoded.ProviderCredentialRequirement(); err == nil {
+			t.Fatal("deployment readback crossed into runtime scope")
+		}
+	})
 	for _, role := range []string{"", "session_token"} {
 		c := testCandidate(strings.Repeat("a", 64), "support")
 		c.Posture, c.ProviderCredentialRole, c.SigningCredentialRole, c.Target.SigningCredentialKey = ActivationSessionConnection, role, "", ""

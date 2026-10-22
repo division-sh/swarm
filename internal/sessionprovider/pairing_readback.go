@@ -32,6 +32,7 @@ func (q *pairingQR) readAuthorized(ctx context.Context, principal operatorchanne
 		return pairingQRSnapshot{}, err
 	}
 	if op.OperationID != q.scope.OperationID || op.PrincipalID != principal.ID || op.Provider != "whatsapp" ||
+		op.DeploymentRegistration != q.scope.DeploymentRegistration ||
 		op.SessionConnectionID != q.scope.ConnectionID ||
 		op.Posture != channelonboarding.ActivationSessionConnection || !op.Ceremony.Valid() ||
 		op.Coordinate != q.scope.Coordinate || op.Phase != channelonboarding.PhaseActivatingProvider ||
