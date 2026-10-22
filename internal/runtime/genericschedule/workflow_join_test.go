@@ -35,6 +35,13 @@ func TestWorkflowJoinScheduleUsesRetainedArm(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(command, original) {
 				t.Fatalf("shared projection changed live command: got=%#v want=%#v err=%v", command, original, err)
 			}
+			wantScope, err := command.ScopeKey()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scope, err := WorkflowJoinScopeKey(join); err != nil || scope != wantScope {
+				t.Fatalf("retained join scope differs from canonical admitted scope: %q != %q, err=%v", scope, wantScope, err)
+			}
 			schedule := exactWorkflowJoinSchedule(t, command)
 			if err := ValidateWorkflowJoinScheduleRelation(join, schedule); err != nil {
 				t.Fatal(err)
