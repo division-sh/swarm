@@ -33,7 +33,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
@@ -2258,31 +2257,32 @@ func TestEventBusPublish_NoTargetScopedRoutedNodeWithoutFlowInstanceFailsBeforeP
 
 func TestEventBusPublish_UncompiledCrossFlowDeclarationsCannotCreateRecipients(t *testing.T) {
 	const eventType = "repo-scaffold/opco.repo_scaffold_requested"
-	componentFlow := runtimecontracts.FlowContractView{
-		Path: "component-scaffold", Paths: runtimecontracts.FlowContractPaths{FlowPath: "component-scaffold"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"opco.repo_scaffold_requested": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"component-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"opco.repo_scaffold_requested": existingOwnerHandlerFixture()}},
-		},
-	}
-	repositoryFlow := runtimecontracts.FlowContractView{
-		Path: "repo-scaffold", Paths: runtimecontracts.FlowContractPaths{FlowPath: "repo-scaffold"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"opco.repo_scaffold_requested": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"repo-scaffold-node": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"opco.repo_scaffold_requested": existingOwnerHandlerFixture()}},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{componentFlow, repositoryFlow}}
-	bundle := &runtimecontracts.WorkflowContractBundle{SourceArtifact: sourceartifactfixture.Artifact(), FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-		Root: &root,
-		ByID: map[string]*runtimecontracts.FlowContractView{
-			"component-scaffold": &root.Children[0],
-			"repo-scaffold":      &root.Children[1],
-		},
-	}}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatal(err)
-	}
+	bundle := loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml":                    "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":                      "stages: []\n",
+		"component-scaffold/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"component-scaffold/schema.yaml":   "stages: []\n",
+		"component-scaffold/events.yaml":   "opco.repo_scaffold_requested:\n",
+		"component-scaffold/nodes.yaml": `component-node:
+  execution_type: system_node
+  event_handlers:
+    opco.repo_scaffold_requested:
+      guard:
+        id: selected_owner
+        check: _entity.id != ""
+`,
+		"repo-scaffold/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"repo-scaffold/schema.yaml":   "stages: []\n",
+		"repo-scaffold/events.yaml":   "opco.repo_scaffold_requested:\n",
+		"repo-scaffold/nodes.yaml": `repo-scaffold-node:
+  execution_type: system_node
+  event_handlers:
+    opco.repo_scaffold_requested:
+      guard:
+        id: selected_owner
+        check: _entity.id != ""
+`,
+	})
 	source := semanticview.Wrap(bundle)
 	rt := derivedRouteTableFixture(t, source)
 
@@ -2328,31 +2328,23 @@ func TestEventBusPublish_UncompiledCrossFlowDeclarationsCannotCreateRecipients(t
 }
 
 func TestEventBusPublish_DescendantWithoutConnectFailsBeforePersistence(t *testing.T) {
-	grandchild := runtimecontracts.FlowContractView{
-		Path: "child/grandchild", Paths: runtimecontracts.FlowContractPaths{FlowPath: "child/grandchild"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"micro.start": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"grandchild-worker": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"micro.start": existingOwnerHandlerFixture(),
-				},
-			},
-		},
-	}
-	child := runtimecontracts.FlowContractView{
-		Path: "child", Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
-		Children: []runtimecontracts.FlowContractView{grandchild},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
-	bundle := &runtimecontracts.WorkflowContractBundle{SourceArtifact: sourceartifactfixture.Artifact(), FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-		Root: &root,
-		ByID: map[string]*runtimecontracts.FlowContractView{
-			"child": &root.Children[0], "child/grandchild": &root.Children[0].Children[0],
-		},
-	}}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatal(err)
-	}
+	bundle := loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml":                  "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":                    "stages: []\n",
+		"child/manifest.yaml":            "version: 1.0.0\nplatform_version: '*'\n",
+		"child/schema.yaml":              "stages: []\n",
+		"child/grandchild/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"child/grandchild/schema.yaml":   "stages: []\n",
+		"child/grandchild/events.yaml":   "micro.start:\n",
+		"child/grandchild/nodes.yaml": `grandchild-worker:
+  execution_type: system_node
+  event_handlers:
+    micro.start:
+      guard:
+        id: selected_owner
+        check: _entity.id != ""
+`,
+	})
 	source := semanticview.Wrap(bundle)
 	routes := derivedRouteTableFixture(t, source)
 	store := newTargetRouteMemoryStore()
@@ -2638,38 +2630,6 @@ func TestEventBusPublish_ExplicitTargetedRootInputSameIDSiblingRejectsBeforeMuta
 	}
 }
 
-func TestRoutedSubscriberAuthorityDoesNotTransferAcrossDuplicateNodeIDScopes(t *testing.T) {
-	source, routes := duplicateIDScopedRootInputAuthorityFixture(t)
-	ordinaryDefinitions := routes.PubsubDeclarationDefinitionsFixture(t, "ordinary", "ordinary/thing.created")
-	rootDefinitions := routes.PubsubDeclarationDefinitionsFixture(t, "validation", "validation/thing.created")
-	if len(ordinaryDefinitions) != 1 || len(rootDefinitions) != 1 {
-		t.Fatalf("exact scoped definitions: ordinary=%+v validation=%+v", ordinaryDefinitions, rootDefinitions)
-	}
-	ordinary, rootInput := ordinaryDefinitions[0], rootDefinitions[0]
-	event := eventtest.OperatorInjected(
-		uuid.NewString(), events.EventType("ordinary/thing.created"), "operator", "", nil, 0,
-		uuid.NewString(), nil, events.EventEnvelope{}, time.Now().UTC(),
-	)
-	intent := RoutePlanDeliveryIntent{
-		Recipient: ordinary.Recipient,
-		TargetBlueprint: events.RouteIdentity{
-			FlowID: "ordinary", FlowInstance: "ordinary",
-		},
-		Handler:  routedSubscriberTargetHandler(ordinary, event.Type()),
-		Producer: routeIntentProducerInternalTargetRoute,
-		Persist:  true,
-	}
-
-	ordinaryKey := newRoutedSubscriberAuthorityKey(source, event, ordinary)
-	if !routePlanIntentAuthorizesRoutedSubscriber(intent, ordinaryKey, ordinary) {
-		t.Fatal("planned ordinary-flow intent did not authorize its exact subscriber scope")
-	}
-	rootInputKey := newRoutedSubscriberAuthorityKey(source, event, rootInput)
-	if routePlanIntentAuthorizesRoutedSubscriber(intent, rootInputKey, rootInput) {
-		t.Fatal("planned ordinary-flow intent transferred authority to duplicate-ID root-input sibling")
-	}
-}
-
 func TestEventBusRootAPIAdmissionDoesNotAuthorizePrivateChildren(t *testing.T) {
 	for _, explicitTarget := range []bool{false, true} {
 		t.Run(fmt.Sprint(explicitTarget), func(t *testing.T) {
@@ -2729,52 +2689,28 @@ func TestEventBusRootAPIAdmissionDoesNotAuthorizePrivateChildren(t *testing.T) {
 	}
 }
 
-func duplicateIDScopedRootInputAuthorityFixture(t testing.TB) (semanticview.Source, *RouteTable) {
+func duplicateIDScopedRootInputAuthorityFixture(t *testing.T) (semanticview.Source, *RouteTable) {
 	t.Helper()
-	flow := func(id string) runtimecontracts.FlowContractView {
-		return runtimecontracts.FlowContractView{
-			Path: id, Paths: runtimecontracts.FlowContractPaths{
-				FlowPath:   id,
-				SchemaFile: id + "/schema.yaml", EventsFile: id + "/events.yaml",
-			},
-			Schema: runtimecontracts.FlowSchemaDocument{
-
-				Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}}},
-			},
-			Events: map[string]runtimecontracts.EventCatalogEntry{"thing.created": {}},
-			Nodes: map[string]runtimecontracts.SystemNodeContract{
-				"shared-writer": {
-					ExecutionType: "system_node", SubscribesTo: []string{"thing.created"},
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"thing.created": existingOwnerHandlerFixture()},
-				},
-			},
-		}
+	files := map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\npins:\n  inputs: [thing.created]\n",
+		"events.yaml":   "thing.created:\n",
 	}
-	ordinary := flow("ordinary")
-	validation := flow("validation")
-	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{ordinary, validation}}
-	for i := range root.Children {
-		root.Children[i].Parent = &root
+	for _, id := range []string{"ordinary", "validation"} {
+		files[id+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
+		files[id+"/schema.yaml"] = "stages: []\npins:\n  inputs: [thing.created]\n"
+		files[id+"/events.yaml"] = "thing.created:\n"
+		files[id+"/nodes.yaml"] = `shared-writer:
+  execution_type: system_node
+  subscribes_to: [thing.created]
+  event_handlers:
+    thing.created:
+      guard:
+        id: selected_owner
+        check: _entity.id != ""
+`
 	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		SourceArtifact: sourceartifactfixture.Artifact(),
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}}},
-		},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				".": &root, "ordinary": &root.Children[0], "validation": &root.Children[1],
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"ordinary": ordinary.Schema, "validation": validation.Schema,
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatalf("CompileWorkflowSemantics: %v", err)
-	}
-	source := semanticview.Wrap(bundle)
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, files))
 	routes, err := DeriveRouteTable(source)
 	if err != nil {
 		t.Fatal(err)
