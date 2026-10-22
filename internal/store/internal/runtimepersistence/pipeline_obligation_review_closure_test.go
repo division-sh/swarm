@@ -36,7 +36,7 @@ func TestExecutableEventCommitRequiresCurrentPublicationClaimOnSQLiteAndPostgres
 			fixture := backend.open(t)
 			selected := fixture.store.(pipelineObligationParityStore)
 			owner := selected.PipelineObligations()
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
@@ -711,7 +711,7 @@ func TestSQLitePipelineClaimMutationSerializesWithReleaseAndCloseScan(t *testing
 				fixture := openSQLiteAuthorActivityReceiptFixture(t)
 				selected := fixture.store.(*SQLiteRuntimeStore)
 				owner := selected.PipelineObligations()
-				ctx := testAuthorActivityContext()
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 				runID := uuid.NewString()
 				at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
@@ -844,7 +844,7 @@ func TestPipelineScanCancellationAndAbandonmentReleaseClaimsOnSQLiteAndPostgres(
 			fixture := backend.open(t)
 			selected := fixture.store.(pipelineObligationParityStore)
 			owner := selected.PipelineObligations()
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))
@@ -1132,17 +1132,18 @@ func TestPostgresParentTerminalizationLinearizesClaimRegistration(t *testing.T) 
 func TestPostgresPipelineClaimLeaseExcludesIndependentStoreUntilRelease(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	primary := newTestPostgresStore(t, db)
+	// The genuine process lease adds the second slot before publication claims.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(2)
 	fixture := authorActivityReceiptFixture{
 		store:   primary,
 		db:      db,
 		dialect: authoractivityfixture.DialectPostgres,
 	}
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), primary)
 	runID := uuid.NewString()
 	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	eventID := commitPipelineParityEvent(t, ctx, primary, runID, time.Now().UTC().Add(-time.Minute))
-	db.SetMaxOpenConns(2)
-	db.SetMaxIdleConns(2)
 
 	secondaryDB, err := sql.Open("postgres", dsn)
 	if err != nil {
