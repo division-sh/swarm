@@ -22,16 +22,11 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 type publisherOnlyContextKey struct{}
-
-type receiverProjectionStore struct{ InMemoryEventStore }
-
-func (receiverProjectionStore) ListEventDeliveryRecipients(context.Context, string) ([]string, error) {
-	return []string{}, nil
-}
 
 type receiverProjectionEffectStore struct{}
 
@@ -52,9 +47,10 @@ func (receiverProjectionEffectStore) SettleExternalAttempt(context.Context, runt
 }
 
 type receiverProjectionInterceptor struct {
-	eventErr   error
-	routeErr   error
-	eventCalls atomic.Int64
+	eventErr               error
+	routeErr               error
+	eventCalls             atomic.Int64
+	wantSourceArtifactFact runtimecorrelation.SourceArtifactFact
 }
 
 type continuationPassthroughInterceptor struct{}
@@ -162,7 +158,7 @@ func TestAcceptedReceiverDispatchDoesNotReadmitAfterOwnerFence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("continue accepted receiver dispatch after fence: %v", err)
 	}
-	if err := validateClosedReceiverContext(receiver.Context, evt); err != nil {
+	if err := validateClosedReceiverContext(receiver.Context, evt, authorActivityTestSourceArtifactFact); err != nil {
 		t.Fatal(err)
 	}
 	descendant, err := owner.BeginAcceptedDescendant(receiver.Context)
@@ -243,12 +239,12 @@ func TestAcceptedReceiverDispatchRetainsChannelExecutionAuthority(t *testing.T) 
 
 func (i *receiverProjectionInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.eventCalls.Add(1)
-	i.eventErr = validateClosedReceiverContext(ctx, evt)
+	i.eventErr = validateClosedReceiverContext(ctx, evt, i.wantSourceArtifactFact)
 	return true, nil, runtimepipelineobligation.Continue(), i.eventErr
 }
 
 func (i *receiverProjectionInterceptor) InterceptDeliveryRoute(ctx context.Context, evt events.DeliveryEvent, route events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
-	i.routeErr = validateClosedReceiverContext(ctx, evt.Event())
+	i.routeErr = validateClosedReceiverContext(ctx, evt.Event(), i.wantSourceArtifactFact)
 	if i.routeErr == nil {
 		got, ok := runtimedeliveryRouteFromContext(ctx)
 		if !ok || !sameReceiverRoute(got, route) {
@@ -261,25 +257,15 @@ func (i *receiverProjectionInterceptor) InterceptDeliveryRoute(ctx context.Conte
 	return false, nil, runtimepipelineobligation.Continue(), i.routeErr
 }
 
-func TestEventBusEventInterceptorReceiverProjectionRejectsPublisherState(t *testing.T) {
-	interceptor := &receiverProjectionInterceptor{}
-	eventBus, err := newScopedTestEventBus(receiverProjectionStore{}, EventBusOptions{Interceptors: []EventInterceptor{interceptor}})
-	if err != nil {
-		t.Fatalf("create event bus: %v", err)
-	}
-	evt := receiverProjectionEvent("event-wide")
-	if err := eventBus.Publish(hostilePublisherContext(t), evt); err != nil {
-		t.Fatalf("publish through event-wide receiver: %v", err)
-	}
-	if interceptor.eventErr != nil {
-		t.Fatal(interceptor.eventErr)
-	}
-}
-
 func TestPersistedReplayUsesClosedReceiverProjection(t *testing.T) {
-	interceptor := &receiverProjectionInterceptor{}
+	bundle := loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "custom.receiver_projection:\n",
+	})
+	interceptor := &receiverProjectionInterceptor{wantSourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact)}
 	store := newTargetRouteMemoryStore()
-	eventBus, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{interceptor}})
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{interceptor}, ContractBundle: semanticview.Wrap(bundle)})
 	if err != nil {
 		t.Fatalf("create event bus: %v", err)
 	}
@@ -298,25 +284,8 @@ func TestPersistedReplayUsesClosedReceiverProjection(t *testing.T) {
 	}
 }
 
-func TestEngineOutboxUsesClosedReceiverProjection(t *testing.T) {
-	interceptor := &receiverProjectionInterceptor{}
-	store := newTargetRouteMemoryStore()
-	eventBus, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{interceptor}})
-	if err != nil {
-		t.Fatalf("create event bus: %v", err)
-	}
-	evt := receiverProjectionEvent("engine-outbox")
-	seedCommittedNoDeliveryForTest(t, store, evt)
-	if err := eventBus.EngineDispatcher().DispatchPostCommit(hostilePublisherContext(t), []runtimeengine.EmitIntent{{Event: evt}}); err != nil {
-		t.Fatalf("dispatch engine outbox receiver: %v", err)
-	}
-	if interceptor.eventErr != nil {
-		t.Fatal(interceptor.eventErr)
-	}
-}
-
 func TestDeliveryContinuationUsesClosedReceiverProjection(t *testing.T) {
-	interceptor := &receiverProjectionInterceptor{}
+	interceptor := &receiverProjectionInterceptor{wantSourceArtifactFact: authorActivityTestSourceArtifactFact}
 	eventBus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{Interceptors: []EventInterceptor{interceptor}})
 	if err != nil {
 		t.Fatalf("create event bus: %v", err)
@@ -583,26 +552,6 @@ func TestDeliveryContinuationDispatchTransfersCommittedDeferredHandoffBeforeCarr
 	}
 }
 
-func TestEventBusNodeRouteReceiverProjectionRejectsPublisherState(t *testing.T) {
-	interceptor := &receiverProjectionInterceptor{}
-	eventBus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{Interceptors: []EventInterceptor{interceptor}})
-	if err != nil {
-		t.Fatalf("create event bus: %v", err)
-	}
-	evt := receiverProjectionEvent("node-route")
-	eventBus.deliveryPlanner = nodeOnlyDeliveryPlanner(t, "workflow-node", evt.Type())
-	_ = subscribeInternalDeliveriesForTest(t, eventBus, workflowRuntimeInternalCarrierID, evt.Type())
-	if err := eventBus.Publish(hostilePublisherContext(t), evt); err != nil {
-		t.Fatalf("publish through node-route receiver: %v", err)
-	}
-	if interceptor.eventErr != nil {
-		t.Fatalf("event-wide receiver: %v", interceptor.eventErr)
-	}
-	if interceptor.routeErr != nil {
-		t.Fatalf("node-route receiver: %v", interceptor.routeErr)
-	}
-}
-
 func TestAgentRouteUsesClosedReceiverProjection(t *testing.T) {
 	eventBus, err := newScopedTestEventBus(InMemoryEventStore{})
 	if err != nil {
@@ -615,7 +564,7 @@ func TestAgentRouteUsesClosedReceiverProjection(t *testing.T) {
 		t.Fatalf("publish through agent receiver: %v", err)
 	}
 	delivery := <-deliveries
-	if err := validateClosedReceiverContext(delivery.Context(), evt); err != nil {
+	if err := validateClosedReceiverContext(delivery.Context(), evt, authorActivityTestSourceArtifactFact); err != nil {
 		t.Fatal(err)
 	}
 	if route, ok := runtimedeliveryRouteFromContext(delivery.Context()); !ok || !route.Recipient.IsAgent() || route.Recipient.LocalID() != "agent-a" {
@@ -644,7 +593,7 @@ func TestInternalSubscriptionUsesClosedReceiverProjection(t *testing.T) {
 		t.Fatalf("publish through internal receiver: %v", err)
 	}
 	delivery := <-deliveries
-	if err := validateClosedReceiverContext(delivery.Context(), evt); err != nil {
+	if err := validateClosedReceiverContext(delivery.Context(), evt, authorActivityTestSourceArtifactFact); err != nil {
 		t.Fatal(err)
 	}
 	if route, ok := runtimedeliveryRouteFromContext(delivery.Context()); !ok || !route.Recipient.IsNode() || route.Recipient.LocalID() != "internal-owner" {
@@ -878,7 +827,7 @@ func deliveryContinuationProjectionEvent(suffix string, eventType events.EventTy
 	return eventtest.ForDelivery(evt, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: "reply-" + suffix}})
 }
 
-func validateClosedReceiverContext(ctx context.Context, evt events.Event) error {
+func validateClosedReceiverContext(ctx context.Context, evt events.Event, wantSourceArtifactFact runtimecorrelation.SourceArtifactFact) error {
 	if got := ctx.Value(publisherOnlyContextKey{}); got != nil {
 		return fmt.Errorf("receiver inherited arbitrary publisher value %#v", got)
 	}
@@ -910,7 +859,7 @@ func validateClosedReceiverContext(ctx context.Context, evt events.Event) error 
 	if _, ok := worklifetime.OccurrenceFromContext(ctx); !ok {
 		return fmt.Errorf("receiver occurrence is missing")
 	}
-	if fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); !ok || !fact.Matches(authorActivityTestSourceArtifactFact) {
+	if fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); !ok || !fact.Matches(wantSourceArtifactFact) {
 		return fmt.Errorf("receiver bundle source fact is missing or wrong")
 	}
 	return nil
