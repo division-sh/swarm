@@ -157,8 +157,8 @@ func TestRewrite2566CurrentSelectorsPreserveHistoricalDecisionsAndRegeneration(t
 			}
 		}
 	}
-	if count != 43 || imported != 1 {
-		t.Fatalf("current source remaps=%d imported=%d, want all41 C relocations plus rule-activity and one exact import-source correspondence", count, imported)
+	if count != 44 || imported != 1 {
+		t.Fatalf("current source remaps=%d imported=%d, want all41 C relocations plus rule-activity, proposed-effect and one exact import-source correspondence", count, imported)
 	}
 }
 
