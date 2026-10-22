@@ -19,12 +19,14 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packadmission"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	waBinary "go.mau.fi/whatsmeow/binary"
 )
 
@@ -333,7 +335,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				MessageReference: "SERVED_INBOX", ConversationReference: from.String(), InterfaceKey: result.Operation.Interface.Key()}
 			waitTextReplyIntent(t, reader, observation, "entry")
 			requireNativeIntentObservationScope(t, reader, observation)
-			cards := requireServedNativeInboxReply(t, endpoint, peer, reader)
+			cards := requireServedNativeInboxReply(t, endpoint, peer, reader, opts.SourceRoot)
 			if proof.explicitLogout {
 				requireServedNativeExplicitLogout(t, endpoint, peer, result.Operation)
 				if code := process.stop(); code != 0 {
@@ -595,8 +597,13 @@ func requireServedNativeDisconnect(t *testing.T, peer *serveNativeProtocolPeer) 
 	return 0
 }
 
-func requireServedNativeInboxReply(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, reader storetest.ChannelObservation) []servedNativeMessage {
+func requireServedNativeInboxReply(t *testing.T, endpoint string, peer *serveNativeProtocolPeer, reader storetest.ChannelObservation, sourceRoot string) []servedNativeMessage {
 	t.Helper()
+	projection, err := packadmission.FromBundle(loadWorkflowValidationBundleAt(t, sourceRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounds := packfixture.ChannelPlanByID(t, projection.ChannelPlans, "provider.whatsapp.hitl_channel").PresentationBounds()
 	var sent servedNativeMessage
 	var cards []servedNativeMessage
 	deadline := time.After(5 * time.Second)
@@ -718,7 +725,22 @@ waiting:
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := frozen.FullText + "\nReference: " + plan.SourceID
+			frozen, err = render.WithPresentation(frozen, bounds, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actions, err := render.ControlsForRender(frozen)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range actions {
+				// The text formatter requires an opaque token but never displays it.
+				actions[i].Token = "presentation-only"
+			}
+			want, err := render.TextReplyPresentation(frozen, actions)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if sent.Body.GetConversation() != want {
 				t.Fatal("decrypted native Inbox differs from canonical public state and recovery presentation", sent.Body.GetConversation(), want)
 			}
