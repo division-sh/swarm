@@ -440,60 +440,6 @@ func handlerConditionExpressionsForSource(source semanticview.Source, node runti
 	return runtimepipeline.WorkflowHandlerConditionExpressions(source, node, eventType, handler)
 }
 
-func handlerEntityFieldWriters(handler runtimecontracts.SystemNodeEventHandler) map[string]struct{} {
-	out := map[string]struct{}{}
-	addWriter := func(target string) {
-		if field, ok := runtimepipeline.WorkflowEntityFieldNameFromTarget(target); ok {
-			out[field] = struct{}{}
-		}
-	}
-	var addRuleWriters func(rule runtimecontracts.HandlerRuleEntry)
-	addRuleWriters = func(rule runtimecontracts.HandlerRuleEntry) {
-		for _, write := range rule.DataAccumulation.Writes {
-			addWriter(write.Target())
-		}
-		if rule.Compute != nil {
-			addWriter(rule.Compute.StoreAs)
-		}
-	}
-	if handler.Query != nil {
-		addWriter(handler.Query.StoreAs)
-	}
-	if gateNameLocal(handler.SetsGate) != "" {
-		out["gates"] = struct{}{}
-	}
-	for _, write := range handler.DataAccumulation.Writes {
-		addWriter(write.Target())
-	}
-	if handler.Compute != nil {
-		addWriter(handler.Compute.StoreAs)
-	}
-	if handler.Filter != nil {
-		addWriter(handler.Filter.StoreAs)
-	}
-	if handler.GroupBy != nil {
-		addWriter(handler.GroupBy.StoreAs)
-	}
-	if handler.Reduce != nil {
-		addWriter(handler.Reduce.StoreAs)
-	}
-	if handler.Count != nil {
-		addWriter(handler.Count.StoreAs)
-	}
-	if handler.Clear != nil {
-		for _, target := range handler.Clear.Targets {
-			addWriter(target)
-		}
-	}
-	for _, rule := range handler.Rules {
-		addRuleWriters(rule)
-	}
-	for _, rule := range handler.OnComplete {
-		addRuleWriters(rule)
-	}
-	return out
-}
-
 func validateGuardOnFailLocal(spec *runtimecontracts.GuardSpec) error {
 	failureSpec, err := spec.FailureSpec()
 	if err != nil {

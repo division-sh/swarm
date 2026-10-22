@@ -182,19 +182,6 @@ func collectPathByID[T any](node *T, targetID string, id func(*T) string, childr
 	return false
 }
 
-func NearestAncestor[T any](node *T, parent func(*T) *T, include func(*T) bool) *T {
-	for node != nil {
-		if include != nil && include(node) {
-			return node
-		}
-		if parent == nil {
-			return nil
-		}
-		node = parent(node)
-	}
-	return nil
-}
-
 func RegistryKey(flowID, localID string) string {
 	if strings.TrimSpace(flowID) == "" {
 		return strings.TrimSpace(localID)

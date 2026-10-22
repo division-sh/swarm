@@ -4322,38 +4322,10 @@ func TestRun_RejectsGuardReferenceToSparseFieldEvenWhenSameHandlerWritesFieldLat
 	}
 }
 
-func TestHandlerEntityFieldWriters_TracksSetsGateAndClearTargets(t *testing.T) {
-	handler := runtimecontracts.SystemNodeEventHandler{
-		SetsGate: &runtimecontracts.GateSpec{Name: "approved", Value: true},
-		Clear: &runtimecontracts.ClearSpec{
-			Targets: []string{"revision_count", "entity.base_score"},
-		},
-	}
-
-	writers := handlerEntityFieldWriters(handler)
-	if _, ok := writers["gates"]; !ok {
-		t.Fatalf("gates missing from handler writers: %#v", writers)
-	}
-	if _, ok := writers["revision_count"]; !ok {
-		t.Fatalf("revision_count missing from handler writers: %#v", writers)
-	}
-	if _, ok := writers["base_score"]; !ok {
-		t.Fatalf("base_score missing from handler writers: %#v", writers)
-	}
-}
-
 func TestQueryWriterUsesOnlyAdmittedTopLevelTarget(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{
 		StoreAs: "entity.executed_rows",
 	}}
-
-	writers := handlerEntityFieldWriters(handler)
-	if _, ok := writers["executed_rows"]; !ok {
-		t.Fatalf("top-level query writer missing: %#v", writers)
-	}
-	if _, ok := writers["unexecuted_rows"]; ok {
-		t.Fatalf("nested query row created executable writer: %#v", writers)
-	}
 
 	targets := wave1HandlerWriteTargets(identitytest.FlowNode(t, "flow", "node"), "event", handler)
 	if len(targets) != 1 || targets[0].Target != "entity.executed_rows" || targets[0].Kind != "handler.query" {

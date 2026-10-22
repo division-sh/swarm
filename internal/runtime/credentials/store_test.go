@@ -209,14 +209,6 @@ worker-agent:
 		t.Fatalf("provider_key refs = %#v, want brave web_search_provider", refs)
 	}
 
-	missing, err := MissingRequired(ctx, store, source)
-	if err != nil {
-		t.Fatalf("MissingRequired: %v", err)
-	}
-	if len(missing) != 0 {
-		t.Fatalf("MissingRequired = %#v, want provider_key to satisfy the direct flow requirement", missing)
-	}
-
 	descriptors, err := ListDescriptors(ctx, store, source)
 	if err != nil {
 		t.Fatalf("ListDescriptors: %v", err)

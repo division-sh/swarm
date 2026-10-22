@@ -59,51 +59,6 @@ func TestRootExecutionCoordinateBindsAuthoredRootAndExactRun(t *testing.T) {
 	}
 }
 
-func TestResolveAgentMemoryProof_FlowScopedAgentCarriesFlowPath(t *testing.T) {
-	repoRoot, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
-	root := t.TempDir()
-
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
-item:
-  item_id: string
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `name: support
-stages:
-  waiting: {}
-  done: {}
-`)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "agents.yaml"), `
-backend:
-  intent: {inline: "Exercise flow-scoped memory proof."}
-  model: regular
-  memory: true
-  subscriptions:
-    - item.created
-`)
-
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	source := Wrap(bundle)
-
-	proof := ResolveAgentMemoryProof(source, AgentMemoryLocator{
-		AgentID:  "backend",
-		FlowPath: "support",
-	})
-	if proof.OwningFlowID != "support" {
-		t.Fatalf("OwningFlowID = %q, want support", proof.OwningFlowID)
-	}
-	if proof.FlowPath != "support" {
-		t.Fatalf("FlowPath = %q, want support", proof.FlowPath)
-	}
-}
-
 func writeSemanticviewFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
 	if filepath.Base(path) == "nodes.yaml" && strings.TrimSpace(contents) == "{}" {

@@ -360,30 +360,6 @@ func toolNames(tools []ToolDefinition) []string {
 	return names
 }
 
-func buildInitialPrompt(s *Session, firstMessage string) string {
-	var b strings.Builder
-	if strings.TrimSpace(s.SystemPrompt) != "" {
-		b.WriteString("System: ")
-		b.WriteString(s.SystemPrompt)
-		b.WriteString("\n\n")
-	}
-	if len(s.Tools) > 0 {
-		b.WriteString("Tools:\n")
-		for _, t := range s.Tools {
-			b.WriteString("- ")
-			b.WriteString(t.Name)
-			if delivered := strings.TrimSpace(DeliveredToolDescription(t)); delivered != "" {
-				b.WriteString(": ")
-				b.WriteString(delivered)
-			}
-			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
-	b.WriteString(firstMessage)
-	return b.String()
-}
-
 func jsonBytes(v any) []byte {
 	return runtimesharedjson.MustJSON(v)
 }
