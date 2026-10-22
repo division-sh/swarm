@@ -12,7 +12,10 @@ import (
 )
 
 func TestProviderConnectUsesCanonicalRenamedIdentitySource(t *testing.T) {
-	source := targetFreeProviderSource(t, canonicalrouting.CopyProviderRollbackRenamedSource(t, true))
+	source, err := targetFreeProviderSource(t, canonicalrouting.CopyProviderRollbackRenamedSource(t, true))
+	if err != nil || source == nil {
+		t.Fatalf("project captured provider fixture: %v", err)
+	}
 	graph := pinrouting.CompileConnectGraph(source)
 	plans, issues := graph.Plans(), graph.Issues()
 	if len(issues) != 0 || len(plans) != 1 || plans[0].InstanceKey() == nil {
@@ -36,18 +39,22 @@ func TestProviderConnectUsesCanonicalRenamedIdentitySource(t *testing.T) {
 }
 
 func TestProviderConnectRejectsAuthoritativeSourceTypeMismatch(t *testing.T) {
-	source := targetFreeProviderSource(t, canonicalrouting.CopyProviderRollbackInvalidSourceType(t))
-	graph := pinrouting.CompileConnectGraph(source)
-	plans, issues := graph.Plans(), graph.Issues()
-	if len(plans) != 0 || len(issues) != 1 || !strings.Contains(issues[0].Detail, "key_types_incompatible") {
-		t.Fatalf("plans/issues = %#v/%#v, want target-free source type blocker", plans, issues)
+	source, err := targetFreeProviderSource(t, canonicalrouting.CopyProviderRollbackInvalidSourceType(t))
+	if source != nil || err == nil {
+		t.Fatalf("projection = %v/%v, want no source and a type blocker", source, err)
+	}
+	if message := err.Error(); !strings.Contains(message, "compiled connection input binding failed:") || !strings.Contains(message, "key_types_incompatible: resolution source payload.chat_id type integer is incompatible with receiver entity.chat_id type text") {
+		t.Fatalf("projection error = %q, want exact source/receiver type incompatibility", message)
 	}
 }
 
 func TestTemplateInputReceiverPlanAcceptsSyntheticProjectionWithDistinctSchemaEvidence(t *testing.T) {
 	for _, tc := range targetFreeSyntheticProjectionCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			source := targetFreeProviderSource(t, canonicalrouting.CopyProviderRollbackSyntheticProjection(t, tc.mint))
+			source, err := targetFreeProviderSource(t, canonicalrouting.CopyProviderRollbackSyntheticProjection(t, tc.mint))
+			if err != nil || source == nil {
+				t.Fatalf("project captured provider fixture: %v", err)
+			}
 			association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "inbound.telegram.text_message")
 			endpoint, ok := association.Endpoint()
 			if !ok {
@@ -65,7 +72,10 @@ func TestTemplateInputReceiverPlanAcceptsSyntheticProjectionWithDistinctSchemaEv
 func TestProviderConnectAcceptsSyntheticProjectionWithDistinctSchemaEvidence(t *testing.T) {
 	for _, tc := range targetFreeSyntheticProjectionCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			source := targetFreeProviderSource(t, canonicalrouting.CopyProviderRollbackSyntheticProjection(t, tc.mint))
+			source, err := targetFreeProviderSource(t, canonicalrouting.CopyProviderRollbackSyntheticProjection(t, tc.mint))
+			if err != nil || source == nil {
+				t.Fatalf("project captured provider fixture: %v", err)
+			}
 			graph := pinrouting.CompileConnectGraph(source)
 			plans, issues := graph.Plans(), graph.Issues()
 			if len(issues) != 0 || len(plans) != 1 {
@@ -79,11 +89,17 @@ func TestProviderConnectAcceptsSyntheticProjectionWithDistinctSchemaEvidence(t *
 func TestProviderConnectRejectsSyntheticProjectionCollision(t *testing.T) {
 	for _, tc := range targetFreeSyntheticProjectionCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			source := targetFreeProviderSource(t, canonicalrouting.CopyProviderRollbackSyntheticCollision(t, tc.mint))
-			graph := pinrouting.CompileConnectGraph(source)
-			plans, issues := graph.Plans(), graph.Issues()
-			if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != pinrouting.ConnectFailureResolutionProjectionCollision || !strings.Contains(issues[0].Detail, "field chat_id conflicts") {
-				t.Fatalf("provider plans/issues = %#v/%#v, want synthetic projection collision", plans, issues)
+			source, err := targetFreeProviderSource(t, canonicalrouting.CopyProviderRollbackSyntheticCollision(t, tc.mint))
+			if source != nil || err == nil {
+				t.Fatalf("projection = %v/%v, want no source and a projection collision", source, err)
+			}
+			projection := "generated.uuid"
+			if tc.mint == canonicalrouting.CreateMintEventID {
+				projection = "event.id"
+			}
+			want := "connection projection conflicts with producer: producer event inbound.telegram.text_message field chat_id conflicts with connection projection " + projection
+			if message := err.Error(); !strings.Contains(message, "compiled connection input binding failed:") || !strings.Contains(message, want) {
+				t.Fatalf("projection error = %q, want %q", message, want)
 			}
 		})
 	}
@@ -114,16 +130,12 @@ func assertTargetFreeSchemaRoles(t testing.TB, plan pinrouting.ConnectRoutePlan)
 	}
 }
 
-func targetFreeProviderSource(t testing.TB, root string) semanticview.Source {
+func targetFreeProviderSource(t testing.TB, root string) (semanticview.Source, error) {
 	t.Helper()
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatalf("load captured provider fixture: %v", err)
 	}
-	source, err := runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), nil)
-	if err != nil {
-		t.Fatalf("project captured provider fixture: %v", err)
-	}
-	return source
+	return runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), nil)
 }
