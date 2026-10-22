@@ -5,12 +5,111 @@ import (
 	"fmt"
 	"strings"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
+func asBool(v any) bool {
+	typed, ok := v.(bool)
+	return ok && typed
+}
+
 func workflowEntityContract(source semanticview.Source, flowID string) (entityruntime.Contract, bool) {
 	return entityruntime.ResolveForFlow(source, flowID)
+}
+
+func WorkflowEntitySchemaInitialValueFields(source semanticview.Source) map[string]struct{} {
+	if source == nil {
+		return nil
+	}
+	return workflowEntitySchemaInitialValueFieldsFromRaw(source.WorkflowEntitySchema())
+}
+
+func workflowEntitySchemaInitialValueFieldsFromRaw(raw any) map[string]struct{} {
+	fields := workflowEntitySchemaFieldDefinitions(raw)
+	if len(fields) == 0 {
+		return nil
+	}
+	out := map[string]struct{}{}
+	for name, field := range fields {
+		if field.Initial != nil {
+			out[name] = struct{}{}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func workflowEntitySchemaFieldDefinitions(raw any) map[string]runtimecontracts.EntitySchemaField {
+	out := map[string]runtimecontracts.EntitySchemaField{}
+	switch typed := raw.(type) {
+	case runtimecontracts.EntitySchema:
+		for _, group := range typed.Groups {
+			for _, field := range group.Fields {
+				name := strings.TrimSpace(field.Name)
+				if name != "" {
+					field.Name = name
+					out[name] = field
+				}
+			}
+		}
+		return out
+	case *runtimecontracts.EntitySchema:
+		if typed != nil {
+			return workflowEntitySchemaFieldDefinitions(*typed)
+		}
+		return out
+	}
+	obj, ok := asObject(raw)
+	if !ok {
+		return out
+	}
+	if groups, ok := obj["groups"]; ok {
+		switch typed := groups.(type) {
+		case []any:
+			for _, item := range typed {
+				group, ok := asObject(item)
+				if !ok {
+					continue
+				}
+				fields, ok := group["fields"]
+				if !ok {
+					continue
+				}
+				for name, field := range workflowEntitySchemaFieldDefinitions(fields) {
+					out[name] = field
+				}
+			}
+		}
+	}
+	if fields, ok := obj["fields"]; ok {
+		for name, field := range workflowEntitySchemaFieldDefinitions(fields) {
+			out[name] = field
+		}
+		return out
+	}
+	if items, ok := raw.([]any); ok {
+		for _, item := range items {
+			field, ok := asObject(item)
+			if !ok {
+				continue
+			}
+			name := strings.TrimSpace(asString(field["name"]))
+			if name != "" {
+				out[name] = runtimecontracts.EntitySchemaField{
+					Name:        name,
+					Type:        strings.TrimSpace(asString(field["type"])),
+					Initial:     cloneWorkflowSchemaValue(field["initial"]),
+					Nullable:    asBool(field["nullable"]),
+					Description: strings.TrimSpace(asString(field["description"])),
+				}
+			}
+		}
+	}
+	return out
 }
 
 func workflowNormalizeEntityFields(source semanticview.Source, flowID string, fields map[string]any) (map[string]any, error) {
