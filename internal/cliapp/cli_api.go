@@ -769,6 +769,17 @@ func (c *cliAPIClient) call(ctx context.Context, method string, params map[strin
 	if result == nil {
 		return nil
 	}
+	if rawResult, ok := result.(*json.RawMessage); ok && rawResult != nil {
+		// Raw consumers retain the validated wire result, including numeric kinds.
+		var original struct {
+			Result json.RawMessage `json:"result"`
+		}
+		if err := json.Unmarshal(raw, &original); err != nil {
+			return fmt.Errorf("decode JSON-RPC result: %w", err)
+		}
+		*rawResult = original.Result
+		return nil
+	}
 	if err := canonicaljson.DecodeInto(envelope.Result, result); err != nil {
 		return fmt.Errorf("decode JSON-RPC result: %w", err)
 	}
