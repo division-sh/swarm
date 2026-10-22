@@ -6222,33 +6222,6 @@
       ]
     },
     {
-      "file": "internal/runtime/semanticview/scopes_test.go",
-      "before_hash": "151708b0b74a92f410243b952eddbcc86e96be22552baba2a567ecd3a477d5e8",
-      "after_hash": "63a78119ab514d23416926a277669cee46e428388e6b7664ef0770d0ccea6fab",
-      "edits": [
-        {
-          "offset": 2635,
-          "before": "  waiting: {initial: true}\n",
-          "after": "  waiting: {}\n"
-        }
-      ],
-      "equivalence": [
-        {
-          "site": "internal/runtime/semanticview/scopes_test.go:75:81",
-          "entry": "waiting",
-          "before_order": [
-            "waiting",
-            "done"
-          ],
-          "after_order": [
-            "waiting",
-            "done"
-          ],
-          "finals": []
-        }
-      ]
-    },
-    {
       "file": "internal/runtime/template_instance_delivery_test.go",
       "before_hash": "e5db7a7314fdaebe0f6c656e6d7177e942c1a42bec292b4688c42d9ebe9451cb",
       "after_hash": "3da5c7d589f54bb737b46bfb9568b5588bd6607f6ed0af5c78224b88b59895f6",

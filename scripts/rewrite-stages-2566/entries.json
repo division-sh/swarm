@@ -3045,19 +3045,6 @@
     "literal": 16
   },
   {
-    "file": "internal/runtime/semanticview/scopes_test.go",
-    "source": "internal/runtime/semanticview/scopes_test.go",
-    "flow": "TestResolveAgentMemoryProof_FlowScopedAgentCarriesFlowPath/literal-11",
-    "entry": "waiting",
-    "order": [
-      "waiting",
-      "done"
-    ],
-    "finals": [],
-    "function": "TestResolveAgentMemoryProof_FlowScopedAgentCarriesFlowPath",
-    "literal": 11
-  },
-  {
     "file": "internal/runtime/template_instance_delivery_test.go",
     "source": "internal/runtime/template_instance_delivery_test.go",
     "flow": "templateInstanceDeliveryFixtureFiles/literal-4",
