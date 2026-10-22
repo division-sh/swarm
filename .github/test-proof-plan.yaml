@@ -75,6 +75,7 @@ profiles:
     - catalog-runtime-scatter-safety
     - catalog-runtime-fork-readiness
     - hitl-releasee2e-rest
+    - hitl-releasee2e-s
     - hitl-releasee2e-golden
     - hitl-releasee2e-journeys
     - runtime-full
@@ -146,6 +147,7 @@ profiles:
     - catalog-runtime-scatter-safety
     - catalog-runtime-fork-readiness
     - hitl-releasee2e-rest
+    - hitl-releasee2e-s
     - hitl-releasee2e-burst-1
     - hitl-releasee2e-burst-2
     - hitl-releasee2e-golden
@@ -739,7 +741,7 @@ units:
   hitl-releasee2e-rest:
     packages:
       - github.com/division-sh/swarm/internal/releasee2e
-    run: '^(Test($|[^CDG].*|CatalogTypeAdmissionPublicRestartBothStores|CatalogTypeAdmissionTemplateRoutingBothStores|CatalogTypeNamespacePublicAdmissionBothStores|CatalogTypeDetachmentPublicRestartBothStores|DeclaredClockFiniteAndPublicReadbackBothStores|DeclaredClockNestedBinaryDeliveryBothStores|DurableDataOperationAggregatePublicRestartBothStores|GoldenI.*|Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*|CompiledWorkspace.*)|Example.*|Fuzz.*)$'
+    run: '^(Test($|[^CDGS].*|CatalogTypeAdmissionPublicRestartBothStores|CatalogTypeAdmissionTemplateRoutingBothStores|CatalogTypeNamespacePublicAdmissionBothStores|CatalogTypeDetachmentPublicRestartBothStores|DeclaredClockFiniteAndPublicReadbackBothStores|DeclaredClockNestedBinaryDeliveryBothStores|DurableDataOperationAggregatePublicRestartBothStores|GoldenI.*|Channel.*|Claude.*|Command.*|CompiledProcessLifecycle.*|CompiledWorkspace.*)|Example.*|Fuzz.*)$'
     required_children:
       TestCatalogTypeAdmissionPublicRestartBothStores: [sqlite, postgres]
       TestCatalogTypeAdmissionTemplateRoutingBothStores: [sqlite, postgres]
@@ -749,6 +751,14 @@ units:
       TestDeclaredClockNestedBinaryDeliveryBothStores: [sqlite, postgres]
       TestDurableDataOperationAggregatePublicRestartBothStores: [sqlite, postgres]
       TestPayloadlessEventPublicPersistenceJourneyBothStores: [sqlite, postgres]
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: full
+  hitl-releasee2e-s:
+    packages:
+      - github.com/division-sh/swarm/internal/releasee2e
+    run: '^TestS.*$'
+    required_children:
       TestStandingPauseAuthorityPublicBothStores: [sqlite, postgres]
       TestStandingResetNonExecutablePublicBothStores: [sqlite, postgres]
       TestStandingRootTreePublicRestartAndResetBothStores: [sqlite, postgres]
