@@ -680,6 +680,7 @@ func VerifyChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcros
 			}))
 			defer server.Close()
 			store := fixture.Persistence.store
+			store.activityJournal = fixture.CaptureActivityJournal()
 			if err := fixture.RequireRun(ctx, runID); err != nil {
 				t.Fatal(err)
 			}
@@ -1631,6 +1632,7 @@ func VerifyPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutT
 	}
 	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store)})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
+	store.activityJournal = fixture.CaptureActivityJournal()
 	if _, inserted, err := store.StartActivityAttempt(ctx, activityAttemptStartRecord(intent, activityInputHash(intent.Input))); err != nil {
 		t.Fatalf("StartActivityAttempt: %v", err)
 	} else if !inserted {
@@ -1681,6 +1683,9 @@ func VerifyLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatchFor
 	intent.FlowInstance = flowInstance
 	intent.Generation, intent.LoopStage = activation.Generation(), activation.CurrentStage
 	pc, lost := fixture.ClaimReplyLossCoordinator(ctx, bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}}, runID, activityRequestEventID(intent), errors.New("simulated commit acknowledgment loss"))
+	if err := pc.InstallActivityJournal(pc.workflowStore.activityJournal); err != nil {
+		t.Fatal(err)
+	}
 	if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err != nil {
 		t.Fatalf("execute after commit acknowledgment loss: %v", err)
 	}

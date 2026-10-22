@@ -44,9 +44,9 @@ func CopyForkFanOutReceiverOwnership(t testing.TB) string {
 		removeForkReceiverFinishedConnection(t, root, receiver)
 	}
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
-		"start.requested:\n  token: text\n", "start.requested:\n  token: text\n  tokens: '[text]'\n")
+		"start.requested:\n  token: text\n", "start.requested:\n  token: text\n  tokens: [text]\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
-		"work.requested:\n  token: text\n", "work.requested:\n  token: text\n  tokens: '[text]'\n")
+		"work.requested:\n  token: text\n", "work.requested:\n  token: text\n  tokens: [text]\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"),
 		"        fields: {token: payload.token}\n    start.closed:",
 		"        fields: {token: payload.token, tokens: payload.tokens}\n    start.closed:")

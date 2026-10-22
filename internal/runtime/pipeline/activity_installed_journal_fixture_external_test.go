@@ -16,7 +16,7 @@ import (
 
 // Native activity proofs capture a real admitted role. Historical result replay
 // intentionally continues to use the unbound, read-only journal after reopening.
-func installActivityReplayJournal(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, bus *activityJournalProofBus, pc *pipeline.PipelineCoordinator) (pipeline.ActivityAttemptJournal, func()) {
+func installActivityReplayJournal(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, bus interface{ WaitForQuiescence(context.Context) error }, pc *pipeline.PipelineCoordinator) (pipeline.ActivityAttemptJournal, func()) {
 	t.Helper()
 	journal, release := captureActivityReplayJournal(t, ctx, selected.events.(startupownership.Store), bus.WaitForQuiescence)
 	if err := pc.InstallActivityJournal(journal); err != nil {
@@ -57,8 +57,18 @@ func captureActivityReplayJournal(t *testing.T, ctx context.Context, owner start
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := process.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: set}); err != nil {
+	current, present, err := process.CurrentSourceSet(ctx)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if present {
+		if current.Revision != set.Revision {
+			t.Fatal("activity proof reopened a different complete source set")
+		}
+	} else {
+		if _, err := process.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: set}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	grant, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{
 		BundleHash: fact.BundleHash(), RuntimeInstanceID: scope.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: set.Revision,

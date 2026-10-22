@@ -123,9 +123,10 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		return pc
 	}
 	return pipeline.WorkflowActivityNativeFixtureForTest{
-		Persistence: persistence,
-		Context:     ctx,
-		Runs:        selected,
+		Persistence:            persistence,
+		CaptureActivityJournal: captureJournal,
+		Context:                ctx,
+		Runs:                   selected,
 		RequireRun: func(ctx context.Context, runID string) error {
 			return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{
 				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(), Artifact: artifact,
@@ -153,7 +154,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 			return nil
 		},
 		ClaimReplyLossCoordinator: func(ctx context.Context, bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions, run, request string, fault error) (*pipeline.PipelineCoordinator, func() int32) {
-			faulted, count := storetest.ActivityClaimReplyLossPersistenceFault(t, ctx, selected, run, request, fault)
+			faulted, count := storetest.ActivityClaimReplyLossPersistenceFault(t, ctx, selected, run, request, fault, captureJournal())
 			return coordinator(bus, options, faulted), count
 		},
 		ReadAttemptStatuses: func(ctx context.Context) ([]string, error) {

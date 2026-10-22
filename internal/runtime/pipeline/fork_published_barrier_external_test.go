@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -87,7 +88,7 @@ const (
 func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarrierCompletionProof) {
 	failingCompletion := proof != publishedBarrierCompletionSuccess
 	for _, backend := range []string{"sqlite", "postgres"} {
-		if crashBackend := os.Getenv("SWARM_PUBLISHED_BARRIER_CRASH_BACKEND"); crashBackend != "" && backend != crashBackend {
+		if crashBackend := os.Getenv("TEST_PUBLISHED_BARRIER_CRASH_BACKEND"); crashBackend != "" && backend != crashBackend {
 			continue
 		}
 		t.Run(backend, func(t *testing.T) {
@@ -101,7 +102,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 			}
 			sourceProbe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), resume: make(chan struct{}), completed: make(chan string, 1)}
 			root := canonicalrouting.CopyForkFanOutBarrierReceiver(t)
-			rt, selected, repo, capability, _, _ := startForkEngineRuntimeOwnerAt(t, backend, root, sourceProbe, os.Getenv("SWARM_PUBLISHED_BARRIER_CRASH_ADDRESS"))
+			rt, selected, repo, capability, _, _ := startForkEngineRuntimeOwnerAt(t, backend, root, sourceProbe, os.Getenv("TEST_PUBLISHED_BARRIER_CRASH_ADDRESS"))
 			var sourceRelease sync.Once
 			t.Cleanup(func() { sourceRelease.Do(func() { close(sourceProbe.resume) }) })
 			ctx := correlation.WithRuntimeInstanceID(context.Background(), rt.Options.RuntimeInstanceID)
@@ -171,7 +172,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 				storetest.RequireBundleDataCatalog(t, phase, selected.SourceArtifactWriter(), bundle)
 			}
 			childProbe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), completed: make(chan string, 1)}
-			crashing := os.Getenv("SWARM_PUBLISHED_BARRIER_CRASH_BACKEND") != ""
+			crashing := os.Getenv("TEST_PUBLISHED_BARRIER_CRASH_BACKEND") != ""
 			if crashing || failingCompletion {
 				childProbe.resume = make(chan struct{})
 				t.Cleanup(func() {
@@ -274,7 +275,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 				if err != nil {
 					t.Fatal(err)
 				}
-				if child.Fields["completed_total"] == float64(1) {
+				if child.Fields["completed_total"] == json.Number("1") {
 					if forkFixtureEntityRevision(t, child.Entity.Revision) != 2 {
 						t.Fatalf("final consumer did not commit once: %+v", child)
 					}

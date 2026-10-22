@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
@@ -17,6 +18,18 @@ func ValidateSelectedResetHistoryTx(ctx context.Context, tx *sql.Tx, req destruc
 	for _, prepared := range req.SelectedHistory {
 		if err := ValidateSelectedResetPreparationTx(ctx, tx, prepared, sqlite); err != nil {
 			return err
+		}
+		permanent, err := ReadClosedSelectedPermanentForkCohortTx(ctx, tx, prepared.Binding.ForkRunID, sqlite)
+		if err != nil {
+			return err
+		}
+		if _, err := ReadClosedSelectedInstalledJournalCohortTx(ctx, tx, prepared.Binding.ForkRunID, sqlite, prepared.Original); err != nil {
+			return err
+		}
+		for _, generation := range permanent.Generations {
+			if err := effectpersistence.RequireSelectedHistoryNoLiveAttemptsTx(ctx, tx, generation.Execution.ExecutionID, sqlite); err != nil {
+				return err
+			}
 		}
 	}
 	return ctx.Err()

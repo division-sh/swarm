@@ -33,6 +33,7 @@ import (
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -275,6 +276,11 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 		}))
 	}
 	if toolEffectClass == runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		if intent.ExecutionMode == runtimeeffects.ExecutionModeMock {
+			if _, _, err := d.coordinator.admittedScenarioExecutionProfileForRun(ctx, intent.SourceRunID); err != nil {
+				return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "scenario_execution_profile_not_admitted", "activity-runtime", "admit_mock_activity", map[string]any{"tool": intent.Tool, "run_id": intent.SourceRunID}, err))
+			}
+		}
 		if reused, err := d.reuseExistingNonIdempotentActivityAttempt(ctx, intent); err != nil || reused {
 			return err
 		}
@@ -297,6 +303,23 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 		mockResponse = &admitted
 	}
 	if toolEffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		// An exact publication is accounting, not permission to start work in
+		// the current loop generation. Validate it before fresh-work admission.
+		if _, published, err := selectedActivityInputPublication(ctx, intent); err != nil || published {
+			return err
+		}
+		if recorded, ok, err := d.recordedActivityResult(ctx, intent); err != nil {
+			return err
+		} else if ok {
+			d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{
+				"activity_id":       intent.ActivityID,
+				"tool":              intent.Tool,
+				"effect_class":      string(intent.EffectClass),
+				"result_event_id":   recorded.EventID,
+				"result_event_type": recorded.EventType,
+			})
+			return nil
+		}
 		if err := d.admitReadOnlyActivityGeneration(ctx, intent); err != nil {
 			return d.publishActivityFailure(ctx, intent, err)
 		}
@@ -307,18 +330,6 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	client := d.client
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
-	}
-	if recorded, ok, err := d.recordedActivityResult(ctx, intent); err != nil {
-		return err
-	} else if ok {
-		d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{
-			"activity_id":       intent.ActivityID,
-			"tool":              intent.Tool,
-			"effect_class":      string(intent.EffectClass),
-			"result_event_id":   recorded.EventID,
-			"result_event_type": recorded.EventType,
-		})
-		return nil
 	}
 	maxAttempts := activityRetryMaxAttempts(intent, toolEffectClass)
 	var lastErr error
@@ -361,26 +372,37 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 }
 
 func (pc *PipelineCoordinator) mockResponsePlanForRun(ctx context.Context, runID string, source semanticview.Source) (*providerconnectors.MockResponsePlan, error) {
-	if pc.scenarioProfiles == nil {
-		return pc.mockConnectorResponses, nil
-	}
-	profile, found, err := pc.scenarioProfiles.LoadScenarioExecutionProfile(ctx, strings.TrimSpace(runID))
+	profile, found, err := pc.admittedScenarioExecutionProfileForRun(ctx, runID)
 	if err != nil {
-		return nil, fmt.Errorf("load scenario execution profile for run %s: %w", runID, err)
+		return nil, err
 	}
 	if !found {
 		return pc.mockConnectorResponses, nil
 	}
+	return providerconnectors.OverlayMockResponsePlan(pc.mockConnectorResponses, source, profile.ConnectorResponses())
+}
+
+func (pc *PipelineCoordinator) admittedScenarioExecutionProfileForRun(ctx context.Context, runID string) (scenarioexecution.Profile, bool, error) {
+	if pc.scenarioProfiles == nil {
+		return scenarioexecution.Profile{}, false, nil
+	}
+	profile, found, err := pc.scenarioProfiles.LoadScenarioExecutionProfile(ctx, strings.TrimSpace(runID))
+	if err != nil {
+		return scenarioexecution.Profile{}, false, fmt.Errorf("load scenario execution profile for run %s: %w", runID, err)
+	}
+	if !found {
+		return scenarioexecution.Profile{}, false, nil
+	}
 	if pc.executionPosture != executionposture.MockOnly {
-		return nil, fmt.Errorf("run %s has a scenario execution profile but runtime posture is %q", runID, pc.executionPosture)
+		return scenarioexecution.Profile{}, false, fmt.Errorf("run %s has a scenario execution profile but runtime posture is %q", runID, pc.executionPosture)
 	}
 	if err := pc.effectiveSource.Validate(); err != nil {
-		return nil, fmt.Errorf("runtime effective source identity is unavailable: %w", err)
+		return scenarioexecution.Profile{}, false, fmt.Errorf("runtime effective source identity is unavailable: %w", err)
 	}
 	if !profile.EffectiveSourceIdentity().Equal(pc.effectiveSource) {
-		return nil, fmt.Errorf("run %s scenario execution effective source mismatch: persisted=%s runtime=%s", runID, profile.EffectiveSourceIdentity().Digest(), pc.effectiveSource.Digest())
+		return scenarioexecution.Profile{}, false, fmt.Errorf("run %s scenario execution effective source mismatch: persisted=%s runtime=%s", runID, profile.EffectiveSourceIdentity().Digest(), pc.effectiveSource.Digest())
 	}
-	return providerconnectors.OverlayMockResponsePlan(pc.mockConnectorResponses, source, profile.ConnectorResponses())
+	return profile, true, nil
 }
 
 func (d pipelineActivityDispatcher) reuseExistingNonIdempotentActivityAttempt(ctx context.Context, intent runtimeengine.ActivityIntent) (bool, error) {
@@ -398,6 +420,14 @@ func (d pipelineActivityDispatcher) reuseExistingNonIdempotentActivityAttempt(ct
 	}
 	if err := validateActivityAttemptClaimIdentity(existing, expected); err != nil {
 		return true, err
+	}
+	if existing.Status == ActivityAttemptStatusStarted && d.coordinator.activityJournalRole.Load() == nil {
+		if err := ctx.Err(); err != nil {
+			return true, err
+		}
+		// An unbound reader can report the retained attempt, but cannot wait as
+		// its admitted owner or reconcile it into a terminal result.
+		return true, runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "activity_provider_outcome_uncertain", "activity-runtime", "reconcile_activity_attempt", map[string]any{"request_event_id": existing.RequestEventID})
 	}
 	if existing.Status != ActivityAttemptStatusStarted {
 		d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{"result_event_id": existing.ResultEventID})

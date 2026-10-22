@@ -60,8 +60,10 @@ func TestIssue642FanOutTerminalRecipientDisposition(t *testing.T) {
 				}
 				row := deliverylifecycle.HistoricalFact{DeliveryID: deliveryID, EventID: event, RunID: run, Route: route, RouteIdentity: routeID,
 					SubscriberClass: deliverylifecycle.SubscriberNode, SubscriberID: node.Key(), Status: status,
-					CreatedAt: at, SettledAt: at, MaxRetries: 3, SettledClaimVersion: 1}
+					CreatedAt: at, SettledAt: at, MaxRetries: 3, SettledClaimVersion: 1,
+					FinalSelection: deliverylifecycle.PresentSelection(deliverylifecycle.NotApplicableHandlerRuleSelection())}
 				if status == deliverylifecycle.StatusCanceled {
+					row.FinalSelection = deliverylifecycle.AbsentSelection()
 					row.ReasonCode = string(deliverylifecycle.CancellationTerminate)
 				}
 				deliveryRows[event] = append(deliveryRows[event], runForkRevisionDelivery{Snapshot: row})

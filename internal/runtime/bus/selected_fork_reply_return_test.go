@@ -90,7 +90,7 @@ func TestIssue642RetainedReturnRequiresExactTerminalScope(t *testing.T) {
 		t.Fatal("context restoration rewrote retained input")
 	}
 	resolver := connectRoutePlanResolver{replyStore: retainedReturnReplyStore{record: record}}
-	matched, loaded, err := resolver.resolveReplyPlans(bound, []pinrouting.ConnectRoutePlan{ordinary, response})
+	matched, loaded, err := resolver.resolveReplyPlans(bound, event, []pinrouting.ConnectRoutePlan{ordinary, response})
 	if err != nil || len(matched) != 2 || !reflect.DeepEqual(loaded, record) {
 		t.Fatalf("paired reply selection discarded an ordinary connection: plans=%d error=%v", len(matched), err)
 	}
@@ -107,7 +107,7 @@ func TestIssue642RetainedReturnRequiresExactTerminalScope(t *testing.T) {
 				changed.ProviderOutputPin = "other"
 				callResolver.replyStore = retainedReturnReplyStore{record: changed}
 			}
-			plans, _, err := callResolver.resolveReplyPlans(callCtx, []pinrouting.ConnectRoutePlan{ordinary, response})
+			plans, _, err := callResolver.resolveReplyPlans(callCtx, event, []pinrouting.ConnectRoutePlan{ordinary, response})
 			if err != nil || len(plans) != 1 || plans[0].ReplyRole() != pinrouting.ConnectReplyRoleResponse {
 				t.Fatalf("unadmitted response escaped its ordinary refusal branch: plans=%d error=%v", len(plans), err)
 			}

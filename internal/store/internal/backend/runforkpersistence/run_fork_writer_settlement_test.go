@@ -157,7 +157,19 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 					admission_fingerprint text, container_plan_fingerprint text,
 					actor_census_fingerprint text, effective_config_fingerprint text,
 					preparation_binding jsonb, preparation_fingerprint text,
-					declaration_plan_fingerprint text, executable_coordinate_fingerprint text
+					declaration_plan_fingerprint text, executable_coordinate_fingerprint text,
+					binding_id uuid NOT NULL, source_run_id uuid NOT NULL,
+					UNIQUE(execution_id,binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,generation),
+					UNIQUE(execution_id,fork_event_id)
+				);
+				CREATE TABLE run_fork_selected_contract_execution_detachments (execution_id uuid PRIMARY KEY, binding_id uuid NOT NULL);
+				CREATE TABLE run_fork_selected_contract_execution_live_parents (
+					execution_id uuid PRIMARY KEY, binding_id uuid NOT NULL, fork_run_id uuid NOT NULL,
+					source_run_id uuid NOT NULL, fork_point_kind text NOT NULL, fork_revision bigint NOT NULL,
+					generation bigint NOT NULL, fork_event_id uuid,
+					FOREIGN KEY(execution_id,binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,generation)
+					REFERENCES run_fork_selected_contract_runtime_executions(execution_id,binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,generation),
+					FOREIGN KEY(execution_id,fork_event_id) REFERENCES run_fork_selected_contract_runtime_executions(execution_id,fork_event_id)
 				)`); err != nil {
 				t.Fatal(err)
 			}
@@ -204,9 +216,14 @@ func TestSelectedForkClaimPreservesCommittedEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.Exec(`INSERT INTO run_fork_selected_contract_runtime_executions VALUES ($1,$2,1,'event',1,$3,'prepared','issuer',$4,NULL,'admission','container','actors','config',$5,$6,$7,$8)`, issued.ExecutionID, issued.ForkRunID, issued.ForkEventID, issued.LeaseExpiresAt, string(preparationJSON), issued.PreparationFingerprint, issued.DeclarationPlanFingerprint, issued.ExecutableCoordinateFingerprint); err != nil {
+			if _, err := db.Exec(`INSERT INTO run_fork_selected_contract_runtime_executions VALUES ($1,$2,1,'event',1,$3,'prepared','issuer',$4,NULL,'admission','container','actors','config',$5,$6,$7,$8,$9,$10)`, issued.ExecutionID, issued.ForkRunID, issued.ForkEventID, issued.LeaseExpiresAt, string(preparationJSON), issued.PreparationFingerprint, issued.DeclarationPlanFingerprint, issued.ExecutableCoordinateFingerprint, uuid.NewString(), issued.SourceRunID); err != nil {
 				t.Fatal(err)
 			}
+			withForkOperationTx(t, db, func(tx *sql.Tx) {
+				if err := insertSelectedExecutionLiveParentsTx(context.Background(), tx, issued.ExecutionID); err != nil {
+					t.Fatal(err)
+				}
+			})
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			primary := errors.New("selected claim exit failure")
@@ -484,7 +501,7 @@ func TestSelectedForkActivationProjectsAcknowledgedOutcome(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			primary := errors.New("activation settlement error")
-			s := &RunForkPostgresOwner{requireCurrent: func() error { return nil }}
+			s := &RunForkPostgresOwner{requireCurrent: func() error { return nil }, replies: &runForkReplyOwnerProbe{}}
 			port := postgresRunForkSelectedContractActivationPort(s)
 			// Isolate the typed projection from SQL. The port settlement matrix
 			// above separately proves the real transaction's acknowledged outcome.

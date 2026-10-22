@@ -2,6 +2,7 @@ package pipeline_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -53,14 +54,14 @@ func (p publishedBarrierCrashAuthority) native() effects.Authority {
 }
 
 func TestIssue642PublishedBarrierCrashProcessHelper(t *testing.T) {
-	if os.Getenv("SWARM_PUBLISHED_BARRIER_CRASH_BACKEND") == "" {
+	if os.Getenv("TEST_PUBLISHED_BARRIER_CRASH_BACKEND") == "" {
 		return
 	}
 	TestIssue642PublishedFanOutBarrierContinuesFinalConsumerBothStores(t)
 }
 
 func TestIssue642UnpublishedBarrierCrashProcessHelper(t *testing.T) {
-	if os.Getenv("SWARM_UNPUBLISHED_BARRIER_CRASH_BACKEND") == "" {
+	if os.Getenv("TEST_UNPUBLISHED_BARRIER_CRASH_BACKEND") == "" {
 		return
 	}
 	TestIssue642UnpublishedTransferredBarrierReforkBothStores(t)
@@ -81,7 +82,7 @@ func publishBarrierCrashCheckpoint(t *testing.T, ctx context.Context, selected *
 		t.Fatal("crash proof must preserve the exact active authority without another union branch")
 	}
 	child, err := selected.Entities().LoadOperatorEntity(ctx, claim.RunID(), claim.RunID())
-	if err != nil || child.Fields["completed_total"] != float64(0) || forkFixtureEntityRevision(t, child.Entity.Revision) != 1 {
+	if err != nil || child.Fields["completed_total"] != json.Number("0") || forkFixtureEntityRevision(t, child.Entity.Revision) != 1 {
 		t.Fatalf("crash crossed the unpublished final-consumer write: %+v err=%v", child, err)
 	}
 	fixture := &mixedFanOutCrashFixture{}
@@ -112,10 +113,10 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 				request.Selection = storebackend.Selection{Backend: storebackend.BackendPostgres}
 				request.PostgresDSN = address
 			}
-			helper, prefix := "TestIssue642PublishedBarrierCrashProcessHelper", "SWARM_PUBLISHED_BARRIER_CRASH_"
+			helper, prefix := "TestIssue642PublishedBarrierCrashProcessHelper", "TEST_PUBLISHED_BARRIER_CRASH_"
 			actor, key, transport := "published-barrier-crash", "pending-cut", "published-barrier-crash-transport"
 			if pendingSource {
-				helper, prefix = "TestIssue642UnpublishedBarrierCrashProcessHelper", "SWARM_UNPUBLISHED_BARRIER_CRASH_"
+				helper, prefix = "TestIssue642UnpublishedBarrierCrashProcessHelper", "TEST_UNPUBLISHED_BARRIER_CRASH_"
 				actor, key, transport = "pending-barrier-refork", "parent-start", "pending-barrier-refork-transport"
 			}
 			checkpoint := killSelectedReceiverAtClaim(t, helper, []string{prefix + "BACKEND=" + backend, prefix + "ADDRESS=" + address})
@@ -279,7 +280,7 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			}
 			waitPublishedBarrierPipelineReceipts(t, wait, selected.RuntimeDeps().DeliveryStore, observed.id, output)
 			child, err := selected.Entities().LoadOperatorEntity(wait, checkpoint.Proof.ChildRunID, checkpoint.Proof.ChildRunID)
-			if err != nil || child.Fields["completed_total"] != float64(1) || forkFixtureEntityRevision(t, child.Entity.Revision) != checkpoint.ChildRevision+1 {
+			if err != nil || child.Fields["completed_total"] != json.Number("1") || forkFixtureEntityRevision(t, child.Entity.Revision) != checkpoint.ChildRevision+1 {
 				t.Fatalf("barrier successor lost the once-only final consumer: %+v err=%v", child, err)
 			}
 			final, err := family.Plan(wait, runfork.RunForkPlanRequest{SourceRunID: checkpoint.Proof.ChildRunID, At: output})

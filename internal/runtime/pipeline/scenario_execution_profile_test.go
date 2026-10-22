@@ -44,7 +44,7 @@ func TestAuthoredScenarioWitnessResponsePlanNeverRescansMaterializedData(t *test
 	}
 	tool, err := runtimecontracts.NewToolSchemaEntry(
 		runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-
+		runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"}),
 		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), output),
 	)
@@ -274,6 +274,10 @@ func VerifyScenarioExecutionProfileMismatchFencesTerminalReplayForTest(t *testin
 	if len(firstBus.publishes) != 1 {
 		t.Fatalf("initial publications = %#v", firstBus.publishes)
 	}
+	success, err := admitActivityPublication(intent, intent.SuccessEvent)
+	if err != nil || firstBus.publishes[0].ID() != success.eventID {
+		t.Fatalf("initial profiled activity did not succeed: event=%s payload=%s err=%v", firstBus.publishes[0].ID(), firstBus.publishes[0].Payload(), err)
+	}
 
 	drifted, err := scenarioexecution.NewEffectiveSourceIdentity(fact, "sha256:"+strings.Repeat("8", 64))
 	if err != nil {
@@ -313,7 +317,7 @@ func scenarioExecutionProfileTestSource(t *testing.T) (semanticview.Source, runt
 	tool, err := runtimecontracts.NewToolSchemaEntry(
 		runtimecontracts.WithToolCategory("provider_connector"),
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-
+		runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"}),
 		runtimecontracts.WithToolSchemas(empty, output),
 	)

@@ -2,6 +2,7 @@ package pipeline_test
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -197,7 +198,7 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 					t.Fatalf("selected barrier did not reach its real final consumer: %v", err)
 				}
 				child, err := selected.Entities().LoadOperatorEntity(phase, proof.ForkRunID, proof.ForkRunID)
-				if err != nil || child.Fields["completed_total"] != float64(1) || forkFixtureEntityRevision(t, child.Entity.Revision) != 2 {
+				if err != nil || child.Fields["completed_total"] != json.Number("1") || forkFixtureEntityRevision(t, child.Entity.Revision) != 2 {
 					t.Fatalf("final consumer did not retain exactly one ordinal: %+v err=%v", child, err)
 				}
 				childPlan, err := family.Plan(phase, runfork.RunForkPlanRequest{SourceRunID: proof.ForkRunID, At: final.EventID})

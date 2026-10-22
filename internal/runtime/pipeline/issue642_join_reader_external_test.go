@@ -101,7 +101,7 @@ func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, 
 		files["nodes.yaml"] += "        on_deadline: {advances_to: ready}\n"
 	}
 	if scenario.emptyList {
-		files["entities.yaml"] += "  members_list: \"[text]\"\n"
+		files["entities.yaml"] += "  members_list: [text]\n"
 		files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "members: {count: 0, by: payload.member_id}", "members: {from: state.members_list, by: payload.member_id}", 1)
 	}
 	subscriptions := []events.EventType{"item.completed"}
@@ -156,6 +156,7 @@ func issue642NewJoinReaderFixture(t *testing.T, selected gateRecoveryStoreCase, 
 	}
 	initial, lifecycle, err := f.pc.PrepareInitialEntryLifecycle(ctx, f.owner, pipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: semanticview.RootExecutionFlowID(source), WorkflowVersion: source.WorkflowVersion(),
+		Mode:         bundle.RootSchema.EffectiveMode(),
 		CurrentState: "awaiting", StageDefined: true, EntityType: "count_state", EnteredStageAt: at, CreatedAt: at,
 		Fields: fields,
 	}, at)

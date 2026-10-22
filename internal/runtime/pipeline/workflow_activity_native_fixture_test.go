@@ -14,6 +14,7 @@ import (
 // or a test transaction runner reconstructed around the selected database.
 type WorkflowActivityNativeFixtureForTest struct {
 	Persistence               WorkflowPersistence
+	CaptureActivityJournal    func() ActivityAttemptJournal
 	Context                   context.Context
 	Runs                      runlifecycle.OperationOwner
 	RequireRun                func(context.Context, string) error

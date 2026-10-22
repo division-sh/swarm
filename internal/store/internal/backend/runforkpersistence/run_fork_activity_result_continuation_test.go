@@ -41,7 +41,7 @@ func activityPublicationCutFixture(t *testing.T) (runForkSourceStateAdmission, s
 	f.record = activityPublicationFixtureRecord(t, original)
 	source.SourceEventID = original.ID()
 	resultID := activityidentity.ResultEventID(fact, "compute.succeeded")
-	raw := []byte(`{"activity_id":"compute","result":{"value":"recorded"},"tool":"compute"}`)
+	raw := []byte(`{"activity_id":"compute","result":{"value":"recorded"},"tool":"compute","effect_class":"read_only","attempt":1}`)
 	producer, err := events.NewProducerIdentity(events.EventProducerAgent, "provider")
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +65,8 @@ func activityPublicationCutFixture(t *testing.T) (runForkSourceStateAdmission, s
 	snapshot := &runForkRevisionSnapshot{RunID: f.record.RunID, Revision: 3,
 		Events: []runForkRevisionEvent{genericPublicationRevisionEvent(f.record, original), genericPublicationRevisionEvent(record, result)}}
 	child := runForkActivityRequestPayload{SourceRunID: uuid.NewString(), SourceEventID: uuid.NewString(), EntityID: uuid.NewString(),
-		NodeID: fact.Owner.Key(), FlowID: ".", HandlerEventKey: fact.HandlerEventKey, ActivityID: fact.ActivityID, Tool: fact.Tool}
+		NodeID: fact.Owner.Key(), FlowID: ".", HandlerEventKey: fact.HandlerEventKey, ActivityID: fact.ActivityID, Tool: fact.Tool,
+		EffectClass: "read_only", Attempt: 1, SuccessEvent: "compute.succeeded", FailureEvent: "compute.failed"}
 	evidence := runForkActivityAttemptEvidence{Status: "succeeded", ExecutionMode: source.ExecutionMode,
 		ResultEventID: resultID, ResultEventType: "compute.succeeded", ResultPayload: raw, InputHash: "exact-input", CompletedAt: result.CreatedAt()}
 	return runForkSourceStateAdmission{snapshot: snapshot, forkRunID: child.SourceRunID}, source.SourceEventID, evidence, child

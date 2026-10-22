@@ -27,10 +27,10 @@ func SetBarrierCompletionPublicationFaultTx(ctx context.Context, tx *sql.Tx, pos
 		statements = []string{"DROP TRIGGER selected_barrier_completion_output_cut ON events", "DROP FUNCTION selected_barrier_completion_output_cut()"}
 	}
 	if enabled {
-		witness := fmt.Sprintf(`EXISTS (SELECT 1 FROM entity_state WHERE run_id='%s' AND entity_id='%s' AND revision=%d)
+		witness := fmt.Sprintf(`EXISTS (SELECT 1 FROM entity_state WHERE run_id='%s' AND entity_id='%s')
 			AND EXISTS (SELECT 1 FROM flow_instances WHERE run_id='%s' AND entity_id='%s' AND revision=%d)
 			AND (SELECT COUNT(*) FROM entity_mutations WHERE run_id='%s' AND entity_id='%s')>%d`,
-			run, entity, revision+1, run, entity, revision+1, run, entity, mutations)
+			run, entity, run, entity, revision+1, run, entity, mutations)
 		statements = []string{fmt.Sprintf(`CREATE TRIGGER selected_barrier_completion_output_cut AFTER INSERT ON events
 			WHEN NEW.run_id='%s' AND NEW.event_name='producer/batch.completed' AND (%s)
 			BEGIN SELECT RAISE(ABORT,'selected_barrier_completion_late_output_fault'); END`, run, witness)}

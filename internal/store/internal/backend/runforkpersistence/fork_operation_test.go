@@ -222,6 +222,13 @@ func forkOperationTestDatabase(t *testing.T, backend string) *sql.DB {
 		t.Cleanup(func() { _ = db.Close() })
 	}
 	db.SetMaxOpenConns(1)
+	// These operation-only cuts have no detached history. Keep the positive
+	// detachment exclusion present rather than bypassing the native reader.
+	if _, err := db.Exec(`CREATE TABLE run_fork_selected_contract_execution_detachments (
+		execution_id TEXT PRIMARY KEY, binding_id TEXT NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
 	query := strings.ReplaceAll(`CREATE TABLE run_fork_operations (
 		operation_id TEXT PRIMARY KEY, actor TEXT NOT NULL, idempotency_key TEXT,
 		transport_hash TEXT NOT NULL, semantic_hash TEXT NOT NULL,

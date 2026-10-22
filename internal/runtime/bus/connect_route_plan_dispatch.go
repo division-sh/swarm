@@ -125,7 +125,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 	if len(matched) == 0 {
 		return connectRoutePlanDispatch{Evaluation: emptyEvaluation}, nil
 	}
-	matched, replyRecord, err := r.resolveReplyPlans(ctx, matched)
+	matched, replyRecord, err := r.resolveReplyPlans(ctx, evt, matched)
 	if err != nil {
 		return connectRoutePlanDispatch{}, err
 	}
@@ -158,9 +158,9 @@ func terminalDiagnosticPlans(plans []runtimepinrouting.ConnectRoutePlan) bool {
 	return true
 }
 
-// A paired response narrows response authority, not unrelated ordinary edges.
-// Missing authority still reaches typed refusal before ordinary publication.
-func (r connectRoutePlanResolver) resolveReplyPlans(ctx context.Context, matched []runtimepinrouting.ConnectRoutePlan) ([]runtimepinrouting.ConnectRoutePlan, runtimereplycontext.Record, error) {
+// Ordinary replies resume only their retained return audience. Selected replay
+// may also carry ordinary routes already fixed by its exact recipient owner.
+func (r connectRoutePlanResolver) resolveReplyPlans(ctx context.Context, event events.Event, matched []runtimepinrouting.ConnectRoutePlan) ([]runtimepinrouting.ConnectRoutePlan, runtimereplycontext.Record, error) {
 	var responses []runtimepinrouting.ConnectRoutePlan
 	for _, plan := range matched {
 		if plan.ReplyRole() == runtimepinrouting.ConnectReplyRoleResponse {
@@ -189,6 +189,13 @@ func (r connectRoutePlanResolver) resolveReplyPlans(ctx context.Context, matched
 	}
 	if len(exact) == 0 {
 		return responses, record, nil
+	}
+	retained, err := selectedForkReplyReturn(ctx, event, record)
+	if err != nil {
+		return nil, runtimereplycontext.Record{}, err
+	}
+	if !retained {
+		return exact, record, nil
 	}
 	var admitted []runtimepinrouting.ConnectRoutePlan
 	for _, plan := range matched {

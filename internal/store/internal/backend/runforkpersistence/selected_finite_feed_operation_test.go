@@ -95,7 +95,12 @@ func TestSelectedFiniteFeedRecoveryPinsMatchDurableFeedInventoryBothStores(t *te
 					}
 				})
 			}
-			read(true) // An eventless child does not require a synthetic feed or pin.
+			withForkOperationTx(t, db, func(tx *sql.Tx) {
+				pins, err := selectedForkRecoveryPinsTx(ctx, tx, runID, bundle)
+				if err != nil || len(pins) != 0 {
+					t.Fatalf("eventless child invented a feed pin: pins=%+v err=%v", pins, err)
+				}
+			})
 			if _, err := db.Exec(`INSERT INTO fan_out_intents VALUES ($1,'deployment','.','root.ready',$2,$3,$4)`, runID, version, schema, bundle); err != nil {
 				t.Fatal(err)
 			}

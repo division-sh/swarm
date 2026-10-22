@@ -499,7 +499,7 @@ func assertForkEngineRows(t *testing.T, ctx context.Context, selected *storesele
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := func(snapshot map[string]storetest.SelectedForkStorageTableSnapshot, path, entity string) (fields string, revision int64, found bool) {
+	state := func(snapshot map[string]storetest.SelectedForkStorageTableSnapshot, path, entity string) (fields string, found bool) {
 		rows, err := storetest.DecodeSelectedForkSnapshotRows(snapshot["entity_state"])
 		if err != nil {
 			t.Fatal(err)
@@ -523,14 +523,19 @@ func assertForkEngineRows(t *testing.T, ctx context.Context, selected *storesele
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := json.Unmarshal(row["revision"].Value, &revision); err != nil {
-				t.Fatal(err)
-			}
 			found = true
 		}
-		return fields, revision, found
+		return fields, found
 	}
-	fields, revision, found := state(child, "consumer", receiver)
+	fields, found := state(child, "consumer", receiver)
+	var revision int64
+	if found {
+		readback, err := selected.Entities().LoadOperatorEntity(ctx, receiver, childRun)
+		if err != nil || readback.Entity.EntityID != receiver || readback.Entity.FlowInstance != "consumer" {
+			t.Fatalf("receiver header did not match its field companion: %+v err=%v", readback, err)
+		}
+		revision = int64(forkFixtureEntityRevision(t, readback.Entity.Revision))
+	}
 	if missing {
 		if found {
 			t.Fatalf("required-state failure recreated the receiver: %s", fields)
@@ -538,10 +543,10 @@ func assertForkEngineRows(t *testing.T, ctx context.Context, selected *storesele
 	} else if !found || forkEngineMarker(t, fields) != "consumer-engine" || revision != wantRevision {
 		t.Fatalf("engine did not write receiving entity exactly once: %s revision=%d want=%d found=%t", fields, revision, wantRevision, found)
 	}
-	if fields, _, found := state(child, "producer", ""); !found || forkEngineMarker(t, fields) != "producer-owned" {
+	if fields, found := state(child, "producer", ""); !found || forkEngineMarker(t, fields) != "producer-owned" {
 		t.Fatalf("engine borrowed producer state: %s found=%t", fields, found)
 	}
-	if fields, _, found := state(source, "consumer", ""); !found || fields != sourceBefore {
+	if fields, found := state(source, "consumer", ""); !found || fields != sourceBefore {
 		t.Fatalf("engine mutated source receiver: %s found=%t", fields, found)
 	}
 }

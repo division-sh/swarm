@@ -52,7 +52,7 @@ func VerifyReadOnlyPublishedAccountingAfterNativeLoopAdvanceAndReopenForTest(t *
     read.failed:
       guard: {id: exact_activity, check: payload.activity_id == 'read'}
 `,
-				"tools.yaml": fmt.Sprintf("read:\n  handler_type: http\n  http: {method: GET, url: %q}\n", server.URL),
+				"tools.yaml": fmt.Sprintf("read:\n  handler_type: http\n  effect_class: read_only\n  http: {method: GET, url: %q}\n", server.URL),
 			})
 			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 			run := correlation.RunIDFromContext(ctx)

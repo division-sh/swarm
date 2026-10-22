@@ -58,8 +58,9 @@ func TestIssue642FanOutPublishedPendingNodeProjection(t *testing.T) {
 				}
 				row := deliverylifecycle.HistoricalFact{DeliveryID: deliveryID, EventID: event, RunID: run, Route: route, RouteIdentity: routeID,
 					SubscriberClass: deliverylifecycle.SubscriberNode, SubscriberID: node.Key(), Status: status,
-					CreatedAt: now, MaxRetries: 3}
+					CreatedAt: now, MaxRetries: 3, FinalSelection: deliverylifecycle.AbsentSelection()}
 				if status.Terminal() {
+					row.FinalSelection = deliverylifecycle.PresentSelection(deliverylifecycle.NotApplicableHandlerRuleSelection())
 					row.SettledClaimVersion, row.SettledAt = 1, now
 				} else {
 					pendingRows[deliveryID] = runfork.RunForkPendingWork{DeliveryID: deliveryID, EventID: event, SubscriberType: "node", SubscriberID: node.Key(), DeliveryRoute: route,

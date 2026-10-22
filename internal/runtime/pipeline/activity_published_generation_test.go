@@ -65,7 +65,7 @@ func TestReadOnlyPublishedAccountingAfterGenerationAdvance(t *testing.T) {
 	}))
 	defer server.Close()
 	intent, _, _, base := publishedActivityAccountingFixture(t)
-	bundle.Tools[intent.Tool] = contracts.MustToolSchemaEntry(contracts.WithToolHandler(contracts.MustToolHandlerKind("http")), contracts.WithToolSchemas(contracts.MustToolInputSchema(contracts.ToolSchemaObject), contracts.MustToolInputSchema(contracts.ToolSchemaObject)), contracts.WithToolHTTP(contracts.HTTPToolSpec{Method: "GET", URL: server.URL}))
+	bundle.Tools[intent.Tool] = contracts.MustToolSchemaEntry(contracts.WithToolHandler(contracts.MustToolHandlerKind("http")), contracts.WithToolEffect(contracts.ActivityEffectClassReadOnly), contracts.WithToolSchemas(contracts.MustToolInputSchema(contracts.ToolSchemaObject), contracts.MustToolInputSchema(contracts.ToolSchemaObject)), contracts.WithToolHTTP(contracts.HTTPToolSpec{Method: "GET", URL: server.URL}))
 	source := semanticview.Wrap(bundle)
 	parent := flowidentity.Derive(source, "outer/left/sink", "same-revision")
 	child, err := flowidentity.KeylessChild(source, parent, parent.TemplateID+"/final")

@@ -17,7 +17,7 @@ func continuedActivityIdentityFixture(t *testing.T) (selectedInputReadFixture, r
 	f.record.EventName, f.lineage.EventName = runForkActivityRequestEvent, runForkActivityRequestEvent
 	request := runForkActivityRequestPayload{SourceRunID: f.record.RunID, SourceEventID: f.record.EventID, EntityID: f.record.RunID,
 		FlowID: ".", NodeID: activityidentity.MustAgentOwner("provider").Key(), HandlerEventKey: "request.started", ActivityID: "compute", Tool: "compute",
-		SuccessEvent: "compute.succeeded", FailureEvent: "compute.failed"}
+		SuccessEvent: "compute.succeeded", FailureEvent: "compute.failed", EffectClass: "read_only", Attempt: 1}
 	payload, err := json.Marshal(request)
 	if err != nil {
 		t.Fatal(err)

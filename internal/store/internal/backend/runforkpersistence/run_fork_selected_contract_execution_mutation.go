@@ -89,8 +89,19 @@ func prepareRunForkSelectedContractRouteResolution(
 			firstTurnSeen = true
 			continue
 		}
+		pending, pendingPresent, err := plan.PendingJoinOccurrence(entry.SourceEventID)
+		if err != nil {
+			return runfork.RunForkSelectedContractRouteRecovery{}, err
+		}
+		if pendingPresent {
+			_, physical := historicalEvents[entry.SourceEventID]
+			if physical || entry.EventName != pending.Command.EventType || len(entry.SourceClassifications) != 1 || entry.SourceClassifications[0] != "retained_pending_join" {
+				return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route frontier differs from its exact retained pending join")
+			}
+			continue
+		}
 		for _, classification := range entry.SourceClassifications {
-			if strings.TrimSpace(classification) == "start_first_turn" {
+			if strings.TrimSpace(classification) == "start_first_turn" || strings.TrimSpace(classification) == "retained_pending_join" {
 				return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route first turn is not its admitted original intention")
 			}
 		}

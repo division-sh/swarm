@@ -226,7 +226,7 @@ func c4NativeComponentSourceConstruction(source pipeline.WorkflowTimerActivation
 		Identity: identity, OccurredAt: source.CreatedAt,
 		Instance: pipeline.WorkflowInstance{
 			InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
-			WorkflowName: identity.TemplateID, WorkflowVersion: "c4-source-component", Mode: "template", Status: "active",
+			WorkflowName: identity.TemplateID, WorkflowVersion: "c4-source-component", Mode: "static", Status: "active",
 			CurrentState: "waiting", StageDefined: true, EnteredStageAt: source.CreatedAt, CreatedAt: source.CreatedAt,
 		},
 		Readiness: pipeline.DynamicFlowRuntimeReadinessPlan{

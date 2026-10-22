@@ -20,8 +20,13 @@ func VerifyActivityAttemptJournalSQLiteAndPostgresForTest(t *testing.T, open fun
 		t.Run(backend, func(t *testing.T) {
 			fixture := open(t, backend)
 			journal, ctx := fixture.Persistence.store, fixture.Context
+			journal.activityJournal = fixture.CaptureActivityJournal()
 			runID := uuid.NewString()
 			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
+			}
+			initial, err := fixture.ReadJournal(ctx, runID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
@@ -80,8 +85,8 @@ func VerifyActivityAttemptJournalSQLiteAndPostgresForTest(t *testing.T, open fun
 				if err != nil {
 					t.Fatalf("count activity-only run fork revisions: %v", err)
 				}
-				if observed.RunForkRevisions != 0 {
-					t.Fatalf("activity-only run fork revisions = %d, want 0 for post-frontier selected-execution evidence", observed.RunForkRevisions)
+				if observed.RunForkRevisions != initial.RunForkRevisions {
+					t.Fatalf("activity-only transitions changed the constructed run's frontier: before=%d after=%d", initial.RunForkRevisions, observed.RunForkRevisions)
 				}
 			}
 		})
@@ -93,6 +98,7 @@ func VerifyActivityAttemptJournalPreservesReplyContextAcrossRestartForTest(t *te
 		t.Run(backend, func(t *testing.T) {
 			fixture := open(t, backend)
 			journal, ctx := fixture.Persistence.store, fixture.Context
+			journal.activityJournal = fixture.CaptureActivityJournal()
 			runID := uuid.NewString()
 			if err := fixture.RequireRun(ctx, runID); err != nil {
 				t.Fatal(err)
@@ -122,6 +128,7 @@ func VerifyLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStoresForTest(t *te
 		t.Run(backend, func(t *testing.T) {
 			fixture := open(t, backend)
 			store := fixture.Persistence.store
+			store.activityJournal = fixture.CaptureActivityJournal()
 			// Each independent cell constructs one keyless validation instance.
 			newRunContext := func(t *testing.T) context.Context {
 				t.Helper()

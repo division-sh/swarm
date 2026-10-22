@@ -65,13 +65,13 @@ func (f *mixedFanOutCrashFixture) publishCheckpoint(t *testing.T, checkpoint mix
 }
 
 func TestIssue642MixedFanOutCrashProcessHelper(t *testing.T) {
-	backend := os.Getenv("SWARM_MIXED_FANOUT_CRASH_BACKEND")
+	backend := os.Getenv("TEST_MIXED_FANOUT_CRASH_BACKEND")
 	if backend == "" {
 		return
 	}
 	runMixedFanOutPendingMatrixWithCrash(t, false, &mixedFanOutCrashFixture{
-		backend: backend, address: os.Getenv("SWARM_MIXED_FANOUT_CRASH_ADDRESS"),
-		retained: fanoutobligation.InheritedTerminalDisposition(os.Getenv("SWARM_MIXED_FANOUT_CRASH_RETAINED")),
+		backend: backend, address: os.Getenv("TEST_MIXED_FANOUT_CRASH_ADDRESS"),
+		retained: fanoutobligation.InheritedTerminalDisposition(os.Getenv("TEST_MIXED_FANOUT_CRASH_RETAINED")),
 	})
 }
 
@@ -251,8 +251,8 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 func killMixedFanOutAtClaim(t *testing.T, backend, address string, retained fanoutobligation.InheritedTerminalDisposition) mixedFanOutCrashCheckpoint {
 	t.Helper()
 	return killSelectedReceiverAtClaim(t, "TestIssue642MixedFanOutCrashProcessHelper", []string{
-		"SWARM_MIXED_FANOUT_CRASH_BACKEND=" + backend, "SWARM_MIXED_FANOUT_CRASH_ADDRESS=" + address,
-		"SWARM_MIXED_FANOUT_CRASH_RETAINED=" + string(retained),
+		"TEST_MIXED_FANOUT_CRASH_BACKEND=" + backend, "TEST_MIXED_FANOUT_CRASH_ADDRESS=" + address,
+		"TEST_MIXED_FANOUT_CRASH_RETAINED=" + string(retained),
 	})
 }
 

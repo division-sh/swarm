@@ -465,30 +465,49 @@ func requireCurrentExternalEffectAuthorityMutation(res sql.Result, err error, au
 }
 
 func requireCompletionAuthorityNoLiveAttempts(ctx context.Context, tx *sql.Tx, sqlite bool, authority runtimeeffects.Authority) error {
-	var query string
 	var coordinate string
 	switch authority.Kind {
 	case runtimeeffects.AuthoritySelectedContractFork:
 		coordinate = authority.SelectedFork.ExecutionID
+	case runtimeeffects.AuthorityConversationForkChat:
+		coordinate = authority.ForkChat.ForkTurnID
+	default:
+		return fmt.Errorf("completion authority %q has no container terminalization", authority.Kind)
+	}
+	return requireNoLiveCompletionAttempts(ctx, tx, sqlite, authority.Kind, coordinate)
+}
+
+// This is a negative history guard, not completion evidence or an execution
+// authority. The reset owner must independently prove the complete closed cohort.
+func RequireSelectedHistoryNoLiveAttemptsTx(ctx context.Context, tx *sql.Tx, executionID string, sqlite bool) error {
+	return requireNoLiveCompletionAttempts(ctx, tx, sqlite, runtimeeffects.AuthoritySelectedContractFork, executionID)
+}
+
+func requireNoLiveCompletionAttempts(ctx context.Context, tx *sql.Tx, sqlite bool, kind runtimeeffects.AuthorityKind, coordinate string) error {
+	if tx == nil || coordinate == "" {
+		return fmt.Errorf("completion attempt guard requires its transaction and exact coordinate")
+	}
+	var query string
+	switch kind {
+	case runtimeeffects.AuthoritySelectedContractFork:
 		query = `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.selected_execution_id=$1::uuid AND a.state IN ('authorized','launched','response_observed')`
 		if sqlite {
 			query = `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.selected_execution_id=? AND a.state IN ('authorized','launched','response_observed')`
 		}
 	case runtimeeffects.AuthorityConversationForkChat:
-		coordinate = authority.ForkChat.ForkTurnID
 		query = `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.fork_turn_id=$1::uuid AND a.state IN ('authorized','launched','response_observed')`
 		if sqlite {
 			query = `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.fork_turn_id=? AND a.state IN ('authorized','launched','response_observed')`
 		}
 	default:
-		return fmt.Errorf("completion authority %q has no container terminalization", authority.Kind)
+		return fmt.Errorf("completion authority %q has no container terminalization", kind)
 	}
 	var count int
 	if err := tx.QueryRowContext(ctx, query, coordinate).Scan(&count); err != nil {
-		return fmt.Errorf("count live completion attempts for %s: %w", authority.Kind, err)
+		return fmt.Errorf("count live completion attempts for %s: %w", kind, err)
 	}
 	if count != 0 {
-		return fmt.Errorf("%s authority has %d non-terminal completion attempts", authority.Kind, count)
+		return fmt.Errorf("%s authority has %d non-terminal completion attempts", kind, count)
 	}
 	return nil
 }

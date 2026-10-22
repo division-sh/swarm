@@ -42,7 +42,7 @@ func TestIssue642UnpublishedBarrierIgnoresLateSourcePublicationBothStores(t *tes
 
 func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication bool) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		if crashBackend := os.Getenv("SWARM_UNPUBLISHED_BARRIER_CRASH_BACKEND"); crashBackend != "" && backend != crashBackend {
+		if crashBackend := os.Getenv("TEST_UNPUBLISHED_BARRIER_CRASH_BACKEND"); crashBackend != "" && backend != crashBackend {
 			continue
 		}
 		t.Run(backend, func(t *testing.T) {
@@ -56,7 +56,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 			}
 			probe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), resume: make(chan struct{}), completed: make(chan string, 1)}
 			root := canonicalrouting.CopyForkFanOutBarrierReceiver(t)
-			rt, selected, repo, capability, _, _ := startForkEngineRuntimeOwnerAt(t, backend, root, probe, os.Getenv("SWARM_UNPUBLISHED_BARRIER_CRASH_ADDRESS"))
+			rt, selected, repo, capability, _, _ := startForkEngineRuntimeOwnerAt(t, backend, root, probe, os.Getenv("TEST_UNPUBLISHED_BARRIER_CRASH_ADDRESS"))
 			var release sync.Once
 			t.Cleanup(func() { release.Do(func() { close(probe.resume) }) })
 			ctx := correlation.WithRuntimeInstanceID(context.Background(), rt.Options.RuntimeInstanceID)
@@ -109,6 +109,11 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 				ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 				AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture}}
+			request.ForkOperation = &runfork.ForkOperationRequest{
+				OperationID: uuid.NewString(), Actor: "pending-barrier-parent", IdempotencyKey: "ancestor-cut",
+				TransportHash: "sha256:pending-barrier-parent", SourceRunID: ancestor, ForkEventID: original.id,
+				TargetBundleHash: rt.Options.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection, AllowSourceFreeze: true,
+			}
 			parentRequest := request
 			prepared, err := family.Prepare(phase, request)
 			if err != nil {
@@ -126,6 +131,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 			writer := selected.RuntimeDeps().DeliveryStore.(interface {
 				MaterializeRunForkForSelectedContractExecution(context.Context, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
 			})
+			materialization.ForkOperation = request.ForkOperation
 			parent, err := writer.MaterializeRunForkForSelectedContractExecution(phase, materialization)
 			if err != nil {
 				t.Fatal(err)
@@ -151,7 +157,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 				t.Fatal(err)
 			}
 			childProbe := &publishedBarrierClaimProbe{Probe: lifecycleprobe.New(), owner: producer.Key(), claim: make(chan forkEngineObservation, 1), completed: make(chan string, 1)}
-			if os.Getenv("SWARM_UNPUBLISHED_BARRIER_CRASH_BACKEND") != "" {
+			if os.Getenv("TEST_UNPUBLISHED_BARRIER_CRASH_BACKEND") != "" {
 				childProbe.resume = make(chan struct{})
 				t.Cleanup(func() { close(childProbe.resume) })
 			}

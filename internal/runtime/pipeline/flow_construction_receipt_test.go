@@ -188,7 +188,7 @@ func TestFlowConstructionReceiptV3StoredHeaderDelegatesStrictAdmission(t *testin
 		{"version_two", strings.Replace(raw, `"version":3`, `"version":2`, 1)},
 		{"legacy_readiness", strings.TrimSuffix(raw, "}") + `,"readiness":{}}`},
 		{"duplicate_identity", strings.TrimSuffix(raw, "}") + `,"identity":null}`},
-		{"invalid_initial_state", strings.Replace(raw, `"initial_state":"initial"`, `"initial_state":""`, 1)},
+		{"invalid_initial_state", strings.Replace(raw, `"initial_state":"pending"`, `"initial_state":""`, 1)},
 		{"trailing_value", raw + `{}`},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -466,7 +466,7 @@ func TestFlowConstructionReceiptV3PersistenceRecordSeparatesReadiness(t *testing
 		Instance: WorkflowInstance{
 			StorageRef: receipt.FlowInstance, InstanceID: receipt.Identity.InstanceID, EntityID: receipt.EntityID, EntityType: "account",
 			WorkflowName: receipt.WorkflowName, WorkflowVersion: receipt.WorkflowVersion, Mode: "template", Status: "active",
-			CurrentState: receipt.InitialState, Fields: receipt.Persisted.Fields, StageDefined: true,
+			CurrentState: receipt.InitialState, Fields: receipt.Persisted.Fields, StageDefined: true, InstanceKey: receipt.InstanceKey,
 			EnteredStageAt: receipt.OccurredAt, CreatedAt: receipt.OccurredAt,
 		},
 	}
