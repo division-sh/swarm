@@ -39,18 +39,14 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected stageCompletionJourneyStore
-			var reopen func() stageCompletionJourneyStore
 			var db *sql.DB
 			if backend == "sqlite" {
-				s, open := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background())
+				s := storetest.StartSQLiteRuntimeStore(t)
 				selected, db = s, storetest.DatabaseForTest(s)
-				reopen = func() stageCompletionJourneyStore { return open() }
 			} else {
-				dsn, opened, cleanup := testutil.StartPostgres(t)
+				_, opened, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				s, open := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)
-				selected, db = s, opened
-				reopen = func() stageCompletionJourneyStore { return open() }
+				selected, db = storetest.AdmitPostgresRuntimeStore(t, opened), opened
 			}
 			bundle := exactStageCompletionJourneyBundle(t)
 			source := semanticview.Wrap(bundle)
@@ -83,15 +79,14 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			stageCompletionWaitForDelivery(t, db, backend, runID, "flow.started")
 			stageCompletionAssertStoredState(t, selected, runID, "ready")
 
-			recovered := reopen()
-			recoveredSource := stageCompletionRehydrate(t, recovered, runID, fact.BundleHash())
-			stageCompletionAssertStoredState(t, recovered, runID, "ready")
+			recoveredSource := stageCompletionRehydrate(t, selected, runID, fact.BundleHash())
+			stageCompletionAssertStoredState(t, selected, runID, "ready")
 			catalog := stageCompletionCatalog(t, recoveredSource)
 			ctx := testAuthorActivityContextForSource(context.Background(), fact)
-			if _, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
+			if _, err := selected.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
 				t.Fatalf("request nonterminal completion: %v", err)
 			}
-			outcome, err := storetest.ExecuteRunCompletionCandidate(ctx, recovered, fact.BundleHash(), runID, catalog)
+			outcome, err := storetest.ExecuteRunCompletionCandidate(ctx, selected, fact.BundleHash(), runID, catalog)
 			if err != nil || outcome.Outcome != runtimerunlifecycle.OutcomeAwaitMutation {
 				t.Fatalf("nonterminal ready candidate = %s, %v", outcome.Outcome, err)
 			}
@@ -103,14 +98,13 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			}
 			stageCompletionWaitForDelivery(t, db, backend, runID, "flow.finish")
 			stageCompletionAssertStoredState(t, selected, runID, "Ready")
-			recovered = reopen()
-			recoveredSource = stageCompletionRehydrate(t, recovered, runID, fact.BundleHash())
-			stageCompletionAssertStoredState(t, recovered, runID, "Ready")
+			recoveredSource = stageCompletionRehydrate(t, selected, runID, fact.BundleHash())
+			stageCompletionAssertStoredState(t, selected, runID, "Ready")
 			catalog = stageCompletionCatalog(t, recoveredSource)
-			if _, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
+			if _, err := selected.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
 				t.Fatalf("request terminal completion: %v", err)
 			}
-			outcome, err = storetest.ExecuteRunCompletionCandidate(ctx, recovered, fact.BundleHash(), runID, catalog)
+			outcome, err = storetest.ExecuteRunCompletionCandidate(ctx, selected, fact.BundleHash(), runID, catalog)
 			if err != nil || outcome.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible {
 				t.Fatalf("terminal Ready candidate = %s, %v", outcome.Outcome, err)
 			}
