@@ -10,7 +10,7 @@ import (
 )
 
 const codemodProofPackage = "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations"
-const codemodIntegrationRoots = `^(TestNativeTimerSuccessorObserverRejectsRepublicationBothStores|TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores|TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts|TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners|TestReviewedSnapshotCandidateOverlayTypeChecks)$`
+const codemodIntegrationRoots = `^(TestNativeTimerSuccessorObserverRejectsRepublicationBothStores|TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores|TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts|TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners)$`
 
 // Run-only complement: the policy permits skip only for the original soak.
 // The finite equality and future-prefix controls below pin this selector.
@@ -18,7 +18,7 @@ const codemodOrdinaryRoots = `^(?:T(?:e(?:s(?:t(?:N(?:a(?:t(?:i(?:v(?:e(?:B(?:u(
 
 func codemodProofEnvelopes() map[string]UnitPolicy {
 	common := UnitPolicy{Packages: []string{codemodProofPackage}, CountMode: "count-1", EnvironmentIDs: managedEnvironmentIDs(), BudgetClass: "broad"}
-	guards, pipeline, bus, candidate := common, common, common, common
+	guards, pipeline, bus := common, common, common
 	guards.Run = codemodOrdinaryRoots
 	pipeline.Run = `^(TestNativeTimerSuccessorObserverRejectsRepublicationBothStores|TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores)$`
 	pipeline.RequiredChildren = map[string][]string{
@@ -27,8 +27,7 @@ func codemodProofEnvelopes() map[string]UnitPolicy {
 	}
 	bus.Run = `^(TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts|TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners)$`
 	bus.RequiredChildren = map[string][]string{"TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts": {"claim", "settle"}}
-	candidate.Run = `^TestReviewedSnapshotCandidateOverlayTypeChecks$`
-	return map[string]UnitPolicy{"codemod-owner-guards": guards, "codemod-pipeline-mutation": pipeline, "codemod-bus-mutation": bus, "codemod-candidate-overlay": candidate}
+	return map[string]UnitPolicy{"codemod-owner-guards": guards, "codemod-pipeline-mutation": pipeline, "codemod-bus-mutation": bus}
 }
 
 func validateCodemodProofEnvelopes(policy Policy) error {
@@ -40,7 +39,7 @@ func validateCodemodProofEnvelopes(policy Policy) error {
 			return fmt.Errorf("%s changed count/environment/selector/child/budget envelope", id)
 		}
 		for _, tier := range []string{ProfileCore, ProfileLifecycle, ProfileFull} {
-			want := tier == ProfileFull || id == "codemod-owner-guards" || tier == ProfileLifecycle && id != "codemod-candidate-overlay"
+			want := tier == ProfileFull || id == "codemod-owner-guards" || tier == ProfileLifecycle
 			if slices.Contains(policy.Profiles[tier].Units, id) != want {
 				return fmt.Errorf("%s has incorrect %s placement", id, tier)
 			}
@@ -66,19 +65,13 @@ func TestCodemodProofPlacementRetainsExhaustivePartition(t *testing.T) {
 				units = append(units, ProofUnit{ID: id, Run: unit.Run, Skip: unit.Skip})
 			}
 		}
-		if tier == ProfileLifecycle {
-			// This one exact full-only deferral remains owned, not executed by
-			// lifecycle or replaced by a cheaper compiler proxy.
-			candidate := policy.Units["codemod-candidate-overlay"]
-			units = append(units, ProofUnit{ID: "deferred-full-candidate", Run: candidate.Run})
-		}
 		if err := ValidateGoProofUnitPartition(dir, units); err != nil {
 			t.Fatalf("%s executed/deferred partition lost an original/new codemod root: %v", tier, err)
 		}
 	}
 	core := policy.Units["codemod-owner-guards"]
 	if err := ValidateGoProofUnitPartition(dir, []ProofUnit{{Run: core.Run, Skip: core.Skip}, {Run: codemodIntegrationRoots}}); err != nil {
-		t.Fatalf("core loses more than the exact five integration roots: %v", err)
+		t.Fatalf("core loses more than the exact four integration roots: %v", err)
 	}
 	for _, future := range []string{"TestFutureCodemodOwnerGuard", "ExampleFutureCodemod", "FuzzFutureCodemod"} {
 		selected, err := selectedByUnit(ProofUnit{Run: core.Run, Skip: core.Skip}, future)
@@ -96,7 +89,6 @@ func TestCodemodProofPlacementExcludesOnlyExactIntegrationNames(t *testing.T) {
 		"TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores",
 		"TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts",
 		"TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners",
-		"TestReviewedSnapshotCandidateOverlayTypeChecks",
 	}
 	for _, name := range names {
 		if ordinary.MatchString(name) || !integration.MatchString(name) {
@@ -139,11 +131,6 @@ func TestCodemodProofPlacementRejectsEnvelopeAndCoverageLoss(t *testing.T) {
 			unit := p.Units["codemod-owner-guards"]
 			unit.Run = "^TestCandidate"
 			p.Units["codemod-owner-guards"] = unit
-		},
-		"changed environment": func(p *Policy) {
-			unit := p.Units["codemod-candidate-overlay"]
-			unit.EnvironmentIDs = nil
-			p.Units["codemod-candidate-overlay"] = unit
 		},
 		"changed count": func(p *Policy) {
 			unit := p.Units["codemod-bus-mutation"]
