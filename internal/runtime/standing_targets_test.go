@@ -116,23 +116,32 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 	contextDef.ProviderTriggerCatalog = catalog
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
 	hash := contextDef.BundleHash()
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "coordinator", Provider: "telegram", SigningSecret: "fixture-signing-value"})
-	if err != nil {
-		t.Fatal(err)
+	alias, present := captured.FlowIngressAlias("coordinator")
+	if !present {
+		t.Fatal("captured coordinator has no compiled directory webhook alias")
 	}
+	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, catalog)
+	if err != nil || len(declarations) != 1 {
+		t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
+	}
+	declaration := declarations[0]
+	if declaration.FlowPath != "coordinator" || declaration.Alias != alias || len(declaration.Ingress) != 1 || declaration.Ingress[0].Provider != "telegram" {
+		t.Fatalf("captured coordinator/Telegram declaration: %+v", declaration)
+	}
+	binding := declaration.Ingress[0]
 	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "coordinator", Provider: "telegram",
-		RunID: "run", Generation: 1, SigningSecret: "fixture-signing-value",
-		AdmissionPlan: plan,
+		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: declaration.Alias, Provider: "telegram",
+		RunID: "run", Generation: 1, SigningSecret: binding.SigningSecret,
+		SourcePath: declaration.SourcePath, AdmissionPlan: binding.AdmissionPlan,
 	}}
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
-	if lookup := manager.LookupIngress("coordinator", "telegram"); !lookup.Loaded() || lookup.Target.RunID != "run" {
+	if lookup := manager.LookupIngress(alias, "telegram"); !lookup.Loaded() || lookup.Target.RunID != "run" {
 		t.Fatalf("telegram lookup = %#v, want loaded standing target", lookup)
 	}
-	if lookup := manager.LookupIngress("coordinator", "github"); lookup.Found || !lookup.AliasFound {
+	if lookup := manager.LookupIngress(alias, "github"); lookup.Found || !lookup.AliasFound {
 		t.Fatalf("wrong-provider lookup = %#v, want alias found without provider target", lookup)
 	}
 }
@@ -176,14 +185,23 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 	contextDef.ProviderTriggerCatalog = catalog
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
 	hash := contextDef.BundleHash()
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "coordinator", Provider: "telegram", SigningSecret: "fixture-signing-value"})
-	if err != nil {
-		t.Fatal(err)
+	alias, present := captured.FlowIngressAlias("coordinator")
+	if !present {
+		t.Fatal("captured coordinator has no compiled directory webhook alias")
 	}
+	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, catalog)
+	if err != nil || len(declarations) != 1 {
+		t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
+	}
+	declaration := declarations[0]
+	if declaration.FlowPath != "coordinator" || declaration.Alias != alias || len(declaration.Ingress) != 1 || declaration.Ingress[0].Provider != "telegram" {
+		t.Fatalf("captured coordinator/Telegram declaration: %+v", declaration)
+	}
+	binding := declaration.Ingress[0]
 	target := StandingTarget{
-		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "coordinator", Provider: "telegram",
+		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: declaration.Alias, Provider: "telegram",
 		RunID: "run-1", Generation: 1, PublicationSequence: 1,
-		SigningSecret: "fixture-signing-value", AdmissionPlan: plan,
+		SourcePath: declaration.SourcePath, SigningSecret: binding.SigningSecret, AdmissionPlan: binding.AdmissionPlan,
 	}
 	contextDef.StandingTargets = []StandingTarget{target}
 	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
@@ -193,13 +211,13 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 	if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
 		t.Fatalf("SuppressStandingServiceTargets: %v", err)
 	}
-	if lookup := manager.LookupIngress("coordinator", "telegram"); !lookup.Found || lookup.Loaded() || lookup.Cause != RuntimeContextCauseStandingSuppressed {
+	if lookup := manager.LookupIngress(alias, "telegram"); !lookup.Found || lookup.Loaded() || lookup.Cause != RuntimeContextCauseStandingSuppressed {
 		t.Fatalf("suppressed lookup = %#v", lookup)
 	}
 	if err := manager.RestoreStandingServiceTargets(target.ServiceID); err != nil {
 		t.Fatalf("RestoreStandingServiceTargets: %v", err)
 	}
-	if lookup := manager.LookupIngress("coordinator", "telegram"); !lookup.Loaded() || lookup.Target.RunID != target.RunID {
+	if lookup := manager.LookupIngress(alias, "telegram"); !lookup.Loaded() || lookup.Target.RunID != target.RunID {
 		t.Fatalf("restored lookup = %#v", lookup)
 	}
 	if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
@@ -215,7 +233,7 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 	if err := manager.PublishStandingServiceTargets(target.ServiceID, []StandingTarget{published}, nil); err != nil {
 		t.Fatalf("PublishStandingServiceTargets: %v", err)
 	}
-	lookup := manager.LookupIngress("coordinator", "telegram")
+	lookup := manager.LookupIngress(alias, "telegram")
 	if !lookup.Loaded() || lookup.Target.RunID != "run-2" || lookup.Target.Generation != 2 || lookup.Target.PublicationSequence != 3 {
 		t.Fatalf("republished lookup = %#v", lookup)
 	}
@@ -260,14 +278,23 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 	contextDef.ProviderTriggerCatalog = catalog
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
 	hash := contextDef.BundleHash()
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "coordinator", Provider: "telegram", SigningSecret: "fixture-signing-value"})
-	if err != nil {
-		t.Fatal(err)
+	alias, present := captured.FlowIngressAlias("coordinator")
+	if !present {
+		t.Fatal("captured coordinator has no compiled directory webhook alias")
 	}
+	declarations, err := ResolveStandingTargetDeclarations(contextDef.Source, catalog)
+	if err != nil || len(declarations) != 1 {
+		t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
+	}
+	declaration := declarations[0]
+	if declaration.FlowPath != "coordinator" || declaration.Alias != alias || len(declaration.Ingress) != 1 || declaration.Ingress[0].Provider != "telegram" {
+		t.Fatalf("captured coordinator/Telegram declaration: %+v", declaration)
+	}
+	binding := declaration.Ingress[0]
 	target := StandingTarget{
-		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: "coordinator", Provider: "telegram",
+		BundleHash: hash, ServiceID: flowidentity.StandingServiceID("coordinator"), FlowPath: "coordinator", Alias: declaration.Alias, Provider: "telegram",
 		RunID: "run-1", Generation: 1, PublicationSequence: 1,
-		SigningSecret: "fixture-signing-value", AdmissionPlan: plan,
+		SourcePath: declaration.SourcePath, SigningSecret: binding.SigningSecret, AdmissionPlan: binding.AdmissionPlan,
 	}
 	manager, err := newTestRuntimeContextManager(t, nil)
 	if err != nil {
@@ -283,7 +310,7 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 	if err := manager.PublishStandingServiceTargets(target.ServiceID, []StandingTarget{target}, nil); err != nil {
 		t.Fatalf("PublishStandingServiceTargets after suspended startup: %v", err)
 	}
-	if lookup := manager.LookupIngress("coordinator", "telegram"); !lookup.Loaded() || lookup.Target.ServiceID != target.ServiceID {
+	if lookup := manager.LookupIngress(alias, "telegram"); !lookup.Loaded() || lookup.Target.ServiceID != target.ServiceID {
 		t.Fatalf("resumed lookup = %#v, want fresh loaded process occurrence", lookup)
 	}
 }
