@@ -3,6 +3,7 @@ package eventschema
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 )
@@ -146,6 +147,10 @@ func TestOptionalNullOneOfRefusalsRemainClosed(t *testing.T) {
 			}
 			if err == nil && ValidatePayloadAgainstSchema(tc.schema, got) == nil {
 				t.Fatal("invalid payload obtained admission")
+			}
+			var typed *Violation
+			if !errors.As(err, &typed) {
+				t.Fatalf("normalization lost its typed schema violation: %v", err)
 			}
 		})
 	}
