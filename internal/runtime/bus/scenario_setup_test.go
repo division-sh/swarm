@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -53,8 +53,6 @@ func TestScenarioSetupDispatchesOnlyAcknowledgedConstruction(t *testing.T) {
 			fault := errors.New("scenario post-commit diagnostic")
 			store := &scenarioSetupProbeStore{acknowledged: test.acknowledged, fault: fault}
 			source, _ := acknowledgedRootInputEndpoint(t)
-			bundle, _ := semanticview.Bundle(source)
-			bundle.Semantics.Version = "1"
 			var calls int
 			finalizer := pipeline.CommittedFlowInstanceActivationFinalizerFunc(func(ctx context.Context, activation pipeline.CommittedFlowInstanceActivation) error {
 				calls++
@@ -82,7 +80,11 @@ func TestScenarioSetupDispatchesOnlyAcknowledgedConstruction(t *testing.T) {
 				entityID = runID
 			}
 			request := pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: time.Now().UTC(), Entities: []pipeline.ScenarioSetupEntityRequest{{EntityID: entityID, EntityType: "record", CurrentState: "pending"}}}
-			ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
+			ctx, err := bus.AdmitSourceArtifactFact(authoractivity.WithScope(context.Background(), authoractivity.BundleScope(bus.runtimeInstanceID, bus.sourceArtifactFact.BundleHash())))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
 			if test.cancel {
 				store.cancel = cancel

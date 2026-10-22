@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -131,24 +132,20 @@ func staticAPIEventPublicationSource() semanticview.Source {
 
 func acknowledgedRootInputEndpoint(t testing.TB) (semanticview.Source, APIEventPublicationEndpoint) {
 	t.Helper()
-	schema := runtimecontracts.FlowSchemaDocument{
-		Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
-			EventPins: []runtimecontracts.FlowInputEventPin{{Event: "task.requested"}},
-		}},
-	}
-	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Schema: schema}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		SourceArtifact: sourceartifactfixture.Artifact(),
-		RootSchema:     &schema,
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": schema},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\npins:\n  inputs: [task.requested]\n"),
+		"events.yaml":   []byte("task.requested:\n"),
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	bundle.Semantics.Version = "1.0.0"
+	rooted, _ := sourceartifactfixture.Rooted(t, "acknowledged-input", artifact)
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	source := semanticview.Wrap(bundle)
 	endpoint, err := NewRootInputAPIEventPublicationEndpoint(source, "task.requested")
 	if err != nil {
