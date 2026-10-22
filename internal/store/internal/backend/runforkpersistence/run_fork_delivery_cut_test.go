@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func replayCutFixture(t *testing.T) (*runForkRevisionSnapshot, events.Event, deliverylifecycle.Snapshot) {
+func replayCutFixture(t *testing.T) (*runForkRevisionSnapshot, events.Event, deliverylifecycle.HistoricalFact) {
 	t.Helper()
 	snapshot, event, delivery := replayReceiverProjectionFixture(t, "observer")
 	binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{

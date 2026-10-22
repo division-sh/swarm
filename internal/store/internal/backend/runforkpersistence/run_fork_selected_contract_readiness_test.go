@@ -36,7 +36,7 @@ func selectedWorkflowConstructionFixture(t *testing.T, state selectedContractWor
 		WorkflowVersion: state.WorkflowVersion, Mode: state.Mode, InstanceKey: key, Status: "active", EntityType: state.EntityType,
 		CurrentState: "initial", StageDefined: true, EnteredStageAt: at, CreatedAt: at,
 	}, state.ExecutionMode)
-	state.History = runfork.RunForkEntityState{EntityID: state.EntityID, CurrentState: record.CurrentState, EnteredStateAt: &at, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+	state.History = runfork.RunForkEntityState{EntityID: state.EntityID, CurrentState: &record.CurrentState, EnteredStateAt: &at, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 		FlowInstance: state.Route, FlowTemplate: state.WorkflowName, FlowConfig: raw,
 		ParentInstance: record.State.ParentInstance, InstanceKey: record.State.InstanceKey,

@@ -62,7 +62,7 @@ func fanOutPendingPartitionFixture(t testing.TB) RunForkPlan {
 		if index < 2 {
 			// Historical attempt coordinates are deliberately non-fresh lineage.
 			pending.ClaimVersion, pending.RetryCount = 7, 2
-			pending.ActiveSessionID, pending.StartedAt = uuid.NewString(), &now
+			pending.SourceExecution.SessionBound, pending.SourceExecution.Started = true, true
 			plan.FanOutObligations[0].PendingReplays[0].SourceDeliveryIDs = append(
 				plan.FanOutObligations[0].PendingReplays[0].SourceDeliveryIDs, deliveryID)
 		} else {
@@ -228,7 +228,8 @@ func TestFanOutPendingPartitionDoesNotBroadenGenericReplay(t *testing.T) {
 	plan := fanOutPendingPartitionFixture(t)
 	for index := 0; index < 2; index++ {
 		pending := plan.PendingWork[index]
-		pending.ClaimVersion, pending.RetryCount, pending.ActiveSessionID, pending.StartedAt = 0, 0, "", nil
+		pending.ClaimVersion, pending.RetryCount = 0, 0
+		pending.SourceExecution.SessionBound, pending.SourceExecution.Started = false, false
 		if got := RunForkPendingWorkReplayableForHistoricalReplay(pending); got != (index == 1) {
 			t.Fatalf("generic replay taxonomy changed for %s: %t", pending.SubscriberType, got)
 		}

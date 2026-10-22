@@ -25,7 +25,7 @@ func selectedFanOutPartitionFixture(t *testing.T) (*runForkRevisionSnapshot, run
 	if err != nil {
 		t.Fatal(err)
 	}
-	nodeDelivery := deliverylifecycle.Snapshot{DeliveryID: nodeID, EventID: sourceEvent.ID(), RunID: snapshot.RunID,
+	nodeDelivery := deliverylifecycle.HistoricalFact{DeliveryID: nodeID, EventID: sourceEvent.ID(), RunID: snapshot.RunID,
 		Route: nodeRoute, Status: deliverylifecycle.StatusPending, FinalSelection: deliverylifecycle.AbsentSelection()}
 	snapshot.Deliveries = append(snapshot.Deliveries, runForkRevisionDelivery{Snapshot: nodeDelivery,
 		runForkRevisionedFact: runForkRevisionedFact{FirstRevision: 3, Revision: 5}})
@@ -48,7 +48,7 @@ func selectedFanOutPartitionFixture(t *testing.T) (*runForkRevisionSnapshot, run
 	replay := runfork.RunForkFanOutPendingReplay{Ordinal: 0, SourceEventID: sourceEvent.ID(),
 		SourceDeliveryIDs: []string{agent.DeliveryID, nodeID}, InheritedDisposition: "succeeded"}
 	var routes []events.DeliveryRoute
-	for _, delivery := range []deliverylifecycle.Snapshot{agent, nodeDelivery} {
+	for _, delivery := range []deliverylifecycle.HistoricalFact{agent, nodeDelivery} {
 		route, err := projectSelectedFanOutRecipient(snapshot, sourceEvent, delivery, childRun)
 		if err != nil {
 			t.Fatal(err)

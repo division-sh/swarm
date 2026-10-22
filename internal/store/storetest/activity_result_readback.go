@@ -26,9 +26,9 @@ func ReadActivityAttemptStorage(ctx context.Context, selected any, run string) (
 	return private.ReadActivityAttemptStorageForTest(ctx, selected, run)
 }
 
-func ActivityJournalCleanupPersistenceFault(t testing.TB, selected any, fault error) (runtimepipeline.WorkflowPersistence, func() int32) {
+func ActivityJournalCleanupPersistenceFault(t testing.TB, selected any, fault error, installed ...runtimepipeline.ActivityAttemptJournal) (runtimepipeline.WorkflowPersistence, func() int32) {
 	t.Helper()
-	persistence, count, err := private.ActivityJournalCleanupPersistenceFaultForTest(selected, fault)
+	persistence, count, err := private.ActivityJournalCleanupPersistenceFaultForTest(selected, fault, installed...)
 	if err != nil {
 		t.Fatalf("install exact selected activity journal cleanup fault: %v", err)
 	}

@@ -573,7 +573,7 @@ func issue642ObserveFutureClaim(ctx context.Context, fixture issue2564ServedFixt
 		keyField = "case_id"
 	}
 	key, ok := worker.Fields[keyField].(string)
-	if err != nil || !ok || key == "" || worker.Entity.CurrentState != "pending" || worker.Entity.FlowInstance != delivery.Target.FlowInstance || page.Events[0].Payload["work_id"] != "one" {
+	if err != nil || !ok || key == "" || worker.Entity.CurrentState == nil || *worker.Entity.CurrentState != "pending" || worker.Entity.FlowInstance != delivery.Target.FlowInstance || page.Events[0].Payload["work_id"] != "one" {
 		return facts, occurrence, fmt.Errorf("claim precedes or escapes actual native construction: worker=%+v event=%+v err=%v", worker, page.Events[0], err)
 	}
 	if minted {
@@ -671,7 +671,7 @@ func issue642RequireFutureClaimCut(t *testing.T, fixture issue2564ServedFixture,
 		t.Fatalf("claim cut already published a result: %+v", finished)
 	}
 	root, err := fixture.selected.LoadOperatorEntity(t.Context(), claim.RunID, claim.RunID)
-	if err != nil || root.Entity.CurrentState != "pending" || root.Fields["counter"] != float64(0) {
+	if err != nil || root.Entity.CurrentState == nil || *root.Entity.CurrentState != "pending" || root.Fields["counter"] != float64(0) {
 		t.Fatalf("claim cut already changed the root result: %+v err=%v", root, err)
 	}
 	outcomes, err := fixture.persistence.deps.DeliveryStore.Outcomes(t.Context(), claim.DeliveryID)

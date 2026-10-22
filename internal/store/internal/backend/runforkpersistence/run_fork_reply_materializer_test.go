@@ -87,9 +87,10 @@ func runForkReplyPlanFixture(t *testing.T, state replycontext.State, root, field
 		history = append(history, record.AcceptedReplyEventID)
 	}
 	record = record.Normalized()
+	currentState := "later"
 	plan := (runfork.RunForkPlan{
 		SourceRunID: sourceRun, ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: request, Revision: 1},
-		Entities: []runfork.RunForkEntityState{{EntityID: owner.EntityID, CurrentState: "later", EnteredStateAt: &born, Bookkeeping: bookkeeping, Fields: initial.Fields,
+		Entities: []runfork.RunForkEntityState{{EntityID: owner.EntityID, CurrentState: &currentState, EnteredStateAt: &born, Bookkeeping: bookkeeping, Fields: initial.Fields,
 			MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 				Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 				FlowInstance: owner.InstancePath, FlowTemplate: owner.TemplateID, EntityType: initial.EntityType, FlowConfig: constructed.Config,

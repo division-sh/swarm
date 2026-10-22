@@ -11,7 +11,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -111,7 +110,7 @@ func TestC4F40SelectedStartTimerChildBothStores(t *testing.T) {
 				Owner: owner, SourceRunID: sourceRun, AtStart: true, ForkOperation: operation, AllowSourceFreeze: true,
 				ContractSelection: selection, ExpectedBundleHash: bundleHash,
 				SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
-					RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(runforkexecution.SourceArtifactSelectedContractSourceStore),
+					RepoRoot: repo, Store: selected.(runforkexecution.SourceArtifactSelectedContractSourceStore),
 				},
 				AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{
 					ProcessCapability: capability, ExecutionPosture: executionposture.Live,

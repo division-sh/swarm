@@ -273,7 +273,7 @@ func issue642TimerContinuationPlan(t *testing.T, reader issue642TimerContinuatio
 		captured.Route != issue642TimerContinuationRoot(t, runID).Route {
 		t.Fatalf("fixed-cut timer lost its exact active root/event arm: captured=%+v err=%v", captured, err)
 	}
-	if len(plan.Entities) != 1 || plan.Entities[0].EntityID != runID || plan.Entities[0].CurrentState != "waiting" {
+	if len(plan.Entities) != 1 || plan.Entities[0].EntityID != runID || plan.Entities[0].CurrentState == nil || *plan.Entities[0].CurrentState != "waiting" {
 		t.Fatalf("post-arm cut did not retain the actual historical waiting receiver: %+v", plan.Entities)
 	}
 	return plan, captured.Canonical()

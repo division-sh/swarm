@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -255,7 +254,7 @@ func requireLifecycleTemplatePendingCut(t *testing.T, bundleHash string, selecte
 	}
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{
-		RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()}
+		RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()}
 	loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
 		SourceRunID: runID, BundleHash: bundleHash, Selection: selection})
 	if err != nil {

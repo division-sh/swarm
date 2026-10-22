@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -269,7 +268,7 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, ctx context.Context, rea
 			TargetBundleHash: bundleHash, ContractSelection: selection,
 		},
 		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
-			RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
+			RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore(),
 		},
 		AgentRuntime: forkRuntime,
 	})

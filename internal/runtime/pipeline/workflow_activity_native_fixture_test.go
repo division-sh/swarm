@@ -21,7 +21,6 @@ type WorkflowActivityNativeFixtureForTest struct {
 	Reopen                    func() WorkflowActivityNativeFixtureForTest
 	ReadJournal               func(context.Context, string) (WorkflowJournalStorageForTest, error)
 	CreateReply               func(context.Context, string, string, string) error
-	CleanupFault              func(error) (WorkflowPersistence, func() int32)
 	CleanupFaultCoordinator   func(Bus, PipelineCoordinatorOptions, error) (*PipelineCoordinator, func() int32)
 	Construct                 func(context.Context, WorkflowInstance) error
 	ClaimReplyLossCoordinator func(context.Context, Bus, PipelineCoordinatorOptions, string, string, error) (*PipelineCoordinator, func() int32)

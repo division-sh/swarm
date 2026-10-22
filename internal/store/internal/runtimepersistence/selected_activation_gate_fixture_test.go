@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -68,8 +67,8 @@ func selectedStoreActivationGateForTest(t *testing.T, ctx context.Context, selec
 	}
 	repo := canonicalrouting.RepoRoot(t)
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{
-		RepoRoot: repo, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
-		Store: selected.(runforkexecution.SourceArtifactSelectedContractSourceStore),
+		RepoRoot: repo,
+		Store:    selected.(runforkexecution.SourceArtifactSelectedContractSourceStore),
 	}
 	return func(original runfork.RunForkSelectedContractExecutionActivateRequest, point runfork.RunForkPoint, call func(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)) (runfork.RunForkActivation, error) {
 		binding, err := probe.RequireRunForkSelectedContractBinding(ctx, original.ForkRunID)

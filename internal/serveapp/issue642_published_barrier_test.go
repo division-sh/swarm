@@ -120,7 +120,7 @@ func TestIssue642ServedPublishedBarrierReachesFinalConsumerBothStores(t *testing
 			output := issue642WaitBarrierOutput(t, phase, rt, fork.ForkRunID)
 			issue642WaitExactBarrierPipeline(t, phase, rt, output.EventID)
 			entity, err := rt.selected.LoadOperatorEntity(phase, fork.ForkRunID, fork.ForkRunID)
-			if err != nil || entity.Fields["completed_total"] != float64(1) || entity.Entity.Revision != 2 {
+			if err != nil || entity.Fields["completed_total"] != float64(1) || entity.Entity.Revision == nil || *entity.Entity.Revision != 2 {
 				t.Fatalf("public final consumer did not commit once: %+v err=%v", entity, err)
 			}
 			final, err := reader.PlanRunFork(phase, runfork.RunForkPlanRequest{SourceRunID: fork.ForkRunID, At: output.EventID})
@@ -167,7 +167,7 @@ func issue642RequireServedBarrierGrandchild(t *testing.T, rt issue2564ServedFixt
 	output := issue642WaitBarrierOutput(t, phase, rt, grandchild.ForkRunID)
 	issue642WaitExactBarrierPipeline(t, phase, rt, output.EventID)
 	entity, err := rt.selected.LoadOperatorEntity(phase, grandchild.ForkRunID, grandchild.ForkRunID)
-	if err != nil || entity.Fields["completed_total"] != float64(1) || entity.Entity.Revision != 2 {
+	if err != nil || entity.Fields["completed_total"] != float64(1) || entity.Entity.Revision == nil || *entity.Entity.Revision != 2 {
 		t.Fatalf("served grandchild did not commit its real final consumer once: %+v err=%v", entity, err)
 	}
 	final, err := reader.PlanRunFork(phase, runfork.RunForkPlanRequest{SourceRunID: grandchild.ForkRunID, At: output.EventID})

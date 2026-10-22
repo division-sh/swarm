@@ -88,7 +88,8 @@ func fanOutDeploymentReplayAdmissionFixture(t testing.TB, phase RunForkDeploymen
 		item := &plan.PendingWork[index]
 		item.RoutingSource = source
 		if index < 2 {
-			item.ClaimVersion, item.RetryCount, item.ActiveSessionID, item.StartedAt = 0, 0, "", nil
+			item.ClaimVersion, item.RetryCount = 0, 0
+			item.SourceExecution.SessionBound, item.SourceExecution.Started = false, false
 		}
 	}
 	if phase == RunForkDeploymentPendingReceiver {
@@ -170,7 +171,8 @@ func checkFanOutReplayMixedPartition(t *testing.T, plan RunForkPlan, fresh bool)
 	if fresh {
 		for index := 0; index < 2; index++ {
 			item := &plan.PendingWork[index]
-			item.ClaimVersion, item.RetryCount, item.ActiveSessionID, item.StartedAt = 0, 0, "", nil
+			item.ClaimVersion, item.RetryCount = 0, 0
+			item.SourceExecution.SessionBound, item.SourceExecution.Started = false, false
 		}
 	}
 	admission := fanOutReplayAdmissionFixture(plan)
@@ -496,10 +498,9 @@ func TestRunForkSelectedFanOutReplayAdmissionDeploymentPhaseProof(t *testing.T) 
 			p.PendingWork[0].Classification, p.PendingWork[0].Status = RunForkPendingClassificationFailedRetryable, "failed"
 		}},
 		{"source_retry", RunForkDeploymentPendingPublication, func(p *RunForkPlan) { p.PendingWork[0].RetryCount = 1 }},
-		{"source_session", RunForkDeploymentPendingPublication, func(p *RunForkPlan) { p.PendingWork[0].ActiveSessionID = uuid.NewString() }},
+		{"source_session", RunForkDeploymentPendingPublication, func(p *RunForkPlan) { p.PendingWork[0].SourceExecution.SessionBound = true }},
 		{"source_started", RunForkDeploymentPendingPublication, func(p *RunForkPlan) {
-			started := p.PendingWork[0].CreatedAt
-			p.PendingWork[0].StartedAt = &started
+			p.PendingWork[0].SourceExecution.Started = true
 		}},
 		{"missing_committed_handoff_time", RunForkDeploymentPendingReceiver, func(p *RunForkPlan) {
 			p.PendingWork[len(p.PendingWork)-1].ReceiptAt = nil

@@ -44,7 +44,7 @@ func requestContinuationPartitionFixture(t *testing.T) (*runForkRevisionSnapshot
 		t.Fatal(err)
 	}
 	snapshot.Deliveries = []runForkRevisionDelivery{{runForkRevisionedFact: runForkRevisionedFact{FirstRevision: 3, Revision: 5},
-		Snapshot: deliverylifecycle.Snapshot{DeliveryID: id, EventID: event.ID(), RunID: snapshot.RunID, Route: route,
+		Snapshot: deliverylifecycle.HistoricalFact{DeliveryID: id, EventID: event.ID(), RunID: snapshot.RunID, Route: route,
 			Status: deliverylifecycle.StatusPending, FinalSelection: deliverylifecycle.AbsentSelection()}}}
 	snapshot.ReplyContexts = []runForkRevisionReplyContext{{runForkHistoricalReplyFact: runForkHistoricalReplyFact{Record: record,
 		runForkRevisionedFact: runForkRevisionedFact{FirstRevision: 3, Revision: 3}}}}

@@ -58,9 +58,9 @@ func TestIssue642FanOutTerminalRecipientDisposition(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				row := deliverylifecycle.Snapshot{DeliveryID: deliveryID, EventID: event, RunID: run, Route: route, RouteIdentity: routeID,
+				row := deliverylifecycle.HistoricalFact{DeliveryID: deliveryID, EventID: event, RunID: run, Route: route, RouteIdentity: routeID,
 					SubscriberClass: deliverylifecycle.SubscriberNode, SubscriberID: node.Key(), Status: status,
-					CreatedAt: at, UpdatedAt: at, SettledAt: at, MaxRetries: 3, ClaimVersion: 1}
+					CreatedAt: at, SettledAt: at, MaxRetries: 3, SettledClaimVersion: 1}
 				if status == deliverylifecycle.StatusCanceled {
 					row.ReasonCode = string(deliverylifecycle.CancellationTerminate)
 				}

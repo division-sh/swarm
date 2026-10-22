@@ -3,7 +3,6 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -82,7 +81,7 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 				ContractSelection: selection,
 				ForkOperation:     &operation,
 				SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
-					RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
+					RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore(),
 				}, AgentRuntime: *forkRuntime,
 			}
 			result, err := family.Execute(ctx, request)
@@ -189,7 +188,7 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			reopenedRequest := request
 			reopenedRequest.AgentRuntime = *forkRuntime
 			reopenedRequest.SourceLoader = runforkexecution.SourceArtifactSelectedContractSourceLoader{
-				RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: rt.Selected.SourceArtifactStore(),
+				RepoRoot: repoRootForTest(), Store: rt.Selected.SourceArtifactStore(),
 			}
 			coldReplay, err := freshFamily.Execute(freshContext, reopenedRequest)
 			if err != nil || !reflect.DeepEqual(coldReplay, replay) || coldReplay.Materialization.ForkRunID != persisted.ForkRunID {

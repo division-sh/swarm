@@ -159,7 +159,7 @@ func issue642RecurringTimerPlan(t *testing.T, reader issue642TimerContinuationRe
 		arm.Ref.Cause != timeridentity.WorkflowTimerActivationCauseEvent || arm.Route != issue642TimerContinuationRoot(t, runID).Route {
 		t.Fatalf("fixed cut did not keep its original active recurring arm: arm=%+v err=%v", arm, err)
 	}
-	if len(plan.Entities) != 1 || plan.Entities[0].EntityID != runID || plan.Entities[0].CurrentState != "waiting" {
+	if len(plan.Entities) != 1 || plan.Entities[0].EntityID != runID || plan.Entities[0].CurrentState == nil || *plan.Entities[0].CurrentState != "waiting" {
 		t.Fatalf("recurring cut lost its historical waiting receiver: %+v", plan.Entities)
 	}
 	return plan, arm.Canonical()

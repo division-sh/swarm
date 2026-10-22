@@ -95,9 +95,12 @@ func TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 				t.Fatal("historical capture fixture requires its exact admitted artifact")
 			}
 			at := time.Date(2026, time.September, 21, 0, 0, 0, 0, time.UTC)
+			if plan.Entities[0].CurrentState == nil {
+				t.Fatal("constructed historical header is missing its declared stage")
+			}
 			construction := selectedWorkflowConstructionRecordFixture(t, runID, bundle.SourceArtifact.BundleHash(), instance, pipeline.WorkflowInstance{
 				WorkflowVersion: "v1", Mode: metadata.Mode, Status: "active", EntityType: "deployment", InstanceKey: metadata.InstanceKey,
-				CurrentState: plan.Entities[0].CurrentState, Fields: plan.Entities[0].Fields, StageDefined: true, EnteredStageAt: at, CreatedAt: at,
+				CurrentState: *plan.Entities[0].CurrentState, Fields: plan.Entities[0].Fields, StageDefined: true, EnteredStageAt: at, CreatedAt: at,
 			}, executionmode.Live)
 			metadata.InitialMaterialization = construction.InitialMaterialization
 			if _, err := tx.Exec(insertHeader, runID, path, entityID, config, plan.Entities[0].CurrentState, instance.ParentRoute.FlowInstance, metadata.InstanceKey); err != nil {

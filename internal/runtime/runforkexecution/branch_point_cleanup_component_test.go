@@ -7,10 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -188,9 +191,53 @@ func q1ResetBranchPointComponent(t *testing.T, ctx context.Context, owner Select
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := capability.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
+	bases, err := packartifact.NewPlatformPackBaseGenerationOwner(packfixture.EmbeddedBase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loader := SourceArtifactSelectedContractSourceLoader{
+		RepoRoot: runForkExecutionRepoRoot(t), Store: owner.ports.fork.(SourceArtifactSelectedContractSourceStore), PlatformPackBases: bases,
+	}
+	history, err := owner.PrepareResetHistory(ctx, []string{victim}, loader)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("prepare original selected reset history: cohorts=%d err=%v", len(history), err)
+	}
+	missingResolver := loader
+	missingResolver.PlatformPackBases = nil
+	if _, err := owner.PrepareResetHistory(ctx, []string{victim}, missingResolver); err == nil {
+		t.Fatal("selected reset silently used a default pack resolver")
+	}
+	request := destructivereset.CleanupRequest{
 		OperationID: operation.Request.OperationID, ActorTokenID: operation.Request.ActorTokenID, RequestedAt: now, Result: *planned.Plan, Quiescence: quiesced,
-	}, nil); err != nil {
+		SelectedHistory: history,
+	}
+	before := q1ComponentSnapshot(t, owner.ports.fork)
+	dry := request
+	dry.Result.DryRun = true
+	if _, err := capability.ApplyDestructiveResetCleanup(ctx, dry, nil); err != nil {
+		t.Fatalf("validate original reset source/cut without mutation: %v", err)
+	}
+	for _, corruption := range []string{"source", "cut", "origin", "duplicate"} {
+		invalid := dry
+		invalid.SelectedHistory = append([]runfork.SelectedResetPreparation(nil), history...)
+		switch corruption {
+		case "source":
+			invalid.SelectedHistory[0].Binding.SourceRunID = uuid.NewString()
+		case "cut":
+			invalid.SelectedHistory[0].Plan.ForkPoint.Revision++
+		case "origin":
+			invalid.SelectedHistory[0].Original = semanticview.OriginalLoopCarriage{}
+		case "duplicate":
+			invalid.SelectedHistory = append(invalid.SelectedHistory, history[0])
+		}
+		if _, err := capability.ApplyDestructiveResetCleanup(ctx, invalid, nil); err == nil {
+			t.Fatalf("selected reset admitted %s preparation", corruption)
+		}
+	}
+	if !reflect.DeepEqual(before, q1ComponentSnapshot(t, owner.ports.fork)) {
+		t.Fatal("reset preparation/current-cut controls mutated the application")
+	}
+	if _, err := capability.ApplyDestructiveResetCleanup(ctx, request, nil); err != nil {
 		t.Fatal(err)
 	}
 }

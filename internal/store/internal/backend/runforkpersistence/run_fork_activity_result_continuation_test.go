@@ -106,7 +106,7 @@ func TestActivityPublicationContinuationUsesCutNotCurrentProgress(t *testing.T) 
 					status = deliverylifecycle.StatusDelivered
 				}
 				a.snapshot.Deliveries = []runForkRevisionDelivery{{runForkRevisionedFact: runForkRevisionedFact{FirstRevision: 3, Revision: 3},
-					Snapshot: deliverylifecycle.Snapshot{DeliveryID: uuid.NewString(), RunID: a.snapshot.RunID, EventID: evidence.ResultEventID, Status: status,
+					Snapshot: deliverylifecycle.HistoricalFact{DeliveryID: uuid.NewString(), RunID: a.snapshot.RunID, EventID: evidence.ResultEventID, Status: status,
 						SubscriberClass: deliverylifecycle.SubscriberNode, SubscriberID: "provider",
 						Route: events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, "provider")),
 							Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: a.snapshot.RunID, EntityID: a.snapshot.RunID})}}}}

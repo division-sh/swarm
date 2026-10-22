@@ -259,6 +259,10 @@ func (o RunFork) Plan(ctx context.Context, req runfork.RunForkPlanRequest) (runf
 	return o.planner.PlanRunFork(ctx, req)
 }
 
+func (o RunFork) PrepareResetHistory(ctx context.Context, runIDs []string, loader runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader) ([]runfork.SelectedResetPreparation, error) {
+	return o.executionOwner.PrepareResetHistory(ctx, runIDs, loader)
+}
+
 func (o RunFork) Prepare(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (*runtimerunforkexecution.PreparedSelectedFork, error) {
 	return o.executionOwner.Prepare(ctx, req)
 }

@@ -87,7 +87,7 @@ func TestReplayReceiverRequiresFixedPublicationAndInitializedState(t *testing.T)
 	}
 }
 
-func replayReceiverProjectionFixture(t *testing.T, supplier string) (*runForkRevisionSnapshot, events.Event, deliverylifecycle.Snapshot) {
+func replayReceiverProjectionFixture(t *testing.T, supplier string) (*runForkRevisionSnapshot, events.Event, deliverylifecycle.HistoricalFact) {
 	t.Helper()
 	runID := eventtest.UUID("replay-source")
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("replay-publication"), "work.ready", "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
@@ -134,7 +134,7 @@ func replayReceiverProjectionFixture(t *testing.T, supplier string) (*runForkRev
 	}
 	snapshot := &runForkRevisionSnapshot{RunID: runID, Revision: 1}
 	setReplayReceiverConstructedHistory(t, snapshot, target.Route().EntityID, "receiver", "receiver", event.CreatedAt())
-	var source deliverylifecycle.Snapshot
+	var source deliverylifecycle.HistoricalFact
 	for _, route := range publication {
 		id, err := deliverylifecycle.DeliveryID(event.ID(), route)
 		if err != nil {
@@ -144,7 +144,7 @@ func replayReceiverProjectionFixture(t *testing.T, supplier string) (*runForkRev
 		if route.Recipient.IsNode() {
 			state = deliverylifecycle.StatusDelivered
 		}
-		source = deliverylifecycle.Snapshot{DeliveryID: id, RunID: runID, EventID: event.ID(), Route: route, Status: state}
+		source = deliverylifecycle.HistoricalFact{DeliveryID: id, RunID: runID, EventID: event.ID(), Route: route, Status: state}
 		snapshot.Deliveries = append(snapshot.Deliveries, runForkRevisionDelivery{Snapshot: deliverylifecycle.HistoricalFact{DeliveryID: id, RunID: runID, EventID: event.ID(), Route: route, Status: state}})
 	}
 	return snapshot, event, source

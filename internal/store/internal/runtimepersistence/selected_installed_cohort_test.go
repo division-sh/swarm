@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -133,6 +134,7 @@ func completeSelectedHistoryJournal(t *testing.T, ctx context.Context, original 
 	record, inserted, err := journal.StartActivityAttempt(ctx, pipeline.ActivityAttemptRecord{
 		RequestEventID: uuid.NewString(), RunID: runID, SourceEventID: sourceID, ActivityID: uuid.NewString(), Tool: "selected_history.fixture",
 		Attempt: 1, SuccessEvent: "fixture.succeeded", FailureEvent: "fixture.failed", InputHash: "selected-history-input",
+		EffectClass:   string(contracts.ActivityEffectClassNonIdempotentWrite),
 		ExecutionMode: executionmode.Live, StartedAt: time.Now().UTC(),
 	})
 	if err != nil || !inserted {

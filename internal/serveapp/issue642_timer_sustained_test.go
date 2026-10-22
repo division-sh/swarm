@@ -208,7 +208,7 @@ func issue642SustainedInteger(t *testing.T, value any) int {
 func issue642RequireSustainedEffects(t *testing.T, rt issue2564ServedFixture, completed operatorread.RunHeader, occurrences []timeridentity.WorkflowTimerOccurrenceRef, node string) int {
 	t.Helper()
 	entity, err := rt.selected.LoadOperatorEntity(t.Context(), completed.RunID, completed.RunID)
-	if err != nil || entity.Entity.CurrentState != "checked" {
+	if err != nil || entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != "checked" {
 		t.Fatalf("sustained timer effects did not complete their actual receiver: entity=%+v err=%v", entity, err)
 	}
 	count := issue642SustainedInteger(t, entity.Fields["tick_count"])

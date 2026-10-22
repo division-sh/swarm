@@ -104,9 +104,10 @@ func (o *workflowTimerMaterializerOwner) MaterializeRunForkWorkflowTimerTx(_ con
 }
 
 func workflowTimerMaterializerPlan(source pipeline.WorkflowTimerActivation, point runfork.RunForkPoint) runfork.RunForkPlan {
+	state := "waiting"
 	return runfork.RunForkPlan{SourceRunID: source.RunID, ForkPoint: point,
 		WorkflowTimers: []pipeline.WorkflowTimerActivationPersistenceRecord{source.PersistenceRecord()},
-		Entities: []runfork.RunForkEntityState{{EntityID: source.EntityID, CurrentState: "waiting",
+		Entities: []runfork.RunForkEntityState{{EntityID: source.EntityID, CurrentState: &state,
 			MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 				FlowInstance: source.Route.InstancePath, FlowTemplate: source.Route.ScopeKey,
 			}}}}

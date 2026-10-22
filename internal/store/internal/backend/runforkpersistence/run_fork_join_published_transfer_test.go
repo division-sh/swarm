@@ -114,7 +114,7 @@ func publishedArrivalTransferFixture(t *testing.T, root, completion bool, status
 	}
 	snapshot.Deliveries = []runForkRevisionDelivery{{
 		runForkRevisionedFact: runForkRevisionedFact{FirstRevision: 3, Revision: 7},
-		Snapshot: deliverylifecycle.Snapshot{DeliveryID: deliveryID, EventID: event.ID(), RunID: snapshot.RunID,
+		Snapshot: deliverylifecycle.HistoricalFact{DeliveryID: deliveryID, EventID: event.ID(), RunID: snapshot.RunID,
 			Route: route, RouteIdentity: identity, SubscriberClass: deliverylifecycle.SubscriberNode, SubscriberID: ref.Node().Key(),
 			Status: status, FinalSelection: deliverylifecycle.AbsentSelection(), CreatedAt: source.CurrentEventAdmittedAt},
 	}}

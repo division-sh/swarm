@@ -31,7 +31,8 @@ func TestSelectedFanOutInFlightAdmissionSurvivesMutationGate(t *testing.T) {
 			}
 			item := runfork.RunForkPendingWork{EventID: eventID, DeliveryID: deliveryID, DeliveryRoute: route,
 				SubscriberType: "node", SubscriberID: route.Recipient.ID(), Classification: classification, Status: status,
-				CreatedAt: now, StartedAt: &now, ClaimVersion: 3, RetryCount: 1}
+				CreatedAt: now, ClaimVersion: 3, RetryCount: 1}
+			item.SourceExecution.Started = true
 			plan := runfork.RunForkPlan{SourceRunID: runID, PendingWork: []runfork.RunForkPendingWork{item},
 				FanOutObligations: []runfork.RunForkFanOutObligation{{
 					Intent: fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{Key: fanoutobligation.IntentKey{

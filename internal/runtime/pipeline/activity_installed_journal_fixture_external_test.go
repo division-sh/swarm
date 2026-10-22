@@ -18,12 +18,21 @@ import (
 // intentionally continues to use the unbound, read-only journal after reopening.
 func installActivityReplayJournal(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, bus *activityJournalProofBus, pc *pipeline.PipelineCoordinator) (pipeline.ActivityAttemptJournal, func()) {
 	t.Helper()
+	journal, release := captureActivityReplayJournal(t, ctx, selected.events.(startupownership.Store), bus.WaitForQuiescence)
+	if err := pc.InstallActivityJournal(journal); err != nil {
+		t.Fatal(err)
+	}
+	return journal, release
+}
+
+func captureActivityReplayJournal(t *testing.T, ctx context.Context, owner startupownership.Store, join func(context.Context) error) (pipeline.ActivityAttemptJournal, func()) {
+	t.Helper()
 	fact, found := correlation.SourceArtifactFactFromContext(ctx)
 	scope, scoped := authoractivity.ScopeFromContext(ctx)
 	if !found || fact.Validate() != nil || !scoped || scope.RuntimeInstanceID == "" {
 		t.Fatal("activity proof requires its exact admitted source and runtime scope")
 	}
-	process, err := selected.events.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+	process, err := owner.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
 		OwnerID: "activity-journal-proof", BootID: uuid.NewString(), RuntimeInstanceID: scope.RuntimeInstanceID,
 	})
 	if err != nil {
@@ -35,7 +44,7 @@ func installActivityReplayJournal(t *testing.T, ctx context.Context, selected ga
 		once.Do(func() {
 			cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := bus.WaitForQuiescence(cleanup); err != nil {
+			if err := join(cleanup); err != nil {
 				t.Error(err)
 			}
 			if err := process.Release(cleanup); err != nil {
@@ -66,9 +75,6 @@ func installActivityReplayJournal(t *testing.T, ctx context.Context, selected ga
 	}
 	journal, err := startupownership.CaptureActivityJournal(ctx, grant, evidence)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := pc.InstallActivityJournal(journal); err != nil {
 		t.Fatal(err)
 	}
 	return journal, release

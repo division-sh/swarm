@@ -56,11 +56,11 @@ func TestIssue642FanOutPublishedPendingNodeProjection(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				row := deliverylifecycle.Snapshot{DeliveryID: deliveryID, EventID: event, RunID: run, Route: route, RouteIdentity: routeID,
+				row := deliverylifecycle.HistoricalFact{DeliveryID: deliveryID, EventID: event, RunID: run, Route: route, RouteIdentity: routeID,
 					SubscriberClass: deliverylifecycle.SubscriberNode, SubscriberID: node.Key(), Status: status,
-					CreatedAt: now, UpdatedAt: now, MaxRetries: 3}
+					CreatedAt: now, MaxRetries: 3}
 				if status.Terminal() {
-					row.ClaimVersion, row.SettledAt = 1, now
+					row.SettledClaimVersion, row.SettledAt = 1, now
 				} else {
 					pendingRows[deliveryID] = runfork.RunForkPendingWork{DeliveryID: deliveryID, EventID: event, SubscriberType: "node", SubscriberID: node.Key(), DeliveryRoute: route,
 						Status: "pending", Classification: runfork.RunForkPendingClassificationPending}

@@ -30,7 +30,7 @@ func TestReviewerDeploymentMixedPartitionRetainsTerminalRows(t *testing.T) {
 	pending := plan.PendingWork[0]
 	pending.RoutingSource = source
 	pending.ClaimVersion, pending.RetryCount = 0, 0
-	pending.ActiveSessionID, pending.StartedAt = "", nil
+	pending.SourceExecution.SessionBound, pending.SourceExecution.Started = false, false
 	now := time.Unix(100, 0).UTC()
 	terminal := append([]RunForkPendingWork(nil), plan.PendingWork[2:5]...)
 	plan.PendingWork = []RunForkPendingWork{pending, {EventID: original.SourceEventID,

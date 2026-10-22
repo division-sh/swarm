@@ -34,6 +34,7 @@ const runtimeSharedStoreOwnershipLock = "swarm:runtime:shared-store-owner"
 
 type StartupPostgresOwner struct {
 	processOperations
+	selectedResetHistory
 	constructionMu       sync.Mutex
 	constructionLease    *postgresbackend.AdvisoryLockLease
 	constructionCapacity func()
@@ -50,6 +51,7 @@ type StartupPostgresOwner struct {
 
 type StartupSQLiteOwner struct {
 	processOperations
+	selectedResetHistory
 	backend             *sqlitebackend.Backend
 	path                string
 	backendIdentity     *SQLiteBackendIdentity
@@ -391,6 +393,9 @@ func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req 
 			}
 		}
 		var err error
+		if err := s.owner.validateSelectedResetPreparationsTx(txctx, tx, req, false); err != nil {
+			return err
+		}
 		result, err = storeadmin.ApplyDestructiveResetCleanupInRetainedTransaction(s.owner.destructiveReset, txctx, tx, req)
 		if err == nil && !req.Result.DryRun {
 			err = storeadmin.CommitResetCleanupTx(txctx, tx, req, result, false)
@@ -586,6 +591,9 @@ func (s *sqliteSession) ApplyDestructiveResetCleanup(ctx context.Context, req ru
 			}
 		}
 		var err error
+		if err := s.owner.validateSelectedResetPreparationsTx(txctx, tx, req, true); err != nil {
+			return err
+		}
 		result, err = storeadmin.ApplyDestructiveResetSQLiteCleanupInRetainedTransaction(txctx, tx, req)
 		if err == nil && !req.Result.DryRun {
 			err = storeadmin.CommitResetCleanupTx(txctx, tx, req, result, true)

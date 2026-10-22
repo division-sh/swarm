@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/containeridentity"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/dataaccess"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
@@ -81,11 +82,12 @@ type QuiescenceResult struct {
 }
 
 type CleanupRequest struct {
-	OperationID  string
-	Result       Result
-	Quiescence   QuiescenceResult
-	ActorTokenID string
-	RequestedAt  time.Time
+	OperationID     string
+	Result          Result
+	Quiescence      QuiescenceResult
+	ActorTokenID    string
+	RequestedAt     time.Time
+	SelectedHistory []runfork.SelectedResetPreparation `json:"-"`
 }
 
 type CleanupResult struct {

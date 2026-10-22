@@ -146,10 +146,10 @@ func publishedBarrierEvidenceFixture(t *testing.T, root bool, mode executionmode
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot.Deliveries = []runForkRevisionDelivery{{runForkRevisionedFact: runForkRevisionedFact{FirstRevision: 3, Revision: 4}, Snapshot: deliverylifecycle.Snapshot{
+	snapshot.Deliveries = []runForkRevisionDelivery{{runForkRevisionedFact: runForkRevisionedFact{FirstRevision: 3, Revision: 4}, Snapshot: deliverylifecycle.HistoricalFact{
 		RunID: snapshot.RunID, DeliveryID: deliveryID, EventID: event.ID(), Route: route, RouteIdentity: routeID,
 		SubscriberClass: deliverylifecycle.SubscriberNode, SubscriberID: ref.Node().Key(), Status: status, FinalSelection: deliverylifecycle.AbsentSelection(),
-		CreatedAt: at, UpdatedAt: at,
+		CreatedAt: at,
 	}}}
 	return snapshot, obligations
 }

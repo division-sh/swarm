@@ -228,7 +228,7 @@ func newPermanentCohortTimerFixture(t *testing.T, opened authorActivityReceiptFi
 		f.eventID = event.ID()
 	}
 	repo := canonicalrouting.RepoRoot(t)
-	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: opened.store.(runforkexecution.SourceArtifactSelectedContractSourceStore)}
+	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: opened.store.(runforkexecution.SourceArtifactSelectedContractSourceStore)}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
 		SourceRunID: runID, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 	})

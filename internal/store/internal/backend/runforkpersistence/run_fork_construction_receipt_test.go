@@ -44,10 +44,11 @@ func forkConstructionPlanFixture(t *testing.T, outgoing bool) runfork.RunForkPla
 	if err != nil {
 		t.Fatal(err)
 	}
+	state := "later"
 	return (runfork.RunForkPlan{
 		SourceRunID: sourceRun, ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointRunStart, Revision: 1},
 		Entities: []runfork.RunForkEntityState{{
-			EntityID: identity.EntityID, CurrentState: "later", EnteredStateAt: &at,
+			EntityID: identity.EntityID, CurrentState: &state, EnteredStateAt: &at,
 			Fields: map[string]any{"value": int64(99), "double": float64(99)},
 			MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 				Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,

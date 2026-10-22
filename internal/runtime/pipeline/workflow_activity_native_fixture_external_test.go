@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
@@ -52,6 +53,21 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 	ctx := testAuthorActivityContextForSource(t, context.Background(), fact)
 	persistence := pipeline.NewWorkflowPersistence(selected)
 	var buses []*runtimebus.EventBus
+	var journal pipeline.ActivityAttemptJournal
+	var releaseJournal func()
+	captureJournal := func() pipeline.ActivityAttemptJournal {
+		if journal == nil {
+			journal, releaseJournal = captureActivityReplayJournal(t, ctx, selected.(startupownership.Store), func(ctx context.Context) error {
+				for _, bus := range buses {
+					if err := bus.WaitForQuiescence(ctx); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+		}
+		return journal
+	}
 	join := func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -92,6 +108,9 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		if pc == nil {
 			t.Fatal("native activity coordinator rejected its selected semantic owners")
 		}
+		if err := pc.InstallActivityJournal(captureJournal()); err != nil {
+			t.Fatal(err)
+		}
 		// Register after the bus catalog lease so cleanup joins this bus
 		// before releasing its catalog, runtime occurrence or selected store.
 		t.Cleanup(func() {
@@ -115,11 +134,8 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		NewCoordinator: func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions) *pipeline.PipelineCoordinator {
 			return coordinator(bus, options, persistence)
 		},
-		CleanupFault: func(fault error) (pipeline.WorkflowPersistence, func() int32) {
-			return storetest.ActivityJournalCleanupPersistenceFault(t, selected, fault)
-		},
 		CleanupFaultCoordinator: func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions, fault error) (*pipeline.PipelineCoordinator, func() int32) {
-			faulted, count := storetest.ActivityJournalCleanupPersistenceFault(t, selected, fault)
+			faulted, count := storetest.ActivityJournalCleanupPersistenceFault(t, selected, fault, captureJournal())
 			return coordinator(bus, options, faulted), count
 		},
 		Construct: func(ctx context.Context, instance pipeline.WorkflowInstance) error {
@@ -192,6 +208,9 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 			if err := join(); err != nil {
 				t.Fatal(err)
 			}
+			if releaseJournal != nil {
+				releaseJournal()
+			}
 			if err := selected.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -217,10 +236,6 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 			})
 		},
 	}
-}
-
-func TestActivityJournalFixtureTerminalNoopBothStores(t *testing.T) {
-	pipeline.VerifyActivityJournalFixtureTerminalNoopBothStoresForTest(t, workflowActivityNativeFixture)
 }
 
 func TestHumanTaskExpiryUsesClosedSelectedStoreCommitEvidence(t *testing.T) {
@@ -283,10 +298,6 @@ func TestChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossS
 
 func TestActivityTerminalPostCommitErrorPublishesJournaledResultBothStores(t *testing.T) {
 	pipeline.VerifyActivityTerminalPostCommitErrorPublishesJournaledResultBothStoresForTest(t, workflowActivityNativeFixture)
-}
-
-func TestActivityJournalFixtureTerminalAcknowledgementSurvivesPostCommitError(t *testing.T) {
-	pipeline.VerifyActivityJournalFixtureTerminalAcknowledgementSurvivesPostCommitErrorForTest(t, workflowActivityNativeFixture)
 }
 
 func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) {
