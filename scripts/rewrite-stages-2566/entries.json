@@ -2557,7 +2557,12 @@
     ],
     "finals": [],
     "function": "proposedEffectProofBundle",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/pipeline/workflow_gate_recovery_external_test.go",
+      "function": "proposedEffectProofBundleForMethod",
+      "literal": 2
+    }
   },
   {
     "file": "internal/runtime/pipeline/workflow_guard_cause_hostility_test.go",
