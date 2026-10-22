@@ -608,7 +608,6 @@ func mixedPubsubConnectStaticSource(t *testing.T) semanticview.Source {
 		"producer/nodes.yaml":    "local-observer:\n  execution_type: system_node\n  subscribes_to: [deploy.done]\n  event_handlers:\n    deploy.done:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
-		"consumer/events.yaml":   "deploy.completed:\n",
 		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.completed:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
 	}))
 }

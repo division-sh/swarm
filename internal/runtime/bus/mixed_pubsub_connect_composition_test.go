@@ -123,10 +123,9 @@ func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
 		"producer/events.yaml":   "deploy.done:\n",
 		"producer/nodes.yaml":    "producer-local:\n  execution_type: system_node\n  subscribes_to: [deploy.done]\n  event_handlers:\n    deploy.done:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
-		"producer/agents.yaml":   "producer-agent:\n  subscriptions: [deploy.done]\n",
+		"producer/agents.yaml":   "producer-agent:\n  intent: {inline: 'Observe deployment completion.'}\n  subscriptions: [deploy.done]\n",
 		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.accepted]\n",
-		"consumer/events.yaml":   "deploy.accepted:\n",
 		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.accepted:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
 	}))
 	owners := mixedStaticOwners(t, source, "producer", "consumer")
@@ -246,7 +245,7 @@ func mixedFanoutToFanoutSource(t *testing.T, reverse bool) semanticview.Source {
 	for _, id := range []string{"left", "right"} {
 		files[id+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 		files[id+"/schema.yaml"] = "stages: []\npins:\n  inputs: [branch.accepted]\n  outputs: [branch.done]\n"
-		files[id+"/events.yaml"] = "branch.accepted:\nbranch.done:\n"
+		files[id+"/events.yaml"] = "branch.done:\n"
 		files[id+"/nodes.yaml"] = fmt.Sprintf(`%s-receiver:
   execution_type: system_node
   event_handlers:
@@ -261,7 +260,6 @@ func mixedFanoutToFanoutSource(t *testing.T, reverse bool) semanticview.Source {
 `, id, id)
 		files[id+"-sink/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 		files[id+"-sink/schema.yaml"] = "stages: []\npins:\n  inputs: [branch.final]\n"
-		files[id+"-sink/events.yaml"] = "branch.final:\n"
 		files[id+"-sink/nodes.yaml"] = fmt.Sprintf(`%s-sink-node:
   execution_type: system_node
   event_handlers:

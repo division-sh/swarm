@@ -112,7 +112,6 @@ func TestParentLocalConstructionSelectionUsesRecordedAncestry(t *testing.T) {
 			}
 			if authoredPin {
 				files["parent/schema.yaml"] += "pins:\n  inputs: [work.done]\n"
-				files["parent/events.yaml"] = "work.done:\n"
 			}
 			source := semanticview.Wrap(loadTargetRouteTempBundle(t, files))
 			graph := pinrouting.CompileConnectGraph(source)
