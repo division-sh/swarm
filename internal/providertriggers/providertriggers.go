@@ -195,6 +195,25 @@ func NewCatalogSnapshotFromAdmittedBodies(manifests ...Manifest) (*CatalogSnapsh
 	return freezeCatalogSnapshot(snapshot, entries)
 }
 
+// ComposeCatalogSnapshots combines immutable admitted entries without repeating
+// BODY admission or reconstructing identities from readback.
+func ComposeCatalogSnapshots(catalogs ...*CatalogSnapshot) (*CatalogSnapshot, error) {
+	snapshot := &CatalogSnapshot{byProvider: map[string]catalogEntryValue{}, byID: map[string]catalogEntryValue{}}
+	var entries []catalogEntryValue
+	for _, catalog := range catalogs {
+		if catalog == nil || !catalog.Generation().Valid() {
+			return nil, fmt.Errorf("catalog composition requires admitted snapshots")
+		}
+		for _, entry := range catalog.byProvider {
+			if err := recordCatalogEntry(snapshot, entry); err != nil {
+				return nil, err
+			}
+			entries = append(entries, entry)
+		}
+	}
+	return freezeCatalogSnapshot(snapshot, entries)
+}
+
 func recordCatalogEntry(snapshot *CatalogSnapshot, entry catalogEntryValue) error {
 	provider := entry.manifest.Provider()
 	if existing, exists := snapshot.byProvider[provider]; exists {
@@ -345,7 +364,7 @@ func DerivedCapabilities(manifest Manifest) packs.Capabilities {
 	sort.Strings(eventNames)
 	verifySecret := ""
 	if manifest.RequiresSecret() {
-		verifySecret = "webhook_signing." + provider
+		verifySecret = provider + ".webhook_signing_secret"
 	}
 	return packs.Capabilities{
 		Can: packs.CanCapabilities{
@@ -365,7 +384,7 @@ func DerivedCapabilities(manifest Manifest) packs.Capabilities {
 func DerivedRequires(manifest Manifest) packs.Requires {
 	provider := manifest.Provider()
 	if manifest.RequiresSecret() {
-		return packs.Requires{Secrets: []string{"webhook_signing." + provider}}
+		return packs.Requires{Secrets: []string{provider + ".webhook_signing_secret"}}
 	}
 	return packs.Requires{}
 }

@@ -6,7 +6,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	platformcontract "github.com/division-sh/swarm/internal/platform"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
@@ -89,6 +91,26 @@ func (p ProviderSource) FlowPaths() []string {
 	return paths
 }
 
+func (p ProviderSource) VerifyProviderOutputAuthorization(authorization runtimeprovideroutput.Authorization) error {
+	if !p.Valid() || !authorization.Valid() {
+		return fmt.Errorf("provider output requires its captured source and complete authorization")
+	}
+	for _, flow := range p.FlowPaths() {
+		scope, err := p.Scope(flow)
+		if err != nil {
+			return err
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			return err
+		}
+		if catalog.VerifyProviderOutputAuthorization(authorization) == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("provider output does not belong to a captured flow scope")
+}
+
 // Scope accepts an exact admitted flow path, never a directory/key heuristic.
 func (p ProviderSource) Scope(flowPath string) (ProviderScope, error) {
 	if !p.Valid() {
@@ -136,4 +158,17 @@ func (s ProviderScope) HeldProviders() []ProviderDefinition {
 		}
 	}
 	return out
+}
+
+func (s ProviderScope) TriggerCatalog() (*providertriggers.CatalogSnapshot, error) {
+	if !s.source.Valid() {
+		return nil, fmt.Errorf("trigger catalog requires an admitted provider scope")
+	}
+	var catalogs []*providertriggers.CatalogSnapshot
+	for _, definition := range s.Providers() {
+		if catalog, present := definition.TriggerCatalog(); present {
+			catalogs = append(catalogs, catalog)
+		}
+	}
+	return providertriggers.ComposeCatalogSnapshots(catalogs...)
 }

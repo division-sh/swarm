@@ -11,6 +11,7 @@ func ScopedActivityMembers() map[string][]byte {
 		if flow != "." {
 			prefix = flow + "/"
 		}
+		members[prefix+"manifest.yaml"] = []byte("version: 1.0.0\nplatform_version: '*'\n")
 		members[prefix+"schema.yaml"] = []byte("stages: []\n")
 		members[prefix+"events.yaml"] = []byte("send.requested:\n")
 		members[prefix+"nodes.yaml"] = []byte(`sender:

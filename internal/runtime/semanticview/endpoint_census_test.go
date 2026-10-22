@@ -158,7 +158,7 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 	// Timer census is a direct compiled-carrier fixture, not timer authoring.
 	bundle.Semantics.Timers = timers
 	base := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{".": {{Event: "flow.started"}}}, map[string][]runtimecontracts.FlowOutputEventPin{".": {{Event: "flow.completed"}}})
-	source := markedToolOverlaySource{Source: base, capabilities: base.SemanticCapabilities().WithProviderTriggerEvents(base, triggergeneration.FromCanonicalBytes([]byte("endpoint-census")), nil).WithProviderIngressEvents(map[string][]string{".": {"external.received"}})}
+	source := markedToolOverlaySource{Source: base, capabilities: base.SemanticCapabilities().WithProviderTriggerEvents(base, triggergeneration.FromCanonicalBytes([]byte("endpoint-census")), nil, nil).WithProviderIngressEvents(map[string][]string{".": {"external.received"}})}
 	census := BuildAuthoredEventEndpointCensus(source)
 	producerKinds := endpointKindSet(census.Producers())
 	for _, kind := range []EventEndpointKind{EventEndpointNodeHandler, EventEndpointAgent, EventEndpointRequiredAgentRole, EventEndpointTimer, EventEndpointAutoEmit, EventEndpointExternal} {

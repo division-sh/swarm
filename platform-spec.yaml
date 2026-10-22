@@ -12604,45 +12604,22 @@ tool_model:
     compiled_admission_authority:
       owner: internal/providertriggers.CatalogSnapshot and InboundAdmissionPlan
       issue: '#1936'
-      declaration_owner: schema.yaml ingress.providers[].admission in the owning FlowNode
+      declaration_owner: captured provider trigger.yaml plus the holding flow's declared provider input pins
       omission_rule: >
-        Omitted `admission` or omitted `admission.kind` always means `pack`, independent of environment. Pack mode must
-        resolve exactly one verified provider-trigger pack from the current immutable CatalogSnapshot or verification fails.
-        Missing packs never select raw mode. Platform and external packs resolve through the identical rule and verifier.
-      pack_grammar:
-        minimal: '{provider: telegram, signing_secret: webhook_signing.telegram}'
-        optional_pin: 'admission: {kind: pack, pack: {id: provider.telegram}}'
-        rules:
-        - '`kind` may be omitted or exactly `pack`'
-        - '`pack.id` is optional and pins one exact loaded pack id; wrong, missing, or provider-mismatched ids fail with loaded-pack remediation'
-        - authentication, event, delivery_id, and payload are raw-only and forbidden
-        - signed pack plans require one non-empty signing_secret reference; unauthenticated pack plans forbid it
-        - an unauthenticated pack plan requires `acknowledge: unsigned_webhook`; authenticated plans forbid acknowledgement
-      raw_grammar:
-        required:
-        - 'kind: raw'
-        - 'authentication.kind: none | token | hmac_sha256'
-        - exact literal event
-        - 'delivery_id.source: header | json_path | body_sha256'
-        - 'payload: json | raw'
-        conditional:
-        - token requires one explicit header, permits an optional prefix, and forbids encoding
-        - hmac_sha256 requires one explicit header, permits an optional prefix, signs exact raw body bytes, and uses encoding hex or base64
-        - none forbids header, prefix, encoding, and signing_secret
-        - header delivery identity requires exactly one value from the named header
-        - json_path delivery identity requires one syntactically valid declared JSONPath and a non-empty resolved value
-        - body_sha256 derives identity only from exact body bytes
-        rules:
-        - raw is legal only through explicit `kind: raw`; there is no raw default, fallback, or compatibility path
-        - raw provider names cannot equal a provider owned by any installed pack; intentional raw use must choose a distinct namespace such as `<provider>-raw`
-        - provider-specific signature headers, delivery fields, event fields, or payload heuristics not named by the declaration are ignored
-        - duplicate declared authentication or delivery-id header values fail closed
-        - authenticated raw plans require signing_secret; unauthenticated raw plans forbid it
-      unsigned_acknowledgement: >
-        `acknowledge: unsigned_webhook` is the only accepted acknowledgement token. For explicit unauthenticated raw
-        admission, absence emits the non-blocking `inbound_unsigned_webhook` verify warning with remediation naming the
-        token; presence suppresses that warning. Effective readback always renders request_authentication=UNAUTHENTICATED
-        regardless of acknowledgement. Comments and booleans are not controls.
+        A provider directory in scope supplies typed schemas and tools, not a route by visibility alone. Only the exact
+        holding flow's consumed provider input pins declare standing ingress. Inherited, sibling, unused and connector-only
+        directories cannot declare that ingress. Clock-only declarations keep their existing construction and lifecycle owner.
+        The captured BODY supplies authentication, normalization, event naming and delivery identity; there is no schema-side
+        pack/raw selection, alias override, import list or fallback to an installed global role catalog.
+      scoped_catalog_authority: >
+        Scope composition combines already-admitted immutable snapshots without repeating BODY admission. Context admission
+        preserves its supplied captured catalog and validates exact scope membership, generation, BODY member paths and
+        installed subjects. It never replaces that catalog with the global pack projection. Standing target plans validate
+        against their own holder declaration and scoped generation, not another flow's catalog generation.
+      unsigned_route_note: >
+        A BODY with no required secret declares an open route. Verification reports a NOTE; there is no second acknowledgement
+        grammar or automatic acknowledgement. Readback reports request_authentication=UNAUTHENTICATED. Signed BODYs still
+        require their exact provider-qualified signing role, and missing, empty or invalid credentials cannot enable a route.
       exact_request_authentication:
         TOKEN_EQUALITY: pack manifest token_equality
         TOKEN: explicit raw token equality
@@ -12981,7 +12958,7 @@ tool_model:
       signed_payload_recipe_discipline: >
         Signed-payload recipes are shared scheme families, not provider-specific escape hatches. New recipes should be added
         only when they generalize a provider family; recipe count should grow sublinearly as provider coverage expands.
-    secret_binding: schema.yaml ingress.providers[].signing_secret is the target-scoped credential reference owner; source never carries the secret value.
+    secret_binding: The admitted trigger BODY derives the target-scoped provider.webhook_signing_secret role; source never carries its secret value or a schema-side signing-secret override.
     configured_provider_manifests:
     - provider: github
       signature: >
@@ -42949,7 +42926,7 @@ filesystem_source_model:
       ProviderScope distinguishes the selected visible definitions from definitions physically held by that exact flow. Inherited visibility never transfers holder ownership. Held membership alone is not an enabled route, ready connection, claim, retained binding or effect grant; consumed holder inputs and the existing authorized ingress/connection owners remain required. Provider keys and flow selectors are exact and non-normalizing. Returned slices, role descriptors and bytes cannot mutate the frozen scope or its definitions.
     effective_trigger_schema_admission: |
       AdmitEffectiveSourceProjection compiles trigger schemas from the same captured ProviderSource and nearest whole-directory selection used by connector composition. An imports list, global role catalog, host reread or independently supplied provider key cannot select a BODY. Each schema is owned by its exact flow/event coordinate and captured BODY identity. A nearer directory without a trigger hides the ancestor trigger, including its schemas; equal short names in separate branches do not share a BODY.
-      Normalized schemas come from the admitted declarative mapping. Raw-only bodies remain supported. Raw event templates bind only concrete matching authored input pins through the existing event-name policy; the directory key is not a protocol hint. Both input and output pin schemas use the same typed imported schema compiler. Static visibility does not create enabled ingress, authenticated publication, a standing target, a connection, or an effect grant, even when a flow declares an input. Holder/input and existing authorized ingress owners remain separate requirements.
+      Normalized schemas come from the admitted declarative mapping. Raw-only bodies remain supported. Raw event templates bind only concrete matching authored input pins through the existing event-name policy; the directory key is not a protocol hint. Both input and output pin schemas use the same typed imported schema compiler. Visibility alone creates no ingress declaration. The canonical standing declaration compiler consumes only held provider directories and matching input pins, and its compiled normalized-output metadata retains the exact flow's catalog generation separately from the composite schema fingerprint. This declaration metadata is not authenticated wire input, an enabled standing generation, a connection or an effect grant; credential admission and the existing runtime lifecycle owners remain required.
       The scoped source preserves the existing private activity-tool compiler during repeated composition. Exact rooted selectors, defensive catalog/scope readbacks and closed retained reconstruction preserve schema and activity bindings after host mutation or deletion. Target-free catalog inspection may expose an unambiguous imported schema, but cannot supply an explicit root or foreign flow with receiver authority. Global aliases omit differing scoped BODY owners. The deterministic trigger-selection fingerprint and member labels describe captured schema composition, not credential or connection authority, acquisition provenance, or a new persisted receipt.
       Event proofs, source-backed node/agent/timer subscription admission, endpoint association and declared-output readers validate the raw explicit flow selector through the existing admitted scope owner before any normalization. Padded, missing or unknown receiver selectors cannot acquire schema proof, handler/route admission or an endpoint by borrowing the root or another flow. Immediate agent/timer, pipeline and public-input wrappers preserve that raw coordinate. Source-free grammar classification and target-free catalog inspection are distinct supported operations, not receiver authority.
       Descriptor and model preparation, replacement, and actor persistence projection preserve the raw authored FlowID until the existing exact scope owner admits or refuses it. Refusal must not repair a mutable input or readback into a selector that a later call can admit. Agent declaration, name, execution and memory proofs, scoped policy provenance, executable-node lookup, root-coordinate matching and input-producer evidence use the same exact authored coordinate; derived event names and typed route/instance semantics retain their separate existing normalization rules.

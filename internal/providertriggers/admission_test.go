@@ -49,24 +49,30 @@ func TestCompileAdmissionProjectsExactPackAuthentication(t *testing.T) {
 		{signatureTypeTokenEquality, RequestAuthenticationTokenEquality},
 		{signatureTypeHMACSHA256, RequestAuthenticationHMACSHA256},
 		{signatureTypeHMACSHA1, RequestAuthenticationHMACSHA1},
+		{"", RequestAuthenticationNone},
 	} {
 		t.Run(tc.signature, func(t *testing.T) {
-			catalog, err := NewCatalogSnapshotFromAdmittedBodies(admissionTestEntry(admissionTestManifest("acme", tc.signature, true), "provider.acme").Manifest)
+			requiresSecret := tc.want != RequestAuthenticationNone
+			secret, requirements := "", 0
+			if requiresSecret {
+				secret, requirements = "webhook_signing.acme", 1
+			}
+			catalog, err := NewCatalogSnapshotFromAdmittedBodies(admissionTestEntry(admissionTestManifest("acme", tc.signature, requiresSecret), "provider.acme").Manifest)
 			if err != nil {
 				t.Fatal(err)
 			}
-			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "acme", SigningSecret: "webhook_signing.acme"})
+			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "acme", SigningSecret: secret})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if plan.RequestAuthentication() != tc.want || !plan.RequiresSecret() {
+			if plan.RequestAuthentication() != tc.want || plan.RequiresSecret() != requiresSecret || plan.AcknowledgedUnsigned() {
 				t.Fatalf("authentication = %s requires=%t", plan.RequestAuthentication(), plan.RequiresSecret())
 			}
-			subject, err := plan.EffectiveCapabilitySubject(EffectiveSubjectRequest{BundleHash: strings.Repeat("a", 64), FlowPath: ".", Alias: "chat", SigningSecret: "webhook_signing.acme"})
+			subject, err := plan.EffectiveCapabilitySubject(EffectiveSubjectRequest{BundleHash: strings.Repeat("a", 64), FlowPath: ".", Alias: "chat", SigningSecret: secret})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if subject.TriggerAdmission == nil || subject.TriggerAdmission.RequestAuthentication != string(tc.want) || subject.TriggerAdmission.PolicySource != string(PolicySourceVerifiedPack) || len(subject.Requirements) != 1 {
+			if subject.TriggerAdmission == nil || subject.TriggerAdmission.RequestAuthentication != string(tc.want) || subject.TriggerAdmission.PolicySource != string(PolicySourceVerifiedPack) || len(subject.Requirements) != requirements {
 				t.Fatalf("subject = %#v", subject)
 			}
 		})

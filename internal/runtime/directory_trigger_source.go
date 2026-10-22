@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
@@ -70,10 +71,43 @@ func sourceWithDirectoryTriggerSchemas(source semanticview.Source, providers pac
 	if err != nil {
 		return nil, err
 	}
+	declarations, err := resolveDirectoryStandingDeclarations(schemaSource, bundle, providers)
+	if err != nil {
+		return nil, err
+	}
+	authorizations := map[string][]runtimeprovideroutput.Authorization{}
+	scopeGenerations := map[string]triggergeneration.Generation{}
+	ingressEvents := map[string][]string{}
+	for _, declaration := range declarations {
+		for _, binding := range declaration.Ingress {
+			scopeGenerations[declaration.FlowPath] = binding.AdmissionPlan.Generation()
+			identity, _ := binding.AdmissionPlan.PackIdentity()
+			for _, pin := range schemaSource.FlowInputEventPins(declaration.FlowPath) {
+				for _, output := range binding.AdmissionPlan.Outputs() {
+					if output.Kind == providertriggers.OutputKindRaw {
+						if output.EventName.Accepts(pin.EventType()) {
+							ingressEvents[declaration.FlowPath] = append(ingressEvents[declaration.FlowPath], pin.EventType())
+						}
+						continue
+					}
+					if output.Event != pin.EventType() {
+						continue
+					}
+					authorization, err := runtimeprovideroutput.NewAuthorization(binding.Provider, output.Event, identity.ID, identity.Version, identity.ManifestHash, binding.AdmissionPlan.Generation())
+					if err != nil {
+						return nil, err
+					}
+					authorizations[declaration.FlowPath] = append(authorizations[declaration.FlowPath], authorization)
+					ingressEvents[declaration.FlowPath] = append(ingressEvents[declaration.FlowPath], output.Event)
+				}
+			}
+		}
+	}
 	out := providerTriggerEventSource{
 		Source: source, generation: generation, owners: owners, byFlow: byFlow,
 		imported: aliases, compiledCatalog: readback, compiledByFlow: compiled,
 		compiledInputPins: inputs, compiledOutputPins: outputs,
+		outputs: authorizations, ingressEvents: ingressEvents, scopeGenerations: scopeGenerations,
 	}
 	out.connectionInputs = runtimecontracts.CompileConnectionInputs(bundle, out)
 	if err := out.connectionInputs.ValidateBindings(); err != nil {

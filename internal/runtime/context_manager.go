@@ -796,36 +796,74 @@ func validateRuntimeContextDefinition(contextDef BundleContext, executable bool)
 		return BundleContext{}, fmt.Errorf("runtime context %s installed provider trigger subjects: %w", bundleHash, err)
 	}
 	contextDef.InstalledTriggerSubjects = normalizedSubjects
-	if bundle, ok := semanticview.Bundle(contextDef.Source); ok && bundle != nil && bundle.PackInventory != nil {
-		inventoryDigest := bundle.PackInventory.Digest()
-		if contextDef.PackInventoryDigest == "" || contextDef.PackInventoryDigest != inventoryDigest {
-			return BundleContext{}, fmt.Errorf("runtime context %s pack inventory digest %q does not match bundle inventory %q", bundleHash, contextDef.PackInventoryDigest, inventoryDigest)
-		}
-		projection, err := packadmission.FromBundle(bundle)
-		if err != nil {
-			return BundleContext{}, fmt.Errorf("runtime context %s load admitted pack projection: %w", bundleHash, err)
-		}
-		catalog := projection.ProviderTriggers
-		contextDef.ProviderTriggerCatalog = catalog
-		if !contextDef.ProviderTriggerGeneration.Equal(catalog.Generation()) {
-			return BundleContext{}, fmt.Errorf("runtime context %s provider-trigger generation %q does not match bundle inventory generation %q", bundleHash, contextDef.ProviderTriggerGeneration.Diagnostic(), catalog.Generation().Diagnostic())
-		}
-		expectedSubjects, err := catalog.InstalledCapabilitySubjects()
-		if err != nil {
-			return BundleContext{}, fmt.Errorf("runtime context %s derive installed provider-trigger subjects: %w", bundleHash, err)
-		}
-		expectedSubjects, err = packs.NormalizeSubjects(expectedSubjects)
-		if err != nil {
-			return BundleContext{}, err
-		}
-		if !reflect.DeepEqual(contextDef.InstalledTriggerSubjects, expectedSubjects) {
-			return BundleContext{}, fmt.Errorf("runtime context %s installed provider-trigger subjects do not match its bundle inventory", bundleHash)
-		}
+	if err := validateRuntimeContextProviderCatalog(contextDef); err != nil {
+		return BundleContext{}, err
 	}
 	if err := validateTargetsGeneration(contextDef, contextDef.ProviderTriggerGeneration); err != nil {
 		return BundleContext{}, err
 	}
 	return contextDef, nil
+}
+
+func validateRuntimeContextProviderCatalog(contextDef BundleContext) error {
+	bundle, present := semanticview.Bundle(contextDef.Source)
+	if !present || bundle == nil {
+		return fmt.Errorf("runtime context provider catalog requires its compiled source")
+	}
+	if bundle.PackInventory != nil && contextDef.PackInventoryDigest != bundle.PackInventory.Digest() {
+		return fmt.Errorf("runtime context %s pack inventory digest does not match its captured inventory", contextDef.BundleHash())
+	}
+	catalog := contextDef.ProviderTriggerCatalog
+	if catalog == nil {
+		return fmt.Errorf("runtime context %s requires its captured provider catalog", contextDef.BundleHash())
+	}
+	if !contextDef.ProviderTriggerGeneration.Equal(catalog.Generation()) {
+		return fmt.Errorf("runtime context %s provider-trigger generation does not match its captured catalog", contextDef.BundleHash())
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return err
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		return err
+	}
+	matched := false
+	for _, flow := range providers.FlowPaths() {
+		scope, err := providers.Scope(flow)
+		if err != nil {
+			return err
+		}
+		expected, err := scope.TriggerCatalog()
+		if err != nil {
+			return err
+		}
+		if !catalog.Generation().Equal(expected.Generation()) || len(catalog.Entries()) != len(expected.Entries()) {
+			continue
+		}
+		matched = true
+		for _, entry := range catalog.Entries() {
+			owner, found := expected.EntryByProvider(entry.Manifest.Provider())
+			if !found || owner.Identity != entry.Identity || owner.SourcePath != entry.SourcePath {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			break
+		}
+	}
+	if !matched {
+		return fmt.Errorf("runtime context %s provider catalog is not an exact captured flow scope", contextDef.BundleHash())
+	}
+	expectedSubjects, err := catalog.InstalledCapabilitySubjects()
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(contextDef.InstalledTriggerSubjects, expectedSubjects) {
+		return fmt.Errorf("runtime context %s installed provider-trigger subjects do not match its captured catalog", contextDef.BundleHash())
+	}
+	return nil
 }
 
 func equalRuntimeContextSlice[T any](left, right []T) bool {
@@ -925,8 +963,19 @@ func validateStandingTargetDeclarationOwner(contextDef *BundleContext, target St
 			continue
 		}
 		for _, binding := range declaration.Ingress {
-			if binding.Provider == target.Provider && binding.AdmissionPlan.Generation().Equal(target.AdmissionPlan.Generation()) {
-				owned = true
+			if binding.Provider == target.Provider && binding.SigningSecret == target.SigningSecret && binding.AdmissionPlan.Generation().Equal(target.AdmissionPlan.Generation()) {
+				expected, err := binding.AdmissionPlan.EffectiveCapabilitySubject(providertriggers.EffectiveSubjectRequest{
+					BundleHash: contextDef.BundleHash(), FlowPath: declaration.FlowPath, Alias: declaration.Alias,
+					SigningSecret: binding.SigningSecret, SourcePath: declaration.SourcePath,
+				})
+				if err != nil {
+					return err
+				}
+				actual, err := target.CapabilitySubject()
+				if err != nil {
+					return err
+				}
+				owned = reflect.DeepEqual(actual, expected)
 			}
 		}
 	}
@@ -2400,8 +2449,8 @@ func validateTargetsGeneration(contextDef BundleContext, generation triggergener
 		return fmt.Errorf("runtime context %s provider-trigger catalog generation is required", contextDef.BundleHash())
 	}
 	for _, target := range contextDef.StandingTargets {
-		if !target.AdmissionPlan.Generation().Equal(generation) {
-			return fmt.Errorf("runtime context %s standing target %q/%q admission generation %q does not match its bundle generation %q", contextDef.BundleHash(), target.Alias, target.Provider, target.AdmissionPlan.Generation().Diagnostic(), generation.Diagnostic())
+		if err := validateStandingTargetDeclarationOwner(&contextDef, target); err != nil {
+			return err
 		}
 	}
 	return nil

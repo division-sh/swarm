@@ -35,7 +35,7 @@ func TestSemanticSourceCapabilitiesAreCompileVisibleAndComplete(t *testing.T) {
 			},
 			map[string]ConnectorImportSource{"telegram.send": MustConnectorImportSource("pack://telegram")},
 		).
-		WithProviderTriggerEvents(base, triggerGeneration, map[string][]runtimeprovideroutput.Authorization{"ingress": authorizations})
+		WithProviderTriggerEvents(base, triggerGeneration, map[string][]runtimeprovideroutput.Authorization{"ingress": authorizations}, map[string]triggergeneration.Generation{"ingress": triggerGeneration})
 	permissions[0] = MustConnectorGenerationPermission("caller.mutation", "owner")
 	authorizations[0] = runtimeprovideroutput.MustAuthorization(
 		"caller-mutation", "inbound.telegram.message", "provider.telegram", "1.0.0",
@@ -73,7 +73,7 @@ func TestSemanticSourceCapabilityCompositionHasOneOwner(t *testing.T) {
 		"sha256:"+strings.Repeat("a", 64), triggerGeneration,
 	)
 	capabilities := Capabilities{}.
-		WithProviderTriggerEvents(base, triggerGeneration, map[string][]runtimeprovideroutput.Authorization{"ingress": {authorization}}).
+		WithProviderTriggerEvents(base, triggerGeneration, map[string][]runtimeprovideroutput.Authorization{"ingress": {authorization}}, map[string]triggergeneration.Generation{"ingress": triggerGeneration}).
 		WithConnectorPackImports(".",
 			map[string]ConnectorGenerationSurface{"telegram.send": semanticCapabilityGeneration("connector-v1", nil)},
 			map[string]ConnectorImportSource{"telegram.send": MustConnectorImportSource("pack://telegram")},
@@ -84,7 +84,7 @@ func TestSemanticSourceCapabilityCompositionHasOneOwner(t *testing.T) {
 	if generation, ok := capabilities.ConnectorGeneration(".", "telegram.send"); !ok || generation.GeneratorVersion() != "connector-v1" {
 		t.Fatalf("connector capability was lost during composition: %#v, exists=%v", generation, ok)
 	}
-	if generation, base, ok := capabilities.WithProviderTriggerEvents(base, triggergeneration.Generation{}, nil).ProviderTriggerEvents(); ok || generation.Valid() || base != nil {
+	if generation, base, ok := capabilities.WithProviderTriggerEvents(base, triggergeneration.Generation{}, nil, nil).ProviderTriggerEvents(); ok || generation.Valid() || base != nil {
 		t.Fatalf("missing generation acquired provider-trigger capability: (%q, %#v, %v)", generation.Diagnostic(), base, ok)
 	}
 }
@@ -107,6 +107,7 @@ func TestRuntimeToolOverlayPreservesSemanticSourceCapabilities(t *testing.T) {
 			baseSource,
 			triggerGeneration,
 			map[string][]runtimeprovideroutput.Authorization{"ingress": {authorization}},
+			map[string]triggergeneration.Generation{"ingress": triggerGeneration},
 		)
 	base := markedToolOverlaySource{Source: baseSource, capabilities: capabilities}
 	objectSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
@@ -197,8 +198,18 @@ func TestChannelRuntimeToolProjectionReplacesOnlyChannelTools(t *testing.T) {
 func TestSemanticSourceCapabilitiesRejectIncompletePayloads(t *testing.T) {
 	base := Wrap(&runtimecontracts.WorkflowContractBundle{})
 	generation := triggergeneration.FromCanonicalBytes([]byte("trigger-generation"))
+	authorization := runtimeprovideroutput.MustAuthorization("telegram", "inbound.telegram.message", "telegram", "1.0.0", "sha256:"+strings.Repeat("a", 64), generation)
+	for _, scopes := range []map[string]triggergeneration.Generation{
+		nil,
+		{"other": generation},
+		{"ingress": triggergeneration.FromCanonicalBytes([]byte("foreign-scope"))},
+	} {
+		if _, _, present := (Capabilities{}).WithProviderTriggerEvents(base, generation, map[string][]runtimeprovideroutput.Authorization{"ingress": {authorization}}, scopes).ProviderTriggerEvents(); present {
+			t.Fatal("missing, foreign-flow or mismatched scope generation admitted provider output")
+		}
+	}
 	capabilities := Capabilities{}.
-		WithProviderTriggerEvents(base, generation, map[string][]runtimeprovideroutput.Authorization{"ingress": {{}}}).
+		WithProviderTriggerEvents(base, generation, map[string][]runtimeprovideroutput.Authorization{"ingress": {{}}}, map[string]triggergeneration.Generation{"ingress": generation}).
 		WithConnectorPackImports(".",
 			map[string]ConnectorGenerationSurface{"deliver": {}},
 			map[string]ConnectorImportSource{"deliver": {}},

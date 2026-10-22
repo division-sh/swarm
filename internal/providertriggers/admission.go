@@ -179,7 +179,7 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 		return InboundAdmissionPlan{}, err
 	}
 	ack := strings.TrimSpace(declaration.Acknowledge)
-	if err := validateAcknowledgement(alias, provider, auth, ack, true); err != nil {
+	if err := validateAcknowledgement(alias, provider, auth, ack); err != nil {
 		return InboundAdmissionPlan{}, err
 	}
 	requiresSecret := auth != RequestAuthenticationNone
@@ -213,7 +213,7 @@ func (s *CatalogSnapshot) compileRawAdmission(alias, provider, signingSecret str
 		return InboundAdmissionPlan{}, err
 	}
 	ack := strings.TrimSpace(declaration.Acknowledge)
-	if err := validateAcknowledgement(alias, provider, auth, ack, false); err != nil {
+	if err := validateAcknowledgement(alias, provider, auth, ack); err != nil {
 		return InboundAdmissionPlan{}, err
 	}
 	requiresSecret := auth != RequestAuthenticationNone
@@ -260,15 +260,12 @@ func manifestRequestAuthentication(manifest Manifest) (RequestAuthentication, er
 	}
 }
 
-func validateAcknowledgement(alias, provider string, auth RequestAuthentication, acknowledge string, pack bool) error {
+func validateAcknowledgement(alias, provider string, auth RequestAuthentication, acknowledge string) error {
 	if acknowledge != "" && acknowledge != UnsignedWebhookAcknowledgement {
 		return fmt.Errorf("ingress alias %q provider %q admission.acknowledge must be %q when present; remove it or use the canonical token", alias, provider, UnsignedWebhookAcknowledgement)
 	}
 	if auth != RequestAuthenticationNone && acknowledge != "" {
 		return fmt.Errorf("ingress alias %q provider %q acknowledges unsigned_webhook, but the compiled admission uses %s; remove admission.acknowledge", alias, provider, auth)
-	}
-	if pack && auth == RequestAuthenticationNone && acknowledge == "" {
-		return fmt.Errorf("ingress alias %q provider %q resolves an unauthenticated verified pack; add admission.acknowledge: unsigned_webhook to authorize this public endpoint, or install an authenticated pack", alias, provider)
 	}
 	return nil
 }

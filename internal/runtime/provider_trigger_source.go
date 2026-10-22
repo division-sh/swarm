@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -13,163 +14,20 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
-func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *providertriggers.CatalogSnapshot) (semanticview.Source, error) {
-	if source == nil {
-		return nil, fmt.Errorf("semantic source is required")
+func SourceWithProviderTriggerEvents(source semanticview.Source, _ *providertriggers.CatalogSnapshot) (semanticview.Source, error) {
+	bundle, present := semanticview.Bundle(source)
+	if !present || bundle == nil {
+		return nil, fmt.Errorf("provider trigger events require their compiled rooted source")
 	}
-	if generation, base, applied := source.SemanticCapabilities().ProviderTriggerEvents(); applied {
-		if catalog != nil && generation.Equal(catalog.Generation()) {
-			return source, nil
-		}
-		source = base
-	}
-	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle == nil {
-		return nil, fmt.Errorf("provider trigger event import requires a bundle-backed semantic source")
-	}
-	owners := map[providerTriggerSchemaCoordinate]providerTriggerSchemaOwner{}
-	byFlow := map[string]map[string]runtimecontracts.EventCatalogEntry{}
-	outputs := map[string][]runtimeprovideroutput.Authorization{}
-	ingressEvents := map[string][]string{}
-	for _, view := range bundle.FlowViews() {
-		flowID := strings.TrimSpace(view.Paths.FlowPath)
-		location := flowSchemaLocation(view)
-		seen := map[string]struct{}{}
-		for index, declaration := range view.Schema.Imports.ProviderTriggerEvents {
-			provider := declaration.Provider
-			eventName := strings.TrimSpace(declaration.Event)
-			declarationKey := provider + "\x00" + eventName
-			if _, duplicate := seen[declarationKey]; duplicate {
-				return nil, fmt.Errorf("%s imports.provider_trigger_events[%d] duplicates provider %q event %q; remove the duplicate declaration", location, index, provider, eventName)
-			}
-			seen[declarationKey] = struct{}{}
-			if catalog == nil {
-				return nil, fmt.Errorf("%s imports.provider_trigger_events[%d] requires a verified provider-trigger catalog", location, index)
-			}
-			entry, exists := catalog.EntryByProvider(provider)
-			if !exists {
-				return nil, fmt.Errorf("%s imports.provider_trigger_events[%d] references unknown provider %q; available providers: %s", location, index, provider, strings.Join(providerTriggerCatalogProviders(catalog), ", "))
-			}
-			eventEntry, exists, normalized := providerTriggerCatalogEvent(entry, eventName)
-			if !exists {
-				return nil, fmt.Errorf("%s imports.provider_trigger_events[%d] references unknown event %q for provider %q; normalized events: %s", location, index, eventName, provider, strings.Join(providerTriggerNormalizedEvents(entry), ", "))
-			}
-			if !normalized {
-				return nil, fmt.Errorf("%s imports.provider_trigger_events[%d] event %q is a raw provider event; schema-only imports accept normalized events only", location, index, eventName)
-			}
-			owner := newProviderTriggerSchemaOwner(provider, eventName, providertriggers.OutputKindNormalized, entry.Identity, catalog.Generation(), entry.SourcePath)
-			if err := addProviderTriggerSchema(source, flowID, eventName, eventEntry, owner, owners, byFlow); err != nil {
-				return nil, err
-			}
-		}
-	}
-	if catalog == nil {
-		return source, nil
-	}
-
-	for _, view := range bundle.FlowViews() {
-		flowID := strings.TrimSpace(view.Paths.FlowPath)
-		if view.Schema.Ingress == nil {
-			continue
-		}
-		alias, present := bundle.FlowIngressAlias(flowID)
-		if !present {
-			return nil, fmt.Errorf("%s has no compiled ingress alias", flowSchemaLocation(view))
-		}
-		for _, binding := range view.Schema.Ingress.Providers {
-			plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
-				Alias: alias, Provider: binding.Provider, SigningSecret: binding.SigningSecret,
-				Declaration: providerAdmissionDeclaration(binding.Admission),
-			})
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", flowSchemaLocation(view), err)
-			}
-			identity, packBacked := plan.PackIdentity()
-			if !packBacked {
-				for _, output := range plan.Outputs() {
-					if output.Kind == providertriggers.OutputKindRaw && output.EventName.Literal != "" {
-						ingressEvents[normalizedProviderTriggerProjectKey(flowID)] = append(ingressEvents[normalizedProviderTriggerProjectKey(flowID)], output.EventName.Literal)
-					}
-				}
-				continue
-			}
-			entry, exists := catalog.EntryByID(identity.ID)
-			if !exists {
-				return nil, fmt.Errorf("effective ingress pack %q disappeared from verified catalog generation %s", identity.ID, catalog.Generation().Diagnostic())
-			}
-			entries := entry.Manifest.EventCatalogEntries()
-			for _, output := range plan.Outputs() {
-				if output.Kind != providertriggers.OutputKindRaw || strings.TrimSpace(output.EventName.Template) == "" {
-					continue
-				}
-				for _, pin := range source.FlowInputEventPins(flowID) {
-					name := strings.TrimSpace(pin.EventType())
-					if output.EventName.Accepts(name) {
-						entries[name] = providertriggers.RawEventCatalogEntry()
-					}
-				}
-			}
-			for eventName, eventEntry := range entries {
-				eventName = strings.TrimSpace(eventName)
-				kind := providertriggers.OutputKindRaw
-				_, _, normalized := providerTriggerCatalogEvent(entry, eventName)
-				if normalized {
-					kind = providertriggers.OutputKindNormalized
-				}
-				owner := newProviderTriggerSchemaOwner(binding.Provider, eventName, kind, identity, catalog.Generation(), entry.SourcePath)
-				if err := addProviderTriggerSchema(source, flowID, eventName, eventEntry, owner, owners, byFlow); err != nil {
-					return nil, err
-				}
-				ingressEvents[normalizedProviderTriggerProjectKey(flowID)] = append(ingressEvents[normalizedProviderTriggerProjectKey(flowID)], eventName)
-				if normalized {
-					authorization, err := runtimeprovideroutput.NewAuthorization(
-						binding.Provider,
-						eventName,
-						identity.ID,
-						identity.Version,
-						identity.ManifestHash,
-						catalog.Generation(),
-					)
-					if err != nil {
-						return nil, fmt.Errorf("admit provider trigger output %q: %w", eventName, err)
-					}
-					outputs[normalizedProviderTriggerProjectKey(flowID)] = append(outputs[normalizedProviderTriggerProjectKey(flowID)], authorization)
-				}
-			}
-		}
-	}
-	if len(owners) == 0 && len(ingressEvents) == 0 {
-		return source, nil
-	}
-	for _, bindings := range outputs {
-		sort.Slice(bindings, func(i, j int) bool { return bindings[i].Event() < bindings[j].Event() })
-	}
-	compiledByFlow, err := compileProviderTriggerEventSchemas(byFlow, owners)
+	rooted, err := bundle.RootedSource()
 	if err != nil {
 		return nil, err
 	}
-	compiledInputPins, err := bindProviderTriggerInputPins(source, compiledByFlow)
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
 	if err != nil {
 		return nil, err
 	}
-	compiledOutputPins, err := bindProviderTriggerOutputPins(source, compiledByFlow)
-	if err != nil {
-		return nil, err
-	}
-	imported, catalogSchemas, err := providerTriggerGlobalReadback(byFlow, owners)
-	if err != nil {
-		return nil, err
-	}
-	out := providerTriggerEventSource{
-		Source: source, generation: catalog.Generation(), imported: imported, owners: owners,
-		byFlow: byFlow, outputs: outputs, ingressEvents: ingressEvents, compiledInputPins: compiledInputPins, compiledOutputPins: compiledOutputPins, compiledByFlow: compiledByFlow,
-		compiledCatalog: catalogSchemas,
-	}
-	out.connectionInputs = runtimecontracts.CompileConnectionInputs(bundle, out)
-	if err := out.connectionInputs.ValidateBindings(); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return sourceWithDirectoryTriggerSchemas(source, providers)
 }
 
 func bindProviderTriggerOutputPins(source semanticview.Source, compiledByFlow map[string]map[string]runtimecontracts.CompiledEventSchema) (map[string][]runtimecontracts.CompiledFlowOutputPin, error) {
@@ -361,29 +219,6 @@ func flowSchemaLocation(view runtimecontracts.FlowContractView) string {
 	return "schema.yaml"
 }
 
-func providerTriggerCatalogProviders(catalog *providertriggers.CatalogSnapshot) []string {
-	if catalog == nil {
-		return nil
-	}
-	providers := make([]string, 0, len(catalog.Entries()))
-	for _, entry := range catalog.Entries() {
-		providers = append(providers, entry.Manifest.Provider())
-	}
-	sort.Strings(providers)
-	return providers
-}
-
-func providerTriggerNormalizedEvents(entry providertriggers.CatalogEntry) []string {
-	events := []string{}
-	for _, output := range entry.Manifest.OutputManifest() {
-		if output.Kind == providertriggers.OutputKindNormalized {
-			events = append(events, output.Event)
-		}
-	}
-	sort.Strings(events)
-	return events
-}
-
 func providerTriggerCatalogEvent(entry providertriggers.CatalogEntry, eventName string) (runtimecontracts.EventCatalogEntry, bool, bool) {
 	eventName = strings.TrimSpace(eventName)
 	entries := entry.Manifest.EventCatalogEntries()
@@ -406,6 +241,7 @@ type providerTriggerEventSource struct {
 	owners             map[providerTriggerSchemaCoordinate]providerTriggerSchemaOwner
 	byFlow             map[string]map[string]runtimecontracts.EventCatalogEntry
 	outputs            map[string][]runtimeprovideroutput.Authorization
+	scopeGenerations   map[string]triggergeneration.Generation
 	ingressEvents      map[string][]string
 	compiledInputPins  map[string][]runtimecontracts.CompiledFlowInputPin
 	compiledOutputPins map[string][]runtimecontracts.CompiledFlowOutputPin
@@ -481,7 +317,7 @@ func (s providerTriggerEventSource) FlowInputEventPin(flowID, eventType string) 
 }
 
 func (s providerTriggerEventSource) SemanticCapabilities() semanticview.Capabilities {
-	capabilities := s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, s.outputs).WithProviderIngressEvents(s.ingressEvents)
+	capabilities := s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, s.outputs, s.scopeGenerations).WithProviderIngressEvents(s.ingressEvents)
 	return capabilities.WithProviderTriggerEventProvenance(s.provenanceReadback()).WithProviderTriggerSchemaReadback(s.compiledCatalog)
 }
 

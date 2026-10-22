@@ -71,8 +71,7 @@ func TestBuildServeRuntimeMapsFanOutWorkers(t *testing.T) {
 				StateStoreSummary: summary, Config: cfg,
 				WorkspaceBackend: cliapp.WorkspaceBackendSelection{Backend: cliapp.WorkspaceBackendNone, NoWorkspace: true, Source: "test"},
 				BootStartedAt:    time.Now().UTC(), ProcessWorkOwner: worklifetime.NewProcess(), RuntimeInstanceID: uuid.NewString(),
-				ProviderTriggerCatalog: testProviderTriggerCatalog(t),
-				Credentials:            processIngressCredentialStore{}, ProviderCredentials: processIngressCredentialStore{},
+				Credentials: processIngressCredentialStore{}, ProviderCredentials: processIngressCredentialStore{},
 				Options: cliapp.ServeOptions{ShutdownGrace: time.Second, TestLLMRuntime: servedNoopLLMRuntime{}},
 			})
 			if err != nil {

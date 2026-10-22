@@ -18,10 +18,14 @@ import (
 
 func s1EffectiveProviderScopeMembers() map[string][]byte {
 	members := map[string][]byte{
-		"schema.yaml":            []byte("stages: []\n"),
-		"child/schema.yaml":      []byte("stages: []\n"),
-		"child/deep/schema.yaml": []byte("stages: []\n"),
-		"sibling/schema.yaml":    []byte("stages: []\n"),
+		"manifest.yaml":            []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"child/manifest.yaml":      []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"child/deep/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"sibling/manifest.yaml":    []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":              []byte("stages: []\n"),
+		"child/schema.yaml":        []byte("stages: []\n"),
+		"child/deep/schema.yaml":   []byte("stages: []\n"),
+		"sibling/schema.yaml":      []byte("stages: []\n"),
 	}
 	provider := packfixture.NeutralProviderMembers()
 	for _, key := range []string{"team-bot", "team_bot"} {

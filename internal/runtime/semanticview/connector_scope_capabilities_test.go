@@ -69,7 +69,7 @@ func TestS1ConnectorCapabilitiesRetainExactIndependentFlowCoordinates(t *testing
 	}
 	base := Wrap(&contracts.WorkflowContractBundle{})
 	generation := triggergeneration.FromCanonicalBytes([]byte("scope-generation"))
-	withTrigger := child.WithProviderTriggerEvents(base, generation, nil)
+	withTrigger := child.WithProviderTriggerEvents(base, generation, nil, nil)
 	retained, source, found := withTrigger.WithoutConnectorPackImports().ProviderTriggerEvents()
 	if !found || source != base || !retained.Equal(generation) {
 		t.Fatal("connector rebuild changed another capability owner's evidence")

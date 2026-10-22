@@ -1342,7 +1342,7 @@ type providerBoundGraphSource struct {
 }
 
 func (s providerBoundGraphSource) SemanticCapabilities() semanticview.Capabilities {
-	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.authorization.Generation(), map[string][]runtimeprovideroutput.Authorization{".": {s.authorization}})
+	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.authorization.Generation(), map[string][]runtimeprovideroutput.Authorization{".": {s.authorization}}, map[string]triggergeneration.Generation{".": s.authorization.Generation()})
 }
 
 func targetFreeSyntheticProjectionCases() []struct {

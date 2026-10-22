@@ -6,9 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -37,6 +39,58 @@ func TestS1EffectiveProviderTriggerSchemasUseWholeScopedDirectory(t *testing.T) 
 		t.Fatal(err)
 	}
 	source := projection.Source()
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, flow := range providers.FlowPaths() {
+		scope, err := providers.Scope(flow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		subjects, err := catalog.InstalledCapabilitySubjects()
+		if err != nil {
+			t.Fatal(err)
+		}
+		contextDef := BundleContext{Source: source, SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
+			ProviderTriggerCatalog: catalog, ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: subjects}
+		if bundle.PackInventory != nil {
+			contextDef.PackInventoryDigest = bundle.PackInventory.Digest()
+		}
+		if err := validateRuntimeContextProviderCatalog(contextDef); err != nil || contextDef.ProviderTriggerCatalog != catalog {
+			t.Fatalf("%s lost its exact captured catalog: %v", flow, err)
+		}
+		contextDef.InstalledTriggerSubjects = nil
+		if err := validateRuntimeContextProviderCatalog(contextDef); err == nil {
+			t.Fatalf("%s admitted missing installed subjects", flow)
+		}
+		contextDef.InstalledTriggerSubjects = subjects
+		contextDef.ProviderTriggerGeneration = triggergeneration.Generation{}
+		if err := validateRuntimeContextProviderCatalog(contextDef); err == nil {
+			t.Fatalf("%s admitted a foreign generation", flow)
+		}
+		contextDef.ProviderTriggerGeneration = catalog.Generation()
+		definition, found := scope.Provider("team_bot")
+		if !found {
+			t.Fatal("scope lost its underscore provider")
+		}
+		contextDef.ProviderTriggerCatalog, found = definition.TriggerCatalog()
+		if !found {
+			t.Fatal("underscore provider lost its captured trigger")
+		}
+		contextDef.ProviderTriggerGeneration = contextDef.ProviderTriggerCatalog.Generation()
+		contextDef.InstalledTriggerSubjects, err = contextDef.ProviderTriggerCatalog.InstalledCapabilitySubjects()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := validateRuntimeContextProviderCatalog(contextDef); err == nil {
+			t.Fatalf("%s admitted a partial catalog instead of its captured whole scope", flow)
+		}
+	}
 	const event = "inbound.team-bot.text_message"
 	for _, cell := range []struct{ flow, marker string }{
 		{".", "root_marker"}, {"child", ""}, {"child/deep", ""}, {"sibling", "sibling_marker"},
@@ -175,8 +229,16 @@ func TestS1EffectiveProviderTriggerSchemasBindRawAndTemplatePinsWithoutIngress(t
 			if cell.name != "normalized-and-raw" && semanticview.ResolveEventSchema(source, ".", "inbound.team-bot.text_message").HasSchema {
 				t.Fatal("raw-only directory acquired a fabricated normalized event")
 			}
-			if len(source.SemanticCapabilities().ProviderTriggerOutputBindings()) != 0 || len(source.SemanticCapabilities().ProviderIngressEvents()) != 0 {
-				t.Fatal("static input/schema composition created authenticated output or enabled ingress")
+			if len(source.SemanticCapabilities().ProviderTriggerOutputBindings()) != 0 {
+				t.Fatal("raw input composition invented normalized-output authority")
+			}
+			ingress := source.SemanticCapabilities().ProviderIngressEvents()
+			if len(ingress) != 1 || len(ingress["."]) != 1 || ingress["."][0] != event {
+				t.Fatalf("provider declaration borrowed an unlisted input or non-holder: %+v", ingress)
+			}
+			declarations, err := ResolveStandingTargetDeclarations(source, nil)
+			if err != nil || len(declarations) != 1 || declarations[0].FlowPath != "." || declarations[0].Alias != rooted.Admission().RootDirectory() || len(declarations[0].Ingress) != 1 {
+				t.Fatalf("directory holder lost its exact standing declaration: %+v, %v", declarations, err)
 			}
 		})
 	}

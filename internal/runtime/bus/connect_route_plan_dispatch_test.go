@@ -64,7 +64,7 @@ func (s providerOutputAuthorizedTestSource) SemanticCapabilities() semanticview.
 		flow = "consumer"
 	}
 	capabilities := s.Source.SemanticCapabilities()
-	return capabilities.WithProviderTriggerEvents(s.Source, s.generation, map[string][]runtimeprovideroutput.Authorization{flow: s.authorizations}).
+	return capabilities.WithProviderTriggerEvents(s.Source, s.generation, map[string][]runtimeprovideroutput.Authorization{flow: s.authorizations}, map[string]triggergeneration.Generation{flow: s.generation}).
 		WithProviderIngressEvents(capabilities.ProviderIngressEvents())
 }
 

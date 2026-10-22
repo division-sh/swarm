@@ -299,7 +299,7 @@ type Capabilities struct {
 	connectorPacks  map[string]*connectorPackCapabilities
 }
 
-func (c Capabilities) WithProviderTriggerEvents(base Source, generation triggergeneration.Generation, outputs map[string][]runtimeprovideroutput.Authorization) Capabilities {
+func (c Capabilities) WithProviderTriggerEvents(base Source, generation triggergeneration.Generation, outputs map[string][]runtimeprovideroutput.Authorization, scopeGenerations map[string]triggergeneration.Generation) Capabilities {
 	out := c
 	if base == nil || !generation.Valid() {
 		out.providerTrigger = nil
@@ -312,7 +312,7 @@ func (c Capabilities) WithProviderTriggerEvents(base Source, generation triggerg
 			return out
 		}
 		for _, authorization := range authorizations {
-			if !authorization.Valid() || !authorization.Generation().Equal(generation) {
+			if !authorization.Valid() || !scopeGenerations[flowID].Valid() || !authorization.Generation().Equal(scopeGenerations[flowID]) {
 				out.providerTrigger = nil
 				return out
 			}

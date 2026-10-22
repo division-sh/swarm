@@ -58,8 +58,7 @@ func TestBuildServeRuntimeContextFailureAfterRuntimeConstructionJoinsOccurrence(
 		StateStoreSummary: stateStoreSummary, Config: cfg,
 		WorkspaceBackend: cliapp.WorkspaceBackendSelection{Backend: cliapp.WorkspaceBackendNone, NoWorkspace: true, Source: "test"},
 		BootStartedAt:    time.Now().UTC(), ProcessWorkOwner: process, RuntimeInstanceID: uuid.NewString(),
-		ProviderTriggerCatalog: testProviderTriggerCatalog(t),
-		Credentials:            processIngressCredentialStore{}, ProviderCredentials: processIngressCredentialStore{},
+		Credentials: processIngressCredentialStore{}, ProviderCredentials: processIngressCredentialStore{},
 		Options: cliapp.ServeOptions{ShutdownGrace: time.Second, TestLLMRuntime: servedNoopLLMRuntime{}},
 	})
 	if err == nil || !strings.Contains(err.Error(), "bundle-specific effective pack inventory is required") {

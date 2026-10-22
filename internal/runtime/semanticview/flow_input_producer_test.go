@@ -17,7 +17,7 @@ func TestResolveFlowInputProducer_ClassifiesAdmittedProviderIngress(t *testing.T
 		Event: "work.requested",
 	}, nil)
 
-	source = markedToolOverlaySource{Source: source, capabilities: source.SemanticCapabilities().WithProviderTriggerEvents(source, triggergeneration.FromCanonicalBytes([]byte("provider-test")), nil).WithProviderIngressEvents(map[string][]string{"worker": {"work.requested"}})}
+	source = markedToolOverlaySource{Source: source, capabilities: source.SemanticCapabilities().WithProviderTriggerEvents(source, triggergeneration.FromCanonicalBytes([]byte("provider-test")), nil, nil).WithProviderIngressEvents(map[string][]string{"worker": {"work.requested"}})}
 	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
 
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) {

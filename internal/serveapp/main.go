@@ -22,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -140,32 +139,31 @@ type serveRuntimeBundleContext struct {
 }
 
 type serveRuntimeBundleContextRequest struct {
-	RepoRoot               string
-	PlatformPackBases      *packartifact.PlatformPackBaseGenerationOwner
-	ExecutionPosture       executionposture.Posture
-	Ctx                    context.Context
-	Stores                 serveRuntimePersistence
-	Config                 *config.Config
-	Loaded                 serveRuntimeBundle
-	StateStoreSummary      string
-	Options                cliapp.ServeOptions
-	MountSources           cliapp.WorkspaceMountSources
-	WorkspaceBackend       cliapp.WorkspaceBackendSelection
-	Credentials            runtimecredentials.Store
-	ManagedCredentials     runtimemanagedcredentials.Store
-	ProviderCredentials    runtimecredentials.Store
-	ProviderTriggerCatalog *providertriggers.CatalogSnapshot
-	ChannelPlans           []packs.SatisfactionPlan
-	ChannelBindings        []packs.OutboundBindingPlan
-	BootStartedAt          time.Time
-	BootProgress           func(runtime.BootProgressEvent)
-	EnableToolGateway      bool
-	ToolGatewayBinding     toolgateway.Binding
-	UseStartupRecovery     bool
-	RuntimeInstanceID      string
-	DataProjectionRoot     string
-	ProcessWorkOwner       *worklifetime.Process
-	NoticePresentation     runtimetools.InformationalNoticePresentationSink
+	RepoRoot            string
+	PlatformPackBases   *packartifact.PlatformPackBaseGenerationOwner
+	ExecutionPosture    executionposture.Posture
+	Ctx                 context.Context
+	Stores              serveRuntimePersistence
+	Config              *config.Config
+	Loaded              serveRuntimeBundle
+	StateStoreSummary   string
+	Options             cliapp.ServeOptions
+	MountSources        cliapp.WorkspaceMountSources
+	WorkspaceBackend    cliapp.WorkspaceBackendSelection
+	Credentials         runtimecredentials.Store
+	ManagedCredentials  runtimemanagedcredentials.Store
+	ProviderCredentials runtimecredentials.Store
+	ChannelPlans        []packs.SatisfactionPlan
+	ChannelBindings     []packs.OutboundBindingPlan
+	BootStartedAt       time.Time
+	BootProgress        func(runtime.BootProgressEvent)
+	EnableToolGateway   bool
+	ToolGatewayBinding  toolgateway.Binding
+	UseStartupRecovery  bool
+	RuntimeInstanceID   string
+	DataProjectionRoot  string
+	ProcessWorkOwner    *worklifetime.Process
+	NoticePresentation  runtimetools.InformationalNoticePresentationSink
 }
 
 func (b serveRuntimeBundle) serveIdentityDetail() string {
@@ -466,6 +464,22 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		return serveRuntimeBundleContext{}, fmt.Errorf("admit effective source projection: %w", err)
 	}
 	loaded.source = projection.Source()
+	rooted, err := loaded.bundle.RootedSource()
+	if err != nil {
+		return serveRuntimeBundleContext{}, err
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, loaded.bundle.Platform)
+	if err != nil {
+		return serveRuntimeBundleContext{}, err
+	}
+	scope, err := providers.Scope(".")
+	if err != nil {
+		return serveRuntimeBundleContext{}, err
+	}
+	providerCatalog, err := scope.TriggerCatalog()
+	if err != nil {
+		return serveRuntimeBundleContext{}, err
+	}
 	bootIdentity := loaded.bootIdentity
 	bootIdentity.BundleHash = sourceArtifactFact.BundleHash()
 	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Config, loaded.sourceProjection, loaded.source, req.MountSources, req.WorkspaceBackend)
@@ -514,7 +528,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	validationOpts.ModelAliases = req.Config.LLM.Models
 	validationOpts.ManagedCredentials = req.ManagedCredentials
 	validationOpts.ProviderCredentials = req.ProviderCredentials
-	validationOpts.ProviderTriggerCatalog = req.ProviderTriggerCatalog
+	validationOpts.ProviderTriggerCatalog = providerCatalog
 	validationOpts.ChannelPlans = req.ChannelPlans
 	declaredChannelPublication, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication(req.ChannelBindings)
 	if err != nil {
@@ -560,7 +574,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		Credentials:                      req.Credentials,
 		ManagedCredentials:               req.ManagedCredentials,
 		ProviderCredentials:              req.ProviderCredentials,
-		ProviderTriggerCatalog:           req.ProviderTriggerCatalog,
+		ProviderTriggerCatalog:           providerCatalog,
 		NoticePresentation:               req.NoticePresentation,
 		ChannelPlans:                     req.ChannelPlans,
 		DeclaredChannelPublication:       declaredChannelPublication,
@@ -596,7 +610,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("retain admitted runtime source: %w", err)
 	}
-	installedTriggerSubjects, err := req.ProviderTriggerCatalog.InstalledCapabilitySubjects()
+	installedTriggerSubjects, err := providerCatalog.InstalledCapabilitySubjects()
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("derive installed provider trigger subjects: %w", err)
 	}
@@ -613,7 +627,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		workspaces:                workspaces,
 		validation:                validation,
 		runtime:                   rt,
-		providerTriggerGeneration: req.ProviderTriggerCatalog.Generation(),
+		providerTriggerGeneration: providerCatalog.Generation(),
 		installedTriggerSubjects:  installedTriggerSubjects,
 		packInventoryDigest:       loaded.bundle.PackInventory.Digest(),
 	}, nil
@@ -1287,32 +1301,31 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 		packLoad := bundlePackLoads[i]
 		request := serveRuntimeBundleContextRequest{
-			RepoRoot:               repo,
-			PlatformPackBases:      platformPackBases,
-			ExecutionPosture:       req.Purpose,
-			DataProjectionRoot:     req.DataProjectionRoot,
-			Ctx:                    ctx,
-			Stores:                 runtimePersistence,
-			Config:                 cfg,
-			Loaded:                 loaded,
-			StateStoreSummary:      serveStateStoreSummaryAt(stateStoreSummaries, i),
-			Options:                opts,
-			MountSources:           mountSources,
-			WorkspaceBackend:       workspaceBackend,
-			Credentials:            credentialStore,
-			ManagedCredentials:     managedCredentialStore,
-			ProviderCredentials:    providerCredentialStore,
-			ProviderTriggerCatalog: packLoad.ProviderTriggers.Catalog,
-			ChannelPlans:           packLoad.Channels.Plans,
-			ChannelBindings:        packLoad.Channels.Bindings,
-			BootStartedAt:          bootStartedAt,
-			BootProgress:           bootProgress,
-			EnableToolGateway:      i == 0,
-			ToolGatewayBinding:     contextToolGatewayBinding,
-			UseStartupRecovery:     len(loadedBundles) == 1,
-			RuntimeInstanceID:      runtimeInstanceID,
-			ProcessWorkOwner:       processWorkOwner,
-			NoticePresentation:     noticePresentation,
+			RepoRoot:            repo,
+			PlatformPackBases:   platformPackBases,
+			ExecutionPosture:    req.Purpose,
+			DataProjectionRoot:  req.DataProjectionRoot,
+			Ctx:                 ctx,
+			Stores:              runtimePersistence,
+			Config:              cfg,
+			Loaded:              loaded,
+			StateStoreSummary:   serveStateStoreSummaryAt(stateStoreSummaries, i),
+			Options:             opts,
+			MountSources:        mountSources,
+			WorkspaceBackend:    workspaceBackend,
+			Credentials:         credentialStore,
+			ManagedCredentials:  managedCredentialStore,
+			ProviderCredentials: providerCredentialStore,
+			ChannelPlans:        packLoad.Channels.Plans,
+			ChannelBindings:     packLoad.Channels.Bindings,
+			BootStartedAt:       bootStartedAt,
+			BootProgress:        bootProgress,
+			EnableToolGateway:   i == 0,
+			ToolGatewayBinding:  contextToolGatewayBinding,
+			UseStartupRecovery:  len(loadedBundles) == 1,
+			RuntimeInstanceID:   runtimeInstanceID,
+			ProcessWorkOwner:    processWorkOwner,
+			NoticePresentation:  noticePresentation,
 		}
 		contextDef, err := buildServeRuntimeBundleContext(request)
 		if err != nil {
@@ -2436,6 +2449,7 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 		planned = append(planned, runtime.BundleContext{
 			SourceArtifactFact:         contextDef.sourceArtifactFact,
 			RootAdmission:              rooted.Admission(),
+			ProviderTriggerCatalog:     contextDef.runtime.Options.ProviderTriggerCatalog,
 			BundleIdentity:             contextDef.bootIdentity,
 			Source:                     contextDef.loaded.source,
 			PlatformSpecPath:           contextDef.loaded.platformSpecPath,
@@ -2667,6 +2681,7 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 			definition := runtime.BundleContext{
 				SourceArtifactFact:         contextDef.sourceArtifactFact,
 				RootAdmission:              rooted.Admission(),
+				ProviderTriggerCatalog:     contextDef.runtime.Options.ProviderTriggerCatalog,
 				BundleIdentity:             contextDef.bootIdentity,
 				Source:                     contextDef.loaded.source,
 				PlatformSpecPath:           contextDef.loaded.platformSpecPath,
