@@ -275,15 +275,8 @@ func loadSelectedRecoveryExecutionTx(ctx context.Context, tx *sql.Tx, snapshot r
 		coordinate != execution.ExecutableCoordinateFingerprint || execution.DeclarationPlanFingerprint != preparation.DeclarationPlanFingerprint {
 		return result, fmt.Errorf("selected recovery execution conflicts with preparation")
 	}
-	var declarations agenttopology.SelectedDeclarationPlan
-	if err := canonicaljson.DecodeInto(declarationRaw, &declarations); err != nil {
+	if err := requireSelectedRecoveryDeclarations(declarationRaw, execution.DeclarationPlanFingerprint, snapshot.BundleHash); err != nil {
 		return result, err
-	}
-	if err := declarations.Validate(); err != nil {
-		return result, err
-	}
-	if declarations.Revision != execution.DeclarationPlanFingerprint || declarations.BundleHash != snapshot.BundleHash {
-		return result, fmt.Errorf("selected recovery declarations conflict with preparation")
 	}
 	var failure *failures.Envelope
 	if len(failureRaw) != 0 && string(failureRaw) != "null" {
@@ -296,6 +289,20 @@ func loadSelectedRecoveryExecutionTx(ctx context.Context, tx *sql.Tx, snapshot r
 	result.binding, result.preparation = binding, preparation
 	result.state, result.failure, result.hasExecution = state, failure, true
 	return result, nil
+}
+
+func requireSelectedRecoveryDeclarations(raw []byte, fingerprint, bundleHash string) error {
+	var declarations agenttopology.SelectedDeclarationPlan
+	if err := canonicaljson.DecodeInto(raw, &declarations); err != nil {
+		return err
+	}
+	if err := declarations.Validate(); err != nil {
+		return err
+	}
+	if declarations.Revision != fingerprint || declarations.BundleHash != bundleHash {
+		return fmt.Errorf("selected recovery declarations conflict with preparation")
+	}
+	return nil
 }
 
 func selectedRecoveryWithoutExecution(snapshot runlifecycle.Snapshot, result selectedRecoveryRecord) (selectedRecoveryRecord, error) {
