@@ -118,7 +118,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 					disposition != runtimerunlifecycle.MutationApplied {
 					t.Fatalf("revise scenario source = %s/%v", disposition, err)
 				}
-				ctx = testAuthorActivityContextForBundle(runLifecycleCandidateParityReplacementHash)
+				ctx = originalStoreFixtureContext(t, testAuthorActivityContextForBundle(runLifecycleCandidateParityReplacementHash), fixture.store)
 				requireRunOriginHeader(t, ctx, reader, runID, want, 1)
 				for _, state := range []runtimerunlifecycle.State{
 					runtimerunlifecycle.StatePaused,

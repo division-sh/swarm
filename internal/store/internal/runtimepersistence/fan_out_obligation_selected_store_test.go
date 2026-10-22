@@ -688,10 +688,10 @@ func TestFanOutRepresentativeStoreSizeDoesNotChangeN25OrN500ProgressOnBothStores
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				db, owner = store.backend.ConstructionHandle(), store
 			}
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			base := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Microsecond)
 			for caseIndex, cardinality := range []int{25, 500} {
 				t.Run(fmt.Sprintf("n_%d", cardinality), func(t *testing.T) {
-					ctx = originalStoreFixtureContext(t, ctx, owner)
 					fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, cardinality, base.Add(time.Duration(caseIndex)*time.Hour))
 					tx, err := db.BeginTx(ctx, nil)
 					if err != nil {

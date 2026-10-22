@@ -16,10 +16,10 @@ import (
 
 func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(originalStoreFixtureContext(t, testAuthorActivityContext(), admitTestPostgresStore(t, db)), 20*time.Second)
 	defer cancel()
 
-	fixture := seedNormalRunCompletionFixture(t, db, "active", "lock-order/instance", "lock-order")
+	fixture := seedNormalRunCompletionFixture(t, ctx, db, "active", "lock-order/instance", "lock-order")
 	route := testAgentDeliveryRoute(t, fixture.RunID, "lock-order-agent", "fixture/lock-order-agent")
 	event := commitPostgresDeliveryFixture(t, ctx, db, fixture.EventID, route)
 	claimed := claimPostgresDeliveryFixture(t, ctx, db, event, route)
