@@ -15,7 +15,8 @@ func TestTurnTimeoutHasExactProducerCensusWithoutAgentEmitTool(t *testing.T) {
 	}
 	repo := filepath.Clean(filepath.Join(cwd, "..", "..", ".."))
 	root := t.TempDir()
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: timeout-census\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), "work.aborted:\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: investigate}\n  turn_timeout:\n    after: 10m\n    emit: work.aborted\n")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))

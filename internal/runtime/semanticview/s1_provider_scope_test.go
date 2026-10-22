@@ -19,11 +19,14 @@ func (s1InventedProviderScope) ProviderDirectoriesInScope(string) ([]sourceartif
 func TestS1ProviderScopeConsumesFrozenCompilerMembership(t *testing.T) {
 	root := t.TempDir()
 	for label, body := range map[string]string{
-		"schema.yaml":         "stages: []\n",
-		"team/manifest.yaml":  "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [message]}, cannot: [execute code]}\n",
-		"team/trigger.yaml":   "{}\n",
-		"child/schema.yaml":   "stages: []\n",
-		"sibling/schema.yaml": "stages: []\n",
+		"manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":           "stages: []\n",
+		"team/manifest.yaml":    "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [message]}, cannot: [execute code]}\n",
+		"team/trigger.yaml":     "{}\n",
+		"child/manifest.yaml":   "version: 1.0.0\nplatform_version: '*'\n",
+		"child/schema.yaml":     "stages: []\n",
+		"sibling/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"sibling/schema.yaml":   "stages: []\n",
 	} {
 		file := filepath.Join(root, label)
 		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {

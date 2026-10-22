@@ -71,9 +71,10 @@ func TestResolveAgentMemoryProof_FlowScopedAgentCarriesFlowPath(t *testing.T) {
 item:
   item_id: string
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `name: support
-stages:
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `stages:
   waiting: {}
   done: {}
 `)
