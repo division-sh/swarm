@@ -805,6 +805,10 @@ func TestProviderTriggerCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *te
 	if err != nil {
 		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
 	}
+	expectedGeneration, _, present := imported.SemanticCapabilities().ProviderTriggerEvents()
+	if !present {
+		t.Fatal("effective source has no provider trigger generation before overlay")
+	}
 	overlaid, err := semanticview.WithRuntimeTools(imported, map[string]runtimecontracts.ToolSchemaEntry{
 		"channel.ops.deliver": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("channel_operation"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("channel")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 	})
@@ -816,7 +820,7 @@ func TestProviderTriggerCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *te
 		t.Fatalf("same-generation revalidation through overlay: %v", err)
 	}
 	generation, _, ok := revalidated.SemanticCapabilities().ProviderTriggerEvents()
-	if !ok || !generation.Equal(catalog.Generation()) {
+	if !ok || !generation.Equal(expectedGeneration) {
 		t.Fatalf("provider trigger generation hidden through overlay: capability=%v generation=%v", ok, generation.Diagnostic())
 	}
 	authorized := revalidated.SemanticCapabilities().ProviderTriggerOutputBindings()["coordinator"]
