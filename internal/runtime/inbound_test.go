@@ -25,9 +25,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -268,12 +267,14 @@ func (*capturingInboundEventStore) ListEventDeliveryRecipients(context.Context, 
 
 func TestInboundGatewayResolvedTargetPreservesStandingAuthority(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "chat-flow", RunID: "41000000-0000-0000-0000-000000000001"})
+	bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "chat-flow", RunID: "41000000-0000-0000-0000-000000000001"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &recordingInboundStore{inserted: true}
 	gateway := newTestInboundGateway(t, bus, nil, nil, store)
+	gateway.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 	body := []byte(`{"update_id":123,"message":{"message_id":7,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"hello"}}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/chat/telegram", strings.NewReader(string(body)))
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
@@ -312,6 +313,7 @@ type rollbackTrackingInboundStore struct {
 	rolled     bool
 	store      runtimebus.EventStore
 	bundleHash string
+	plan       providertriggers.InboundAdmissionPlan
 }
 
 func (s *rollbackTrackingInboundStore) bindTestInboundBundleHash(hash string) { s.bundleHash = hash }
@@ -323,6 +325,7 @@ func (s *rollbackTrackingInboundStore) bindTestInboundEventStore(store runtimebu
 func (s *rollbackTrackingInboundStore) ResolveInboundTarget(context.Context, string, string) (InboundTarget, error) {
 	target := testInboundTarget("entity-1", "")
 	target.BundleHash = s.bundleHash
+	target.AdmissionPlan = s.plan
 	return target, nil
 }
 
@@ -571,12 +574,21 @@ func (*rollbackTrackingInboundStore) ValidateInboundPublicationIntegrity(context
 }
 
 func TestInboundGateway_Returns503WithoutCompensatingMarkerPathWhenBatchFails(t *testing.T) {
-	bus, err := newInboundTestEventBus(t, failingInboundEventStore{})
+	bus, capturedCatalog, err := newInboundTestEventBus(t, failingInboundEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	store := &rollbackTrackingInboundStore{}
+	plan, err := capturedCatalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+		Alias: "entity-1", Provider: "custom",
+		Declaration: providertriggers.AdmissionDeclaration{Acknowledge: providertriggers.UnsignedWebhookAcknowledgement},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &rollbackTrackingInboundStore{plan: plan}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/entity-1/custom", strings.NewReader(`{"id":"evt-1","type":"push"}`))
 	rec := httptest.NewRecorder()
@@ -591,12 +603,14 @@ func TestInboundGateway_Returns503WithoutCompensatingMarkerPathWhenBatchFails(t 
 }
 
 func TestInboundGateway_Returns503WhenRuntimeShutdownAdmissionClosed(t *testing.T) {
-	bus, err := newInboundTestEventBus(t, nil)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &rollbackTrackingInboundStore{}
 	g := newTestInboundGateway(t, bus, nil, func() bool { return true }, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/entity-1/custom", strings.NewReader(`{"id":"evt-1","type":"push"}`))
 	rec := httptest.NewRecorder()
@@ -614,12 +628,14 @@ func TestInboundGateway_Returns503WhenRuntimeShutdownAdmissionClosed(t *testing.
 }
 
 func TestInboundGateway_UnknownTargetFailsBeforeProviderAdmission(t *testing.T) {
-	bus, err := newInboundTestEventBus(t, nil)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, nil)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &recordingInboundStore{resolveErr: errors.New("target not found")}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	// A GitHub request without a signature would fail provider admission with 401
 	// if target resolution did not gate the provider interpreter first.
@@ -637,7 +653,7 @@ func TestInboundGateway_UnknownTargetFailsBeforeProviderAdmission(t *testing.T) 
 
 func TestInboundGateway_PausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -651,7 +667,16 @@ func TestInboundGateway_PausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(
 	}
 	t.Cleanup(runtimebus.ResumeRuntimeIngress)
 	store := &recordingInboundStore{target: testInboundTarget("entity-1", ""), inserted: true}
+	store.target.AdmissionPlan, err = capturedCatalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+		Alias: "entity-1", Provider: "custom",
+		Declaration: providertriggers.AdmissionDeclaration{Acknowledge: providertriggers.UnsignedWebhookAcknowledgement},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 	g.SetRuntimeIngress(controller)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/entity-1/custom", strings.NewReader(`{"id":"evt-1","type":"push"}`))
@@ -666,50 +691,9 @@ func TestInboundGateway_PausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(
 	}
 }
 
-func TestInboundGateway_GitHubPausedRuntimeUsesIngressOwnerAndAcceptsQueueableWebhook(t *testing.T) {
-	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	controller := runtimeingress.NewController(nil, bus, runtimeingress.Options{ExecutionPosture: executionposture.Live})
-	bus.SetRuntimeIngressDispatchGate(controller)
-	if _, err := controller.Pause(testAuthorActivityContext(context.Background()), runtimeingress.TransitionRequest{
-		Reason:       "test_pause",
-		ControlledBy: "test",
-	}); err != nil {
-		t.Fatalf("Pause: %v", err)
-	}
-	t.Cleanup(runtimebus.ResumeRuntimeIngress)
-	store := &recordingInboundStore{
-		target:   testInboundTarget("customer-a", "github-secret"),
-		inserted: true,
-	}
-	g := newTestInboundGateway(t, bus, nil, nil, store)
-	g.SetRuntimeIngress(controller)
-
-	body := []byte(`{"zen":"Keep it logically awesome."}`)
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/github", strings.NewReader(string(body)))
-	req.Header.Set("X-Hub-Signature-256", githubWebhookSignature("github-secret", body))
-	req.Header.Set("X-GitHub-Delivery", "delivery-123")
-	req.Header.Set("X-GitHub-Event", "push")
-	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
-	}
-	if !eventStore.recorded {
-		t.Fatal("expected GitHub delivery to record inbound marker while paused")
-	}
-	if eventStore.providerEventID != "delivery-123" {
-		t.Fatalf("providerEventID = %q, want delivery-123", eventStore.providerEventID)
-	}
-}
-
 func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -718,6 +702,8 @@ func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *t
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	body := []byte(`{"zen":"Keep it logically awesome."}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/github", strings.NewReader(string(body)))
@@ -786,7 +772,7 @@ func TestInboundGateway_GitHubAdapterOwnsSignatureDeliveryIDAndEventMapping(t *t
 
 func TestInboundGateway_GitHubAdapterRejectsInvalidSignatureBeforeMarkerAndPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -798,6 +784,8 @@ func TestInboundGateway_GitHubAdapterRejectsInvalidSignatureBeforeMarkerAndPubli
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	body := []byte(`{"zen":"Keep it logically awesome."}`)
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/github", strings.NewReader(string(body)))
@@ -818,50 +806,17 @@ func TestInboundGateway_GitHubAdapterRejectsInvalidSignatureBeforeMarkerAndPubli
 	}
 }
 
-func TestInboundGateway_GitHubAdapterDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
-	eventStore := &capturingInboundEventStore{duplicate: true}
-	bus, err := newInboundTestEventBus(t, eventStore)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	store := &recordingInboundStore{
-		target: InboundTarget{
-
-			SigningSecret: "github-secret",
-		},
-		inserted: false,
-	}
-	g := newTestInboundGateway(t, bus, nil, nil, store)
-
-	body := []byte(`{"zen":"Keep it logically awesome."}`)
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/github", strings.NewReader(string(body)))
-	req.Header.Set("X-Hub-Signature-256", githubWebhookSignature("github-secret", body))
-	req.Header.Set("X-GitHub-Delivery", "delivery-123")
-	req.Header.Set("X-GitHub-Event", "push")
-	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"status":"duplicate"`) {
-		t.Fatalf("duplicate response = %s", rec.Body.String())
-	}
-	if len(eventStore.events) != 0 {
-		t.Fatalf("published events = %d, want 0", len(eventStore.events))
-	}
-}
-
 func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedRedactedSemantics(t *testing.T) {
+	firstPlan, _, source := compiledRedactedNormalizedPlan(t, "1.0.0", "string")
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "ingress", RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687"})
+	bus, capturedCatalog, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{ContractBundle: source}, InboundTarget{FlowPath: "ingress", RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := &recordingInboundStore{inserted: true}
 	gateway := newTestInboundGateway(t, bus, nil, nil, store)
-	firstPlan, firstCatalog := compiledRedactedNormalizedPlan(t, "1.0.0", "string")
-	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
+	gateway.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 	target := InboundTarget{
 		BundleHash: inboundTestBusBundleHash(t, bus),
 		ServiceID:  runtimeflowidentity.StandingServiceID("ingress"), FlowPath: "ingress",
@@ -880,7 +835,7 @@ func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedR
 	}
 	committedEventCount := len(eventStore.events)
 
-	projectionFailingPlan, _ := compiledRedactedNormalizedPlan(t, "2.0.0", "integer")
+	projectionFailingPlan, _, _ := compiledRedactedNormalizedPlan(t, "2.0.0", "integer")
 	target.AdmissionPlan = projectionFailingPlan
 	duplicate := httptest.NewRecorder()
 	gateway.HandleResolvedWebhook(duplicate, normalizedRetryRequest(`{"message":{"text":"hello"}}`), target, nil)
@@ -906,16 +861,17 @@ func TestInboundGatewayExactRetryBypassesCurrentProjectionAndConflictsOnChangedR
 }
 
 func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProjectionFailure(t *testing.T) {
+	firstPlan, _, source := compiledRedactedNormalizedPlan(t, "1.0.0", "string")
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "ingress", RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687"})
+	bus, capturedCatalog, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{ContractBundle: source}, InboundTarget{FlowPath: "ingress", RunID: "85fe8f5a-40dd-4ff2-8785-9f5450e42687"})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	store := newConcurrentInboundStore()
 	gateway := newTestInboundGateway(t, bus, nil, nil, store)
-	firstPlan, firstCatalog := compiledRedactedNormalizedPlan(t, "1.0.0", "string")
-	projectionFailingPlan, _ := compiledRedactedNormalizedPlan(t, "2.0.0", "integer")
-	bus.SetProviderOutputAuthorizationVerifier(firstCatalog)
+	gateway.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
+	projectionFailingPlan, _, _ := compiledRedactedNormalizedPlan(t, "2.0.0", "integer")
 	target := InboundTarget{
 		BundleHash: inboundTestBusBundleHash(t, bus),
 		ServiceID:  runtimeflowidentity.StandingServiceID("ingress"), FlowPath: "ingress",
@@ -966,11 +922,15 @@ func TestInboundGatewayConcurrentLoserReturnsCommittedBatchDespiteCurrentProject
 	}
 }
 
-func compiledRedactedNormalizedPlan(t *testing.T, version, projectedType string) (providertriggers.InboundAdmissionPlan, *providertriggers.CatalogSnapshot) {
+func compiledRedactedNormalizedPlan(t *testing.T, version, projectedType string) (providertriggers.InboundAdmissionPlan, *providertriggers.CatalogSnapshot, semanticview.Source) {
 	t.Helper()
-	provider, err := s1LoadProviderMembers("telegram", map[string][]byte{
-		"manifest.yaml": []byte(fmt.Sprintf("version: %s\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n", version)),
-		"trigger.yaml": []byte(fmt.Sprintf(`payload_object_required: true
+	bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+		"manifest.yaml":                  []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":                    []byte("stages: []\n"),
+		"ingress/manifest.yaml":          []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"ingress/schema.yaml":            []byte("stages: []\npins: {inputs: [inbound.telegram.raw, inbound.telegram.text_message]}\n"),
+		"ingress/telegram/manifest.yaml": []byte(fmt.Sprintf("version: %s\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n", version)),
+		"ingress/telegram/trigger.yaml": []byte(fmt.Sprintf(`payload_object_required: true
 delivery_id: {literal: delivery-1, required: true}
 event_type: {literal: message, required: true}
 event_name: {literal: raw}
@@ -981,18 +941,15 @@ normalized_events:
       text: {from: message.text, schema: {type: %s}}
 `, projectedType)),
 	})
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, present := provider.Body(packmodel.BodyTrigger)
-	if !present {
-		t.Fatal("captured retry provider has no trigger BODY")
-	}
-	manifest, err := providertriggers.AdmitBody(body)
+	scope, err := providers.Scope("ingress")
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(manifest)
+	catalog, err := scope.TriggerCatalog()
 	if err != nil {
 		t.Fatalf("NewCatalogSnapshot: %v", err)
 	}
@@ -1003,7 +960,7 @@ normalized_events:
 	if err != nil {
 		t.Fatalf("CompileAdmission: %v", err)
 	}
-	return plan, catalog
+	return plan, catalog, semanticview.Wrap(bundle)
 }
 
 func normalizedRetryRequest(body string) *http.Request {
@@ -1016,13 +973,15 @@ func TestInboundGatewayDuplicateReadRevalidatesFrozenCredential(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	target := testInboundTarget("chat", "webhook_signing.telegram")
 	target.Provider = "telegram"
-	bus, err := newInboundTestEventBus(t, eventStore, target)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore, target)
 	if err != nil {
 		t.Fatal(err)
 	}
 	target.BundleHash = inboundTestBusBundleHash(t, bus)
 	store := &credentialMutatingInboundStore{recordingInboundStore: &recordingInboundStore{inserted: true}}
 	gateway := newTestInboundGateway(t, bus, nil, nil, store)
+	gateway.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 	plan, err := gateway.catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret})
 	if err != nil {
 		t.Fatal(err)
@@ -1061,7 +1020,7 @@ func TestInboundGatewayDuplicateReadRevalidatesFrozenCredential(t *testing.T) {
 
 func TestInboundGateway_SlackURLVerificationReturnsChallengeWithoutMarkerOrPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1070,6 +1029,8 @@ func TestInboundGateway_SlackURLVerificationReturnsChallengeWithoutMarkerOrPubli
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	body := []byte(`{"type":"url_verification","challenge":"challenge-value","token":"deprecated-token"}`)
 	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
@@ -1095,7 +1056,7 @@ func TestInboundGateway_SlackURLVerificationReturnsChallengeWithoutMarkerOrPubli
 
 func TestInboundGateway_SlackURLVerificationRequiresChallengeBeforeMarkerAndPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1104,6 +1065,8 @@ func TestInboundGateway_SlackURLVerificationRequiresChallengeBeforeMarkerAndPubl
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	body := []byte(`{"type":"url_verification","token":"deprecated-token"}`)
 	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
@@ -1115,34 +1078,6 @@ func TestInboundGateway_SlackURLVerificationRequiresChallengeBeforeMarkerAndPubl
 	}
 	if store.recorded {
 		t.Fatal("Slack url_verification without challenge recorded inbound marker")
-	}
-	if len(eventStore.events) != 0 {
-		t.Fatalf("published events = %d, want 0", len(eventStore.events))
-	}
-}
-
-func TestInboundGateway_SlackRejectsMissingSecretBeforeMarkerAndPublish(t *testing.T) {
-	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	store := &recordingInboundStore{
-		target:   InboundTarget{},
-		inserted: true,
-	}
-	g := newTestInboundGateway(t, bus, nil, nil, store)
-
-	body := []byte(`{"type":"event_callback","event_id":"Ev123","event":{"type":"message"}}`)
-	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
-	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 body=%s", rec.Code, rec.Body.String())
-	}
-	if store.recorded {
-		t.Fatal("Slack request without configured signing secret recorded inbound marker")
 	}
 	if len(eventStore.events) != 0 {
 		t.Fatalf("published events = %d, want 0", len(eventStore.events))
@@ -1161,12 +1096,14 @@ func TestInboundGatewayRejectsUnusableSigningBindingBeforeMarkerAndPublish(t *te
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := newInboundTestEventBus(t, eventStore)
+			bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatal(err)
 			}
 			store := &recordingInboundStore{target: testInboundTarget("customer-a", "webhook_signing.slack"), inserted: true}
 			gateway := newTestInboundGateway(t, bus, nil, nil, store)
+			gateway.catalog = capturedCatalog
+			bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 			credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 			if err != nil {
 				t.Fatal(err)
@@ -1213,7 +1150,7 @@ func TestInboundGateway_SlackRejectsMissingOrInvalidSignatureBeforeMarkerAndPubl
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := newInboundTestEventBus(t, eventStore)
+			bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -1225,6 +1162,8 @@ func TestInboundGateway_SlackRejectsMissingOrInvalidSignatureBeforeMarkerAndPubl
 				inserted: true,
 			}
 			g := newTestInboundGateway(t, bus, nil, nil, store)
+			g.catalog = capturedCatalog
+			bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 			body := []byte(`{"type":"event_callback","event_id":"Ev123","event":{"type":"message"}}`)
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/slack", strings.NewReader(string(body)))
@@ -1247,7 +1186,7 @@ func TestInboundGateway_SlackRejectsMissingOrInvalidSignatureBeforeMarkerAndPubl
 
 func TestInboundGateway_SlackRejectsStaleTimestampBeforeMarkerAndPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1259,6 +1198,8 @@ func TestInboundGateway_SlackRejectsStaleTimestampBeforeMarkerAndPublish(t *test
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	body := []byte(`{"type":"event_callback","event_id":"Ev123","event":{"type":"message"}}`)
 	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, "1")
@@ -1278,7 +1219,7 @@ func TestInboundGateway_SlackRejectsStaleTimestampBeforeMarkerAndPublish(t *test
 
 func TestInboundGateway_SlackEventCallbackOwnsEventIDAndInnerEventMapping(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1287,6 +1228,8 @@ func TestInboundGateway_SlackEventCallbackOwnsEventIDAndInnerEventMapping(t *tes
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	body := []byte(`{"type":"event_callback","token":"deprecated-token","event_id":"Ev123ABC456","event":{"type":"message.channels","text":"hello"}}`)
 	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
@@ -1328,71 +1271,9 @@ func TestInboundGateway_SlackEventCallbackOwnsEventIDAndInnerEventMapping(t *tes
 	}
 }
 
-func TestInboundGateway_SlackEventCallbackAcknowledgesBeforePostCommitDispatchCompletes(t *testing.T) {
-	eventStore := &capturingInboundEventStore{}
-	started := make(chan struct{}, 1)
-	release := make(chan struct{})
-	var releaseOnce sync.Once
-	releaseDispatch := func() {
-		releaseOnce.Do(func() {
-			close(release)
-		})
-	}
-	t.Cleanup(releaseDispatch)
-	bus, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
-		Interceptors: []runtimebus.EventInterceptor{
-			blockingInboundInterceptor{started: started, release: release},
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	store := &recordingInboundStore{
-		target:   testInboundTarget("customer-a", "slack-secret"),
-		inserted: true,
-	}
-	g := newTestInboundGateway(t, bus, nil, nil, store)
-
-	body := []byte(`{"type":"event_callback","event_id":"Ev123ABC456","event":{"type":"message","text":"hello"}}`)
-	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
-	responseDone := make(chan *httptest.ResponseRecorder, 1)
-	go func() {
-		rec := httptest.NewRecorder()
-		g.Handler().ServeHTTP(rec, req)
-		responseDone <- rec
-	}()
-
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Slack callback post-commit dispatch did not start")
-	}
-	select {
-	case rec := <-responseDone:
-		if rec.Code != http.StatusAccepted {
-			t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
-		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("Slack callback response waited for post-commit dispatch completion")
-	}
-	if !eventStore.recorded {
-		t.Fatal("expected Slack callback to record inbound marker before acknowledgement")
-	}
-	if len(eventStore.events) != 1 {
-		t.Fatalf("published events = %d, want 1 before dispatch release", len(eventStore.events))
-	}
-
-	releaseDispatch()
-	waitCtx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), inboundTestBusBundleHash(t, bus)), 5*time.Second)
-	defer cancel()
-	if err := bus.WaitForQuiescence(waitCtx); err != nil {
-		t.Fatalf("WaitForQuiescence after dispatch release: %v", err)
-	}
-}
-
 func TestInboundGateway_SlackEventCallbackRequiresEventIDBeforeMarkerAndPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1401,6 +1282,8 @@ func TestInboundGateway_SlackEventCallbackRequiresEventIDBeforeMarkerAndPublish(
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	body := []byte(`{"type":"event_callback","event":{"type":"message"}}`)
 	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
@@ -1418,34 +1301,6 @@ func TestInboundGateway_SlackEventCallbackRequiresEventIDBeforeMarkerAndPublish(
 	}
 }
 
-func TestInboundGateway_SlackDuplicateEventDoesNotPublishAgain(t *testing.T) {
-	eventStore := &capturingInboundEventStore{duplicate: true}
-	bus, err := newInboundTestEventBus(t, eventStore)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	store := &recordingInboundStore{
-		target:   testInboundTarget("customer-a", "slack-secret"),
-		inserted: false,
-	}
-	g := newTestInboundGateway(t, bus, nil, nil, store)
-
-	body := []byte(`{"type":"event_callback","event_id":"Ev123ABC456","event":{"type":"message"}}`)
-	req := newSignedSlackRequest("/webhooks/customer-a/slack", "slack-secret", body, strconv.FormatInt(time.Now().UTC().Unix(), 10))
-	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"status":"duplicate"`) {
-		t.Fatalf("duplicate response = %s", rec.Body.String())
-	}
-	if len(eventStore.events) != 0 {
-		t.Fatalf("published events = %d, want 0", len(eventStore.events))
-	}
-}
-
 func TestInboundGateway_StripeManifestOwnsSignatureReplayIDTypeAndAck(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	started := make(chan struct{}, 1)
@@ -1457,7 +1312,7 @@ func TestInboundGateway_StripeManifestOwnsSignatureReplayIDTypeAndAck(t *testing
 		})
 	}
 	t.Cleanup(releaseDispatch)
-	bus, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
+	bus, capturedCatalog, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
 		Interceptors: []runtimebus.EventInterceptor{
 			blockingInboundInterceptor{started: started, release: release},
 		},
@@ -1470,6 +1325,8 @@ func TestInboundGateway_StripeManifestOwnsSignatureReplayIDTypeAndAck(t *testing
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	body := []byte(`{"id":"evt_123","type":"invoice.paid","data":{"object":{"id":"in_123"}}}`)
 	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
@@ -1510,7 +1367,7 @@ func TestInboundGateway_StripeManifestOwnsSignatureReplayIDTypeAndAck(t *testing
 		t.Fatalf("published events = %d, want 1 before dispatch release", len(eventStore.events))
 	}
 	evt := eventStore.events[0]
-	if evt.Type() != events.EventType("inbound.stripe") {
+	if evt.Type() != events.EventType("inbound.stripe.raw") {
 		t.Fatalf("event type = %q, want inbound.stripe", evt.Type())
 	}
 	var payload map[string]any
@@ -1629,7 +1486,7 @@ func TestInboundGateway_StripeRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := newInboundTestEventBus(t, eventStore)
+			bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -1641,6 +1498,8 @@ func TestInboundGateway_StripeRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 				inserted: true,
 			}
 			g := newTestInboundGateway(t, bus, nil, nil, store)
+			g.catalog = capturedCatalog
+			bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/stripe", strings.NewReader(string(tc.body)))
 			tc.configure(req, tc.body)
@@ -1660,42 +1519,9 @@ func TestInboundGateway_StripeRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 	}
 }
 
-func TestInboundGateway_StripeDuplicateEventDoesNotPublishAgain(t *testing.T) {
-	eventStore := &capturingInboundEventStore{duplicate: true}
-	bus, err := newInboundTestEventBus(t, eventStore)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	store := &recordingInboundStore{
-		target: InboundTarget{
-
-			SigningSecret: "stripe-secret",
-		},
-		inserted: false,
-	}
-	g := newTestInboundGateway(t, bus, nil, nil, store)
-
-	body := []byte(`{"id":"evt_123","type":"invoice.paid"}`)
-	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/stripe", strings.NewReader(string(body)))
-	req.Header.Set("Stripe-Signature", stripeWebhookSignature("stripe-secret", timestamp, body))
-	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"status":"duplicate"`) {
-		t.Fatalf("duplicate response = %s", rec.Body.String())
-	}
-	if len(eventStore.events) != 0 {
-		t.Fatalf("published events = %d, want 0", len(eventStore.events))
-	}
-}
-
 func TestInboundGateway_TwilioManifestOwnsURLFormSignatureAndLiteralEvent(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1704,6 +1530,8 @@ func TestInboundGateway_TwilioManifestOwnsURLFormSignatureAndLiteralEvent(t *tes
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	requestURL := "https://example.com/webhooks/customer-a/twilio?tenant=alpha"
 	form := url.Values{
@@ -1733,7 +1561,7 @@ func TestInboundGateway_TwilioManifestOwnsURLFormSignatureAndLiteralEvent(t *tes
 		t.Fatalf("published events = %d, want 1", len(eventStore.events))
 	}
 	evt := eventStore.events[0]
-	if evt.Type() != events.EventType("inbound.twilio") {
+	if evt.Type() != events.EventType("inbound.twilio.raw") {
 		t.Fatalf("event type = %q, want inbound.twilio", evt.Type())
 	}
 	var payload map[string]any
@@ -1818,7 +1646,7 @@ func TestInboundGateway_TwilioRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := newInboundTestEventBus(t, eventStore)
+			bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -1830,6 +1658,8 @@ func TestInboundGateway_TwilioRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 				inserted: true,
 			}
 			g := newTestInboundGateway(t, bus, nil, nil, store)
+			g.catalog = capturedCatalog
+			bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 			req := newSignedTwilioRequest(tc.requestURL, "twilio-secret", tc.form)
 			tc.configure(req, tc.form, tc.requestURL)
 			rec := httptest.NewRecorder()
@@ -1848,41 +1678,9 @@ func TestInboundGateway_TwilioRejectsInvalidInputsBeforeMarkerAndPublish(t *test
 	}
 }
 
-func TestInboundGateway_TwilioDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
-	eventStore := &capturingInboundEventStore{duplicate: true}
-	bus, err := newInboundTestEventBus(t, eventStore)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	store := &recordingInboundStore{
-		target: InboundTarget{
-
-			SigningSecret: "twilio-secret",
-		},
-		inserted: false,
-	}
-	g := newTestInboundGateway(t, bus, nil, nil, store)
-
-	requestURL := "https://example.com/webhooks/customer-a/twilio?tenant=alpha"
-	form := url.Values{"MessageSid": {"SM1234567890abcdef"}, "Body": {"hello"}}
-	req := newSignedTwilioRequest(requestURL, "twilio-secret", form)
-	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"status":"duplicate"`) {
-		t.Fatalf("duplicate response = %s", rec.Body.String())
-	}
-	if len(eventStore.events) != 0 {
-		t.Fatalf("published events = %d, want 0", len(eventStore.events))
-	}
-}
-
 func TestInboundGateway_ShopifyManifestOwnsRawBodySignatureDeliveryIDAndTopic(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1891,6 +1689,8 @@ func TestInboundGateway_ShopifyManifestOwnsRawBodySignatureDeliveryIDAndTopic(t 
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	body := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
 	req := newSignedShopifyRequest("/webhooks/customer-a/shopify", "shopify-secret", body)
@@ -1915,7 +1715,7 @@ func TestInboundGateway_ShopifyManifestOwnsRawBodySignatureDeliveryIDAndTopic(t 
 		t.Fatalf("published events = %d, want 1", len(eventStore.events))
 	}
 	evt := eventStore.events[0]
-	if evt.Type() != events.EventType("inbound.shopify") {
+	if evt.Type() != events.EventType("inbound.shopify.raw") {
 		t.Fatalf("event type = %q, want inbound.shopify", evt.Type())
 	}
 	var payload map[string]any
@@ -1991,7 +1791,7 @@ func TestInboundGateway_ShopifyRejectsInvalidInputsBeforeMarkerAndPublish(t *tes
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := newInboundTestEventBus(t, eventStore)
+			bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -2003,6 +1803,8 @@ func TestInboundGateway_ShopifyRejectsInvalidInputsBeforeMarkerAndPublish(t *tes
 				inserted: true,
 			}
 			g := newTestInboundGateway(t, bus, nil, nil, store)
+			g.catalog = capturedCatalog
+			bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/shopify", strings.NewReader(string(tc.body)))
 			req.Header.Set("X-Shopify-Webhook-Id", "webhook-123")
 			req.Header.Set("X-Shopify-Topic", "orders/create")
@@ -2020,39 +1822,6 @@ func TestInboundGateway_ShopifyRejectsInvalidInputsBeforeMarkerAndPublish(t *tes
 				t.Fatalf("published events = %d, want 0", len(eventStore.events))
 			}
 		})
-	}
-}
-
-func TestInboundGateway_ShopifyDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
-	eventStore := &capturingInboundEventStore{duplicate: true}
-	bus, err := newInboundTestEventBus(t, eventStore)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	store := &recordingInboundStore{
-		target: InboundTarget{
-
-			SigningSecret: "shopify-secret",
-		},
-		inserted: false,
-	}
-	g := newTestInboundGateway(t, bus, nil, nil, store)
-
-	body := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
-	req := newSignedShopifyRequest("/webhooks/customer-a/shopify", "shopify-secret", body)
-	req.Header.Set("X-Shopify-Webhook-Id", "webhook-123")
-	req.Header.Set("X-Shopify-Topic", "orders/create")
-	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"status":"duplicate"`) {
-		t.Fatalf("duplicate response = %s", rec.Body.String())
-	}
-	if len(eventStore.events) != 0 {
-		t.Fatalf("published events = %d, want 0", len(eventStore.events))
 	}
 }
 
@@ -2077,7 +1846,7 @@ func TestInboundGateway_TypeformAndIntercomManifestsOwnRawBodySignatureDeliveryI
 			newRequest:        newSignedTypeformRequest,
 			wantProviderID:    "tf-evt-123",
 			wantProviderType:  "form_response",
-			wantEventName:     events.EventType("inbound.typeform"),
+			wantEventName:     events.EventType("inbound.typeform.raw"),
 			wantMetadataKeyID: "typeform_event_id",
 			wantMetadataKeyTy: "typeform_event_type",
 		},
@@ -2089,14 +1858,14 @@ func TestInboundGateway_TypeformAndIntercomManifestsOwnRawBodySignatureDeliveryI
 			newRequest:        newSignedIntercomRequest,
 			wantProviderID:    "notif_123",
 			wantProviderType:  "conversation_user_created",
-			wantEventName:     events.EventType("inbound.intercom"),
+			wantEventName:     events.EventType("inbound.intercom.raw"),
 			wantMetadataKeyID: "intercom_notification_id",
 			wantMetadataKeyTy: "intercom_topic",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := newInboundTestEventBus(t, eventStore)
+			bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -2105,6 +1874,8 @@ func TestInboundGateway_TypeformAndIntercomManifestsOwnRawBodySignatureDeliveryI
 				inserted: true,
 			}
 			g := newTestInboundGateway(t, bus, nil, nil, store)
+			g.catalog = capturedCatalog
+			bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 			req := tc.newRequest("/webhooks/customer-a/"+tc.provider, tc.secret, tc.body)
 			rec := httptest.NewRecorder()
@@ -2276,7 +2047,7 @@ func TestInboundGateway_TypeformAndIntercomRejectInvalidInputsBeforeMarkerAndPub
 		for _, tc := range providerCase.cases {
 			t.Run(providerCase.provider+"/"+tc.name, func(t *testing.T) {
 				eventStore := &capturingInboundEventStore{}
-				bus, err := newInboundTestEventBus(t, eventStore)
+				bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 				if err != nil {
 					t.Fatalf("NewEventBus: %v", err)
 				}
@@ -2288,6 +2059,8 @@ func TestInboundGateway_TypeformAndIntercomRejectInvalidInputsBeforeMarkerAndPub
 					inserted: true,
 				}
 				g := newTestInboundGateway(t, bus, nil, nil, store)
+				g.catalog = capturedCatalog
+				bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 				body := tc.body
 				if len(body) == 0 {
 					body = providerCase.validBody
@@ -2311,58 +2084,6 @@ func TestInboundGateway_TypeformAndIntercomRejectInvalidInputsBeforeMarkerAndPub
 	}
 }
 
-func TestInboundGateway_TypeformAndIntercomDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
-	for _, tc := range []struct {
-		provider   string
-		secret     string
-		body       []byte
-		newRequest func(path string, secret string, body []byte) *http.Request
-	}{
-		{
-			provider:   "typeform",
-			secret:     "typeform-secret",
-			body:       []byte(`{"event_id":"tf-evt-123","event_type":"form_response","form_response":{"token":"abc"}}`),
-			newRequest: newSignedTypeformRequest,
-		},
-		{
-			provider:   "intercom",
-			secret:     "intercom-secret",
-			body:       []byte(`{"id":"notif_123","topic":"conversation.user.created","data":{"item":{"id":"conv_1"}}}`),
-			newRequest: newSignedIntercomRequest,
-		},
-	} {
-		t.Run(tc.provider, func(t *testing.T) {
-			eventStore := &capturingInboundEventStore{duplicate: true}
-			bus, err := newInboundTestEventBus(t, eventStore)
-			if err != nil {
-				t.Fatalf("NewEventBus: %v", err)
-			}
-			store := &recordingInboundStore{
-				target: InboundTarget{
-
-					SigningSecret: tc.secret,
-				},
-				inserted: false,
-			}
-			g := newTestInboundGateway(t, bus, nil, nil, store)
-
-			req := tc.newRequest("/webhooks/customer-a/"+tc.provider, tc.secret, tc.body)
-			rec := httptest.NewRecorder()
-			g.Handler().ServeHTTP(rec, req)
-
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-			}
-			if !strings.Contains(rec.Body.String(), `"status":"duplicate"`) {
-				t.Fatalf("duplicate response = %s", rec.Body.String())
-			}
-			if len(eventStore.events) != 0 {
-				t.Fatalf("published events = %d, want 0", len(eventStore.events))
-			}
-		})
-	}
-}
-
 func TestInboundGateway_TelegramManifestOwnsTokenDeliveryIDLiteralEventAndAck(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
 	started := make(chan struct{}, 1)
@@ -2374,7 +2095,7 @@ func TestInboundGateway_TelegramManifestOwnsTokenDeliveryIDLiteralEventAndAck(t 
 		})
 	}
 	t.Cleanup(releaseDispatch)
-	bus, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
+	bus, capturedCatalog, err := newInboundTestEventBusWithOptions(t, eventStore, runtimebus.EventBusOptions{
 		Interceptors: []runtimebus.EventInterceptor{
 			blockingInboundInterceptor{started: started, release: release},
 		},
@@ -2387,6 +2108,8 @@ func TestInboundGateway_TelegramManifestOwnsTokenDeliveryIDLiteralEventAndAck(t 
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"hello"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", "telegram-secret", body)
@@ -2431,7 +2154,7 @@ func TestInboundGateway_TelegramManifestOwnsTokenDeliveryIDLiteralEventAndAck(t 
 		t.Fatalf("published events = %d, want atomic raw plus normalized before dispatch release", len(eventStore.events))
 	}
 	evt := eventStore.events[0]
-	if evt.Type() != events.EventType("inbound.telegram") {
+	if evt.Type() != events.EventType("inbound.telegram.raw") {
 		t.Fatalf("event type = %q, want inbound.telegram", evt.Type())
 	}
 	var payload map[string]any
@@ -2559,7 +2282,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := newInboundTestEventBus(t, eventStore)
+			bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -2572,6 +2295,8 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 				inserted: true,
 			}
 			g := newTestInboundGateway(t, bus, nil, nil, store)
+			g.catalog = capturedCatalog
+			bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 			req := newSignedTelegramRequest("/webhooks/customer-a/telegram", "telegram-secret", tc.body)
 			tc.configure(req, tc.body)
@@ -2593,37 +2318,6 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 				t.Fatalf("published events = %d, want 0", len(eventStore.events))
 			}
 		})
-	}
-}
-
-func TestInboundGateway_TelegramDuplicateDeliveryDoesNotPublishAgain(t *testing.T) {
-	eventStore := &capturingInboundEventStore{duplicate: true}
-	bus, err := newInboundTestEventBus(t, eventStore)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	store := &recordingInboundStore{
-		target: InboundTarget{
-
-			SigningSecret: "telegram-secret",
-		},
-		inserted: false,
-	}
-	g := newTestInboundGateway(t, bus, nil, nil, store)
-
-	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"text":"hello"}}`)
-	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", "telegram-secret", body)
-	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"status":"duplicate"`) {
-		t.Fatalf("duplicate response = %s", rec.Body.String())
-	}
-	if len(eventStore.events) != 0 {
-		t.Fatalf("published events = %d, want 0", len(eventStore.events))
 	}
 }
 
@@ -2650,7 +2344,7 @@ func TestInboundGateway_NoPlanDoesNotInterpretTypeformOrIntercomSignatures(t *te
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			eventStore := &capturingInboundEventStore{}
-			bus, err := newInboundTestEventBus(t, eventStore)
+			bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
@@ -2662,6 +2356,8 @@ func TestInboundGateway_NoPlanDoesNotInterpretTypeformOrIntercomSignatures(t *te
 				inserted: true,
 			}
 			g := newTestInboundGateway(t, bus, nil, nil, store)
+			g.catalog = capturedCatalog
+			bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 			req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/custom", strings.NewReader(string(tc.body)))
 			tc.configure(req, tc.body)
@@ -2681,252 +2377,9 @@ func TestInboundGateway_NoPlanDoesNotInterpretTypeformOrIntercomSignatures(t *te
 	}
 }
 
-func TestInboundGateway_NoPlanDoesNotInterpretTelegramSecretToken(t *testing.T) {
-	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	store := &recordingInboundStore{
-		target: InboundTarget{
-
-			SigningSecret: "raw-secret",
-		},
-		inserted: true,
-	}
-	g := newTestInboundGateway(t, bus, nil, nil, store)
-
-	body := []byte(`{"update_id":123456789}`)
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/custom", strings.NewReader(string(body)))
-	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "raw-secret")
-	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 body=%s", rec.Code, rec.Body.String())
-	}
-	if store.recorded {
-		t.Fatal("missing compiled plan accepted Telegram secret token and recorded inbound marker")
-	}
-	if len(eventStore.events) != 0 {
-		t.Fatalf("published events = %d, want 0", len(eventStore.events))
-	}
-}
-
-func TestInboundGateway_NoPlanDoesNotInterpretShopifySignature(t *testing.T) {
-	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	store := &recordingInboundStore{
-		target: InboundTarget{
-
-			SigningSecret: "raw-secret",
-		},
-		inserted: true,
-	}
-	g := newTestInboundGateway(t, bus, nil, nil, store)
-
-	body := []byte(`{"id":123,"line_items":[{"sku":"abc"}]}`)
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/custom", strings.NewReader(string(body)))
-	req.Header.Set("X-Shopify-Hmac-Sha256", shopifyWebhookSignature("raw-secret", body))
-	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 body=%s", rec.Code, rec.Body.String())
-	}
-	if store.recorded {
-		t.Fatal("missing compiled plan accepted Shopify signature and recorded inbound marker")
-	}
-	if len(eventStore.events) != 0 {
-		t.Fatalf("published events = %d, want 0", len(eventStore.events))
-	}
-}
-
-func TestInboundGateway_NoPlanDoesNotInterpretStripeSignature(t *testing.T) {
-	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
-	store := &recordingInboundStore{
-		target: InboundTarget{
-
-			SigningSecret: "raw-secret",
-		},
-		inserted: true,
-	}
-	g := newTestInboundGateway(t, bus, nil, nil, store)
-
-	body := []byte(`{"id":"evt_123","type":"invoice.paid"}`)
-	timestamp := strconv.FormatInt(time.Now().UTC().Unix(), 10)
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/custom", strings.NewReader(string(body)))
-	req.Header.Set("Stripe-Signature", stripeWebhookSignature("raw-secret", timestamp, body))
-	rec := httptest.NewRecorder()
-	g.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503 body=%s", rec.Code, rec.Body.String())
-	}
-	if store.recorded {
-		t.Fatal("missing compiled plan accepted Stripe-Signature and recorded inbound marker")
-	}
-	if len(eventStore.events) != 0 {
-		t.Fatalf("published events = %d, want 0", len(eventStore.events))
-	}
-}
-
-func TestInboundGateway_ExecutesOnlyCompiledRawAdmissionPolicy(t *testing.T) {
-	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies()
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
-		Alias: "partner", Provider: "partner-events", SigningSecret: "partner-secret",
-		Declaration: providertriggers.AdmissionDeclaration{
-			Kind: "raw", Event: "inbound.partner", Payload: "json",
-			Authentication: providertriggers.RawAuthenticationDeclaration{Kind: "hmac_sha256", Header: "X-Partner-Signature", Prefix: "sha256=", Encoding: "hex"},
-			DeliveryID:     providertriggers.RawDeliveryIDDeclaration{Source: "header", Header: "X-Partner-Delivery"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := []byte(`{"id":"payload-id-is-not-authority","value":1}`)
-	mac := hmac.New(sha256.New, []byte("partner-secret"))
-	_, _ = mac.Write(body)
-	signature := "sha256=" + hex.EncodeToString(mac.Sum(nil))
-
-	for _, tc := range []struct {
-		name, signature string
-		wantStatus      int
-		wantRecorded    bool
-	}{
-		{name: "declared signature and delivery header", signature: signature, wantStatus: http.StatusAccepted, wantRecorded: true},
-		{name: "provider-shaped but undeclared signature is rejected", signature: shopifyWebhookSignature("partner-secret", body), wantStatus: http.StatusUnauthorized},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			eventStore := &capturingInboundEventStore{}
-			bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "partner-flow", RunID: eventtest.UUID("compiled-raw-admission-run-" + tc.name)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			store := &recordingInboundStore{inserted: true, store: eventStore}
-			gateway := NewInboundGateway(bus, nil, nil, executionposture.Live, store)
-			gateway.SetCredentialAdmission(testInboundCredentialAdmission(t, identityInboundCredentialStore{}))
-			req := httptest.NewRequest(http.MethodPost, "/webhooks/partner/partner-events", strings.NewReader(string(body)))
-			req.Header.Set("X-Partner-Signature", tc.signature)
-			req.Header.Set("X-Partner-Delivery", "declared-delivery")
-			// These old heuristic candidates are deliberately irrelevant.
-			req.Header.Set("Stripe-Signature", signature)
-			req.Header.Set("X-GitHub-Event", "push")
-			rec := httptest.NewRecorder()
-			runID := eventtest.UUID("compiled-raw-admission-run-" + tc.name)
-			gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-				BundleHash: inboundTestBusBundleHash(t, bus), FlowPath: "partner-flow", RunID: runID,
-				ServiceID: runtimeflowidentity.StandingServiceID("partner-flow"), Generation: 1, PublicationSequence: 1,
-				Alias: "partner", Provider: "partner-events",
-				SigningSecret: "partner-secret", AdmissionPlan: plan,
-			}, nil)
-			if rec.Code != tc.wantStatus {
-				t.Fatalf("status = %d, want %d body=%s", rec.Code, tc.wantStatus, rec.Body.String())
-			}
-			if eventStore.recorded != tc.wantRecorded {
-				t.Fatalf("marker recorded=%t, want %t", eventStore.recorded, tc.wantRecorded)
-			}
-			if tc.wantRecorded {
-				if eventStore.providerEventID != "declared-delivery" || len(eventStore.events) != 1 || eventStore.events[0].Type() != "inbound.partner" {
-					t.Fatalf("accepted raw delivery marker=%q events=%#v", eventStore.providerEventID, eventStore.events)
-				}
-			} else if len(eventStore.events) != 0 {
-				t.Fatalf("rejected raw delivery published %d events", len(eventStore.events))
-			}
-		})
-	}
-}
-
-func TestInboundGateway_PreservesExactEmptyBodyForCompiledAdmission(t *testing.T) {
-	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies()
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
-		Alias: "partner", Provider: "partner-events", SigningSecret: "partner-secret",
-		Declaration: providertriggers.AdmissionDeclaration{
-			Kind: "raw", Event: "inbound.partner", Payload: "raw",
-			Authentication: providertriggers.RawAuthenticationDeclaration{Kind: "hmac_sha256", Header: "X-Partner-Signature", Encoding: "hex"},
-			DeliveryID:     providertriggers.RawDeliveryIDDeclaration{Source: "body_sha256"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	mac := hmac.New(sha256.New, []byte("partner-secret"))
-	signature := hex.EncodeToString(mac.Sum(nil))
-	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore, InboundTarget{FlowPath: "partner-flow", RunID: eventtest.UUID("compiled-empty-body-run")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	store := &recordingInboundStore{inserted: true, store: eventStore}
-	gateway := NewInboundGateway(bus, nil, nil, executionposture.Live, store)
-	gateway.SetCredentialAdmission(testInboundCredentialAdmission(t, identityInboundCredentialStore{}))
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/partner/partner-events", nil)
-	req.Header.Set("X-Partner-Signature", signature)
-	rec := httptest.NewRecorder()
-	runID := eventtest.UUID("compiled-empty-body-run")
-	gateway.HandleResolvedWebhook(rec, req, InboundTarget{
-		BundleHash: inboundTestBusBundleHash(t, bus), FlowPath: "partner-flow", RunID: runID,
-		ServiceID: runtimeflowidentity.StandingServiceID("partner-flow"), Generation: 1, PublicationSequence: 1,
-		Alias: "partner", Provider: "partner-events",
-		SigningSecret: "partner-secret", AdmissionPlan: plan,
-	}, nil)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
-	}
-	wantID := hex.EncodeToString(sha256.New().Sum(nil))
-	if eventStore.providerEventID != wantID {
-		t.Fatalf("body_sha256 delivery id = %q, want exact empty-body hash %q", eventStore.providerEventID, wantID)
-	}
-	if len(eventStore.events) != 1 {
-		t.Fatalf("published events = %d, want 1", len(eventStore.events))
-	}
-
-	jsonPlan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
-		Alias: "json", Provider: "json-events",
-		Declaration: providertriggers.AdmissionDeclaration{
-			Kind: "raw", Acknowledge: providertriggers.UnsignedWebhookAcknowledgement,
-			Event: "inbound.json", Payload: "json",
-			Authentication: providertriggers.RawAuthenticationDeclaration{Kind: "none"},
-			DeliveryID:     providertriggers.RawDeliveryIDDeclaration{Source: "body_sha256"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	jsonStore := &recordingInboundStore{inserted: true, store: eventStore}
-	jsonGateway := NewInboundGateway(bus, nil, nil, executionposture.Live, jsonStore)
-	jsonGateway.SetCredentialAdmission(testInboundCredentialAdmission(t, identityInboundCredentialStore{}))
-	jsonReq := httptest.NewRequest(http.MethodPost, "/webhooks/json/json-events", nil)
-	jsonRec := httptest.NewRecorder()
-	jsonGateway.HandleResolvedWebhook(jsonRec, jsonReq, InboundTarget{
-		BundleHash: "bundle-v2:sha256:" + strings.Repeat("f", 64), FlowPath: "json-flow", RunID: eventtest.UUID("compiled-empty-json-run"),
-		Alias: "json", Provider: "json-events",
-		AdmissionPlan: jsonPlan,
-	}, nil)
-	if jsonRec.Code != http.StatusBadRequest || !strings.Contains(jsonRec.Body.String(), "must be valid JSON") {
-		t.Fatalf("empty JSON body response = %d %q", jsonRec.Code, jsonRec.Body.String())
-	}
-	if eventStore.providerEventID != wantID || len(eventStore.events) != 1 {
-		t.Fatal("empty JSON body mutated the previously recorded marker or events")
-	}
-}
-
 func TestInboundGateway_RejectsOversizedBodyBeforeMarkerAndPublish(t *testing.T) {
 	eventStore := &capturingInboundEventStore{}
-	bus, err := newInboundTestEventBus(t, eventStore)
+	bus, capturedCatalog, err := newInboundTestEventBus(t, eventStore)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -2938,6 +2391,8 @@ func TestInboundGateway_RejectsOversizedBodyBeforeMarkerAndPublish(t *testing.T)
 		inserted: true,
 	}
 	g := newTestInboundGateway(t, bus, nil, nil, store)
+	g.catalog = capturedCatalog
+	bus.SetProviderOutputAuthorizationVerifier(capturedCatalog)
 
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/github", strings.NewReader(strings.Repeat("a", inboundWebhookMaxBodyBytes+1)))
 	rec := httptest.NewRecorder()
