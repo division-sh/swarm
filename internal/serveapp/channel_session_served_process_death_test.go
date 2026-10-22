@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -68,10 +69,23 @@ func TestServedWhatsAppLaunchedProcessDeathBothStores(t *testing.T) {
 				}
 				message := awaitServedNativeProcessSend(t, peer, text)
 				var original pipeline.ActivityAttemptRecord
+				var recovered pipeline.ActivityAttemptRecord
 				var frozenRequest map[string]any
 				if activity {
 					original = readServedNativeActivityAttempt(t, backend, location, message.ID)
+					if original.Status != pipeline.ActivityAttemptStatusStarted || original.Tool != "whatsapp.send_text" || original.Attempt != 1 ||
+						original.StartedAt.IsZero() || original.CompletedAt != nil || original.ResultEventID != "" || original.Failure != nil {
+						t.Fatal("unconfirmed provider acceptance lost its sole started activity journal", original)
+					}
 					frozenRequest = readServedNativeFrozenActivityRequest(t, endpoint, message, original)
+					for _, name := range []string{original.SuccessEvent, original.FailureEvent} {
+						var results operatorread.OperatorEventListResult
+						requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
+							"filter": map[string]any{"run_id": original.RunID, "event_name": name}, "limit": 10}, &results)
+						if len(results.Events) != 0 {
+							t.Fatal("unconfirmed provider acceptance fabricated a terminal result", results)
+						}
+					}
 				}
 				if err := process.kill(); err != nil {
 					t.Fatal("owned launched SDK process did not die and join", err)
@@ -89,7 +103,7 @@ func TestServedWhatsAppLaunchedProcessDeathBothStores(t *testing.T) {
 					t.Fatal("process death replaced original enabled authority or lost readiness", restored)
 				}
 				if activity {
-					requireServedNativeStartedActivity(t, endpoint, backend, location, message, original, frozenRequest)
+					recovered = requireServedNativeRecoveredActivity(t, endpoint, backend, location, message, original, frozenRequest)
 				} else {
 					requireServedNativeUncertainInbox(t, reader, message)
 				}
@@ -103,7 +117,9 @@ func TestServedWhatsAppLaunchedProcessDeathBothStores(t *testing.T) {
 				endpoint = process.endpoint(t) + "/v1/rpc"
 				peer.awaitPostLogin()
 				if activity {
-					requireServedNativeStartedActivity(t, endpoint, backend, location, message, original, frozenRequest)
+					if current := requireServedNativeRecoveredActivity(t, endpoint, backend, location, message, original, frozenRequest); !reflect.DeepEqual(current, recovered) {
+						t.Fatal("second restart changed the original terminal activity evidence", recovered, current)
+					}
 				} else {
 					requireServedNativeUncertainInbox(t, reader, message)
 				}
@@ -142,10 +158,6 @@ func readServedNativeActivityAttempt(t *testing.T, backend, location, messageID 
 	}); err != nil || !found {
 		t.Fatal("original activity attempt is absent or unreadable", found, err)
 	}
-	if record.Status != pipeline.ActivityAttemptStatusStarted || record.Tool != "whatsapp.send_text" || record.Attempt != 1 ||
-		record.StartedAt.IsZero() || record.CompletedAt != nil || record.ResultEventID != "" || record.Failure != nil {
-		t.Fatal("unconfirmed provider acceptance lost its sole started activity journal", record)
-	}
 	return record
 }
 
@@ -171,22 +183,51 @@ func readServedNativeFrozenActivityRequest(t *testing.T, endpoint string, messag
 	return request.Payload
 }
 
-func requireServedNativeStartedActivity(t *testing.T, endpoint, backend, location string, message servedNativeMessage, original pipeline.ActivityAttemptRecord, frozenRequest map[string]any) {
+func requireServedNativeRecoveredActivity(t *testing.T, endpoint, backend, location string, message servedNativeMessage, original pipeline.ActivityAttemptRecord, frozenRequest map[string]any) pipeline.ActivityAttemptRecord {
 	t.Helper()
-	if current := readServedNativeActivityAttempt(t, backend, location, message.ID); !reflect.DeepEqual(current, original) {
-		t.Fatal("restart rewrote the surviving indeterminate activity attempt", original, current)
+	current := readServedNativeActivityAttempt(t, backend, location, message.ID)
+	if err := pipeline.ValidateActivityAttemptTerminal(current); err != nil || current.CompletedAt == nil ||
+		current.CompletedAt.Before(original.StartedAt) || current.UpdatedAt.Before(*current.CompletedAt) {
+		t.Fatal("restart lost terminal activity evidence", current, err)
 	}
-	if current := readServedNativeFrozenActivityRequest(t, endpoint, message, original); !reflect.DeepEqual(current, frozenRequest) {
-		t.Fatal("restart changed the original frozen request payload", frozenRequest, current)
+	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassOutcomeUncertain,
+		"activity_provider_outcome_uncertain", "activity-runtime", "recover_displaced_http_activity",
+		map[string]any{"activity_id": original.ActivityID, "tool": original.Tool}), "activity-runtime", "recover_displaced_http_activity")
+	failureValue, err := runtimefailures.EnvelopeValue(failure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := original
+	expected.Status, expected.Failure = pipeline.ActivityAttemptStatusUncertain, &failure
+	expected.ResultEventID, expected.ResultEventType = current.ResultEventID, original.FailureEvent
+	expected.ResultPayload = map[string]any{"activity_id": original.ActivityID, "tool": original.Tool, "failure": failureValue}
+	expected.CompletedAt, expected.UpdatedAt = current.CompletedAt, current.UpdatedAt
+	if !reflect.DeepEqual(current, expected) {
+		t.Fatal("restart changed original attempt lineage or its exact uncertainty result", expected, current)
+	}
+	if request := readServedNativeFrozenActivityRequest(t, endpoint, message, original); !reflect.DeepEqual(request, frozenRequest) {
+		t.Fatal("restart changed the original frozen request payload", frozenRequest, request)
 	}
 	for _, name := range []string{original.SuccessEvent, original.FailureEvent} {
 		var results operatorread.OperatorEventListResult
 		requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
 			"filter": map[string]any{"run_id": original.RunID, "event_name": name}, "limit": 10}, &results)
-		if len(results.Events) != 0 {
-			t.Fatal("restart fabricated a terminal result for an indeterminate native attempt", results)
+		want := 0
+		if name == original.FailureEvent {
+			want = 1
+		}
+		if len(results.Events) != want {
+			t.Fatal("restart changed the sole uncertain activity result", name, results)
+		}
+		if want == 1 {
+			result := results.Events[0]
+			if result.EventID != current.ResultEventID || result.RunID != original.RunID || result.SourceEventID != original.SourceEventID ||
+				!result.CreatedAt.Equal(*current.CompletedAt) || !reflect.DeepEqual(result.Payload, current.ResultPayload) {
+				t.Fatal("public uncertainty result differs from the original activity journal", current, result)
+			}
 		}
 	}
+	return current
 }
 
 func requireServedNativeNoResend(t *testing.T, peer *serveNativeProtocolPeer, original servedNativeMessage) {
