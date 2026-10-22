@@ -474,6 +474,14 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err := continuations.Start(runCtx); err != nil {
 		return nil, fmt.Errorf("start selected delivery continuations: %w", err)
 	}
+	agentRuntimeStopped := false
+	if agentRuntime != nil {
+		defer func() {
+			if !agentRuntimeStopped {
+				finalErr = errors.Join(finalErr, agentRuntime.Shutdown())
+			}
+		}()
+	}
 	defer func() {
 		finalErr = errors.Join(finalErr, continuations.Retire(context.WithoutCancel(runCtx)))
 	}()
@@ -487,14 +495,6 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		if err := continuations.Synchronize(runCtx); err != nil {
 			return nil, fmt.Errorf("synchronize recovered selected child deliveries: %w", err)
 		}
-	}
-	agentRuntimeStopped := false
-	if agentRuntime != nil {
-		defer func() {
-			if !agentRuntimeStopped {
-				finalErr = errors.Join(finalErr, agentRuntime.Shutdown())
-			}
-		}()
 	}
 	out := make([]SelectedContractExecutionForkEvent, 0, len(sourceEvents))
 	for _, sourceEvent := range sourceEvents {
@@ -623,6 +623,9 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		default:
 		}
 		stopHeartbeatWork()
+		if err := continuations.Retire(context.WithoutCancel(runCtx)); err != nil {
+			return out, fmt.Errorf("retire selected delivery continuations before runtime shutdown: %w", err)
+		}
 		if err := agentRuntime.Shutdown(); err != nil {
 			return out, fmt.Errorf("%s stop selected-fork runtime after quiescence: %w", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
 		}
