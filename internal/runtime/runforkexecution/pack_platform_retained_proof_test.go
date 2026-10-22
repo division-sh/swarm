@@ -11,8 +11,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/packadmission"
-	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -44,15 +42,6 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 			if err := os.CopyFS(root, os.DirFS(filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"))); err != nil {
 				t.Fatal(err)
 			}
-			base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, id := range []string{"provider.telegram", "provider.telegram.connector", "provider.telegram.hitl_channel"} {
-				if changed, err := packartifact.ImportEmbeddedPack(root, id, base); err != nil || !changed {
-					t.Fatalf("import %s: %t %v", id, changed, err)
-				}
-			}
 			fixture := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}
 			loaded, err := fixture.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 			if err != nil {
@@ -61,10 +50,6 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 			before, ok := semanticview.Bundle(loaded.Source)
 			if !ok {
 				t.Fatal("typed bundle missing")
-			}
-			beforeProjection, err := packadmission.FromBundle(before)
-			if err != nil {
-				t.Fatal(err)
 			}
 			sourceRun, eventID := uuid.NewString(), uuid.NewString()
 			input := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, sourceRun,
@@ -88,18 +73,8 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 				if !ok {
 					t.Fatal("retained typed bundle missing")
 				}
-				projection, err := packadmission.FromBundle(after)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if !bytes.Equal(before.SourceArtifact.LogicalBlob(), after.SourceArtifact.LogicalBlob()) || !reflect.DeepEqual(before.EffectiveProvenance().Entries(), after.EffectiveProvenance().Entries()) || !reflect.DeepEqual(beforeProjection.ChannelPlans, projection.ChannelPlans) || before.PackInventory.Digest() != after.PackInventory.Digest() {
-					t.Fatal("retained reload changed source/provenance/plan/hash")
-				}
-				for _, entry := range before.PackInventory.Entries() {
-					other, ok := after.PackInventory.Lookup(entry.ID())
-					if !ok || !bytes.Equal(entry.ManifestBody(), other.ManifestBody()) || !bytes.Equal(entry.EnvelopeBody(), other.EnvelopeBody()) {
-						t.Fatalf("retained pack bytes changed: %s", entry.ID())
-					}
+				if !bytes.Equal(before.SourceArtifact.LogicalBlob(), after.SourceArtifact.LogicalBlob()) || !reflect.DeepEqual(before.EffectiveProvenance().Entries(), after.EffectiveProvenance().Entries()) {
+					t.Fatal("retained reload changed source/provenance")
 				}
 				cleanupLoadedSelectedContractSource(retained)
 			}

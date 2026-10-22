@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -1686,6 +1687,7 @@ func TestDurableDataPruneValidatesCurrentAggregateBeforeHeadConflict(t *testing.
 func TestDurableDataPruneRetainsCompletePinRefusalEvidence(t *testing.T) {
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
 		ctx := context.Background()
+		rooted, _ := sourceartifactfixture.Rooted(t, "durable-data-test", testDataSourceArtifact)
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
@@ -1713,9 +1715,10 @@ func TestDurableDataPruneRetainsCompletePinRefusalEvidence(t *testing.T) {
 		for index := 0; index < pinCount; index++ {
 			runID := fmt.Sprintf("00000000-0000-4000-8000-%012d", index+1)
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-				RunID:      runID,
-				State:      runtimerunlifecycle.StateRunning,
-				Origin:     storetest.ScenarioSetupOrigin(),
+				RunID:    runID,
+				State:    runtimerunlifecycle.StateRunning,
+				Origin:   storetest.ScenarioSetupOrigin(),
+				Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
 				BundleHash: testDataBundle,
 				StartedAt:  time.Unix(int64(index+1), 0).UTC(),
 			})

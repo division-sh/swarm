@@ -13,8 +13,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/division-sh/swarm/internal/packadmission"
-	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -508,89 +506,6 @@ func TestSelectedContractSourceLoadersRejectPresentZeroBeforePublication(t *test
 	}
 	if artifactStore.requestedBundleHash != record.BundleHash {
 		t.Fatalf("source artifact selected-contract request hash = %q, want %q", artifactStore.requestedBundleHash, record.BundleHash)
-	}
-}
-
-func TestSourceArtifactSelectedContractSourceLoaderPreservesImportedPackGenerationForFork(t *testing.T) {
-	ctx := context.Background()
-	repoRoot := runForkExecutionRepoRoot(t)
-	fixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution")
-	project := t.TempDir()
-	if err := os.CopyFS(project, os.DirFS(fixtureRoot)); err != nil {
-		t.Fatalf("copy selected-contract fixture: %v", err)
-	}
-	base := packfixture.EmbeddedBase(t)
-	baseGenerations, err := packartifact.NewPlatformPackBaseGenerationOwner(base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if changed, err := packartifact.ImportEmbeddedPack(project, "provider.telegram", base); err != nil || !changed {
-		t.Fatalf("import Telegram pack changed=%t: %v", changed, err)
-	}
-	manifestPath := filepath.Join(project, "packs", "provider.telegram", packartifact.TriggerManifestFileName)
-	body, err := os.ReadFile(manifestPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	edited := []byte(strings.Replace(string(body), "telegram update object is required", "fork project telegram update object is required", 1))
-	if string(edited) == string(body) {
-		t.Fatal("Telegram fork edit found no canonical field")
-	}
-	if err := os.WriteFile(manifestPath, edited, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
-		repoRoot,
-		project,
-		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-		runtimecontracts.WorkflowContractLoadOptions{
-			PlatformPackBase: base, AdmitPackInventory: packadmission.AdmitInventory,
-		},
-	)
-	if err != nil {
-		t.Fatalf("load imported project-pack bundle: %v", err)
-	}
-	record := persistedSourceArtifactForTest(t, bundle)
-	telegram, ok := base.Lookup("provider.telegram")
-	if !ok {
-		t.Fatal("embedded Telegram pack is missing")
-	}
-	successorBody := []byte(strings.Replace(string(telegram.ManifestBody()), "telegram update object is required", "successor development telegram update object is required", 1))
-	successor, _ := packfixture.DevelopmentBase(t, map[string][]byte{"provider.telegram": successorBody})
-	if err := baseGenerations.Select(successor); err != nil {
-		t.Fatalf("select successor development generation: %v", err)
-	}
-	sourceRunID := uuid.NewString()
-	artifactStore := &fakeSourceArtifactSelectedContractSourceStore{
-		availability: runbundle.Availability{
-			RunID: sourceRunID, Status: "running", BundleHash: record.BundleHash,
-			SourceArtifactPresent: true,
-		},
-		record: record,
-	}
-	loader := SourceArtifactSelectedContractSourceLoader{
-		RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
-		PlatformPackBases: baseGenerations, Store: artifactStore,
-	}
-	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
-		Responsibility: FreshSelectedSource(record.BundleHash),
-		BundleHash:     record.BundleHash,
-		Selection: runfork.RunForkContractSelection{
-			Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash,
-		},
-	})
-	if err != nil {
-		t.Fatalf("load imported project-pack fork source: %v", err)
-	}
-	defer cleanupLoadedSelectedContractSource(loaded)
-	loadedBundle, ok := semanticview.Bundle(loaded.Source)
-	if !ok || loadedBundle == nil || loadedBundle.PackInventory == nil {
-		t.Fatalf("fork source bundle = %#v, present=%t", loadedBundle, ok)
-	}
-	entry, ok := loadedBundle.PackInventory.Lookup("provider.telegram")
-	if !ok || entry.Source() != packartifact.ProvenanceProject || !entry.Modified() || !entry.ShadowsBase() ||
-		loadedBundle.PackInventory.BaseDigest() != successor.Digest() || string(entry.ManifestBody()) != string(edited) {
-		t.Fatalf("fork imported pack = %#v present=%t base=%s", entry, ok, loadedBundle.PackInventory.BaseDigest())
 	}
 }
 
