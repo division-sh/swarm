@@ -35,14 +35,6 @@ func normalizeTerminationReason(raw string) TerminationReason {
 	}
 }
 
-func ParseTerminationReason(raw string) (TerminationReason, error) {
-	reason := normalizeTerminationReason(raw)
-	if reason == "" {
-		return "", fmt.Errorf("invalid termination reason %q", strings.TrimSpace(raw))
-	}
-	return reason, nil
-}
-
 func validateRuntimeTerminationReason(reason TerminationReason) error {
 	reason = normalizeTerminationReason(reason.String())
 	if reason == "" {
@@ -56,14 +48,4 @@ type TerminationMetadata struct {
 	Detail             string
 	SuccessorSessionID string
 	TerminatedAt       time.Time
-}
-
-func (m TerminationMetadata) ValidateForWrite() error {
-	if err := validateRuntimeTerminationReason(m.Reason); err != nil {
-		return err
-	}
-	if m.TerminatedAt.IsZero() {
-		return fmt.Errorf("terminated_at is required")
-	}
-	return nil
 }

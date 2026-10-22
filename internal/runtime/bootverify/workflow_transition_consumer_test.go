@@ -72,16 +72,6 @@ func TestCompiledTransitionStrictCarrierReferences(t *testing.T) {
 		{"missing_trigger", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.EventType = "" }, "transition_reference_validation", "missing trigger"},
 		{"unknown_platform_not_protocol", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.EventType = "platform.not_a_protocol" }, "transition_reference_validation", "missing from event catalog"},
 		{"timer_prefix_not_authority", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.EventType = "timer:known" }, "transition_reference_validation", "missing from event catalog"},
-		{"wrong_handler", func(e *runtimecontracts.WorkflowStageTopologyEdge) {
-			e.HandlerEvent = "ticket.audit"
-			e.EventType = "ticket.audit"
-		}, "transition_ownership_validation", "originating handler ticket.audit is missing"},
-		{"foreign_owner", func(e *runtimecontracts.WorkflowStageTopologyEdge) {
-			e.Node = identitytest.FlowNode(t, "child", "dispatcher")
-		}, "transition_ownership_validation", "invalid compiled carrier"},
-		{"wrong_carrier", func(e *runtimecontracts.WorkflowStageTopologyEdge) {
-			e.AdvanceCarrier = runtimecontracts.HandlerAdvanceCarrierOnComplete
-		}, "transition_ownership_validation", "invalid compiled carrier"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := bootverifyTransitionRuntimeOwnershipBundle()
@@ -91,71 +81,12 @@ func TestCompiledTransitionStrictCarrierReferences(t *testing.T) {
 			tc.mutate(&topology.Edges[0])
 			bundle.Semantics.StageTopologies["."] = topology
 			c := &checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}
-			findings := append(c.transitionReferences(), c.transitionOwnership()...)
+			findings := c.transitionReferences()
 			if !reportContains(findings, tc.check, tc.want) {
 				t.Fatalf("missing %s %q: %#v", tc.check, tc.want, findings)
 			}
 		})
 	}
-}
-
-func TestCompiledTransitionOwnershipUsesCanonicalAdmission(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		mutate func(*runtimecontracts.WorkflowStageTopologyEdge)
-	}{
-		{"valid", nil},
-		{"unknown_source_kind", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.Source = "invented" }},
-		{"runtime_owner_on_handler", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.InternalOwner = "runtime" }},
-		{"handler_protocol_disagreement", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.EventType = "platform.join_timeout" }},
-		{"foreign_timer_coordinate", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.TimerID = "foreign" }},
-		{"foreign_gate_coordinate", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.DecisionID = "foreign" }},
-		{"foreign_verdict_coordinate", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.Verdict = "approved" }},
-		{"foreign_loop_coordinate", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.LoopID = "foreign" }},
-		{"foreign_loop_operation", func(e *runtimecontracts.WorkflowStageTopologyEdge) {
-			e.LoopOperation = runtimecontracts.LoopOperationRepeat
-		}},
-		{"foreign_timing_coordinate", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.Timed = true }},
-		{"foreign_after_coordinate", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.After = "1h" }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := bootverifyTransitionRuntimeOwnershipBundle()
-			graph := bundle.Semantics.StageTopologies["."]
-			if tc.mutate != nil {
-				tc.mutate(&graph.Edges[0])
-			}
-			edge := graph.Edges[0]
-			_, err := graph.AdmitTransition(edge.Site(), edge.From, edge.To)
-			if (err != nil) != (tc.mutate != nil) {
-				t.Fatalf("canonical admission: %v", err)
-			}
-			bundle.Semantics.StageTopologies["."] = graph
-			findings := (&checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}).transitionOwnership()
-			if tc.mutate == nil {
-				if len(findings) != 0 {
-					t.Fatalf("valid carrier rejected: %#v", findings)
-				}
-			} else if !reportContains(findings, "transition_ownership_validation", "invalid compiled carrier") {
-				t.Fatalf("bootverify disagrees with canonical admission: %#v", findings)
-			}
-		})
-	}
-	t.Run("valid_shape_still_requires_declared_advance", func(t *testing.T) {
-		bundle := bootverifyTransitionRuntimeOwnershipBundle()
-		node := identitytest.RootNode(t, "dispatcher")
-		handler := bundle.Semantics.NodeHandlers[node.Key()]["ticket.created"]
-		handler.AdvancesTo = ""
-		bundle.Semantics.NodeHandlers[node.Key()]["ticket.created"] = handler
-		graph := bundle.Semantics.StageTopologies["."]
-		edge := graph.Edges[0]
-		if _, err := graph.AdmitTransition(edge.Site(), edge.From, edge.To); err != nil {
-			t.Fatal(err)
-		}
-		findings := (&checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}).transitionOwnership()
-		if !reportContains(findings, "transition_ownership_validation", "does not belong to its originating handler") {
-			t.Fatalf("declaration ownership proof was lost: %#v", findings)
-		}
-	})
 }
 
 func TestCompiledTransitionRootGateUsesScopedStageMetadata(t *testing.T) {
@@ -227,7 +158,7 @@ func TestCompiledTransitionConsumerAgreement(t *testing.T) {
 			report := Run(context.Background(), source, Options{})
 			for _, finding := range report.Findings {
 				switch finding.CheckID {
-				case "transition_reference_validation", "transition_ownership_validation", "handler_field_compliance", "semantic_drift_unreachable_state", "join_validation", "timer_validation", "loop_validation", "stage_gate_validation":
+				case "transition_reference_validation", "handler_field_compliance", "semantic_drift_unreachable_state", "join_validation", "timer_validation", "loop_validation", "stage_gate_validation":
 					if strings.EqualFold(finding.Severity, "error") {
 						t.Errorf("compiled consumer disagreement: %#v", finding)
 					}
@@ -255,11 +186,6 @@ func TestCompiledTransitionLifecycleReferenceGuards(t *testing.T) {
 		{"unknown_verdict", canonicalrouting.LifecycleGateLocal, "gate", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.Verdict = "missing" }, "transition_reference_validation", "unknown or mismatched gate"},
 		{"unknown_decision", canonicalrouting.LifecycleGateLocal, "gate", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.DecisionID = "missing" }, "transition_reference_validation", "unknown or mismatched gate"},
 		{"gate_wrong_target", canonicalrouting.LifecycleGateLocal, "gate", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.To = "done" }, "transition_reference_validation", "unknown or mismatched gate"},
-		{"gate_fake_node", canonicalrouting.LifecycleGateLocal, "gate", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.Node = identitytest.RootNode(t, "requester") }, "transition_ownership_validation", "invalid compiled carrier"},
-		{"unknown_loop", canonicalrouting.LifecycleLoopConnected, "loop.escape", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.LoopID = "missing" }, "transition_ownership_validation", "does not belong to its originating repeat operation"},
-		{"loop_wrong_operation", canonicalrouting.LifecycleLoopConnected, "loop.escape", func(e *runtimecontracts.WorkflowStageTopologyEdge) {
-			e.LoopOperation = runtimecontracts.LoopOperationClose
-		}, "transition_ownership_validation", "invalid compiled carrier"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := loadLifecycleEmitterBundle(t, tc.variant)
@@ -277,7 +203,7 @@ func TestCompiledTransitionLifecycleReferenceGuards(t *testing.T) {
 			}
 			bundle.Semantics.StageTopologies["."] = topology
 			c := &checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}
-			findings := append(c.transitionReferences(), c.transitionOwnership()...)
+			findings := c.transitionReferences()
 			if !reportContains(findings, tc.check, tc.want) {
 				t.Fatalf("missing %s %q: %#v", tc.check, tc.want, findings)
 			}
@@ -297,7 +223,6 @@ func TestCompiledTransitionStageTimerReferenceGuards(t *testing.T) {
 		{"foreign_timer", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.TimerID = "child.advance" }, "transition_reference_validation", "unknown or mismatched stage timer"},
 		{"wrong_source", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.From = "opened" }, "transition_reference_validation", "unknown or mismatched stage timer"},
 		{"wrong_target", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.To = "created" }, "transition_reference_validation", "unknown or mismatched stage timer"},
-		{"fake_node", func(e *runtimecontracts.WorkflowStageTopologyEdge) { e.Node = identitytest.RootNode(t, "dispatcher") }, "transition_ownership_validation", "invalid compiled carrier"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := bootverifyTransitionRuntimeOwnershipBundle()
@@ -314,7 +239,7 @@ func TestCompiledTransitionStageTimerReferenceGuards(t *testing.T) {
 			}
 			bundle.Semantics.StageTopologies["."] = topology
 			c := &checkerContext{source: compileBootverifySchemasPreservingPlans(bundle)}
-			findings := append(c.transitionReferences(), c.transitionOwnership()...)
+			findings := c.transitionReferences()
 			if tc.want == "" {
 				if len(findings) != 0 {
 					t.Fatalf("valid timer rejected: %#v", findings)
@@ -425,7 +350,7 @@ worker:
 		}
 	}
 	c := &checkerContext{source: source}
-	findings := append(c.transitionReferences(), c.transitionOwnership()...)
+	findings := c.transitionReferences()
 	findings = append(findings, c.handlerFieldCompliance()...)
 	findings = append(findings, c.stateReachability()...)
 	findings = append(findings, c.timerValidation()...)
@@ -433,7 +358,7 @@ worker:
 	if len(findings) != 0 {
 		t.Fatalf("strict-loaded carrier consumers disagree: %#v", findings)
 	}
-	// Reversing compiled presentation order cannot change references or ownership.
+	// Reversing compiled presentation order cannot change references.
 	for flow, topology := range bundle.Semantics.StageTopologies {
 		for i, j := 0, len(topology.Edges)-1; i < j; i, j = i+1, j-1 {
 			topology.Edges[i], topology.Edges[j] = topology.Edges[j], topology.Edges[i]
@@ -441,7 +366,7 @@ worker:
 		bundle.Semantics.StageTopologies[flow] = topology
 	}
 	reordered := &checkerContext{source: source}
-	if got := append(reordered.transitionReferences(), reordered.transitionOwnership()...); len(got) != 0 {
+	if got := reordered.transitionReferences(); len(got) != 0 {
 		t.Fatalf("order changed canonical validation: %#v", got)
 	}
 }

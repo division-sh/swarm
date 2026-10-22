@@ -5915,19 +5915,6 @@ func TestFlowEventExistsDoesNotUseAnotherFlowDeclaration(t *testing.T) {
 	}
 }
 
-func TestRun_ReportsTransitionOwnershipMismatch(t *testing.T) {
-	bundle := bootverifyTransitionRuntimeOwnershipBundle()
-	topology := bundle.Semantics.StageTopologies["."]
-	topology.Edges[0].Node = identitytest.RootNode(t, "projector")
-	bundle.Semantics.StageTopologies["."] = topology
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "transition_ownership_validation", "workflow owner is flow . node projector") {
-		t.Fatalf("expected transition_ownership_validation error, got %#v", report.Errors())
-	}
-}
-
 func TestRun_ReportsMissingSemanticHandlerForOwnedRuntimeEvent(t *testing.T) {
 	bundle := bootverifyTransitionRuntimeOwnershipBundle()
 	node := bundle.Nodes["dispatcher"]

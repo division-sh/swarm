@@ -53,11 +53,6 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, operation func(cont
 	return b.RunTransactionWithOptionsOutcome(ctx, nil, operation)
 }
 
-func (b *Backend) RunTransactionWithOptions(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) error {
-	_, err := b.RunTransactionWithOptionsOutcome(ctx, opts, operation)
-	return err
-}
-
 func (b *Backend) RunTransactionWithOptionsOutcome(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (bool, error) {
 	return b.runTransactionOutcome(ctx, opts, true, operation)
 }

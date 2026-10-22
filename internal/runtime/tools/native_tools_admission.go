@@ -74,10 +74,6 @@ func validateNativeToolAgentAdmission(ctx context.Context, actor models.AgentCon
 	return fmt.Errorf("%s", strings.Join(denied, "; "))
 }
 
-func NativeToolAdmissionDecisions(ctx context.Context, actor models.AgentConfig, opts NativeToolAdmissionOptions) []NativeToolAdmissionDecision {
-	return nativeToolAdmissionDecisions(ctx, actor, opts, workspaceResolutionExecution)
-}
-
 func nativeToolAdmissionDecisions(ctx context.Context, actor models.AgentConfig, opts NativeToolAdmissionOptions, purpose workspaceResolutionPurpose) []NativeToolAdmissionDecision {
 	if !actor.NativeTools.Any() {
 		return nil

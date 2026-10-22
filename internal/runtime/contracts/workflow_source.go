@@ -34,33 +34,6 @@ func (s FlowSource) LocalName() string {
 	return path.Base(s.FlowPath)
 }
 
-func (s FlowSource) DeclarationLabel(fileName string) string {
-	switch fileName {
-	case "schema.yaml":
-		return s.Schema
-	case "types.yaml":
-		return s.Types
-	case "entities.yaml":
-		return s.Entities
-	case "nodes.yaml":
-		return s.Nodes
-	case "events.yaml":
-		return s.Events
-	case "agents.yaml":
-		return s.Agents
-	case "tools.yaml":
-		return s.Tools
-	case "policy.yaml":
-		return s.Policy
-	case "rules.yaml":
-		return s.Rules
-	case "manifest.yaml":
-		return s.Manifest
-	default:
-		return ""
-	}
-}
-
 func indexFlowSources(artifact *sourceartifact.AdmittedSourceArtifact) (map[string]FlowSource, error) {
 	if artifact == nil || artifact.Root() == nil {
 		return nil, NewSourceArtifactRequiredDiagnostic()

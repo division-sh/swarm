@@ -85,14 +85,6 @@ func NewToolPermission(raw string) (ToolPermission, error) {
 	return ToolPermission{value: raw}, nil
 }
 
-func MustToolPermission(raw string) ToolPermission {
-	permission, err := NewToolPermission(raw)
-	if err != nil {
-		panic(err)
-	}
-	return permission
-}
-
 func (p ToolPermission) String() string { return p.value }
 func (p ToolPermission) IsZero() bool   { return p.value == "" }
 
@@ -126,14 +118,6 @@ func NewToolRatePolicy(rateLimit, maxWait string) (ToolRatePolicy, error) {
 		return ToolRatePolicy{}, fmt.Errorf("rate_limit_max_wait: %w", err)
 	}
 	return ToolRatePolicy{enabled: true, limit: limit, period: period, maxWait: wait}, nil
-}
-
-func MustToolRatePolicy(rateLimit, maxWait string) ToolRatePolicy {
-	policy, err := NewToolRatePolicy(rateLimit, maxWait)
-	if err != nil {
-		panic(err)
-	}
-	return policy
 }
 
 func (p ToolRatePolicy) Enabled() bool          { return p.enabled }

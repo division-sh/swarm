@@ -213,10 +213,6 @@ func (d FlowStageDeclarations) WorkflowStages(phase string) []WorkflowStageContr
 	return out
 }
 
-func (d FlowStageDeclarations) IsExplicitStateless() bool {
-	return d.Declared && len(d.Entries) == 0
-}
-
 func (s FlowSchemaDocument) UsesAuthoredStages() bool {
 	return s.StageDeclarations.Declared
 }

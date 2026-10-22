@@ -684,10 +684,6 @@ func upsertActiveRunQuiescenceRunControlTx(ctx context.Context, tx *sql.Tx, runI
 	return nil
 }
 
-func (s *RunLifecyclePostgresOwner) UpsertQuiescedRunControlTx(ctx context.Context, tx *sql.Tx, runID, reasonCode, controlledBy string, at time.Time) error {
-	return upsertActiveRunQuiescenceRunControlTx(ctx, tx, runID, reasonCode, controlledBy, at)
-}
-
 func sqliteUpsertActiveRunQuiescenceRunControlTx(ctx context.Context, tx *sql.Tx, runID, reasonCode, controlledBy string, at time.Time) error {
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO run_control_state (run_id, control_status, reason, controlled_by, updated_at, paused_at, stopped_at)

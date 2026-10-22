@@ -466,16 +466,6 @@ func sourceToolAuthorizationDecision(source semanticview.Source, actor models.Ag
 	return decision
 }
 
-func (e *Executor) RoleScopedEntityToolsEnabledForActor(actor models.AgentConfig) bool {
-	if e == nil {
-		return false
-	}
-	e.mu.RLock()
-	source := e.workflowSource
-	e.mu.RUnlock()
-	return roleScopedEntityToolsEnabledForActor(source, actor)
-}
-
 func (e *Executor) Execute(ctx context.Context, name string, input any) (any, error) {
 	return e.execute(ctx, name, input, nil)
 }
@@ -781,26 +771,6 @@ func (e *Executor) humanTaskStoreDependency() (HumanTaskCardStore, error) {
 		return nil, errors.New("human-task card store is not configured")
 	}
 	return store, nil
-}
-
-func (e *Executor) ValidateRuntimeToolInputForTest(name string, input any) error {
-	return e.validateRuntimeToolInput(context.Background(), models.AgentConfig{}, name, input)
-}
-
-func (e *Executor) ExecScheduleDirect(actor models.AgentConfig, input any) (any, error) {
-	return e.execSchedule(context.Background(), actor, input)
-}
-
-func (e *Executor) ExecNotifyHumanDirect(actor models.AgentConfig, input any) (any, error) {
-	return e.execNotifyHuman(context.Background(), actor, input)
-}
-
-func (e *Executor) ExecNotifyHumanDirectContext(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	return e.execNotifyHuman(ctx, actor, input)
-}
-
-func (e *Executor) ExecAskHumanDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	return e.execAskHuman(ctx, actor, input)
 }
 
 func authorizeNotifyHuman(provider runtimeauthority.Provider, actor models.AgentConfig) error {

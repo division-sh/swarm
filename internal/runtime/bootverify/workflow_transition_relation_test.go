@@ -122,7 +122,7 @@ func TestCompiledTransitionSourceAuthoredExactRelation(t *testing.T) {
 				// Consumer diagnostics supplement, rather than define, the oracle.
 				for _, finding := range bootverify.Run(context.Background(), source, bootverify.Options{}).Findings {
 					switch finding.CheckID {
-					case "transition_reference_validation", "transition_ownership_validation", "handler_field_compliance", "semantic_drift_unreachable_state", "join_validation", "timer_validation", "loop_validation", "stage_gate_validation":
+					case "transition_reference_validation", "handler_field_compliance", "semantic_drift_unreachable_state", "join_validation", "timer_validation", "loop_validation", "stage_gate_validation":
 						if strings.EqualFold(finding.Severity, "error") {
 							t.Errorf("source-loaded consumer rejected authored relation: %+v", finding)
 						}
