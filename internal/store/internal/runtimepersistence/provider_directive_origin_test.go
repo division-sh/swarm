@@ -321,7 +321,7 @@ func requirePersistedProviderDirectiveOrigin(t *testing.T, fixture completionSet
 
 func requireDirectiveOperationState(t *testing.T, store providerDirectiveTestStore, operationID string, want runtimeagentcontrol.DirectiveOperationState, wantCode string) {
 	t.Helper()
-	op, found, err := store.LoadDirectiveOperation(fixture.original, operationID)
+	op, found, err := store.LoadDirectiveOperation(testAuthorActivityContext(), operationID)
 	if err != nil || !found || op.State != want {
 		t.Fatalf("directive operation=%+v found=%v err=%v, want %s", op, found, err, want)
 	}
