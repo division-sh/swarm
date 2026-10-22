@@ -95,7 +95,6 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/publicingress/exposure.go:probePublicRoute:http_do:1":                                                               ownerOperatorInfra,
 	"internal/runtime/publicingress/exposure.go:readQuickTunnelEndpoints:http_do:1":                                                       ownerOperatorInfra,
 	"internal/runtime/publicingress/exposure.go:readQuickTunnelEndpoints:http_do:2":                                                       ownerOperatorInfra,
-	"internal/runtime/pipeline/generic_test_module.go:init:http_do:1":                                                                     ownerBuildTest,
 	"internal/runtime/pythonmodule/artifact_cache.go:materializedArtifactDir:http_do:1":                                                   ownerComputeSandbox,
 	"internal/runtime/pythonmodule/compiled_cache.go:currentCompiledInterpreterIdentity:http_do:1":                                        ownerComputeSandbox, // sync.Once executable fingerprint, not HTTP.
 	"internal/runtime/pythonmodule/compiled_cache.go:loadCompiledInterpreter:filesystem_write:1":                                          ownerComputeSandbox, // Private compiled-code directory.
