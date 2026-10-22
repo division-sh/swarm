@@ -372,15 +372,16 @@ func (s *rejectingPrimaryDecisionCards) GetDecisionCard(context.Context, string)
 
 func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelectedPipeline(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
+	ctx := originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), fixture.pg)
 	now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
 	runID := uuid.NewString()
-	storetest.RequireRun(t, testAuthorActivityContext(context.Background()), fixture.pg, storetest.RunFixture{
+	storetest.RequireRun(t, ctx, fixture.pg, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
 		BundleHash: runtimeContextTestBundleHashB,
 	})
 	card, continuation := newAPIHumanTaskAckLossCard(t, runID, runtimeContextTestBundleHashB, now)
 	continuation.BudgetBundleHash = runtimeContextTestBundleHashB
-	if err := fixture.pg.CreateHumanTaskCard(testAuthorActivityContextForSource(context.Background(), runtimeContextTestSourceFact(runtimeContextTestBundleHashB)), card, continuation); err != nil {
+	if err := fixture.pg.CreateHumanTaskCard(testAuthorActivityContextForSource(ctx, runtimeContextTestSourceFact(runtimeContextTestBundleHashB)), card, continuation); err != nil {
 		t.Fatalf("create selected-bundle human-task card: %v", err)
 	}
 

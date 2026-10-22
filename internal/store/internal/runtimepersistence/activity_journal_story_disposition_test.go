@@ -116,14 +116,14 @@ func TestActivityJournalTerminalTimestampAfterAdmissionBothStores(t *testing.T) 
 					if status == "uncertain" {
 						op = "uncertain"
 					}
-					receipt, _, err = activityStoryOuter(fixture, op, candidate)
+					receipt, _, err = activityStoryOuter(t, fixture, op, candidate)
 					after = time.Now().UTC().Truncate(time.Microsecond)
 					if err != nil {
 						t.Fatal(err)
 					}
 					assertActivityTerminalWriteTime(t, receipt, before, after)
 					candidate.CompletedAt, candidate.UpdatedAt = &after, after
-					replayed, _, err := activityStoryOuter(fixture, op, candidate)
+					replayed, _, err := activityStoryOuter(t, fixture, op, candidate)
 					if err != nil || !reflect.DeepEqual(receipt, replayed) {
 						t.Fatalf("duplicate completion reminted durable time: %v", err)
 					}
@@ -150,7 +150,7 @@ func TestActivityJournalPreservesExecutionNumberKindsBothStores(t *testing.T) {
 					request := activityStoryRequest(t, record, operation)
 					want := map[string]any{"integer": int64(75), "double": float64(75), "fraction": 7.5, "nested": []any{int64(8), float64(8)}}
 					request.ResultPayload = want
-					got, _, err := activityStoryOuter(fixture, operation, request)
+					got, _, err := activityStoryOuter(t, fixture, operation, request)
 					if err != nil || !reflect.DeepEqual(got.ResultPayload, want) {
 						t.Fatalf("committed result kinds = %#v, err=%v", got.ResultPayload, err)
 					}
@@ -160,7 +160,7 @@ func TestActivityJournalPreservesExecutionNumberKindsBothStores(t *testing.T) {
 						if err != nil || !found || !reflect.DeepEqual(got.ResultPayload, want) {
 							t.Fatalf("reloaded result kinds = %#v, found=%v err=%v", got.ResultPayload, found, err)
 						}
-						if _, _, err := activityStoryOuter(fixture, operation, request); err != nil {
+						if _, _, err := activityStoryOuter(t, fixture, operation, request); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -225,7 +225,7 @@ func TestActivityJournalStoryDispositionBothStores(t *testing.T) {
 							}
 							assertActivityStoryTablesUnchanged(t, fixture, postgres, before)
 							previous := activityStoryOccurrences(t, fixture, postgres, record.RunID)
-							got, inserted, err = activityStoryOuter(fixture, op, request)
+							got, inserted, err = activityStoryOuter(t, fixture, op, request)
 							if missing {
 								if err == nil || !strings.Contains(err.Error(), "was not found") {
 									t.Fatalf("outer missing record error = %v", err)
@@ -307,7 +307,7 @@ func TestActivityJournalStoryValidationNoDraftBothStores(t *testing.T) {
 							if err == nil || !strings.Contains(err.Error(), want) || len(spy.drafts) != 0 {
 								t.Fatalf("kernel error=%v drafts=%d, want %s and no draft", err, len(spy.drafts), want)
 							}
-							_, _, err = activityStoryOuter(fixture, op, request)
+							_, _, err = activityStoryOuter(t, fixture, op, request)
 							if err == nil || !strings.Contains(err.Error(), want) {
 								t.Fatalf("outer error=%v, want %s", err, want)
 							}
@@ -344,13 +344,13 @@ func TestActivityJournalStoryFailureAtomicityBothStores(t *testing.T) {
 					// Fail actual occurrence insertion inside the real outer owner, not
 					// just the spy, after the source mutation has been attempted.
 					remove := installActivityStoryFailure(t, fixture.db, postgres)
-					_, _, err = activityStoryOuter(fixture, op, request)
+					_, _, err = activityStoryOuter(t, fixture, op, request)
 					remove()
 					if err == nil || !strings.Contains(err.Error(), "injected activity story persistence") {
 						t.Fatalf("outer injected failure=%v", err)
 					}
 					assertActivityStoryTablesUnchanged(t, fixture, postgres, before)
-					if _, _, err := activityStoryOuter(fixture, op, request); err != nil {
+					if _, _, err := activityStoryOuter(t, fixture, op, request); err != nil {
 						t.Fatalf("retry after rollback: %v", err)
 					}
 				})
@@ -361,7 +361,7 @@ func TestActivityJournalStoryFailureAtomicityBothStores(t *testing.T) {
 
 func seedActivityStoryAttempt(t *testing.T, fixture authorActivityReceiptFixture, mode executionmode.Mode, status string, generated bool) runtimepipeline.ActivityAttemptRecord {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 	runID := uuid.NewString()
 	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	record := runtimepipeline.ActivityAttemptRecord{
@@ -396,7 +396,7 @@ func seedActivityStoryAttempt(t *testing.T, fixture authorActivityReceiptFixture
 	if generated {
 		op = "claim"
 	}
-	actual, inserted, err := activityStoryOuter(fixture, op, record)
+	actual, inserted, err := activityStoryOuter(t, fixture, op, record)
 	if err != nil || !inserted {
 		t.Fatalf("seed start: inserted=%v err=%v", inserted, err)
 	}
@@ -408,7 +408,7 @@ func seedActivityStoryAttempt(t *testing.T, fixture authorActivityReceiptFixture
 	if status == "uncertain" {
 		op = "uncertain"
 	}
-	actual, _, err = activityStoryOuter(fixture, op, request)
+	actual, _, err = activityStoryOuter(t, fixture, op, request)
 	if err != nil {
 		t.Fatalf("seed terminal: %v", err)
 	}
@@ -446,8 +446,9 @@ func activityStoryRequest(t *testing.T, record runtimepipeline.ActivityAttemptRe
 	return record
 }
 
-func activityStoryOuter(fixture authorActivityReceiptFixture, op string, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
-	j, ctx := fixture.store.(activityStoryJournal), testAuthorActivityContext()
+func activityStoryOuter(t *testing.T, fixture authorActivityReceiptFixture, op string, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
+	t.Helper()
+	j, ctx := fixture.store.(activityStoryJournal), originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 	switch op {
 	case "start":
 		return j.StartActivityAttempt(ctx, record)

@@ -148,7 +148,7 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 								if err != nil || inserted || !reflect.DeepEqual(got, copied) || len(spy.drafts) != 0 {
 									t.Fatalf("copied no-op kernel: err=%v inserted=%v drafts=%d got=%#v", err, inserted, len(spy.drafts), got)
 								}
-								got, inserted, err = activityStoryOuter(fixture, op, request)
+								got, inserted, err = activityStoryOuter(t, fixture, op, request)
 								if err != nil || inserted || !reflect.DeepEqual(got, copied) {
 									t.Fatalf("copied no-op outer: err=%v inserted=%v got=%#v", err, inserted, got)
 								}

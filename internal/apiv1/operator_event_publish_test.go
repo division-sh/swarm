@@ -1051,7 +1051,7 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 		t.Fatalf("missing run data = %#v, want %s", data, RunNotFoundCode)
 	}
 
-	if _, _, err := storetest.TerminalizeRun(testAuthorActivityContext(context.Background()), pg, storerunlifecycle.TerminalRequest{
+	if _, _, err := storetest.TerminalizeRun(originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg), pg, storerunlifecycle.TerminalRequest{
 		RunID:   runID,
 		State:   storerunlifecycle.StateCancelled,
 		EndedAt: time.Now().UTC(),
@@ -1971,7 +1971,7 @@ func TestOperatorEventPublishOperatorReferenceRejectsInvalidReferenceBeforePersi
 			name: "terminal run with source",
 			body: eventPublishBodyWithSource(firstRunID, firstEventID, runStartTestBundleHash, "scan.requested", `{"topic":"terminal"}`, "", "idem-source-terminal"),
 			mutateBefore: func() {
-				if _, _, err := storetest.TerminalizeRun(testAuthorActivityContext(context.Background()), pg, storerunlifecycle.TerminalRequest{
+				if _, _, err := storetest.TerminalizeRun(originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg), pg, storerunlifecycle.TerminalRequest{
 					RunID:   firstRunID,
 					State:   storerunlifecycle.StateCancelled,
 					EndedAt: time.Now().UTC(),
@@ -2744,6 +2744,7 @@ func seedEventPublishConstructedFlow(t *testing.T, selected *store.PostgresStore
 	t.Helper()
 	opts := runStartTestEventBusOptions(source)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), opts.SourceArtifactFact), runID)
+	ctx = originalAPIFixtureContext(t, ctx, selected)
 	trigger, err := eventfixture.Load(ctx, storetest.DatabaseForTest(selected), authoractivityfixture.DialectPostgres, sourceEventID)
 	if err != nil {
 		t.Fatal(err)
