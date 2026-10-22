@@ -10,16 +10,17 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestS1StandingCandidatesRetainCompiledRoot(t *testing.T) {
-	source, _ := standingTelegramDeclarationSource(t, "inbound.telegram")
-	bundle, _ := semanticview.Bundle(source)
-	first, err := bundle.RootedSource()
-	if err != nil {
-		t.Fatal(err)
-	}
+	bundle, first, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+		"manifest.yaml":          []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":            []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+		"telegram/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n"),
+		"telegram/trigger.yaml":  packfixture.NeutralProviderMembers()["trigger.yaml"],
+	})
 	second, _ := sourceartifactfixture.Rooted(t, "other", first.Artifact())
 	for _, rooted := range []struct {
 		name string
@@ -50,7 +51,7 @@ func TestS1StandingCandidatesRetainCompiledRoot(t *testing.T) {
 			}
 			for _, enabled := range []bool{false, true} {
 				if enabled {
-					if err := credentials.Set(context.Background(), "webhook_signing.telegram", "fixture-signing-value"); err != nil {
+					if err := credentials.Set(context.Background(), "telegram.webhook_signing_secret", "fixture-signing-value"); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -72,13 +73,22 @@ func TestS1StandingCandidatesRetainCompiledRoot(t *testing.T) {
 }
 
 func TestS1StandingCandidatesRefuseContradictoryContent(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
+	bundle, _, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+		"manifest.yaml":          []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":            []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+		"telegram/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n"),
+		"telegram/trigger.yaml":  packfixture.NeutralProviderMembers()["trigger.yaml"],
+	})
+	projection, err := packadmission.FromBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
 	credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rt := &Runtime{Options: RuntimeOptions{
-		WorkflowModule: semanticOnlyWorkflowRuntime{source: source}, ProviderTriggerCatalog: catalog, ProviderCredentials: credentials,
+		WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)}, ProviderTriggerCatalog: projection.ProviderTriggers, ProviderCredentials: credentials,
 		SourceArtifactFact: sourceartifactfixture.FactFor(sourceartifactfixture.New("schema.yaml", []byte("stages: []\n"))),
 	}}
 	if candidates, err := rt.PlanStandingServiceCandidates(); err == nil || len(candidates) != 0 {

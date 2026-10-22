@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -16,9 +17,11 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
@@ -29,18 +32,28 @@ const (
 )
 
 func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
+	var contexts [2]BundleContext
+	for i, event := range []string{"alpha.requested", "beta.requested"} {
+		bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"schema.yaml":   []byte("stages: []\nevents:\n  " + event + ":\n"),
+		})
+		contexts[i] = rootedContextForSource(t, semanticview.Wrap(bundle), rooted)
+	}
+	a, b := contexts[0], contexts[1]
 	availability := fakeRunBundleAvailability{
 		rows: map[string]runbundle.Availability{
 			"run-b": {
 				RunID:                 "run-b",
-				BundleHash:            runtimeContextTestHashB,
+				BundleHash:            b.BundleHash(),
+				RootReference:         b.RootAdmission.Reference(),
+				RootAdmissionPresent:  true,
 				SourceArtifactPresent: true,
 			},
 		},
 	}
 	manager, err := newTestRuntimeContextManager(t, availability,
-		testBundleContext(t, runtimeContextTestHashB, "beta.requested"),
-		testBundleContext(t, runtimeContextTestHashA, "alpha.requested"),
+		b, a,
 	)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
@@ -48,22 +61,27 @@ func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
 	if manager.Len() != 2 || !manager.MultiContext() {
 		t.Fatalf("manager Len/MultiContext = %d/%v, want 2/true", manager.Len(), manager.MultiContext())
 	}
-	if got, want := manager.BundleHashes(), []string{runtimeContextTestHashA, runtimeContextTestHashB}; !reflect.DeepEqual(got, want) {
+	wantHashes := []string{a.BundleHash(), b.BundleHash()}
+	sort.Strings(wantHashes)
+	if got, want := manager.BundleHashes(), wantHashes; !reflect.DeepEqual(got, want) {
 		t.Fatalf("BundleHashes = %#v, want %#v", got, want)
 	}
 	primary, ok := manager.Primary()
-	if !ok || primary.BundleHash() != runtimeContextTestHashB {
-		t.Fatalf("Primary = %#v/%v, want first registered semantic primary %s", primary, ok, runtimeContextTestHashB)
+	if !ok || primary.BundleHash() != b.BundleHash() {
+		t.Fatalf("Primary = %#v/%v, want first registered semantic primary %s", primary, ok, b.BundleHash())
 	}
-	contextDef, availabilityResult, loaded, err := manager.LookupRun(testAuthorActivityContext(context.Background()), "run-b")
+	ctx := testAuthorActivityContextForBundle(context.Background(), b.BundleHash())
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, b.SourceArtifactFact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, b.RootAdmission)
+	contextDef, availabilityResult, loaded, err := manager.LookupRun(ctx, "run-b")
 	if err != nil {
 		t.Fatalf("LookupRun: %v", err)
 	}
-	if !loaded || contextDef == nil || contextDef.BundleHash() != runtimeContextTestHashB {
-		t.Fatalf("LookupRun context = %#v loaded=%v, want %s", contextDef, loaded, runtimeContextTestHashB)
+	if !loaded || contextDef == nil || contextDef.BundleHash() != b.BundleHash() {
+		t.Fatalf("LookupRun context = %#v loaded=%v, want %s", contextDef, loaded, b.BundleHash())
 	}
-	if availabilityResult.BundleHash != runtimeContextTestHashB || !availabilityResult.Available() {
-		t.Fatalf("LookupRun availability = %#v, want available %s", availabilityResult, runtimeContextTestHashB)
+	if availabilityResult.BundleHash != b.BundleHash() || !availabilityResult.Available() {
+		t.Fatalf("LookupRun availability = %#v, want available %s", availabilityResult, b.BundleHash())
 	}
 }
 
