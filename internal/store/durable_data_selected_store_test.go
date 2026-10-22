@@ -1,10 +1,8 @@
 package store_test
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1829,25 +1827,10 @@ func registerDurableDataTestCatalog(ctx context.Context, selected durableDataSel
 }
 
 func durableDataTestSourceArtifact() *sourceartifact.AdmittedSourceArtifact {
-	const label = "schema.yaml"
-	const body = "name: durable-data-test\n"
-	var blob bytes.Buffer
-	blob.WriteString("swarm-bundle-v2\x00")
-	if err := binary.Write(&blob, binary.BigEndian, uint64(1)); err != nil {
-		panic(err)
-	}
-	if err := blob.WriteByte(byte(sourceartifact.DispositionDeclaration)); err != nil {
-		panic(err)
-	}
-	if err := binary.Write(&blob, binary.BigEndian, uint64(len(label))); err != nil {
-		panic(err)
-	}
-	blob.WriteString(label)
-	if err := binary.Write(&blob, binary.BigEndian, uint64(len(body))); err != nil {
-		panic(err)
-	}
-	blob.WriteString(body)
-	artifact, err := sourceartifact.DecodeLogical(blob.Bytes())
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	})
 	if err != nil {
 		panic(err)
 	}
