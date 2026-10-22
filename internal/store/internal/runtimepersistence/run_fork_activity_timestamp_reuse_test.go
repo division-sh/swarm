@@ -169,7 +169,6 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 func TestOrdinaryForkActivityReplayCardDependencyBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
-			fixture := backend.open(t)
 			for _, approved := range []bool{false, true} {
 				policy := "recorded"
 				if approved {
@@ -182,6 +181,7 @@ func TestOrdinaryForkActivityReplayCardDependencyBothStores(t *testing.T) {
 							presence = "pending_child_card"
 						}
 						t.Run(policy+"/"+status+"/"+presence, func(t *testing.T) {
+							fixture := backend.open(t)
 							child, event, sourceRecord := seedActivityEvidenceForFork(t, fixture, backend.name == "postgres", approved, status, 0, true, pendingCard)
 							original := originalActivityCarriageAtPoint(t, fixture.store.(selectedActivityProjectionStore), event.RunID(), child.ForkPoint)
 							source := selectedActivityProducerSourceOptions(t, false, false, true, !approved)
