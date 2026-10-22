@@ -2065,52 +2065,7 @@ func (a *Adapter) RunOperationalEvidence(ctx context.Context, q queryer, runID s
 	out := []RunOperationalFact{}
 	byID := map[string]int{}
 	for rows.Next() {
-		fact := RunOperationalFact{RunID: runID, KnownCompletionAttempts: make(map[string]bool)}
-		fields := agentidentity.StorageFields{RunID: runID}
-		var class, status, kind, bundle, authorityID, selectedID, selectedRunID string
-		var generation, selectedGeneration uint64
-		var targetRaw []byte
-		if err := rows.Scan(&fact.DeliveryID, &fact.EventID, &fact.RouteIdentity,
-			&class, &fact.SubscriberID, &fields.NameOwner, &fields.NameSource, &fields.RoutePresence,
-			&fields.FlowScopeKey, &fields.FlowInstanceID, &fields.FlowInstancePath, &status, &fact.ReasonCode,
-			&kind, &bundle, &authorityID, &generation, &selectedID, &selectedRunID, &selectedGeneration, &targetRaw); err != nil {
-			return nil, errors.Join(err, rows.Close())
-		}
-		if _, err := events.ParseDeliveryRouteIdentity(fact.RouteIdentity); err != nil {
-			return nil, errors.Join(fmt.Errorf("%w: persisted delivery route identity: %v", ErrConflict, err), rows.Close())
-		}
-		fact.SubscriberClass, err = ParseSubscriberClass(class)
-		if err == nil {
-			fact.Status, err = ParseStatus(status)
-		}
-		if err != nil {
-			return nil, errors.Join(fmt.Errorf("%w: persisted delivery status or subscriber class: %v", ErrConflict, err), rows.Close())
-		}
-		forkRunID := ""
-		if ExecutionAuthorityKind(kind) == ExecutionAuthoritySelectedContractFork {
-			if selectedID != authorityID || selectedGeneration != generation {
-				return nil, errors.Join(fmt.Errorf("%w: selected delivery authority projection mismatch", ErrConflict), rows.Close())
-			}
-			forkRunID = selectedRunID
-		}
-		if _, err := DecodeExecutionAuthority(ExecutionAuthorityKind(kind), bundle, authorityID, forkRunID, generation); err != nil {
-			return nil, errors.Join(fmt.Errorf("%w: persisted delivery execution authority: %v", ErrConflict, err), rows.Close())
-		}
-		// Agent ownership is carried by its typed identity columns. Hydrating the
-		// executable route tail here would read beyond bounded diagnostic pages.
-		if fact.SubscriberClass == SubscriberAgent {
-			fields.AgentID = fact.SubscriberID
-			fact.AgentIdentity, err = agentidentity.FromStorageFields(fields)
-			if err == nil {
-				_, _, fact.FlowInstance, err = fact.AgentIdentity.ExecutionCoordinates()
-			}
-		} else {
-			var target events.DeliveryTargetOwnership
-			if err := json.Unmarshal(targetRaw, &target); err != nil {
-				return nil, errors.Join(fmt.Errorf("%w: decode delivery target: %v", ErrConflict, err), rows.Close())
-			}
-			fact.FlowInstance = target.Route().FlowInstance
-		}
+		fact, err := scanRunOperationalFact(rows, runID)
 		if err != nil {
 			return nil, errors.Join(err, rows.Close())
 		}
@@ -2153,6 +2108,57 @@ func (a *Adapter) RunOperationalEvidence(ctx context.Context, q queryer, runID s
 		return nil, err
 	}
 	return out, nil
+}
+
+func scanRunOperationalFact(row scanner, runID string) (RunOperationalFact, error) {
+	fact := RunOperationalFact{RunID: runID, KnownCompletionAttempts: make(map[string]bool)}
+	fields := agentidentity.StorageFields{RunID: runID}
+	var class, status, kind, bundle, authorityID, selectedID, selectedRunID string
+	var generation, selectedGeneration uint64
+	var targetRaw []byte
+	if err := row.Scan(&fact.DeliveryID, &fact.EventID, &fact.RouteIdentity,
+		&class, &fact.SubscriberID, &fields.NameOwner, &fields.NameSource, &fields.RoutePresence,
+		&fields.FlowScopeKey, &fields.FlowInstanceID, &fields.FlowInstancePath, &status, &fact.ReasonCode,
+		&kind, &bundle, &authorityID, &generation, &selectedID, &selectedRunID, &selectedGeneration, &targetRaw); err != nil {
+		return RunOperationalFact{}, err
+	}
+	if _, err := events.ParseDeliveryRouteIdentity(fact.RouteIdentity); err != nil {
+		return RunOperationalFact{}, fmt.Errorf("%w: persisted delivery route identity: %v", ErrConflict, err)
+	}
+	var err error
+	fact.SubscriberClass, err = ParseSubscriberClass(class)
+	if err == nil {
+		fact.Status, err = ParseStatus(status)
+	}
+	if err != nil {
+		return RunOperationalFact{}, fmt.Errorf("%w: persisted delivery status or subscriber class: %v", ErrConflict, err)
+	}
+	forkRunID := ""
+	if ExecutionAuthorityKind(kind) == ExecutionAuthoritySelectedContractFork {
+		if selectedID != authorityID || selectedGeneration != generation {
+			return RunOperationalFact{}, fmt.Errorf("%w: selected delivery authority projection mismatch", ErrConflict)
+		}
+		forkRunID = selectedRunID
+	}
+	if _, err := DecodeExecutionAuthority(ExecutionAuthorityKind(kind), bundle, authorityID, forkRunID, generation); err != nil {
+		return RunOperationalFact{}, fmt.Errorf("%w: persisted delivery execution authority: %v", ErrConflict, err)
+	}
+	// Agent ownership is carried by its typed identity columns. Hydrating the
+	// executable route tail here would read beyond bounded diagnostic pages.
+	if fact.SubscriberClass == SubscriberAgent {
+		fields.AgentID = fact.SubscriberID
+		fact.AgentIdentity, err = agentidentity.FromStorageFields(fields)
+		if err == nil {
+			_, _, fact.FlowInstance, err = fact.AgentIdentity.ExecutionCoordinates()
+		}
+	} else {
+		var target events.DeliveryTargetOwnership
+		if err := json.Unmarshal(targetRaw, &target); err != nil {
+			return RunOperationalFact{}, fmt.Errorf("%w: decode delivery target: %v", ErrConflict, err)
+		}
+		fact.FlowInstance = target.Route().FlowInstance
+	}
+	return fact, err
 }
 
 // RunDiagnosticCounts aggregates run-debug delivery counts in storage without
