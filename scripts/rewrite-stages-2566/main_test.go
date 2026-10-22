@@ -45,8 +45,8 @@ func TestRewrite2566ReviewedPlanHasExplicitEntryAndFragmentDecisions(t *testing.
 			}
 		}
 	}
-	// One retired deactivation fixture leaves 552 originals, plus 3 and 11 incoming sites.
-	if sites != 566 || moved != 2 {
+	// Retired deactivation and memory-proof fixtures leave 551 originals, plus 3 and 11 incoming sites.
+	if sites != 565 || moved != 2 {
 		t.Fatalf("missing positive preparation: sites=%d moves=%d", sites, moved)
 	}
 }
