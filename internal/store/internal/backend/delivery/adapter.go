@@ -2052,47 +2052,73 @@ func (a *Adapter) RunOperationalEvidence(ctx context.Context, q queryer, runID s
 	if id, err := uuid.Parse(runID); err != nil || id.String() != runID {
 		return nil, fmt.Errorf("delivery operational evidence requires exact run identity")
 	}
-	rows, err := q.QueryContext(ctx, `SELECT CAST(delivery_id AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY delivery_id`, runID)
+	rows, err := q.QueryContext(ctx, `SELECT CAST(delivery_id AS TEXT),CAST(event_id AS TEXT),route_identity,
+		subscriber_type,subscriber_id,agent_name_owner,agent_name_source,agent_route_presence,
+		agent_flow_scope_key,agent_flow_instance_id,agent_flow_instance_path,status,COALESCE(reason_code,''),
+		execution_authority_kind,authority_bundle_hash,execution_authority_id,execution_authority_generation,
+		COALESCE(CAST(selected_execution_id AS TEXT),''),COALESCE(CAST(selected_fork_run_id AS TEXT),''),COALESCE(selected_execution_generation,0),
+		delivery_target_route
+		FROM event_deliveries WHERE run_id=$1 ORDER BY delivery_id`, runID)
 	if err != nil {
 		return nil, err
 	}
-	var ids []string
+	out := []RunOperationalFact{}
+	byID := map[string]int{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		fact := RunOperationalFact{RunID: runID, KnownCompletionAttempts: make(map[string]bool)}
+		fields := agentidentity.StorageFields{RunID: runID}
+		var class, status, kind, bundle, authorityID, selectedID, selectedRunID string
+		var generation, selectedGeneration uint64
+		var targetRaw []byte
+		if err := rows.Scan(&fact.DeliveryID, &fact.EventID, &fact.RouteIdentity,
+			&class, &fact.SubscriberID, &fields.NameOwner, &fields.NameSource, &fields.RoutePresence,
+			&fields.FlowScopeKey, &fields.FlowInstanceID, &fields.FlowInstancePath, &status, &fact.ReasonCode,
+			&kind, &bundle, &authorityID, &generation, &selectedID, &selectedRunID, &selectedGeneration, &targetRaw); err != nil {
 			return nil, errors.Join(err, rows.Close())
 		}
-		ids = append(ids, id)
+		if _, err := events.ParseDeliveryRouteIdentity(fact.RouteIdentity); err != nil {
+			return nil, errors.Join(fmt.Errorf("%w: persisted delivery route identity: %v", ErrConflict, err), rows.Close())
+		}
+		fact.SubscriberClass, err = ParseSubscriberClass(class)
+		if err == nil {
+			fact.Status, err = ParseStatus(status)
+		}
+		if err != nil {
+			return nil, errors.Join(fmt.Errorf("%w: persisted delivery status or subscriber class: %v", ErrConflict, err), rows.Close())
+		}
+		forkRunID := ""
+		if ExecutionAuthorityKind(kind) == ExecutionAuthoritySelectedContractFork {
+			if selectedID != authorityID || selectedGeneration != generation {
+				return nil, errors.Join(fmt.Errorf("%w: selected delivery authority projection mismatch", ErrConflict), rows.Close())
+			}
+			forkRunID = selectedRunID
+		}
+		if _, err := DecodeExecutionAuthority(ExecutionAuthorityKind(kind), bundle, authorityID, forkRunID, generation); err != nil {
+			return nil, errors.Join(fmt.Errorf("%w: persisted delivery execution authority: %v", ErrConflict, err), rows.Close())
+		}
+		// Agent ownership is carried by its typed identity columns. Hydrating the
+		// executable route tail here would read beyond bounded diagnostic pages.
+		if fact.SubscriberClass == SubscriberAgent {
+			fields.AgentID = fact.SubscriberID
+			fact.AgentIdentity, err = agentidentity.FromStorageFields(fields)
+			if err == nil {
+				_, _, fact.FlowInstance, err = fact.AgentIdentity.ExecutionCoordinates()
+			}
+		} else {
+			var target events.DeliveryTargetOwnership
+			if err := json.Unmarshal(targetRaw, &target); err != nil {
+				return nil, errors.Join(fmt.Errorf("%w: decode delivery target: %v", ErrConflict, err), rows.Close())
+			}
+			fact.FlowInstance = target.Route().FlowInstance
+		}
+		if err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		byID[fact.DeliveryID] = len(out)
+		out = append(out, fact)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
-	}
-	now, err := a.databaseNow(ctx, q)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]RunOperationalFact, 0, len(ids))
-	byID := make(map[string]int, len(ids))
-	for _, id := range ids {
-		record, err := a.loadByID(ctx, q, id, false)
-		if err != nil {
-			return nil, err
-		}
-		snapshot := snapshotAt(record, now)
-		path := snapshot.Route.Target.Route().FlowInstance
-		if snapshot.SubscriberClass == SubscriberAgent {
-			_, _, path, err = snapshot.Route.AgentIdentity.ExecutionCoordinates()
-			if err != nil {
-				return nil, err
-			}
-		}
-		byID[id] = len(out)
-		out = append(out, RunOperationalFact{
-			DeliveryID: id, EventID: snapshot.EventID, RunID: snapshot.RunID, SubscriberID: snapshot.SubscriberID,
-			RouteIdentity: events.EncodeDeliveryRouteIdentity(snapshot.RouteIdentity), AgentIdentity: snapshot.Route.AgentIdentity,
-			FlowInstance: path, SubscriberClass: snapshot.SubscriberClass, Status: snapshot.Status, ReasonCode: snapshot.ReasonCode,
-			KnownCompletionAttempts: make(map[string]bool),
-		})
 	}
 	rows, err = q.QueryContext(ctx, `SELECT CAST(d.delivery_id AS TEXT),CAST(a.attempt_id AS TEXT)
 		FROM event_delivery_attempts d JOIN runtime_external_effect_attempts a
