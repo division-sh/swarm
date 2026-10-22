@@ -91,8 +91,8 @@ func TestResetRetainedCleanupDirectiveAuthorityBothStores(t *testing.T) {
 	for _, state := range []string{"prepared", "executing", "indeterminate", "succeeded", "failed", "expired_succeeded", "expired_failed"} {
 		t.Run(state, func(t *testing.T) {
 			forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
-				ctx := testAuthorActivityContext()
-				seedDirectiveOperationRun(t, backend.db, backend.name == "postgres")
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), backend.store)
+				seedDirectiveOperationRun(t, ctx, backend.db, backend.name == "postgres")
 				now := time.Now().UTC()
 				if strings.HasPrefix(state, "expired_") {
 					now = now.Add(-48 * time.Hour)

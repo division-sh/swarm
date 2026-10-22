@@ -164,7 +164,7 @@ func nonCompletionRegistrationsForParity(t *testing.T) []runtimeeffects.Registra
 
 func newNeutralEffectParityFixture(t *testing.T, store neutralEffectParityStore, db *sql.DB, sqlite bool) neutralEffectParityFixture {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	now := time.Now().UTC()
 	agentID := "neutral-effect-parity-agent"
 	identity := testAgentIdentity(t, agentID, "neutral")

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -64,7 +65,7 @@ func TestAgentLifecycleRemovedSourceRetirementParity(t *testing.T) {
 				_, db, _ := testutil.StartPostgres(t)
 				store = admitTestPostgresStore(t, db)
 			}
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			identity := testAgentIdentity(t, "removed-source-agent", "")
 			requireRunningRunForTest(t, ctx, store, identity.RunID, time.Now().UTC())
 			record := runtimemanager.PersistedAgent{
@@ -100,6 +101,11 @@ func TestAgentLifecycleRemovedSourceRetirementParity(t *testing.T) {
 			grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
 				BundleHash: hash, RuntimeInstanceID: authority.RuntimeInstanceID, RuntimeGeneration: 2, SourceSetRevision: plan.Revision,
 			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx = authoractivity.WithScope(correlation.WithRuntimeInstanceID(testAuthorActivityContextForBundle(hash), authority.RuntimeInstanceID), authoractivity.BundleScope(authority.RuntimeInstanceID, hash))
+			ctx, err = runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -282,7 +288,7 @@ func TestAgentLifecyclePreparedReadinessRebindBothStores(t *testing.T) {
 
 func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSourceSetRebindStore, sourceSetRebind ...bool) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	now := time.Now().UTC()
 	staticIdentity := testAgentIdentity(t, "process-static-agent", "")
 	runID := uuid.NewString()
@@ -837,7 +843,7 @@ func seedLifecycleReadinessOwner(
 
 func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRebindStore) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	agentID := "source-set-rebind-agent"
 	identity := testAgentIdentity(t, agentID, "global")
