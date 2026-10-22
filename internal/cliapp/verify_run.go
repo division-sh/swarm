@@ -123,7 +123,7 @@ func prepareVerifyRunInspection(ctx context.Context, repo string, opts verifyCom
 	if err != nil {
 		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
 	}
-	paths, err := resolveCLISourcePlatformSpecPathsFromConfig(repo, CLISourcePlatformSpecPathOptions{SourceRoot: opts.sourceRoot, PlatformSpecPath: opts.platformSpecPath, ConfigPath: opts.configPath}, cfg.cli)
+	paths, err := resolveCLISourcePathsFromConfig(repo, CLISourcePathOptions{SourceRoot: opts.sourceRoot, ConfigPath: opts.configPath}, cfg.cli)
 	if err != nil {
 		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
 	}
@@ -131,7 +131,7 @@ func prepareVerifyRunInspection(ctx context.Context, repo string, opts verifyCom
 	if err != nil {
 		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
 	}
-	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, paths.SourceRoot, paths.PlatformSpecPath, base)
+	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, paths.SourceRoot, base)
 	if err != nil {
 		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
 	}

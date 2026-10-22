@@ -49,6 +49,11 @@ type WorkflowContractValidationResult struct {
 	CapabilitySubjects               []packs.Subject
 	mockConnectorResponses           *providerconnectors.MockResponsePlan
 	bootEffectReachability           runtimebootverify.SourceBootEffectReachability
+	credentialSources                []runtimecredentials.SourceFact
+}
+
+func (r WorkflowContractValidationResult) CredentialSources() []runtimecredentials.SourceFact {
+	return append(r.BootReport.CredentialSources(), r.credentialSources...)
 }
 
 func DefaultWorkflowContractValidationOptions(credentials runtimecredentials.Store, posture executionposture.Posture) WorkflowContractValidationOptions {
@@ -143,14 +148,14 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if result.BootReport.HasErrors() {
 		reportBlocks = true
 		blockingPrerequisite = result.BootReport.Errors()[0].CheckID
-		return result, fmt.Errorf("boot verification failed:\n%s", formatWorkflowValidationFindings(result.BootReport.Errors(), true))
+		return result, fmt.Errorf("boot verification failed: %s", formatWorkflowValidationFindings(result.BootReport.Errors(), true))
 	}
 	if opts.FatalBootWarnings {
 		warnings := filterWorkflowValidationFindings(result.BootReport.Warnings(), opts.ExcludedFatalBootWarningChecks...)
 		if len(warnings) > 0 {
 			reportBlocks = true
 			blockingPrerequisite = warnings[0].CheckID
-			return result, fmt.Errorf("boot verification blocked by policy-escalated findings:\n%s", formatWorkflowValidationFindings(warnings, true))
+			return result, fmt.Errorf("boot verification blocked by policy-escalated findings: %s", formatWorkflowValidationFindings(warnings, true))
 		}
 	}
 
@@ -227,6 +232,7 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if err != nil {
 		return result, fmt.Errorf("provider trigger capability projection failed: %w", err)
 	}
+	result.credentialSources = append(result.credentialSources, providerCredentialOwner.SourceFacts()...)
 	result.finishAdmissionClause(phase)
 	phase = "channel_capability_projection"
 	result.startAdmissionClause(phase)

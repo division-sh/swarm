@@ -89,7 +89,7 @@ func (transport *supportedTelegramRegistrationTransport) applies() int {
 func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *testing.T) {
 	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
 	copyRegistrationFixtureTelegram(t, sourceRoot)
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
@@ -121,6 +121,10 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	declaredPublication, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
@@ -147,7 +151,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		t.Fatalf("InstalledCapabilitySubjects: %v", err)
 	}
 	rt := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway, ChannelActivations: activationOwner,
-		Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString(), ProviderCredentials: credentialStore, WorkflowModule: module, ProviderTriggerCatalog: catalog,
+		Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString(), ProviderCredentials: credentialStore, WorkflowModule: module, ProviderTriggerCatalog: catalog, DeclaredChannelPublication: declaredPublication,
 			SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash)}}
 	if _, err := rt.PlanStandingTargets(); err != nil {
 		t.Fatal(err)
@@ -193,6 +197,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	effectsStore := &supportedRegistrationEffectStore{Harness: effecttest.New()}
 	transport := &supportedTelegramRegistrationTransport{}
 	readiness := runtimepublicingress.NewReadinessOwner(true)
+	registrationNow := time.Now().UTC()
 	startup := runtimestartupownership.GrantEvidence{
 		GrantID: uuid.NewString(), ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "serve-owner",
 		ProcessBootID: uuid.NewString(), BundleHash: bundleHash,
@@ -209,6 +214,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		StartupAuthority: func() (runtimestartupownership.GrantEvidence, error) { return startup, nil },
 		SelectionCurrent: func(context.Context, runtimepublicingress.RegistrationPair, bool) (bool, error) { return true, nil },
 		Readiness:        readiness,
+		Now:              func() time.Time { return registrationNow },
 	})
 	if err != nil {
 		t.Fatalf("NewProviderRegistrationController: %v", err)
@@ -256,14 +262,38 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	if !initial.PublicIngressReady || len(initial.Registrations) != 1 {
 		t.Fatalf("initial registration readiness = %#v", initial)
 	}
-	handler := controller.Handler(runtimeProcessInboundHandler{contexts: manager})
+	handler := runtimeProcessInboundHandler{contexts: manager, publicRegistration: controller}
+	use, lookup, err := manager.AcquireIngress(t.Context(), "chat", "telegram")
+	if err != nil || use == nil {
+		t.Fatalf("registration control did not acquire its context: %+v err=%v", lookup, err)
+	}
+	_, _, admissionErr := use.AdmitPublicIngressTarget(runtimepkg.InboundTarget{
+		BundleHash: lookup.Target.BundleHash, ServiceID: lookup.Target.ServiceID, FlowPath: lookup.Target.FlowPath,
+		RunID: lookup.Target.RunID, Generation: lookup.Target.Generation, PublicationSequence: lookup.Target.PublicationSequence,
+		Alias: lookup.Target.Alias, Provider: lookup.Target.Provider, SigningSecret: lookup.Target.SigningSecret, AdmissionPlan: lookup.Target.AdmissionPlan,
+	})
+	if err := use.Done(); err != nil {
+		t.Fatal(err)
+	}
+	if admissionErr != nil {
+		t.Fatalf("registration control lacks exact acquired ownership: %v", admissionErr)
+	}
 	initialBody := `{"update_id":99,"message":{"message_id":7,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"initial"}}`
+	for _, callback := range []string{"/webhooks/chat/telegram", "/webhooks/chat/telegram?swarm_callback_generation=foreign", "/webhooks/chat/TELEGRAM?swarm_callback_generation=foreign"} {
+		request := httptest.NewRequest(http.MethodPost, callback, strings.NewReader(initialBody))
+		request.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret-v1")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound || len(eventsStore.events) != 0 {
+			t.Fatalf("managed callback %s bypassed token fence: status=%d events=%d", callback, response.Code, len(eventsStore.events))
+		}
+	}
 	initialRequest := httptest.NewRequest(http.MethodPost, initial.Registrations[0].CallbackURL, strings.NewReader(initialBody))
 	initialRequest.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret-v1")
 	initialRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(initialRecorder, initialRequest)
 	if initialRecorder.Code != http.StatusAccepted || len(eventsStore.events) != 2 {
-		t.Fatalf("initial registered verifier status/events=%d/%d", initialRecorder.Code, len(eventsStore.events))
+		t.Fatalf("initial registered verifier status/events=%d/%d commit_error=%v", initialRecorder.Code, len(eventsStore.events), persistence.lastError)
 	}
 
 	if err := credentialStore.Set(context.Background(), "webhook_signing.telegram", "telegram-secret-v2"); err != nil {
@@ -310,12 +340,88 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	if newSecretRecorder.Code != http.StatusServiceUnavailable || len(eventsStore.events) != 2 {
 		t.Fatalf("provider registration alone refreshed runtime admission status/events=%d/%d, want 503/2", newSecretRecorder.Code, len(eventsStore.events))
 	}
+
+	// Invariant reach: callback authorization precedes every availability
+	// response, including after the executable registration has disappeared.
+	assertManagedFence := func(t *testing.T) {
+		t.Helper()
+		for _, callback := range []string{"/webhooks/chat/telegram", "/webhooks/chat/telegram?swarm_callback_generation=", "/webhooks/chat/telegram?swarm_callback_generation=foreign", initial.Registrations[0].CallbackURL} {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, callback, strings.NewReader(rotatedBody)))
+			if response.Code != http.StatusNotFound || len(eventsStore.events) != 2 {
+				t.Fatalf("managed availability disclosed before token fence: callback=%s status=%d events=%d", callback, response.Code, len(eventsStore.events))
+			}
+		}
+		valid := httptest.NewRecorder()
+		handler.ServeHTTP(valid, httptest.NewRequest(http.MethodPost, rotated.Registrations[0].CallbackURL, strings.NewReader(rotatedBody)))
+		if valid.Code != http.StatusServiceUnavailable || len(eventsStore.events) != 2 {
+			t.Fatalf("valid callback lost its independent runtime refusal: status=%d events=%d", valid.Code, len(eventsStore.events))
+		}
+		registrationNow = registrationNow.Add(runtimepublicingress.EvidenceTTL)
+		expired := httptest.NewRecorder()
+		handler.ServeHTTP(expired, httptest.NewRequest(http.MethodPost, rotated.Registrations[0].CallbackURL, strings.NewReader(rotatedBody)))
+		registrationNow = registrationNow.Add(-runtimepublicingress.EvidenceTTL)
+		if expired.Code != http.StatusNotFound || len(eventsStore.events) != 2 {
+			t.Fatalf("expired callback reached availability: status=%d events=%d", expired.Code, len(eventsStore.events))
+		}
+	}
+	t.Run("loaded_callback_fence", assertManagedFence)
+	t.Run("suppressed_callback_fence", func(t *testing.T) {
+		transition, err := manager.BeginStandingServiceTransition(t.Context(), target.ServiceID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := transition.Restore(context.Background()); err != nil {
+				t.Error(err)
+			}
+		}()
+		assertManagedFence(t)
+	})
+	t.Run("acquisition_failed_callback_fence", func(t *testing.T) {
+		if err := workOwner.Fence(); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := workOwner.Reopen(); err != nil {
+				t.Error(err)
+			}
+		}()
+		assertManagedFence(t)
+	})
+	t.Run("unloaded_callback_fence", func(t *testing.T) {
+		result := manager.DeactivateBundleHash(bundleHash, "managed callback availability control")
+		if !result.Found || result.State != runtimepkg.RuntimeContextStateUnloaded || result.ShutdownErr != nil {
+			t.Fatalf("unloaded callback precondition: %+v", result)
+		}
+		assertManagedFence(t)
+	})
+	readiness.RevokeExposure("managed callback revocation control")
+	revoked := httptest.NewRecorder()
+	handler.ServeHTTP(revoked, httptest.NewRequest(http.MethodPost, rotated.Registrations[0].CallbackURL, strings.NewReader(rotatedBody)))
+	if revoked.Code != http.StatusNotFound || len(eventsStore.events) != 2 {
+		t.Fatalf("revoked callback reached availability: status=%d events=%d", revoked.Code, len(eventsStore.events))
+	}
+	readiness.SetExposure(runtimepublicingress.ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: registrationNow, ExpiresAt: registrationNow.Add(runtimepublicingress.EvidenceTTL)})
+	if err := controller.Reconcile(t.Context(), exposure, nil); err != nil {
+		t.Fatal(err)
+	}
+	if controller.OwnsRoute("chat", "telegram") {
+		t.Fatal("withdrawal control retained current registration ownership")
+	}
+	for _, callback := range []string{rotated.Registrations[0].CallbackURL, "/webhooks/chat/telegram?swarm_callback_generation=", "/webhooks/chat/telegram?swarm_callback_generation=%zz"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, callback, strings.NewReader(rotatedBody)))
+		if response.Code != http.StatusNotFound || len(eventsStore.events) != 2 {
+			t.Fatalf("withdrawn generation fell through to author admission: status=%d events=%d", response.Code, len(eventsStore.events))
+		}
+	}
 }
 
 func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T) {
 	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
 	copyRegistrationFixtureTelegram(t, sourceRoot)
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
@@ -488,7 +594,7 @@ func TestDeclaredRegistrationWithoutEnabledTargetStaysDiscoverable(t *testing.T)
 	for _, flow := range []string{".", "telegram-ingress", "telegram-chat"} {
 		copyRegistrationFixtureTelegram(t, filepath.Join(sourceRoot, flow))
 	}
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -63,6 +63,9 @@ var eventRecordImportFiles = map[string]struct{}{
 	"internal/store/internal/operatorsurface/operator_event_batch.go":                {},
 	"internal/store/internal/operatorsurface/operator_observability_read_surface.go": {},
 	"internal/store/internal/operatorsurface/sqlite_runtime_observability.go":        {},
+	// #2720 Gate E 6221291258: read-only exact turn/publication attribution
+	// consumes the canonical record decoder, never event SQL or admission.
+	"internal/store/internal/operatorsurface/run_turn_attribution.go": {},
 	// The materialization dependency owner decodes complete publication records; it does not reconstruct event identity.
 	"internal/store/internal/backend/delivery/receiver_materialization.go": {},
 	// Historical inherited ordinals are revalidated by the complete-record decoder before the shared fan-out owner.
@@ -107,6 +110,9 @@ var eventPayloadBytesSQLFiles = map[string]struct{}{
 }
 
 var directEventSQLTestFixtures = map[string]int{
+	// Isolated five-column work.ready read probe reviewed at 49db0f2b0f;
+	// its transaction is rolled back, with no publication or dispatch.
+	"internal/store/internal/operatorsurface/run_turn_attribution_selected_test.go": 1,
 	// Isolated aggregate-query schema admits NULL/foreign rows deliberately;
 	// these are not executable event fixtures or an event publication path.
 	"internal/store/internal/backend/pipelinepersistence/pipeline_run_summary_materialization_test.go": 4,
@@ -571,6 +577,7 @@ func TestHostileEventRecordConsumerClassificationDoesNotGrantSQL(t *testing.T) {
 		"internal/store/internal/operatorsurface/operator_event_batch.go",
 		"internal/store/internal/operatorsurface/operator_observability_read_surface.go",
 		"internal/store/internal/operatorsurface/sqlite_runtime_observability.go",
+		"internal/store/internal/operatorsurface/run_turn_attribution.go",
 	} {
 		if _, ok := eventRecordImportFiles[path]; !ok {
 			t.Errorf("missing canonical consumer %s", path)

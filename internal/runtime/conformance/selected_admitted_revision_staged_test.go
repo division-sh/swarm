@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -42,6 +41,9 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 			sourceRows := []byte("{\"account_id\":\"source\",\"document\":{}}\n")
 			sourceVersion := selectedDeploymentVersion(t, f, sourceRows)
 			sourceRun := start("source", sourceRows)
+			// --no-follow acknowledges before the root and singleton finish attaching.
+			waitNotifyAllChildrenRuntimeReadiness(t, f.ctx, f.runtime.pipeline, sourceRun, sourceRun)
+			waitNotifyAllChildrenRuntimeReadiness(t, f.ctx, f.runtime.pipeline, sourceRun, "consumer")
 			laterRows := []byte("{\"account_id\":\"later\",\"document\":{\"value\":2}}\n")
 			laterVersion := selectedDeploymentVersion(t, f, laterRows)
 			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
@@ -59,7 +61,7 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 			prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 				ForkOperation: &operation, SourceRunID: sourceRun, ExpectedBundleHash: operation.TargetBundleHash, ContractSelection: selection,
 				DataPinOverrides: append([]durabledata.ExplicitPin(nil), operation.DataPinOverrides...),
-				SourceLoader:     runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: f.selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)},
+				SourceLoader:     runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: f.selected.(runforkexecution.SourceArtifactSelectedContractSourceStore)},
 				AgentRuntime:     runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: f.topology.capability},
 			})
 			if err != nil {

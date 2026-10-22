@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"io"
 	"net"
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packartifact"
@@ -72,15 +73,16 @@ type localPreflightFinding struct {
 }
 
 type LocalPreflightReport struct {
-	OK                 bool                    `json:"ok"`
-	Owner              string                  `json:"owner"`
-	Mode               string                  `json:"mode"`
-	Backend            string                  `json:"backend"`
-	ConfigSource       *doctorConfigSource     `json:"config_source,omitempty"`
-	CapabilitySubjects []packs.Subject         `json:"capability_subjects,omitempty"`
-	Findings           []localPreflightFinding `json:"findings"`
-	SchemaInventory    *doctorSchemaInventory  `json:"schema_inventory,omitempty"`
-	PackInventory      *packInventoryReadback  `json:"pack_inventory,omitempty"`
+	OK                 bool                            `json:"ok"`
+	Owner              string                          `json:"owner"`
+	Mode               string                          `json:"mode"`
+	Backend            string                          `json:"backend"`
+	ConfigSource       *doctorConfigSource             `json:"config_source,omitempty"`
+	CapabilitySubjects []packs.Subject                 `json:"capability_subjects,omitempty"`
+	Findings           []localPreflightFinding         `json:"findings"`
+	SchemaInventory    *doctorSchemaInventory          `json:"schema_inventory,omitempty"`
+	PackInventory      *packInventoryReadback          `json:"pack_inventory,omitempty"`
+	CredentialSources  []runtimecredentials.SourceFact `json:"credential_sources,omitempty"`
 }
 
 type localPreflightRequest struct {
@@ -89,7 +91,7 @@ type localPreflightRequest struct {
 	SourceFree             bool
 	RepoRoot               string
 	Config                 *config.Config
-	ResolvedPaths          CLISourcePlatformSpecPaths
+	ResolvedPaths          CLISourcePaths
 	DataSource             string
 	MountSources           WorkspaceMountSources
 	WorkspaceBackend       WorkspaceBackendSelection
@@ -223,6 +225,9 @@ func runLocalClaudeCLIPreflight(ctx context.Context, req localPreflightRequest) 
 		report.add(localPreflightBackendPrerequisite, "missing_backend_credential", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), fmt.Sprintf("store %s with `swarm secrets set %s`", runtimellm.ProviderCredentialKey(profile), runtimellm.ProviderCredentialKey(profile)))
 	} else {
 		message := fmt.Sprintf("%s is present in swarm secrets", runtimellm.ProviderCredentialKey(profile))
+		if fact := credential.SourceFact(); fact.Reference != "" {
+			report.CredentialSources = append(report.CredentialSources, fact)
+		}
 		if credential.EnvShadowed {
 			message += "; process env value is ignored"
 		}
@@ -330,6 +335,7 @@ func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightR
 	appendProviderConnectorCapabilitySubjects(ctx, report, source)
 	appendEffectiveProviderTriggerCapabilitySubjects(ctx, report, source, req.ProviderTriggerCatalog, req.ProviderCredentials)
 	appendChannelCapabilitySubjects(report, req.ChannelPacks)
+	report.CredentialSources = append(report.CredentialSources, req.ChannelPacks.CredentialSources()...)
 	return source, sourceRoot, true
 }
 
@@ -488,13 +494,23 @@ func (r *LocalPreflightReport) checkContractSecrets(ctx context.Context, source 
 		r.add(localPreflightContractSecretPrerequisite, "credential_store_unavailable", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the local credential store or SWARM_CREDENTIALS_FILE")
 		return
 	}
-	missing, err := runtimebootverify.MissingStaticCredentialRequirements(ctx, source, runtimebootverify.Options{
+	observed, err := runtimebootverify.InspectStaticCredentialRequirements(ctx, source, runtimebootverify.Options{
 		Credentials:        store,
 		EffectReachability: effectReachability,
 	})
 	if err != nil {
 		r.add(localPreflightContractSecretPrerequisite, "contract_secret_check_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix contract credential references or credential store access")
 		return
+	}
+	var missing []runtimecredentials.Descriptor
+	for _, descriptor := range observed {
+		if descriptor.Present {
+			if fact := descriptor.SourceFact(); fact.Reference != "" {
+				r.CredentialSources = append(r.CredentialSources, fact)
+			}
+		} else {
+			missing = append(missing, descriptor)
+		}
 	}
 	if len(missing) == 0 {
 		r.add(localPreflightContractSecretPrerequisite, "contract_secrets_present", LocalPreflightSeverityInfo, LocalPreflightStatusOK, "all contract-required secrets are present", "")
@@ -607,12 +623,12 @@ func workspacePrerequisiteDiagnostic(err error, fallbackRemediation string) (str
 	return message, remediation
 }
 
-func loadLocalPreflightSource(repo string, paths CLISourcePlatformSpecPaths, base *packartifact.PlatformPackInventory) (semanticview.Source, string, error) {
+func loadLocalPreflightSource(repo string, paths CLISourcePaths, base *packartifact.PlatformPackInventory) (semanticview.Source, string, error) {
 	sourceRoot, err := NormalizeSourceRoot(paths.SourceRoot)
 	if err != nil {
 		return nil, "", err
 	}
-	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, paths.PlatformSpecPath, base)
+	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, base)
 	if err != nil {
 		return nil, "", fmt.Errorf("load Swarm contracts: %w", err)
 	}
@@ -641,6 +657,9 @@ func WriteLocalPreflightText(out io.Writer, report LocalPreflightReport) {
 	}
 	for _, finding := range report.Findings {
 		fmt.Fprintln(out, formatLocalPreflightFinding(report.Mode, finding))
+	}
+	for _, line := range CredentialSourceLines(report.CredentialSources) {
+		fmt.Fprintln(out, line)
 	}
 	writeDoctorSchemaInventoryText(out, report.SchemaInventory)
 }
@@ -718,7 +737,7 @@ func serveLocalPreflightMode(opts ServeOptions) string {
 	return "serve"
 }
 
-func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLISourcePlatformSpecPaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, platformPackBase *packartifact.PlatformPackInventory, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store, channelPacks ChannelPackLoad, source semanticview.Source, apiListener net.Listener) LocalPreflightReport {
+func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLISourcePaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, platformPackBase *packartifact.PlatformPackInventory, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store, channelPacks ChannelPackLoad, source semanticview.Source, apiListener net.Listener) LocalPreflightReport {
 	mode := serveLocalPreflightMode(opts)
 	if source == nil {
 		report := LocalPreflightReport{Mode: mode, Owner: localPreflightOwner}

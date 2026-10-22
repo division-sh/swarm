@@ -13,7 +13,6 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -73,7 +72,6 @@ func (r corruptStageRecoveryReader) GetRootedSource(ctx context.Context, ref sou
 
 func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *testing.T) {
 	repo := runtimepipeline.WorkflowRepoRoot()
-	spec := runtimecontracts.DefaultPlatformSpecFile(repo)
 	packBases := testPlatformPackBaseGenerations(t)
 	artifacts := []*sourceartifact.AdmittedSourceArtifact{
 		stageRecoveryArtifact(t, "ready: {}\n  Ready:\n    final: true"),
@@ -105,7 +103,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 				if _, err := selected.EnsureRootedSource(ctx, roots[i]); err != nil {
 					t.Fatal(err)
 				}
-				_, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, roots[i].Admission().Reference())
+				_, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, roots[i].Admission().Reference())
 				if err != nil {
 					t.Fatalf("load retained entity source %d: %v", i, err)
 				}
@@ -124,21 +122,21 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 				if _, err := selected.SetupScenarioEntities(createCtx, runtimepipeline.ScenarioSetupRequest{
 					RunID: runs[i], CreatedAt: time.Now().UTC(),
 					Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
-						Alias: "retained", EntityID: entityID, FlowInstance: "child", EntityType: "item", CurrentState: initial,
+						Alias: "retained", EntityID: entityID, FlowInstance: "child", EntityType: "item", CurrentState: &initial,
 					}},
 				}); err != nil {
 					t.Fatalf("create retained entity %d: %v", i, err)
 				}
 			}
-			current, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, roots[0].Admission().Reference())
+			current, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, roots[0].Admission().Reference())
 			if err != nil {
 				t.Fatalf("load current source: %v", err)
 			}
-			stateless, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, roots[2].Admission().Reference())
+			stateless, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, roots[2].Admission().Reference())
 			if err != nil {
 				t.Fatalf("load stateless source: %v", err)
 			}
-			terminalSource, err := loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, roots[1].Admission().Reference())
+			terminalSource, err := loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, roots[1].Admission().Reference())
 			if err != nil {
 				t.Fatalf("load terminal source: %v", err)
 			}
@@ -183,7 +181,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 			}}, nil, nil, current, executionposture.Live, runtimepkg.BudgetRecoveryStageSources{
 				Load: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
 					loads[reference]++
-					return loadBudgetRecoveryStageSource(ctx, selected, repo, spec, packBases, reference)
+					return loadBudgetRecoveryStageSource(ctx, selected, repo, packBases, reference)
 				},
 			})
 			for pass := 1; pass <= 2; pass++ {
@@ -209,7 +207,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 						"budget": map[string]any{"per_entity_monthly_cap": 10},
 					}}, nil, nil, current, executionposture.Live, runtimepkg.BudgetRecoveryStageSources{
 						Load: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
-							return loadBudgetRecoveryStageSource(ctx, tc.reader, repo, spec, packBases, reference)
+							return loadBudgetRecoveryStageSource(ctx, tc.reader, repo, packBases, reference)
 						},
 					})
 					if err := badTracker.ProjectRecoveryBudgetState(ctx); err == nil {
@@ -217,9 +215,9 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 					}
 				})
 			}
-			query := "UPDATE entity_state SET current_state = 'unknown' WHERE run_id = ? AND entity_id = ?"
+			query := "UPDATE flow_instances SET current_state = 'unknown' WHERE run_id = ? AND entity_id = ?"
 			if backend == "postgres" {
-				query = "UPDATE entity_state SET current_state = 'unknown' WHERE run_id = $1::uuid AND entity_id = $2::uuid"
+				query = "UPDATE flow_instances SET current_state = 'unknown' WHERE run_id = $1::uuid AND entity_id = $2::uuid"
 			}
 			if _, err := db.ExecContext(ctx, query, runs[0], sharedEntity); err != nil {
 				t.Fatalf("inject undeclared staged storage state: %v", err)
@@ -239,10 +237,9 @@ func stageRecoveryArtifact(t *testing.T, stages string) *sourceartifact.Admitted
 		childSchema = "name: child\nstages: []\n"
 	}
 	for path, contents := range map[string]string{
-		"schema.yaml":         "name: stage-recovery\n",
-		"child/schema.yaml":   childSchema,
-		"child/entities.yaml": "item: {}\n",
-		"policy.yaml":         "budget_warning_percent: 50\nbudget_throttle_percent: 75\nbudget_emergency_percent: 90\n",
+		"schema.yaml":       "name: stage-recovery\n",
+		"child/schema.yaml": childSchema,
+		"policy.yaml":       "budget_warning_percent: 50\nbudget_throttle_percent: 75\nbudget_emergency_percent: 90\n",
 	} {
 		absolute := filepath.Join(root, path)
 		if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {
@@ -261,12 +258,13 @@ func stageRecoveryArtifact(t *testing.T, stages string) *sourceartifact.Admitted
 
 func seedStageRecoveryFlowInstance(t *testing.T, ctx context.Context, db *sql.DB, backend, runID, entityID, stage string, stageDefined bool) {
 	t.Helper()
-	// This is a physical budget projection fixture, not executable construction.
+	// This fieldless physical budget fixture is not executable construction.
+	// Recovery must not require a shadow entity_state row to discover it.
 	query := `INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, current_state, mode, config, status, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
-		VALUES (?, 'child', 'child', ?, 'item', ?, 'static', '{}', 'active', ?, '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+		VALUES (?, 'child', 'child', ?, NULL, ?, 'static', '{}', 'active', ?, '{}', '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
 	if backend == "postgres" {
 		query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, current_state, mode, config, status, stage_defined, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at)
-			VALUES ($1::uuid, 'child', 'child', $2::uuid, 'item', $3, 'static', '{}'::jsonb, 'active', $4, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, NOW(), NOW(), NOW())`
+			VALUES ($1::uuid, 'child', 'child', $2::uuid, NULL, $3, 'static', '{}'::jsonb, 'active', $4, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, NOW(), NOW(), NOW())`
 	}
 	if _, err := db.ExecContext(ctx, query, runID, entityID, stage, stageDefined); err != nil {
 		t.Fatalf("seed selected child flow instance: %v", err)

@@ -42,10 +42,6 @@ func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	out.Mock.Source = append([]byte(nil), in.Mock.Source...)
 	out.AuthoredFields = cloneBoolMap(in.AuthoredFields)
 	out.EffectiveFieldSources = cloneStringMap(in.EffectiveFieldSources)
-	out.admissionProvenance = make(map[string]EffectiveValueProvenance, len(in.admissionProvenance))
-	for path, provenance := range in.admissionProvenance {
-		out.admissionProvenance[path] = cloneEffectiveValueProvenance(provenance)
-	}
 	out.DataAccess = append([]DurableDataAccessRef(nil), in.DataAccess...)
 	if len(in.EntityWrites) > 0 {
 		out.EntityWrites = make(map[string]AgentEntityWriteDecl, len(in.EntityWrites))
@@ -139,6 +135,11 @@ func sortedContractKeys[T any](m map[string]T) []string {
 // loadYAMLFile is reserved for the platform-owned specification. Authored
 // source is decoded exclusively from AdmittedSourceArtifact snapshots.
 func loadYAMLFile(path string, target *PlatformSpecDocument) error {
+	if path == platform.PlatformSpecDisplayPath {
+		var err error
+		*target, err = ParsePlatformSpecDocument(platform.PlatformSpecYAML(), path)
+		return err
+	}
 	source, err := yamlsource.LoadFile(path)
 	if err != nil {
 		if cause, ok := yamlsource.ParseCause(err); ok {

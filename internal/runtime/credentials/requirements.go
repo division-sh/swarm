@@ -25,7 +25,10 @@ type Descriptor struct {
 	Shadowed   bool
 	UpdatedAt  *time.Time
 	RequiredBy []Requirement
+	sourceFact SourceFact
 }
+
+func (d Descriptor) SourceFact() SourceFact { return d.sourceFact }
 
 var ErrNotWritable = fmt.Errorf("credential store is not writable")
 
@@ -117,6 +120,7 @@ func Describe(ctx context.Context, store Store, source semanticview.Source, key 
 		Shadowed:   meta.Shadowed,
 		UpdatedAt:  meta.UpdatedAt,
 		RequiredBy: append([]Requirement{}, index[key]...),
+		sourceFact: meta.SourceFact(),
 	}, nil
 }
 

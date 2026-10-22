@@ -23,7 +23,16 @@ import (
 
 const runLifecycleCandidateParityBundleHash = sourceartifactfixture.BundleHash
 
-var runLifecycleCandidateParityReplacementArtifact = sourceartifactfixture.New("agents.yaml", []byte("agents:\n  replacement: {}\n"))
+var runLifecycleCandidateParityReplacementArtifact = func() *sourceartifact.AdmittedSourceArtifact {
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents:\n  replacement: {}\n"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return artifact
+}()
 var runLifecycleCandidateParityReplacementHash = runLifecycleCandidateParityReplacementArtifact.BundleHash()
 
 type runLifecycleCandidateParityStore interface {

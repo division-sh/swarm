@@ -185,7 +185,6 @@ func (p FlowEventProof) CrossesDeclaredOutputBoundary(source Source) bool {
 	}
 	return false
 }
-
 func localizeFlowEventForProof(source Source, flowID, canonical string) string {
 	if source == nil {
 		return ""

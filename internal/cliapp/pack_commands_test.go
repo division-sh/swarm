@@ -88,7 +88,7 @@ func TestCLIWorkflowModuleConsumersUseConfiguredDevelopmentBase(t *testing.T) {
 
 	sourceRoot := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 
-	_, bundle, paths, err := loadConfiguredCLIWorkflowModule(RepoRoot(), CLISourcePlatformSpecPathOptions{
+	_, bundle, paths, err := loadConfiguredCLIWorkflowModule(RepoRoot(), CLISourcePathOptions{
 		SourceRoot: sourceRoot, ConfigPath: configPath,
 	})
 	if err != nil {
@@ -179,7 +179,7 @@ func runPacksCommand(t testing.TB, repo string, args ...string) (int, string, st
 
 func loadPackCommandBundleHash(t testing.TB, project, specPath string) string {
 	t.Helper()
-	_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), project, specPath)
+	_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), project)
 	if err != nil {
 		t.Fatalf("load project bundle: %v", err)
 	}

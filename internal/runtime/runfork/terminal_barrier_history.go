@@ -27,18 +27,18 @@ type TerminalBarrierHistory struct {
 	reasonCode   string
 }
 
-func NewTerminalBarrierHistory(runID string, revision int64, barrier fanoutbarrier.Barrier, delivery deliverylifecycle.Snapshot) (TerminalBarrierHistory, error) {
+func NewTerminalBarrierHistory(runID string, revision int64, barrier fanoutbarrier.Barrier, delivery deliverylifecycle.HistoricalFact) (TerminalBarrierHistory, error) {
 	if err := barrier.Validate(); err != nil {
 		return TerminalBarrierHistory{}, err
 	}
 	if revision <= 0 || runID == "" || barrier.Registration.IntentKey.RunID != runID || delivery.RunID != runID ||
 		barrier.Status != fanoutbarrier.StatusOutcomeDeadLettered || barrier.ScheduleActivationID == "" ||
-		delivery.Status != deliverylifecycle.StatusDeadLetter || delivery.ClaimVersion <= 0 || delivery.SettledAt.IsZero() {
+		delivery.Status != deliverylifecycle.StatusDeadLetter || delivery.SettledClaimVersion <= 0 || delivery.SettledAt.IsZero() {
 		return TerminalBarrierHistory{}, fmt.Errorf("terminal barrier history requires exact revision and settled failed delivery")
 	}
 	return TerminalBarrierHistory{runID: runID, revision: revision, activationID: barrier.ScheduleActivationID,
 		deliveryID: delivery.DeliveryID, eventID: delivery.EventID, route: delivery.RouteIdentity,
-		claimVersion: delivery.ClaimVersion, settledAt: delivery.SettledAt, reasonCode: delivery.ReasonCode}, nil
+		claimVersion: delivery.SettledClaimVersion, settledAt: delivery.SettledAt, reasonCode: delivery.ReasonCode}, nil
 }
 
 func (h TerminalBarrierHistory) matches(item RunForkPendingWork) bool {

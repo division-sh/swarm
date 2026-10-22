@@ -620,9 +620,16 @@ func rateLimitedNativeWebSearchSource(provider, rateLimit, maxWait string, custo
 		root["credentials_key"] = "brave_search_api_key"
 	}
 	if customHTTP != nil {
-		rawHTTP, _ := json.Marshal(customHTTP)
-		var httpMap map[string]any
-		_ = json.Unmarshal(rawHTTP, &httpMap)
+		httpMap := map[string]any{"method": customHTTP.Method, "url": customHTTP.URL}
+		if customHTTP.Headers != nil {
+			httpMap["headers"] = customHTTP.Headers
+		}
+		if customHTTP.BodyPresent || customHTTP.Body != nil {
+			httpMap["body"] = customHTTP.Body
+		}
+		if customHTTP.TimeoutSeconds != 0 {
+			httpMap["timeout_seconds"] = customHTTP.TimeoutSeconds
+		}
 		root["http"] = httpMap
 	}
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{

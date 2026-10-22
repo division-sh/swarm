@@ -340,6 +340,8 @@ func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.P
 		writes []string
 	}
 	shapes := map[string]fixtureShape{
+		"internal/store/internal/operatorsurface/run_turn_attribution_selected_test.go": {
+			"CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT)", []string{"INSERT INTO runs VALUES ($1,$2)", "UPDATE runs SET bundle_hash='foreign'"}},
 		"internal/store/internal/backend/mutationprotocol/event_counts_test.go": {
 			"CREATE TABLE runs (run_id UUID PRIMARY KEY, event_count INTEGER NOT NULL DEFAULT 0 CHECK (event_count >= 0))", []string{"INSERT INTO runs (run_id) VALUES ($1)"}},
 		"internal/store/internal/backend/agentpersistence/selected_grant_point_test.go": {

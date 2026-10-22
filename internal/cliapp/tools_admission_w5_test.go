@@ -36,9 +36,6 @@ func TestW5ToolsVerifyAndDescribeSupportedSurface(t *testing.T) {
 		if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), command, &stdout, &stderr, defaultRootCommandOptions()); code != 0 {
 			t.Fatalf("%s=%d stdout=%s stderr=%s", command[0], code, &stdout, &stderr)
 		}
-		if command[0] == "describe" && (!strings.Contains(stdout.String(), "tools[") || !strings.Contains(stdout.String(), "input_schema")) {
-			t.Fatalf("supported readback lost tools provenance: %s", &stdout)
-		}
 	}
 	for _, fields := range []string{"input_schema: {type: string, minLength: 1.5}", "<<: {parameters: null}", "handler_type: wasm", "input_schema: {type: object}"} {
 		t.Run(fields, func(t *testing.T) {
@@ -48,6 +45,20 @@ func TestW5ToolsVerifyAndDescribeSupportedSurface(t *testing.T) {
 			code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"verify", root, "--portable", "--config", config, "--json"}, &stdout, &stderr, defaultRootCommandOptions())
 			if code == 0 || !strings.Contains(stdout.String()+stderr.String(), "tools.yaml") {
 				t.Fatalf("invalid source accepted/lost: code=%d stdout=%s stderr=%s", code, &stdout, &stderr)
+			}
+		})
+	}
+	for _, name := range []string{"Read", "mcp__runtime-tools__renderer", "mcp__runtime-tools__mcp__runtime-tools__renderer", "emit_probe"} {
+		t.Run("private_name/"+name, func(t *testing.T) {
+			writeDescribeTestFile(t, filepath.Join(root, "tools.yaml"), strings.Replace(module, "renderer:", name+":", 1))
+			for _, command := range [][]string{{"verify", root, "--portable", "--config", config, "--json"}, {"describe", root, "--json"}} {
+				stdout.Reset()
+				stderr.Reset()
+				code := executeRootCommandWithOptions(context.Background(), RepoRoot(), command, &stdout, &stderr, defaultRootCommandOptions())
+				message := stdout.String() + stderr.String()
+				if code == 0 || !strings.Contains(message, "tools.yaml") || !strings.Contains(message, name) || !strings.Contains(message, "private tool declaration") {
+					t.Fatalf("%s lost private-name admission: code=%d stdout=%s stderr=%s", command[0], code, &stdout, &stderr)
+				}
 			}
 		})
 	}

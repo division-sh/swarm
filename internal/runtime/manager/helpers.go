@@ -3,7 +3,6 @@ package manager
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -11,98 +10,6 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/google/uuid"
 )
-
-func OrderAgentsByParent(in []PersistedAgent) ([]PersistedAgent, error) {
-	if len(in) == 0 {
-		return in, nil
-	}
-	inSet := make(map[string]struct{}, len(in))
-	for _, a := range in {
-		if id := strings.TrimSpace(a.Config.ID); id != "" {
-			inSet[id] = struct{}{}
-		}
-	}
-
-	done := make(map[string]struct{}, len(in))
-	pending := append([]PersistedAgent(nil), in...)
-	out := make([]PersistedAgent, 0, len(in))
-
-	for len(pending) > 0 {
-		progress := false
-		next := pending[:0]
-		for _, a := range pending {
-			id := strings.TrimSpace(a.Config.ID)
-			parent := strings.TrimSpace(a.ParentAgentID)
-			if parent == "" {
-				parent = strings.TrimSpace(a.Config.ParentAgent)
-			}
-			if parent == "" {
-				out = append(out, a)
-				if id != "" {
-					done[id] = struct{}{}
-				}
-				progress = true
-				continue
-			}
-			if _, ok := inSet[parent]; !ok {
-				return nil, fmt.Errorf("agent %s references missing parent %s", id, parent)
-			}
-			if _, ok := done[parent]; ok {
-				out = append(out, a)
-				if id != "" {
-					done[id] = struct{}{}
-				}
-				progress = true
-				continue
-			}
-			next = append(next, a)
-		}
-		if !progress {
-			ids := make([]string, 0, len(next))
-			for _, a := range next {
-				ids = append(ids, strings.TrimSpace(a.Config.ID))
-			}
-			sort.Strings(ids)
-			return nil, fmt.Errorf("cyclic parent links: %v", ids)
-		}
-		pending = next
-	}
-	return out, nil
-}
-
-func RenderFlowActivationText(m runtimeactors.FlowActivationPayload) string {
-	entityID := m.EffectiveEntityID()
-	obj := map[string]any{"entity_id": entityID}
-	if len(m.Metadata) > 0 {
-		obj["metadata"] = json.RawMessage(m.Metadata)
-	}
-	b, _ := json.MarshalIndent(obj, "", "  ")
-	return string(b)
-}
-
-func DefaultJSON(raw, fallback []byte) []byte {
-	if len(raw) == 0 {
-		return fallback
-	}
-	return raw
-}
-
-func NormalizeStringList(in []string) []string {
-	seen := make(map[string]struct{}, len(in))
-	out := make([]string, 0, len(in))
-	for _, raw := range in {
-		v := strings.TrimSpace(raw)
-		if v == "" {
-			continue
-		}
-		if _, ok := seen[v]; ok {
-			continue
-		}
-		seen[v] = struct{}{}
-		out = append(out, v)
-	}
-	return out
-}
 
 func MustJSON(v any) []byte {
 	raw, err := json.Marshal(v)
@@ -114,15 +21,6 @@ func MustJSON(v any) []byte {
 
 func mustJSON(v any) []byte {
 	return MustJSON(v)
-}
-
-func FirstNonEmptyString(vals ...string) string {
-	for _, val := range vals {
-		if trimmed := strings.TrimSpace(val); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 func DeterministicOutputEventID(inbound events.Event, identity runtimeagentidentity.Identity, index int, out events.Event) (string, error) {
@@ -146,28 +44,4 @@ func nativeToolConfigFromMap(values map[string]bool) runtimeactors.NativeToolCon
 		WebSearch: values["web_search"],
 		FileIO:    values["file_io"],
 	}
-}
-
-func ExtractDirectiveText(payload []byte) string {
-	if len(payload) == 0 {
-		return ""
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(payload, &obj); err != nil {
-		return ""
-	}
-	text, _ := obj["directive_text"].(string)
-	if strings.TrimSpace(text) == "" {
-		text, _ = obj["message"].(string)
-	}
-	if strings.TrimSpace(text) == "" {
-		if directive, ok := obj["directive"].(map[string]any); ok && len(directive) > 0 {
-			if structured, _ := directive["text"].(string); strings.TrimSpace(structured) != "" {
-				text = structured
-			} else if encoded, err := json.Marshal(directive); err == nil {
-				text = string(encoded)
-			}
-		}
-	}
-	return strings.TrimSpace(text)
 }

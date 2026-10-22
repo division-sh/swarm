@@ -34,7 +34,7 @@ func TestWorkflowEngineHistoricalForkM16BothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if preFork.ForkPoint != prePlan.ForkPoint || prePlan.EventCountAtFork != 2 || len(prePlan.Entities) != 1 || prePlan.Entities[0].CurrentState != "waiting" || prePlan.Entities[0].Fields["marker"] != "source-owned" {
+			if preFork.ForkPoint != prePlan.ForkPoint || prePlan.EventCountAtFork != 2 || len(prePlan.Entities) != 1 || prePlan.Entities[0].CurrentState == nil || *prePlan.Entities[0].CurrentState != "waiting" || prePlan.Entities[0].Fields["marker"] != "source-owned" {
 				t.Fatalf("pre-handler cut lost the source state/publication prefix: fork=%+v plan=%+v", preFork.ForkPoint, prePlan)
 			}
 			m16RequireHistoricalEventSet(t, prePlan, eventID, false, "")
@@ -85,7 +85,7 @@ func TestWorkflowEngineHistoricalForkM16BothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if preFork.ForkRunID == postFork.ForkRunID || preFork.ForkPoint.Revision >= postFork.ForkPoint.Revision || postFork.ForkPoint != postPlan.ForkPoint || postPlan.EventCountAtFork != 3 || len(postPlan.Entities) != 1 || postPlan.Entities[0].CurrentState != "done" || postPlan.Entities[0].Fields["handled"] != true {
+			if preFork.ForkRunID == postFork.ForkRunID || preFork.ForkPoint.Revision >= postFork.ForkPoint.Revision || postFork.ForkPoint != postPlan.ForkPoint || postPlan.EventCountAtFork != 3 || len(postPlan.Entities) != 1 || postPlan.Entities[0].CurrentState == nil || *postPlan.Entities[0].CurrentState != "done" || postPlan.Entities[0].Fields["handled"] != true {
 				t.Fatalf("distinct ordered historical cuts: pre=%+v post=%+v", preFork, postFork)
 			}
 			m16RequireHistoricalEventSet(t, postPlan, eventID, true, postEvent.ID())
@@ -175,7 +175,9 @@ func m16RequireEntity(t *testing.T, db *sql.DB, runID, entityID, wantState strin
 	var state string
 	var raw []byte
 	var revision int
-	if err := db.QueryRow(`SELECT current_state,fields,revision FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, entityID).Scan(&state, &raw, &revision); err != nil {
+	if err := db.QueryRow(`SELECT f.current_state,e.fields,f.revision FROM entity_state e
+		JOIN flow_instances f ON f.run_id=e.run_id AND f.entity_id=e.entity_id AND f.instance_path=e.flow_instance AND f.entity_type=e.entity_type
+		WHERE e.run_id=$1 AND e.entity_id=$2`, runID, entityID).Scan(&state, &raw, &revision); err != nil {
 		t.Fatal(err)
 	}
 	var fields map[string]any

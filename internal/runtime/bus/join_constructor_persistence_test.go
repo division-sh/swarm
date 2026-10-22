@@ -38,22 +38,25 @@ func TestJoinReceiverReadConsumesHeaderAndOptionalFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := time.Now().UTC()
-	header := pipeline.WorkflowEntityStatePersistenceRecord{EntityID: constructed.EntityID, FlowInstance: constructed.InstancePath,
+	header := pipeline.WorkflowInstancePersistenceRecord{EntityID: constructed.EntityID, FlowInstance: constructed.InstancePath,
+		WorkflowName: constructed.TemplateID, WorkflowVersion: "v1", Mode: "template", Status: "active", Config: raw, StageDefined: true,
 		CurrentState: "ready", Revision: 1, EnteredStageAt: at, CreatedAt: at, UpdatedAt: at,
 		Gates: json.RawMessage(`{}`), Bookkeeping: json.RawMessage(`{}`), Accumulator: json.RawMessage(`{}`)}
 	complete := pipeline.WorkflowTargetPersistenceRecord{Presence: pipeline.WorkflowTargetPersistenceCompleteFieldless,
 		Lifecycle: pipeline.WorkflowLifecycleCompanionPersistenceRecord{FlowInstance: constructed.InstancePath,
 			WorkflowName: constructed.TemplateID, WorkflowVersion: "v1", Mode: "template", Status: "active", Config: raw,
 			ParentInstance: constructed.ParentRoute.FlowInstance, InstanceKey: "one",
-			CreatedAt: at, State: header}}
+			CreatedAt: at, State: header, StageDefined: true}}
 	for _, fields := range []bool{false, true} {
 		t.Run(map[bool]string{false: "fieldless", true: "fields"}[fields], func(t *testing.T) {
 			record := complete
 			if fields {
 				record.Presence = pipeline.WorkflowTargetPersistenceComplete
 				record.Lifecycle.State.EntityType = "worker"
-				record.State = record.Lifecycle.State
-				record.State.Fields = json.RawMessage(`{"value":2}`)
+				record.State = pipeline.WorkflowEntityStatePersistenceRecord{
+					EntityID: constructed.EntityID, FlowInstance: constructed.InstancePath, EntityType: "worker",
+					Fields: json.RawMessage(`{"value":2}`), CreatedAt: at, UpdatedAt: at,
+				}
 			}
 			store := &joinConstructedReceiverStore{record: record}
 			bus := &EventBus{store: store, semanticSource: fixture.Source}

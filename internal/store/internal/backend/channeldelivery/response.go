@@ -328,6 +328,10 @@ func PlanActionResponseTx(ctx context.Context, tx *sql.Tx, action operatorchanne
 	if tx == nil || expected.PrincipalID == "" {
 		return "", false, fmt.Errorf("channel navigation response requires a verified action")
 	}
+	parent, err := lockActionParentTx(ctx, tx, action.ActionFact, postgres)
+	if err != nil {
+		return "", false, err
+	}
 	if err := LockPrincipalTx(ctx, tx, expected.PrincipalID, postgres); err != nil {
 		return "", false, err
 	}
@@ -338,7 +342,7 @@ func PlanActionResponseTx(ctx context.Context, tx *sql.Tx, action operatorchanne
 	if state != "pending" {
 		return "", false, fmt.Errorf("channel navigation action is already settled")
 	}
-	resolved, found, err := ResolveActionFactForMutationTx(ctx, tx, action.ActionFact, postgres)
+	resolved, found, err := parent.resolve(ctx, tx, action.ActionFact, postgres)
 	if err != nil {
 		return "", false, err
 	}

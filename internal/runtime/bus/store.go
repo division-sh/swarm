@@ -11,8 +11,10 @@ import (
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -162,8 +164,38 @@ type PublicationCommand struct {
 }
 
 func (c PublicationCommand) Validate() error {
+	event := c.Commit.Event.Event()
+	if c.Commit.inbound != nil || event.RoutingSource().Kind() == events.RoutingSourceExternalIngress && event.AdmissionClass() != events.EventAdmissionReplay {
+		return fmt.Errorf("provider ingress publication requires its exact inbound transaction")
+	}
 	if !c.prospective.Empty() {
 		return fmt.Errorf("prospective receiver publication requires its exact engine mutation transaction")
+	}
+	if err := events.ValidateGenericPublishEvent(c.Commit.Event.Event()); err != nil {
+		return err
+	}
+	return c.validatePublicationFacts()
+}
+
+func (c PublicationCommand) ValidateInbound(admission providertriggers.PublicationAdmission) error {
+	prepared := c.Commit.inbound
+	if prepared == nil || !prepared.admission.SameOwner(admission) || !c.prospective.Empty() || c.Commit.Event.ID() != prepared.eventID {
+		return fmt.Errorf("provider ingress publication requires its original prepared output seal")
+	}
+	event := c.Commit.Event.Event()
+	if event.Type() != prepared.normalized.Type() || event.RunID() != prepared.normalized.RunID() ||
+		event.RoutingSource() != prepared.normalized.RoutingSource() || !slices.Equal(event.Payload(), prepared.normalized.Payload()) {
+		return fmt.Errorf("provider publication changed its schema-admitted output")
+	}
+	// Check the original authenticated payload with the current receiver facts;
+	// canonical optional-null lowering is bound above, not a new provider output.
+	authenticated, err := events.ResolveEnvelope(prepared.authenticated, event.NormalizedEnvelope())
+	if err != nil {
+		return err
+	}
+	if err := admission.ValidateCommitOutput(context.Background(), prepared.bundleHash, prepared.provider,
+		prepared.ordinal, prepared.count, authenticated, prepared.kind, prepared.authorization); err != nil {
+		return err
 	}
 	if err := events.ValidateGenericPublishEvent(c.Commit.Event.Event()); err != nil {
 		return err
@@ -456,6 +488,7 @@ const (
 // mandatory initial side effects are the delivery manifest, replay scope, and
 // optional failure evidence declared here.
 type CommitPublishRequest struct {
+	inbound             *preparedInboundPublication
 	Event               events.AdmittedEvent
 	RouteSettlement     events.RouteSettlement
 	DeliveryRoutes      []events.DeliveryRoute
@@ -467,6 +500,23 @@ type CommitPublishRequest struct {
 	ReplyCreations      []runtimereplycontext.Record
 	ReplyClaims         []runtimereplycontext.ClaimCommand
 	JoinAdmissionFences []runtimepipeline.WorkflowJoinAdmissionFence
+}
+
+// The canonical prepared commit retains its exact provider seal. Exported
+// command projections cannot erase this responsibility: ingress source facts
+// require this capability for fresh input. Replay retains recorded provenance
+// under its distinct causal admission rather than repeating input admission.
+type preparedInboundPublication struct {
+	admission     providertriggers.PublicationAdmission
+	authenticated events.Event
+	normalized    events.Event
+	eventID       string
+	bundleHash    string
+	provider      string
+	ordinal       int
+	count         int
+	kind          provideroutput.Kind
+	authorization provideroutput.Authorization
 }
 
 func (r CommitPublishRequest) ValidatePreparedEvent() error {

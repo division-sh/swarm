@@ -65,13 +65,14 @@ var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm describe routes":   {Constructor: "newDescribeRoutesCommand", Runner: "runDescribeRoutesCommandWithOutput"},
 	"swarm entity list":       {Constructor: "newEntitiesListCommand", Runner: "runEntitiesListCommand"},
 	"swarm entity view":       {Constructor: "newEntityViewCommand", Runner: "runEntityViewCommand"},
-	"swarm channel connect":   {Constructor: "newChannelLifecycleCommand", Runner: "runChannelConnect"},
-	"swarm channel reconnect": {Constructor: "newChannelLifecycleCommand", Runner: "runChannelConnect"},
-	"swarm channel rebind":    {Constructor: "newChannelLifecycleCommand", Runner: "runChannelConnect"},
-	"swarm channel resume":    {Constructor: "newChannelResumeCommand", Runner: "runChannelResume"},
+	"swarm channel connect":   {Constructor: "newChannelLifecycleCommand", Runner: "renderChannelOnboardingResult"},
+	"swarm channel reconnect": {Constructor: "newChannelLifecycleCommand", Runner: "renderChannelOnboardingResult"},
+	"swarm channel rebind":    {Constructor: "newChannelLifecycleCommand", Runner: "renderChannelOnboardingResult"},
+	"swarm channel resume":    {Constructor: "newChannelResumeCommand", Runner: "renderChannelOnboardingResult"},
 	"swarm channel list":      {Constructor: "newChannelListCommand", Runner: "runChannelList"},
 	"swarm channel status":    {Constructor: "newChannelStatusCommand", Runner: "runChannelStatus"},
 	"swarm channel unbind":    {Constructor: "newChannelUnbindCommand", Runner: "runChannelUnbind"},
+	"swarm channel logout":    {Constructor: "newChannelLogoutCommand", Runner: "runChannelLogout"},
 }
 
 var cliOutputGrandfatheredNonSharedRows = map[string]string{
@@ -153,6 +154,7 @@ var cliOutputExpectedFactOwners = map[string]string{
 	"swarm channel list":      "/v1/rpc channel.list",
 	"swarm channel status":    "/v1/rpc channel.list",
 	"swarm channel unbind":    "/v1/rpc channel.unbind",
+	"swarm channel logout":    "/v1/rpc channel.logout",
 }
 
 var cliOutputSharedDisplayProofs = map[string][]string{
@@ -436,6 +438,11 @@ func TestCLIOutputConformanceSharedRowsConsumeSharedOwner(t *testing.T) {
 	if !calls["runVerifyCommandWithOutput"]["renderVerifyCommandResult"] || !calls["renderVerifyAdmissionRefusal"]["renderVerifyCommandResult"] {
 		t.Error("verify success and refusal must consume the shared command-result renderer")
 	}
+	for _, runner := range []string{"runChannelConnect", "runChannelResume"} {
+		if !calls[runner]["renderChannelOnboardingResult"] {
+			t.Errorf("channel runner %s does not call renderChannelOnboardingResult", runner)
+		}
+	}
 	for command, row := range rows {
 		proof, hasProof := cliOutputSharedOwnerProofs[command]
 		if row.Classification == "shared_output" {
@@ -712,7 +719,7 @@ func cliOutputFunctionCalls(t *testing.T) map[string]map[string]bool {
 					return true
 				}
 				switch ident.Name {
-				case "bindCLIOutputFlags", "renderCLIOutput", "renderVerifyCommandResult", "writeCLITable", "writeCLIFieldLine", "writeCLITitle", "writeCLIEmptyState", "writeCLILabeledDetail":
+				case "bindCLIOutputFlags", "renderCLIOutput", "renderVerifyCommandResult", "renderChannelOnboardingResult", "writeCLITable", "writeCLIFieldLine", "writeCLITitle", "writeCLIEmptyState", "writeCLILabeledDetail":
 					calls[fn.Name.Name][ident.Name] = true
 				}
 				return true

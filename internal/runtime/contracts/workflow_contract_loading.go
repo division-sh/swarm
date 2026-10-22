@@ -204,9 +204,6 @@ func finalizeWorkflowContractBundle(bundle *WorkflowContractBundle) error {
 	if err := validateWorkflowContractBundleLoadConstraints(bundle); err != nil {
 		return err
 	}
-	if err := populateEffectiveProvenance(bundle); err != nil {
-		return err
-	}
 	if _, err := BuildDurableDataCatalog(bundle); err != nil {
 		return fmt.Errorf("compile durable data catalog: %w", err)
 	}
@@ -301,7 +298,7 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 	}
 	for eventType, owners := range bundle.Semantics.EventOwners {
 		if len(normalizeStrings(owners)) > 1 {
-			errs = append(errs, fmt.Errorf("%w: event %s has multiple authoritative system node owners: %s", ErrMultipleAuthoritativeOwners, strings.TrimSpace(eventType), strings.Join(normalizeStrings(owners), ", ")))
+			errs = append(errs, multipleEventOwnersError(bundle, eventType, owners))
 		}
 	}
 	errs = append(errs, validateWorkflowSchemaRefinements(bundle)...)

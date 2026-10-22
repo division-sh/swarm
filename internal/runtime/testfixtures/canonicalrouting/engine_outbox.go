@@ -18,6 +18,7 @@ pins:
 func CopyEngineOutboxTarget(t testing.TB) string {
 	t.Helper()
 	root := CopyEngineOutboxPublication(t)
+	writeClosedVariantFile(t, root, "flow-original/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "flow-original/schema.yaml", "stages: []\n# fixture: original-target\n")
 	writeClosedVariantFile(t, root, "flow-original/events.yaml", "custom.snapshot:\n")
 	return root

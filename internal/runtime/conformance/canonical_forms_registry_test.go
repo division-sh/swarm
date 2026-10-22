@@ -651,7 +651,6 @@ func TestCanonicalFormsRegistryPinsWave3EventAdmission(t *testing.T) {
 	migratedFiles := []string{
 		"internal/runtime/contracts/event_catalog_admission.go",
 		"internal/runtime/contracts/event_schema_ownership.go",
-		"internal/runtime/contracts/effective_provenance.go",
 	}
 	for _, relative := range migratedFiles {
 		path := filepath.Join(root, filepath.FromSlash(relative))

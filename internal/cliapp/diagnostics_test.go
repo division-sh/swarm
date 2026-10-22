@@ -232,14 +232,14 @@ func TestStatusHumanOutputPreservesCanonicalTerminalEvidence(t *testing.T) {
 	}
 }
 
-func TestStatusProjectsCanonicalScoringBlockerTuple(t *testing.T) {
+func TestStatusProjectsCanonicalDeliveryBlockerTuple(t *testing.T) {
 	runID := "11111111-1111-4111-8111-111111111111"
 	setCLIAPITestToken(t, "test-token")
 	server, _ := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
 		if req.Method != "run.diagnose" {
 			t.Fatalf("method = %q, want run.diagnose", req.Method)
 		}
-		return validDiagnosticRunDiagnosis(runID, "stalled", "scoring_terminal_outcome", "terminal_scoring_outcome_missing", []any{})
+		return validDiagnosticRunDiagnosis(runID, "stalled", "delivery_lifecycle", "no_active_deliveries", []any{})
 	})
 	defer server.Close()
 
@@ -248,13 +248,139 @@ func TestStatusProjectsCanonicalScoringBlockerTuple(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "blocker     scoring outcome, waiting for a terminal scoring outcome") {
-		t.Fatalf("stdout does not project scoring blocker tuple:\n%s", stdout.String())
+	if !strings.Contains(stdout.String(), "blocker     delivery lifecycle, no active deliveries") {
+		t.Fatalf("stdout does not project canonical blocker tuple:\n%s", stdout.String())
 	}
-	for _, machineLabel := range []string{"scoring_terminal_outcome", "terminal_scoring_outcome_missing"} {
+	for _, machineLabel := range []string{"delivery_lifecycle", "no_active_deliveries"} {
 		if strings.Contains(stdout.String(), machineLabel) {
 			t.Fatalf("stdout leaks machine label %q:\n%s", machineLabel, stdout.String())
 		}
+	}
+}
+
+func TestStatusLeadsWithOperationalStateAndExactTurnAttribution(t *testing.T) {
+	runID := "11111111-1111-4111-8111-111111111111"
+	setCLIAPITestToken(t, "test-token")
+	for _, mode := range []string{"human", "json"} {
+		t.Run(mode, func(t *testing.T) {
+			calls := 0
+			server, _ := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
+				calls++
+				if req.Method != "run.diagnose" {
+					t.Fatalf("status performed a second interpretation or re-drive: %s", req.Method)
+				}
+				result := validDiagnosticRunDiagnosis(runID, "stalled", "delivery_lifecycle", "no_active_deliveries", []any{})
+				result["attributions"] = []any{map[string]any{
+					"flow_instance": "review/one", "agent_id": "reviewer", "event_id": "request-id", "event_type": "review.requested", "delivery_id": "delivery-id", "logical_turn_id": "logical-id",
+					"provider_turns": []any{"provider-id"}, "granted_emit_tools": []any{"emit_review_done"}, "emitted_events": []any{}, "emission_evidence": "none", "historical": false,
+				}}
+				return result
+			})
+			defer server.Close()
+			args := []string{"run", "status", runID}
+			if mode == "json" {
+				args = append(args, "--json")
+			}
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server))
+			if code != 0 || calls != 1 {
+				t.Fatalf("status code=%d calls=%d stdout=%s stderr=%s", code, calls, stdout.String(), stderr.String())
+			}
+			text := stdout.String()
+			if mode == "human" {
+				if !strings.HasPrefix(text, "Run "+runID+"  stalled\n") || strings.Index(text, "attribution") > strings.Index(text, "run status") || !strings.Contains(text, "agent reviewer, event review.requested (request-id), delivery delivery-id, logical turn logical-id; no accepted emission") {
+					t.Fatalf("headline and origin did not lead the detail: %s", text)
+				}
+				if !strings.Contains(text, "frozen emit grants: emit_review_done") {
+					t.Fatalf("text lost the frozen emit grant: %s", text)
+				}
+			} else {
+				for _, expected := range []string{`"operational_state":"stalled"`, `"delivery_id":"delivery-id"`, `"emission_evidence":"none"`, `"granted_emit_tools":["emit_review_done"]`} {
+					if !strings.Contains(text, expected) {
+						t.Fatalf("JSON lost %s: %s", expected, text)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestStatusPreservesFrozenEmitGrantEvidence(t *testing.T) {
+	runID := "11111111-1111-4111-8111-111111111111"
+	for _, tc := range []struct {
+		name       string
+		grants     []string
+		emission   string
+		reason     string
+		historical bool
+		wantText   string
+	}{
+		{name: "granted", grants: []string{"emit_review_done", "emit_review_escalated"}, emission: "none", wantText: "frozen emit grants: emit_review_done, emit_review_escalated"},
+		{name: "zero_grants", grants: []string{}, emission: "none", wantText: "frozen emit grants: none"},
+		{name: "unknown", grants: []string{}, emission: "unknown", reason: "logical_turn_evidence_incomplete", wantText: "frozen emit grants: unknown"},
+		{name: "incomplete_with_grant", grants: []string{"emit_review_done"}, emission: "unknown", reason: "logical_turn_evidence_incomplete", wantText: "frozen emit grants: emit_review_done"},
+		{name: "historical", grants: []string{"emit_review_done"}, emission: "unknown", reason: "historical_drained_completion", historical: true, wantText: "frozen emit grants: emit_review_done"},
+		{name: "historical_unknown", grants: []string{}, emission: "unknown", reason: "historical_drained_completion", historical: true, wantText: "frozen emit grants: unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, mode := range []string{"human", "json"} {
+				t.Run(mode, func(t *testing.T) {
+					setCLIAPITestToken(t, "test-token")
+					calls := 0
+					server, _ := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
+						calls++
+						if req.Method != "run.diagnose" {
+							t.Fatalf("status performed a second interpretation or re-drive: %s", req.Method)
+						}
+						result := validDiagnosticRunDiagnosis(runID, "stalled", "", "", []any{})
+						result["attributions"] = []any{map[string]any{
+							"flow_instance": "review/one", "agent_id": "reviewer", "event_id": "request-id", "event_type": "review.requested", "delivery_id": "delivery-id", "logical_turn_id": "logical-id",
+							"provider_turns": []string{"provider-id"}, "granted_emit_tools": tc.grants, "emitted_events": []any{}, "emission_evidence": tc.emission, "evidence_reason": tc.reason, "historical": tc.historical,
+						}}
+						return result
+					})
+					defer server.Close()
+					args := []string{"run", "status", runID}
+					if mode == "json" {
+						args = append(args, "--json")
+					}
+					var stdout, stderr bytes.Buffer
+					if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server)); code != 0 || calls != 1 {
+						t.Fatalf("status code=%d calls=%d stdout=%s stderr=%s", code, calls, stdout.String(), stderr.String())
+					}
+					if mode == "json" {
+						var result DiagnosticRunDiagnosisResult
+						if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+							t.Fatal(err)
+						}
+						if len(result.Attributions) != 1 {
+							t.Fatalf("JSON attribution count = %d", len(result.Attributions))
+						}
+						got := result.Attributions[0]
+						if !reflect.DeepEqual(got.GrantedEmitTools, tc.grants) || string(got.Emission) != tc.emission || got.EvidenceReason != tc.reason || got.Historical != tc.historical {
+							t.Fatalf("JSON changed frozen evidence: %+v", got)
+						}
+						return
+					}
+					text := stdout.String()
+					for _, want := range []string{tc.wantText, "agent reviewer, event review.requested (request-id), delivery delivery-id, logical turn logical-id", tc.reason} {
+						if !strings.Contains(text, want) {
+							t.Fatalf("text lost %q: %s", want, text)
+						}
+					}
+					if tc.emission == "unknown" {
+						if !strings.Contains(text, "emission evidence unknown") || strings.Contains(text, "no accepted emission") || strings.Contains(text, "frozen emit grants: none") {
+							t.Fatalf("text presented incomplete evidence as proven silence: %s", text)
+						}
+					} else if !strings.Contains(text, "no accepted emission") {
+						t.Fatalf("text lost proven silence: %s", text)
+					}
+					if tc.historical && !strings.Contains(text, "historical ") {
+						t.Fatalf("text lost the historical label: %s", text)
+					}
+				})
+			}
+		})
 	}
 }
 
@@ -1670,18 +1796,66 @@ func TestDiagnosticsFailClosedOnAPIAndMalformedResults(t *testing.T) {
 			wantStderr: "heuristics is required",
 		},
 		{
+			name: "run diagnose missing instances",
+			args: []string{"run", "status", "run-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validDiagnosticRunDiagnosis("run-1", "running", "", "", []any{})
+				delete(result, "instances")
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "instances and attributions are required",
+		},
+		{
+			name: "run diagnose null instances",
+			args: []string{"run", "status", "run-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validDiagnosticRunDiagnosis("run-1", "running", "", "", []any{})
+				result["instances"] = nil
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "instances and attributions are required",
+		},
+		{
+			name: "run diagnose missing attributions",
+			args: []string{"run", "status", "run-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validDiagnosticRunDiagnosis("run-1", "running", "", "", []any{})
+				delete(result, "attributions")
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "instances and attributions are required",
+		},
+		{
+			name: "run diagnose null attributions",
+			args: []string{"run", "status", "run-1"},
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				_ = json.NewDecoder(r.Body).Decode(&req)
+				result := validDiagnosticRunDiagnosis("run-1", "running", "", "", []any{})
+				result["attributions"] = nil
+				writeJSONRPCResult(t, w, req.ID, result)
+			},
+			wantCode:   3,
+			wantStderr: "instances and attributions are required",
+		},
+		{
 			name: "run diagnose missing test quiescence",
 			args: []string{"run", "status", "run-1"},
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeJSONRPCResult(t, w, req.ID, map[string]any{
-					"run":               validDiagnosticRunHeader("run-1"),
-					"operational_state": "running",
-					"blocking_layer":    "",
-					"blocking_reason":   "",
-					"heuristics":        []any{},
-				})
+				result := validDiagnosticRunDiagnosis("run-1", "running", "", "", []any{})
+				delete(result, "test_quiescence")
+				writeJSONRPCResult(t, w, req.ID, result)
 			},
 			wantCode:   3,
 			wantStderr: "test_quiescence is required",
@@ -1892,6 +2066,8 @@ func validDiagnosticRunDiagnosis(runID, state, layer, reason string, heuristics 
 		"blocking_reason":   reason,
 		"heuristics":        heuristics,
 		"failed_deliveries": []any{},
+		"instances":         []any{},
+		"attributions":      []any{},
 		"fan_out":           validDiagnosticFanOutSummary(runID),
 		"test_quiescence": map[string]any{
 			"ready":                     true,

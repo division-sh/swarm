@@ -115,11 +115,11 @@ func TestSourceInvocationCommandsShareSelectedRoot(t *testing.T) {
 		})
 	}
 	t.Run("test selection and compilation", func(t *testing.T) {
-		selected, spec, err := resolveScenarioTestSources(base, "alias", cliCommandConfig{})
+		selected, err := resolveScenarioTestSources(base, "alias", cliCommandConfig{})
 		if err != nil || selected != root {
 			t.Fatalf("scenario selection: %q %v", selected, err)
 		}
-		if _, _, err := NewSwarmWorkflowModule(base, selected, spec); err != nil {
+		if _, _, err := NewSwarmWorkflowModule(base, selected); err != nil {
 			t.Fatal(err)
 		}
 		var out, stderr bytes.Buffer

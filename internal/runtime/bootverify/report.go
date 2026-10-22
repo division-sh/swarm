@@ -97,7 +97,6 @@ var stableHardInvalidityRemediation = map[string]string{
 	"template_instance_validation":            "Fix the template instance declaration so instance keys and policies are valid.",
 	"timer_validation":                        "Use only supported timer start_on/cancel_on forms and ensure referenced states/events are declared and reachable.",
 	"clock_schedule_validation":               "Declare one cron or every cadence and a bare business emit with an actual consumer or selected-root output; schedules arm only on deployment.",
-	"transition_ownership_validation":         "Move the transition owner to the handler that owns the triggering event or change the transition.",
 	"transition_reference_validation":         "Fix transition references so all events and states are declared and reachable.",
 	"workflow_contract_validation":            "Fix the contract source/load error named by the message, then rerun `swarm verify`.",
 	"workspace_class_exists":                  "Declare the referenced workspace class or update the agent workspace_class.",
@@ -135,18 +134,6 @@ var routingRemediationSplitCheckIDs = map[string]struct{}{
 
 type FindingOption func(*Finding)
 
-func WithRemediation(remediation string) FindingOption {
-	return func(f *Finding) {
-		f.Remediation = remediation
-	}
-}
-
-func WithEvidence(evidence ...string) FindingOption {
-	return func(f *Finding) {
-		f.Evidence = append(f.Evidence, evidence...)
-	}
-}
-
 func NewHardInvalidityFinding(checkID, location, message, remediation string, evidence ...string) Finding {
 	return Finding{
 		CheckID:     checkID,
@@ -167,6 +154,11 @@ type Report struct {
 	SourceArtifactHash   string
 	mcpTools             map[string]runtimemcp.DiscoveredTool
 	mcpObservation       *AdmissionObservation
+	credentialSources    []runtimecredentials.SourceFact
+}
+
+func (r Report) CredentialSources() []runtimecredentials.SourceFact {
+	return append([]runtimecredentials.SourceFact(nil), r.credentialSources...)
 }
 
 // DiscoveredToolAdmission returns only the catalog from this completed
@@ -234,6 +226,7 @@ func Run(ctx context.Context, source semanticview.Source, opts Options) Report {
 		report.runAdmissionCheck(checkCtx, check)
 	}
 	report.mcpTools = maps.Clone(checkCtx.mcpDiscoveredTools)
+	report.credentialSources = append(report.credentialSources, checkCtx.credentialSources...)
 	if checkCtx.mcpObservation != nil {
 		observation := *checkCtx.mcpObservation
 		report.mcpObservation = &observation
@@ -281,16 +274,6 @@ func (r Report) SemanticDriftWarnings() []Finding {
 	out := make([]Finding, 0)
 	for _, finding := range r.Findings {
 		if finding.Severity == SeveritySemanticDriftWarn {
-			out = append(out, finding)
-		}
-	}
-	return out
-}
-
-func (r Report) AuditAnalyses() []Finding {
-	out := make([]Finding, 0)
-	for _, finding := range r.Findings {
-		if finding.Severity == SeverityAuditAnalysis {
 			out = append(out, finding)
 		}
 	}
@@ -365,10 +348,6 @@ func severityRank(severity string) int {
 	default:
 		return 4
 	}
-}
-
-func FindingSurfaceLevel(f Finding, blocking bool) string {
-	return SurfaceLevelForSeverity(f.Severity, blocking)
 }
 
 func SurfaceLevelForSeverity(severity string, blocking bool) string {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"io"
 	"net"
 	"net/http"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -52,6 +53,7 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -114,8 +116,6 @@ type serveRuntimeBundle struct {
 	source             semanticview.Source
 	sourceProjection   *sourceartifact.RuntimeProjection
 	sourceRoot         string
-	platformSpecPath   string
-	runningSpecPath    string
 	bootIdentity       runtimecontracts.BundleIdentity
 	sourceArtifactFact runtimecorrelation.SourceArtifactFact
 	dbLoaded           bool
@@ -267,14 +267,10 @@ func serveRuntimeStateStoreSummary(contexts []serveRuntimeBundleContext) string 
 	return strings.Join(parts, "; ")
 }
 
-func serveConfigLoadDetail(configDetail string, resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions) string {
+func serveConfigLoadDetail(configDetail string, resolvedPaths cliapp.CLISourcePaths, opts cliapp.ServeOptions) string {
 	parts := []string{"config=" + strings.TrimSpace(configDetail)}
 	parts = append(parts, "source="+filepath.Clean(resolvedPaths.SourceRoot))
 	return strings.Join(parts, " ")
-}
-
-func servePreCatalogPlatformSpecPath(resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions) (string, error) {
-	return resolvedPaths.PlatformSpecPath, nil
 }
 
 type sourceArtifactReader interface {
@@ -282,7 +278,7 @@ type sourceArtifactReader interface {
 	GetRootedSource(context.Context, sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error)
 }
 
-func loadServeRuntimeBundles(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
+func loadServeRuntimeBundles(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
 	loaded, err := loadServeRuntimeBundle(ctx, repo, artifacts, resolvedPaths, opts, packBases)
 	if err != nil {
 		return nil, err
@@ -290,7 +286,7 @@ func loadServeRuntimeBundles(ctx context.Context, repo string, artifacts sourceA
 	return []serveRuntimeBundle{loaded}, nil
 }
 
-func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
+func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
 	sourceRoot, err := cliapp.NormalizeSourceRoot(resolvedPaths.SourceRoot)
 	if err != nil {
 		return serveRuntimeBundle{}, err
@@ -299,14 +295,14 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceAr
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	module, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, resolvedPaths.PlatformSpecPath, packBase)
+	module, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, packBase)
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	return materializeRuntimeBundle(module, bundle, sourceRoot, resolvedPaths.PlatformSpecPath)
+	return materializeRuntimeBundle(module, bundle, sourceRoot)
 }
 
-func materializeRuntimeBundle(module runtimepipeline.WorkflowModule, bundle *runtimecontracts.WorkflowContractBundle, sourceRoot, platformSpecPath string) (serveRuntimeBundle, error) {
+func materializeRuntimeBundle(module runtimepipeline.WorkflowModule, bundle *runtimecontracts.WorkflowContractBundle, sourceRoot string) (serveRuntimeBundle, error) {
 	bootIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
 	if err != nil {
 		return serveRuntimeBundle{}, fmt.Errorf("compute boot bundle identity: %w", err)
@@ -321,14 +317,12 @@ func materializeRuntimeBundle(module runtimepipeline.WorkflowModule, bundle *run
 		source:           semanticview.Wrap(bundle),
 		sourceProjection: sourceProjection,
 		sourceRoot:       sourceRoot,
-		platformSpecPath: platformSpecPath,
-		runningSpecPath:  platformSpecPath,
 		bootIdentity:     bootIdentity,
 		cleanup:          sourceProjection.Release,
 	}, nil
 }
 
-func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactReader, repoRoot, runningSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactReader, repoRoot string, packBases *packartifact.PlatformPackBaseGenerationOwner, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
 	if reader == nil {
 		return nil, fmt.Errorf("budget recovery source artifact reader is required")
 	}
@@ -345,7 +339,11 @@ func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactRea
 	if rooted.Admission().Reference() != reference {
 		return nil, fmt.Errorf("budget source does not match the selected root reference")
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repoRoot, rooted, runningSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+	specPath, err := cliapp.EmbeddedPlatformSpecPath()
+	if err != nil {
+		return nil, err
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repoRoot, rooted, specPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {
@@ -354,7 +352,7 @@ func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactRea
 	return semanticview.Wrap(bundle), nil
 }
 
-func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifacts sourceArtifactReader, reference sourceartifact.RootAdmissionReference, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner, materialize func(*sourceartifact.AdmittedSourceArtifact, semanticview.Source) (*sourceartifact.RuntimeProjection, error)) (serveRuntimeBundle, error) {
+func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifacts sourceArtifactReader, reference sourceartifact.RootAdmissionReference, packBases *packartifact.PlatformPackBaseGenerationOwner, materialize func(*sourceartifact.AdmittedSourceArtifact, semanticview.Source) (*sourceartifact.RuntimeProjection, error)) (serveRuntimeBundle, error) {
 	if artifacts == nil {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: exact source reconstruction requires selected source artifact store")
 	}
@@ -376,7 +374,11 @@ func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifa
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_DATA_INTEGRITY_ERROR: reset source differs from the frozen root reference")
 	}
 	artifact := rooted.Artifact()
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, strings.TrimSpace(runningPlatformSpecPath), runtimecontracts.WorkflowContractLoadOptions{
+	specPath, err := cliapp.EmbeddedPlatformSpecPath()
+	if err != nil {
+		return serveRuntimeBundle{}, err
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, specPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBases:  packBases,
 		AdmitPackInventory: packadmission.AdmitInventory,
 	})
@@ -406,8 +408,6 @@ func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifa
 		source:             source,
 		sourceProjection:   sourceProjection,
 		sourceRoot:         ".",
-		platformSpecPath:   strings.TrimSpace(runningPlatformSpecPath),
-		runningSpecPath:    strings.TrimSpace(runningPlatformSpecPath),
 		bootIdentity:       bootIdentity,
 		sourceArtifactFact: fact,
 		dbLoaded:           true,
@@ -548,7 +548,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	runtimeDeps.Config = req.Config
 	if req.Stores.sourceReader != nil {
 		runtimeDeps.BudgetStageSourceLoader = func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
-			return loadBudgetRecoveryStageSource(ctx, req.Stores.sourceReader, req.RepoRoot, req.Loaded.runningSpecPath, req.PlatformPackBases, reference)
+			return loadBudgetRecoveryStageSource(ctx, req.Stores.sourceReader, req.RepoRoot, req.PlatformPackBases, reference)
 		}
 	}
 	locatedScenarios, err := scenarioderivation.LoadDeclarations(loaded.bundle.SourceArtifact)
@@ -787,10 +787,9 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	if apiAuth.UsesDefaultLoopbackToken() {
 		presenter.recordDefaultAPITokenWarning()
 	}
-	resolvedPaths, err := cliapp.ResolveCLISourcePlatformSpecPaths(repo, cliapp.CLISourcePlatformSpecPathOptions{
-		SourceRoot:       opts.SourceRoot,
-		PlatformSpecPath: opts.PlatformSpecPath,
-		ConfigPath:       opts.ConfigPath,
+	resolvedPaths, err := cliapp.ResolveCLISourcePaths(repo, cliapp.CLISourcePathOptions{
+		SourceRoot: opts.SourceRoot,
+		ConfigPath: opts.ConfigPath,
 	})
 	if err != nil {
 		presenter.fail(2, "config_load", err)
@@ -926,7 +925,7 @@ type runtimeCompositionRequest struct {
 	Repo                 string
 	Options              cliapp.ServeOptions
 	Config               cliapp.RuntimeConfigLoadResult
-	ResolvedPaths        cliapp.CLISourcePlatformSpecPaths
+	ResolvedPaths        cliapp.CLISourcePaths
 	LocalState           cliapp.LocalRuntimeStateResolution
 	SwarmDir             cliapp.CLISwarmDirResolution
 	StoreSelection       storebackend.Selection
@@ -999,9 +998,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			defer cancel()
 			if err := apiProbe.Close(shutdownCtx); err != nil {
 				presenter.cleanupFailure("api probe shutdown", err)
-				if exitCode == 0 {
-					exitCode = 1
-				}
+				exitCode = max(exitCode, 1)
 			}
 		}
 	}()
@@ -1038,17 +1035,15 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 		if err := storeLifetime.CloseUnactivated(); err != nil {
 			presenter.cleanupFailure("store shutdown", err)
-			if exitCode == 0 {
-				exitCode = 1
-			}
+			exitCode = max(exitCode, 1)
 		}
 	}()
-	preCatalogPlatformSpecPath, err := servePreCatalogPlatformSpecPath(resolvedPaths, opts)
+	_, err = cliapp.EmbeddedPlatformSpecPath()
 	if err != nil {
 		presenter.fail(4, "bundle_load", err)
 		return 1
 	}
-	if _, err := initializeServePlatformStateStores(ctx, runtimePersistence.schema, preCatalogPlatformSpecPath); err != nil {
+	if _, err := initializeServePlatformStateStores(ctx, runtimePersistence.schema); err != nil {
 		presenter.fail(4, "bundle_load", err)
 		return 1
 	}
@@ -1086,13 +1081,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), opts.ShutdownGrace)
 		defer cancelShutdown()
 		deadline, _ := shutdownCtx.Deadline()
-		if storyFollower != nil {
-			storyFollower.StopAndWait()
-		}
-		var shutdownErr error
-		if publicExposure != nil {
-			shutdownErr = publicExposure.Stop(shutdownCtx)
-		}
+		storyFollower.StopAndWait()
+		shutdownErr := publicExposure.Stop(shutdownCtx)
 		shutdownErr = errors.Join(shutdownErr, apiProbe.Close(shutdownCtx))
 		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
 		if !httpServersStarted {
@@ -1106,9 +1096,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		if supervisor != nil {
 			shutdownErr = errors.Join(shutdownErr, supervisor.ShutdownProcessWithOptions(context.Background(), runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)}))
 		} else {
-			if len(runtimeContexts) > 1 {
-				shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts, deadline))
-			}
+			shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[min(1, len(runtimeContexts)):], runtimeContextManager, opts, deadline))
 			if len(runtimeContexts) > 0 && runtimeContexts[0].runtime != nil {
 				joinErr := runtimeContexts[0].runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)})
 				shutdownErr = errors.Join(shutdownErr, joinErr)
@@ -1123,8 +1111,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		cancelOwnershipWatch()
 		finalErr := selectedLifecycle.Finalize(shutdownCtx, shutdownErr)
 		presenter.shutdown(finalErr)
-		if finalErr != nil && exitCode == 0 {
-			exitCode = 1
+		if finalErr != nil {
+			exitCode = max(exitCode, 1)
 		}
 	}()
 	apiProbeOwnedByLifecycle = true
@@ -1191,12 +1179,11 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(4, "bundle_load", errors.New("no bundle contexts loaded"))
 		return 1
 	}
-	loadedBundle := serveRuntimeBundle{platformSpecPath: preCatalogPlatformSpecPath, runningSpecPath: preCatalogPlatformSpecPath}
+	loadedBundle := serveRuntimeBundle{}
 	if len(loadedBundles) > 0 {
 		loadedBundle = loadedBundles[0]
 	}
 	source := loadedBundle.source
-	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
 	var listenerWorkspaceBackend cliapp.WorkspaceBackendSelection
 	if len(loadedBundles) == 0 {
 		presenter.boot(4, "bundle_load", "ok", "reset retained an empty source set; execution remains unloaded")
@@ -1283,8 +1270,10 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 	workspaceLabels := serveLifecycleWorkspaceLabels(loadedBundles)
 	for i, loaded := range loadedBundles {
 		contextToolGatewayBinding := toolgateway.Binding{}
+		var bootProgress func(runtime.BootProgressEvent)
 		if i == 0 {
 			contextToolGatewayBinding = toolGatewayBinding
+			bootProgress = presenter.runtimeSink()
 		}
 		workspaceBackend, err := cliapp.DecideWorkspaceBackend(req.Purpose, workspaceBackendPreference, cfg, loaded.source)
 		if err != nil {
@@ -1295,10 +1284,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return 3
 		}
 		presenter.recordWorkspace(workspaceLabels[i], workspaceBackend)
-		var bootProgress func(runtime.BootProgressEvent)
-		if i == 0 {
-			bootProgress = presenter.runtimeSink()
-		}
 		packLoad := bundlePackLoads[i]
 		request := serveRuntimeBundleContextRequest{
 			RepoRoot:            repo,
@@ -1335,6 +1320,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return 1
 		}
 		runtimeContexts = append(runtimeContexts, contextDef)
+		presenter.recordCredentialSources(contextDef.validation.CredentialSources())
+		presenter.recordCredentialSources(packLoad.Channels.CredentialSources())
 		runtimeRequests = append(runtimeRequests, request)
 		supervisor.resetContexts = runtimeContexts
 		supervisor.resetRequests = runtimeRequests
@@ -1386,18 +1373,39 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(5, "operator_channel", err)
 		return 1
 	}
-	operatorChannels, err := operatorchannel.NewService(stores.OperatorChannels(), proofStore, providerCredentialOwner, channelInterfaces, runtimeInstanceID)
+	nativeDirectory := swarmDir.Path
+	var nativeInvocation *sessionprovider.InvocationState
+	if opts.Dev {
+		nativeInvocation, err = sessionprovider.NewInvocationState(processWorkOwner)
+		if err == nil {
+			err = selectedLifecycle.SetNativeInvocationState(nativeInvocation)
+		}
+		if err != nil {
+			presenter.fail(5, "channel_onboarding", err)
+			return 1
+		}
+		nativeDirectory = ""
+	}
+	sessionBootstrap, channelProviderOwner, err := newServeChannelProviderOwners(runtimeContextManager, channelOnboardingStore, providerCredentialOwner, nativeDirectory, nativeInvocation)
+	if err != nil {
+		presenter.fail(5, "channel_onboarding", err)
+		return 1
+	}
+	if sessionBootstrap != nil {
+		if err := runtimeContextManager.BindChannelSessionAdmissionOwner(sessionBootstrap); err != nil {
+			presenter.fail(5, "channel_onboarding", err)
+			return 1
+		}
+	}
+	operatorChannels, err := operatorchannel.NewService(stores.OperatorChannels(), proofStore, channelProviderOwner, channelInterfaces, runtimeInstanceID)
 	if err != nil {
 		presenter.fail(5, "operator_channel", err)
 		return 1
 	}
-	operatorPrincipal, recoveredBindings, err := operatorChannels.Bootstrap(ctx, bootStartedAt)
+	operatorPrincipal, err := operatorChannels.PreparePrincipal(ctx, bootStartedAt)
 	if err != nil {
 		presenter.fail(5, "operator_channel", err)
 		return 1
-	}
-	for _, binding := range recoveredBindings {
-		presenter.recordOperatorChannelProofReuse(binding)
 	}
 	bootReport := primaryContext.validation.BootReport
 	stateStoreSummary := serveRuntimeStateStoreSummary(runtimeContexts)
@@ -1455,23 +1463,21 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		return 1
 	}
 	apiCapabilityRequest := selectedAPICapabilityRequest{
-		RepoRoot:                repo,
-		PlatformSpecPath:        resolvedPlatformSpecPath,
-		RunningPlatformSpecPath: strings.TrimSpace(loadedBundle.runningSpecPath),
-		LoadedBundle:            loadedBundle,
-		Source:                  source,
-		Config:                  cfg,
-		Workspaces:              workspaces,
-		Credentials:             credentialStore,
-		ManagedCredentials:      managedCredentialStore,
-		ProviderCredentials:     providerCredentialStore,
-		ExecutionPosture:        posture,
-		ProcessCapability:       processCapability,
-		PlatformPackBases:       platformPackBases,
-		RuntimeContextManager:   runtimeContextManager,
-		RuntimeSupervisor:       supervisor,
-		NoticePresentation:      noticePresentation,
-		SelectedFork:            supervisor.selected,
+		RepoRoot:              repo,
+		LoadedBundle:          loadedBundle,
+		Source:                source,
+		Config:                cfg,
+		Workspaces:            workspaces,
+		Credentials:           credentialStore,
+		ManagedCredentials:    managedCredentialStore,
+		ProviderCredentials:   providerCredentialStore,
+		ExecutionPosture:      posture,
+		ProcessCapability:     processCapability,
+		PlatformPackBases:     platformPackBases,
+		RuntimeContextManager: runtimeContextManager,
+		RuntimeSupervisor:     supervisor,
+		NoticePresentation:    noticePresentation,
+		SelectedFork:          supervisor.selected,
 	}
 	apiStoreCaps, err := buildSelectedAPICapabilities(stores, apiCapabilityRequest)
 	if err != nil {
@@ -1533,8 +1539,10 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(20, "channel_onboarding", err)
 		return 1
 	}
+	confirmationDispatcher.sessions = sessionBootstrap
 	channelActivationRefresher := &serveChannelActivationRefresher{
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
+		sessions:    sessionBootstrap,
 		credentials: providerCredentialOwner, ingress: ready,
 		testBarrier: opts.TestChannelOnboardingBarrier,
 		published:   stores.ChannelDelivery().NotifyChannelPublication,
@@ -1555,10 +1563,12 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
 		native:      stores.ChannelNative(),
 		credentials: providerCredentialOwner, effects: confirmationEffects, ingress: ready,
+		sessions: sessionBootstrap,
 	}
 	channelOnboarding, err := channelonboarding.NewService(channelonboarding.ServiceOptions{
 		Store: channelOnboardingStore, Identities: operatorChannels, Credentials: credentialWriter,
 		SourceArtifacts: stores.SourceArtifactStore(),
+		Sessions:        sessionBootstrap,
 		Catalog: func() (*channelonboarding.CandidateCatalog, error) {
 			return serveChannelOnboardingCatalog(runtimeContextManager)
 		},
@@ -1569,7 +1579,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(20, "channel_onboarding", err)
 		return 1
 	}
-	channelDestructive, err := channelonboarding.NewDestructiveService(channelOnboardingStore, operatorChannels, credentialWriter, channelActivationRefresher, opts.TestChannelOnboardingNow, opts.TestChannelOnboardingBarrier)
+	logoutDispatcher := &serveSessionLogoutDispatcher{sessions: sessionBootstrap, effects: confirmationEffects, posture: posture}
+	channelDestructive, err := channelonboarding.NewDestructiveService(channelOnboardingStore, operatorChannels, credentialWriter, channelActivationRefresher, opts.TestChannelOnboardingNow, opts.TestChannelOnboardingBarrier, logoutDispatcher)
 	if err != nil {
 		presenter.fail(20, "channel_onboarding", err)
 		return 1
@@ -1589,7 +1600,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		apiv1.ChannelOnboardingHandlers(apiv1.ChannelOnboardingHandlerOptions{Onboarding: channelOnboarding, Channels: operatorChannels}),
 	)
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
-		PlatformSpecPath:    resolvedPlatformSpecPath,
 		AuthTokens:          apiAuth.Tokens,
 		ProcessWorkOwner:    processWorkOwner,
 		OperatorPrincipalID: operatorPrincipal.ID,
@@ -1648,7 +1658,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 		publicHandler := http.NotFoundHandler()
 		if inboundHandler != nil {
-			publicHandler = registrationController.Handler(inboundHandler)
+			publicHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager, publicRegistration: registrationController}
 		}
 		publicExposure, controllerErr = runtimepublicingress.NewController(runtimepublicingress.Options{
 			Mode: publicIngressMode, PublicOrigin: opts.PublicWebhookBaseURL, ListenAddress: opts.PublicWebhookListen,
@@ -1702,7 +1712,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return err
 		}
 		current := supervisor.CurrentRuntime()
-		stop, err := startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), supervisor.resetContexts, current.Bus, current.ExecutionPosture)
+		stop, err := startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), current.Bus, current.ExecutionPosture)
 		if err != nil {
 			return err
 		}
@@ -1735,7 +1745,14 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return err
 		}
 		supervisor.resetContextsManaged = true
-		return reconcileRetiredConnectedChannelContexts(ctx, runtimeContextManager, channelOnboardingStore, channelDestructive)
+		recoveredBindings, err := restoreServeChannelStartup(ctx, runtimeContextManager, channelOnboardingStore, channelDestructive, channelOnboarding, operatorChannels, bootStartedAt)
+		if err != nil {
+			return fmt.Errorf("recover retained channel proofs: %w", err)
+		}
+		for _, binding := range recoveredBindings {
+			presenter.recordOperatorChannelProofReuse(binding)
+		}
+		return nil
 	}, channelOnboarding); err != nil {
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
@@ -1767,6 +1784,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return 1
 		}
 		presenter.recordIneligibleIngress(dormant)
+		presenter.recordCredentialSources(contextDef.runtime.CredentialSources())
 	}
 	initialRegistrationPairs := []runtimepublicingress.RegistrationPair{}
 	if publicIngressEnabled {
@@ -1815,7 +1833,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		opts.TestRuntimeContextsReadyHook(runtimeContextManager)
 	}
 	if rt != nil {
-		supervisor.stopRunStalled, err = startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), runtimeContexts, rt.Bus, posture)
+		supervisor.stopRunStalled, err = startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), rt.Bus, posture)
 	}
 	if err != nil {
 		presenter.fail(22, "ready", err)
@@ -1835,7 +1853,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			return 1
 		}
 	}
-	if !publicIngressEnabled && len(standing) > 0 {
+	if !publicIngressEnabled && requiresPublicIngressPresentation(standing) {
 		presenter.recordPublicIngressDisabledHint()
 	}
 	standing = publicIngressPresentation(standing, ready.Snapshot(time.Now().UTC()))
@@ -1916,6 +1934,8 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		store: stores.ChannelDelivery(), native: stores.ChannelNative(), cards: storeDeps.DecisionCards,
 		mailbox: stores.MailboxAPI(), proposedEffects: storeDeps.ProposedEffects,
 		activations: channelOnboardingStore, manager: runtimeContextManager,
+		sessions: sessionBootstrap, onboarding: channelOnboarding, output: opts.Output,
+		sessionStates: map[string]string{}, sessionAttempts: map[string]int{}, sessionNextAttempt: map[string]time.Time{},
 		ingress: ready,
 		effects: stores.Effects(), credentials: providerCredentialOwner,
 		posture: posture, runtimeInstanceID: runtimeInstanceID, now: time.Now,
@@ -2413,7 +2433,7 @@ func reportServeStandingReadiness(ctx context.Context, owner standingServiceStat
 			if out != nil {
 				fmt.Fprintf(out, "standing service %s suspended by=%s at=%s reason=%s resume=`swarm standing resume %s`\n", status.ServiceID, status.OverrideActor, status.OverrideAt.Format(time.RFC3339), status.OverrideReason, status.ServiceID)
 			}
-		case runtimerunlifecycle.StandingRestartCredentialDormant, runtimerunlifecycle.StandingRestartRecoveryRequired:
+		case runtimerunlifecycle.StandingRestartCredentialDormant, runtimerunlifecycle.StandingRestartSessionDormant, runtimerunlifecycle.StandingRestartRecoveryRequired:
 			if out != nil {
 				fmt.Fprintf(out, "standing service %s %s declaration_present=true binding_enabled=false run=%s generation=%d override=%s remediation=%s\n", status.ServiceID, status.RestartDisposition.Kind, status.RunID, status.Generation, status.RestartDisposition.OperatorOverride, status.RestartDisposition.RunControlGuidance())
 			}
@@ -2452,7 +2472,6 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 			ProviderTriggerCatalog:     contextDef.runtime.Options.ProviderTriggerCatalog,
 			BundleIdentity:             contextDef.bootIdentity,
 			Source:                     contextDef.loaded.source,
-			PlatformSpecPath:           contextDef.loaded.platformSpecPath,
 			Runtime:                    contextDef.runtime,
 			WorkOwner:                  contextDef.runtime.WorkOccurrence(),
 			StandingTargets:            targets,
@@ -2684,7 +2703,6 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 				ProviderTriggerCatalog:     contextDef.runtime.Options.ProviderTriggerCatalog,
 				BundleIdentity:             contextDef.bootIdentity,
 				Source:                     contextDef.loaded.source,
-				PlatformSpecPath:           contextDef.loaded.platformSpecPath,
 				Runtime:                    contextDef.runtime,
 				WorkOwner:                  contextDef.runtime.WorkOccurrence(),
 				StandingTargets:            contextTargets,
@@ -2862,8 +2880,8 @@ func initializeStateStores(ctx context.Context, schema store.SchemaBootstrapper,
 	return cliapp.SummarizeServeSchemaPlans(plans.All()), nil
 }
 
-func initializeServePlatformStateStores(ctx context.Context, schema store.SchemaBootstrapper, platformSpecPath string) (string, error) {
-	spec, err := loadServePlatformSpecDocument(platformSpecPath)
+func initializeServePlatformStateStores(ctx context.Context, schema store.SchemaBootstrapper) (string, error) {
+	spec, err := loadServePlatformSpecDocument()
 	if err != nil {
 		return "", err
 	}
@@ -2901,10 +2919,10 @@ func ensureServeSchemaTables(ctx context.Context, schema store.SchemaBootstrappe
 	return schema.BootstrapSchema(ctx, request)
 }
 
-func loadServePlatformSpecDocument(platformSpecPath string) (runtimecontracts.PlatformSpecDocument, error) {
-	platformSpecPath = strings.TrimSpace(platformSpecPath)
-	if platformSpecPath == "" {
-		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("platform spec path is required")
+func loadServePlatformSpecDocument() (runtimecontracts.PlatformSpecDocument, error) {
+	platformSpecPath, err := cliapp.EmbeddedPlatformSpecPath()
+	if err != nil {
+		return runtimecontracts.PlatformSpecDocument{}, err
 	}
 	source, err := yamlsource.LoadFile(platformSpecPath)
 	if err != nil {

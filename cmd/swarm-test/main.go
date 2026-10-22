@@ -26,6 +26,12 @@ func main() {
 }
 
 func run(args []string) int {
+	if len(args) > 0 && args[0] == "accounting" {
+		return runCompletionWithSignals(func(ctx context.Context) int { return runAccounting(ctx, args[1:]) })
+	}
+	if len(args) > 0 && args[0] == "--internal-accounting-executor" {
+		return runCompletionWithSignals(func(ctx context.Context) int { return runAccountingExecutor(ctx, args[1:]) })
+	}
 	if len(args) > 0 && args[0] == "preflight" {
 		if len(args) != 1 {
 			fmt.Fprintln(os.Stderr, "usage: swarm-test preflight (finite local selection; no selectors)")

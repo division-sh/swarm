@@ -510,6 +510,26 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 	})
 	pair := testRegistrationPair(t, registration, "hitl", "ingress:support:telegram", snapshotOwner)
 
+	t.Run("renamed raw provider cannot reuse compiled registration", func(t *testing.T) {
+		foreign := pair
+		foreign.Target.Provider = "telegram-raw"
+		foreign.Target.Selector = "ingress:support:telegram-raw"
+		before := controller.snapshot.capture()
+		err := controller.Preflight(context.Background(), exposure, foreign)
+		if err == nil || !strings.Contains(err.Error(), "provider conflicts with compiled channel registration") {
+			t.Fatalf("foreign registration provider error=%v", err)
+		}
+		if identified, applied := transport.counts(); identified != 0 || applied != 0 {
+			t.Fatalf("foreign registration provider reached identify/apply: %d/%d", identified, applied)
+		}
+		if _, launched := effectsStore.StateForAdapter("provider_registration"); launched {
+			t.Fatal("foreign registration provider launched an external effect")
+		}
+		if controller.snapshot.capture().revision != before.revision {
+			t.Fatal("foreign registration provider changed selected registration")
+		}
+	})
+
 	t.Run("duplicate slot rejects whole set before writes", func(t *testing.T) {
 		other := testRegistrationPair(t, registration, "alerts", "ingress:alerts:telegram", snapshotOwner)
 		other.CredentialKeys = map[string]string{"telegram.telegram_bot_token": "bot-other"}

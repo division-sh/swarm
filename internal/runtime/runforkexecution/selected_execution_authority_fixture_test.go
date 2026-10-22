@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -40,7 +39,7 @@ func selectedContractTestRuntimeAuthority(t *testing.T, ctx context.Context, sel
 	repo := runForkExecutionRepoRoot(t)
 	materialized := materializeSelectedRuntimeOutcomeFork(t, ctx, owner, SelectedContractExecutionRequest{
 		SourceRunID: sourceRun, At: eventID, SourceArtifactFact: source, ContractSelection: operationRequest.ContractSelection, ForkOperation: operationRequest,
-		SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected},
+		SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected},
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: agents.Options.ProcessCapability, ExecutionPosture: executionposture.Live,
 			Config: &config.Config{LLM: config.LLMConfig{Backend: llmselection.BackendAnthropic}}},
 	})

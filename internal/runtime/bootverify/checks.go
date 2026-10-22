@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/flowdata"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
@@ -146,6 +147,7 @@ type checkerContext struct {
 
 	credentialLoaded      bool
 	credentialFindings    []Finding
+	credentialSources     []runtimecredentials.SourceFact
 	credentialObservation *AdmissionObservation
 
 	mcpLoaded   bool
@@ -180,9 +182,6 @@ type checkerContext struct {
 
 	entityRefLoaded   bool
 	entityRefFindings []Finding
-
-	transitionOwnerLoaded   bool
-	transitionOwnerFindings []Finding
 
 	eventRuntimeLoaded   bool
 	eventRuntimeFindings []Finding
@@ -262,7 +261,6 @@ var bootCheckRegistry = []Check{
 	{ID: "template_instance_validation", Mode: CheckSource, Severity: "error", Run: checkTemplateInstanceValidation},
 	{ID: "singleton_coordinator_validation", Mode: CheckSource, Severity: "error", Run: checkSingletonCoordinatorValidation},
 	{ID: "cross_surface_named_type_use", Mode: CheckSource, Severity: SeverityLintEvidence, Run: checkCrossSurfaceNamedTypeUse},
-	{ID: "transition_ownership_validation", Mode: CheckSource, Severity: "error", Run: checkTransitionOwnershipValidation},
 	{ID: "event_runtime_wiring_validation", Mode: CheckSource, Severity: "error", Run: checkEventRuntimeWiringValidation},
 	{ID: "timer_validation", Mode: CheckSource, Severity: "error", Run: checkTimerValidation},
 	{ID: "clock_schedule_validation", Mode: CheckSource, Severity: "error", Run: checkClockScheduleValidation},

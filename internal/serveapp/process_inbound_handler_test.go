@@ -3,6 +3,8 @@ package serveapp
 import (
 	"context"
 	"errors"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -83,7 +86,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 			t.Fatal(err)
 		}
 		writeStandingCandidateFile(t, schemaPath, string(raw))
-		_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), contractsRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+		_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), contractsRoot)
 		if err != nil {
 			t.Fatalf("load standing fixture: %v", err)
 		}
@@ -134,16 +137,75 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	}
 	contextA, persistenceA, eventsA, _ := makeContext("chat-a", "41000000-0000-0000-0000-000000000001")
 	contextB, persistenceB, eventsB, credentialsB := makeContext("chat-b", "42000000-0000-0000-0000-000000000001")
+	contextUnavailable, persistenceUnavailable, eventsUnavailable, _ := makeContext("chat-unavailable", "43000000-0000-0000-0000-000000000001")
 	if contextA.SourceArtifactFact.Matches(contextB.SourceArtifactFact) {
 		t.Fatal("selected context fixture collapsed two distinct admitted sources")
 	}
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, contextA, contextB)
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, contextA, contextB, contextUnavailable)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 	t.Cleanup(func() {
 		if err := manager.QuiesceAllRuntimeContexts(context.Background()); err != nil {
 			t.Errorf("quiesce process ingress runtime contexts: %v", err)
+		}
+	})
+
+	t.Run("unauthenticated_acquisition_refusal", func(t *testing.T) {
+		if err := contextA.WorkOwner.Fence(); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := contextA.WorkOwner.Reopen(); err != nil {
+				t.Errorf("restore original runtime admission: %v", err)
+			}
+		})
+		use, lookup, err := manager.AcquireIngress(context.Background(), "chat-a", "telegram")
+		if use != nil {
+			_ = use.Done()
+			t.Fatal("fenced runtime admitted ingress work")
+		}
+		if !lookup.Found || !lookup.Loaded() || !errors.Is(err, worklifetime.ErrAdmissionFenced) {
+			t.Fatalf("wrong acquisition boundary: lookup=%+v error=%v", lookup, err)
+		}
+		processLog := &lockedBuffer{}
+		previousLog := log.Writer()
+		log.SetOutput(io.MultiWriter(previousLog, processLog))
+		t.Cleanup(func() { log.SetOutput(previousLog) })
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/webhooks/chat-a/telegram", strings.NewReader(`{"update_id":98}`))
+		runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(response, request)
+		if response.Code != http.StatusServiceUnavailable || response.Body.String() != "ingress target is unavailable\n" || strings.Contains(response.Body.String(), err.Error()) {
+			t.Fatalf("public acquisition response disclosed internal facts: status=%d body=%q", response.Code, response.Body.String())
+		}
+		if !strings.Contains(processLog.String(), err.Error()) {
+			t.Fatalf("acquisition cause missing from internal diagnostics: %s", processLog.String())
+		}
+		if persistenceA.recorded || persistenceB.recorded || persistenceUnavailable.recorded || len(eventsA.events)+len(eventsB.events)+len(eventsUnavailable.events) != 0 {
+			t.Fatal("unauthenticated acquisition refusal published work")
+		}
+	})
+	t.Run("unauthenticated_unavailable_target", func(t *testing.T) {
+		const privateCause = "private-unavailable-runtime-diagnostic"
+		result := manager.DeactivateBundleHash(contextUnavailable.SourceArtifactFact.BundleHash(), privateCause)
+		if !result.Found || result.State != runtimepkg.RuntimeContextStateUnloaded || result.Cause != privateCause || result.ShutdownErr != nil {
+			t.Fatalf("unavailable target precondition: %+v", result)
+		}
+		processLog := &lockedBuffer{}
+		previousLog := log.Writer()
+		log.SetOutput(io.MultiWriter(previousLog, processLog))
+		t.Cleanup(func() { log.SetOutput(previousLog) })
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/webhooks/chat-unavailable/telegram", strings.NewReader(`{"update_id":98}`))
+		runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(response, request)
+		if response.Code != http.StatusServiceUnavailable || response.Body.String() != "ingress target is unavailable\n" || strings.Contains(response.Body.String(), privateCause) {
+			t.Fatalf("public unavailable response disclosed internal facts: status=%d body=%q", response.Code, response.Body.String())
+		}
+		if !strings.Contains(processLog.String(), privateCause) {
+			t.Fatalf("unavailability cause missing from internal diagnostics: %s", processLog.String())
+		}
+		if persistenceA.recorded || persistenceB.recorded || persistenceUnavailable.recorded || len(eventsA.events)+len(eventsB.events)+len(eventsUnavailable.events) != 0 {
+			t.Fatal("unavailable target published work")
 		}
 	})
 
@@ -200,7 +262,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 
 func TestProcessIngressIndexRequiresSelectedScope(t *testing.T) {
 	root := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +305,7 @@ func TestProcessIngressIndexRequiresSelectedScope(t *testing.T) {
 
 func TestProcessIngressConstructionObservationRequiresExactOwner(t *testing.T) {
 	root := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

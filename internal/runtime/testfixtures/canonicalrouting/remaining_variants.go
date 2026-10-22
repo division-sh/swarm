@@ -329,8 +329,8 @@ func CopyTemplateInstanceEmpireOutbox(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectOrCreate)
 	removeClosedVariantFiles(t, root,
-		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer",
-		"account/entities.yaml", "account/nodes.yaml", "account/schema.yaml", "account")
+		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer/manifest.yaml", "producer",
+		"account/entities.yaml", "account/nodes.yaml", "account/schema.yaml", "account/manifest.yaml", "account")
 	files := map[string]string{
 		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
 		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",

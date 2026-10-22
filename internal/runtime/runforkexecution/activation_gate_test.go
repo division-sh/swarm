@@ -355,7 +355,7 @@ func rootedActivationGateFixture(t *testing.T, forkRunID string) (runfork.RunFor
 	var sources [2]LoadedSelectedContractSource
 	for i, root := range []string{targetRoot, canonicalrouting.CopyForkFanOutCarrier(t, false, false)} {
 		loaded, err := (admittedFixtureSelectedContractSourceLoader{
-			RepoRoot: repo, SourceRoot: root, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo),
+			RepoRoot: repo, SourceRoot: root,
 		}).LoadRunForkSelectedContractSource(context.Background(), binding.ContractSelection)
 		if err != nil {
 			t.Fatalf("load activation fixture source: %v", err)

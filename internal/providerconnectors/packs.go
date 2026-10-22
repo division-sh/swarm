@@ -309,6 +309,9 @@ func ParseConnectorManifest(body []byte) (ConnectorManifest, error) {
 func (m ConnectorManifest) SourceValue() yamlsource.Value { return m.source }
 
 func (m ConnectorManifest) Validate() error {
+	if err := runtimecontracts.ValidateToolDeclarationNames(m.Tools); err != nil {
+		return err
+	}
 	provider := m.Provider
 	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
 		return fmt.Errorf("connector manifest provider requires an exact portable directory key: %w", err)

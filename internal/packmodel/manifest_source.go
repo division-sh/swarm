@@ -69,7 +69,7 @@ func manifestTexts(value yamlsource.Value) ([]string, error) {
 }
 
 func admitCanValues(can map[string]yamlsource.Value, capabilities *Capabilities) error {
-	for name, target := range map[string]*string{"receive_https_route": &capabilities.Can.ReceiveHTTPSRoute, "verify_secret": &capabilities.Can.VerifySecret} {
+	for name, target := range map[string]*string{"receive_https_route": &capabilities.Can.ReceiveHTTPSRoute, "receive_session_events": &capabilities.Can.ReceiveSessionEvents, "verify_secret": &capabilities.Can.VerifySecret} {
 		if value, present := can[name]; present {
 			text, err := manifestText(value)
 			if err != nil {

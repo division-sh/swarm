@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
@@ -47,6 +46,7 @@ func assertCompletion2270SelectedCLIReadback(t testing.TB, ctx context.Context, 
 }
 
 func TestSelectedCompletion2270EvidenceBothStores(t *testing.T) {
+	t.Run("q1_session_execution_preservation", proveSelectedQ1SessionExecutionPreservationBothStores)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, protocol := range []struct {
 			backend, credential, first, last string
@@ -77,7 +77,7 @@ func TestSelectedCompletion2270EvidenceBothStores(t *testing.T) {
 				}))
 				defer lookup.Close()
 				root := runForkExecutionRepoRoot(t)
-				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: selectedForkFrameContracts(t, root, lookup.URL), PlatformSpecPath: contracts.DefaultPlatformSpecFile(root)}
+				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: selectedForkFrameContracts(t, root, lookup.URL)}
 				loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 				if err != nil {
 					t.Fatal(err)

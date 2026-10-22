@@ -37,8 +37,12 @@ func provePlan(root, ledger string) error {
 		if err != nil {
 			return err
 		}
+		currentOutput, err := finiteCurrentOutput(root, c, output)
+		if err != nil {
+			return err
+		}
 		current, err := os.ReadFile(filepath.Join(root, c.File))
-		if err != nil || !bytes.Equal(current, output) {
+		if err != nil || !bytes.Equal(current, currentOutput) {
 			return fmt.Errorf("%s: output differs from the reviewed tree", c.File)
 		}
 		second, err := rewrite(c, output)

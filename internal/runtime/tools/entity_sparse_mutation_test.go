@@ -14,11 +14,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deadletters"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -51,19 +53,24 @@ type entityToolImportOwner interface {
 }
 
 type entityToolImportFixture struct {
-	owner    entityToolImportOwner
-	source   semanticview.Source
-	selected any
-	pipeline *pipeline.PipelineCoordinator
+	owner           entityToolImportOwner
+	source          semanticview.Source
+	selected        any
+	pipeline        *pipeline.PipelineCoordinator
+	continuation    *bustest.DeliveryContinuationOwner
+	deliveryRuntime *bus.EventBus
 }
 
 type entityToolImportFixtureKey struct{}
 
-type entityToolPipelineModule struct{ source semanticview.Source }
+type entityToolPipelineModule struct {
+	source semanticview.Source
+	nodes  []pipeline.WorkflowNode
+}
 
-func (m entityToolPipelineModule) SemanticSource() semanticview.Source  { return m.source }
-func (entityToolPipelineModule) WorkflowNodes() []pipeline.WorkflowNode { return nil }
-func (entityToolPipelineModule) GuardRegistry() pipeline.GuardRegistry  { return nil }
+func (m entityToolPipelineModule) SemanticSource() semanticview.Source    { return m.source }
+func (m entityToolPipelineModule) WorkflowNodes() []pipeline.WorkflowNode { return m.nodes }
+func (entityToolPipelineModule) GuardRegistry() pipeline.GuardRegistry    { return nil }
 
 type entityToolPipelineBus struct {
 	pipeline.WorkflowDeliveryRuntime
@@ -87,24 +94,131 @@ func (entityToolPipelineDispatcher) DispatchPostCommit(context.Context, []engine
 	return errors.New("unexpected fixture dispatch")
 }
 
-func newEntityToolPipeline(t *testing.T, selected any, source semanticview.Source) *pipeline.PipelineCoordinator {
+func newEntityToolPipeline(t *testing.T, selected any, source semanticview.Source, bindings ...*entityToolImportFixture) *pipeline.PipelineCoordinator {
 	t.Helper()
-	bus := entityToolPipelineBus{}
-	pc := pipeline.NewPipelineCoordinatorWithOptions(bus, pipeline.PipelineCoordinatorOptions{
+	bundle, found := semanticview.Bundle(source)
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("entity pipeline fixture requires its admitted source artifact")
+	}
+	fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := worklifetime.NewProcess()
+	work, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: fact.BundleHash()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := deliverylifecycle.NewNormalExecutionAuthority(fact, authorActivityTestRuntimeInstanceID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliveryRuntime, err := bus.NewEphemeralEventBusWithOptions(selected.(bus.EventStore), bus.EventBusOptions{
+		ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(), ContractBundle: source,
+		WorkOwner: work, SourceArtifactFact: fact, RuntimeInstanceID: authorActivityTestRuntimeInstanceID, DeliveryAuthority: authority,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation := bustest.NewDeliveryContinuationOwner(false)
+	if len(bindings) > 0 {
+		bindings[0].continuation = continuation
+		bindings[0].deliveryRuntime = deliveryRuntime
+	}
+	if err := deliveryRuntime.SetDeliveryContinuationOwner(continuation); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := deliveryRuntime.WaitForQuiescence(ctx); err != nil {
+			t.Error(err)
+		}
+		if _, err := work.RetireAndWait(ctx); err != nil {
+			t.Error(err)
+		}
+		if _, err := process.Join(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	fixtureBus := entityToolPipelineBus{WorkflowDeliveryRuntime: deliveryRuntime}
+	var nodes []pipeline.WorkflowNode
+	for _, declaration := range source.ExecutableNodeRecords() {
+		node, err := declaration.Identity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		entry := pipeline.WorkflowNode{Node: node, ExecutionType: declaration.Entry.ExecutionType}
+		for _, subscription := range semanticview.ExecutableNodeEffectiveSubscriptions(source, node) {
+			entry.Subscriptions = append(entry.Subscriptions, events.EventType(subscription))
+		}
+		nodes = append(nodes, entry)
+	}
+	pc := pipeline.NewPipelineCoordinatorWithOptions(fixtureBus, pipeline.PipelineCoordinatorOptions{
 		ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
-		Module: entityToolPipelineModule{source: source}, Persistence: pipeline.NewWorkflowPersistence(selected.(pipeline.WorkflowPersistenceOwner)),
+		WorkOwner: work, SourceArtifactFact: fact,
+		Module: entityToolPipelineModule{source: source, nodes: nodes}, Persistence: pipeline.NewWorkflowPersistence(selected.(pipeline.WorkflowPersistenceOwner)),
 		DeliveryStore: selected.(deliverylifecycle.Store), DeadLetters: selected.(deadletters.AcknowledgedRecorder),
 		PipelineObligations: selected.(interface {
 			PipelineObligations() pipelineobligation.Store
 		}).PipelineObligations(),
 		DecisionCards: selected.(decisioncard.Store), ProposedEffects: selected.(decisioncard.ProposedEffectStore), HumanTasks: selected.(decisioncard.HumanTaskStore),
 		DecisionCardDraftExpiry: selected.(pipeline.DecisionCardDraftExpiry), HumanTaskExpiry: selected.(pipeline.HumanTaskExpiry),
-		DeliveryRuntime: bus, RunLifecycle: selected.(runlifecycle.OperationOwner),
+		DeliveryRuntime: fixtureBus, RunLifecycle: selected.(runlifecycle.OperationOwner),
 	})
 	if pc == nil {
 		t.Fatal("constructed entity fixture requires the selected pipeline")
 	}
 	return pc
+}
+
+func advanceReviewedEntityToolFixture(t *testing.T, ctx context.Context, flowInstance, entityID string) {
+	t.Helper()
+	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
+	owner := flowidentity.RunScopedFlowInstance{RunID: correlation.RunIDFromContext(ctx), Route: flowidentity.StoredRoute("review", flowidentity.LogicalInstanceID(flowInstance), flowInstance)}
+	before, found, err := fixture.pipeline.Load(ctx, owner)
+	if err != nil || !found || before.CurrentState != "queued" {
+		t.Fatalf("stored-stage witness must start queued: found=%v instance=%+v err=%v", found, before, err)
+	}
+	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), flowInstance)
+	event := eventtest.RuntimeControl(uuid.NewString(), "review/advance", "test", "", json.RawMessage(`{}`), 0, owner.RunID, "", envelope, time.Now().UTC())
+	storetest.CommitSemanticEvent(t, ctx, fixture.selected, event)
+	node, err := semanticview.ResolveExecutableNodeDeclaration(fixture.source, "review", "reviewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: flowInstance, EntityID: entityID})}
+	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, fixture.selected, event, []events.DeliveryRoute{route})
+	deliveryID, err := deliverylifecycle.DeliveryID(event.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := fixture.selected.(deliverylifecycle.Store).Snapshot(ctx, deliveryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.deliveryRuntime.SetDeliveryAuthority(snapshot.Authority); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.continuation.Retain(snapshot); err != nil {
+		t.Fatal(err)
+	}
+	delivery, err := events.NewDeliveryEvent(event, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executionCtx, err := eventreceiver.NormalExecution().Bind(ctx, effects.ExecutionModeLive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forward, _, outcome, err := fixture.pipeline.InterceptDeliveryRoute(executionCtx, delivery, route)
+	if err != nil || forward || !outcome.Committed {
+		t.Fatalf("native reviewed transition did not commit: forward=%v outcome=%+v err=%v", forward, outcome, err)
+	}
+	after, found, err := fixture.pipeline.Load(ctx, owner)
+	if err != nil || !found || after.CurrentState != "marginal_review" || after.Revision != before.Revision+1 || !reflect.DeepEqual(after.Fields, before.Fields) {
+		t.Fatalf("native reviewed transition changed readback/business fields: found=%v instance=%+v err=%v", found, after, err)
+	}
 }
 
 func entityToolFixtureActor(t *testing.T, source semanticview.Source, actor models.AgentConfig, runID, flowID, flowInstance string) models.AgentConfig {
@@ -170,6 +284,14 @@ func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any,
 	}
 	instanceKey, err := pipeline.AdmitFlowInstanceKey(source, flowID, owner.Route.InstanceID)
 	if err != nil {
+		t.Fatalf("admit the component fixture's explicit construction key: %v", err)
+	}
+	graph, found := semanticview.WorkflowStageTopology(source, flowID)
+	if !found {
+		t.Fatal("entity fixture requires its compiled stage catalog")
+	}
+	storedStage, err := graph.ResolveStoredStage(stage)
+	if err != nil {
 		t.Fatal(err)
 	}
 	ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
@@ -178,7 +300,7 @@ func constructEntityToolFixture(t *testing.T, ctx context.Context, selected any,
 		Mode: view.Schema.EffectiveMode(), InstanceKey: instanceKey,
 		ParentFlowID: constructed.ParentRoute.FlowID, ParentFlowInstance: constructed.ParentRoute.FlowInstance, ParentEntityID: constructed.ParentEntityID,
 		EntityType:   func() string { contract, _ := entityruntime.ResolveForFlow(source, flowID); return contract.EntityType }(),
-		CurrentState: stage, StageDefined: true, Fields: fields, CreatedAt: at, EnteredStageAt: at,
+		CurrentState: storedStage.ID(), StageDefined: !storedStage.IsStatelessPosture(), Fields: fields, CreatedAt: at, EnteredStageAt: at,
 	}, at)
 	if err != nil {
 		t.Fatal(err)
@@ -285,7 +407,9 @@ func seedEntityToolSourceRun(t *testing.T, selected any, bundle *contracts.Workf
 		t.Fatalf("entity test backend %T has no scenario import owner", selected)
 	}
 	source := semanticview.Wrap(bundle)
-	return context.WithValue(ctx, entityToolImportFixtureKey{}, entityToolImportFixture{owner: owner, source: source, selected: selected, pipeline: newEntityToolPipeline(t, selected, source)})
+	bindings := entityToolImportFixture{owner: owner, source: source, selected: selected}
+	bindings.pipeline = newEntityToolPipeline(t, selected, source, &bindings)
+	return context.WithValue(ctx, entityToolImportFixtureKey{}, bindings)
 }
 
 func TestEntitySparseGeneratedToolMutation(t *testing.T) {

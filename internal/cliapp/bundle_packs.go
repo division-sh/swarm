@@ -28,7 +28,7 @@ func LoadBundlePackRuntime(ctx context.Context, cfgResult RuntimeConfigLoadResul
 	if err != nil {
 		return BundlePackRuntimeLoad{}, err
 	}
-	bindings, err := compileChannelBindings(ctx, cfgResult.Config, projection.ChannelPlans, staticCredentials, managedCredentials)
+	bindings, sources, err := compileChannelBindings(ctx, cfgResult.Config, projection.ChannelPlans, staticCredentials, managedCredentials)
 	if err != nil {
 		return BundlePackRuntimeLoad{}, fmt.Errorf("load channel bindings: %w", err)
 	}
@@ -37,6 +37,7 @@ func LoadBundlePackRuntime(ctx context.Context, cfgResult RuntimeConfigLoadResul
 	}
 	channels := ChannelPackLoad{
 		Plans: projection.ChannelPlans, Bindings: bindings,
+		credentialSources: sources,
 	}
 	return BundlePackRuntimeLoad{ProviderTriggers: triggers, Connectors: projection.ProviderConnectors, Channels: channels}, nil
 }

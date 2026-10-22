@@ -141,9 +141,8 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 				contractsRoot = canonicalrouting.CopyForkFanOutCarrier(t, false, true)
 			}
 			loader := admittedFixtureSelectedContractSourceLoader{
-				RepoRoot:         repoRoot,
-				SourceRoot:       contractsRoot,
-				PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+				RepoRoot:   repoRoot,
+				SourceRoot: contractsRoot,
 			}
 			sourceRunID := uuid.NewString()
 			sourceEventID := uuid.NewString()
@@ -504,9 +503,8 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 				contractsRoot = canonicalrouting.CopyForkFanOutCarrier(t, false, true)
 			}
 			loader := admittedFixtureSelectedContractSourceLoader{
-				RepoRoot:         repoRoot,
-				SourceRoot:       contractsRoot,
-				PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+				RepoRoot:   repoRoot,
+				SourceRoot: contractsRoot,
 			}
 			loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 				Mode: runfork.RunForkContractSelectionModeSelectedContracts,
@@ -698,7 +696,6 @@ func TestSelectedRunRootEntityContractUsesExactRunCoordinate(t *testing.T) {
 	repoRoot := runForkExecutionRepoRoot(t)
 	loader := admittedFixtureSelectedContractSourceLoader{
 		RepoRoot: repoRoot, SourceRoot: filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple"),
-		PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 	}
 	loaded, err := loader.LoadRunForkSelectedContractSource(runForkTestContext(t), runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err != nil {
@@ -724,8 +721,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -956,9 +952,15 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, result.Materialization.ForkRunID, result.Materialization.ForkRunID).Scan(&forkEntityState); err != nil {
+	forkOwner, err := flowidentity.NewRunScopedFlowInstance(result.Materialization.ForkRunID, flowidentity.StoredRoute(semanticview.RootExecutionFlowID(loaded.Source), result.Materialization.ForkRunID, result.Materialization.ForkRunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, found, err := runtimepipeline.NewWorkflowPersistence(pg).LoadWorkflowInstance(ctx, forkOwner)
+	if err != nil || !found {
 		t.Fatalf("load fork entity state: %v", err)
 	}
+	forkEntityState = instance.CurrentState
 	if sourceStatus != runfork.RunForkSourceFrozenStatus || forkStatus != runfork.RunForkActivatedStatus || forkEntityState == "" {
 		t.Fatalf("post execution = source:%s fork:%s entity:%s", sourceStatus, forkStatus, forkEntityState)
 	}
@@ -971,9 +973,8 @@ func TestExecuteSelectedContractRunForkAdmitsExactSourceModeBeforeMaterializatio
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{
-		RepoRoot:         repoRoot,
-		SourceRoot:       contractsRoot,
-		PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		RepoRoot:   repoRoot,
+		SourceRoot: contractsRoot,
 	}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: runfork.RunForkContractSelectionModeSelectedContracts,
@@ -1058,7 +1059,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := canonicalrouting.ExampleRoot(t, canonicalrouting.TemplateCreateMintedKey)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: runfork.RunForkContractSelectionModeSelectedContracts,
 	})
@@ -1240,8 +1241,7 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, platformSpecPath)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
@@ -1310,7 +1310,7 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := canonicalrouting.CopyForkChronologicalDispatch(t)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -1374,8 +1374,7 @@ func TestExecuteSelectedContractRunForkConstructsAgentRecipientWithoutHandlerMat
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -1435,8 +1434,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -1690,7 +1688,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			}))
 			defer lookup.Close()
 			contractsRoot := selectedForkFrameContracts(t, repoRoot, lookup.URL)
-			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
+			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 			loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 			if err != nil {
 				t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
@@ -2068,7 +2066,7 @@ func proveSelectedForkClaudeOAuth(t *testing.T, backend string, db *sql.DB, sele
 	if err := os.CopyFS(contractsRoot, os.DirFS(sourceContractsRoot)); err != nil {
 		t.Fatalf("copy selected contract fixture: %v", err)
 	}
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
@@ -3033,7 +3031,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier7-composition/test-agent-emits-to-node")
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
@@ -3131,7 +3129,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
 	repoRoot := runForkExecutionRepoRoot(t)
 	loader := admittedFixtureSelectedContractSourceLoader{
-		RepoRoot: repoRoot, SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		RepoRoot: repoRoot, SourceRoot: root,
 	}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, selection)
 	if err != nil {
@@ -3691,7 +3689,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\n")
 	repoRoot := runForkExecutionRepoRoot(t)
 	loaded, err := (admittedFixtureSelectedContractSourceLoader{
-		RepoRoot: repoRoot, SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		RepoRoot: repoRoot, SourceRoot: root,
 	}).LoadRunForkSelectedContractSource(context.Background(), testContractSelection())
 	if err != nil {
 		t.Fatal(err)
@@ -3799,8 +3797,7 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -3895,8 +3892,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -4006,8 +4002,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -4069,8 +4064,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -4172,8 +4166,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -4307,8 +4300,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -4433,8 +4425,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -4503,8 +4494,7 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -4562,8 +4552,7 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := canonicalrouting.CopyUnresolvedSelectedForkInput(t)
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -4611,8 +4600,7 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -4672,8 +4660,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
-	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: platformSpecPath}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{
 		Mode: "selected_contracts",
 	})
@@ -5396,7 +5383,7 @@ func materializeSelectedExecutionForkForTest(
 	}
 	repo := runForkExecutionRepoRoot(t)
 	original, err := loadOriginalLoopCarriage(ctx, SourceArtifactSelectedContractSourceLoader{
-		RepoRoot: repo, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo), Store: pg,
+		RepoRoot: repo, Store: pg,
 	}, sourceRunID, prepared)
 	defer func() {
 		if err := prepared.Close(); err != nil {
@@ -5621,13 +5608,11 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			fields, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'flow-a/1', $3, 'Selected Execution Entity',
-			'pending', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
-			$4, $4, $4
+			'{}'::jsonb, $4, $4
 		)
 	`, sourceRunID, entityID, entityType, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)

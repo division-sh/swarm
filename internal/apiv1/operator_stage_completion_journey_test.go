@@ -8,6 +8,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -76,10 +77,10 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 				t.Fatalf("run.start: %#v", started.Error)
 			}
 			stageCompletionWaitForDelivery(t, db, backend, runID, "flow.started")
-			stageCompletionAssertStoredState(t, db, backend, runID, "ready")
+			stageCompletionAssertStoredState(t, selected, runID, "ready")
 
-			recovered := selected
-			recoveredSource := stageCompletionRehydrate(t, selected, runID, fact.BundleHash())
+			recovered, recoveredSource := stageCompletionRehydrate(t, selected, db, backend, runID, fact.BundleHash())
+			stageCompletionAssertStoredState(t, recovered, runID, "ready")
 			catalog := stageCompletionCatalog(t, recoveredSource)
 			ctx := testAuthorActivityContextForSource(context.Background(), fact)
 			if _, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
@@ -96,8 +97,9 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 				t.Fatalf("event.publish finish: %#v", finished.Error)
 			}
 			stageCompletionWaitForDelivery(t, db, backend, runID, "flow.finish")
-			stageCompletionAssertStoredState(t, db, backend, runID, "Ready")
-			recoveredSource = stageCompletionRehydrate(t, selected, runID, fact.BundleHash())
+			stageCompletionAssertStoredState(t, selected, runID, "Ready")
+			recovered, recoveredSource = stageCompletionRehydrate(t, selected, db, backend, runID, fact.BundleHash())
+			stageCompletionAssertStoredState(t, recovered, runID, "Ready")
 			catalog = stageCompletionCatalog(t, recoveredSource)
 			if _, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
 				t.Fatalf("request terminal completion: %v", err)
@@ -122,7 +124,7 @@ func exactStageCompletionJourneyBundle(t *testing.T) *runtimecontracts.WorkflowC
 	return bundle
 }
 
-func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore, runID, hash string) semanticview.Source {
+func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore, db *sql.DB, backend, runID, hash string) (stageCompletionJourneyStore, semanticview.Source) {
 	t.Helper()
 	record, err := selected.GetSourceArtifact(context.Background(), hash)
 	if err != nil {
@@ -144,7 +146,10 @@ func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore
 	if err != nil {
 		t.Fatalf("recompile retained selected source: %v", err)
 	}
-	return semanticview.Wrap(bundle)
+	if backend == "sqlite" {
+		return storetest.AdmitSQLiteRuntimeStore(t, db), semanticview.Wrap(bundle)
+	}
+	return storetest.AdmitPostgresRuntimeStore(t, db), semanticview.Wrap(bundle)
 }
 
 func stageCompletionCatalog(t *testing.T, source semanticview.Source) runtimerunlifecycle.FinalCatalog {
@@ -192,15 +197,18 @@ func stageCompletionWaitForDelivery(t *testing.T, db *sql.DB, backend, runID, ev
 	})
 }
 
-func stageCompletionAssertStoredState(t *testing.T, db *sql.DB, backend, runID, want string) {
+func stageCompletionAssertStoredState(t *testing.T, selected runtimepipeline.WorkflowInstancePersistenceReader, runID, want string) {
 	t.Helper()
-	query := "SELECT current_state FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = 'discovery'"
-	if backend == "postgres" {
-		query = "SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = 'discovery'"
+	owner := flowidentity.RunScopedFlowInstance{RunID: runID,
+		Route: flowidentity.StoredRoute("discovery", "discovery", "discovery")}
+	stored, found, err := selected.LoadWorkflowInstance(context.Background(), owner)
+	if err != nil || !found || stored.EntityID != runtimepipeline.FlowInstanceEntityID("discovery") ||
+		stored.StorageRef != "discovery" || stored.WorkflowName != "discovery" || stored.EntityType != "discovery" {
+		t.Fatalf("stored selected stage identity: found=%t instance=%+v err=%v", found, stored, err)
 	}
-	var state string
-	if err := db.QueryRow(query, runID, runtimepipeline.FlowInstanceEntityID("discovery")).Scan(&state); err != nil || state != want {
-		t.Fatalf("stored selected stage = %q, %v, want %q", state, err, want)
+	if !stored.StageDefined || stored.CurrentState != want || stored.Revision < 1 || stored.CreatedAt.IsZero() ||
+		stored.EnteredStageAt.IsZero() || stored.UpdatedAt.IsZero() {
+		t.Fatalf("stored selected lifecycle = %+v, want present named stage %q", stored, want)
 	}
 }
 

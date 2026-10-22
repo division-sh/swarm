@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -75,7 +74,6 @@ func issue2655PreparedProjection(t *testing.T) *PreparedSelectedFork {
 	repo := runForkExecutionRepoRoot(t)
 	loaded, err := (admittedFixtureSelectedContractSourceLoader{
 		RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"),
-		PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
 	}).LoadRunForkSelectedContractSource(ctx, selection)
 	if err != nil {
 		t.Fatal(err)

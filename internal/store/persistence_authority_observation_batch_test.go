@@ -17,7 +17,7 @@ func observationBatchAuthorityViolations(findings []authorityFinding) []string {
 			closed = true
 		case "internal/runtime/conformance/persisted_surfaces_test.go":
 			switch finding.Enclosing {
-			case "requireCanonicalConversationSurface", "requireCanonicalRuntimeLogSurface", "requireMutationSurface", "trackedMutationStateMatchesEntityState", "newEntityToolConformanceHarness", "TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrites", "TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites":
+			case "requireCanonicalConversationSurface", "requireCanonicalRuntimeLogSurface", "requireMutationSurface", "trackedMutationStateMatchesEntityState", "newEntityToolConformanceHarness", "newMutationSurfaceConformanceStore", "testTrackedEntityWorkflowWrites", "testTrackedEntityToolWrites", "TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrites", "TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites":
 				closed = true
 			}
 		case "internal/runtime/conformance/delivery_lifecycle_conformance_test.go":
@@ -52,6 +52,9 @@ func TestObservationBatchGuardRejectsRawAndCallbackAuthority(t *testing.T) {
 		{"internal/runtime/conformance/notify_all_children_runtime_conformance_test.go", "assertNotifyAllChildrenCompletedTurns"},
 		{"internal/runtime/conformance/notify_all_children_runtime_conformance_test.go", "loadNotifyAllChildrenItemEvents"},
 		{"internal/runtime/conformance/persisted_surfaces_test.go", "trackedMutationStateMatchesEntityState"},
+		{"internal/runtime/conformance/persisted_surfaces_test.go", "testTrackedEntityWorkflowWrites"},
+		{"internal/runtime/conformance/persisted_surfaces_test.go", "testTrackedEntityToolWrites"},
+		{"internal/runtime/conformance/persisted_surfaces_test.go", "newMutationSurfaceConformanceStore"},
 		{"internal/runtime/conformance/fan_in_barrier_runtime_conformance_test.go", "newFanInBarrierRuntimeForSource"},
 	} {
 		for _, signature := range []string{"db *sql.DB", "query func(context.Context,*sql.Tx) error"} {

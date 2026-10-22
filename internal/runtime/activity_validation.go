@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -100,13 +101,7 @@ func validateActivitySpec(source semanticview.Source, node runtimeidentity.Execu
 	if !ok {
 		return []error{fmt.Errorf("%s: tool %q is not declared in tools.yaml", context, toolID)}
 	}
-	handler := tool.Handler()
-	if handler != runtimecontracts.ToolHandlerHTTP {
-		errs = append(errs, fmt.Errorf("%s: tool %q handler_type %q is not supported for activities; MCP/platform/native/generated tools fail closed in Stage 1", context, toolID, handler.String()))
-	}
-	if _, hasHTTP := tool.HTTPExecution(); !hasHTTP {
-		errs = append(errs, fmt.Errorf("%s: tool %q is missing http block; activities support authored HTTP tools only", context, toolID))
-	}
+	errs = append(errs, validateActivityToolTransport(source, site, resultEvents, tool, context)...)
 	if tool.RatePolicy().Enabled() {
 		errs = append(errs, fmt.Errorf("%s: tool %q uses rate_limit; activity HTTP rate-limit admission is split until the activity dispatcher consumes the external dispatch owner", context, toolID))
 	}
@@ -148,6 +143,29 @@ func validateActivitySpec(source semanticview.Source, node runtimeidentity.Execu
 		}
 	}
 	errs = append(errs, validateActivityInputAgainstToolSchema(context, activity, tool.InputSchema())...)
+	return errs
+}
+
+func validateActivityToolTransport(source semanticview.Source, reference runtimecontracts.ActivitySite, resultEvents runtimecontracts.ActivityResultEvents, tool runtimecontracts.ToolSchemaEntry, context string) []error {
+	toolID := reference.Spec.Tool
+	if _, native := tool.InProcess(); native {
+		activityID := resultEvents.ActivityID
+		site, err := channelonboarding.ResolveSessionActivitySite(source, reference.Node, reference.HandlerEventKey, toolID, activityID)
+		if err == nil {
+			err = channelonboarding.QualifySessionActivityDeclaration(source, site)
+		}
+		if err != nil {
+			return []error{fmt.Errorf("%s: private native activity: %w", context, err)}
+		}
+		return nil
+	}
+	var errs []error
+	if handler := tool.Handler(); handler != runtimecontracts.ToolHandlerHTTP {
+		errs = append(errs, fmt.Errorf("%s: tool %q handler_type %q is not supported for activities; MCP/platform/native/generated tools fail closed in Stage 1", context, toolID, handler.String()))
+	}
+	if _, hasHTTP := tool.HTTPExecution(); !hasHTTP {
+		errs = append(errs, fmt.Errorf("%s: tool %q is missing http block; activities support authored HTTP tools only", context, toolID))
+	}
 	return errs
 }
 

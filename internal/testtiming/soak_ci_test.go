@@ -184,7 +184,7 @@ func TestMandatorySoakWorkflowRequiredExactHeadAndBudgets(t *testing.T) {
 		t.Fatal(err)
 	}
 	job := workflow.Jobs["proof-unit"]
-	if job.If != `(github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.proof_matrix != '{"include":[]}'` || job.TimeoutMinutes != "${{ matrix.timeout_minutes }}" || job.RunsOn != "ubuntu-latest" || job.Strategy.FailFast == nil || *job.Strategy.FailFast != "${{ !inputs.keep_going }}" || job.Strategy.Matrix != "${{ fromJson(needs.ci-plan.outputs.proof_matrix) }}" || !slices.Equal(job.Needs, []string{"ci-plan"}) || job.Name != "Go proof ${{ matrix.unit }}" {
+	if job.If != `(github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.proof_matrix != '{"include":[]}'` || job.TimeoutMinutes != "${{ matrix.timeout_minutes }}" || job.RunsOn != "ubuntu-latest" || job.Strategy.FailFast == nil || *job.Strategy.FailFast != "${{ !inputs.keep_going }}" || job.Strategy.Matrix != "${{ fromJson(needs.ci-plan.outputs.proof_matrix) }}" || !slices.Equal(job.Needs, []string{"ci-plan"}) || job.Name != "Go proof ${{ matrix.unit }}" {
 		t.Fatalf("mandatory isolated soak job changed: %+v", job)
 	}
 	for _, name := range []string{"timing-budget", "required-tests", "publish-timing-model"} {

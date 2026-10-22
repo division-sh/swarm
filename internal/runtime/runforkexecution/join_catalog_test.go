@@ -59,7 +59,7 @@ func TestSelectedActivationReconstructsJoinCatalogWithoutDeferredAuthority(t *te
 	var sources [2]LoadedSelectedContractSource
 	for i, root := range []string{targetRoot, canonicalrouting.CopyForkFanOutCarrier(t, false, false)} {
 		loaded, err := (admittedFixtureSelectedContractSourceLoader{
-			RepoRoot: repo, SourceRoot: root, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo),
+			RepoRoot: repo, SourceRoot: root,
 		}).LoadRunForkSelectedContractSource(context.Background(), binding.ContractSelection)
 		if err != nil {
 			t.Fatal(err)

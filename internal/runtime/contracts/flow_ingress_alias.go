@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/packmodel"
@@ -10,8 +9,7 @@ import (
 )
 
 type compiledFlowIngressAlias struct {
-	value      string
-	provenance EffectiveValueProvenance
+	value string
 }
 
 // FlowIngressAlias is an immutable declaration fact, not deployment enablement.
@@ -66,11 +64,7 @@ func compileFlowIngressAliases(bundle *WorkflowContractBundle) (map[string]compi
 		if err := ValidateIngressAlias(alias); err != nil {
 			return nil, fmt.Errorf("%s: %w", view.Paths.SchemaFile, err)
 		}
-		out[flowID] = compiledFlowIngressAlias{value: alias, provenance: EffectiveValueProvenance{
-			Origin: EffectiveValueOriginDerived, RuleID: "flow.rooted_ingress_alias",
-			InputPaths: []string{"source.root_directory", "schemas[" + strconv.Quote(flowID) + "].declaration"},
-			SourceFile: view.Paths.SchemaFile,
-		}}
+		out[flowID] = compiledFlowIngressAlias{value: alias}
 	}
 	return out, nil
 }

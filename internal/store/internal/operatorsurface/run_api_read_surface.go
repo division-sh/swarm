@@ -39,6 +39,11 @@ func (s *RunPostgres) requireRunHeaderAccess() error {
 }
 
 func (s *RunPostgres) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {
+	var root sourceartifact.RootAdmissionReference
+	return s.loadRunHeader(ctx, runID, &root)
+}
+
+func (s *RunPostgres) loadRunHeader(ctx context.Context, runID string, root *sourceartifact.RootAdmissionReference) (operatorread.RunHeader, error) {
 	if s == nil || s.backend == nil {
 		return operatorread.RunHeader{}, fmt.Errorf("postgres store is required")
 	}
@@ -55,7 +60,7 @@ func (s *RunPostgres) LoadRunHeader(ctx context.Context, runID string) (operator
 	row := s.backend.QueryRowContext(ctx, runHeaderSelectSQL()+`
 WHERE r.run_id = $1::uuid
 `, runID)
-	header, err := scanRunHeader(row)
+	header, err := scanRunHeaderWithRoot(row, root)
 	if errors.Is(err, sql.ErrNoRows) {
 		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
@@ -182,6 +187,11 @@ type runHeaderScanner interface {
 }
 
 func scanRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
+	var root sourceartifact.RootAdmissionReference
+	return scanRunHeaderWithRoot(row, &root)
+}
+
+func scanRunHeaderWithRoot(row runHeaderScanner, reference *sourceartifact.RootAdmissionReference) (operatorread.RunHeader, error) {
 	var header operatorread.RunHeader
 	var endedAt sql.NullTime
 	var failureRaw []byte
@@ -244,6 +254,7 @@ func scanRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 		return operatorread.RunHeader{}, err
 	}
 	header.BundleHash = root.BundleHash
+	*reference = root
 	return header, nil
 }
 

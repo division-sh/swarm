@@ -248,17 +248,6 @@ func providerSchemaValidationActors(source semanticview.Source) ([]models.AgentC
 	return actors, errs
 }
 
-func (r *EmitRegistry) EventSchemaSnapshot() map[string]EmitSchema {
-	if r == nil {
-		return map[string]EmitSchema{}
-	}
-	return SnapshotEmitSchemas(r.activeSchemas)
-}
-
-func (r *EmitRegistry) ValidateEventPayloadAgainstSchema(eventType string, payload map[string]any) error {
-	return ValidatePayloadAgainstSchema(r.SchemaForEventType(eventType).Schema, payload)
-}
-
 func (r *EmitRegistry) EventSchemaForActorTool(actor models.AgentConfig, toolName string) (string, EmitSchema, bool) {
 	if r == nil {
 		return "", EmitSchema{}, false
@@ -312,21 +301,6 @@ func (r *EmitRegistry) IsEmitToolAllowedForActor(actor models.AgentConfig, toolN
 		}
 	}
 	return false
-}
-
-func (r *EmitRegistry) SchemaForEventType(eventType string) EmitSchema {
-	if schema, ok := emitSchemaForEventType(r.activeSchemas, eventType); ok {
-		return schema
-	}
-	eventType = strings.TrimSpace(eventType)
-	return EmitSchema{
-		Description: "Emit " + eventType + " event",
-		Schema: map[string]any{
-			"type":                 "object",
-			"properties":           map[string]any{},
-			"additionalProperties": false,
-		},
-	}
 }
 
 func emitEventTypesEquivalent(left, right string) bool {

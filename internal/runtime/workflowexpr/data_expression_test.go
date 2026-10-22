@@ -645,6 +645,22 @@ func TestValidateValueExpressionRejectsDynamicPayloadAuthority(t *testing.T) {
 	if err := ValidateValueExpressionWithOptions(`payload.value`, ValueExpressionOptions{PayloadType: &dynamic}); err == nil {
 		t.Fatal("dynamic payload authority was accepted for an exact-schema expression")
 	}
+	for _, named := range []bool{false, true} {
+		body := dynamic
+		if named {
+			body = runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Name: "AccountInput", Fields: []runtimecontracts.ResolvedCatalogField{
+				{Name: "user_id", Type: runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeText}},
+			}}
+		}
+		payload := runtimecontracts.ResolvedCatalogType{Kind: runtimecontracts.CatalogTypeObject, Fields: []runtimecontracts.ResolvedCatalogField{{Name: "data", Type: body}}}
+		err := ValidateValueExpressionWithOptions(`payload.data.user_id`, ValueExpressionOptions{PayloadType: &payload})
+		if named && err != nil || !named && err == nil {
+			t.Fatalf("inbound body structural member selection named=%t error=%v", named, err)
+		}
+		if !named && !strings.Contains(err.Error(), "exact structural type") {
+			t.Fatalf("opaque body lost its existing structural teaching: %v", err)
+		}
+	}
 }
 
 func TestValidateValueExpression_RejectsRetiredFanOutTarget(t *testing.T) {

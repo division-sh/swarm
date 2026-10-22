@@ -46,10 +46,6 @@ func WorkflowEntityReferenceField(ref string) string {
 	return workflowexpr.EntityReferenceField(ref)
 }
 
-func WorkflowBuiltinEntityField(field string) bool {
-	return false
-}
-
 func WorkflowEntityFieldNameFromTarget(target string) (string, bool) {
 	return workflowEntityFieldNameFromTarget(target)
 }

@@ -7,8 +7,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
@@ -20,6 +22,8 @@ type PipelineObligationSource interface {
 	PipelineObligations() runtimepipelineobligation.Store
 	FanOutRunSummary(context.Context, string, time.Time) (fanoutobligation.RunSummary, error)
 	ListFanOutIntents(context.Context, fanoutobligation.ListQuery) (fanoutobligation.ListPage, error)
+	ListFlowInstances(context.Context, pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error)
+	ReadWorkflowPublicationStages(context.Context, string, flowidentity.RunScopedFlowInstance) (pipeline.WorkflowPublicationStageEvidence, bool, error)
 }
 
 type TimerObligationSource interface {
@@ -42,6 +46,8 @@ type RunPostgres struct {
 	pipeline    PipelineObligationSource
 	timers      TimerObligationSource
 	deadLetters DeadLetterProjection
+	sources     operationalRootedSourceReader
+	sourceMemo  *runOperationalSourceMemo
 }
 
 type EntityPostgres struct {
@@ -73,14 +79,14 @@ func requirePostgresBackend(backend *postgresbackend.Backend) error {
 	return nil
 }
 
-func NewRunPostgres(backend *postgresbackend.Backend, schemaGuard func() error, pipeline PipelineObligationSource, timers TimerObligationSource, deadLetters DeadLetterProjection) (*RunPostgres, error) {
+func NewRunPostgres(backend *postgresbackend.Backend, schemaGuard func() error, pipeline PipelineObligationSource, timers TimerObligationSource, deadLetters DeadLetterProjection, sources operationalRootedSourceReader) (*RunPostgres, error) {
 	if err := requirePostgresBackend(backend); err != nil {
 		return nil, err
 	}
-	if pipeline == nil || timers == nil || deadLetters == nil {
+	if pipeline == nil || timers == nil || deadLetters == nil || sources == nil {
 		return nil, fmt.Errorf("run diagnostics sources are required")
 	}
-	return &RunPostgres{backend: backend, schemaGuard: schemaGuard, pipeline: pipeline, timers: timers, deadLetters: deadLetters}, nil
+	return &RunPostgres{backend: backend, schemaGuard: schemaGuard, pipeline: pipeline, timers: timers, deadLetters: deadLetters, sources: sources, sourceMemo: newRunOperationalSourceMemo()}, nil
 }
 
 func NewEntityPostgres(backend *postgresbackend.Backend, schemaGuard func() error) (*EntityPostgres, error) {
@@ -162,6 +168,8 @@ type RunSQLite struct {
 	pipeline    PipelineObligationSource
 	timers      TimerObligationSource
 	deadLetters DeadLetterProjection
+	sources     operationalRootedSourceReader
+	sourceMemo  *runOperationalSourceMemo
 }
 
 type EntitySQLite struct {
@@ -193,14 +201,14 @@ func requireSQLiteBackend(backend *sqlitebackend.Backend) error {
 	return nil
 }
 
-func NewRunSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, nowFn func() time.Time, pipeline PipelineObligationSource, timers TimerObligationSource, deadLetters DeadLetterProjection) (*RunSQLite, error) {
+func NewRunSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, nowFn func() time.Time, pipeline PipelineObligationSource, timers TimerObligationSource, deadLetters DeadLetterProjection, sources operationalRootedSourceReader) (*RunSQLite, error) {
 	if err := requireSQLiteBackend(backend); err != nil {
 		return nil, err
 	}
-	if pipeline == nil || timers == nil || deadLetters == nil {
+	if pipeline == nil || timers == nil || deadLetters == nil || sources == nil {
 		return nil, fmt.Errorf("run diagnostics sources are required")
 	}
-	return &RunSQLite{backend: backend, schemaGuard: schemaGuard, nowFn: nowFn, pipeline: pipeline, timers: timers, deadLetters: deadLetters}, nil
+	return &RunSQLite{backend: backend, schemaGuard: schemaGuard, nowFn: nowFn, pipeline: pipeline, timers: timers, deadLetters: deadLetters, sources: sources, sourceMemo: newRunOperationalSourceMemo()}, nil
 }
 
 func NewEntitySQLite(backend *sqlitebackend.Backend, schemaGuard func() error) (*EntitySQLite, error) {

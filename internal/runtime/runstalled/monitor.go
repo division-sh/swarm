@@ -18,8 +18,6 @@ type ProjectionReader interface {
 	ListRunHeaders(context.Context, operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error)
 	LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
 	ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
-	LoadLatestRunFlowInstance(context.Context, string) (string, error)
-	LoadLatestRunNonEscalationProgressAt(context.Context, string, string) (time.Time, error)
 }
 
 const (
@@ -35,12 +33,12 @@ type Diagnosis struct {
 	OperationalState string
 	BlockingLayer    string
 	BlockingReason   string
+	StalledInstances []StalledInstance
 }
 
 type RunSnapshot struct {
 	RunID          string
 	RunTableStatus string
-	FlowInstance   string
 	LastProgressAt time.Time
 	Diagnosis      Diagnosis
 }
@@ -51,14 +49,8 @@ type RunRef struct {
 
 type EscalationKey struct {
 	RunID          string
-	BlockingLayer  string
-	BlockingReason string
 	LastProgressAt time.Time
-}
-
-type Policy struct {
-	Enabled   bool
-	Threshold time.Duration
+	AttributionSet string
 }
 
 type Reader interface {
@@ -71,13 +63,10 @@ type Publisher interface {
 	Publish(context.Context, events.Event) error
 }
 
-type PolicyResolver func(flowInstance string) Policy
-
 type Monitor struct {
 	Reader           Reader
 	Publisher        Publisher
 	ExecutionPosture executionposture.Posture
-	PolicyResolver   PolicyResolver
 	PageLimit        int
 	PollInterval     time.Duration
 	OnError          func(error)
@@ -89,9 +78,7 @@ type CheckResult struct {
 	Skipped   int
 }
 
-func DefaultPolicy() Policy {
-	return Policy{Enabled: true, Threshold: time.Duration(DefaultThresholdSeconds) * time.Second}
-}
+const Threshold = time.Duration(DefaultThresholdSeconds) * time.Second
 
 func (m *Monitor) Run(ctx context.Context) {
 	if ctx == nil {
@@ -194,13 +181,9 @@ func (m *Monitor) eventForSnapshot(snapshot RunSnapshot, now time.Time) (events.
 	if snapshot.LastProgressAt.IsZero() {
 		return none, EscalationKey{}, false, nil
 	}
-	policy := m.resolvePolicy(snapshot.FlowInstance)
-	if !policy.Enabled || policy.Threshold <= 0 {
-		return none, EscalationKey{}, false, nil
-	}
 	lastProgressAt := snapshot.LastProgressAt.UTC()
 	stalledFor := now.Sub(lastProgressAt)
-	if stalledFor < policy.Threshold {
+	if stalledFor < Threshold {
 		return none, EscalationKey{}, false, nil
 	}
 	blockingLayer := strings.TrimSpace(snapshot.Diagnosis.BlockingLayer)
@@ -208,20 +191,22 @@ func (m *Monitor) eventForSnapshot(snapshot RunSnapshot, now time.Time) (events.
 	if blockingLayer == "" || blockingReason == "" {
 		return none, EscalationKey{}, false, nil
 	}
-	key := EscalationKey{
-		RunID:          runID,
-		BlockingLayer:  blockingLayer,
-		BlockingReason: blockingReason,
-		LastProgressAt: lastProgressAt,
+	instances, attributionSet, err := canonicalStalledInstances(snapshot.Diagnosis.StalledInstances)
+	if err != nil {
+		return none, EscalationKey{}, false, err
 	}
+	if len(instances) == 0 {
+		return none, EscalationKey{}, false, fmt.Errorf("stalled run %s has no stalled-instance evidence", runID)
+	}
+	key := EscalationKey{RunID: runID, LastProgressAt: lastProgressAt, AttributionSet: attributionSet}
 	payload, err := json.Marshal(map[string]any{
 		"run_id":              runID,
-		"flow_instance":       strings.Trim(strings.TrimSpace(snapshot.FlowInstance), "/"),
+		"stalled_instances":   instances,
 		"operational_state":   stalledOperationalStatus,
 		"blocking_layer":      blockingLayer,
 		"blocking_reason":     blockingReason,
 		"last_progress_at":    lastProgressAt.Format(time.RFC3339Nano),
-		"threshold_seconds":   int(policy.Threshold / time.Second),
+		"threshold_seconds":   DefaultThresholdSeconds,
 		"stalled_for_seconds": int(stalledFor / time.Second),
 		"emitted_at":          now.UTC().Format(time.RFC3339Nano),
 	})
@@ -231,7 +216,7 @@ func (m *Monitor) eventForSnapshot(snapshot RunSnapshot, now time.Time) (events.
 	evt, err := events.NewRunScopedRuntimeDiagnosticEvent(events.RunScopedRuntimeEventInput{
 		Facts: events.EventFacts{
 			Type: events.EventType(EventType), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime"},
-			Payload: payload, Envelope: events.EventEnvelope{FlowInstance: snapshot.FlowInstance},
+			Payload:   payload,
 			CreatedAt: now.UTC(), ExecutionMode: m.ExecutionPosture.RootMode(),
 		},
 		RunID: runID,
@@ -240,17 +225,6 @@ func (m *Monitor) eventForSnapshot(snapshot RunSnapshot, now time.Time) (events.
 		return none, EscalationKey{}, false, err
 	}
 	return evt, key, true, nil
-}
-
-func (m *Monitor) resolvePolicy(flowInstance string) Policy {
-	if m != nil && m.PolicyResolver != nil {
-		policy := m.PolicyResolver(flowInstance)
-		if policy.Threshold > 0 {
-			return policy
-		}
-		return Policy{Enabled: policy.Enabled, Threshold: DefaultPolicy().Threshold}
-	}
-	return DefaultPolicy()
 }
 
 func (m *Monitor) reportError(err error) {

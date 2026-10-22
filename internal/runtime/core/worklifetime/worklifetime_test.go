@@ -190,6 +190,7 @@ func TestFencedRuntimeRouteCarriesOnlyLiveAcceptedWork(t *testing.T) {
 }
 
 func TestRuntimeAndManagerLeasesRetainExactProcessOwner(t *testing.T) {
+	t.Run("shutdown cancellation retains exact owner", proveManagerShutdownCancellationOwner)
 	process := NewProcess()
 	runtimeOwner, err := process.NewRuntime(context.Background(), RuntimeIdentity{
 		RuntimeInstanceID: "runtime-process-owner",
@@ -232,6 +233,100 @@ func TestRuntimeAndManagerLeasesRetainExactProcessOwner(t *testing.T) {
 	process.Retire()
 	if _, err := process.Join(context.Background()); err != nil {
 		t.Fatalf("join process: %v", err)
+	}
+}
+
+// Adds cancellation-origin reach: a later shutdown cannot relabel reset,
+// caller cancellation, or loss of the original runtime/standing companion.
+func proveManagerShutdownCancellationOwner(t *testing.T) {
+	for _, mode := range []string{"shutdown", "reset_retire", "companion_lost", "parent_lost", "caller_cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			process := NewProcess()
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			runtimeOwner, err := process.NewRuntime(ctx, RuntimeIdentity{RuntimeInstanceID: "shutdown-owner-" + mode, BundleHash: "exact-bundle"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			manager, err := NewManagerRunOccurrence(ctx, runtimeOwner, ManagerRunIdentity{Generation: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreign, err := NewManagerRunOccurrence(ctx, runtimeOwner, ManagerRunIdentity{Generation: 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var companion *StandingOccurrence
+			var owner Occurrence
+			if mode == "companion_lost" {
+				companion, err = runtimeOwner.NewStanding(ctx, StandingIdentity{ServiceID: "shutdown-companion", RunID: uuid.NewString(), Generation: 1})
+				if err != nil {
+					t.Fatal(err)
+				}
+				owner = companion
+			}
+			caller, cancelCaller := context.WithCancel(ctx)
+			defer cancelCaller()
+			lease, err := manager.Begin(caller, owner)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "shutdown":
+				manager.RetireForShutdown()
+			case "reset_retire":
+				manager.Retire()
+			case "companion_lost":
+				companion.Retire()
+			case "parent_lost":
+				runtimeOwner.Retire()
+			case "caller_cancel":
+				cancelCaller()
+			}
+			select {
+			case <-lease.Context().Done():
+			case <-ctx.Done():
+				t.Fatal("original cancellation did not reach admitted lease")
+			}
+			manager.RetireForShutdown()
+			if got := manager.CancelledByShutdown(lease.Context()); got != (mode == "shutdown") {
+				t.Fatalf("mode=%s shutdown origin=%t cause=%v", mode, got, context.Cause(lease.Context()))
+			}
+			if foreign.CancelledByShutdown(lease.Context()) || manager.CancelledByShutdown(context.Background()) {
+				t.Fatal("foreign or unadmitted context inherited shutdown origin")
+			}
+			if mode != "caller_cancel" && !errors.Is(context.Cause(lease.Context()), ErrRetired) {
+				t.Fatal("retirement lost its original public cause")
+			}
+			if mode == "shutdown" {
+				t.Run("legacy branch traversal retains closed origin", func(t *testing.T) {
+					if errors.Unwrap(context.Cause(lease.Context())) != nil {
+						t.Error("branch traversal strips the owning Manager identity before comparing its cancellation cause")
+					}
+				})
+			}
+			if err := lease.Done(); err != nil {
+				t.Fatal(err)
+			}
+			if err := manager.RetireAndWait(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := foreign.RetireAndWait(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if companion != nil {
+				if err := companion.RetireAndWait(ctx); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := runtimeOwner.RetireAndWait(ctx); err != nil {
+				t.Fatal(err)
+			}
+			process.Retire()
+			if _, err := process.Join(ctx); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

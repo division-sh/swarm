@@ -233,7 +233,14 @@ func mustStoreTestSourceArtifactFact(bundleHash string) runtimecorrelation.Sourc
 }
 
 func storeTestSourceArtifact(label string) *sourceartifact.AdmittedSourceArtifact {
-	return sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# "+label+"\n"))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents: {}\n# " + label + "\n"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return artifact
 }
 
 func requireStoreTestPersistedBundle(t *testing.T, db *sql.DB, bundleHash string) {

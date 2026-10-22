@@ -492,6 +492,7 @@ func eventBusSourceOperationLedger() map[string]string {
 		"FenceAgentRoute":                            operationMutation,
 		"FinalizeSelectedReceiverAdmission":          operationRetained,
 		"LookupAPIEventPublication":                  operationPureRead,
+		"LoadWorkflowStageEntryEvent":                operationPureRead,
 		"LogRuntime":                                 operationMutation,
 		// This projects an exact already-admitted durable transition, including retained
 		// history. Current consumer source admission cannot retag its producer identity.

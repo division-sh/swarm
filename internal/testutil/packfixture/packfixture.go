@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packmodel"
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	platformpacks "github.com/division-sh/swarm/packs"
@@ -97,6 +98,22 @@ func ChannelPacks(t testing.TB) []packartifact.AdmittedProvider {
 		}
 	}
 	return providers
+}
+
+func ChannelPlanByID(t testing.TB, plans []packs.SatisfactionPlan, id string) packs.SatisfactionPlan {
+	t.Helper()
+	var selected packs.SatisfactionPlan
+	count := 0
+	for _, plan := range plans {
+		if plan.ChannelIdentity().ID() == id {
+			selected = plan
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("channel inventory has %d exact members for %s", count, id)
+	}
+	return selected
 }
 
 func ConnectorTool(t testing.TB, provider, toolID string) providerconnectors.InstalledTool {

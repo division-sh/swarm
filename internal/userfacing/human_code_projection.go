@@ -35,12 +35,10 @@ var humanCodePhrases = map[HumanCodeFamily]map[string]string{
 		"completed": "completed", "failed": "failed", "cancelled": "cancelled", "forked": "forked",
 	},
 	HumanCodeRunBlockingLayer: {
-		"scoring_terminal_outcome": "scoring outcome",
-		"delivery_lifecycle":       "delivery lifecycle",
+		"delivery_lifecycle": "delivery lifecycle",
 	},
 	HumanCodeRunBlockingReason: {
-		"terminal_scoring_outcome_missing": "waiting for a terminal scoring outcome",
-		"no_active_deliveries":             "no active deliveries",
+		"no_active_deliveries": "no active deliveries",
 	},
 	HumanCodeAgentStatus: {
 		"idle": "idle", "running": "running", "paused": "paused",
@@ -86,6 +84,7 @@ var humanCodePhrases = map[HumanCodeFamily]map[string]string{
 	},
 	HumanCodeProviderCapability: {
 		"receive_https_route":       "receive HTTPS route",
+		"receive_session_events":    "receive authenticated session events",
 		"verify_secret":             "verify named secret",
 		"emit_event":                "emit named event",
 		"persist_dedupe_markers":    "persist dedupe markers",

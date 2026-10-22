@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -100,7 +101,6 @@ type SourceArtifactSelectedContractSourceStore interface {
 
 type SourceArtifactSelectedContractSourceLoader struct {
 	RepoRoot          string
-	PlatformSpecPath  string
 	PlatformPackBases packartifact.PlatformPackBaseResolver
 	Store             SourceArtifactSelectedContractSourceStore
 }
@@ -167,7 +167,11 @@ func (l SourceArtifactSelectedContractSourceLoader) InspectRunForkSelectedContra
 		req.SourceArtifactFact.BundleHash() != "" && req.SourceArtifactFact.BundleHash() != bundleHash {
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected rooted responsibility differs from requested content", runbundle.CodeBundleDataIntegrityError)
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(strings.TrimSpace(l.RepoRoot), rooted, strings.TrimSpace(l.PlatformSpecPath), runtimecontracts.WorkflowContractLoadOptions{
+	specPath, err := platform.MaterializePlatformSpecFile()
+	if err != nil {
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: compile DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(strings.TrimSpace(l.RepoRoot), rooted, specPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBases: l.PlatformPackBases, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {

@@ -58,9 +58,6 @@ func TestPayloadlessEventCanonicalGrammarDiskAndReconstructedSource(t *testing.T
 						if !ok || len(entries) != 1 || len(entry.Payload.Properties) != 0 || len(entry.Payload.Required) != 0 {
 							t.Fatalf("bare declaration = %#v", entries)
 						}
-						if entry.admissionProvenance["declaration"].SourcePresence != "null" {
-							t.Fatal("bare source presence lost")
-						}
 						return
 					}
 					want := fmt.Sprintf("an event with no fields is declared bare \u2014 write `%s:` (remove the `%s`).", event, variant)

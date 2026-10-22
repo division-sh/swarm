@@ -84,7 +84,7 @@ func runNotionManagedCredentialConnectorSurface(t *testing.T, backend slackManag
 	defer fake.server.Close()
 
 	managedStore := runtimemanagedcredentials.NewMemoryStore(runtimemanagedcredentials.Record{
-		Key:          "notion_oauth",
+		Key:          "notion.notion_oauth",
 		Provider:     "notion",
 		GrantType:    runtimemanagedcredentials.GrantAuthorizationCode,
 		TokenURL:     fake.server.URL + "/v1/oauth/token",

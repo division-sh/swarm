@@ -17,7 +17,7 @@ func TestSelectedContractLoadersRejectRetiredDynamicAgentTools(t *testing.T) {
 		t.Run(name+"/disk", func(t *testing.T) {
 			repoRoot := runForkExecutionRepoRoot(t)
 			contractsRoot := writeRetiredSelectedContractFixture(t, name)
-			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot)}
+			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
 			_, err := loader.LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{
 				Mode: runfork.RunForkContractSelectionModeSelectedContracts,
 			})

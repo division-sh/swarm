@@ -102,41 +102,6 @@ func TestPlatformPackInventoryHasOneSourceAndFiniteProductionConsumers(t *testin
 	}
 }
 
-func TestPackPublishingSurfacesCarryExplicitBaseAndAdmissionOwners(t *testing.T) {
-	emptyLoadOptionOwners := pathSet(
-		"internal/runtime/contracts/bundle_registration_upload.go",
-		"internal/runtime/contracts/workflow_contract_loading.go",
-	)
-	inspectProductionGo(t, func(path string, file *ast.File) {
-		ast.Inspect(file, func(node ast.Node) bool {
-			literal, ok := node.(*ast.CompositeLit)
-			if !ok {
-				return true
-			}
-			name := calledFunctionName(literal.Type)
-			fields := compositeLiteralFields(literal)
-			switch name {
-			case "WorkflowContractLoadOptions":
-				if len(fields) == 0 {
-					if _, allowed := emptyLoadOptionOwners[path]; !allowed {
-						t.Errorf("%s constructs empty workflow pack load options outside the pure contract-loader owners", path)
-					}
-					return true
-				}
-				if _, ok := fields["AdmitPackInventory"]; !ok {
-					t.Errorf("%s workflow pack load options omit canonical body admission", path)
-				}
-				_, hasBase := fields["PlatformPackBase"]
-				_, hasBases := fields["PlatformPackBases"]
-				if !hasBase && !hasBases {
-					t.Errorf("%s workflow pack load options omit an explicit selected-base owner", path)
-				}
-			}
-			return true
-		})
-	})
-}
-
 func TestPlatformPackBodiesHaveOneEmbedOwnerAndNoRetiredTeachingConfig(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	bodyEmbeds, err := platformBodyEmbeds(repoRoot)
@@ -305,21 +270,6 @@ func missingPaths(want, got map[string]struct{}) []string {
 	}
 	sort.Strings(missing)
 	return missing
-}
-
-func compositeLiteralFields(literal *ast.CompositeLit) map[string]struct{} {
-	fields := make(map[string]struct{}, len(literal.Elts))
-	for _, element := range literal.Elts {
-		keyed, ok := element.(*ast.KeyValueExpr)
-		if !ok {
-			continue
-		}
-		identifier, ok := keyed.Key.(*ast.Ident)
-		if ok {
-			fields[identifier.Name] = struct{}{}
-		}
-	}
-	return fields
 }
 
 func assertNoRetiredPackConfig(t *testing.T, path, body string) {

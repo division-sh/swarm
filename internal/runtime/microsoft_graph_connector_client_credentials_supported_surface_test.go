@@ -313,7 +313,7 @@ func (f *fakeMicrosoftGraphConnectorServer) refreshTokenValues() []string {
 
 func microsoftGraphClientCredentialsRecord(baseURL, accessToken string, expiresAt time.Time) runtimemanagedcredentials.Record {
 	return runtimemanagedcredentials.Record{
-		Key:          "microsoft_graph_app",
+		Key:          "microsoft_graph.microsoft_graph_app",
 		Provider:     "microsoft_graph",
 		GrantType:    runtimemanagedcredentials.GrantClientCredentials,
 		TokenURL:     strings.TrimRight(baseURL, "/") + "/tenant/oauth2/v2.0/token",

@@ -19,8 +19,13 @@ import (
 )
 
 type ChannelPackLoad struct {
-	Plans    []packs.SatisfactionPlan
-	Bindings []packs.OutboundBindingPlan
+	Plans             []packs.SatisfactionPlan
+	Bindings          []packs.OutboundBindingPlan
+	credentialSources []runtimecredentials.SourceFact
+}
+
+func (l ChannelPackLoad) CredentialSources() []runtimecredentials.SourceFact {
+	return append([]runtimecredentials.SourceFact(nil), l.credentialSources...)
 }
 
 func LoadConfiguredChannelPacks(ctx context.Context, cfgResult RuntimeConfigLoadResult, projection packadmission.Projection, staticCredentials runtimecredentials.Store, managedCredentials runtimemanagedcredentials.Store) (ChannelPackLoad, error) {
@@ -30,12 +35,13 @@ func LoadConfiguredChannelPacks(ctx context.Context, cfgResult RuntimeConfigLoad
 	if projection.EffectivePackInventoryDigest() == "" || projection.ProviderTriggers == nil || projection.ProviderConnectors == nil {
 		return ChannelPackLoad{}, fmt.Errorf("admitted pack projection is required for channel satisfaction")
 	}
-	bindings, err := compileChannelBindings(ctx, cfgResult.Config, projection.ChannelPlans, staticCredentials, managedCredentials)
+	bindings, sources, err := compileChannelBindings(ctx, cfgResult.Config, projection.ChannelPlans, staticCredentials, managedCredentials)
 	if err != nil {
 		return ChannelPackLoad{}, err
 	}
 	return ChannelPackLoad{
 		Plans: projection.ChannelPlans, Bindings: bindings,
+		credentialSources: sources,
 	}, nil
 }
 
@@ -59,7 +65,8 @@ func loadChannelPlatformSpecDocument(platformSpecPath string) (runtimecontracts.
 	return spec, nil
 }
 
-func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []packs.SatisfactionPlan, staticCredentials runtimecredentials.Store, managedCredentials runtimemanagedcredentials.Store) ([]packs.OutboundBindingPlan, error) {
+func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []packs.SatisfactionPlan, staticCredentials runtimecredentials.Store, managedCredentials runtimemanagedcredentials.Store) ([]packs.OutboundBindingPlan, []runtimecredentials.SourceFact, error) {
+	var sources []runtimecredentials.SourceFact
 	byID := make(map[string]packs.SatisfactionPlan, len(plans))
 	for _, plan := range plans {
 		byID[plan.ChannelIdentity().ID()] = plan
@@ -74,31 +81,31 @@ func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []pac
 		declared := cfg.Channels.Bindings[id]
 		plan, ok := byID[strings.TrimSpace(declared.Pack)]
 		if !ok {
-			return nil, fmt.Errorf("channels.bindings.%s references unavailable channel pack %q", id, declared.Pack)
+			return nil, nil, fmt.Errorf("channels.bindings.%s references unavailable channel pack %q", id, declared.Pack)
 		}
 		credentialKeys := normalizeChannelCredentialMap(declared.Credentials)
 		if err := validateChannelBindingRegistration(id, declared, plan, credentialKeys); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		credentialStore := mappedChannelCredentialStore{Store: staticCredentials, keys: credentialKeys}
+		credentialStore := mappedChannelCredentialStore{Store: staticCredentials, keys: credentialKeys, sources: &sources}
 		requirementsByKey := map[string]packs.Requirement{}
 		requirementOwner := map[string]string{}
 		for _, operationName := range plan.OperationNames() {
 			connectorToolID, tool, err := plan.ConnectorOperation(operationName)
 			if err != nil {
-				return nil, fmt.Errorf("channels.bindings.%s connector operation: %w", id, err)
+				return nil, nil, fmt.Errorf("channels.bindings.%s connector operation: %w", id, err)
 			}
 			resolved, err := providerconnectors.RequirementsForTool(ctx, connectorToolID, tool, providerconnectors.CapabilityOptions{
 				StaticCredentials: credentialStore, ManagedCredentials: managedCredentials,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("channels.bindings.%s connector requirements: %w", id, err)
+				return nil, nil, fmt.Errorf("channels.bindings.%s connector requirements: %w", id, err)
 			}
 			for _, requirement := range resolved {
 				key := requirement.Kind + "\x00" + requirement.Name
 				if existing, exists := requirementsByKey[key]; exists {
 					if !reflect.DeepEqual(existing, requirement) {
-						return nil, fmt.Errorf("channels.bindings.%s operations %q and %q require incompatible %s %q descriptors", id, requirementOwner[key], operationName, requirement.Kind, requirement.Name)
+						return nil, nil, fmt.Errorf("channels.bindings.%s operations %q and %q require incompatible %s %q descriptors", id, requirementOwner[key], operationName, requirement.Kind, requirement.Name)
 					}
 					continue
 				}
@@ -117,11 +124,11 @@ func compileChannelBindings(ctx context.Context, cfg *config.Config, plans []pac
 		}
 		binding, err := packs.NewOutboundBindingPlanWithRegistration(id, plan, declared.Destination, requirements, credentialKeys, declared.Register)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		bindings = append(bindings, binding)
 	}
-	return bindings, nil
+	return bindings, sources, nil
 }
 
 func normalizeChannelCredentialMap(input map[string]string) map[string]string {
@@ -185,7 +192,8 @@ func validateChannelBindingRegistration(id string, declared config.ChannelBindin
 
 type mappedChannelCredentialStore struct {
 	runtimecredentials.Store
-	keys map[string]string
+	keys    map[string]string
+	sources *[]runtimecredentials.SourceFact
 }
 
 func (s mappedChannelCredentialStore) mapped(key string) string {
@@ -207,6 +215,9 @@ func (s mappedChannelCredentialStore) Inspect(ctx context.Context, key string) (
 	mapped := s.mapped(key)
 	if inspector, ok := s.Store.(runtimecredentials.Inspector); ok {
 		metadata, err := inspector.Inspect(ctx, mapped)
+		if err == nil && s.sources != nil && metadata.SourceFact().Reference != "" {
+			*s.sources = append(*s.sources, metadata.SourceFact())
+		}
 		metadata.Key = strings.TrimSpace(key)
 		return metadata, err
 	}

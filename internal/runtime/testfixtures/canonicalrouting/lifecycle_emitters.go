@@ -210,7 +210,7 @@ func CopyLifecycleNestedCascade(t testing.TB) string {
 		}
 		prefix := "outer/" + side + "/"
 		loopRoot := CopyLifecycleEmitter(t, LifecycleLoopConnected)
-		for _, path := range []string{"schema.yaml", "events.yaml", "entities.yaml", "nodes.yaml", "sink/entities.yaml", "sink/nodes.yaml"} {
+		for _, path := range []string{"manifest.yaml", "schema.yaml", "events.yaml", "entities.yaml", "nodes.yaml", "sink/manifest.yaml", "sink/entities.yaml", "sink/nodes.yaml"} {
 			raw, err := os.ReadFile(filepath.Join(loopRoot, path))
 			if err != nil {
 				t.Fatal(err)
@@ -244,6 +244,7 @@ connect:
   - {event: work.completed, from: ., to: final}
 `, side))
 		writeClosedVariantFile(t, root, prefix+"sink/events.yaml", "work.completed:\n  result: text\n")
+		writeClosedVariantFile(t, root, prefix+"sink/final/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, prefix+"sink/final/schema.yaml", "# fixture: final\nstages:\n  waiting: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.completed\n")
 		writeClosedVariantFile(t, root, prefix+"sink/final/entities.yaml", "receipt:\n  result: text\n")
 		writeClosedVariantFile(t, root, prefix+"sink/final/nodes.yaml", `collector:

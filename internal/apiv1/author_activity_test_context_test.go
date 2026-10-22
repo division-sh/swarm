@@ -364,7 +364,14 @@ func newAPITestFlowConstructor(t *testing.T, selected runtimebus.EventStore, bus
 	}), nil
 }
 func mustAPITestSourceArtifactNamed(name string) *sourceartifact.AdmittedSourceArtifact {
-	return sourceartifactfixture.New("schema.yaml", []byte("name: "+name+"\n"))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("# " + name + "\nstages: []\n"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return artifact
 }
 
 func newAPITestRuntimeWorkOccurrence(t *testing.T, runtimeInstanceID, bundleHash string) *worklifetime.RuntimeOccurrence {

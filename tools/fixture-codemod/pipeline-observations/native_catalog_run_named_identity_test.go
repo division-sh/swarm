@@ -105,7 +105,62 @@ func reviewedCatalogNamedIdentityCurrentSource(row recipe) (string, error) {
 	if strings.Count(row.After, before) != 1 || row.Successor != strings.Replace(row.After, before, after, 1) {
 		return "", fmt.Errorf("named-event successor changed beyond reviewed captured header facts")
 	}
-	return row.Successor, nil
+	current := row.Successor
+	for _, pair := range [][2]string{
+		{`preserved = entity.CurrentState == "killed"`, `preserved = entity.CurrentState != nil && *entity.CurrentState == "killed"`},
+		{"\t\t\t\tfields, err := json.Marshal(entity.Fields)", "\t\t\t\tif entity.CurrentState == nil {\n\t\t\t\t\tt.Fatalf(\"historical guard cause lacks its actual lifecycle stage: %+v\", entity)\n\t\t\t\t}\n\t\t\t\tfields, err := json.Marshal(entity.Fields)"},
+		{"CurrentState: entity.CurrentState, Config: metadata.FlowConfig, Fields: fields,", "CurrentState: *entity.CurrentState, Config: metadata.FlowConfig, Fields: fields,"},
+	} {
+		if strings.Count(current, pair[0]) != 1 {
+			return "", fmt.Errorf("missing exact Q10 historical lifecycle binding %q", pair[0])
+		}
+		current = strings.Replace(current, pair[0], pair[1], 1)
+	}
+	return current, nil
+}
+
+func TestQ10CatalogHistorySuccessorRetainsExactPresenceAndCause(t *testing.T) {
+	var rows []recipe
+	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
+		t.Fatal(err)
+	}
+	var selected recipe
+	matched := 0
+	for _, row := range rows {
+		if row.File == "internal/runtime/cataloge2e/guard_historical_fork_test.go" && row.Function == "TestGuardTerminationHistoricalForkPreservesCauseBothStores" {
+			selected = row
+			matched++
+		}
+	}
+	if matched != 1 {
+		t.Fatalf("historical guard successor multiplicity=%d, want1", matched)
+	}
+	current, err := reviewedCatalogNamedIdentityCurrentSource(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := selected
+	guard.Before, guard.After, guard.Successor = current, current, ""
+	for _, cut := range []string{
+		"entity.CurrentState != nil && ", "*entity.CurrentState == \"killed\"",
+		"if entity.CurrentState == nil", "CurrentState: *entity.CurrentState",
+		"metadata.ParentInstance", "metadata.InstanceKey", "metadata.Mode", "metadata.FlowTemplate",
+		"reflect.DeepEqual(instance.TransitionHistory, guarded.TransitionHistory)",
+		"fork.ExecutedEventCount != 1", "len(plan.Entities) != 2", "h.readRunNamedEventIdentity", "catalogRuntimeRunID",
+	} {
+		t.Run(cut, func(t *testing.T) {
+			mutant := strings.Replace(current, cut, "unreviewed", 1)
+			if mutant == current {
+				t.Fatal("negative control did not change the exact current binding")
+			}
+			if _, changed, err := rewriteFunction(guard.File, []byte("package proof\n"+mutant), guard); err == nil || changed {
+				t.Fatal("changed lifecycle presence, cause or native fork assertion accepted")
+			}
+		})
+	}
+	if _, changed, err := rewriteFunction(guard.File, []byte("package proof\n"+selected.Successor), guard); err == nil || changed {
+		t.Fatal("historical scalar source accepted as the current optional-lifecycle endpoint")
+	}
 }
 
 func TestCatalogRunNamedIdentitySuccessorRejectsUnreviewedHeaderBindings(t *testing.T) {
@@ -148,8 +203,8 @@ func TestR7ReviewedFixtureSuccessorInventoryIsExact(t *testing.T) {
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	// The selected-input134a521a8 endpoint is retained as history; its exact
-	// reviewed C05/C4 successor alone is current. The other three pins stay current.
+	// Keep the reviewed R7 endpoints immutable. Selected-input composes C05/C4;
+	// guard history composes only the exact Q10 lifecycle-presence repair above.
 	for _, pin := range []struct{ file, function, digest string }{
 		{"internal/runtime/cataloge2e/guard_historical_fork_test.go", "TestGuardTerminationHistoricalForkPreservesCauseBothStores", "b2e7ab7337a58d13ab1837b7b4f31b3dd9d489a291e5650e8f5760eb6f0bdcc8"},
 		{"internal/runtime/cataloge2e/receiver_materialization_geometry_test.go", "TestReceiverMaterializationSourceLocalTargetlessAgentControlBothStores", "ba3016484746604e9e3999fc799b1948c71a0d65e67ee16a2e5d900193a53eea"},

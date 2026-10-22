@@ -53,24 +53,36 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 		if err := validateRecipeSnapshots(row); err != nil {
 			t.Fatal(err)
 		}
-		historicalMechanicalRecipe(t, row)
+		current := q10PrivateTargetCurrentRecipe(t, row)
+		if source, found, err := q10SharedCoordinatorCurrentSource(row); err != nil {
+			t.Fatal(err)
+		} else if found {
+			current.Successor = source
+		}
+		historicalMechanicalRecipe(t, current)
 	}
 	if count != 24 {
 		t.Fatalf("mechanical repair target count=%d, want24", count)
 	}
-	digest, err := mechanicalReceiptDigest(rows)
+	var pins []fixtureSetupSuccessor2617
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 40 {
+		t.Fatalf("finite fixture receipt packet changed: %v", err)
+	}
+	// Reverse only Q1's appended wait/setup edits before checking the complete
+	// original digest, including every earlier live successor and assertion.
+	archived, err := q1RetryDecisionPriorRows(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, err := mechanicalReceiptDigest(archived)
 	if err != nil || digest != "637fcb76a19075ffc1dd93fc6a189652be2a50f2b199647d67cc0ffd58885fed" {
 		t.Fatalf("source-pinned mechanical/current receipts changed: %s/%v", digest, err)
 	}
 	// Retain the complete predecessor digest, including its old live Successors.
 	// Only the two appended #2287 join-presentation receipts may reverse it.
-	var pins []fixtureSetupSuccessor2617
-	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 39 {
-		t.Fatalf("finite presentation receipt packet changed: %v", err)
-	}
-	prior := append([]recipe(nil), rows...)
+	prior := append([]recipe(nil), archived...)
 	restored := 0
-	for _, pin := range pins[36:] {
+	for _, pin := range pins[36:39] {
 		if pin.Original.Mechanical == nil {
 			continue
 		}
@@ -158,17 +170,47 @@ func TestHistoricalMechanicalCurrentHandlerAssemblyIsSourcePinned(t *testing.T) 
 	} {
 		t.Run(pin.function, func(t *testing.T) {
 			source := selectedCausalObservationBody(t, pin.file, pin.function)
-			if !historicalCurrentSourcePinned(source, pin.digest) {
+			historical, err := historicalHandlerAssemblySource(source, pin.function)
+			if err != nil || !historicalCurrentSourcePinned(historical, pin.digest) {
 				t.Fatal("extracted native handler owner/cleanup/publication assembly changed")
 			}
 			for _, cut := range []string{"t.Helper()", "selected", "fact", "return"} {
 				mutant := strings.Replace(source, cut, "foreignCut", 1)
-				if mutant != source && historicalCurrentSourcePinned(mutant, pin.digest) {
+				restored, err := historicalHandlerAssemblySource(mutant, pin.function)
+				if mutant != source && err == nil && historicalCurrentSourcePinned(restored, pin.digest) {
 					t.Fatalf("changed handler successor accepted: %s", cut)
+				}
+			}
+			if pin.function == "workflowHandlerNativeFixtureFromSelected" {
+				for _, cut := range []string{"prepare native handler construction: %w", "commit native handler construction: %w"} {
+					for _, replacement := range []string{"foreign construction: %w", strings.Replace(cut, "%w", "%v", 1)} {
+						mutant := strings.Replace(source, cut, replacement, 1)
+						restored, err := historicalHandlerAssemblySource(mutant, pin.function)
+						if mutant == source || err == nil && historicalCurrentSourcePinned(restored, pin.digest) {
+							t.Fatalf("lost construction phase/error cause accepted: %s", replacement)
+						}
+					}
+				}
+				if _, err := historicalHandlerAssemblySource(historical, pin.function); err == nil {
+					t.Fatal("historical unannotated errors accepted as the current handler assembly")
 				}
 			}
 		})
 	}
+}
+
+func historicalHandlerAssemblySource(source, name string) (string, error) {
+	if name != "workflowHandlerNativeFixtureFromSelected" {
+		return source, nil
+	}
+	for _, phase := range []string{"prepare", "commit"} {
+		current := "return fmt.Errorf(\"" + phase + " native handler construction: %w\", err)"
+		if strings.Count(source, current) != 1 {
+			return "", fmt.Errorf("missing exact %s construction error cause", phase)
+		}
+		source = strings.Replace(source, current, "return err", 1)
+	}
+	return source, nil
 }
 
 func historicalCurrentSourcePinned(source, digest string) bool {

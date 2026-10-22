@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -37,7 +38,7 @@ func TestScenarioConstructionNativeCommitBothStores(t *testing.T) {
 				at := time.Now().UTC().Truncate(time.Microsecond)
 				seed := pipeline.ScenarioSetupEntityRequest{
 					Alias: "root", EntityID: runID, FlowInstance: runID, EntityType: "record",
-					CurrentState: "pending", Fields: map[string]any{"marker": "imported"}, Gates: map[string]bool{},
+					CurrentState: mutationlog.PresentLifecycleState("pending"), Fields: map[string]any{"marker": "imported"}, Gates: map[string]bool{},
 				}
 				source := semanticview.Wrap(f.bundle)
 				plan, err := f.manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
@@ -62,7 +63,7 @@ func TestScenarioConstructionNativeCommitBothStores(t *testing.T) {
 					case "fields":
 						hostile.Setup.Entities[0].Fields = map[string]any{"marker": "different"}
 					case "stage":
-						hostile.Setup.Entities[0].CurrentState = "foreign"
+						hostile.Setup.Entities[0].CurrentState = mutationlog.PresentLifecycleState("foreign")
 					case "gates":
 						hostile.Setup.Entities[0].Gates = map[string]bool{"foreign": true}
 					case "run":
@@ -112,7 +113,7 @@ func TestScenarioConstructionNativeCommitBothStores(t *testing.T) {
 					t.Fatalf("setup replay repeated construction: %+v err=%v", replay, err)
 				}
 				var fields, stage string
-				if err := db.QueryRowContext(ctx, `SELECT CAST(fields AS TEXT), current_state FROM entity_state WHERE run_id=$1 AND entity_id=$1`, runID).Scan(&fields, &stage); err != nil || stage != "pending" {
+				if err := db.QueryRowContext(ctx, `SELECT CAST(es.fields AS TEXT), fi.current_state FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance WHERE es.run_id=$1 AND es.entity_id=$1`, runID).Scan(&fields, &stage); err != nil || stage != "pending" {
 					t.Fatalf("setup changed imported meaning: fields=%s stage=%s err=%v", fields, stage, err)
 				}
 				var decoded map[string]any
@@ -138,7 +139,7 @@ func TestScenarioConstructionFieldlessStateBothStores(t *testing.T) {
 			ctx := correlation.WithRunID(f.ctx, runID)
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			seed := pipeline.ScenarioSetupEntityRequest{Alias: "root", EntityID: runID, FlowInstance: runID,
-				EntityType: "default", CurrentState: "pending", Fields: map[string]any{}, Gates: map[string]bool{}}
+				EntityType: "default", CurrentState: mutationlog.PresentLifecycleState("pending"), Fields: map[string]any{}, Gates: map[string]bool{}}
 			source := semanticview.Wrap(f.bundle)
 			plan, err := f.manager.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
 				ContractBundle: source, OccurredAt: at, ScenarioSeed: &seed,

@@ -4044,21 +4044,15 @@ func TestRoutePlanCanonicalFailClosedDropsExecutableRoutes(t *testing.T) {
 
 func TestOrdinaryOperatorPublishCannotAcquireProviderTargetFreeAuthorityByEventName(t *testing.T) {
 	const eventName = "inbound.telegram.text_message"
-	generation := triggergeneration.FromCanonicalBytes([]byte("operator-provider-trigger-generation"))
-	authorization := runtimeprovideroutput.MustAuthorization(
-		"telegram", eventName, "provider.telegram", "1.0.0",
-		"sha256:"+strings.Repeat("a", 64), generation,
-	)
-	source := providerOutputAuthorizedTestSource{
-		Source:        loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyProviderRollback(t, true)),
-		declaringFlow: ".",
-		generation:    generation, authorizations: []runtimeprovideroutput.Authorization{authorization},
+	source := loadConnectRoutePlanCanonicalSource(t, canonicalrouting.CopyProviderRollback(t, true))
+	authorization, exists := source.SemanticCapabilities().ProviderTriggerOutputAuthorization(".", eventName)
+	if !exists {
+		t.Fatal("provider fixture is missing its captured output authority")
 	}
-	pin, exists := source.Source.FlowInputEventPin("consumer", eventName)
+	_, exists = source.FlowInputEventPin("consumer", eventName)
 	if !exists {
 		t.Fatal("provider fixture is missing its exact input pin")
 	}
-	source.input = pin
 	resolver := newConnectRoutePlanResolver(source, nil, nil, nil, nil)
 	externalSource, err := events.NewExternalIngressRoutingSource(".", events.RoutingSourceAuthorityProviderAdmissionPlan)
 	if err != nil {

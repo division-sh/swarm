@@ -10,6 +10,9 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	if bundle == nil {
 		return nil
 	}
+	if err := bundle.ValidateToolDeclarationNames(); err != nil {
+		return err
+	}
 	name := "."
 	version := ""
 	if bundle.SourceArtifact != nil {
@@ -182,6 +185,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 				ID:               fmt.Sprintf("%s:%s", nodeRef.Key(), rawEventType),
 				Node:             nodeRef,
 				EventType:        rawEventType,
+				ownerEventType:   ownerEventType,
 				Guard:            handler.Guard,
 				AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
 				Terminate:        handler.Terminate,

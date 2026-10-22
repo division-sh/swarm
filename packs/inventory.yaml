@@ -10,3 +10,4 @@ packs:
   - path: providers/telegram
   - path: providers/twilio
   - path: providers/typeform
+  - path: providers/whatsapp

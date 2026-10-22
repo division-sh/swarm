@@ -298,12 +298,14 @@ func a2SameCommitWitnessState(t *testing.T, witness a2SameCommitMutationWitness)
 	if err := json.Unmarshal(witness.state, &record); err != nil {
 		t.Fatal(err)
 	}
-	instance, err := runtimepipeline.DecodeWorkflowEntityStatePersistenceRecord(runtimepipeline.WorkflowEntityStatePersistenceRecord{
+	instance, err := runtimepipeline.DecodeWorkflowInstancePersistenceRecord(runtimepipeline.WorkflowInstancePersistenceRecord{
 		EntityID: record.EntityID, FlowInstance: record.Identity.Route.InstancePath, EntityType: record.EntityType,
+		WorkflowName: record.WorkflowName, WorkflowVersion: record.WorkflowVersion, Mode: record.Mode, Status: record.Status,
+		Config: record.Config, StageDefined: record.StageDefined, TerminatedAt: record.TerminatedAt,
 		CurrentState: record.CurrentState, Revision: record.ExpectedRevision + 1, EnteredStageAt: record.EnteredStageAt,
 		Fields: record.Fields, Bookkeeping: record.Bookkeeping, Gates: record.Gates, Accumulator: record.Accumulator,
 		CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
-	}, record.Identity.Route, record.WorkflowName, record.WorkflowVersion, record.Mode)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

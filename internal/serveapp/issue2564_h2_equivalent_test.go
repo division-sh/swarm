@@ -87,7 +87,6 @@ func TestIssue2564H2ServeProcessHelper(t *testing.T) {
 	opts := cliapp.DefaultServeOptions()
 	opts.SourceRoot, opts.ConfigPath = request.Source, request.Config
 	opts.StoreMode, opts.StoreModeSet = request.Backend, true
-	opts.PlatformSpecPath = defaultPlatformSpecPath
 	opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
 	opts.WorkspaceBackend, opts.WorkspaceBackendSet = "host", true
 	opts.SelfCheck, opts.Verbose, opts.Dev = true, true, false
@@ -305,8 +304,8 @@ func issue2564H2Read(ctx context.Context, rt issue2564H2Fixture, run string) (is
 		if err != nil {
 			return issue2564H2Snapshot{}, err
 		}
-		if hub.Stage != row.HeaderState || hub.Revision != row.HeaderRevision || snapshot.Hubs[hub.ID].ID != "" {
-			return issue2564H2Snapshot{}, fmt.Errorf("H2 header/field identity disagreement for %+v", hub)
+		if snapshot.Hubs[hub.ID].ID != "" {
+			return issue2564H2Snapshot{}, fmt.Errorf("H2 duplicate business hub identity for %+v", hub)
 		}
 		var persisted struct {
 			History []pipeline.WorkflowTransitionRecord `json:"transition_history"`

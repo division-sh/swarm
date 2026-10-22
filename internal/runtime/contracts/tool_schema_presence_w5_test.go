@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -201,43 +200,6 @@ func TestW5ToolsDocumentExpansionBudget(t *testing.T) {
 		body.WriteString("b: *a15\nc: *a15\n")
 		if _, err := admitW5Tools(t, body.String()); err == nil || !strings.Contains(err.Error(), "YAML-EXPANSION-LIMIT") {
 			t.Fatalf("aggregate merge=%t budget: %v", merged, err)
-		}
-	}
-}
-
-func TestW5ToolProvenanceComposesAndIsIdempotent(t *testing.T) {
-	repo := repoRootForContractsTest(t)
-	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: provenance\n")
-	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "task.ready:\ntask.done:\n")
-	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "worker:\n  event_handlers:\n    task.ready:\n      emit: task.done\n")
-	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: intent}\n")
-	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), "first: &tool\n  description: intent\n  input_schema: {type: string, minLength: 0}\nsecond:\n  <<: *tool\n")
-	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
-	if err != nil {
-		t.Fatal(err)
-	}
-	before := bundle.EffectiveProvenance().Entries()
-	for _, family := range []string{"schemas[", "nodes[", "events[", "agents[", "tools["} {
-		found := false
-		for _, entry := range before {
-			if strings.HasPrefix(entry.Path, family) {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("missing provenance family %s", family)
-		}
-	}
-	populateEffectiveProvenance(bundle)
-	if !reflect.DeepEqual(before, bundle.EffectiveProvenance().Entries()) {
-		t.Fatal("finalizer replaced/composed ledger inconsistently")
-	}
-	for _, entry := range before {
-		if strings.Contains(entry.Path, `second"].input_schema.minLength`) && (entry.Provenance.SourceLine != 5 || entry.Provenance.SourceColumn != 7) {
-			t.Fatalf("merge introduction lost: %+v", entry)
 		}
 	}
 }

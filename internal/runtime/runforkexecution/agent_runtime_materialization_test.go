@@ -441,7 +441,7 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\n")
 	repoRoot := filepath.Join("..", "..", "..")
 	loaded, err := (admittedFixtureSelectedContractSourceLoader{
-		RepoRoot: repoRoot, SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		RepoRoot: repoRoot, SourceRoot: root,
 	}).LoadRunForkSelectedContractSource(context.Background(), testContractSelection())
 	if err != nil {
 		t.Fatal(err)

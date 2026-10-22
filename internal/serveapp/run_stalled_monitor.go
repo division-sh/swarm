@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 	"time"
 
@@ -14,14 +13,13 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runstalled"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type serveRunStalledReader struct {
 	store runstalled.ProjectionReader
 }
 
-func startServeRunStalledEscalation(ctx context.Context, owner *worklifetime.Process, projection runstalled.ProjectionReader, contexts []serveRuntimeBundleContext, eventBus *bus.EventBus, posture executionposture.Posture) (func(), error) {
+func startServeRunStalledEscalation(ctx context.Context, owner *worklifetime.Process, projection runstalled.ProjectionReader, eventBus *bus.EventBus, posture executionposture.Posture) (func(), error) {
 	reader, ok := newServeRunStalledReader(projection)
 	if !ok || eventBus == nil {
 		return func() {}, nil
@@ -30,7 +28,6 @@ func startServeRunStalledEscalation(ctx context.Context, owner *worklifetime.Pro
 		Reader:           reader,
 		Publisher:        eventBus,
 		ExecutionPosture: posture,
-		PolicyResolver:   serveRunStalledPolicyResolver(contexts),
 		OnError: func(err error) {
 			log.Printf("run stalled escalation monitor: %v", err)
 		},
@@ -91,15 +88,10 @@ func (r *serveRunStalledReader) LoadRunSnapshot(ctx context.Context, runID strin
 	if err != nil {
 		return runstalled.RunSnapshot{}, err
 	}
-	flowInstance, err := r.store.LoadLatestRunFlowInstance(ctx, report.RunID)
-	if err != nil {
-		return runstalled.RunSnapshot{}, err
+	if report.OperationalFacts == nil {
+		return runstalled.RunSnapshot{}, fmt.Errorf("run stalled monitor requires coherent operational evidence")
 	}
-	progressAt, err := r.store.LoadLatestRunNonEscalationProgressAt(ctx, report.RunID, runstalled.EventType)
-	if err != nil {
-		return runstalled.RunSnapshot{}, err
-	}
-	return runStalledSnapshotFromDebugReport(report, flowInstance, progressAt), nil
+	return runStalledSnapshotFromDebugReport(report, report.OperationalFacts.LastProgressAt), nil
 }
 
 func (r *serveRunStalledReader) StalledRunEscalationExists(ctx context.Context, key runstalled.EscalationKey) (bool, error) {
@@ -117,147 +109,39 @@ func (r *serveRunStalledReader) StalledRunEscalationExists(ctx context.Context, 
 	if err != nil {
 		return false, err
 	}
-	lastProgressAt := runstalled.LastProgressAtString(key.LastProgressAt)
 	for _, evt := range result.Events {
-		if payloadString(evt.Payload["blocking_layer"]) != key.BlockingLayer {
-			continue
+		matches, err := key.MatchesPayload(evt.Payload)
+		if err != nil {
+			return false, err
 		}
-		if payloadString(evt.Payload["blocking_reason"]) != key.BlockingReason {
-			continue
+		if matches {
+			return true, nil
 		}
-		if payloadString(evt.Payload["last_progress_at"]) != lastProgressAt {
-			continue
-		}
-		return true, nil
 	}
 	return false, nil
 }
 
-func runStalledSnapshotFromDebugReport(report operatorread.RunDebugReport, flowInstance string, progressAt time.Time) runstalled.RunSnapshot {
+func runStalledSnapshotFromDebugReport(report operatorread.RunDebugReport, progressAt time.Time) runstalled.RunSnapshot {
 	report.LastEventAt = progressAt
 	status := operatorread.ProjectRunOperationalStatus(report)
+	instances := make([]runstalled.StalledInstance, 0)
+	for _, attribution := range status.Attributions {
+		if !attribution.Historical {
+			instances = append(instances, runstalled.StalledInstance{
+				FlowInstance: attribution.FlowInstance, BlockingLayer: status.BlockingLayer,
+				BlockingReason: status.BlockingReason, Attribution: attribution,
+			})
+		}
+	}
 	return runstalled.RunSnapshot{
 		RunID:          strings.TrimSpace(report.RunID),
 		RunTableStatus: strings.TrimSpace(report.RunTableStatus),
-		FlowInstance:   strings.Trim(flowInstance, "/"),
 		LastProgressAt: progressAt,
 		Diagnosis: runstalled.Diagnosis{
 			OperationalState: strings.TrimSpace(status.State),
 			BlockingLayer:    strings.TrimSpace(status.BlockingLayer),
 			BlockingReason:   strings.TrimSpace(status.BlockingReason),
+			StalledInstances: instances,
 		},
-	}
-}
-
-func serveRunStalledPolicyResolver(contexts []serveRuntimeBundleContext) runstalled.PolicyResolver {
-	sources := make([]semanticview.Source, 0, len(contexts))
-	for _, contextDef := range contexts {
-		if contextDef.loaded.source != nil {
-			sources = append(sources, contextDef.loaded.source)
-		}
-	}
-	return func(flowInstance string) runstalled.Policy {
-		policy := runstalled.DefaultPolicy()
-		source, flowID := serveRunStalledPolicyScope(sources, flowInstance)
-		if source == nil {
-			return policy
-		}
-		if value, ok := semanticview.PolicyValueForFlow(source, flowID, "runtime.stalled_run_escalation.enabled"); ok {
-			if enabled, ok := runStalledPolicyBool(value.Value); ok {
-				policy.Enabled = enabled
-			}
-		}
-		if value, ok := semanticview.PolicyValueForFlow(source, flowID, "runtime.stalled_run_escalation.threshold_seconds"); ok {
-			if seconds, ok := runStalledPolicySeconds(value.Value); ok && seconds > 0 {
-				policy.Threshold = time.Duration(seconds) * time.Second
-			}
-		}
-		return policy
-	}
-}
-
-func serveRunStalledPolicyScope(sources []semanticview.Source, flowInstance string) (semanticview.Source, string) {
-	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	for _, source := range sources {
-		if source == nil {
-			continue
-		}
-		if flowID := runStalledFlowIDForInstance(source.FlowScopes(), flowInstance); flowID != "" {
-			return source, flowID
-		}
-	}
-	if len(sources) > 0 {
-		return sources[0], ""
-	}
-	return nil, ""
-}
-
-func runStalledFlowIDForInstance(scopes []semanticview.FlowScope, flowInstance string) string {
-	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
-	if flowInstance == "" {
-		return ""
-	}
-	bestFlowID := ""
-	bestMatchLen := -1
-	for _, scope := range scopes {
-		flowID := strings.TrimSpace(scope.ID)
-		if flowID == "" {
-			continue
-		}
-		for _, candidate := range []string{scope.Path, scope.ID} {
-			candidate = strings.Trim(strings.TrimSpace(candidate), "/")
-			if candidate == "" {
-				continue
-			}
-			if flowInstance != candidate && !strings.HasPrefix(flowInstance, candidate+"/") {
-				continue
-			}
-			if len(candidate) > bestMatchLen {
-				bestMatchLen = len(candidate)
-				bestFlowID = flowID
-			}
-		}
-	}
-	return bestFlowID
-}
-
-func runStalledPolicyBool(value any) (bool, bool) {
-	switch typed := value.(type) {
-	case bool:
-		return typed, true
-	case string:
-		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
-		return parsed, err == nil
-	default:
-		return false, false
-	}
-}
-
-func runStalledPolicySeconds(value any) (int, bool) {
-	switch typed := value.(type) {
-	case int:
-		return typed, true
-	case int64:
-		return int(typed), true
-	case int32:
-		return int(typed), true
-	case float64:
-		return int(typed), typed == float64(int(typed))
-	case float32:
-		return int(typed), typed == float32(int(typed))
-	case string:
-		parsed, err := strconv.Atoi(strings.TrimSpace(typed))
-		return parsed, err == nil
-	default:
-		return 0, false
-	}
-}
-
-func payloadString(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return strings.TrimSpace(typed)
-	default:
-		return strings.TrimSpace(fmt.Sprint(value))
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/packs"
@@ -169,7 +170,7 @@ func TestStandingChannelAdmissionRefusesBeforeDurableMutation(t *testing.T) {
 				candidate.Coordinate.ContextPublicationGeneration++
 				want = "no longer current"
 			}
-			err = manager.AdmitChannelStandingTarget(context.Background(), channelonboarding.Operation{}, candidate, nil)
+			err = manager.AdmitChannelStandingTarget(context.Background(), channelonboarding.Operation{}, candidate, operatorchannel.ProviderAuthority{}, nil)
 			if err == nil || !strings.Contains(err.Error(), want) || store.reads != 0 {
 				t.Fatalf("pre-mutation refusal = %v, owner reads=%d", err, store.reads)
 			}

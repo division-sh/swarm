@@ -70,9 +70,18 @@ func CopyRootIngressServedDecisionControl(t testing.TB) string {
   awaiting_review:
     gate:
       decision: launch_review
+      title: Launch review
+      context:
+        environment: "'staging'"
       outcomes:
-        approve: {advances_to: done}
-        reject: {advances_to: rework}
+        approve:
+          advances_to: done
+          input:
+            score: {type: integer, required: true}
+        reject:
+          advances_to: rework
+          input:
+            feedback: {type: text, required: true}
   waiting: {}
   rework: {}
   done: {final: true}
@@ -125,6 +134,11 @@ pins:
     - fork.source_message
 `)
 	writeClosedVariantFile(t, root, "fork-source/prompts/fork-source-agent.md", "Preserve the source conversation used by the operator fork proof.\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - fork.source_message\n", "    - fork.source_message\n    - conversation.created\n")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [external.observed, fork.source_message, item.processed]", "outputs: [external.observed, fork.source_message, item.processed, conversation.created]")
+	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: item.processed, from: ., to: fork-source}\n", "  - {event: item.processed, from: ., to: fork-source}\n  - {event: conversation.created, from: ., to: flow, resolution: create}\n")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "fork.source_message:\n  note: text\n", "fork.source_message:\n  note: text\nconversation.created:\n  name: text\n")
+	addConversationForkConstruction(t, root)
 	return root
 }
 

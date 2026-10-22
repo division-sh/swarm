@@ -52,7 +52,6 @@ func TestNodeAdmissionDiskCatalogAndRetainedSourceParity(t *testing.T) {
 					{"fan-out", disk.FanOutPlans(), loaded.FanOutPlans()},
 					{"activities", disk.ActivitySites(), loaded.ActivitySites()},
 					{"connects", disk.CompositionConnects(), loaded.CompositionConnects()},
-					{"provenance", disk.EffectiveProvenance().Entries(), loaded.EffectiveProvenance().Entries()},
 				} {
 					if !reflect.DeepEqual(comparison.left, comparison.right) {
 						t.Errorf("%s changed %s", name, comparison.label)

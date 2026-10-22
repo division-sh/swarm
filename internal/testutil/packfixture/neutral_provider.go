@@ -5,8 +5,10 @@ package packfixture
 func NeutralProviderMembers() map[string][]byte {
 	return map[string][]byte{
 		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message], call_provider_actions: [send_message]}, cannot: [bypass journal]}\n"),
-		"trigger.yaml": []byte(`secret: {required: true}
-signature: {type: token_equality, header: X-Signature}
+		"trigger.yaml": []byte(`transport: session
+delivery_id: {json_path: $.message, required: true}
+event_type: {literal: message, required: true}
+ack: {mode: durable_before_dispatch}
 event_name: {literal: raw}
 normalized_events:
   - event: text_message

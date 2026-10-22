@@ -62,7 +62,7 @@ func TestS1CLIWhitespaceParentIsNotAnotherInvocation(t *testing.T) {
 	if err != nil || selected != filepath.Join(parent, "shop-a") {
 		t.Fatalf("valid child escaped the actual whitespace parent: %q, %v", selected, err)
 	}
-	project := resolveLocalRuntimeStateProject(parent, CLISourcePlatformSpecPaths{SourceRoot: parent})
+	project := resolveLocalRuntimeStateProject(parent, CLISourcePaths{SourceRoot: parent})
 	if project.ProjectRoot != parent || project.CanonicalProjectRoot != parent {
 		t.Fatalf("local state retargeted selected root: %+v", project)
 	}

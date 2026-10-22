@@ -23,6 +23,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -1173,7 +1174,16 @@ type destructiveResetCleanupSeed struct {
 }
 
 var destructiveResetCleanupArtifactA = sourceartifactfixture.Artifact()
-var destructiveResetCleanupArtifactB = sourceartifactfixture.New("agents.yaml", []byte("agents:\n  cleanup_b: {}\n"))
+var destructiveResetCleanupArtifactB = func() *sourceartifact.AdmittedSourceArtifact {
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents:\n  cleanup_b: {}\n"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return artifact
+}()
 var destructiveResetCleanupBundleHashA = destructiveResetCleanupArtifactA.BundleHash()
 var destructiveResetCleanupBundleHashB = destructiveResetCleanupArtifactB.BundleHash()
 
@@ -1508,7 +1518,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
 		t.Fatalf("seed agent audit: %v", err)
 	}
-	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES ($1::uuid, $2::uuid, 'flow/a', 'reset_fixture', 'active')`, runA, entityID); err != nil {
+	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields) VALUES ($1::uuid, $2::uuid, 'flow/a', 'reset_fixture', '{"status":"active"}'::jsonb)`, runA, entityID); err != nil {
 		t.Fatalf("seed entity state: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `INSERT INTO entity_mutations (run_id, entity_id, domain, path, writer_type, writer_id) VALUES ($1::uuid, $2::uuid, 'authored_field', 'status', 'platform', 'test')`, runA, entityID); err != nil {

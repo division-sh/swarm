@@ -47,16 +47,8 @@ func runtimeOwnedToolUsage(name string) string {
 	return ""
 }
 
-func NativeFallbackToolUsage(name string) string {
-	return runtimeOwnedToolUsage(name)
-}
-
 func EmitToolUsage() string {
 	return emitToolUsageHint
-}
-
-func PlatformOwnedToolUsage(name string) string {
-	return runtimeOwnedToolUsage(name)
 }
 
 func DescriptionWithUsage(description, usage string) string {

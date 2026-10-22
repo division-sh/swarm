@@ -171,9 +171,9 @@ func materializeCompletedRunEntityForTest(
 			}
 			_, err := tx.ExecContext(txctx, `
 			INSERT INTO entity_state (
-				run_id, entity_id, flow_instance, entity_type, current_state
+				run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
 			)
-			VALUES ($1::uuid, $1::uuid, $2, 'semantic-run-fixture', 'completed')
+			VALUES ($1::uuid, $1::uuid, $2, 'semantic-run-fixture', '{}', now(), now())
 		`, runID, semanticRunFixtureFlow)
 			return err
 		})
@@ -188,9 +188,9 @@ func materializeCompletedRunEntityForTest(
 			}
 			_, err := tx.ExecContext(txctx, `
 			INSERT INTO entity_state (
-				run_id, entity_id, flow_instance, entity_type, current_state
+				run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
 			)
-			VALUES (?, ?, ?, 'semantic-run-fixture', 'completed')
+			VALUES (?, ?, ?, 'semantic-run-fixture', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 		`, runID, runID, semanticRunFixtureFlow)
 			return err
 		})

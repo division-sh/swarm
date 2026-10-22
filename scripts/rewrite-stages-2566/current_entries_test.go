@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -71,12 +70,8 @@ func assertDiagnosticNativeConsumerCall(t *testing.T, function *ast.FuncDecl) {
 
 func TestRewrite2566CurrentSelectorsRetainExactSourceCorrespondence(t *testing.T) {
 	root := canonicalrouting.RepoRoot(t)
-	body, err := os.ReadFile("entries.json")
+	entries, err := readCurrentEntryGoldens(root)
 	if err != nil {
-		t.Fatal(err)
-	}
-	var entries []entryGolden
-	if err := json.Unmarshal(body, &entries); err != nil {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
@@ -141,26 +136,29 @@ func TestRewrite2566CurrentSelectorsPreserveHistoricalDecisionsAndRegeneration(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile("entries.json")
+	retained, err := readCurrentEntryGoldens(root)
 	if err != nil {
-		t.Fatal(err)
-	}
-	var retained []entryGolden
-	if err := json.Unmarshal(body, &retained); err != nil {
 		t.Fatal(err)
 	}
 	merged, err := retainCurrentEntrySelectors(reviewed, retained)
 	if err != nil || !reflect.DeepEqual(merged, retained) {
 		t.Fatalf("regeneration changed a reviewed tuple or current selector: %v", err)
 	}
-	count := 0
+	count, imported := 0, 0
 	for _, entry := range merged {
 		if entry.Current != nil {
 			count++
+			if entry.File == "internal/store/internal/runtimepersistence/flow_constructor_import_handoff_test.go" {
+				want := &currentEntrySelector{File: entry.File, Function: "TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores", Literal: 9}
+				if entry.Function != want.Function || entry.Literal != 4 || !reflect.DeepEqual(entry.Current, want) {
+					t.Fatalf("import source correspondence escaped its exact historical/current pair: %+v", entry)
+				}
+				imported++
+			}
 		}
 	}
-	if count != 42 {
-		t.Fatalf("current source remaps=%d, want all41 C relocations plus the rule-activity source correspondence", count)
+	if count != 43 || imported != 1 {
+		t.Fatalf("current source remaps=%d imported=%d, want all41 C relocations plus rule-activity and one exact import-source correspondence", count, imported)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -72,16 +73,16 @@ func validateClaudeStartupConfigForActiveAgents(ctx context.Context, cfg *config
 	return validateClaudeStartupRequirements(ctx, cfg, opts)
 }
 
-func validateSelectedBackendCredentialForDeclaredAgents(ctx context.Context, cfg *config.Config, opts RuntimeOptions, source semanticview.Source) error {
+func validateSelectedBackendCredentialForDeclaredAgents(ctx context.Context, cfg *config.Config, opts RuntimeOptions, source semanticview.Source) (runtimecredentials.SourceFact, error) {
 	hasAgents, err := workflowSourceDeclaresAgents(source)
 	if err != nil {
-		return err
+		return runtimecredentials.SourceFact{}, err
 	}
 	if !hasAgents {
-		return nil
+		return runtimecredentials.SourceFact{}, nil
 	}
 	if opts.ExecutionPosture == executionposture.MockOnly {
-		return nil
+		return runtimecredentials.SourceFact{}, nil
 	}
 	return validateSelectedBackendCredential(ctx, cfg, providerCredentialResolverForRuntimeOptions(opts))
 }
@@ -125,30 +126,30 @@ func ValidateDeclaredAgentModelAdmission(posture executionposture.Posture, cfg *
 	return nil
 }
 
-func validateSelectedBackendCredentialForActiveAgents(ctx context.Context, cfg *config.Config, opts RuntimeOptions, source semanticview.Source, manager *runtimemanager.AgentManager) error {
+func validateSelectedBackendCredentialForActiveAgents(ctx context.Context, cfg *config.Config, opts RuntimeOptions, source semanticview.Source, manager *runtimemanager.AgentManager) (runtimecredentials.SourceFact, error) {
 	hasAgents, err := workflowSourceOrManagerDeclaresAgents(source, manager)
 	if err != nil {
-		return err
+		return runtimecredentials.SourceFact{}, err
 	}
 	if !hasAgents {
-		return nil
+		return runtimecredentials.SourceFact{}, nil
 	}
 	if opts.ExecutionPosture == executionposture.MockOnly {
-		return validateActiveMockDescriptors(cfg, manager)
+		return runtimecredentials.SourceFact{}, validateActiveMockDescriptors(cfg, manager)
 	}
 	return validateSelectedBackendCredential(ctx, cfg, providerCredentialResolverForRuntimeOptions(opts))
 }
 
-func validateSelectedBackendCredential(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver) error {
+func validateSelectedBackendCredential(ctx context.Context, cfg *config.Config, credentials llm.ProviderCredentialResolver) (runtimecredentials.SourceFact, error) {
 	if cfg == nil {
-		return nil
+		return runtimecredentials.SourceFact{}, nil
 	}
 	profile, err := cfg.LLMBackendProfile()
 	if err != nil {
-		return err
+		return runtimecredentials.SourceFact{}, err
 	}
-	_, err = credentials.Resolve(ctx, profile)
-	return err
+	credential, err := credentials.Resolve(ctx, profile)
+	return credential.SourceFact(), err
 }
 
 func validateActiveMockDescriptors(cfg *config.Config, manager *runtimemanager.AgentManager) error {

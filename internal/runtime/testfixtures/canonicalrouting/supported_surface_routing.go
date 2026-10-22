@@ -154,7 +154,7 @@ func CopyTemplateOutputRootConnect(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
 	// This variant replaces the example's child consumer with the root receiver.
-	removeClosedVariantFiles(t, root, "consumer/nodes.yaml", "consumer/schema.yaml", "consumer")
+	removeClosedVariantFiles(t, root, "consumer/nodes.yaml", "consumer/schema.yaml", "consumer/manifest.yaml", "consumer")
 
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: root
 pins:

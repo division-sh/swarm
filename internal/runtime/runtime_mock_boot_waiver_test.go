@@ -24,7 +24,7 @@ func TestCommandMockStartupDoesNotRequireLiveCredential(t *testing.T) {
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
-	err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
+	_, err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
 		ExecutionPosture:    executionposture.MockOnly,
 		ProviderCredentials: testProviderCredentialStore(t, "ANTHROPIC_API_KEY", ""),
 	}, fullyMockedRuntimeAgentMemorySource(t))
@@ -38,7 +38,7 @@ func TestCommandLiveStartupRequiresCredentialDespiteSourceDoubles(t *testing.T) 
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
-	err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
+	_, err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
 		ExecutionPosture:    executionposture.Live,
 		ProviderCredentials: testProviderCredentialStore(t, "ANTHROPIC_API_KEY", ""),
 	}, fullyMockedRuntimeAgentMemorySource(t))
@@ -56,7 +56,7 @@ func TestValidateSelectedBackendCredentialForDeclaredAgents_UnmockedAgentWithCre
 	cfg.LLM.Backend = "anthropic"
 	t.Setenv("ANTHROPIC_API_KEY", "")
 
-	err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
+	_, err := validateSelectedBackendCredentialForDeclaredAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{
 		ExecutionPosture:    executionposture.Live,
 		ProviderCredentials: testProviderCredentialStore(t, "ANTHROPIC_API_KEY", "sk-test"),
 	}, partiallyMockedRuntimeAgentMemorySource(t, 1))
@@ -85,9 +85,12 @@ func TestCommandMockStartupRejectsRestoredLiveDescriptor(t *testing.T) {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 
-	err := validateSelectedBackendCredentialForActiveAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{ExecutionPosture: executionposture.MockOnly}, fullyMockedRuntimeAgentMemorySource(t), manager)
+	fact, err := validateSelectedBackendCredentialForActiveAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{ExecutionPosture: executionposture.MockOnly}, fullyMockedRuntimeAgentMemorySource(t), manager)
 	if err == nil || !strings.Contains(err.Error(), "mock execution rejects live active agent") || !strings.Contains(err.Error(), "recovered-agent") {
 		t.Fatalf("error = %v, want causal-mode refusal naming the active agent", err)
+	}
+	if fact.Reference != "" {
+		t.Fatalf("mock refusal returned a credential source: %+v", fact)
 	}
 }
 
@@ -100,9 +103,12 @@ func TestCommandMockStartupAcceptsEmptyActiveSet(t *testing.T) {
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
-	err := validateSelectedBackendCredentialForActiveAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{ExecutionPosture: executionposture.MockOnly}, fullyMockedRuntimeAgentMemorySource(t), manager)
+	fact, err := validateSelectedBackendCredentialForActiveAgents(testAuthorActivityContext(context.Background()), cfg, RuntimeOptions{ExecutionPosture: executionposture.MockOnly}, fullyMockedRuntimeAgentMemorySource(t), manager)
 	if err != nil {
 		t.Fatalf("empty active set must not require a live credential in mock execution, got %v", err)
+	}
+	if fact.Reference != "" {
+		t.Fatalf("mock validation returned a credential source: %+v", fact)
 	}
 }
 

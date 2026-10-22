@@ -125,7 +125,6 @@ func TestStructuralCheckPurposeCensus(t *testing.T) {
 		"flow_constructor_validation":             "structural",
 		"singleton_coordinator_validation":        "structural",
 		"cross_surface_named_type_use":            "structural",
-		"transition_ownership_validation":         "structural",
 		"event_runtime_wiring_validation":         "structural",
 		"timer_validation":                        "structural",
 		"clock_schedule_validation":               "structural",

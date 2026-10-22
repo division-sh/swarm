@@ -189,15 +189,6 @@ func WorkflowTimerActivationID(parts ...string) string {
 	return uuid.NewSHA1(workflowTimerIdentityNamespace, []byte("activation\x00"+strings.Join(normalized, "\x00"))).String()
 }
 
-func WorkflowTimerForkActivationID(sourceActivationID, forkRunID, forkEventID string) string {
-	return uuid.NewSHA1(workflowTimerIdentityNamespace, []byte(strings.Join([]string{
-		"fork",
-		strings.TrimSpace(sourceActivationID),
-		strings.TrimSpace(forkRunID),
-		strings.TrimSpace(forkEventID),
-	}, "\x00"))).String()
-}
-
 func WorkflowTimerOccurrenceEventID(ref WorkflowTimerOccurrenceRef) string {
 	ref = ref.Normalize()
 	if !ref.Valid() {

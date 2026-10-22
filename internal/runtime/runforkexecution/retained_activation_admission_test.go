@@ -8,7 +8,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -25,8 +24,8 @@ func TestSelectedForkActivationConsumesRuntimeAdmission(t *testing.T) {
 	ctx := runForkTestContext(t)
 	repo := runForkExecutionRepoRoot(t)
 	fixtureLoader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo,
-		SourceRoot:       filepath.Join(repo, "tests/tier11-flow-composition/test-sibling-both-instantiated-isolated"),
-		PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}
+		SourceRoot: filepath.Join(repo, "tests/tier11-flow-composition/test-sibling-both-instantiated-isolated"),
+	}
 	loaded, err := fixtureLoader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts})
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +44,7 @@ func TestSelectedForkActivationConsumesRuntimeAdmission(t *testing.T) {
 	forkPointEventID := uuid.NewString()
 	checkpoint := eventtest.ExistingRunRootIngress(forkPointEventID, "fork.cli.checkpoint", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{Scope: events.EventScopeGlobal}, at.Add(time.Millisecond))
 	storetest.CommitSemanticForkFrontier(t, ctx, selected, checkpoint, nil, nil)
-	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected}
+	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected}
 	operation := selectedForkFixtureOperation(t, loaded, runID, forkPointEventID)
 	operation.AllowSourceFreeze = false
 	materialized := materializeSelectedRuntimeOutcomeFork(t, ctx, owner, SelectedContractExecutionRequest{

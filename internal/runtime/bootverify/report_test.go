@@ -508,6 +508,45 @@ func TestRun_MapsMissingRuntimeExternalCredentialsToCredentialKeyExistsWarnings(
 			t.Fatalf("expected credential_key_exists warning containing %q, got %#v", expected, report.Warnings())
 		}
 	}
+	for _, finding := range report.Warnings() {
+		if finding.CheckID == "credential_key_exists" {
+			command := "swarm secrets set -- '" + finding.Location + "'"
+			if rendered := FormatSurfaceFinding(finding, true); !strings.Contains(rendered, "remediation:") || !strings.Contains(rendered, command) {
+				t.Fatalf("missing credential does not explain provisioning: %s", rendered)
+			}
+		}
+	}
+	for _, test := range []struct{ key, argument string }{
+		{"space key", "'space key'"},
+		{"owner's key", `'owner'"'"'s key'`},
+		{"$(printf injected);$HOME|&<>*?", "'$(printf injected);$HOME|&<>*?'"},
+		{"`printf injected`", "'`printf injected`'"},
+		{"--stdin", "'--stdin'"},
+	} {
+		t.Run(test.key, func(t *testing.T) {
+			bundle := &runtimecontracts.WorkflowContractBundle{
+				Tools: map[string]runtimecontracts.ToolSchemaEntry{
+					"email_api": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolCredentials(test.key)),
+				},
+			}
+			bundle.Platform.Platform.Name = "swarm"
+			bundle.Platform.Platform.Version = "test"
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{Credentials: bootverifyCredentialStore{}})
+			if report.HasErrors() {
+				t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
+			}
+			for _, finding := range report.Warnings() {
+				if finding.CheckID == "credential_key_exists" && finding.Location == test.key {
+					want := "Provision this credential with swarm secrets set -- " + test.argument + ", then restart swarm serve."
+					if finding.Remediation != want || finding.FailureClass != failures.ClassAuthenticationNeeded {
+						t.Fatalf("unsafe or misclassified credential remedy: %#v, want %q", finding, want)
+					}
+					return
+				}
+			}
+			t.Fatal("missing exact credential warning", report.Findings)
+		})
+	}
 }
 
 func TestRun_MissingCredentialStoreIsUnavailableNotUncheckedSuccess(t *testing.T) {
@@ -5873,19 +5912,6 @@ func TestFlowEventExistsDoesNotUseAnotherFlowDeclaration(t *testing.T) {
 
 	if flowEventExists(semanticview.Wrap(bundle), "child", "root.only") {
 		t.Fatal("another flow's event declaration satisfied transition reference validation")
-	}
-}
-
-func TestRun_ReportsTransitionOwnershipMismatch(t *testing.T) {
-	bundle := bootverifyTransitionRuntimeOwnershipBundle()
-	topology := bundle.Semantics.StageTopologies["."]
-	topology.Edges[0].Node = identitytest.RootNode(t, "projector")
-	bundle.Semantics.StageTopologies["."] = topology
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "transition_ownership_validation", "workflow owner is flow . node projector") {
-		t.Fatalf("expected transition_ownership_validation error, got %#v", report.Errors())
 	}
 }
 

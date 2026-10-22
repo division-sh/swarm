@@ -115,20 +115,6 @@ func sqliteJSONRawMessage(raw any) json.RawMessage {
 	}
 }
 
-func decodeStoreJSONMap(raw []byte) (map[string]any, error) {
-	if len(raw) == 0 {
-		return map[string]any{}, nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	if out == nil {
-		out = map[string]any{}
-	}
-	return out, nil
-}
-
 func sqliteTimeValue(raw any) (time.Time, bool, error) {
 	if raw == nil {
 		return time.Time{}, false, nil

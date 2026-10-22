@@ -31,6 +31,7 @@ func CopyUnavailableConnectionScan(t testing.TB, variant string) string {
 	var connects strings.Builder
 	connects.WriteString("connect:\n")
 	for _, receiver := range receivers {
+		writeClosedVariantFile(t, root, receiver+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		inputs := []string{"work.accepted"}
 		if variant == "pin_collision" || receiver == "bintermediate" && variant == "collision" {
 			inputs = append(inputs, "work.audited")

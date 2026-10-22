@@ -7,7 +7,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -55,7 +54,7 @@ type runForkCLIConstructionStore interface {
 func seedRunForkCLIConstruction(t *testing.T, parent context.Context, selected runForkCLIConstructionStore, runID string, at time.Time) {
 	t.Helper()
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{
-		RepoRoot: repoRootForTest(), PlatformSpecPath: contracts.DefaultPlatformSpecFile(repoRootForTest()), Store: selected,
+		RepoRoot: repoRootForTest(), Store: selected,
 	}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(parent, runforkexecution.SelectedContractSourceLoadRequest{
 		Responsibility: runforkexecution.OriginalRunSource(runID), Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},

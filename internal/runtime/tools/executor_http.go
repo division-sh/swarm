@@ -243,7 +243,10 @@ func (e *Executor) execHTTPRequestOnce(ctx context.Context, method, url string, 
 	if err := continueCommittedEffectLaunch(ctx, attempt, attempt.MarkLaunched(ctx)); err != nil {
 		return nil, err
 	}
-	resp, err := e.httpClient.Do(req)
+	// The prepared request context owns this call's budget, including its body.
+	client := *e.httpClient
+	client.Timeout = 0
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "http_tool_attempt_outcome_unconfirmed", "tool-executor", "execute_http_tool", map[string]any{"tool": toolName, "stage": "transport"}, err)
 	}

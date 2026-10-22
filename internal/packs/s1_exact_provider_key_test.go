@@ -7,7 +7,9 @@ import (
 
 func TestS1TriggerSubjectRetainsExactPortableProviderKey(t *testing.T) {
 	for _, key := range []string{"telegram-sales", "telegram_sales", "_team", "con", "Telegram", "telegram.bot", " acme", "acme ", strings.Repeat("a", 101)} {
-		subject := Subject{ID: "test.trigger", Kind: SubjectProviderTrigger, Provider: key, Source: "trigger_pack", Applicability: "installed"}
+		subject := Subject{ID: "test.trigger", Kind: SubjectProviderTrigger, Provider: key, Source: "trigger_pack", Applicability: "installed",
+			Capabilities: []Capability{{Code: CapabilityReceiveHTTPSRoute, Target: "/webhooks/{alias}/" + key}},
+		}
 		got, err := NormalizeSubjects([]Subject{subject})
 		valid := key == "telegram-sales" || key == "telegram_sales"
 		if !valid {

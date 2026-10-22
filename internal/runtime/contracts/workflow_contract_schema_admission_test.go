@@ -132,7 +132,6 @@ func TestSchemaAdmissionDiskCatalogRetainedParity(t *testing.T) {
 		}{
 			{"schema", disk.RootSchema, loaded.RootSchema}, {"flows", disk.FlowSchemas, loaded.FlowSchemas},
 			{"plans", disk.CompositionConnects(), loaded.CompositionConnects()}, {"timers", disk.WorkflowTimers(), loaded.WorkflowTimers()},
-			{"provenance", disk.EffectiveProvenance().Entries(), loaded.EffectiveProvenance().Entries()},
 		} {
 			if !reflect.DeepEqual(pair.a, pair.b) {
 				t.Fatalf("%s changed %s", name, pair.name)
@@ -232,34 +231,6 @@ func assertSchemaAdmissionInvalidSourceParity(t *testing.T, dir string) error {
 	return diskErr
 }
 
-func TestSchemaAdmissionProvenanceCompositionAndIsolation(t *testing.T) {
-	repo := repoRootForContractsTest(t)
-	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, filepath.Join(repo, "examples/routing/template-create-minted-key"), DefaultPlatformSpecFile(repo))
-	if err != nil {
-		t.Fatal(err)
-	}
-	before := bundle.EffectiveProvenance().Entries()
-	seen := map[string]bool{}
-	for _, entry := range before {
-		for _, family := range []string{"schemas[", "nodes[", "events["} {
-			if strings.HasPrefix(entry.Path, family) {
-				seen[family] = true
-			}
-		}
-	}
-	if len(seen) != 3 {
-		t.Fatalf("family provenance overwritten/missing: %v", seen)
-	}
-	populateEffectiveProvenance(bundle)
-	if !reflect.DeepEqual(before, bundle.EffectiveProvenance().Entries()) {
-		t.Fatal("finalization is not compositional/idempotent")
-	}
-	before[0].Provenance.SourceFile = "changed"
-	if reflect.DeepEqual(before, bundle.EffectiveProvenance().Entries()) {
-		t.Fatal("ledger exposes mutable storage")
-	}
-}
-
 func TestSchemaAdmissionDocumentExpansionBudget(t *testing.T) {
 	for _, variant := range []string{"alias", "merge"} {
 		t.Run(variant, func(t *testing.T) {
@@ -286,24 +257,9 @@ func TestSchemaAdmissionDocumentExpansionBudget(t *testing.T) {
 }
 
 func TestSchemaAdmissionAliasesMergesAndDerivedProvenance(t *testing.T) {
-	schema, err := admitSchemaFragment(canonicalrouting.SchemaAdmissionAliasProvenance)
+	_, err := admitSchemaFragment(canonicalrouting.SchemaAdmissionAliasProvenance)
 	if err != nil {
 		t.Fatal(err)
-	}
-	alias := schema.admissionProvenance["stages.waiting.description"]
-	if alias.Origin != EffectiveValueOriginAuthored || alias.SourceLine != 4 || alias.SourcePresence != "scalar" {
-		t.Fatalf("alias source occurrence lost: %#v", alias)
-	}
-	for _, path := range []string{"stages.waiting.timers[0].id", "pins.inputs[0].event", "pins.outputs[0].event"} {
-		fact := schema.admissionProvenance[path]
-		if fact.Origin != EffectiveValueOriginDerived || fact.RuleID == "" || len(fact.InputPaths) == 0 {
-			t.Fatalf("missing derived explanation %s: %#v", path, fact)
-		}
-		for _, input := range fact.InputPaths {
-			if _, ok := schema.admissionProvenance[input]; !ok {
-				t.Fatalf("%s has dangling input %s", path, input)
-			}
-		}
 	}
 	for _, source := range []string{
 		"required_agents: [{role: &r worker, description: *r}, {role: other, description: *r}]\n",

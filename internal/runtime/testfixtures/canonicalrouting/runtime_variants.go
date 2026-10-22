@@ -69,8 +69,8 @@ func CopyConstructedStaticHandler(t testing.TB, withTimer bool) string {
 	t.Helper()
 	root := CopyExample(t, TemplateCreateMintedKey)
 	removeClosedVariantFiles(t, root,
-		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer",
-		"validator/events.yaml", "validator/entities.yaml", "validator/nodes.yaml", "validator/schema.yaml", "validator")
+		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer/manifest.yaml", "producer",
+		"validator/events.yaml", "validator/entities.yaml", "validator/nodes.yaml", "validator/schema.yaml", "validator/manifest.yaml", "validator")
 
 	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: exact-once-test\npins:\n  inputs:\n    - thing.created\n  outputs:\n    - thing.created\nconnect:\n  - {event: thing.created, from: ., to: validation}\n")
 	writeClosedVariantFile(t, root, "events.yaml", "thing.created:\n  amount: integer\n  who: text\n")

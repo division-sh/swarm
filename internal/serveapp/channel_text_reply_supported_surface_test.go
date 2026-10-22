@@ -57,6 +57,31 @@ func waitTextReplyCardCopies(t *testing.T, reader render.Observer, cardID string
 	return nil
 }
 
+func waitTextReplyIntent(t *testing.T, reader render.Observer, demand render.IntentObservationQuery, disposition string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	var last render.IntentObservation
+	var seen bool
+	for time.Now().Before(deadline) {
+		result, found, err := reader.ObserveChannelIntent(context.Background(), demand)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last, seen = result, found
+		if found && result.State == "settled" && result.Disposition == disposition {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if demand.Kind == render.IntentAction {
+		textDemand := demand
+		textDemand.Kind = render.IntentText
+		text, found, err := reader.ObserveChannelIntent(context.Background(), textDemand)
+		t.Logf("original text: found=%t state=%q disposition=%q err=%v", found, text.State, text.Disposition, err)
+	}
+	t.Fatalf("intent %s/%s did not settle as %s: found=%t state=%q disposition=%q", demand.Kind, demand.ProviderEventID, disposition, seen, last.State, last.Disposition)
+}
+
 func waitChannelPublicCard(t *testing.T, h *channelOnboardingE2EHarness, runID string, kind decisioncard.AnchorKind, flowInstance string) string {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)

@@ -168,9 +168,9 @@ func TestIssue2564M24RunStopWriterBothOrdersAndRollbackBothStores(t *testing.T) 
 						}
 					}()
 					winnerPID := issue2564AwaitRunStopBarrier(t, ctx, observer, barrier, firstDone)
-					// Queue an observer ahead of the contender at the winner's exact
-					// run row, so rollback can be inspected before the loser proceeds.
-					gate := barrier.queueGate(t, ctx, observer, f.runID, "stop", winnerPID)
+					// Queue on the shared native ordering fence, not a domain row
+					// that the contender may reach through a different lock queue.
+					gate := barrier.queueGate(t, ctx, observer, winnerPID)
 					defer func() {
 						if gate != nil {
 							_ = gate.tx.Rollback()
@@ -188,7 +188,8 @@ func TestIssue2564M24RunStopWriterBothOrdersAndRollbackBothStores(t *testing.T) 
 							t.Fatal(ctx.Err())
 						}
 					} else {
-						_, query := issue2564AwaitRunStopSQLWait(t, ctx, observer, winnerPID, secondDone)
+						barrier.awaitPostgresContender(t, ctx, observer, winnerPID, gate, func() bool { return len(secondDone) != 0 })
+						query := gate.contender.query
 						if !issue2564RunLockQuery(query) && !strings.Contains(query, "author_activity_order") {
 							t.Errorf("%s contender waited below run/history authority: %q", map[string]string{"writer": "stop", "stop": "writer"}[first], query)
 						}
@@ -206,13 +207,17 @@ func TestIssue2564M24RunStopWriterBothOrdersAndRollbackBothStores(t *testing.T) 
 					} else if !firstResult.committed || firstResult.err != nil {
 						t.Fatalf("winner lacked native COMMIT acknowledgment: %+v", firstResult)
 					}
-					barrier.awaitGate(t, ctx, gate)
+					barrier.awaitGate(t, ctx, observer, gate)
 					// SQLite's BUSY observer retains no SQL locks after rollback;
-					// PostgreSQL's queued run fence retains the same inspection cut.
+					// PostgreSQL retains the shared native ordering fence at this cut.
 					if rollback {
 						if after := snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres"); !reflect.DeepEqual(baseline, after) {
 							t.Error("rolled-back winner leaked state, gate/card, mutation, story, revision or source evidence")
 						}
+					}
+					barrier.assertContenderFenced(t, ctx, observer, gate)
+					if len(secondDone) != 0 {
+						t.Fatal("run-stop contender returned before the observer cut ended")
 					}
 					barrier.openGate(t, gate)
 					barrier.resume()

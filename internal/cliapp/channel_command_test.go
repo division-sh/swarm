@@ -12,15 +12,21 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 )
 
 const (
-	operatorChannelCLISelector  = "provider.telegram.hitl_channel@operator-channel-cli-generation"
 	operatorChannelCLIToken     = "operator-channel-cli-token"
 	operatorChannelCLIOperation = "00000000-0000-4000-8000-000000000224"
 	operatorChannelCLIChallenge = "SWARM-AAAAAAAAAAAAAAAA"
 )
+
+var operatorChannelCLISelector = (operatorchannel.InterfaceIdentity{
+	InterfaceRef: operatorchannel.InterfaceHITLChannelV2, ChannelPackID: "provider.telegram.hitl_channel",
+	ChannelPackVersion: "1.0.0", ChannelManifestHash: "sha256:" + strings.Repeat("a", 64),
+	SemanticGeneration: "operator-channel-cli-generation",
+}).Normalized().Selector
 
 func TestChannelCLIReportsNativeQualificationWithoutInventingLocale(t *testing.T) {
 	for _, state := range []channelnative.QualificationState{channelnative.QualificationMissing, channelnative.QualificationInvalid, channelnative.QualificationStale, channelnative.QualificationQualified} {
@@ -30,7 +36,7 @@ func TestChannelCLIReportsNativeQualificationWithoutInventingLocale(t *testing.T
 				language = ""
 			}
 			result := channelOnboardingResult{
-				Operation: channelonboarding.Operation{OperationID: operatorChannelCLIOperation, ClientLanguage: language},
+				Operation: channelonboarding.Operation{OperationID: operatorChannelCLIOperation, Provider: "telegram", ClientLanguage: language},
 				Readiness: &channelonboarding.ConnectedChannelReadiness{Ready: true, NativeInbox: &channelnative.Qualification{
 					State: state, ClientLanguage: language, LocaleRevision: 2, Reason: "exact owner evidence",
 				}},
@@ -162,6 +168,28 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		}
 	})
 
+	t.Run("native list retains the disconnected reason", func(t *testing.T) {
+		for _, reason := range []string{"network unreachable", "logged out", "account temporarily banned", "session replaced by another connection", "connection rejected by WhatsApp"} {
+			server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+				if request.Method != "channel.list" {
+					t.Fatalf("method = %q, want channel.list", request.Method)
+				}
+				result := operatorChannelCLIListResult("unbound", nil)
+				row := result["channels"].([]any)[0].(map[string]any)
+				op := sessionProgressCLIResult("whatsapp", "", "succeeded", true)["operation"].(map[string]any)
+				row["identity"].(map[string]any)["interface"] = op["interface"]
+				row["operation"] = op
+				row["connection"] = map[string]any{"state": "disconnected", "linked": true, "reason": reason}
+				return result
+			})
+			out, errOut, code := runOperatorChannelCLI(t, server, "channel", "list")
+			if code != 0 || errOut != "" || !strings.Contains(out, "WhatsApp: disconnected") || !strings.Contains(out, "WhatsApp disconnected: "+reason) ||
+				reason != "network unreachable" && strings.Contains(out, "network unreachable") {
+				t.Fatal("native health lost or invented its disconnected reason", code, out, errOut)
+			}
+		}
+	})
+
 	t.Run("status selects one exact activation coordinate", func(t *testing.T) {
 		firstBundle := "bundle-v2:sha256:" + strings.Repeat("b", 64)
 		sourceDir, artifact := identitySource2376(t)
@@ -248,7 +276,7 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 			methods = append(methods, request.Method)
 			switch request.Method {
 			case "channel.onboarding_start":
-				if request.Params["provider"] != "telegram" || request.Params["verb"] != "connect" || request.Params["save_proof"] != true || request.Params["provider_credential"] != "bot-token" {
+				if request.Params["provider"] != "telegram" || request.Params["verb"] != "connect" || request.Params["save_proof"] != true || request.Params["provider_credential"] != nil {
 					t.Fatalf("channel.onboarding_start params = %#v", request.Params)
 				}
 				return channelOnboardingCLIResult("awaiting_external_identity", "awaiting_claim", false)
@@ -373,10 +401,21 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		for _, verb := range []string{"reconnect", "rebind"} {
 			t.Run(verb, func(t *testing.T) {
 				server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
-					if request.Method != "channel.onboarding_start" || request.Params["verb"] != verb || request.Params["provider_credential"] != "replacement-token" {
-						t.Fatalf("replacement start = %s %#v", request.Method, request.Params)
+					switch request.Method {
+					case "channel.onboarding_select":
+						if request.Params["verb"] != verb || request.Params["provider_credential"] != nil {
+							t.Fatalf("replacement selection = %s %#v", request.Method, request.Params)
+						}
+						return channelCLISelectionResult(channelOnboardingCLIResult("preparing", "", false))
+					case "channel.onboarding_start":
+						if request.Params["expected_selection"] != "selected-declaration" || request.Params["provider_credential"] != "replacement-token" {
+							t.Fatalf("replacement admission = %s %#v", request.Method, request.Params)
+						}
+						return channelOnboardingCLIResult("succeeded", "bound", true)
+					default:
+						t.Fatalf("unexpected replacement method %s", request.Method)
+						return nil
 					}
-					return channelOnboardingCLIResult("succeeded", "bound", true)
 				})
 				stdout, stderr, code := runOperatorChannelCLIWithInput(t, server, "replacement-token\n", "channel", verb, "telegram", "--credential-stdin")
 				if code != 0 || stderr != "" || !strings.Contains(stdout, "Connected telegram channel READY") {
@@ -606,17 +645,25 @@ func runOperatorChannelCLINonterminal(t *testing.T, server *httptest.Server, inp
 }
 
 func channelOnboardingCLIResult(phase, identityState string, ready bool) map[string]any {
+	identity := operatorChannelCLIOperationResult("", 2, 1)["interface"]
+	coordinate := operatorChannelCLIReadiness(ready)["coordinate"].(map[string]any)
+	coordinate["runtime_instance_id"] = "11111111-1111-4111-8111-111111111111"
 	operation := map[string]any{
 		"operation_id": operatorChannelCLIOperation,
 		"verb":         "connect", "provider": "telegram", "phase": phase,
-		"revision": 6, "binding_revision": 1, "activation_revision": 1,
+		"revision": 6, "binding_revision": 1, "activation_revision": map[bool]int{true: 1, false: 0}[ready],
+		"interface": identity, "coordinate": coordinate, "target_selector": "ingress:support:telegram",
+		"activation_posture": "webhook_registration", "identity_ceremony": "authenticated_text_challenge",
+		"credential_reservations": []any{map[string]any{"role": "bot_token", "store_key": "channel.telegram.bot_token"}},
 	}
 	result := map[string]any{
 		"operation": operation,
 		"candidate": map[string]any{
-			"provider":  "telegram",
-			"interface": map[string]any{"selector": operatorChannelCLISelector},
-			"target":    map[string]any{"selector": "ingress:support:telegram"},
+			"provider": "telegram", "interface": identity, "coordinate": coordinate,
+			"target": map[string]any{"selector": "ingress:support:telegram", "service_id": "support-service", "flow_path": "support", "alias": "support", "provider": "telegram",
+				"generation": 1, "publication_sequence": 1, "admission_generation": strings.Repeat("d", 64)},
+			"activation_posture": "webhook_registration", "identity_ceremony": "authenticated_text_challenge",
+			"provider_credential_role": "bot_token", "signing_credential_role": "webhook_signing", "confirmation_operation": "deliver",
 		},
 		"readiness": operatorChannelCLIReadiness(ready),
 	}

@@ -2,7 +2,9 @@ package contracts
 
 import (
 	"fmt"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -229,6 +231,22 @@ func TestExpressionValueR2RejectsRetiredAndMalformedForms(t *testing.T) {
 	var nested ExpressionValue
 	if err := decodeNodeTestYAML([]byte(`{literal: {kind: cel, cel: payload.id}}`), &nested); err == nil {
 		t.Fatal("literal key bypassed reserved expression-shape admission")
+	}
+	stderr, err := os.CreateTemp(t.TempDir(), "lexer-stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := os.Stderr
+	os.Stderr = stderr
+	t.Cleanup(func() { os.Stderr = previous; stderr.Close() })
+	err = decodeNodeTestYAML([]byte(`"${'line\nbreak'}"`), &nested)
+	os.Stderr = previous
+	output, readErr := os.ReadFile(stderr.Name())
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "unterminated ${...} expression") || !strings.Contains(err.Error(), `'\n'`) || !strings.Contains(err.Error(), "close") || len(output) != 0 {
+		t.Fatalf("malformed interpolation needs one character-specific remedy: error=%v stderr=%q", err, output)
 	}
 }
 

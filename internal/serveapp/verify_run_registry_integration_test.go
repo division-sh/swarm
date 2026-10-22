@@ -50,8 +50,7 @@ func TestVerifyRunJobflowRegistryIntegrationBothStores(t *testing.T) {
 			var selected any
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p.deps.EventStore })
 			process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-				SourceRoot: root, ConfigPath: configPath, PlatformSpecPath: defaultPlatformSpecPath,
-				SwarmDir: t.TempDir(), SwarmDirSet: true,
+				SourceRoot: root, ConfigPath: configPath, SwarmDir: t.TempDir(), SwarmDirSet: true,
 				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
 				TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 			})
@@ -351,7 +350,7 @@ func registryProofBusinessResults(t *testing.T, endpoint, runID string, outputEv
 		var detail operatorread.OperatorEntityFull
 		requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &detail)
 		slug, _ := detail.Fields["slug"].(string)
-		if entityIDs[slug] != "" || entity.CurrentState != "done" || !reflect.DeepEqual(detail.Fields, want[slug]) {
+		if entityIDs[slug] != "" || entity.CurrentState == nil || *entity.CurrentState != "done" || !reflect.DeepEqual(detail.Fields, want[slug]) {
 			t.Fatalf("registry business result differs: entity=%+v fields=%+v expected=%+v", entity, detail.Fields, want[slug])
 		}
 		entityIDs[slug] = entity.EntityID

@@ -1,19 +1,13 @@
 package main
 
 import (
-	"encoding/json"
-	"os"
 	"reflect"
 	"testing"
 )
 
 func TestRewrite2566IncomingOptInSourcesHaveIndependentEntryGoldens(t *testing.T) {
-	body, err := os.ReadFile("entries.json")
+	entries, err := readCurrentEntryGoldens("../..")
 	if err != nil {
-		t.Fatal(err)
-	}
-	var entries []entryGolden
-	if err := json.Unmarshal(body, &entries); err != nil {
 		t.Fatal(err)
 	}
 	expected := map[string]entryGolden{

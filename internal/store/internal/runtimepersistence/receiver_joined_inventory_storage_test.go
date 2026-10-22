@@ -221,8 +221,8 @@ func seedReceiverJoinedInventoryStorage(t *testing.T, fixture authorActivityRece
 	if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 		for _, row := range rows {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO entity_state
-				(run_id,entity_id,flow_instance,entity_type,current_state,fields,bookkeeping,revision)
-				VALUES($1,$2,$3,'inventory_entity','stale-business-state',$4,'{}',7)`, runID, row.entity, row.entityPath,
+				(run_id,entity_id,flow_instance,entity_type,fields)
+				VALUES($1,$2,$3,'inventory_entity',$4)`, runID, row.entity, row.entityPath,
 				`{"integer":7,"decimal":7.0,"text":"exact bytes","nested":[null,{"flag":true}]}`); err != nil {
 				return err
 			}
@@ -240,8 +240,8 @@ func seedReceiverJoinedInventoryStorage(t *testing.T, fixture authorActivityRece
 		}
 		entity := "60000000-1111-4111-8111-111111111111"
 		if _, err := tx.ExecContext(ctx, `INSERT INTO entity_state
-			(run_id,entity_id,flow_instance,entity_type,current_state,fields,bookkeeping,revision)
-			VALUES($1,$2,'inventory/foreign','inventory_entity','queued','{}','{}',1)`, sibling, entity); err != nil {
+			(run_id,entity_id,flow_instance,entity_type,fields)
+			VALUES($1,$2,'inventory/foreign','inventory_entity','{}')`, sibling, entity); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO flow_instances

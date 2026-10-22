@@ -29,25 +29,6 @@ import (
 
 type Dialect string
 
-func MakeManagerRetryEligibleTx(ctx context.Context, tx *sql.Tx, event events.Event, route events.DeliveryRoute) error {
-	if tx == nil {
-		return fmt.Errorf("manager retry cut requires the original selected transaction")
-	}
-	id, err := DeliveryID(event.ID(), route)
-	if err != nil {
-		return err
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET next_eligible_at=$1 WHERE delivery_id=$2 AND event_id=$3 AND run_id=$4 AND status='failed'`, time.Now().UTC().Add(-time.Minute), id, event.ID(), event.RunID())
-	if err != nil {
-		return err
-	}
-	count, err := result.RowsAffected()
-	if err != nil || count != 1 {
-		return fmt.Errorf("manager retry cut requires one exact failed delivery: count=%d,error=%v", count, err)
-	}
-	return nil
-}
-
 // This cut changes age, not lease authority or expiry. Settlement still has to
 // renew the exact original token before recording its outcome.
 func AgeManagerClaimStartedAtTx(ctx context.Context, tx *sql.Tx, claim Claim, startedAt time.Time) error {
@@ -1173,10 +1154,11 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutation
 	return ClaimedObligation{Snapshot: claimed.Snapshot, Claim: claim}, nil
 }
 
-// These lifecycle coordinates are still part of the historical contract. A new
-// worker token or lease alone must not declare another historical fact.
+// Preserve only the refusal predicates; worker tokens, leases and session IDs
+// are not historical business facts.
 func declareRetainedDeliveryLifecycle(attempt *mutationprotocol.Attempt, before, after Snapshot) error {
-	if before.Status == after.Status && before.ActiveSessionID == after.ActiveSessionID {
+	if before.Status == after.Status && before.StartedAt.IsZero() == after.StartedAt.IsZero() &&
+		(strings.TrimSpace(before.ActiveSessionID) == "") == (strings.TrimSpace(after.ActiveSessionID) == "") {
 		return nil
 	}
 	return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)
@@ -1612,7 +1594,7 @@ func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mut
 	reason := strings.TrimSpace(settlement.ReasonCode)
 	effectiveFailure := settlement.Failure
 	retryCount := record.RetryCount
-	var nextEligible any
+	var nextEligible *time.Time
 	if settlement.Disposition == FailureRetry {
 		if record.RetryCount < record.MaxRetries {
 			status = StatusFailed
@@ -1624,7 +1606,8 @@ func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mut
 				base = time.Second
 			}
 			delay := time.Duration(float64(base) * math.Pow(2, float64(retryCount-1)))
-			nextEligible = now.Add(delay)
+			due := committedRetryDue(now, delay)
+			nextEligible = &due
 		} else {
 			status = StatusDeadLetter
 			transition = "dead_letter"
@@ -1682,7 +1665,7 @@ func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mut
 	if err := attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
 		return Snapshot{}, err
 	}
-	if err := a.completeAttempt(ctx, tx, attempt, claim, outcome, reason, effectiveFailure, settlement.SideEffects, settlement.Duration, now); err != nil {
+	if err := a.completeAttempt(ctx, tx, attempt, claim, outcome, reason, effectiveFailure, settlement.SideEffects, settlement.Duration, now, nextEligible); err != nil {
 		return Snapshot{}, err
 	}
 	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
@@ -1871,14 +1854,14 @@ func (a *Adapter) Outcomes(ctx context.Context, q queryer, deliveryID string) ([
 	}
 	query := `
 		SELECT delivery_id::text, claim_version, outcome, COALESCE(reason_code, ''),
-			failure, side_effects, duration_ms, completed_at
+			failure, side_effects, duration_ms, completed_at, retry_eligible_at
 		FROM event_delivery_attempts
 		WHERE delivery_id = $1::uuid AND closure_kind = 'settled'
 		ORDER BY claim_version`
 	if a.dialect == DialectSQLite {
 		query = `
 			SELECT delivery_id, claim_version, outcome, COALESCE(reason_code, ''),
-				failure, side_effects, duration_ms, completed_at
+				failure, side_effects, duration_ms, completed_at, retry_eligible_at
 			FROM event_delivery_attempts
 			WHERE delivery_id = ? AND closure_kind = 'settled'
 			ORDER BY claim_version`
@@ -1890,42 +1873,9 @@ func (a *Adapter) Outcomes(ctx context.Context, q queryer, deliveryID string) ([
 	defer rows.Close()
 	out := []Outcome{}
 	for rows.Next() {
-		var (
-			item           Outcome
-			failureRaw     []byte
-			sideEffectsRaw []byte
-			durationMS     int64
-			settledRaw     any
-		)
-		if err := rows.Scan(&item.DeliveryID, &item.ClaimVersion, &item.Outcome, &item.ReasonCode, &failureRaw, &sideEffectsRaw, &durationMS, &settledRaw); err != nil {
-			return nil, fmt.Errorf("scan delivery outcome: %w", err)
-		}
-		if item.ClaimVersion <= 0 {
-			return nil, fmt.Errorf("%w: delivery outcome claim version is invalid", ErrConflict)
-		}
-		switch item.Outcome {
-		case "delivered", "retry_scheduled", "dead_letter", "terminalized", "canceled":
-		default:
-			return nil, fmt.Errorf("%w: delivery outcome %q is invalid", ErrConflict, item.Outcome)
-		}
-		if item.Failure, err = decodeFailure(failureRaw); err != nil {
+		item, err := scanDeliveryOutcome(rows)
+		if err != nil {
 			return nil, err
-		}
-		if item.Outcome == "canceled" {
-			if _, err := ParseCancellationReason(item.ReasonCode); err != nil || item.Failure != nil {
-				return nil, fmt.Errorf("%w: canceled outcome lacks exact authored reason or contains failure", ErrConflict)
-			}
-		}
-		if err := json.Unmarshal(sideEffectsRaw, &item.SideEffects); err != nil {
-			return nil, fmt.Errorf("decode delivery outcome side effects: %w", err)
-		}
-		item.Duration = time.Duration(durationMS) * time.Millisecond
-		var present bool
-		if item.SettledAt, present, err = parseNullableTime(settledRaw); err != nil {
-			return nil, err
-		}
-		if !present {
-			return nil, fmt.Errorf("%w: delivery outcome settled time is missing", ErrConflict)
 		}
 		out = append(out, item)
 	}
@@ -1933,6 +1883,67 @@ func (a *Adapter) Outcomes(ctx context.Context, q queryer, deliveryID string) ([
 		return nil, fmt.Errorf("list delivery outcomes: %w", err)
 	}
 	return out, nil
+}
+
+func scanDeliveryOutcome(rows *sql.Rows) (Outcome, error) {
+	var item Outcome
+	var failureRaw, sideEffectsRaw []byte
+	var durationMS int64
+	var settledRaw, retryRaw any
+	if err := rows.Scan(&item.DeliveryID, &item.ClaimVersion, &item.Outcome, &item.ReasonCode, &failureRaw, &sideEffectsRaw, &durationMS, &settledRaw, &retryRaw); err != nil {
+		return Outcome{}, fmt.Errorf("scan delivery outcome: %w", err)
+	}
+	if item.ClaimVersion <= 0 {
+		return Outcome{}, fmt.Errorf("%w: delivery outcome claim version is invalid", ErrConflict)
+	}
+	switch item.Outcome {
+	case "delivered", "retry_scheduled", "dead_letter", "terminalized", "canceled":
+	default:
+		return Outcome{}, fmt.Errorf("%w: delivery outcome %q is invalid", ErrConflict, item.Outcome)
+	}
+	var err error
+	if item.Failure, err = decodeFailure(failureRaw); err != nil {
+		return Outcome{}, err
+	}
+	if item.Outcome == "canceled" {
+		if _, err := ParseCancellationReason(item.ReasonCode); err != nil || item.Failure != nil {
+			return Outcome{}, fmt.Errorf("%w: canceled outcome lacks exact authored reason or contains failure", ErrConflict)
+		}
+	}
+	if err := json.Unmarshal(sideEffectsRaw, &item.SideEffects); err != nil {
+		return Outcome{}, fmt.Errorf("decode delivery outcome side effects: %w", err)
+	}
+	item.Duration = time.Duration(durationMS) * time.Millisecond
+	var present bool
+	if item.SettledAt, present, err = parseNullableTime(settledRaw); err != nil {
+		return Outcome{}, err
+	}
+	if !present {
+		return Outcome{}, fmt.Errorf("%w: delivery outcome settled time is missing", ErrConflict)
+	}
+	item.RetryEligibleAt, err = decodeOutcomeRetryDue(item, retryRaw)
+	return item, err
+}
+
+func decodeOutcomeRetryDue(item Outcome, raw any) (*time.Time, error) {
+	due, present, err := parseNullableTime(raw)
+	if err != nil {
+		return nil, err
+	}
+	if !present && raw != nil {
+		return nil, fmt.Errorf("%w: outcome retry due is an empty timestamp", ErrConflict)
+	}
+	if item.Outcome != "retry_scheduled" {
+		if present {
+			return nil, fmt.Errorf("%w: non-retry outcome contains a retry due", ErrConflict)
+		}
+		return nil, nil
+	}
+	decision := CommittedRetryDecision{ClaimVersion: item.ClaimVersion, SettledAt: item.SettledAt, EligibleAt: due}
+	if err := decision.Validate(); err != nil {
+		return nil, err
+	}
+	return &due, nil
 }
 
 func (a *Adapter) ProveHandoff(ctx context.Context, q queryer, eventID string, route events.DeliveryRoute) (DurableHandoffProof, error) {
@@ -2020,6 +2031,134 @@ func (a *Adapter) SnapshotsForEvent(ctx context.Context, q queryer, eventID stri
 		return nil, err
 	}
 	return snapshots[eventID], nil
+}
+
+// RunOperationalFact is detached diagnostic evidence, not a claim, execution
+// authority or generic snapshot with executable route/initialization custody.
+type RunOperationalFact struct {
+	DeliveryID, EventID, RunID, SubscriberID string
+	RouteIdentity                            string
+	AgentIdentity                            agentidentity.Identity
+	FlowInstance                             string
+	SubscriberClass                          SubscriberClass
+	Status                                   Status
+	ReasonCode                               string
+	KnownCompletionAttempts                  map[string]bool
+}
+
+// RunOperationalEvidence uses the caller's retained snapshot and keeps native
+// claim-token and historical selected-binding matching within the delivery owner.
+func (a *Adapter) RunOperationalEvidence(ctx context.Context, q queryer, runID string) ([]RunOperationalFact, error) {
+	if id, err := uuid.Parse(runID); err != nil || id.String() != runID {
+		return nil, fmt.Errorf("delivery operational evidence requires exact run identity")
+	}
+	rows, err := q.QueryContext(ctx, `SELECT CAST(delivery_id AS TEXT),CAST(event_id AS TEXT),route_identity,
+		subscriber_type,subscriber_id,agent_name_owner,agent_name_source,agent_route_presence,
+		agent_flow_scope_key,agent_flow_instance_id,agent_flow_instance_path,status,COALESCE(reason_code,''),
+		execution_authority_kind,authority_bundle_hash,execution_authority_id,execution_authority_generation,
+		COALESCE(CAST(selected_execution_id AS TEXT),''),COALESCE(CAST(selected_fork_run_id AS TEXT),''),COALESCE(selected_execution_generation,0),
+		delivery_target_route
+		FROM event_deliveries WHERE run_id=$1 ORDER BY delivery_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	out := []RunOperationalFact{}
+	byID := map[string]int{}
+	for rows.Next() {
+		fact, err := scanRunOperationalFact(rows, runID)
+		if err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		byID[fact.DeliveryID] = len(out)
+		out = append(out, fact)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	rows, err = q.QueryContext(ctx, `SELECT CAST(d.delivery_id AS TEXT),CAST(a.attempt_id AS TEXT)
+		FROM event_delivery_attempts d JOIN runtime_external_effect_attempts a
+		ON d.delivery_id=a.origin_delivery_id AND d.claim_version=a.origin_claim_version AND d.claim_token=a.origin_claim_token
+		LEFT JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
+		WHERE a.origin_kind='delivery' AND a.origin_run_id=$1
+		AND (COALESCE(o.authority_kind,'')<>'selected_contract_fork' OR EXISTS(
+			SELECT 1 FROM event_deliveries selected
+			JOIN run_fork_selected_contract_runtime_executions e ON e.execution_id=selected.selected_execution_id
+			JOIN run_fork_selected_contract_bindings b ON b.binding_id=e.binding_id AND b.fork_run_id=e.fork_run_id
+			JOIN runs r ON r.run_id=e.fork_run_id
+			WHERE selected.delivery_id=a.origin_delivery_id AND selected.run_id=a.origin_run_id
+			AND selected.execution_authority_kind='selected_contract_fork'
+			AND selected.execution_authority_id=CAST(e.execution_id AS TEXT) AND selected.execution_authority_generation=e.generation
+			AND selected.selected_fork_run_id=e.fork_run_id AND selected.selected_execution_generation=e.generation
+			AND o.selected_execution_id=e.execution_id AND o.authority_id=CAST(e.execution_id AS TEXT) AND o.generation=e.generation AND a.generation=e.generation
+			AND o.bundle_hash=selected.authority_bundle_hash AND o.bundle_hash=r.bundle_hash
+			AND (b.mode='selected_contracts' OR (b.mode='bundle_hash' AND b.bundle_hash=r.bundle_hash))))`, runID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var deliveryID, attemptID string
+		if err := rows.Scan(&deliveryID, &attemptID); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		if index, found := byID[deliveryID]; found {
+			out[index].KnownCompletionAttempts[attemptID] = true
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func scanRunOperationalFact(row scanner, runID string) (RunOperationalFact, error) {
+	fact := RunOperationalFact{RunID: runID, KnownCompletionAttempts: make(map[string]bool)}
+	fields := agentidentity.StorageFields{RunID: runID}
+	var class, status, kind, bundle, authorityID, selectedID, selectedRunID string
+	var generation, selectedGeneration uint64
+	var targetRaw []byte
+	if err := row.Scan(&fact.DeliveryID, &fact.EventID, &fact.RouteIdentity,
+		&class, &fact.SubscriberID, &fields.NameOwner, &fields.NameSource, &fields.RoutePresence,
+		&fields.FlowScopeKey, &fields.FlowInstanceID, &fields.FlowInstancePath, &status, &fact.ReasonCode,
+		&kind, &bundle, &authorityID, &generation, &selectedID, &selectedRunID, &selectedGeneration, &targetRaw); err != nil {
+		return RunOperationalFact{}, err
+	}
+	if _, err := events.ParseDeliveryRouteIdentity(fact.RouteIdentity); err != nil {
+		return RunOperationalFact{}, fmt.Errorf("%w: persisted delivery route identity: %v", ErrConflict, err)
+	}
+	var err error
+	fact.SubscriberClass, err = ParseSubscriberClass(class)
+	if err == nil {
+		fact.Status, err = ParseStatus(status)
+	}
+	if err != nil {
+		return RunOperationalFact{}, fmt.Errorf("%w: persisted delivery status or subscriber class: %v", ErrConflict, err)
+	}
+	forkRunID := ""
+	if ExecutionAuthorityKind(kind) == ExecutionAuthoritySelectedContractFork {
+		if selectedID != authorityID || selectedGeneration != generation {
+			return RunOperationalFact{}, fmt.Errorf("%w: selected delivery authority projection mismatch", ErrConflict)
+		}
+		forkRunID = selectedRunID
+	}
+	if _, err := DecodeExecutionAuthority(ExecutionAuthorityKind(kind), bundle, authorityID, forkRunID, generation); err != nil {
+		return RunOperationalFact{}, fmt.Errorf("%w: persisted delivery execution authority: %v", ErrConflict, err)
+	}
+	// Agent ownership is carried by its typed identity columns. Hydrating the
+	// executable route tail here would read beyond bounded diagnostic pages.
+	if fact.SubscriberClass == SubscriberAgent {
+		fields.AgentID = fact.SubscriberID
+		fact.AgentIdentity, err = agentidentity.FromStorageFields(fields)
+		if err == nil {
+			_, _, fact.FlowInstance, err = fact.AgentIdentity.ExecutionCoordinates()
+		}
+	} else {
+		var target events.DeliveryTargetOwnership
+		if err := json.Unmarshal(targetRaw, &target); err != nil {
+			return RunOperationalFact{}, fmt.Errorf("%w: decode delivery target: %v", ErrConflict, err)
+		}
+		fact.FlowInstance = target.Route().FlowInstance
+	}
+	return fact, err
 }
 
 // RunDiagnosticCounts aggregates run-debug delivery counts in storage without
@@ -2977,7 +3116,7 @@ func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, record delivery
 	return nil
 }
 
-func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, outcome, reason string, failure *runtimefailures.Envelope, sideEffects []string, duration time.Duration, now time.Time) error {
+func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, outcome, reason string, failure *runtimefailures.Envelope, sideEffects []string, duration time.Duration, now time.Time, retryEligibleAt *time.Time) error {
 	failureRaw, err := encodeFailure(failure)
 	if err != nil {
 		return err
@@ -2990,17 +3129,18 @@ func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, attempt *muta
 	query := `
 		UPDATE event_delivery_attempts
 		SET outcome = $1, reason_code = NULLIF($2, ''), failure = NULLIF($3, '')::jsonb,
-			side_effects = $4::jsonb, duration_ms = $5, completed_at = $6,
+			side_effects = $4::jsonb, duration_ms = $5, completed_at = $6, retry_eligible_at = $10,
 			current_delivery_id = NULL, open_marker = FALSE, closure_kind = 'settled'
 		WHERE delivery_id = $7::uuid AND claim_version = $8 AND claim_token = $9::uuid AND open_marker = TRUE`
-	args := []any{outcome, reason, failureRaw, string(sideEffectsRaw), durationMS, now, claim.DeliveryID(), claim.Version(), claim.PersistenceToken()}
+	args := []any{outcome, reason, failureRaw, string(sideEffectsRaw), durationMS, now, claim.DeliveryID(), claim.Version(), claim.PersistenceToken(), retryEligibleAt}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_delivery_attempts
 			SET outcome = ?, reason_code = NULLIF(?, ''), failure = NULLIF(?, ''),
-				side_effects = ?, duration_ms = ?, completed_at = ?,
+				side_effects = ?, duration_ms = ?, completed_at = ?, retry_eligible_at = ?,
 				current_delivery_id = NULL, open_marker = FALSE, closure_kind = 'settled'
 			WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
+		args = []any{outcome, reason, failureRaw, string(sideEffectsRaw), durationMS, now, retryEligibleAt, claim.DeliveryID(), claim.Version(), claim.PersistenceToken()}
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {

@@ -10,7 +10,8 @@ var toolEntryFields = map[string]struct{}{
 	"category": {}, "description": {}, "handler_type": {}, "effect_class": {}, "permission": {},
 	"rate_limit": {}, "rate_limit_max_wait": {}, "input_schema": {}, "output_schema": {},
 	"http": {}, "response_mapping": {}, "response_success": {}, "credentials": {}, "managed_credential": {},
-	"path": {}, "abi": {}, "entry": {}, "digest": {}, "source_path": {}, "source_hash": {}, "runtime": {}, "limits": {},
+	"in_process": {},
+	"path":       {}, "abi": {}, "entry": {}, "digest": {}, "source_path": {}, "source_hash": {}, "runtime": {}, "limits": {},
 }
 
 func projectToolDeclarationsValue(root yamlsource.Value) (map[string]ToolSchemaEntry, error) {
@@ -30,14 +31,8 @@ func projectToolDeclarationsValue(root yamlsource.Value) (map[string]ToolSchemaE
 		if err != nil {
 			return nil, fmt.Errorf("tool %q: %w", declaration.Name, err)
 		}
-		entry.admissionProvenance = map[string]EffectiveValueProvenance{"declaration": authoredSourceProvenance(declaration.Value)}
-		if err := collectNodeValueProvenance(declaration.Value, "", entry.admissionProvenance, nil); err != nil {
-			return nil, err
-		}
-		for _, name := range []string{"input_schema", "output_schema"} {
-			if _, present := entry.admissionProvenance[name]; !present {
-				entry.admissionProvenance[name] = EffectiveValueProvenance{Origin: EffectiveValueOriginDerived, RuleID: "tool.default_object_schema"}
-			}
+		if err := entry.ValidateDeclarationName(declaration.Name); err != nil {
+			return nil, nodeValueError(declaration.Value, err)
 		}
 		out[declaration.Name] = entry
 	}
@@ -110,6 +105,17 @@ func projectToolValue(value yamlsource.Value) (ToolSchemaEntry, error) {
 
 func projectToolTransportOptions(fields map[string]yamlsource.Value) ([]ToolSchemaEntryOption, error) {
 	options := []ToolSchemaEntryOption{}
+	if field, present := fields["in_process"]; present {
+		raw, err := nodeValueText(field, "in_process")
+		if err != nil {
+			return nil, err
+		}
+		target, err := ParseToolInProcessTarget(raw)
+		if err != nil {
+			return nil, nodeValueError(field, err)
+		}
+		options = append(options, WithToolInProcessTarget(target))
+	}
 	for _, name := range []string{"path", "abi", "entry", "digest", "source_path", "source_hash", "runtime", "limits"} {
 		if field, present := fields[name]; present {
 			return nil, nodeValueError(field, fmt.Errorf("%s requires handler_type wasm or python", name))
@@ -182,6 +188,15 @@ func ProjectToolResponseSuccessValue(field yamlsource.Value) (HTTPResponseSucces
 		}
 	}
 	return success, nil
+}
+
+// AdmitToolHTTPExecutionValue uses the same authored HTTP admission as tools.yaml.
+func AdmitToolHTTPExecutionValue(value yamlsource.Value) (ToolHTTPExecution, error) {
+	spec, err := projectToolHTTPValue(value)
+	if err != nil {
+		return ToolHTTPExecution{}, err
+	}
+	return AdmitToolHTTPExecution(spec)
 }
 
 func projectToolHTTPValue(value yamlsource.Value) (HTTPToolSpec, error) {
@@ -272,7 +287,7 @@ func ProjectToolManagedCredentialValue(value yamlsource.Value) (ManagedCredentia
 }
 
 func projectToolModuleValue(value yamlsource.Value, fields map[string]yamlsource.Value, handler ToolHandlerKind, schemas map[string]ToolInputSchema) (PolicyModule, error) {
-	for _, name := range []string{"http", "response_mapping", "response_success", "credentials", "managed_credential", "category", "permission", "effect_class", "rate_limit", "rate_limit_max_wait"} {
+	for _, name := range []string{"http", "in_process", "response_mapping", "response_success", "credentials", "managed_credential", "category", "permission", "effect_class", "rate_limit", "rate_limit_max_wait"} {
 		if field, present := fields[name]; present {
 			return PolicyModule{}, nodeValueError(field, fmt.Errorf("module tools cannot declare %s", name))
 		}

@@ -217,7 +217,7 @@ func admitManifestCapabilities(value yamlsource.Value) (Capabilities, error) {
 	if err := manifestRequired(value, fields, "can", "cannot"); err != nil {
 		return Capabilities{}, err
 	}
-	can, err := manifestMapping(fields["can"], "receive_https_route", "verify_secret", "emit_events", "persist_dedupe_markers", "call_provider_actions", "lower_through_activity", "journal_activity_attempts")
+	can, err := manifestMapping(fields["can"], "receive_https_route", "receive_session_events", "verify_secret", "emit_events", "persist_dedupe_markers", "call_provider_actions", "lower_through_activity", "journal_activity_attempts")
 	if err != nil {
 		return Capabilities{}, err
 	}

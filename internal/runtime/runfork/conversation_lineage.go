@@ -181,8 +181,8 @@ func runForkSelectedContractPendingWorkHasActiveDeliverySessionCoupling(item Run
 	default:
 		return false
 	}
-	return strings.TrimSpace(item.ActiveSessionID) != "" ||
-		item.StartedAt != nil ||
+	return item.SourceExecution.SessionBound ||
+		item.SourceExecution.Started ||
 		item.DeliveredAt != nil ||
 		item.ReceiptAt != nil ||
 		strings.TrimSpace(item.ReceiptOutcome) != ""
@@ -208,8 +208,8 @@ func runForkSelectedContractSameSourceDeliveryForkPointEmission(plan RunForkPlan
 		strings.TrimSpace(item.SubscriberID) != strings.TrimSpace(plan.ForkPoint.ProducedBy) {
 		return false
 	}
-	if strings.TrimSpace(item.ActiveSessionID) != "" ||
-		item.StartedAt == nil ||
+	if item.SourceExecution.SessionBound ||
+		!item.SourceExecution.Started ||
 		item.DeliveredAt != nil ||
 		item.ReceiptAt != nil ||
 		strings.TrimSpace(item.ReceiptOutcome) != "" {

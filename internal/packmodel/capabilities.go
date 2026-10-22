@@ -18,6 +18,7 @@ type Capabilities struct {
 
 type CanCapabilities struct {
 	ReceiveHTTPSRoute       string   `yaml:"receive_https_route,omitempty" json:"receive_https_route,omitempty"`
+	ReceiveSessionEvents    string   `yaml:"receive_session_events,omitempty" json:"receive_session_events,omitempty"`
 	VerifySecret            string   `yaml:"verify_secret,omitempty" json:"verify_secret,omitempty"`
 	EmitEvents              []string `yaml:"emit_events,omitempty" json:"emit_events,omitempty"`
 	PersistDedupeMarkers    bool     `yaml:"persist_dedupe_markers,omitempty" json:"persist_dedupe_markers,omitempty"`

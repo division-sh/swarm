@@ -49,23 +49,21 @@ type selectedAPICapabilities struct {
 }
 
 type selectedAPICapabilityRequest struct {
-	RepoRoot                string
-	PlatformSpecPath        string
-	RunningPlatformSpecPath string
-	LoadedBundle            serveRuntimeBundle
-	RuntimeContextManager   *runtime.RuntimeContextManager
-	RuntimeSupervisor       *processLifecycleSupervisor
-	Source                  semanticview.Source
-	Config                  *config.Config
-	Workspaces              cliapp.ServeWorkspaceLifecycle
-	Credentials             runtimecredentials.Store
-	ManagedCredentials      runtimemanagedcredentials.Store
-	ProviderCredentials     runtimecredentials.Store
-	ExecutionPosture        executionposture.Posture
-	ProcessCapability       runtimestartupownership.ProcessCapability
-	PlatformPackBases       *packartifact.PlatformPackBaseGenerationOwner
-	NoticePresentation      runtimetools.InformationalNoticePresentationSink
-	SelectedFork            *storeselected.RunFork
+	RepoRoot              string
+	LoadedBundle          serveRuntimeBundle
+	RuntimeContextManager *runtime.RuntimeContextManager
+	RuntimeSupervisor     *processLifecycleSupervisor
+	Source                semanticview.Source
+	Config                *config.Config
+	Workspaces            cliapp.ServeWorkspaceLifecycle
+	Credentials           runtimecredentials.Store
+	ManagedCredentials    runtimemanagedcredentials.Store
+	ProviderCredentials   runtimecredentials.Store
+	ExecutionPosture      executionposture.Posture
+	ProcessCapability     runtimestartupownership.ProcessCapability
+	PlatformPackBases     *packartifact.PlatformPackBaseGenerationOwner
+	NoticePresentation    runtimetools.InformationalNoticePresentationSink
+	SelectedFork          *storeselected.RunFork
 }
 
 var buildSelectedAPICapabilities = constructSelectedAPICapabilities
@@ -99,8 +97,7 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 			return selectedAPICapabilities{}, fmt.Errorf("run.fork requires selected source artifact reader")
 		}
 		loader := runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{
-			RepoRoot: req.RepoRoot, PlatformSpecPath: req.RunningPlatformSpecPath,
-			PlatformPackBases: req.PlatformPackBases, Store: artifactStore,
+			RepoRoot: req.RepoRoot, PlatformPackBases: req.PlatformPackBases, Store: artifactStore,
 		}
 		deps := owner.RuntimeDeps()
 		executor := apiv1.SelectedContractRunForkExecutor{

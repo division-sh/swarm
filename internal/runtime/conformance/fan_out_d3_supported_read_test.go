@@ -28,9 +28,8 @@ func assertServingD3SupportedReadback(t *testing.T, f *servingMatrixFixture, ctx
 	}
 	const token = "fan-out-d3-supported-read-token"
 	handler, err := apiv1.NewHandler(apiv1.Options{
-		PlatformSpecPath: filepath.Join(conformanceRepoRoot(t), "platform-spec.yaml"),
-		AuthTokens:       []string{token},
-		Handlers:         apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: reader}),
+		AuthTokens: []string{token},
+		Handlers:   apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: reader}),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -137,9 +137,8 @@ func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
 			seedWorkflowHeaderProjectionFixture(t, ctx, db, forkRunID, sourceEffect.EntityID, "root", sourceEffect.FlowID, "default", "operating", "{}", now)
 			if _, err := db.ExecContext(ctx, `
 				INSERT INTO entity_state (
-					run_id, entity_id, flow_instance, entity_type, current_state,
-					gates, fields, accumulator, entered_state_at, created_at, updated_at
-				) VALUES ($1, $2, 'root', 'default', 'operating', '{}', '{}', '{}', $3, $3, $3)
+					run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
+				) VALUES ($1, $2, 'root', 'default', '{}', $3, $3)
 			`, forkRunID, sourceEffect.EntityID, now); err != nil {
 				t.Fatalf("create fork proposed-effect entity: %v", err)
 			}
@@ -411,9 +410,9 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 				t.Fatalf("execute fork root gate through coordinator = forward:%v emitted:%d outcome:%#v error:%v", forward, len(emitted), outcome, err)
 			}
 			var currentState string
-			stateQuery := `SELECT current_state FROM entity_state WHERE run_id = ? AND entity_id = ?`
+			stateQuery := `SELECT current_state FROM flow_instances WHERE run_id = ? AND entity_id = ? AND instance_path = ?`
 			if backend == "postgres" {
-				stateQuery = `SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+				stateQuery = `SELECT current_state FROM flow_instances WHERE run_id = $1::uuid AND entity_id = $2::uuid AND instance_path = $3`
 			}
 			routedActivation := loadDecisionCardGateActivation(t, db, backend == "postgres", forkRunID, forkRunID)
 			var outputCount int
@@ -421,7 +420,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			if backend == "postgres" {
 				outputCountQuery = `SELECT COUNT(*) FROM events WHERE event_name = $1 AND run_id = $2::uuid`
 			}
-			stateErr := db.QueryRowContext(pipelineCtx, stateQuery, forkRunID, forkRunID).Scan(&currentState)
+			stateErr := db.QueryRowContext(pipelineCtx, stateQuery, forkRunID, forkRunID, forkRunID).Scan(&currentState)
 			outputErr := db.QueryRowContext(pipelineCtx, outputCountQuery, "run_fork.compiled_root_gate_approved", forkRunID).Scan(&outputCount)
 			if stateErr != nil || currentState != "done" {
 				t.Fatalf("fork root gate state=%q state_err=%v activation=%#v output_count=%d output_err=%v intercept_outcome=%#v, want done/routed/one", currentState, stateErr, routedActivation, outputCount, outputErr, outcome)
@@ -720,12 +719,28 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := runSelectedFixtureMutation(ctx, opened.store, "materialize proposed effect cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-					if store, ok := opened.store.(*PostgresStore); ok {
-						return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
+				materialize := func(c *loopruntime.ForkCorrespondence) error {
+					return runSelectedFixtureMutation(ctx, opened.store, "materialize proposed effect cards", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+						if store, ok := opened.store.(*PostgresStore); ok {
+							return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, c, now.Add(2*time.Minute), nil)
+						}
+						return opened.store.(*SQLiteRuntimeStore).runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, c, now.Add(2*time.Minute), nil)
+					})
+				}
+				crossed, err := loopruntime.NewForkCorrespondence(nil, forkRunID, uuid.NewString())
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, invalid := range []*loopruntime.ForkCorrespondence{nil, {}, crossed} {
+					before := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
+					if err := materialize(invalid); err == nil || err.Error() != "fork correspondence does not own the exact child run and entity" {
+						t.Fatalf("actual proposed effect lost exact correspondence refusal: %v", err)
 					}
-					return opened.store.(*SQLiteRuntimeStore).runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(txctx, attempt, sourceRunID, forkRunID, target, projection, point, correspondence, now.Add(2*time.Minute), nil)
-				}); err != nil {
+					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")) {
+						t.Fatal("refused proposed-effect correspondence changed source or child state")
+					}
+				}
+				if err := materialize(correspondence); err != nil {
 					t.Fatal(err)
 				}
 				items, _, err := cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: forkRunID, Limit: 10})

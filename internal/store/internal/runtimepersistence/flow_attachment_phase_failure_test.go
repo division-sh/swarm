@@ -334,5 +334,11 @@ func TestFlowAttachmentPhaseFailureRetainsConstructionBothStores(t *testing.T) {
 				})
 			}
 		}
+		// Keep the reviewed schema literal before the shutdown-only cut labels.
+		for _, cut := range []string{"before_progress", "inside_progress", "after_progress"} {
+			t.Run(backend+"/shutdown_"+cut, func(t *testing.T) {
+				proveAttachmentShutdownProgress(t, backend, cut)
+			})
+		}
 	}
 }

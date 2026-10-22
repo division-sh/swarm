@@ -1588,27 +1588,6 @@ func (r ConnectEndpointRole) Matches(flowID string, eventType events.EventType) 
 	return scope != "" && eventType == events.EventType(scope+"/"+string(r.endpoint.event.value))
 }
 
-func (r ConnectEndpointRole) BelongsToFlow(flowID string) bool {
-	return r.endpoint.IsRoot() == (flowID == ".") && r.endpoint.flowID.value == flowID
-}
-
-func (r ConnectEndpointRole) MatchesAuthoredEndpoint(endpoint semanticview.AuthoredEventEndpoint) bool {
-	if r.endpoint.flowID.value != endpoint.FlowID {
-		return false
-	}
-	authored := events.EventType(endpoint.Event.Authored)
-	canonical := events.EventType(endpoint.Event.Canonical)
-	return r.Matches(endpoint.FlowID, authored) || r.Matches(endpoint.FlowID, canonical)
-}
-
-func (r ConnectEndpointRole) MatchesInputPin(flowID string, pin runtimecontracts.CompiledFlowInputPin) bool {
-	return r.kind == ConnectEndpointRoleConsumer && r.endpoint.matchesFlowPin(flowID, pin.EventType(), ConnectEndpointRoleConsumer)
-}
-
-func (r ConnectEndpointRole) MatchesOutputPin(flowID string, pin runtimecontracts.CompiledFlowOutputPin) bool {
-	return r.kind == ConnectEndpointRoleProducer && r.endpoint.matchesFlowPin(flowID, pin.EventType(), ConnectEndpointRoleProducer)
-}
-
 type ConnectEdgeEvidence struct {
 	producer   ConnectEndpointRole
 	consumer   ConnectEndpointRole
@@ -1904,24 +1883,8 @@ func (g CompiledConnectGraph) PlansToInputPin(flowID string, pin runtimecontract
 	return out
 }
 
-func ConnectEndpointsShareFlow(left, right ConnectRoutePlanEndpoint) bool {
-	return left.kind == right.kind && left.flowID == right.flowID
-}
-
 func connectEndpointRole(kind ConnectEndpointRoleKind, endpoint ConnectRoutePlanEndpoint) ConnectEndpointRole {
 	return ConnectEndpointRole{kind: kind, endpoint: endpoint}
-}
-
-func appendUniqueConnectEndpointRole(roles []ConnectEndpointRole, kind ConnectEndpointRoleKind, endpoint ConnectRoutePlanEndpoint) []ConnectEndpointRole {
-	candidate := ConnectEndpointRole{kind: kind, endpoint: endpoint}
-	for _, existing := range roles {
-		if existing.kind == candidate.kind && existing.endpoint.kind == candidate.endpoint.kind &&
-			existing.endpoint.flowID == candidate.endpoint.flowID && existing.endpoint.pin == candidate.endpoint.pin &&
-			existing.endpoint.event == candidate.endpoint.event && existing.endpoint.resolvedEvent == candidate.endpoint.resolvedEvent {
-			return roles
-		}
-	}
-	return append(roles, candidate)
 }
 
 type SourceEvent struct {
@@ -1942,8 +1905,8 @@ func AdmitSourceEvent(eventType events.EventType, source events.RoutingSource) (
 }
 
 // AdmitDeploymentFeedDeclaration binds a source-neutral feed to the exact
-// compiled importable event declaration. A flow coordinate alone is not
-// permission to publish an arbitrary output-pin event.
+// compiled importable event declaration and selected-root input capability.
+// Child-declared feeds retain their separately scoped output boundary.
 func AdmitDeploymentFeedDeclaration(source semanticview.Source, eventType events.EventType, routingSource events.RoutingSource) (SourceEvent, error) {
 	if source == nil || routingSource.Kind() != events.RoutingSourceDeploymentFeed {
 		return SourceEvent{}, fmt.Errorf("deployment feed requires semantic source and typed provenance")
@@ -1960,7 +1923,12 @@ func AdmitDeploymentFeedDeclaration(source semanticview.Source, eventType events
 	if !ok || declaration.OwnerFlowID != routingSource.Route().FlowID || declaration.Ref != ref {
 		return SourceEvent{}, fmt.Errorf("deployment feed event %q has no exact importable declaration in flow %q", eventType, ref.FlowPath)
 	}
-	if !PinDeclaredOutput(source, declaration.OwnerFlowID, declaration.Ref.EventName) {
+	if declaration.OwnerFlowID == "." {
+		pin, declared := semanticview.SelectedRootInputPin(source, declaration.Ref.EventName)
+		if !declared || pin.FlowID() != declaration.OwnerFlowID || pin.EventType() != declaration.Ref.EventName {
+			return SourceEvent{}, fmt.Errorf("deployment feed event %q has no exact declared root input pin in flow %q", eventType, ref.FlowPath)
+		}
+	} else if !PinDeclaredOutput(source, declaration.OwnerFlowID, declaration.Ref.EventName) {
 		return SourceEvent{}, fmt.Errorf("deployment feed event %q has no exact declared output pin in flow %q", eventType, ref.FlowPath)
 	}
 	return AdmitSourceEvent(eventType, routingSource)
@@ -2214,35 +2182,6 @@ func (g CompiledConnectGraph) Issues() []ConnectRoutePlanIssue {
 
 func (g CompiledConnectGraph) ReceiverPinCollisions() []ConnectReceiverPinCollision {
 	return append([]ConnectReceiverPinCollision(nil), g.receiverPinCollisions...)
-}
-
-func (g CompiledConnectGraph) EndpointRoles() []ConnectEndpointRole {
-	roles := make([]ConnectEndpointRole, 0, 2*(len(g.plans)+len(g.issues)))
-	for _, plan := range g.plans {
-		roles = appendUniqueConnectEndpointRole(roles, ConnectEndpointRoleProducer, plan.source)
-		roles = appendUniqueConnectEndpointRole(roles, ConnectEndpointRoleConsumer, plan.receiver)
-	}
-	for _, issue := range g.issues {
-		if !issue.sourceEndpoint.Empty() {
-			roles = appendUniqueConnectEndpointRole(roles, ConnectEndpointRoleProducer, issue.sourceEndpoint)
-		}
-		if !issue.receiverEndpoint.Empty() {
-			roles = appendUniqueConnectEndpointRole(roles, ConnectEndpointRoleConsumer, issue.receiverEndpoint)
-		}
-	}
-	sort.SliceStable(roles, func(i, j int) bool {
-		if roles[i].kind != roles[j].kind {
-			return roles[i].kind < roles[j].kind
-		}
-		if roles[i].endpoint.flowID != roles[j].endpoint.flowID {
-			return roles[i].endpoint.flowID.value < roles[j].endpoint.flowID.value
-		}
-		if roles[i].endpoint.pin != roles[j].endpoint.pin {
-			return roles[i].endpoint.pin.value < roles[j].endpoint.pin.value
-		}
-		return roles[i].endpoint.resolvedEvent.value < roles[j].endpoint.resolvedEvent.value
-	})
-	return roles
 }
 
 func (g CompiledConnectGraph) IssueMatchesEvent(issue ConnectRoutePlanIssue, evt events.Event) bool {

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packadmission"
@@ -20,7 +21,7 @@ func TestS1StandingCandidatesRetainCompiledRoot(t *testing.T) {
 		"manifest.yaml":          []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":            []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
 		"telegram/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n"),
-		"telegram/trigger.yaml":  packfixture.NeutralProviderMembers()["trigger.yaml"],
+		"telegram/trigger.yaml":  []byte(strings.Replace(string(packfixture.NeutralProviderMembers()["trigger.yaml"]), "transport: session\n", "secret: {required: true}\nsignature: {type: token_equality, header: X-Signature}\n", 1)),
 	})
 	second, _ := sourceartifactfixture.Rooted(t, "other", first.Artifact())
 	for _, rooted := range []struct {
@@ -78,7 +79,7 @@ func TestS1StandingCandidatesRefuseContradictoryContent(t *testing.T) {
 		"manifest.yaml":          []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":            []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
 		"telegram/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n"),
-		"telegram/trigger.yaml":  packfixture.NeutralProviderMembers()["trigger.yaml"],
+		"telegram/trigger.yaml":  []byte(strings.Replace(string(packfixture.NeutralProviderMembers()["trigger.yaml"]), "transport: session\n", "secret: {required: true}\nsignature: {type: token_equality, header: X-Signature}\n", 1)),
 	})
 	projection, err := packadmission.FromBundle(bundle)
 	if err != nil {

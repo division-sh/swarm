@@ -867,10 +867,6 @@ func operatorConversationReadQueryError(operation string, err error) error {
 	return fmt.Errorf("%s: %w", operation, err)
 }
 
-func OperatorConversationReadQueryError(operation string, err error) error {
-	return operatorConversationReadQueryError(operation, err)
-}
-
 func operatorConversationQuerySources() []string {
 	return []string{`
 			SELECT
@@ -978,10 +974,6 @@ func projectOperatorConversationSummaryMetadata(p ConversationRuntimeStateDescri
 	}
 	meta.Watchdog = operatorConversationWatchdogFromDescriptor(p.Watchdog)
 	return meta
-}
-
-func ProjectOperatorConversationSummaryMetadata(p ConversationRuntimeStateDescriptor) operatorread.OperatorConversationSummaryMetadata {
-	return projectOperatorConversationSummaryMetadata(p)
 }
 
 func operatorConversationWatchdogFromDescriptor(p *ConversationRuntimeWatchdogDescriptor) *operatorread.OperatorConversationWatchdog {

@@ -9,6 +9,7 @@ import (
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 
@@ -47,22 +48,21 @@ func (s *fakeEntityReadStore) AggregateOperatorEntities(_ context.Context, opts 
 
 func TestOperatorEntityHandlersExposeEntityNativeReads(t *testing.T) {
 	now := time.Unix(1700000000, 0).UTC()
+	stageDefined, currentState, revision := true, "collecting", int64(2)
+	summary := operatorread.OperatorEntitySummary{
+		EntityID: "entity-1", RunID: "run-1", FlowInstance: "review/primary", EntityType: "mvp_spec",
+		StageDefined: &stageDefined, CurrentState: &currentState, Revision: &revision,
+		EnteredStateAt: &now, LifecycleCreatedAt: &now, LifecycleUpdatedAt: &now,
+		CreatedAt: now, UpdatedAt: now,
+	}
 	entities := &fakeEntityReadStore{
 		listResult: operatorread.OperatorEntityListResult{
-			Entities: []operatorread.OperatorEntitySummary{{
-				EntityID:     "entity-1",
-				RunID:        "run-1",
-				FlowInstance: "review/primary",
-				EntityType:   "mvp_spec",
-				CurrentState: "collecting",
-				Revision:     2,
-				CreatedAt:    now,
-				UpdatedAt:    now,
-			}},
+			Entities:   []operatorread.OperatorEntitySummary{summary},
 			NextCursor: "next",
 		},
 		getResult: operatorread.OperatorEntityFull{
-			Entity:      operatorread.OperatorEntitySummary{EntityID: "entity-1", RunID: "run-1", EntityType: "mvp_spec", CurrentState: "collecting"},
+			Entity:      summary,
+			Loops:       []loopruntime.PublicActivation{},
 			Fields:      map[string]any{"priority": "high", "activation": "manual"},
 			Bookkeeping: map[string]any{"activation": "standing"},
 			Gates:       map[string]bool{"approved": true},
@@ -152,6 +152,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 		t.Fatalf("entity.list rows = %#v", list.Result)
 	}
 	for _, row := range rows {
+		assertOperatorDataOnlyLifecycle(t, asMap(t, row))
 		if got := asMap(t, row)["entity_type"]; got != "vertical" {
 			t.Fatalf("entity.list entity_type = %#v, want vertical", got)
 		}
@@ -161,6 +162,12 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 		t.Fatalf("entity.get error = %#v", get.Error)
 	}
 	getResult := asMap(t, get.Result)
+	assertOperatorDataOnlyLifecycle(t, asMap(t, getResult["entity"]))
+	for _, key := range []string{"bookkeeping", "gates", "accumulated", "loops"} {
+		if value, present := getResult[key]; !present || value != nil {
+			t.Fatalf("data-only entity.get %s = %#v, present=%v, want explicit null", key, value, present)
+		}
+	}
 	if got := asMap(t, getResult["entity"])["entity_type"]; got != "vertical" {
 		t.Fatalf("entity.get entity_type = %#v, want vertical", got)
 	}
@@ -179,9 +186,10 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 	if typedState.Error != nil {
 		t.Fatalf("entity.aggregate typed current_state error = %#v", typedState.Error)
 	}
-	stateCounts := asMap(t, asMap(t, typedState.Result)["counts"])
-	if stateCounts["discovered"] != float64(1) || stateCounts["pending"] != float64(1) {
-		t.Fatalf("typed current_state counts = %#v", stateCounts)
+	stateResult := asMap(t, typedState.Result)
+	stateCounts := asMap(t, stateResult["counts"])
+	if len(stateCounts) != 0 || stateResult["absent_count"] != float64(2) {
+		t.Fatalf("data-only current_state counts = %#v", stateResult)
 	}
 }
 
@@ -213,6 +221,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 		t.Fatalf("entity.list rows = %#v", list.Result)
 	}
 	for _, row := range rows {
+		assertOperatorDataOnlyLifecycle(t, asMap(t, row))
 		if got := asMap(t, row)["entity_type"]; got != "vertical" {
 			t.Fatalf("entity.list entity_type = %#v, want vertical", got)
 		}
@@ -223,6 +232,12 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 		t.Fatalf("entity.get error = %#v", get.Error)
 	}
 	getResult := asMap(t, get.Result)
+	assertOperatorDataOnlyLifecycle(t, asMap(t, getResult["entity"]))
+	for _, key := range []string{"bookkeeping", "gates", "accumulated", "loops"} {
+		if value, present := getResult[key]; !present || value != nil {
+			t.Fatalf("data-only entity.get %s = %#v, present=%v, want explicit null", key, value, present)
+		}
+	}
 	if got := asMap(t, getResult["entity"])["entity_type"]; got != "vertical" {
 		t.Fatalf("entity.get entity_type = %#v, want vertical", got)
 	}
@@ -238,7 +253,23 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 	if typeCounts["vertical"] != float64(2) || typeCounts["default"] != nil {
 		t.Fatalf("entity_type counts = %#v", typeCounts)
 	}
+	typedState := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"agg-state","method":"entity.aggregate","params":{"run_id":"11111111-1111-1111-1111-111111111111","group_by":"current_state","type":"vertical"}}`)
+	if typedState.Error != nil {
+		t.Fatalf("entity.aggregate typed current_state error = %#v", typedState.Error)
+	}
+	stateResult := asMap(t, typedState.Result)
+	if counts := asMap(t, stateResult["counts"]); len(counts) != 0 || stateResult["absent_count"] != float64(2) {
+		t.Fatalf("data-only current_state counts = %#v", stateResult)
+	}
+}
 
+func assertOperatorDataOnlyLifecycle(t *testing.T, summary map[string]any) {
+	t.Helper()
+	for _, key := range []string{"stage_defined", "current_state", "revision", "entered_state_at", "lifecycle_created_at", "lifecycle_updated_at"} {
+		if value, present := summary[key]; !present || value != nil {
+			t.Fatalf("data-only lifecycle %s = %#v, present=%v, want explicit null", key, value, present)
+		}
+	}
 }
 
 func createOperatorReadbackEntities(t *testing.T, ctx context.Context, selected interface {
@@ -250,11 +281,11 @@ func createOperatorReadbackEntities(t *testing.T, ctx context.Context, selected 
 		Entities: []pipeline.ScenarioSetupEntityRequest{
 			{
 				Alias: "a", EntityID: entityA, FlowInstance: "scoring/vertical-a", EntityType: "vertical",
-				CurrentState: "discovered", Fields: map[string]any{"vertical_id": "vertical-a", "vertical_name": "Healthcare"},
+				Fields: map[string]any{"vertical_id": "vertical-a", "vertical_name": "Healthcare"},
 			},
 			{
 				Alias: "b", EntityID: entityB, FlowInstance: "scoring/vertical-b", EntityType: "vertical",
-				CurrentState: "pending", Fields: map[string]any{"vertical_id": "vertical-b", "vertical_name": "Manufacturing"},
+				Fields: map[string]any{"vertical_id": "vertical-b", "vertical_name": "Manufacturing"},
 			},
 		},
 	}); err != nil {

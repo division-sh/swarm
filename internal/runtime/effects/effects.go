@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -52,6 +53,7 @@ const (
 	KindChannelDelivery       Kind = "channel_delivery"
 	KindChannelActionAck      Kind = "channel_action_ack"
 	KindChannelNativeSetting  Kind = "channel_native_setting"
+	KindChannelLogout         Kind = "channel_logout"
 )
 
 type LifecycleToken struct {
@@ -181,6 +183,7 @@ type Registration struct {
 	CanonicalEvidence  string
 	SettlementRecovery string
 	Proof              string
+	ProofFile          string // Required when the proof lives in the SDK primitive's package rather than the launch package.
 	PrimitiveKeys      []string
 	PrelaunchFailure   State
 	PostlaunchFailure  State
@@ -197,8 +200,11 @@ var registrations = []Registration{
 	registration(KindServeRegistration, EffectWriteOrUnknown, "provider_registration", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestProviderRegistrationApplyEffectOutcomes"),
 	registration(KindChannelConfirmation, EffectWriteOrUnknown, "channel_confirmation", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelConfirmationEffectOutcomes"),
 	registration(KindChannelDelivery, EffectWriteOrUnknown, "channel_delivery", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelDeliveryEffectOutcomes"),
+	registration(KindChannelConfirmation, EffectWriteOrUnknown, "channel_confirmation_whatsapp", "in_process", "internal/runtime/effects/effects.go", []string{"internal/sessionprovider/channel_execution_unix.go:executeChannelSend:sdk_send:1"}, "TestWhatsAppChannelConfirmationJournalBothStores").withProofFile("internal/sessionprovider/channel_execution_test.go"),
+	registration(KindChannelDelivery, EffectWriteOrUnknown, "channel_delivery_whatsapp", "in_process", "internal/runtime/effects/effects.go", []string{"internal/sessionprovider/channel_execution_unix.go:executeChannelSend:sdk_send:1"}, "TestWhatsAppChannelDeliveryJournalBothStores").withProofFile("internal/sessionprovider/channel_execution_test.go"),
 	registration(KindChannelActionAck, EffectWriteOrUnknown, "channel_action_ack", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelActionAckEffectOutcomes"),
 	registration(KindChannelNativeSetting, EffectWriteOrUnknown, "channel_native_setting", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelNativeSettingEffectOutcomes"),
+	registration(KindChannelLogout, EffectWriteOrUnknown, "channel_logout_whatsapp", "in_process", "internal/runtime/effects/channel_logout.go", []string{"internal/sessionprovider/runtime_logout_unix.go:executeSessionLogout:sdk_logout:1"}, "TestSessionLogoutJournalBothStores").withProofFile("internal/sessionprovider/runtime_logout_test.go"),
 	registration(KindManagedCredential, EffectWriteOrUnknown, "managed_credential", "http", "internal/runtime/managedcredentials/store.go", []string{"internal/runtime/managedcredentials/store.go:exchange:http_do:1", "internal/runtime/managedcredentials/store.go:exchangeGitHubAppInstallation:http_do:1"}, "TestManagedCredentialEffectOutcomes"),
 	registration(KindNativeWebSearchHTTP, EffectWriteOrUnknown, "native_web_search", "http", "internal/runtime/tools/executor_native.go", []string{"internal/runtime/tools/executor_native.go:doNormalizedSearch:http_do:1"}, "TestManagedToolEffectOutcomes"),
 	registration(KindMCPHTTPRequest, EffectWriteOrUnknown, "mcp_tools_call_http", "http", "internal/runtime/mcp/client.go", []string{"internal/runtime/mcp/client.go:callHTTPServerWithCredentialKeyResolver:http_do:1"}, "TestManagedMCPEffectOutcomes"),
@@ -233,6 +239,11 @@ func registration(kind Kind, class EffectClass, adapter, transport, launchSite s
 		registration.SettlementRecovery = fmt.Sprintf("authorized=%s; exact zero-process-launch terminal failure may authorize next ordinal; launched/response_observed=%s; postlaunch replay=no_redispatch", StateTerminalFailure, StateOutcomeUncertain)
 	}
 	return registration
+}
+
+func (r Registration) withProofFile(path string) Registration {
+	r.ProofFile = path
+	return r
 }
 
 func Registrations() []Registration {
@@ -373,20 +384,9 @@ func AdmitCompletionContinuation(attempt Attempt, evidence json.RawMessage, requ
 		attempt.Origin.Kind != CompletionOriginDelivery || !phase.Valid() {
 		return Attempt{}, fmt.Errorf("completion continuation requires a normal provider delivery attempt and phase")
 	}
-	var document map[string]json.RawMessage
-	if err := json.Unmarshal(evidence, &document); err != nil {
-		return Attempt{}, fmt.Errorf("decode completion continuation evidence: %w", err)
-	}
-	var continuation completionContinuationEvidence
-	if err := json.Unmarshal(document[completionContinuationEvidenceKey], &continuation); err != nil {
-		return Attempt{}, fmt.Errorf("decode settled completion continuation: %w", err)
-	}
-	continuation.Request = bytes.TrimSpace(continuation.Request)
-	continuation.Payload = bytes.TrimSpace(continuation.Payload)
-	if continuation.Version != completionContinuationEvidenceVersion || len(continuation.Request) == 0 ||
-		len(continuation.Payload) == 0 || !json.Valid(continuation.Payload) ||
-		Fingerprint(continuation.Request) != strings.TrimSpace(requestFingerprint) {
-		return Attempt{}, fmt.Errorf("settled completion continuation evidence is missing, invalid, or request-mismatched")
+	continuation, err := readCompletionContinuationEvidence(evidence, requestFingerprint)
+	if err != nil {
+		return Attempt{}, err
 	}
 	if err := surface.Validate(); err != nil {
 		return Attempt{}, fmt.Errorf("settled completion continuation capability surface: %w", err)
@@ -408,6 +408,35 @@ func AdmitCompletionContinuation(attempt Attempt, evidence json.RawMessage, requ
 		attempt.completionSuccessor = &successor
 	}
 	return attempt, nil
+}
+
+// ReadCompletionContinuationPayload exposes immutable evidence without admitting
+// the attempt for recovery, response consumption, or tool execution.
+func ReadCompletionContinuationPayload(evidence json.RawMessage, requestFingerprint string) (json.RawMessage, error) {
+	continuation, err := readCompletionContinuationEvidence(evidence, requestFingerprint)
+	if err != nil {
+		return nil, err
+	}
+	return append(json.RawMessage(nil), continuation.Payload...), nil
+}
+
+func readCompletionContinuationEvidence(evidence json.RawMessage, requestFingerprint string) (completionContinuationEvidence, error) {
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(evidence, &document); err != nil {
+		return completionContinuationEvidence{}, fmt.Errorf("decode completion continuation evidence: %w", err)
+	}
+	var continuation completionContinuationEvidence
+	if err := json.Unmarshal(document[completionContinuationEvidenceKey], &continuation); err != nil {
+		return completionContinuationEvidence{}, fmt.Errorf("decode settled completion continuation: %w", err)
+	}
+	continuation.Request = bytes.TrimSpace(continuation.Request)
+	continuation.Payload = bytes.TrimSpace(continuation.Payload)
+	if continuation.Version != completionContinuationEvidenceVersion || len(continuation.Request) == 0 ||
+		len(continuation.Payload) == 0 || !json.Valid(continuation.Payload) ||
+		Fingerprint(continuation.Request) != strings.TrimSpace(requestFingerprint) {
+		return completionContinuationEvidence{}, fmt.Errorf("settled completion continuation evidence is missing, invalid, or request-mismatched")
+	}
+	return continuation, nil
 }
 
 type CompletionContinuationSnapshot struct {
@@ -947,7 +976,17 @@ func BeginServeRegistration(ctx context.Context, request []byte, lineage map[str
 // BeginChannelConfirmation authorizes one operator-origin channel delivery.
 // It is independent of workflow, run, entity, agent, and inbound-event authority.
 func BeginChannelConfirmation(ctx context.Context, request []byte, lineage map[string]string) (*Handle, error) {
-	const adapter = "channel_confirmation"
+	return beginChannelConfirmation(ctx, request, lineage, "channel_confirmation")
+}
+
+func BeginInProcessChannelConfirmation(ctx context.Context, target runtimecontracts.ToolInProcessTarget, request []byte, lineage map[string]string) (*Handle, error) {
+	if target != runtimecontracts.ToolInProcessWhatsAppSendText {
+		return nil, fmt.Errorf("channel confirmation requires the closed WhatsApp send target")
+	}
+	return beginChannelConfirmation(ctx, request, lineage, "channel_confirmation_whatsapp")
+}
+
+func beginChannelConfirmation(ctx context.Context, request []byte, lineage map[string]string, adapter string) (*Handle, error) {
 	if err := admitExecutionMode(ctx, adapter); err != nil {
 		return nil, err
 	}
@@ -972,7 +1011,17 @@ func BeginChannelConfirmation(ctx context.Context, request []byte, lineage map[s
 // BeginChannelDelivery admits one persisted render's first send. The selected
 // store checks the default, binding, activation, plan, and render again at launch.
 func BeginChannelDelivery(ctx context.Context, request []byte, lineage map[string]string) (*Handle, error) {
-	const adapter = "channel_delivery"
+	return beginChannelDelivery(ctx, request, lineage, "channel_delivery")
+}
+
+func BeginInProcessChannelDelivery(ctx context.Context, target runtimecontracts.ToolInProcessTarget, request []byte, lineage map[string]string) (*Handle, error) {
+	if target != runtimecontracts.ToolInProcessWhatsAppSendText {
+		return nil, fmt.Errorf("channel delivery requires the closed WhatsApp send target")
+	}
+	return beginChannelDelivery(ctx, request, lineage, "channel_delivery_whatsapp")
+}
+
+func beginChannelDelivery(ctx context.Context, request []byte, lineage map[string]string, adapter string) (*Handle, error) {
 	if err := admitExecutionMode(ctx, adapter); err != nil {
 		return nil, err
 	}
@@ -1570,6 +1619,11 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 	} else if registration.Kind == KindChannelActionAck {
 		if authority.Kind != AuthorityChannelActionAck || req.CapabilitySurface != nil || req.AgentFrame != nil || req.OperationID != authority.ChannelActionAck.EffectOperationID {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "channel_action_ack_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
+		}
+	} else if registration.Kind == KindChannelLogout {
+		if authority.Kind != AuthorityChannelLogout || req.CapabilitySurface != nil || req.AgentFrame != nil ||
+			req.OperationID != authority.ChannelLogout.EffectOperationID || req.RequestFingerprint != authority.ChannelLogout.TargetFingerprint || len(req.Lineage) != 0 {
+			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "channel_logout_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 		}
 	} else if registration.Kind == KindChannelNativeSetting {
 		if authority.Kind != AuthorityChannelNativeSetting || req.CapabilitySurface != nil || req.AgentFrame != nil || req.OperationID != authority.ChannelNativeSetting.EffectOperationID {

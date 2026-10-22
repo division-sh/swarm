@@ -153,6 +153,10 @@ func loadPreflightPlan(ctx context.Context, head, base string) (testplanning.Pre
 	if err != nil {
 		return testplanning.PreflightPlan{}, err
 	}
+	return buildPreflightPlan(ctx, head, base, comparison)
+}
+
+func buildPreflightPlan(ctx context.Context, head, base string, comparison testplanning.PreflightComparison) (testplanning.PreflightPlan, error) {
 	inventory, err := testplanning.DiscoverRootInventory(ctx, ".")
 	if err != nil {
 		return testplanning.PreflightPlan{}, err

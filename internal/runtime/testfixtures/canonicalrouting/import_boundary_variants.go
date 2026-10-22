@@ -22,8 +22,9 @@ func CopyImportBoundaryAlias(t testing.TB, variant ImportBoundaryAliasVariant) s
 	root := CopyExample(t, ParentConnect)
 	removeInheritedScenarios(t, root)
 	removeClosedVariantFiles(t, root,
-		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer",
-		"consumer/nodes.yaml", "consumer/schema.yaml", "consumer")
+		"producer/events.yaml", "producer/nodes.yaml", "producer/schema.yaml", "producer/manifest.yaml", "producer",
+		"consumer/nodes.yaml", "consumer/schema.yaml", "consumer/manifest.yaml", "consumer")
+	writeClosedVariantFile(t, root, "worker/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	parentSubscription := "parent.lead_enriched"
 	connected := false
 	instance := ""

@@ -81,7 +81,7 @@ func TestVerifyRetainedSourceConsumerSharesFrozenConfiguredPackGeneration(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(root, root, filepath.Join(RepoRoot(), "platform-spec.yaml"), base)
+	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(root, root, base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,8 +92,7 @@ func TestVerifyRetainedSourceConsumerSharesFrozenConfiguredPackGeneration(t *tes
 	if err := os.Remove(configPath); err != nil {
 		t.Fatal(err)
 	}
-	paths := CLISourcePlatformSpecPaths{PlatformSpecPath: filepath.Join(RepoRoot(), "platform-spec.yaml")}
-	verify, err := verifyRetainedSourceLoader(root, paths, bases)
+	verify, err := verifyRetainedSourceLoader(root, bases)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +102,7 @@ func TestVerifyRetainedSourceConsumerSharesFrozenConfiguredPackGeneration(t *tes
 		rooted: sourceartifactfixture.CapturedRoot(t, bundle.SourceArtifact),
 	}
 	verify.Store = reader
-	boot := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: root, PlatformSpecPath: paths.PlatformSpecPath, PlatformPackBases: bases, Store: reader}
+	boot := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: root, PlatformPackBases: bases, Store: reader}
 	for _, request := range []runforkexecution.SelectedContractSourceLoadRequest{
 		{Responsibility: runforkexecution.FreshSelectedSource(record.BundleHash), BundleHash: record.BundleHash, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash}},
 		{Responsibility: runforkexecution.OriginalRunSource(sourceID), Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}},
@@ -119,7 +118,7 @@ func TestVerifyRetainedSourceConsumerSharesFrozenConfiguredPackGeneration(t *tes
 			}
 		}
 	}
-	if _, err := verifyRetainedSourceLoader(root, paths, nil); err == nil {
+	if _, err := verifyRetainedSourceLoader(root, nil); err == nil {
 		t.Fatal("missing generation fell back to embedded inventory")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -15,6 +16,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
 
@@ -24,6 +26,7 @@ func commitFlowInstanceActivations(
 	store eventCommitTxStore,
 	postgres bool,
 	plans []runtimepipeline.FlowInstanceActivationPlan,
+	occurrence *privatemutationlog.ConstructionOccurrence,
 ) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
 	if len(plans) == 0 {
 		return nil, nil
@@ -32,7 +35,7 @@ func commitFlowInstanceActivations(
 	seen := make(map[string]struct{}, len(plans))
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		for index, plan := range plans {
-			result, err := commitFlowConstructionTree(ctx, tx, attempt, store, postgres, plan, true, seen)
+			result, err := commitFlowConstructionTree(ctx, tx, attempt, store, postgres, plan, true, seen, occurrence)
 			if err != nil {
 				return fmt.Errorf("commit flow activation %d: %w", index, err)
 			}
@@ -45,10 +48,16 @@ func commitFlowInstanceActivations(
 
 func commitFlowConstructionTree(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool,
 	plan runtimepipeline.FlowInstanceActivationPlan, mayCreate bool, seen map[string]struct{},
+	occurrence *privatemutationlog.ConstructionOccurrence,
 ) (runtimepipeline.CommittedFlowInstanceActivation, error) {
 	record, err := plan.PersistenceRecord()
 	if err != nil {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	if occurrence != nil {
+		if err := occurrence.ValidateBirthOccurrence(ctx, attempt, record.State); err != nil {
+			return runtimepipeline.CommittedFlowInstanceActivation{}, err
+		}
 	}
 	key := record.Identity.Key()
 	if _, duplicate := seen[key]; duplicate {
@@ -61,7 +70,7 @@ func commitFlowConstructionTree(ctx context.Context, tx *sql.Tx, attempt *mutati
 			return runtimepipeline.CommittedFlowInstanceActivation{}, errors.Join(err, fmt.Errorf("construction replay has missing or conflicting descendant %s", record.Identity.Route.InstancePath))
 		}
 	}
-	created, lifecycle, err := commitFlowInstanceActivation(ctx, tx, attempt, store, postgres, plan, record)
+	created, lifecycle, err := commitFlowInstanceActivation(ctx, tx, attempt, store, postgres, plan, record, occurrence)
 	if err != nil {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, err
 	}
@@ -73,7 +82,7 @@ func commitFlowConstructionTree(ctx context.Context, tx *sql.Tx, attempt *mutati
 		Plan: plan, Created: created, Lifecycle: lifecycle, ReadinessAttemptOrdinal: readiness.AttemptOrdinal,
 	}
 	for _, child := range plan.Children {
-		committed, err := commitFlowConstructionTree(ctx, tx, attempt, store, postgres, child, created, seen)
+		committed, err := commitFlowConstructionTree(ctx, tx, attempt, store, postgres, child, created, seen, occurrence)
 		if err != nil {
 			return runtimepipeline.CommittedFlowInstanceActivation{}, err
 		}
@@ -83,11 +92,37 @@ func commitFlowConstructionTree(ctx context.Context, tx *sql.Tx, attempt *mutati
 }
 
 func (s *PipelinePostgresOwner) CommitFlowInstanceActivationsTx(ctx context.Context, attempt *mutationprotocol.Attempt, plans []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
-	return commitFlowInstanceActivations(ctx, attempt, s, true, plans)
+	return commitFlowInstanceActivations(ctx, attempt, s, true, plans, nil)
 }
 
 func (s *PipelineSQLiteOwner) CommitFlowInstanceActivationsTx(ctx context.Context, attempt *mutationprotocol.Attempt, plans []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
-	return commitFlowInstanceActivations(ctx, attempt, s, false, plans)
+	return commitFlowInstanceActivations(ctx, attempt, s, false, plans, nil)
+}
+
+// The finite historical witnesses supply admitted plans and the original event,
+// and commit through the same constructor under their original live attempt.
+func commitFixedForkConstructionForTest(ctx context.Context, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool, parent *runtimepipeline.FlowInstanceActivationPlan, plan runtimepipeline.FlowInstanceActivationPlan, event events.AdmittedEvent) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	occurrence, err := privatemutationlog.FixedForkConstructionOccurrenceForTest(ctx, attempt, parent, plan, event.Event())
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	plans := []runtimepipeline.FlowInstanceActivationPlan{plan}
+	if parent != nil {
+		plans = []runtimepipeline.FlowInstanceActivationPlan{*parent, plan}
+	}
+	committed, err := commitFlowInstanceActivations(ctx, attempt, store, postgres, plans, occurrence)
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	return committed[len(committed)-1], nil
+}
+
+func (s *PipelinePostgresOwner) CommitFixedForkConstructionForTest(ctx context.Context, attempt *mutationprotocol.Attempt, parent *runtimepipeline.FlowInstanceActivationPlan, plan runtimepipeline.FlowInstanceActivationPlan, event events.AdmittedEvent) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	return commitFixedForkConstructionForTest(ctx, attempt, s, true, parent, plan, event)
+}
+
+func (s *PipelineSQLiteOwner) CommitFixedForkConstructionForTest(ctx context.Context, attempt *mutationprotocol.Attempt, parent *runtimepipeline.FlowInstanceActivationPlan, plan runtimepipeline.FlowInstanceActivationPlan, event events.AdmittedEvent) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	return commitFixedForkConstructionForTest(ctx, attempt, s, false, parent, plan, event)
 }
 
 func commitOneFlowInstanceActivation(
@@ -101,7 +136,7 @@ func commitOneFlowInstanceActivation(
 		return runtimepipeline.CommittedFlowInstanceActivation{}, err
 	}
 	outcome := run(ctx, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimepipeline.CommittedFlowInstanceActivation, error) {
-		committed, err := commitFlowInstanceActivations(txctx, attempt, store, postgres, []runtimepipeline.FlowInstanceActivationPlan{command.Plan})
+		committed, err := commitFlowInstanceActivations(txctx, attempt, store, postgres, []runtimepipeline.FlowInstanceActivationPlan{command.Plan}, nil)
 		if err != nil {
 			return runtimepipeline.CommittedFlowInstanceActivation{}, err
 		}
@@ -143,6 +178,7 @@ func commitFlowInstanceActivation(
 	postgres bool,
 	plan runtimepipeline.FlowInstanceActivationPlan,
 	record runtimepipeline.FlowInstanceActivationRecord,
+	occurrence *privatemutationlog.ConstructionOccurrence,
 ) (bool, runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
 	if err := record.Validate(); err != nil {
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
@@ -179,7 +215,7 @@ func commitFlowInstanceActivation(
 		}
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, nil
 	}
-	lifecycle, err := insertFlowInstanceActivation(ctx, tx, attempt, store, postgres, plan, record)
+	lifecycle, err := insertFlowInstanceActivation(ctx, tx, attempt, store, postgres, plan, record, occurrence)
 	if err != nil {
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
@@ -312,6 +348,7 @@ func insertFlowInstanceActivation(
 	postgres bool,
 	plan runtimepipeline.FlowInstanceActivationPlan,
 	record runtimepipeline.FlowInstanceActivationRecord,
+	occurrence *privatemutationlog.ConstructionOccurrence,
 ) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
 	if err := commitWorkflowEngineState(ctx, attempt, postgres, record.State); err != nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
@@ -347,7 +384,7 @@ func insertFlowInstanceActivation(
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("insert sqlite flow runtime readiness: %w", err)
 		}
 	}
-	before, err := commitWorkflowEngineInitialValues(ctx, attempt, store, postgres, record.State, runtimemutationlog.EntityStateProjection{})
+	before, err := commitWorkflowEngineInitialValues(ctx, attempt, store, postgres, record.State, runtimemutationlog.EntityStateProjection{}, occurrence)
 	if err != nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
@@ -355,7 +392,7 @@ func insertFlowInstanceActivation(
 	if err != nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
-	if err := commitWorkflowEngineMutationLog(ctx, attempt, store, postgres, record.State, before); err != nil {
+	if err := commitWorkflowEngineMutationLog(ctx, attempt, store, postgres, record.State, before, occurrence); err != nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
 	return lifecycle, nil

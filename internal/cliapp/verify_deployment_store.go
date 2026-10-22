@@ -35,7 +35,7 @@ func verifyAbsentSQLiteStoreCause(err error) *bootverify.AdmissionNotRunCause {
 	return &bootverify.AdmissionNotRunCause{Kind: bootverify.AdmissionAbsentSQLiteStore, Path: absent.Path}
 }
 
-func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, workspaces workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult) {
+func inspectVerifySelectedStore(ctx context.Context, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, workspaces workspace.Resolver, workspaceOK bool, result *runtime.WorkflowContractValidationResult) {
 	subject := "project:" + repo
 	var selected *storeselected.AdmissionInspection
 	var schemaRequest store.SchemaBootstrapRequest
@@ -147,7 +147,7 @@ func accountVerifyStoreAccessFailure(result *runtime.WorkflowContractValidationR
 	})
 }
 
-func prepareVerifySelectedStoreInspection(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, swarmDirOpts cliSwarmDirOptions, source semanticview.Source) (storeselected.AuthorityRequest, store.SchemaBootstrapRequest, error) {
+func prepareVerifySelectedStoreInspection(ctx context.Context, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, swarmDirOpts cliSwarmDirOptions, source semanticview.Source) (storeselected.AuthorityRequest, store.SchemaBootstrapRequest, error) {
 	root, err := NewInvocationRoot(repo)
 	if err != nil {
 		return storeselected.AuthorityRequest{}, store.SchemaBootstrapRequest{}, err
@@ -185,7 +185,7 @@ type verifyRetainedAdmissionInventory struct {
 	actorsOK bool
 }
 
-func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult) *verifyRetainedAdmissionInventory {
+func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.AdmissionSnapshot, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult) *verifyRetainedAdmissionInventory {
 	retained := &verifyRetainedAdmissionInventory{}
 	hash := result.BootReport.SourceArtifactHash
 	subject := "source:" + hash
@@ -237,7 +237,7 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 	})
 	inspectVerifyRetainedChannels(ctx, snapshot, subject, result)
 	retained.forksOK = verifyDeploymentObservation(ctx, result, "selected_fork_recovery_admission", "internal/runtime/runforkexecution.InspectSelectedForkRecoveries", subject, failures.ClassLifecycleConflict, func(ctx context.Context) error {
-		loader, err := verifyRetainedSourceLoader(repo, paths, packBases)
+		loader, err := verifyRetainedSourceLoader(repo, packBases)
 		if err != nil {
 			return err
 		}
@@ -279,12 +279,12 @@ func inspectVerifyRecoverySnapshot(ctx context.Context, snapshot *storeselected.
 	return retained
 }
 
-func verifyRetainedSourceLoader(repo string, paths CLISourcePlatformSpecPaths, packBases packartifact.PlatformPackBaseResolver) (runforkexecution.SourceArtifactSelectedContractSourceLoader, error) {
+func verifyRetainedSourceLoader(repo string, packBases packartifact.PlatformPackBaseResolver) (runforkexecution.SourceArtifactSelectedContractSourceLoader, error) {
 	if packBases == nil {
 		return runforkexecution.SourceArtifactSelectedContractSourceLoader{}, fmt.Errorf("invocation-selected platform pack generation is required for retained inspection")
 	}
 	return runforkexecution.SourceArtifactSelectedContractSourceLoader{
-		RepoRoot: repo, PlatformSpecPath: paths.PlatformSpecPath, PlatformPackBases: packBases,
+		RepoRoot: repo, PlatformPackBases: packBases,
 	}, nil
 }
 

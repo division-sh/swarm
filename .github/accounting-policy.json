@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "category": "finite-go-format",
+  "status": "inactive",
+  "rule": "f1-go-horizontal-v1",
+  "executor_source": "",
+  "dependency_digest": "",
+  "inputs": [],
+  "variants": [
+    "linux/amd64/default",
+    "linux/amd64/race",
+    "linux/amd64/issue2413",
+    "darwin/arm64/default",
+    "darwin/arm64/race",
+    "darwin/arm64/issue2413"
+  ]
+}

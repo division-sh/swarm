@@ -35,6 +35,8 @@ const (
 // launch/write primitive makes this test fail until ownership is reclassified.
 // The selected-context Close/Done entries are sync.Once.Do settlement, not HTTP.
 var sourcePrimitiveOwners = map[string]primitiveOwner{
+	"internal/sessionprovider/channel_execution_unix.go:executeChannelSend:sdk_send:1":                                                    ownerOperatorInfra,
+	"internal/sessionprovider/runtime_logout_unix.go:executeSessionLogout:sdk_logout:1":                                                   ownerOperatorInfra,
 	"internal/runtime/testfixtures/canonicalrouting/keyed_ingress.go:CopyNestedDeclarationLocalRawIngress:filesystem_write:1":             ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/keyed_ingress.go:CopyNestedDeclarationLocalRawIngress:filesystem_write:2":             ownerBuildTest,
 	"internal/runtime/context_manager.go:Done:http_do:1":                                                                                  ownerRuntimeDependency,
@@ -93,7 +95,6 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/publicingress/exposure.go:probePublicRoute:http_do:1":                                                               ownerOperatorInfra,
 	"internal/runtime/publicingress/exposure.go:readQuickTunnelEndpoints:http_do:1":                                                       ownerOperatorInfra,
 	"internal/runtime/publicingress/exposure.go:readQuickTunnelEndpoints:http_do:2":                                                       ownerOperatorInfra,
-	"internal/runtime/pipeline/generic_test_module.go:init:http_do:1":                                                                     ownerBuildTest,
 	"internal/runtime/pythonmodule/artifact_cache.go:materializedArtifactDir:http_do:1":                                                   ownerComputeSandbox,
 	"internal/runtime/pythonmodule/compiled_cache.go:currentCompiledInterpreterIdentity:http_do:1":                                        ownerComputeSandbox, // sync.Once executable fingerprint, not HTTP.
 	"internal/runtime/pythonmodule/compiled_cache.go:loadCompiledInterpreter:filesystem_write:1":                                          ownerComputeSandbox, // Private compiled-code directory.
@@ -275,6 +276,23 @@ func TestPipelineEffectPrimitiveOwnersAreExact(t *testing.T) {
 	}
 }
 
+func TestManagedEffectCrossPackageProofFileInventoryIsExact(t *testing.T) {
+	want := map[string]string{
+		"channel_confirmation_whatsapp": "internal/sessionprovider/channel_execution_test.go",
+		"channel_delivery_whatsapp":     "internal/sessionprovider/channel_execution_test.go",
+		"channel_logout_whatsapp":       "internal/sessionprovider/runtime_logout_test.go",
+	}
+	for _, registration := range Registrations() {
+		if registration.ProofFile != want[registration.Adapter] {
+			t.Fatalf("adapter %s proof file = %q, want %q", registration.Adapter, registration.ProofFile, want[registration.Adapter])
+		}
+		delete(want, registration.Adapter)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing cross-package proof registrations: %v", want)
+	}
+}
+
 func TestManagedEffectRegistrationsAreCompleteAndLive(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", "..", ".."))
 	seen := map[string]struct{}{}
@@ -346,7 +364,7 @@ func serveRegistrationPrimitive(adapters []string, owner primitiveOwner) bool {
 	}
 	for _, adapter := range adapters {
 		registration, ok := RegistrationFor(adapter)
-		if !ok || (registration.Kind != KindServeRegistration && registration.Kind != KindChannelConfirmation && registration.Kind != KindChannelDelivery && registration.Kind != KindChannelActionAck && registration.Kind != KindChannelNativeSetting) {
+		if !ok || (registration.Kind != KindServeRegistration && registration.Kind != KindChannelConfirmation && registration.Kind != KindChannelDelivery && registration.Kind != KindChannelActionAck && registration.Kind != KindChannelNativeSetting && registration.Kind != KindChannelLogout) {
 			return false
 		}
 	}
@@ -461,7 +479,7 @@ func isLocalCall(call *ast.CallExpr, name string) bool {
 func collectDirectPrimitives(root string) (map[string]struct{}, error) {
 	out := map[string]struct{}{}
 	base := filepath.Join(root, "internal", "runtime")
-	err := checkoutsource.WalkDir(root, base, func(path string, entry fs.DirEntry, err error) error {
+	visit := func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -500,8 +518,23 @@ func collectDirectPrimitives(root string) (map[string]struct{}, error) {
 			})
 		}
 		return nil
-	})
-	return out, err
+	}
+	if err := checkoutsource.WalkDir(root, base, visit); err != nil {
+		return nil, err
+	}
+	// These closed native launches delegate to private SDK owners. Both send
+	// and unlink are effects, never deterministic in-process read exemptions.
+	for _, name := range []string{"channel_execution_unix.go", "runtime_logout_unix.go"} {
+		path := filepath.Join(root, "internal", "sessionprovider", name)
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+		if err := visit(path, fs.FileInfoToDirEntry(info), nil); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
 }
 
 func commandVariables(body *ast.BlockStmt) map[string]struct{} {
@@ -573,6 +606,10 @@ func directPrimitive(call *ast.CallExpr, commandVars, fileVars map[string]struct
 	}
 	root := selectorRoot(selector.X)
 	switch {
+	case root == "occurrence" && selector.Sel.Name == "send":
+		return "sdk_send"
+	case root == "occurrence" && selector.Sel.Name == "unlink":
+		return "sdk_logout"
 	case selector.Sel.Name == "Do":
 		return "http_do"
 	case commandExecutionCall(selector, commandVars):

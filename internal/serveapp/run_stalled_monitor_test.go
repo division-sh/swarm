@@ -7,8 +7,6 @@ import (
 
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
-	"github.com/division-sh/swarm/internal/runtime/runstalled"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 )
 
@@ -31,7 +29,7 @@ func TestRunStalledSnapshotFromDebugReportUsesProjectRunOperationalStatus(t *tes
 			wantReason: "no_active_deliveries",
 		},
 		{
-			name: "scoring terminal outcome",
+			name: "scoring names do not create obligations",
 			report: operatorread.RunDebugReport{
 				RunID:          "run-scoring",
 				RunTableStatus: "running",
@@ -40,8 +38,8 @@ func TestRunStalledSnapshotFromDebugReportUsesProjectRunOperationalStatus(t *tes
 					{EventName: "scoring/scoring.requested", Count: 1},
 				},
 			},
-			wantLayer:  "scoring_terminal_outcome",
-			wantReason: "terminal_scoring_outcome_missing",
+			wantLayer:  "delivery_lifecycle",
+			wantReason: "no_active_deliveries",
 		},
 		{
 			name: "active delivery remains running",
@@ -59,7 +57,8 @@ func TestRunStalledSnapshotFromDebugReportUsesProjectRunOperationalStatus(t *tes
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := runStalledSnapshotFromDebugReport(tc.report, "review/inst-1", tc.report.LastEventAt)
+			tc.report.OperationalFacts = stalledMonitorFacts(now, "review/inst-1")
+			got := runStalledSnapshotFromDebugReport(tc.report, tc.report.LastEventAt)
 			if got.Diagnosis.BlockingLayer != tc.wantLayer {
 				t.Fatalf("blocking_layer = %q, want %q", got.Diagnosis.BlockingLayer, tc.wantLayer)
 			}
@@ -80,11 +79,12 @@ func TestRunStalledSnapshotFromDebugReportUsesNonEscalationProgressTimestamp(t *
 	progressAt := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	selfAlertAt := progressAt.Add(10 * time.Minute)
 	report := operatorread.RunDebugReport{
-		RunID:          "run-self-alert",
-		RunTableStatus: "running",
-		LastEventAt:    selfAlertAt,
+		RunID:            "run-self-alert",
+		RunTableStatus:   "running",
+		LastEventAt:      selfAlertAt,
+		OperationalFacts: stalledMonitorFacts(progressAt, "review/inst-1"),
 	}
-	got := runStalledSnapshotFromDebugReport(report, "", progressAt)
+	got := runStalledSnapshotFromDebugReport(report, progressAt)
 	if !got.LastProgressAt.Equal(progressAt) {
 		t.Fatalf("last progress at = %s, want %s", got.LastProgressAt, progressAt)
 	}
@@ -98,12 +98,11 @@ func TestServeRunStalledReaderLoadsSnapshotProgressFromStore(t *testing.T) {
 	progressAt := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	reader := &serveRunStalledReader{store: fakeRunStalledReadStore{
 		report: operatorread.RunDebugReport{
-			RunID:          "run-1",
-			RunTableStatus: "running",
-			LastEventAt:    progressAt.Add(10 * time.Minute),
+			RunID:            "run-1",
+			RunTableStatus:   "running",
+			LastEventAt:      progressAt.Add(10 * time.Minute),
+			OperationalFacts: stalledMonitorFacts(progressAt, "review/inst-1"),
 		},
-		flowInstance: "review/inst-1",
-		progressAt:   progressAt,
 	}}
 	got, err := reader.LoadRunSnapshot(ctx, "run-1")
 	if err != nil {
@@ -112,8 +111,8 @@ func TestServeRunStalledReaderLoadsSnapshotProgressFromStore(t *testing.T) {
 	if !got.LastProgressAt.Equal(progressAt) {
 		t.Fatalf("progress timestamp = %s, want %s", got.LastProgressAt, progressAt)
 	}
-	if got.FlowInstance != "review/inst-1" {
-		t.Fatalf("flow instance = %q, want review/inst-1", got.FlowInstance)
+	if len(got.Diagnosis.StalledInstances) != 1 || got.Diagnosis.StalledInstances[0].FlowInstance != "review/inst-1" {
+		t.Fatalf("stalled instances = %+v, want review/inst-1", got.Diagnosis.StalledInstances)
 	}
 }
 
@@ -125,10 +124,25 @@ func TestServeRunStalledReaderUsesSelectedProjection(t *testing.T) {
 	}
 }
 
+func TestServeRunStalledReaderKeepsMixedScopesInRunLevelAlert(t *testing.T) {
+	facts := stalledMonitorFacts(time.Unix(100, 0).UTC(), "review/one")
+	facts.Instances = append(facts.Instances, operatorread.RunInstanceFacts{FlowInstance: "review/two", Complete: true, Revision: 1})
+	reader := &serveRunStalledReader{store: fakeRunStalledReadStore{report: operatorread.RunDebugReport{
+		RunID: "run", RunTableStatus: "running", OperationalFacts: facts,
+	}}}
+	snapshot, err := reader.LoadRunSnapshot(context.Background(), "run")
+	if err != nil || snapshot.Diagnosis.OperationalState != "stalled" || len(snapshot.Diagnosis.StalledInstances) != 2 {
+		t.Fatalf("simultaneous stalls were refused or lost a scope: %+v %v", snapshot, err)
+	}
+	facts.Instances[1].Work.Timers = 1
+	snapshot, err = reader.LoadRunSnapshot(context.Background(), "run")
+	if err != nil || snapshot.Diagnosis.OperationalState != "running" || len(snapshot.Diagnosis.StalledInstances) != 1 || snapshot.Diagnosis.StalledInstances[0].FlowInstance != "review/one" {
+		t.Fatalf("waiting sibling hid the stalled sibling or invented escalation: %+v %v", snapshot, err)
+	}
+}
+
 type fakeRunStalledReadStore struct {
-	report       operatorread.RunDebugReport
-	flowInstance string
-	progressAt   time.Time
+	report operatorread.RunDebugReport
 }
 
 func (s fakeRunStalledReadStore) ListRunHeaders(context.Context, operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error) {
@@ -143,39 +157,8 @@ func (s fakeRunStalledReadStore) ListOperatorEvents(context.Context, operatorrea
 	return operatorread.OperatorEventListResult{}, nil
 }
 
-func (s fakeRunStalledReadStore) LoadLatestRunFlowInstance(context.Context, string) (string, error) {
-	return s.flowInstance, nil
-}
-
-func (s fakeRunStalledReadStore) LoadLatestRunNonEscalationProgressAt(context.Context, string, string) (time.Time, error) {
-	return s.progressAt, nil
-}
-
-func TestRunStalledFlowIDForInstanceChoosesMostSpecificScope(t *testing.T) {
-	scopes := []semanticview.FlowScope{
-		{ID: "parent", Path: "review"},
-		{ID: "child", Path: "review/qa"},
-		{ID: "id-only"},
-	}
-	if got := runStalledFlowIDForInstance(scopes, "review/qa/inst-1"); got != "child" {
-		t.Fatalf("flow id = %q, want child", got)
-	}
-	if got := runStalledFlowIDForInstance(scopes, "review/inst-1"); got != "parent" {
-		t.Fatalf("flow id = %q, want parent", got)
-	}
-	if got := runStalledFlowIDForInstance(scopes, "id-only/inst-1"); got != "id-only" {
-		t.Fatalf("flow id = %q, want id-only", got)
-	}
-}
-
-func TestRunStalledPolicyParsing(t *testing.T) {
-	if got, ok := runStalledPolicyBool("false"); !ok || got {
-		t.Fatalf("bool parse = %v/%v, want false/true", got, ok)
-	}
-	if got, ok := runStalledPolicySeconds(float64(runstalled.DefaultThresholdSeconds)); !ok || got != runstalled.DefaultThresholdSeconds {
-		t.Fatalf("seconds parse = %d/%v, want default/true", got, ok)
-	}
-	if _, ok := runStalledPolicySeconds(3.5); ok {
-		t.Fatalf("fractional threshold parsed successfully, want rejection")
+func stalledMonitorFacts(progress time.Time, path string) *operatorread.RunOperationalFacts {
+	return &operatorread.RunOperationalFacts{Complete: true, LastProgressAt: progress,
+		Instances: []operatorread.RunInstanceFacts{{FlowInstance: path, Complete: true, Revision: 1}},
 	}
 }

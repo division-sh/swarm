@@ -114,7 +114,7 @@ func runSlackManagedCredentialConnectorSurface(t *testing.T, backend slackManage
 	defer fake.server.Close()
 
 	managedStore := runtimemanagedcredentials.NewMemoryStore(runtimemanagedcredentials.Record{
-		Key:          "slack_oauth",
+		Key:          "slack.slack_oauth",
 		Provider:     "slack",
 		GrantType:    runtimemanagedcredentials.GrantAuthorizationCodePKCE,
 		TokenURL:     fake.server.URL + "/oauth.v2.access",

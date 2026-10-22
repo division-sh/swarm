@@ -113,7 +113,7 @@ func openManagerNativeDelivery(t *testing.T, backend string, sources ...semantic
 		},
 		RetryReady: func(t *testing.T, event events.Event, route events.DeliveryRoute) {
 			t.Helper()
-			if err := storetest.MakeManagerRetryEligible(ctx, selected, event, route); err != nil {
+			if err := storetest.WaitManagerRetryDecision(ctx, selected, event, route); err != nil {
 				t.Fatal(err)
 			}
 		},
@@ -246,7 +246,7 @@ func TestManagerDeliveryStorageOnlySourceRefusesSelectedExecutionBothStores(t *t
 				t.Fatal("original native delivery owner has no retained selected source role")
 			}
 			repo := canonicalrouting.RepoRoot(t)
-			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected}
+			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected}
 			ctx := fixture.Context
 			hash := fixture.Authority.SourceArtifact().BundleHash()
 			admitted, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{

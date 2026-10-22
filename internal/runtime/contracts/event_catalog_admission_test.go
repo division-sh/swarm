@@ -40,9 +40,6 @@ note: text?
 	if entry.Payload.Properties["note"].Type != "text" {
 		t.Fatalf("optional marker leaked into effective type: %#v", entry.Payload.Properties["note"])
 	}
-	if provenance := entry.admissionProvenance["fields.item_id.is_optional"]; provenance.Origin != EffectiveValueOriginDerived || provenance.RuleID != eventRequiredByDefaultRule {
-		t.Fatalf("required-by-default provenance = %#v", provenance)
-	}
 }
 
 func TestEventCatalogAdmissionAcceptsExactlyOneFieldLevelOptionalMarkerAcrossTypeForms(t *testing.T) {
@@ -131,9 +128,10 @@ func TestEventCatalogAdmissionRetainsAliasValues(t *testing.T) {
 	if entry.Payload.Properties["id"].Type != "uuid" || entry.Payload.Properties["correlation_id"].Type != "uuid" {
 		t.Fatalf("alias projection = %#v", entry.Payload.Properties)
 	}
-	provenance := entry.admissionProvenance["fields.correlation_id.type"]
-	if provenance.SourceLine != 3 {
-		t.Fatalf("alias provenance line = %d, want authored alias use on line 3", provenance.SourceLine)
+	bundle := retainedLocationFixture(t, "events.yaml", "test.event:\n  id: &kind uuid\n  correlation_id: *kind\n")
+	location, found := bundle.IntroductionLocation("events.yaml", `["test.event"].correlation_id`, false)
+	if !found || location.Line != 3 {
+		t.Fatalf("alias provenance line = %d, want authored alias use on line 3", location.Line)
 	}
 }
 
@@ -168,9 +166,14 @@ value:
 			if err != nil {
 				t.Fatal(err)
 			}
-			provenance := entry.admissionProvenance["fields.value.type"]
-			if provenance.SourceLine != tc.wantLine {
-				t.Fatalf("provenance line = %d, want authored introduction on line %d", provenance.SourceLine, tc.wantLine)
+			if entry.Payload.Properties["value"].Type != "text" {
+				t.Fatal("alias/merge changed the admitted field type")
+			}
+			body := "test.event:\n  " + strings.ReplaceAll(strings.TrimSpace(tc.source), "\n", "\n  ") + "\n"
+			bundle := retainedLocationFixture(t, "events.yaml", body)
+			location, found := bundle.IntroductionLocation("events.yaml", `["test.event"].value.type`, false)
+			if !found || location.Line != tc.wantLine {
+				t.Fatalf("provenance line = %d, want authored introduction on line %d", location.Line, tc.wantLine)
 			}
 		})
 	}
@@ -183,9 +186,13 @@ value:
 	if err != nil {
 		t.Fatal(err)
 	}
-	provenance := entries["test.event"].admissionProvenance["declaration"]
-	if provenance.SourceLine != 1 {
-		t.Fatalf("merged declaration provenance line = %d, want authored merge occurrence on line 1", provenance.SourceLine)
+	if _, found := entries["test.event"]; !found {
+		t.Fatal("merge lost its event declaration")
+	}
+	bundle := retainedLocationFixture(t, "events.yaml", "<<: &defaults\n  test.event:\n")
+	location, found := bundle.IntroductionLocation("events.yaml", `["test.event"]`, true)
+	if !found || location.Line != 1 {
+		t.Fatalf("merged declaration provenance line = %d, want authored merge occurrence on line 1", location.Line)
 	}
 }
 
@@ -225,45 +232,6 @@ func TestEventCatalogAdmissionOwnsDeclarationIdentityBeforeMapInsertion(t *testi
 	}
 	if len(entries) != 5 {
 		t.Fatalf("admitted declarations = %#v", entries)
-	}
-}
-
-func TestEventCatalogAdmissionRecordsExactNestedValueProvenance(t *testing.T) {
-	entry, err := admitEventCatalogEntryForTest(t, `
-value:
-  type: text?
-  description: Human-readable value
-  pattern: ^[a-z]+$
-  length:
-    min: 1
-    max: 20
-  citation:
-    criteria: source field
-    allowed_classes: [public]
-`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	paths := []string{
-		"fields.value.type",
-		"fields.value.is_optional",
-		"fields.value.description",
-		"fields.value.refinements.pattern",
-		"fields.value.refinements.length.min",
-		"fields.value.refinements.length.max",
-		"fields.value.citation.criteria",
-		"fields.value.citation.allowed_classes",
-	}
-	for _, path := range paths {
-		provenance, ok := entry.admissionProvenance[path]
-		if !ok || provenance.SourceFile != "events.yaml" || provenance.SourceLine <= 0 || provenance.SourceColumn <= 0 {
-			t.Fatalf("provenance %s = %#v, found=%t", path, provenance, ok)
-		}
-	}
-	typeSource := entry.admissionProvenance["fields.value.type"]
-	descriptionSource := entry.admissionProvenance["fields.value.description"]
-	if typeSource.SourceLine == descriptionSource.SourceLine {
-		t.Fatalf("mapping type provenance points at outer field instead of nested type: type=%#v description=%#v", typeSource, descriptionSource)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
 )
@@ -79,7 +80,10 @@ func TestScenarioSetupDispatchesOnlyAcknowledgedConstruction(t *testing.T) {
 			if test.root {
 				entityID = runID
 			}
-			request := pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: time.Now().UTC(), Entities: []pipeline.ScenarioSetupEntityRequest{{EntityID: entityID, EntityType: "record", CurrentState: "pending"}}}
+			request := pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: time.Now().UTC(), Entities: []pipeline.ScenarioSetupEntityRequest{{EntityID: entityID, EntityType: "record"}}}
+			if test.root {
+				request.Entities[0].CurrentState = mutationlog.PresentLifecycleState("pending")
+			}
 			ctx, err := bus.AdmitSourceArtifactFact(authoractivity.WithScope(context.Background(), authoractivity.BundleScope(bus.runtimeInstanceID, bus.sourceArtifactFact.BundleHash())))
 			if err != nil {
 				t.Fatal(err)

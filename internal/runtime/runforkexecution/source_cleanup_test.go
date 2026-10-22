@@ -12,7 +12,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -193,7 +192,7 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 				process, _ := worklifetime.ProcessFromContext(ctx)
 				capability := selectedContractTestProcessCapability(t, ctx, selected)
 				repo := runForkExecutionRepoRoot(t)
-				fixture := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"), PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}
+				fixture := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")}
 				loaded, err := fixture.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 				if err != nil {
 					t.Fatal(err)
@@ -206,7 +205,7 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				seedSelectedOperationSource(t, ctx, selected, loaded, runID, eventID, input)
-				base := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)}
+				base := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
 				sibling, err := base.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: OriginalRunSource(runID), Selection: runforkadmission.SelectedContractSelection(loaded.Source)})
 				if err != nil {
 					t.Fatal(err)
@@ -394,7 +393,7 @@ func rootedSourceCleanupFixture(t *testing.T) (LoadedSelectedContractSource, Loa
 	var sources [2]LoadedSelectedContractSource
 	for i, root := range []string{targetRoot, canonicalrouting.CopyForkFanOutCarrier(t, false, false)} {
 		loaded, err := (admittedFixtureSelectedContractSourceLoader{
-			RepoRoot: repo, SourceRoot: root, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo),
+			RepoRoot: repo, SourceRoot: root,
 		}).LoadRunForkSelectedContractSource(context.Background(), testContractSelection())
 		if err != nil {
 			t.Fatal(err)

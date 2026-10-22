@@ -51,7 +51,7 @@ func TestReplayReceiverRequiresFixedPublicationAndInitializedState(t *testing.T)
 					for i := range snapshot.Deliveries {
 						snapshot.Deliveries[i].Snapshot.Route.Initialization = events.ReceiverInitialization{}
 					}
-					source = snapshot.Deliveries[len(snapshot.Deliveries)-1].Snapshot
+					source.Route = snapshot.Deliveries[len(snapshot.Deliveries)-1].Snapshot.Route
 				case "missing_materializer":
 					snapshot.Deliveries = snapshot.Deliveries[1:]
 				case "changed_live_route":
@@ -134,6 +134,7 @@ func replayReceiverProjectionFixture(t *testing.T, supplier string) (*runForkRev
 	}
 	snapshot := &runForkRevisionSnapshot{RunID: runID, Revision: 1}
 	setReplayReceiverConstructedHistory(t, snapshot, target.Route().EntityID, "receiver", "receiver", event.CreatedAt())
+	var source deliverylifecycle.Snapshot
 	for _, route := range publication {
 		id, err := deliverylifecycle.DeliveryID(event.ID(), route)
 		if err != nil {
@@ -143,9 +144,10 @@ func replayReceiverProjectionFixture(t *testing.T, supplier string) (*runForkRev
 		if route.Recipient.IsNode() {
 			state = deliverylifecycle.StatusDelivered
 		}
-		snapshot.Deliveries = append(snapshot.Deliveries, runForkRevisionDelivery{Snapshot: deliverylifecycle.Snapshot{DeliveryID: id, RunID: runID, EventID: event.ID(), Route: route, Status: state}})
+		source = deliverylifecycle.Snapshot{DeliveryID: id, RunID: runID, EventID: event.ID(), Route: route, Status: state}
+		snapshot.Deliveries = append(snapshot.Deliveries, runForkRevisionDelivery{Snapshot: deliverylifecycle.HistoricalFact{DeliveryID: id, RunID: runID, EventID: event.ID(), Route: route, Status: state}})
 	}
-	return snapshot, event, snapshot.Deliveries[len(snapshot.Deliveries)-1].Snapshot
+	return snapshot, event, source
 }
 
 func TestReplayExistingRootReceiverProjectsCanonicalChildOwnership(t *testing.T) {
@@ -165,7 +167,7 @@ func TestReplayExistingRootReceiverProjectsCanonicalChildOwnership(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot.Deliveries = []runForkRevisionDelivery{{Snapshot: delivery}}
+	snapshot.Deliveries = []runForkRevisionDelivery{{Snapshot: deliverylifecycle.HistoricalFact{DeliveryID: delivery.DeliveryID, RunID: delivery.RunID, EventID: delivery.EventID, Route: delivery.Route, Status: delivery.Status}}}
 	setReplayReceiverConstructedHistory(t, snapshot, snapshot.RunID, snapshot.RunID, ".", event.CreatedAt())
 	childRun := eventtest.UUID("replay-child")
 	child, err := projectRunForkReplayInitializedReceiver(snapshot, event, delivery, childRun)
@@ -209,7 +211,7 @@ func TestReplayEntitylessReceiverKeepsFixedConstructionDependency(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			snapshot.Deliveries = []runForkRevisionDelivery{{Snapshot: delivery}}
+			snapshot.Deliveries = []runForkRevisionDelivery{{Snapshot: deliverylifecycle.HistoricalFact{DeliveryID: delivery.DeliveryID, RunID: delivery.RunID, EventID: delivery.EventID, Route: delivery.Route, Status: delivery.Status}}}
 			before := delivery.Route
 			childRun := eventtest.UUID("entityless-replay-child")
 			child, err := projectRunForkReplayInitializedReceiver(snapshot, event, delivery, childRun)
@@ -245,6 +247,7 @@ func setReplayReceiverConstructedHistory(t *testing.T, snapshot *runForkRevision
 		EntityID: entityID, FlowInstance: path, EntityType: "receipt", ConstructionKind: "constructed",
 		FlowTemplate: flowID, Mode: "static", FlowConfig: []byte(`{}`), Status: "active", CurrentState: "pending",
 		StageDefined: true, CreatedAt: at, UpdatedAt: at, EnteredStateAt: at,
+		DataCreatedAt: &at, DataUpdatedAt: &at,
 	}}
 	snapshot.EntityMutations = []runForkRevisionEntityMutation{{
 		EntityID: entityID, Domain: "lifecycle_state", NewValue: []byte(`"pending"`), CreatedAt: at,
@@ -278,7 +281,7 @@ func TestRunForkConstructedHistoryRequiresExactSnapshotState(t *testing.T) {
 				if consumer == "decoder" {
 					var state runfork.RunForkEntityState
 					state, err = loadRunForkConstructedEntityState(snapshot, snapshot.RunID)
-					if err == nil && (state.CurrentState != "pending" || state.MaterializationMetadata == nil || state.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance) {
+					if err == nil && (state.CurrentState == nil || *state.CurrentState != "pending" || state.MaterializationMetadata == nil || state.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance) {
 						t.Fatalf("constructed history lost exact state: %+v", state)
 					}
 				} else {
@@ -289,7 +292,7 @@ func TestRunForkConstructedHistoryRequiresExactSnapshotState(t *testing.T) {
 					if err == nil && (state == nil || state.Source.EntityID != snapshot.RunID || state.Fork.EntityID != forkRun || projected.RoutingSource.Route().EntityID != forkRun) {
 						t.Fatalf("producer lost exact ownership: %+v %+v", projected, state)
 					}
-					if err == nil && (state.history.EntityID != snapshot.RunID || state.history.CurrentState != "pending" || state.history.MaterializationMetadata == nil || state.history.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance) {
+					if err == nil && (state.history.EntityID != snapshot.RunID || state.history.CurrentState == nil || *state.history.CurrentState != "pending" || state.history.MaterializationMetadata == nil || state.history.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance) {
 						t.Fatalf("producer dropped fixed-revision construction history: %+v", state.history)
 					}
 				}
@@ -310,7 +313,7 @@ func TestReplayUntargetedReceiverPreservesAbsence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot.Deliveries = []runForkRevisionDelivery{{Snapshot: delivery}}
+	snapshot.Deliveries = []runForkRevisionDelivery{{Snapshot: deliverylifecycle.HistoricalFact{DeliveryID: delivery.DeliveryID, RunID: delivery.RunID, EventID: delivery.EventID, Route: delivery.Route, Status: delivery.Status}}}
 	snapshot.EntityMetadata = nil
 	childRun := eventtest.UUID("replay-child")
 	before := delivery.Route

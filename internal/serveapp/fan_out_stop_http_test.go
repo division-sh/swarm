@@ -173,8 +173,7 @@ func newIssue2394StopRig(t *testing.T, backend servedparity.Backend) *issue2394S
 	root := writeServedEventPublishFollowUpFixture(t)
 	rig := &issue2394StopRig{bundleHash: servedEventPublishFixtureBundleHash(t, root), backend: "sqlite"}
 	rig.opts = cliapp.ServeOptions{
-		SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath,
-		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true,
+		SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true,
 		TestLifecycleProbe:      lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout)),
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(), TestLLMRuntime: servedNoopLLMRuntime{},
 	}

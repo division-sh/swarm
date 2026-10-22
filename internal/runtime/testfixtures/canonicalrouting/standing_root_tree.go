@@ -1,6 +1,8 @@
 package canonicalrouting
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -10,7 +12,6 @@ import (
 func CopyStandingRootTreePublic(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	const imports = "imports:\n  provider_trigger_events:\n    - {provider: telegram, event: inbound.telegram.text_message}\n    - {provider: telegram, event: inbound.telegram.callback_action}\n"
 	const pins = "pins:\n  inputs:\n    - inbound.telegram\n    - inbound.telegram.text_message\n    - inbound.telegram.callback_action\n"
 	const outputs = "  outputs: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"
 	const nodes = "observer:\n  execution_type: system_node\n  subscribes_to: [inbound.telegram, inbound.telegram.text_message, inbound.telegram.callback_action]\n  event_handlers:\n    inbound.telegram:\n      guard: {id: admit, check: true}\n    inbound.telegram.text_message:\n      guard: {id: admit, check: true}\n    inbound.telegram.callback_action:\n      guard: {id: admit, check: true}\n"
@@ -18,19 +19,29 @@ func CopyStandingRootTreePublic(t testing.TB) string {
 		"alpha-receiver/detail/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 		"alpha-receiver/manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
 		"beta/manifest.yaml":                  "version: 1.0.0\nplatform_version: '*'\n",
+		"beta-receiver/manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
 		"manifest.yaml":                       "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":                         "# fixture: standing-root-tree\nstages: []\n" + imports + pins + outputs + "ingress:\n  alias: alpha\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing.alpha}\nconnect:\n    - {event: inbound.telegram.text_message, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.callback_action, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.text_message, from: beta, to: beta-receiver}\n    - {event: inbound.telegram.callback_action, from: beta, to: beta-receiver}\n",
+		"schema.yaml":                         "# fixture: standing-root-tree\nstages: []\n" + pins + outputs + "connect:\n    - {event: inbound.telegram.text_message, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.callback_action, from: ., to: alpha-receiver}\n    - {event: inbound.telegram.text_message, from: beta, to: beta-receiver}\n    - {event: inbound.telegram.callback_action, from: beta, to: beta-receiver}\n",
 		"nodes.yaml":                          nodes,
-		"beta/schema.yaml":                    "# fixture: beta\nstages: []\n" + imports + pins + outputs + "ingress:\n  alias: beta\n  providers:\n    - {provider: telegram, signing_secret: webhook_signing.beta}\n",
+		"beta/schema.yaml":                    "# fixture: beta\nstages: []\n" + pins + outputs,
 		"beta/nodes.yaml":                     nodes,
 		"alpha-receiver/detail/schema.yaml":   "stages: []\n# fixture: detail\n",
 	}
 	for _, alias := range []string{"alpha", "beta"} {
-		files[alias+"-receiver/schema.yaml"] = "# fixture: " + alias + "-receiver\n" + imports + "pins:\n  inputs: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"
+		files[alias+"-receiver/schema.yaml"] = "# fixture: " + alias + "-receiver\npins:\n  inputs: [inbound.telegram.text_message, inbound.telegram.callback_action]\n"
 		files[alias+"-receiver/nodes.yaml"] = strings.Replace(strings.Replace(nodes, "subscribes_to: [inbound.telegram, ", "subscribes_to: [", 1), "    inbound.telegram:\n      guard: {id: admit, check: true}\n", "", 1)
 	}
 	for name, body := range files {
 		writeClosedVariantFile(t, root, name, body)
+	}
+	for _, holder := range []string{".", "beta"} {
+		for _, name := range []string{"manifest.yaml", "trigger.yaml", "connector.yaml", "channel.yaml"} {
+			body, err := os.ReadFile(filepath.Join(RepoRoot(t), "packs/providers/telegram", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(holder, "telegram", name)), string(body))
+		}
 	}
 	return root
 }

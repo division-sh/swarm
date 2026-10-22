@@ -41,6 +41,10 @@ func AdvanceActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel
 		expected.Action.Token != action.Token || (mode != render.ControlPageEdit && mode != render.ControlPageFreshCopy) {
 		return false, fmt.Errorf("card action page requires an exact verified control")
 	}
+	parent, err := lockActionParentTx(ctx, tx, action.ActionFact, postgres)
+	if err != nil {
+		return false, err
+	}
 	if err := LockPrincipalTx(ctx, tx, expected.PrincipalID, postgres); err != nil {
 		return false, err
 	}
@@ -51,7 +55,7 @@ func AdvanceActionPageTx(ctx context.Context, tx *sql.Tx, action operatorchannel
 	if state != "pending" {
 		return false, fmt.Errorf("card action page tap is already settled")
 	}
-	resolved, found, err := ResolveActionFactForMutationTx(ctx, tx, action.ActionFact, postgres)
+	resolved, found, err := parent.resolve(ctx, tx, action.ActionFact, postgres)
 	if err != nil {
 		return false, err
 	}

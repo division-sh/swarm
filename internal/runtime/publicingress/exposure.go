@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"os/exec"
@@ -180,10 +182,7 @@ func (c *Controller) Start(ctx context.Context) error {
 		cancel()
 		return err
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/webhooks/_swarm_probe/", c.serveProbe)
-	mux.Handle("/webhooks/", c.opts.Handler)
-	c.server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	c.server = &http.Server{Handler: http.HandlerFunc(c.servePublicRoute), ReadHeaderTimeout: 5 * time.Second}
 	c.serverDone = make(chan struct{})
 	go func() {
 		defer close(c.serverDone)
@@ -236,11 +235,7 @@ func (c *Controller) establish(ctx context.Context) error {
 		}
 		publicOrigin = "https://" + hostname
 	}
-	probe := c.probePublicRoute
-	if c.opts.Mode == ModeManagedQuickTunnel {
-		probe = c.probeManagedPublicRoute
-	}
-	if err := probe(ctx, publicOrigin); err != nil {
+	if err := c.probePublicRouteWithRetry(ctx, publicOrigin); err != nil {
 		return err
 	}
 	generation := Generation{ID: uuid.NewString(), Mode: c.opts.Mode, PublicOrigin: publicOrigin, ListenAddress: c.listener.Addr().String(), CreatedAt: c.opts.Now().UTC()}
@@ -388,6 +383,24 @@ func (c *Controller) Stop(ctx context.Context) error {
 	return shutdownErr
 }
 
+func (c *Controller) servePublicRoute(w http.ResponseWriter, request *http.Request) {
+	// Do not let ServeMux normalize or redirect a different public path.
+	parts := strings.Split(request.URL.Path, "/")
+	if request.URL.EscapedPath() != request.URL.Path || len(parts) != 4 || parts[0] != "" || parts[1] != "webhooks" {
+		http.NotFound(w, request)
+		return
+	}
+	if parts[2] == "_swarm_probe" {
+		c.serveProbe(w, request)
+		return
+	}
+	if runtimecontracts.ValidateIngressAlias(parts[2]) != nil || parts[3] == "" || parts[3] == "." || parts[3] == ".." {
+		http.NotFound(w, request)
+		return
+	}
+	c.opts.Handler.ServeHTTP(w, request)
+}
+
 func (c *Controller) serveProbe(w http.ResponseWriter, request *http.Request) {
 	want := "/webhooks/_swarm_probe/" + c.nonce
 	if request.Method != http.MethodGet || request.URL.Path != want {
@@ -405,8 +418,40 @@ func (c *Controller) probePublicRoute(ctx context.Context, origin string) error 
 	if err != nil {
 		return err
 	}
+	var mu sync.Mutex
+	var addresses []string
+	outcomes := make(map[string]string)
+	trace := &httptrace.ClientTrace{
+		ConnectStart: func(network, addr string) {
+			mu.Lock()
+			defer mu.Unlock()
+			key := network + " " + addr
+			if _, seen := outcomes[key]; !seen {
+				addresses = append(addresses, key)
+			}
+			outcomes[key] = "connection incomplete when probe ended"
+		},
+		ConnectDone: func(network, addr string, err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			outcome := "connected"
+			if err != nil {
+				outcome = err.Error()
+			}
+			outcomes[network+" "+addr] = outcome
+		},
+	}
+	request = request.WithContext(httptrace.WithClientTrace(request.Context(), trace))
 	response, err := c.httpClient().Do(request)
 	if err != nil {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(addresses) > 0 {
+			for i, address := range addresses {
+				addresses[i] = address + ": " + outcomes[address]
+			}
+			return fmt.Errorf("prove public webhook route: %w; address attempts: %s", err, strings.Join(addresses, "; "))
+		}
 		return fmt.Errorf("prove public webhook route: %w", err)
 	}
 	defer response.Body.Close()
@@ -417,8 +462,8 @@ func (c *Controller) probePublicRoute(ctx context.Context, origin string) error 
 	return nil
 }
 
-func (c *Controller) probeManagedPublicRoute(ctx context.Context, origin string) error {
-	var last error
+func (c *Controller) probePublicRouteWithRetry(ctx context.Context, origin string) error {
+	var failures []error
 	for attempt, backoff := range append([]time.Duration{0}, time.Second, 2*time.Second, 4*time.Second) {
 		if backoff > 0 {
 			wait := c.waitRetry
@@ -429,15 +474,16 @@ func (c *Controller) probeManagedPublicRoute(ctx context.Context, origin string)
 				return err
 			}
 		}
-		last = c.probePublicRoute(ctx, origin)
-		if last == nil {
+		err := c.probePublicRoute(ctx, origin)
+		if err == nil {
 			return nil
 		}
+		failures = append(failures, fmt.Errorf("attempt %d: %w", attempt+1, err))
 		if attempt == 3 {
 			break
 		}
 	}
-	return fmt.Errorf("prove managed public webhook route after bounded propagation retries: %w", last)
+	return fmt.Errorf("prove public webhook route after bounded retries: %w\nCheck the origin's A/AAAA records, HTTPS reachability, and forwarding to the public webhook listener, then restart serve", errors.Join(failures...))
 }
 
 func waitPublicRouteRetry(ctx context.Context, delay time.Duration) error {

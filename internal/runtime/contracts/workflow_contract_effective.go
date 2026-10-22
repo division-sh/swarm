@@ -138,13 +138,6 @@ func RequiredAgentsDeclared(schema FlowSchemaDocument) bool {
 	return schema.RequiredAgentsDeclared || len(schema.RequiredAgents) > 0
 }
 
-func EffectiveRequiredAgentFacts(schema FlowSchemaDocument, agents map[string]AgentRegistryEntry, schemaFile, agentsFile string) []RequiredAgentFact {
-	if RequiredAgentsDeclared(schema) {
-		return explicitRequiredAgentFacts(schema.RequiredAgents, schemaFile)
-	}
-	return inferredRequiredAgentFacts(agents, agentsFile)
-}
-
 func FlowRequiredAgentsFromFacts(facts []RequiredAgentFact) []FlowRequiredAgent {
 	if len(facts) == 0 {
 		return nil
@@ -192,29 +185,6 @@ func explicitRequiredAgentFacts(required []FlowRequiredAgent, sourceFile string)
 			Emits:        normalizeStrings(requiredAgent.Emits),
 			Description:  strings.TrimSpace(requiredAgent.Description),
 			Source:       RequiredAgentSourceExplicit,
-			SourceFile:   sourceFile,
-		})
-	}
-	return out
-}
-
-func inferredRequiredAgentFacts(agents map[string]AgentRegistryEntry, sourceFile string) []RequiredAgentFact {
-	if len(agents) == 0 {
-		return nil
-	}
-	sourceFile = strings.TrimSpace(sourceFile)
-	out := make([]RequiredAgentFact, 0, len(agents))
-	for _, agentID := range sortedContractKeys(agents) {
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
-			continue
-		}
-		agent := agents[agentID]
-		out = append(out, RequiredAgentFact{
-			Role:         agentID,
-			SubscribesTo: normalizeStrings(agent.Subscriptions),
-			Emits:        agent.ProducedEvents(),
-			Source:       RequiredAgentSourceInferred,
 			SourceFile:   sourceFile,
 		})
 	}

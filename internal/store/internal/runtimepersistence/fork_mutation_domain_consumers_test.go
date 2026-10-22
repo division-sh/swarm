@@ -126,10 +126,10 @@ func TestMutationDomainsReachBothForkConsumersBothStores(t *testing.T) {
 	}
 }
 
-func assertForkDomainSnapshot(t *testing.T, entityID, stage string, fields, bookkeeping, gates, accumulator map[string]any, wantID string, wantFields, wantAtomic map[string]any) {
+func assertForkDomainSnapshot(t *testing.T, entityID string, stage *string, fields, bookkeeping, gates, accumulator map[string]any, wantID string, wantFields, wantAtomic map[string]any) {
 	t.Helper()
-	if entityID != wantID || stage != "ready" || forkTestJSON(t, fields) != forkTestJSON(t, wantFields) {
-		t.Fatalf("snapshot scalar/fields: %s %s %#v", entityID, stage, fields)
+	if entityID != wantID || stage == nil || *stage != "ready" || forkTestJSON(t, fields) != forkTestJSON(t, wantFields) {
+		t.Fatalf("snapshot scalar/fields: %s %v %#v", entityID, stage, fields)
 	}
 	for _, values := range []map[string]any{bookkeeping, gates, accumulator} {
 		if forkTestJSON(t, values) != forkTestJSON(t, wantAtomic) {

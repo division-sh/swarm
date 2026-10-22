@@ -69,11 +69,6 @@ func (c Context) WithAccumulated(accumulated map[string]any) Context {
 	return c
 }
 
-func (c Context) WithFanOut(fanOut map[string]any) Context {
-	c.FanOut = Wrap(fanOut).Clone()
-	return c
-}
-
 func (c Context) Bucket(root paths.PathRoot) Bucket {
 	switch root {
 	case paths.RootEntity:

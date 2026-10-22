@@ -105,7 +105,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		return returnDoctorPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	configReport := newReport()
-	platformSpecPath, err := EmbeddedPlatformSpecPath()
+	_, err = EmbeddedPlatformSpecPath()
 	if err != nil {
 		report := configReport
 		report.add(localPreflightBackendPrerequisite, "platform_spec_resolution_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the embedded platform spec")
@@ -117,7 +117,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		report.add(localPreflightProviderPackPrerequisite, "platform_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix platform.packs.platform_dirs or the referenced platform pack inventory")
 		return returnDoctorPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
-	if !appendDoctorInstalledReadback(&configReport, platformSpecPath, platformPackBase, opts.schemaInventory) {
+	if !appendDoctorInstalledReadback(&configReport, platformPackBase, opts.schemaInventory) {
 		return returnDoctorPreflightResult(cmd, configReport.finalize(), opts.asJSON)
 	}
 	_, err = BuildProviderCredentialStore()
@@ -172,7 +172,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	}
 	localState, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
 		RepoRoot:                repo,
-		ResolvedPaths:           CLISourcePlatformSpecPaths{PlatformSpecPath: platformSpecPath},
+		ResolvedPaths:           CLISourcePaths{},
 		SwarmDir:                swarmDir,
 		Config:                  cfgResult.Config,
 		DataSource:              opts.dataSource,
@@ -208,10 +208,10 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	return returnDoctorPreflightResult(cmd, report.finalize(), opts.asJSON)
 }
 
-func appendDoctorInstalledReadback(report *LocalPreflightReport, platformSpecPath string, base *packartifact.PlatformPackInventory, schemaInventory bool) bool {
+func appendDoctorInstalledReadback(report *LocalPreflightReport, base *packartifact.PlatformPackInventory, schemaInventory bool) bool {
 	findingStart := len(report.Findings)
 	if schemaInventory {
-		inventory, err := buildDoctorSchemaInventory(platformSpecPath)
+		inventory, err := buildDoctorSchemaInventory()
 		if err != nil {
 			report.add(localPreflightBackendPrerequisite, "schema_inventory_unavailable", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the platform store schema")
 			return false
@@ -223,7 +223,7 @@ func appendDoctorInstalledReadback(report *LocalPreflightReport, platformSpecPat
 		report.add(localPreflightProviderPackPrerequisite, "platform_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the platform pack inventory")
 		return false
 	}
-	if err := appendDoctorPackInventoryReadback(report, platformSpecPath, inventory); err != nil {
+	if err := appendDoctorPackInventoryReadback(report, inventory); err != nil {
 		report.add(localPreflightProviderPackPrerequisite, "platform_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the platform pack inventory or platform spec")
 		return false
 	}
@@ -231,7 +231,11 @@ func appendDoctorInstalledReadback(report *LocalPreflightReport, platformSpecPat
 	return !readback.HasBlockers()
 }
 
-func appendDoctorPackInventoryReadback(report *LocalPreflightReport, platformSpecPath string, inventory *packartifact.EffectivePackInventory) error {
+func appendDoctorPackInventoryReadback(report *LocalPreflightReport, inventory *packartifact.EffectivePackInventory) error {
+	platformSpecPath, err := EmbeddedPlatformSpecPath()
+	if err != nil {
+		return err
+	}
 	platformSpec, err := loadChannelPlatformSpecDocument(platformSpecPath)
 	if err != nil {
 		return err

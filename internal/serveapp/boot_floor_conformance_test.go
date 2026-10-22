@@ -30,7 +30,6 @@ func TestBootFloorConformanceNativeBashHostOptOutIsLoudUnsafe(t *testing.T) {
 		SourceRoot:          writeServeRuntimeNativeBashFixture(t),
 		WorkspaceBackend:    workspace.BackendHost,
 		WorkspaceBackendSet: true,
-		PlatformSpecPath:    defaultPlatformSpecPath,
 		StoreMode:           storebackend.ActiveDefaultBackend().String(),
 		APIListenAddr:       "127.0.0.1:0",
 		MCPListenAddr:       "127.0.0.1:0",
@@ -115,8 +114,7 @@ func TestBootFloorExplicitHostRefusalIsLiveAdmissionNotStructuralValidity(t *tes
 	t.Run("serve", func(t *testing.T) {
 		var out lockedBuffer
 		code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-			ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-			StoreMode: storebackend.ActiveDefaultBackend().String(), SwarmDir: t.TempDir(), SwarmDirSet: true,
+			ConfigPath: configPath, SourceRoot: sourceRoot, StoreMode: storebackend.ActiveDefaultBackend().String(), SwarmDir: t.TempDir(), SwarmDirSet: true,
 			APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Output: &out,
 		})
 		if code == 0 {

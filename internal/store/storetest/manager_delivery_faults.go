@@ -9,8 +9,8 @@ import (
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
 
-func MakeManagerRetryEligible(ctx context.Context, selected any, event events.Event, route events.DeliveryRoute) error {
-	return private.MakeManagerRetryEligibleForTest(ctx, selected, event, route)
+func WaitManagerRetryDecision(ctx context.Context, selected any, event events.Event, route events.DeliveryRoute) error {
+	return private.WaitManagerRetryDecisionForTest(ctx, selected, event, route)
 }
 
 func AgeManagerClaimStartedAt(ctx context.Context, selected any, claim deliverylifecycle.Claim, startedAt time.Time) error {

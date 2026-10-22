@@ -14,10 +14,6 @@ type PromptSchemaGuardCase struct {
 	ForbiddenTokens  []string
 }
 
-func PromptSchemaGuards() []PromptSchemaGuardCase {
-	return nil
-}
-
 func DerivePromptSchemaGuards(bundle *WorkflowContractBundle) []PromptSchemaGuardCase {
 	if bundle == nil {
 		return nil

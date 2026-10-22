@@ -75,7 +75,7 @@ func TestServePostgresGracefulContract(t *testing.T) {
 			})
 			serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 				ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-				PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true,
+				StoreMode: "postgres", StoreModeSet: true,
 				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", ShutdownGrace: 5 * time.Second, SelfCheck: true, Verbose: true,
 			})
 			serve.waitForReadyLine()

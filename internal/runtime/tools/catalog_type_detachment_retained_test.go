@@ -97,7 +97,7 @@ func TestCatalogTypeDetachmentRetainedArtifactBothStores(t *testing.T) {
 							t.Fatal(err)
 						}
 						event, _ := compiled.StructuralType()
-						data, err := json.Marshal([]any{shape, event, rebuilt.RootEntityContracts(), compiled.CanonicalAcceptanceSchema(), compiled.AcceptanceSchemaDigest(), compiled.Source(), rebuilt.EffectiveProvenance().Entries()})
+						data, err := json.Marshal([]any{shape, event, rebuilt.RootEntityContracts(), compiled.CanonicalAcceptanceSchema(), compiled.AcceptanceSchemaDigest(), compiled.Source()})
 						if err != nil {
 							t.Fatal(err)
 						}

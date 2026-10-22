@@ -41,10 +41,11 @@ func TestS1BudgetTargetsKeepEachRunsExactRootBothStores(t *testing.T) {
 				request := rootedRunCreationRequest(source)
 				bound := runtimecorrelation.WithRootAdmission(ctx, source.Admission())
 				entityID := uuid.NewString()
+				initial := "Ready"
 				if _, err := selected.SetupScenarioEntities(bound, pipeline.ScenarioSetupRequest{
 					RunID: request.RunID, CreatedAt: request.StartedAt,
 					Entities: []pipeline.ScenarioSetupEntityRequest{{
-						Alias: "subject", EntityID: entityID, FlowInstance: "global", EntityType: "budget_entity", CurrentState: "Ready",
+						Alias: "subject", EntityID: entityID, FlowInstance: "global", EntityType: "budget_entity", CurrentState: &initial,
 					}},
 				}); err != nil {
 					t.Fatal(err)

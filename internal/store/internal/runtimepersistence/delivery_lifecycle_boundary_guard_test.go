@@ -6,12 +6,16 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	privatedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 )
 
 var executableDeliverySQL = regexp.MustCompile(`(?is)\b(?:from|join|into|update|delete\s+from|on)\s+(?:event_deliveries|event_delivery_attempts)\b`)
@@ -33,6 +37,22 @@ var executableDeliverySQLOwners = map[string]string{
 }
 
 func TestRetiredGenericDeliveryReadersHaveNoProductionConsumers(t *testing.T) {
+	fact := reflect.TypeFor[privatedelivery.RunOperationalFact]()
+	want := map[string]reflect.Type{
+		"DeliveryID": reflect.TypeFor[string](), "EventID": reflect.TypeFor[string](), "RunID": reflect.TypeFor[string](), "SubscriberID": reflect.TypeFor[string](),
+		"RouteIdentity": reflect.TypeFor[string](), "FlowInstance": reflect.TypeFor[string](), "ReasonCode": reflect.TypeFor[string](),
+		"AgentIdentity": reflect.TypeFor[agentidentity.Identity](), "SubscriberClass": reflect.TypeFor[deliverylifecycle.SubscriberClass](),
+		"Status": reflect.TypeFor[deliverylifecycle.Status](), "KnownCompletionAttempts": reflect.TypeFor[map[string]bool](),
+	}
+	if fact.NumField() != len(want) || fact.NumMethod() != 0 {
+		t.Fatal("operational delivery evidence regained generic snapshot or executable custody")
+	}
+	for i := 0; i < fact.NumField(); i++ {
+		field := fact.Field(i)
+		if field.Type != want[field.Name] {
+			t.Fatalf("operational delivery evidence exposes an unreviewed field: %s %s", field.Name, field.Type)
+		}
+	}
 	repoRoot := eventBoundaryRepositoryRoot(t)
 	retired := []string{"SnapshotsForRun", "SnapshotsForAgent", "EligibleAgentSnapshots"}
 	for _, rootName := range []string{"internal", "cmd"} {

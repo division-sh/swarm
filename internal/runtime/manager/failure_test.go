@@ -280,6 +280,31 @@ func ProveNativeRunningManagerInterventionSettlementFailureShutsDownAndRecoversC
 				t.Fatal("intervention settlement manager is not running")
 			}
 			inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("intervention-settlement-"+tt.name), events.EventType("test.intervention.settlement"), "test", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+			defer func() {
+				if !t.Failed() {
+					return
+				}
+				readCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				deliveryID, identityErr := runtimedelivery.DeliveryID(inbound.ID(), managerAgentDeliveryRouteForRun(inbound.RunID(), agent.ID()))
+				t.Logf("intervention settlement diagnostic: handler_calls=%d settlement_attempts=%d canceled_at_attempt=%t manager_canceled=%t identity_error=%T",
+					calls.Load(), deliveryStore.attempts.Load(), deliveryStore.canceledAtAttempt.Load(), managerRunCtx.Err() != nil, identityErr)
+				if identityErr != nil {
+					return
+				}
+				snapshot, readErr := baseStore.Snapshot(readCtx, deliveryID)
+				t.Logf("intervention claim: read_error=%T read_canceled=%t read_deadline=%t delivery_equal=%t event_equal=%t run_equal=%t status=%q claim_version=%d claim_expires=%s failure_present=%t",
+					readErr, errors.Is(readErr, context.Canceled), errors.Is(readErr, context.DeadlineExceeded), snapshot.DeliveryID == deliveryID, snapshot.EventID == inbound.ID(), snapshot.RunID == inbound.RunID(), snapshot.Status, snapshot.ClaimVersion, snapshot.ClaimExpiresAt.UTC().Format(time.RFC3339Nano), snapshot.Failure != nil)
+				outcomes, outcomeErr := baseStore.Outcomes(readCtx, deliveryID)
+				t.Logf("intervention outcomes: read_error=%T count=%d", outcomeErr, len(outcomes))
+				for i, outcome := range outcomes {
+					if i == 3 {
+						break
+					}
+					t.Logf("intervention outcome[%d]: delivery_equal=%t claim_version=%d outcome=%q reason=%q settled=%t failure_present=%t side_effects=%d",
+						i, outcome.DeliveryID == deliveryID, outcome.ClaimVersion, outcome.Outcome, outcome.ReasonCode, !outcome.SettledAt.IsZero(), outcome.Failure != nil, len(outcome.SideEffects))
+				}
+			}()
 			nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{inbound})
 			if err := eventBus.Publish(nativeDelivery.Context, inbound); err != nil {
 				t.Fatalf("publish intervention settlement event: %v", err)

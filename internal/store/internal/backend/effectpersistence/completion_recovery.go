@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -285,12 +286,19 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 				settlement = completionProviderHeadUncertainty(settlement, fmt.Errorf("recovered completion session grant is no longer current"))
 			}
 		}
+		turnCtx := ctx
+		if !prelaunch && settlement.AgentTurn != nil {
+			turnCtx, err = completionRecoveryTurnContext(ctx, tx, recovered, attempt, settlement, postgres)
+			if err != nil {
+				return runtimeeffects.RecoverySummary{}, err
+			}
+		}
 		if postgres {
 			if !prelaunch {
 				if err := insertCompletionTargetPostgres(ctx, tx, postgresLLM, mutation, attempt, settlement, projectCurrent); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
-				if err := postgresLLM.RecordCompletionTurnAuthorActivityTx(ctx, mutation, attempt, settlement); err != nil {
+				if err := postgresLLM.RecordCompletionTurnAuthorActivityTx(turnCtx, mutation, attempt, settlement); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
 				if _, err := insertCompletionSpendPostgres(ctx, tx, attempt, settlement); err != nil {
@@ -309,7 +317,7 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 				if err := insertCompletionTargetSQLite(ctx, tx, sqliteLLM, mutation, attempt, settlement, projectCurrent); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
-				if err := sqliteLLM.RecordCompletionTurnAuthorActivityTx(ctx, mutation, attempt, settlement); err != nil {
+				if err := sqliteLLM.RecordCompletionTurnAuthorActivityTx(turnCtx, mutation, attempt, settlement); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
 				if _, err := insertCompletionSpendSQLite(ctx, tx, attempt, settlement); err != nil {
@@ -342,6 +350,36 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 		}
 	}
 	return summary, nil
+}
+
+func completionRecoveryTurnContext(ctx context.Context, tx *sql.Tx, recovered completionRecoveryAttempt, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, postgres bool) (context.Context, error) {
+	if settlement.AgentTurn == nil {
+		return ctx, nil
+	}
+	source, err := loadExternalEffectStorySource(ctx, tx, recovered.AttemptID, postgres)
+	if err != nil {
+		return nil, err
+	}
+	frame, err := agentframe.DecodeDurable(recovered.AgentFrame)
+	if err != nil {
+		return nil, fmt.Errorf("completion recovery scope frame: %w", err)
+	}
+	turn := settlement.AgentTurn
+	if source.AttemptID != attempt.AttemptID || source.Kind != string(runtimeeffects.KindProviderTurn) ||
+		source.AuthorityKind != string(attempt.Authority.Kind) || source.AuthorityID != attempt.Authority.ID ||
+		source.AgentID != attempt.Authority.Normal.AgentID || source.ExecutionMode != string(attempt.Authority.ExecutionMode) ||
+		source.BundleHash != frame.Session.SourceArtifact.Hash ||
+		turn.TurnID != attempt.Authority.Target.ID || turn.RunID != frame.Turn.Event.RunID ||
+		turn.TriggerEventID != frame.Turn.Event.ID || turn.Identity != frame.Session.AgentIdentity {
+		return nil, fmt.Errorf("completion recovery source scope conflicts for attempt %s", recovered.AttemptID)
+	}
+	// The recovery scan may contain several bundles. Its current runtime is the
+	// occurrence owner; each immutable operation remains the bundle owner.
+	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, source.BundleHash)
+	if err != nil {
+		return nil, err
+	}
+	return runtimeauthoractivity.WithScope(ctx, scope), nil
 }
 
 func completionRecoverySettlement(recovered completionRecoveryAttempt, state runtimeeffects.State, failure *runtimefailures.Envelope, now time.Time) (runtimeeffects.Attempt, runtimeeffects.CompletionSettlement, error) {

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -172,6 +173,11 @@ func TestChannelActivationPublicationGenerationRetainsCompleteNonSecretProvenanc
 	publication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{base})
 	if err != nil {
 		t.Fatal(err)
+	}
+	contradictory := base
+	contradictory.SessionAccount = operatorchannel.SessionAccountAdmission{Provider: "whatsapp"}
+	if _, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{contradictory}); err == nil {
+		t.Fatal("webhook publication accepted native session authority")
 	}
 	declaredOnly, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication([]packs.OutboundBindingPlan{base.Plan})
 	if err != nil {
@@ -527,6 +533,44 @@ func TestToolExecutionContractHasOneAuthorityAcrossPublicConnectorAndPrivateTarg
 	}
 }
 
+func TestChannelCompilerRetainsExactConnectorDeclaration(t *testing.T) {
+	registry, channel, trigger, connector := loadTelegramChannelCompilerInputs(t)
+	plan, err := packs.CompileProviderChannel(registry, channel, trigger, connector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := packs.NewOutboundBindingPlan("ops", plan, "42", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, declaration, err := binding.ConnectorDeclaration("deliver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, found := connector.Tools[id]
+	if !found {
+		t.Fatal("declaration is absent from the admitted connector")
+	}
+	want, err := original.CanonicalHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := declaration.CanonicalHash()
+	if err != nil || got != want {
+		t.Fatal("channel compilation mutated the connector declaration", err, got, want)
+	}
+	executable, err := binding.OperationTool("deliver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, compiled := executable.CompiledResultExecution(); !compiled {
+		t.Fatal("preserving declaration evidence removed channel result execution")
+	}
+	if _, _, err := binding.ConnectorDeclaration("missing"); err == nil {
+		t.Fatal("undeclared operation acquired connector evidence")
+	}
+}
+
 func TestChannelCompilerZoneHasNoProviderSpecificRuntimeBranch(t *testing.T) {
 	body, err := os.ReadFile("channel.go")
 	if err != nil {
@@ -554,11 +598,19 @@ func loadTelegramChannelCompilerInputs(t *testing.T) (*packs.InterfaceRegistry, 
 	t.Helper()
 	registry := loadChannelInterfaceRegistry(t)
 	channels := packfixture.ChannelPacks(t)
-	if len(channels) != 1 {
-		t.Fatalf("Telegram channel packs = %#v, want one", channels)
+	var channel packartifact.AdmittedProvider
+	count := 0
+	for _, candidate := range channels {
+		if candidate.Key() == "telegram" {
+			channel = candidate
+			count++
+		}
 	}
-	trigger, connector := s1AcceptedChannelRoleDescriptors(t, channels[0])
-	return registry, channels[0], trigger, connector
+	if count != 1 {
+		t.Fatalf("exact Telegram channel count = %d, want one", count)
+	}
+	trigger, connector := s1AcceptedChannelRoleDescriptors(t, channel)
+	return registry, channel, trigger, connector
 }
 
 func loadChannelInterfaceRegistry(t *testing.T) *packs.InterfaceRegistry {

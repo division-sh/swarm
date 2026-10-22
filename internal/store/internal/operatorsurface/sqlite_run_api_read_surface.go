@@ -22,6 +22,11 @@ func (s *RunSQLite) requireRunHeaderAccess() error {
 }
 
 func (s *RunSQLite) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {
+	var root sourceartifact.RootAdmissionReference
+	return s.loadRunHeader(ctx, runID, &root)
+}
+
+func (s *RunSQLite) loadRunHeader(ctx context.Context, runID string, root *sourceartifact.RootAdmissionReference) (operatorread.RunHeader, error) {
 	if err := s.requireRunHeaderAccess(); err != nil {
 		return operatorread.RunHeader{}, err
 	}
@@ -35,7 +40,7 @@ func (s *RunSQLite) LoadRunHeader(ctx context.Context, runID string) (operatorre
 	row := s.backend.QueryRowContext(ctx, sqliteRunHeaderSelectSQL()+`
 WHERE r.run_id = ?
 `, runID)
-	header, err := scanSQLiteRunHeader(row)
+	header, err := scanSQLiteRunHeaderWithRoot(row, root)
 	if errors.Is(err, sql.ErrNoRows) {
 		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
@@ -114,12 +119,33 @@ LIMIT ?
 }
 
 func (s *RunSQLite) LoadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
+	if s == nil || s.backend == nil {
+		return operatorread.RunDebugReport{}, fmt.Errorf("sqlite store is required")
+	}
+	var report operatorread.RunDebugReport
+	err := s.backend.InspectSnapshot(ctx, func(snapshot context.Context) (err error) {
+		report, err = s.loadRunDebugReport(snapshot, runID, opts)
+		return err
+	})
+	if err != nil {
+		return operatorread.RunDebugReport{}, err
+	}
+	return report, nil
+}
+
+func (s *RunSQLite) loadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
 	opts = defaultRunDebugQueryOptions(opts)
-	header, err := s.LoadRunHeader(ctx, runID)
+	var root sourceartifact.RootAdmissionReference
+	header, err := s.loadRunHeader(ctx, runID, &root)
+	if err != nil {
+		return operatorread.RunDebugReport{}, err
+	}
+	header.ClockSchedules, err = s.LoadRunClockSchedules(ctx, runID)
 	if err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
 	report := operatorread.RunDebugReport{
+		Header:         header,
 		RunID:          header.RunID,
 		RunTableStatus: header.Status,
 		Failure:        runtimefailures.CloneEnvelope(header.Failure),
@@ -182,6 +208,10 @@ func (s *RunSQLite) LoadRunDebugReport(ctx context.Context, runID string, opts o
 	report.TestQuiescence.FanOutUnsettled = report.FanOut.Unsettled
 	report.TestQuiescence.FanOutBarriers = report.FanOut.BarrierArmed + report.FanOut.BarrierPending
 	report.TestQuiescence.Ready = runTestQuiescenceReady(report.TestQuiescence)
+	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorSQLiteDelivery, s.sources, s.sourceMemo, s.pipeline, s.timers, header, root, report.TestQuiescence, s.now())
+	if err != nil {
+		return operatorread.RunDebugReport{}, err
+	}
 	return report, nil
 }
 
@@ -300,6 +330,11 @@ FROM runs r
 }
 
 func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
+	var root sourceartifact.RootAdmissionReference
+	return scanSQLiteRunHeaderWithRoot(row, &root)
+}
+
+func scanSQLiteRunHeaderWithRoot(row runHeaderScanner, reference *sourceartifact.RootAdmissionReference) (operatorread.RunHeader, error) {
 	var header operatorread.RunHeader
 	var startedRaw, endedRaw any
 	var failureRaw any
@@ -368,6 +403,7 @@ func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 		return operatorread.RunHeader{}, err
 	}
 	header.BundleHash = root.BundleHash
+	*reference = root
 	return header, nil
 }
 

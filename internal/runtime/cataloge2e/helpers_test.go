@@ -24,11 +24,6 @@ func repoRootFromCatalogE2E(t testing.TB) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", ".."))
 }
 
-func platformSpecPathFromCatalogE2E(t testing.TB) string {
-	t.Helper()
-	return runtimecontracts.DefaultPlatformSpecFile(repoRootFromCatalogE2E(t))
-}
-
 func catalogExpectedPath(fixtureRoot string) string {
 	return filepath.Join(fixtureRoot, "tests", "expected.yaml")
 }

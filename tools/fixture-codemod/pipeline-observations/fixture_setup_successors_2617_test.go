@@ -31,11 +31,7 @@ import (
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
 
-type fixtureSetupSuccessor2617 struct {
-	Original  recipe
-	Candidate string
-	Edits     []reviewedSuccessorEdit
-}
+const fixtureSetupSuccessorPacketSHA256 = "4fab3ee53d02626879682865f47b64d402442f4cdf08a0cf0873a1e805e50548"
 
 // These settled fixture receipts compose with, but do not replace, the earlier
 // historical transformation and current-endpoint packets.
@@ -52,14 +48,14 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "501485801119fc04c640401945b123bff6fd2644afad7e48ad7b85d548a36528" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != fixtureSetupSuccessorPacketSHA256 {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 39 {
+	if len(pins) != 40 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -166,7 +162,7 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "501485801119fc04c640401945b123bff6fd2644afad7e48ad7b85d548a36528" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != fixtureSetupSuccessorPacketSHA256 {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -177,7 +173,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 39 {
+	if len(pins) != 40 {
 		t.Fatal("fixture successor row count changed")
 	}
 	for index, pin := range pins {
@@ -198,13 +194,29 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 			if err != nil {
 				t.Fatal(err)
 			}
+			historical, _, err := embeddedSpecHistoricalPair1801(row, actual)
+			if err != nil {
+				t.Fatal(err)
+			}
+			currentSource, err := q10FixtureSetupCurrentSource(historical)
+			if err != nil {
+				t.Fatal(err)
+			}
+			expectedCurrent, err := canonicalFunction(currentSource)
+			if err != nil {
+				t.Fatal(err)
+			}
 			valid := func(candidate recipe, source string) bool {
+				candidate, source, err := embeddedSpecHistoricalPair1801(candidate, source)
+				if err != nil {
+					return false
+				}
 				history := candidate
 				history.Successor = pin.Original.Successor
 				current, sourceErr := canonicalFunction(source)
 				endpoint, endpointErr := canonicalFunction(candidate.Successor)
 				return reflect.DeepEqual(history, pin.Original) && sourceErr == nil && endpointErr == nil &&
-					current == expected && endpoint == expected
+					current == expectedCurrent && endpoint == expected
 			}
 			if !valid(row, actual) {
 				t.Fatal("current fixture source/Successor differs from exact settled endpoint")
@@ -219,8 +231,33 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 			if err != nil || wantErr != nil || gotErr != nil || want != got {
 				t.Fatalf("fixture setup reversal failed: %v", err)
 			}
-			if files, changes, err := prepareFiles("../../..", []recipe{row}); err != nil || len(files) != 0 || len(changes) != 0 {
+			if err := validateRecipeSnapshots(row); err != nil {
+				t.Fatal(err)
+			}
+			liveSource := currentSource
+			if !reflect.DeepEqual(historical, row) {
+				liveSource, err = embeddedSpecFieldDeletion1801(currentSource)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if valid(row, currentSource) || valid(historical, actual) {
+					t.Fatal("partial embedded-spec fixture stage admitted as the complete live pair")
+				}
+			}
+			currentGuard := recipe{Family: row.Family, File: row.File, Function: row.Function, Before: liveSource, After: liveSource}
+			if files, changes, err := prepareFiles("../../..", []recipe{currentGuard}); err != nil || len(files) != 0 || len(changes) != 0 {
 				t.Fatalf("current fixture endpoint is not inert: %v", err)
+			}
+			if expectedCurrent != expected {
+				if valid(row, latest.Candidate) {
+					t.Fatal("historical fixture source admitted as the current header-backed endpoint")
+				}
+				for _, cut := range []string{"SourceArtifactFact: sourceFact", "fi.run_id=es.run_id", "fi.entity_id=es.entity_id", "fi.instance_path=es.flow_instance", "fi.revision", "ReadWorkflowDuplicateProjectionStorage", "initialRevision != 1", "fields != initialFields", "headerRevision != initialRevision", "current.Lifecycle.State.Revision"} {
+					mutant := strings.Replace(liveSource, cut, "foreignCut", 1)
+					if mutant != liveSource && valid(row, mutant) {
+						t.Fatalf("current fixture lost exact source, read owner, identity, field or revision: %s", cut)
+					}
+				}
 			}
 			for _, field := range []string{"history", "key", "missing", "body"} {
 				mutant := row

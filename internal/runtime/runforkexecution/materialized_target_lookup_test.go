@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -64,7 +63,7 @@ func proveMaterializedTargetLookup(t *testing.T, selected materializedTargetTest
 		rootPath = canonicalrouting.CopyNestedKeyedConnectionSelection(t)
 	}
 	repo := runForkExecutionRepoRoot(t)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: rootPath, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: rootPath}
 	loaded, err := loader.LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err != nil {
 		t.Fatal(err)

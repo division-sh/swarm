@@ -229,16 +229,12 @@ func TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStore
 			if states != 1 || publications != 0 || failed != 1 {
 				t.Fatalf("terminal planning states=%d publications=%d refused=%d; %s", states, publications, failed, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
 			}
-			var entityID, stage, fields string
-			var headerRevision, fieldRevision, mutations int
-			if err := rt.DB.QueryRow(`SELECT fi.entity_id,fi.current_state,fi.revision,CAST(es.fields AS TEXT),es.revision
-				FROM flow_instances fi JOIN entity_state es ON es.run_id=fi.run_id AND es.entity_id=fi.entity_id AND es.flow_instance=fi.instance_path
-				WHERE fi.run_id=$1 AND fi.instance_path=$2 AND fi.flow_template='.'`, seed.RunID, seed.RunID).Scan(&entityID, &stage, &headerRevision, &fields, &fieldRevision); err != nil {
-				t.Fatal(err)
-			}
+			record, instance := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, ".", seed.RunID, seed.RunID)
+			entityID, stage, fields, headerRevision := instance.EntityID, instance.CurrentState, string(record.State.Fields), instance.Revision
+			var mutations int
 			var values map[string]any
-			if err := json.Unmarshal([]byte(fields), &values); err != nil || len(values) != 0 || entityID != seed.RunID || stage != "waiting" || headerRevision != 1 || fieldRevision != 1 {
-				t.Fatalf("rejected handler changed construction: entity=%s stage=%s revisions=%d/%d fields=%s err=%v", entityID, stage, headerRevision, fieldRevision, fields, err)
+			if err := json.Unmarshal([]byte(fields), &values); err != nil || len(values) != 0 || entityID != seed.RunID || stage != "waiting" || headerRevision != 1 {
+				t.Fatalf("rejected handler changed construction: entity=%s stage=%s header revision=%d fields=%s err=%v", entityID, stage, headerRevision, fields, err)
 			}
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND domain='authored_field'`, seed.RunID).Scan(&mutations); err != nil || mutations != 0 {
 				t.Fatalf("rejected handler journaled business mutations=%d err=%v", mutations, err)

@@ -158,7 +158,7 @@ func (l *Lease) ValidateAdmission(ctx context.Context) error {
 	if !l.live() {
 		return fmt.Errorf("channel activation lease is no longer live")
 	}
-	if l.operation.Binding.BindingID() != "" {
+	if l.operation.Binding.BindingID() != "" && (l.operation.Binding.Transport() != packs.ChannelTransportSession || l.snapshot.admit == nil) {
 		if err := l.operation.Binding.RequireExecutableProvider(); err != nil {
 			return err
 		}
@@ -234,6 +234,9 @@ type Owner struct {
 }
 
 func NewOwner(publication channelonboarding.ChannelActivationPublication) (*Owner, error) {
+	if err := requireNativePublicationAdmission(publication, nil); err != nil {
+		return nil, err
+	}
 	owner := &Owner{accepting: true}
 	owner.changed = sync.NewCond(&owner.mu)
 	next, err := compileSnapshot(publication)
@@ -267,6 +270,9 @@ func (o *Owner) replaceContext(ctx context.Context, publication channelonboardin
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if err := requireNativePublicationAdmission(publication, admit); err != nil {
+		return err
 	}
 	next, err := compileSnapshot(publication)
 	if err != nil {
@@ -335,9 +341,6 @@ func compileSnapshot(publication channelonboarding.ChannelActivationPublication)
 		tools: map[string]runtimecontracts.ToolSchemaEntry{},
 	}
 	for _, binding := range next.bindings {
-		if err := binding.RequireExecutableProvider(); err != nil {
-			return nil, err
-		}
 		tools, err := binding.RuntimeTools()
 		if err != nil {
 			return nil, fmt.Errorf("channel binding %q runtime tools: %w", binding.BindingID(), err)
@@ -351,16 +354,12 @@ func compileSnapshot(publication channelonboarding.ChannelActivationPublication)
 		for _, name := range binding.OperationNames() {
 			operation := Operation{Binding: binding, Name: name}
 			runtimeID := strings.TrimSpace(binding.RuntimeToolID(name))
-			if runtimeID == "" {
-				return nil, fmt.Errorf("channel binding %q operation %q has no runtime tool identity", binding.BindingID(), name)
+			if _, exposed := tools[runtimeID]; exposed {
+				if _, duplicate := next.runtime[runtimeID]; duplicate {
+					return nil, fmt.Errorf("duplicate channel runtime tool %q", runtimeID)
+				}
+				next.runtime[runtimeID] = operation
 			}
-			if _, duplicate := next.runtime[runtimeID]; duplicate {
-				return nil, fmt.Errorf("duplicate channel runtime tool %q", runtimeID)
-			}
-			if _, compiled := next.tools[runtimeID]; !compiled {
-				return nil, fmt.Errorf("channel binding %q operation %q runtime tool %q is absent from its compiled projection", binding.BindingID(), name, runtimeID)
-			}
-			next.runtime[runtimeID] = operation
 			activity, err := binding.RuntimeActivityTarget(name)
 			if err != nil {
 				return nil, fmt.Errorf("channel binding %q operation %q private target: %w", binding.BindingID(), name, err)
@@ -372,6 +371,17 @@ func compileSnapshot(publication channelonboarding.ChannelActivationPublication)
 		}
 	}
 	return next, nil
+}
+
+func requireNativePublicationAdmission(publication channelonboarding.ChannelActivationPublication, admit func(context.Context, channelonboarding.ChannelActivationPublication) error) error {
+	if admit == nil {
+		for _, binding := range publication.Bindings() {
+			if err := binding.RequireExecutableProvider(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // AcquirePresentation pins the complete current publication while a caller

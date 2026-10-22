@@ -408,17 +408,6 @@ func (r *postgresPipelineClaimRegistry) AcquiringForTest(eventID string) bool {
 	return ok
 }
 
-func (r *postgresPipelineClaimRegistry) AnyLeaseForTest() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, state := range r.claims {
-		if state != nil && state.postgresLease != nil {
-			return true
-		}
-	}
-	return false
-}
-
 var postgresPipelineClaimRegistries sync.Map
 
 var (
@@ -2712,12 +2701,6 @@ func writePipelineDispositionTx(ctx context.Context, tx pipelineExecer, attempt 
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	return requireOnePipelineMutation(result, err, "settle decision-route obligation")
-}
-
-func WritePipelineDispositionTx(ctx context.Context, attempt *mutationprotocol.Attempt, eventID string, purpose runtimepipelineobligation.Purpose, disposition runtimepipelineobligation.Disposition, postgres bool, now time.Time) error {
-	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return writePipelineDispositionTx(ctx, tx, attempt, eventID, purpose, disposition, postgres, now)
-	})
 }
 
 func pipelineDispositionState(ctx context.Context, tx pipelineExecer, eventID string, postgres bool) (bool, string, error) {

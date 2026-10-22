@@ -16,7 +16,6 @@ import (
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -241,7 +240,7 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 				ctx, cancel := context.WithCancel(runForkTestContext(t))
 				defer cancel()
 				repo := runForkExecutionRepoRoot(t)
-				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"), PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo)}
+				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")}
 				loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 				if err != nil {
 					t.Fatal(err)
@@ -532,7 +531,7 @@ func TestSelectedForkActivationGateRetainsDirectActivationOutcome(t *testing.T) 
 			var sources [2]LoadedSelectedContractSource
 			for i, root := range []string{targetRoot, canonicalrouting.CopyForkFanOutCarrier(t, false, false)} {
 				loaded, err := (admittedFixtureSelectedContractSourceLoader{
-					RepoRoot: repo, SourceRoot: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
+					RepoRoot: repo, SourceRoot: root,
 				}).LoadRunForkSelectedContractSource(context.Background(), binding.ContractSelection)
 				if err != nil {
 					t.Fatal(err)

@@ -72,6 +72,7 @@ func (t *cancellationBarrierTx) Rollback() error {
 }
 
 func TestTransactionCancellationRollbackOrders(t *testing.T) {
+	t.Run("native_rollback_witness", proveNativeRollbackWitness)
 	for _, read := range []bool{false, true} {
 		for _, deadline := range []bool{false, true} {
 			for _, rollbackFirst := range []bool{false, true} {
@@ -115,6 +116,11 @@ func TestTransactionCancellationRollbackOrders(t *testing.T) {
 								if err := tx.QueryRowContext(ctx, "SELECT value FROM counter").Scan(&value); err != nil {
 									return err
 								}
+								if !read {
+									if _, err := tx.ExecContext(ctx, "UPDATE counter SET value=17"); err != nil {
+										return err
+									}
+								}
 								if !deadline {
 									cancel()
 								}
@@ -122,7 +128,11 @@ func TestTransactionCancellationRollbackOrders(t *testing.T) {
 								<-control.rollbackStarted
 								if rollbackFirst {
 									unblockRollback()
-									<-control.closed
+									if read {
+										<-control.closed
+									} else {
+										<-control.rolledBack
+									}
 								}
 								close(callbackReturning)
 								if callbackError {
@@ -159,7 +169,10 @@ func TestTransactionCancellationRollbackOrders(t *testing.T) {
 						if !callbackError && errors.Is(err, sql.ErrTxDone) {
 							t.Fatalf("automatic rollback manufactured a commit failure: %v", err)
 						}
-						if rollbackFirst {
+						if before, clean := CleanCancellationBeforeCommit(err); clean != (!read && !deadline && !callbackError) || (clean && before) {
+							t.Fatalf("native rollback cancellation evidence: before=%t clean=%t read=%t deadline=%t callback_error=%t err=%v", before, clean, read, deadline, callbackError, err)
+						}
+						if rollbackFirst && read {
 							// The driver is physically closed, although database/sql has not
 							// returned from Close to decrement its pool accounting yet.
 							if control.base.closes.Load() != 1 || db.Stats().InUse != 1 {
@@ -171,7 +184,13 @@ func TestTransactionCancellationRollbackOrders(t *testing.T) {
 						defer progressCancel()
 						if err := b.RunReadTransaction(progressCtx, func(ctx context.Context, tx *sql.Tx) error {
 							var value int
-							return tx.QueryRowContext(ctx, "SELECT value FROM counter").Scan(&value)
+							if err := tx.QueryRowContext(ctx, "SELECT value FROM counter").Scan(&value); err != nil {
+								return err
+							}
+							if value != 0 {
+								return fmt.Errorf("cancelled transaction leaked its write: %d", value)
+							}
+							return nil
 						}); err != nil {
 							t.Fatal(err)
 						}
@@ -181,7 +200,13 @@ func TestTransactionCancellationRollbackOrders(t *testing.T) {
 						}); err != nil {
 							t.Fatal(err)
 						}
-						if control.base.opens.Load() != 2 || control.base.closes.Load() != 1 || db.Stats().InUse != 0 {
+						wantOpens, wantCloses := int32(2), int32(1)
+						if !read {
+							// The write owner positively joined rollback and can reuse the
+							// healthy connection; reads retain their automatic disposal arm.
+							wantOpens, wantCloses = 1, 0
+						}
+						if control.base.opens.Load() != wantOpens || control.base.closes.Load() != wantCloses || db.Stats().InUse != 0 {
 							t.Fatalf("retirement/replacement mismatch: opens=%d closes=%d stats=%+v", control.base.opens.Load(), control.base.closes.Load(), db.Stats())
 						}
 					})
@@ -192,6 +217,31 @@ func TestTransactionCancellationRollbackOrders(t *testing.T) {
 }
 
 func TestTransactionDoesNotSuppressCallbackTxDone(t *testing.T) {
+	t.Run("foreign native cancellation receipt", func(t *testing.T) {
+		b := newTransactionTestBackend(t, filepath.Join(t.TempDir(), "foreign-cancellation.db"))
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, foreign := b.RunTransactionOutcome(ctx, "cancel before native attempt", func(context.Context, *sql.Tx) error {
+			t.Fatal("cancelled callback entered")
+			return nil
+		})
+		if before, clean := CleanCancellationBeforeCommit(foreign); !before || !clean {
+			t.Fatalf("missing native before-entry control: %v", foreign)
+		}
+		for _, cancelOuter := range []bool{false, true} {
+			ctx, cancel := context.WithCancel(context.Background())
+			_, err := b.RunTransactionOutcome(ctx, "foreign callback receipt", func(context.Context, *sql.Tx) error {
+				if cancelOuter {
+					cancel()
+				}
+				return foreign
+			})
+			cancel()
+			if _, clean := CleanCancellationBeforeCommit(err); clean || !errors.Is(err, context.Canceled) {
+				t.Fatalf("callback supplied another transaction's cancellation evidence: %v", err)
+			}
+		}
+	})
 	for _, read := range []bool{false, true} {
 		for _, canceled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("read=%t/canceled=%t", read, canceled), func(t *testing.T) {

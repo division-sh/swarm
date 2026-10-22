@@ -778,6 +778,8 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	}
 	runID := goldenPublishIngress(t, process.rpc, bundleHash, options.candidateIDs)
 	var preRestartRuntimeLog *goldenRuntimeLog
+	var replayed map[string]goldenEvent
+	completionBudget := runDeadline
 	if restart {
 		log := waitForGoldenCrashCheckpoint(t, process.rpc, runID, options.candidateIDs, runDeadline)
 		preRestartRuntimeLog = &log
@@ -785,9 +787,12 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 			t.Fatalf("force-kill release serve: %v\n%s", err, process.output.String())
 		}
 		process = start()
+		recoveryStarted := time.Now()
+		replayed = replayGoldenInterruptedTurns(t, process, runID, runDeadline, binaryPath, projectRoot, env)
+		completionBudget -= time.Since(recoveryStarted)
 	}
-	waitForGoldenTerminalRun(t, process, store, runID, runDeadline)
-	firstEvidence := assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog, []string{runID})
+	waitForGoldenTerminalRun(t, process, store, runID, completionBudget)
+	firstEvidence := assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog, []string{runID}, replayed)
 	assertGoldenRunHasNoDrift(t, binaryPath, projectRoot, contractsOperand, configOperand, env, runID)
 	if options.repeatSequential {
 		secondRunID := goldenPublishIngressWithKey(t, process.rpc, bundleHash, options.candidateIDs, "golden-search-ingress-second")
@@ -796,11 +801,11 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 		}
 		waitForGoldenTerminalRun(t, process, store, secondRunID, options.runDeadline)
 		retainedRunIDs := []string{runID, secondRunID}
-		secondEvidence := assertGoldenPublicProof(t, process.rpc, secondRunID, false, options.candidateIDs, nil, retainedRunIDs)
+		secondEvidence := assertGoldenPublicProof(t, process.rpc, secondRunID, false, options.candidateIDs, nil, retainedRunIDs, nil)
 		if firstEvidence.Scout.RunID == secondEvidence.Scout.RunID {
 			t.Fatalf("singleton scouts share run identity: first=%#v second=%#v", firstEvidence.Scout, secondEvidence.Scout)
 		}
-		firstAfterSecond := assertGoldenPublicProof(t, process.rpc, runID, false, options.candidateIDs, nil, retainedRunIDs)
+		firstAfterSecond := assertGoldenPublicProof(t, process.rpc, runID, false, options.candidateIDs, nil, retainedRunIDs, replayed)
 		if !reflect.DeepEqual(firstEvidence, firstAfterSecond) {
 			t.Fatalf("second run changed first run's terminal evidence: before=%#v after=%#v", firstEvidence, firstAfterSecond)
 		}
@@ -1123,6 +1128,86 @@ func goldenActiveWork(quiescence goldenQuiescence) int {
 	return quiescence.ActiveDeliveries + quiescence.UnsettledPipelineEvents + quiescence.FanOutOwed + quiescence.DueTimers + quiescence.ActiveSessionLeases
 }
 
+type goldenRecoveryFailure struct {
+	SchemaVersion string `json:"schema_version"`
+	Class         string `json:"class"`
+	Component     string `json:"component"`
+	Operation     string `json:"operation"`
+	Detail        struct {
+		Code string `json:"code"`
+	} `json:"detail"`
+}
+
+func replayGoldenInterruptedTurns(t *testing.T, process *releaseServeProcess, runID string, deadline time.Duration, binary, project string, env []string) map[string]goldenEvent {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	defer cancel()
+	var diagnosis goldenDiagnosis
+	if err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
+		if err := process.rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis); err != nil {
+			return false, err
+		}
+		return diagnosis.TestQuiescence.Ready && goldenActiveWork(diagnosis.TestQuiescence) == 0, nil
+	}); err != nil {
+		t.Fatalf("wait for recovered turn disposition: %v; diagnosis=%#v", err, diagnosis)
+	}
+	events, err := listGoldenEvents(ctx, process.rpc, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed := map[string]goldenEvent{}
+	for _, event := range events {
+		if len(event.DeadLetters) == 0 {
+			continue
+		}
+		if len(event.DeadLetters) != 1 || len(event.Deliveries) != 1 {
+			t.Fatalf("unexpected interrupted turn history: %#v", event)
+		}
+		delivery := event.Deliveries[0]
+		var deadLetter struct {
+			DeliveryID string                `json:"delivery_id"`
+			Failure    goldenRecoveryFailure `json:"failure"`
+		}
+		if err := json.Unmarshal(event.DeadLetters[0], &deadLetter); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasSuffix(event.EventName, "/candidate.work.requested") || delivery.SubscriberType != "agent" ||
+			delivery.SubscriberID != "candidate-worker" || delivery.Status != "dead_letter" || !delivery.Terminal ||
+			delivery.ReasonCode != "effect_recovery_outcome_unconfirmed" || deadLetter.DeliveryID != delivery.DeliveryID ||
+			deadLetter.Failure.SchemaVersion != "platform.failure/v1" || deadLetter.Failure.Class != "platform.outcome_uncertain" ||
+			deadLetter.Failure.Component != "external-effects" || deadLetter.Failure.Operation != "startup_reconcile" ||
+			deadLetter.Failure.Detail.Code != "effect_recovery_outcome_unconfirmed" {
+			t.Fatalf("interrupted turn did not retain the ruled recovery failure: %#v / %#v", event, deadLetter)
+		}
+		limit, _ := ctx.Deadline()
+		remaining := time.Until(limit)
+		if remaining <= 0 {
+			t.Fatal("operator replay exhausted the original completion deadline")
+		}
+		result := runReleaseCommand(t, min(goldenStartupTimeout, remaining), project, env, "", binary,
+			"event", "replay", event.EventID, "--subscriber", delivery.SubscriberID,
+			"--config", "swarm.yaml", "--api-server", process.apiBase, "--api-token-file", "api-token")
+		if result.err != nil {
+			t.Fatalf("operator replay of interrupted turn: %v\n%s", result.err, result.output)
+		}
+		var replayID string
+		for _, field := range strings.Fields(result.output) {
+			if id, ok := strings.CutPrefix(field, "replay_event_id="); ok {
+				replayID = id
+			}
+		}
+		if replayID == "" || replayID == event.EventID || replayed[replayID].EventID != "" {
+			t.Fatalf("operator replay did not create a unique event: %s", result.output)
+		}
+		replayed[replayID] = event
+	}
+	if len(replayed) != len(diagnosis.FailedDeliveries) || (len(replayed) > 0 && diagnosis.Run.Status != "running") {
+		t.Fatalf("recovery diagnosis differs from the replayed dead letters: %#v / %#v", diagnosis, replayed)
+	}
+	t.Logf("forced-kill recovery: %d interrupted turns dead-lettered and explicitly replayed", len(replayed))
+	return replayed
+}
+
 func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, store goldenStoreSelection, runID string, deadline time.Duration) {
 	t.Helper()
 	rpc := process.rpc
@@ -1352,7 +1437,7 @@ type goldenConversation struct {
 	Status        string `json:"status"`
 }
 
-func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, restarted bool, candidateIDs []string, preRestartRuntimeLog *goldenRuntimeLog, retainedRunIDs []string) goldenTerminalRunEvidence {
+func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, restarted bool, candidateIDs []string, preRestartRuntimeLog *goldenRuntimeLog, retainedRunIDs []string, replayed map[string]goldenEvent) goldenTerminalRunEvidence {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -1360,8 +1445,8 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 	if err := rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis); err != nil {
 		t.Fatal(err)
 	}
-	if diagnosis.Run.RunID != runID || diagnosis.Run.Status != "completed" || !diagnosis.TestQuiescence.Ready || goldenActiveWork(diagnosis.TestQuiescence) != 0 || len(diagnosis.FailedDeliveries) != 0 {
-		t.Fatalf("run.diagnose = %#v, want completed, quiescent, and failure-free (restarted=%t)", diagnosis, restarted)
+	if diagnosis.Run.RunID != runID || diagnosis.Run.Status != "completed" || !diagnosis.TestQuiescence.Ready || goldenActiveWork(diagnosis.TestQuiescence) != 0 || len(diagnosis.FailedDeliveries) != len(replayed) {
+		t.Fatalf("run.diagnose = %#v, want completed, quiescent, and exactly %d retained recovery failures (restarted=%t)", diagnosis, len(replayed), restarted)
 	}
 	if restarted {
 		assertGoldenRestartedRuntimeLog(t, ctx, rpc, runID, preRestartRuntimeLog)
@@ -1370,13 +1455,61 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 	entities := listGoldenEntities(t, ctx, rpc, runID)
 	entitySet := assertGoldenEntities(t, ctx, rpc, runID, entities, candidateIDs)
 	expectedAgents := goldenRetainedAgentExpectations(t, ctx, rpc, runID, entitySet, candidateIDs, retainedRunIDs)
+	for i := range expectedAgents {
+		for _, before := range replayed {
+			if expectedAgents[i].runID == runID && expectedAgents[i].summary.AgentID == before.Deliveries[0].SubscriberID &&
+				expectedAgents[i].summary.FlowInstance == before.Deliveries[0].Target.FlowInstance {
+				expectedAgents[i].summary.Status = "failed"
+			}
+		}
+	}
 	waitForGoldenRetainedIdleAgents(t, ctx, rpc, expectedAgents)
 
 	events, err := listGoldenEvents(ctx, rpc, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenTurns(t, ctx, rpc, runID, events, entitySet, candidateIDs)
+	if len(replayed) > 0 {
+		var successful []goldenEvent
+		originals, audits, replacements := 0, 0, 0
+		for _, event := range events {
+			original := false
+			for replayID, before := range replayed {
+				if event.EventID == before.EventID {
+					if !reflect.DeepEqual(event, before) {
+						t.Fatalf("operator replay changed original dead-letter history: before=%#v after=%#v", before, event)
+					}
+					originals++
+					original = true
+				}
+				if event.EventID == replayID {
+					if event.SourceEventID != before.EventID || event.RunID != before.RunID || event.EventName != before.EventName ||
+						!reflect.DeepEqual(event.Payload, before.Payload) || len(event.Deliveries) != 1 ||
+						event.Deliveries[0].SubscriberID != before.Deliveries[0].SubscriberID || event.Deliveries[0].Target != before.Deliveries[0].Target {
+						t.Fatalf("operator replay lost the exact source event or recipient: %#v / %#v", before, event)
+					}
+					replacements++
+				}
+			}
+			if original {
+				continue
+			}
+			if event.EventName == "event.replayed" {
+				replayID, _ := event.Payload["replay_event_id"].(string)
+				if before, ok := replayed[replayID]; !ok || event.Payload["original_event_id"] != before.EventID || event.Payload["audit_event_id"] != event.EventID {
+					t.Fatalf("unmatched operator replay audit: %#v", event)
+				}
+				audits++
+				continue
+			}
+			successful = append(successful, event)
+		}
+		if originals != len(replayed) || audits != len(replayed) || replacements != len(replayed) {
+			t.Fatalf("replay history counts originals=%d audits=%d replacements=%d, want %d each", originals, audits, replacements, len(replayed))
+		}
+		events = successful
+	}
+	assertGoldenTurns(t, ctx, rpc, runID, events, entitySet, candidateIDs, replayed)
 	expectedCounts := map[string]int{
 		"search.requested":           1,
 		"scout.requested":            1,
@@ -1703,11 +1836,12 @@ func waitForGoldenRetainedIdleAgents(t *testing.T, ctx context.Context, rpc *rel
 	}
 }
 
-func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string, events []goldenEvent, entities goldenEntitySet, candidateIDs []string) {
+func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string, events []goldenEvent, entities goldenEntitySet, candidateIDs []string, replayed map[string]goldenEvent) {
 	t.Helper()
 	type turnExpectation struct {
-		agentID   string
-		eventName string
+		agentID     string
+		eventName   string
+		interrupted bool
 	}
 	wantByTrigger := map[string]turnExpectation{}
 	addTrigger := func(event goldenEvent, agentID string) {
@@ -1721,11 +1855,15 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 	for _, candidateID := range candidateIDs {
 		addTrigger(goldenSingleNamedEvent(t, events, entities.candidates[candidateID].FlowInstance+"/candidate.work.requested"), "candidate-worker")
 	}
+	for _, before := range replayed {
+		addTrigger(before, before.Deliveries[0].SubscriberID)
+		expectation := wantByTrigger[before.EventID]
+		expectation.interrupted = true
+		wantByTrigger[before.EventID] = expectation
+	}
 
 	conversations := listGoldenConversations(t, ctx, rpc, runID)
-	if len(conversations) != len(candidateIDs)+1 {
-		t.Fatalf("conversation.list count = %d, want one scout and %d candidate conversations: %#v", len(conversations), len(candidateIDs), conversations)
-	}
+	successfulConversations := 0
 	seenSessions := map[string]bool{}
 	seenTriggers := map[string]int{}
 	for _, conversation := range conversations {
@@ -1734,8 +1872,8 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 		}
 		seenSessions[conversation.SessionID] = true
 		turns := listGoldenTurns(t, ctx, rpc, conversation.SessionID)
-		if len(turns) != 1 || !turns[0].ParseOK || turns[0].ExecutionMode != "mock" || turns[0].Ordinal != 1 {
-			t.Errorf("conversation %s turns = %#v, want one successful mock turn", conversation.SessionID, turns)
+		if len(turns) != 1 || turns[0].ExecutionMode != "mock" || turns[0].Ordinal != 1 {
+			t.Errorf("conversation %s turns = %#v, want one exact mock turn", conversation.SessionID, turns)
 			continue
 		}
 		var exact struct {
@@ -1745,17 +1883,34 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 		if err := rpc.call(ctx, "conversation.get_turn", map[string]any{"session_id": conversation.SessionID, "turn_id": turns[0].TurnID}, &exact); err != nil {
 			t.Fatal(err)
 		}
-		if exact.Session != conversation || exact.Turn != turns[0] {
+		if exact.Session != conversation || !reflect.DeepEqual(exact.Turn, turns[0]) {
 			t.Fatalf("conversation.get_turn differs from full-session list/page: list=%+v page=%+v exact=%+v", conversation, turns, exact)
 		}
 		expectation, ok := wantByTrigger[turns[0].TriggerEventID]
 		if !ok || conversation.AgentID != expectation.agentID || turns[0].TriggerEventType != expectation.eventName {
 			t.Errorf("conversation %s turn = %#v agent=%q, want exact routed trigger %#v", conversation.SessionID, turns[0], conversation.AgentID, expectation)
 		}
+		if !expectation.interrupted {
+			successfulConversations++
+		}
+		if turns[0].ParseOK == expectation.interrupted || (turns[0].Failure != nil) != expectation.interrupted {
+			t.Errorf("conversation %s turn = %#v, want interrupted=%t", conversation.SessionID, turns[0], expectation.interrupted)
+		}
+		if expectation.interrupted && turns[0].Failure != nil &&
+			(turns[0].Failure.SchemaVersion != "platform.failure/v1" || turns[0].Failure.Class != "platform.outcome_uncertain" ||
+				turns[0].Failure.Component != "external-effects" || turns[0].Failure.Operation != "startup_reconcile" ||
+				turns[0].Failure.Detail.Code != "effect_recovery_outcome_unconfirmed") {
+			t.Errorf("interrupted conversation lost its canonical recovery failure: %#v", turns[0])
+		}
 		seenTriggers[turns[0].TriggerEventID]++
 	}
+	if successfulConversations != len(candidateIDs)+1 {
+		t.Errorf("successful conversation count = %d, want exactly one scout and %d candidate conversations", successfulConversations, len(candidateIDs))
+	}
 	for triggerID, expectation := range wantByTrigger {
-		if seenTriggers[triggerID] != 1 {
+		// The public SQLite list omits terminated stateless audits. Dead-letter
+		// history is checked separately; every visible turn still has an exact owner.
+		if seenTriggers[triggerID] > 1 || (!expectation.interrupted && seenTriggers[triggerID] != 1) {
 			t.Errorf("concrete mock agent %s trigger %s (%s) turn count = %d, want 1", expectation.agentID, triggerID, expectation.eventName, seenTriggers[triggerID])
 		}
 	}
@@ -1791,12 +1946,13 @@ func listGoldenConversations(t *testing.T, ctx context.Context, rpc *releaseRPCC
 }
 
 type goldenTurn struct {
-	TurnID           string `json:"turn_id"`
-	ExecutionMode    string `json:"execution_mode"`
-	Ordinal          int    `json:"ordinal"`
-	TriggerEventID   string `json:"trigger_event_id"`
-	TriggerEventType string `json:"trigger_event_type"`
-	ParseOK          bool   `json:"parse_ok"`
+	TurnID           string                 `json:"turn_id"`
+	ExecutionMode    string                 `json:"execution_mode"`
+	Ordinal          int                    `json:"ordinal"`
+	TriggerEventID   string                 `json:"trigger_event_id"`
+	TriggerEventType string                 `json:"trigger_event_type"`
+	ParseOK          bool                   `json:"parse_ok"`
+	Failure          *goldenRecoveryFailure `json:"failure"`
 }
 
 func listGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient, sessionID string) []goldenTurn {

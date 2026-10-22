@@ -828,14 +828,15 @@ type Settlement struct {
 }
 
 type Outcome struct {
-	DeliveryID   string
-	ClaimVersion int64
-	Outcome      string
-	ReasonCode   string
-	Failure      *runtimefailures.Envelope
-	SideEffects  []string
-	Duration     time.Duration
-	SettledAt    time.Time
+	DeliveryID      string
+	ClaimVersion    int64
+	Outcome         string
+	ReasonCode      string
+	Failure         *runtimefailures.Envelope
+	SideEffects     []string
+	Duration        time.Duration
+	SettledAt       time.Time
+	RetryEligibleAt *time.Time
 }
 
 type RunSummary struct {

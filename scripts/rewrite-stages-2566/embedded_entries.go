@@ -52,6 +52,9 @@ func goLiteralSites(name string, body []byte) ([]goLiteralSite, error) {
 }
 
 func embeddedEntryGoldens(root string, change change) ([]entryGolden, error) {
+	if err := validateFiniteAccounting(root); err != nil {
+		return nil, err
+	}
 	if change.File == "platform-spec.yaml" {
 		var entries []entryGolden
 		for _, proof := range change.Equivalence {

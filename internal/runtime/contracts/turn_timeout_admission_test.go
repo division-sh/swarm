@@ -56,7 +56,6 @@ func TestIssue2269TurnTimeoutDeclarationAdmission(t *testing.T) {
 			if effective.TurnTimeout == diskEntry.TurnTimeout || effective.EffectiveFieldSources["turn_timeout"] != AgentFieldSourceAuthored {
 				t.Fatal("effective declaration lost timeout ownership or aliases its source")
 			}
-			diskEntry.admissionProvenance, sourceEntry.admissionProvenance = nil, nil
 			if !reflect.DeepEqual(diskEntry, sourceEntry) {
 				t.Fatalf("loaders disagree: disk=%+v source=%+v", diskEntry, sourceEntry)
 			}

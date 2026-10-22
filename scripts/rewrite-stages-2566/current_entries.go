@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -20,6 +21,21 @@ type currentEntrySelector struct {
 }
 
 const deliveryEntryOwner = "internal/runtime/testfixtures/canonicalrouting/pipeline_delivery_authority.go"
+
+func readCurrentEntryGoldens(root string) ([]entryGolden, error) {
+	if err := validateFiniteAccounting(root); err != nil {
+		return nil, err
+	}
+	body, err := os.ReadFile(filepath.Join(root, "scripts/rewrite-stages-2566/entries.json"))
+	if err != nil {
+		return nil, err
+	}
+	var entries []entryGolden
+	if err := json.Unmarshal(body, &entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
 
 func validateCurrentEntrySelector(entry entryGolden) error {
 	current := entry.Current
@@ -74,6 +90,9 @@ func retainCurrentEntrySelectors(reviewed, retained []entryGolden) ([]entryGolde
 }
 
 func readEntryLiteral(root, file, function string, ordinal int) (goLiteralSite, error) {
+	if err := validateFiniteAccounting(root); err != nil {
+		return goLiteralSite{}, err
+	}
 	body, err := os.ReadFile(filepath.Join(root, file))
 	if err != nil {
 		return goLiteralSite{}, err

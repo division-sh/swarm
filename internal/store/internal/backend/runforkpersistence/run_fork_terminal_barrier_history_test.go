@@ -44,13 +44,14 @@ func terminalBarrierHistoryFixture(t *testing.T) (*runForkRevisionSnapshot, []ru
 		ExecutionMode: timer.ExecutionMode, TaskID: timer.TaskID, ProducedBy: genericschedule.OccurrenceProducerID(), ProducedByType: string(events.EventProducerPlatform),
 		Payload: timer.FirePayload, RoutingSource: barrier.Registration.RoutingSource, RouteSettlement: settlementRaw, CreatedAt: timer.FireAt}}
 	failure := failures.Normalize(failures.New(failures.ClassLifecycleConflict, "barrier_test_failure", "test", "barrier", nil), "test", "barrier")
-	delivery := deliverylifecycle.Snapshot{DeliveryID: uuid.NewString(), EventID: timer.OccurrenceEventID, RunID: snapshot.RunID,
+	delivery := deliverylifecycle.HistoricalFact{DeliveryID: uuid.NewString(), EventID: timer.OccurrenceEventID, RunID: snapshot.RunID,
 		Route: route, RouteIdentity: identity, SubscriberClass: deliverylifecycle.SubscriberNode, SubscriberID: route.Recipient.ID(),
-		Status: deliverylifecycle.StatusDeadLetter, ClaimVersion: 2, Failure: &failure, ReasonCode: "barrier_failed", CreatedAt: at, StartedAt: at, SettledAt: at, UpdatedAt: at}
+		Status: deliverylifecycle.StatusDeadLetter, SettledClaimVersion: 2, Failure: &failure, ReasonCode: "barrier_failed", CreatedAt: at, SettledAt: at,
+		SourceExecution: deliverylifecycle.SourceExecutionAtCut{Started: true}}
 	snapshot.Deliveries = []runForkRevisionDelivery{{Snapshot: delivery}}
 	failureRaw, _ := json.Marshal(failure)
 	snapshot.DeadLetters = []runForkRevisionDeadLetter{{DeadLetterID: uuid.NewString(), OriginalEventID: delivery.EventID, DeliveryID: delivery.DeliveryID,
-		HandlerNode: delivery.SubscriberID, CreatedAt: at, ClaimVersion: delivery.ClaimVersion, Outcome: "dead_letter", OutcomeReasonCode: delivery.ReasonCode,
+		HandlerNode: delivery.SubscriberID, CreatedAt: at, ClaimVersion: delivery.SettledClaimVersion, Outcome: "dead_letter", OutcomeReasonCode: delivery.ReasonCode,
 		OutcomeFailure: failureRaw, OutcomeSettledAt: &at}}
 	pending, err := loadRunForkPendingWorkFromRevision(snapshot)
 	if err != nil {
@@ -159,11 +160,11 @@ func TestTerminalBarrierHistoryRejectsContradictionsWithoutProjectionMutation(t 
 			case "delivery_status":
 				snapshot.Deliveries[0].Snapshot.Status = deliverylifecycle.StatusFailed
 			case "delivery_claim":
-				snapshot.Deliveries[0].Snapshot.ClaimVersion++
+				snapshot.Deliveries[0].Snapshot.SettledClaimVersion++
 			case "delivery_failure":
 				snapshot.Deliveries[0].Snapshot.Failure = nil
 			case "delivery_retry":
-				snapshot.Deliveries[0].Snapshot.NextEligibleAt = time.Now()
+				snapshot.Deliveries[0].Snapshot.RetryDecision = &deliverylifecycle.CommittedRetryDecision{ClaimVersion: 1, SettledAt: time.Now(), EligibleAt: time.Now().Add(time.Second)}
 			case "delivery_duplicate":
 				snapshot.Deliveries = append(snapshot.Deliveries, snapshot.Deliveries[0])
 			case "dead_letter_missing":

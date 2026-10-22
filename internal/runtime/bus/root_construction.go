@@ -11,9 +11,25 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+type rootConstructorKeyConflict struct{ key string }
+
+func (e *rootConstructorKeyConflict) Error() string {
+	return fmt.Sprintf("root input key %s contradicts its immutable constructor key", e.key)
+}
+
+// IsRootConstructorKeyConflict preserves this exact refusal through wrapping,
+// but never treats an independent joined failure as a public constructor refusal.
+func IsRootConstructorKeyConflict(err error) bool {
+	return runtimefailures.OnlyBranches(err, func(cause error) bool {
+		conflict, ok := cause.(*rootConstructorKeyConflict)
+		return ok && conflict != nil
+	})
+}
 
 // The creating root input prepares the whole keyless tree before recipient
 // classification. Publication commits that tree and its deliveries atomically.
@@ -170,7 +186,7 @@ func (p deliveryPlanner) validateRootConstructorKey(event events.Event, key, ins
 		}
 		keys, err := pipeline.AdmitFlowInstanceKeyMaterial(p.recipientPolicy.semanticSource, flowID, candidate)
 		if err != nil || len(keys) != 1 || keys[0].Value != instanceKey {
-			return fmt.Errorf("root input key %s contradicts its immutable constructor key", key)
+			return &rootConstructorKeyConflict{key: key}
 		}
 	}
 	return nil

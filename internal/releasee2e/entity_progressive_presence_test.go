@@ -102,7 +102,7 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 					"business_brief": "An assessed brief", "attempt_count": float64(1), "note_supplied": false,
 				})
 				if err := process.stopAndWait(10 * time.Second); err != nil {
-					t.Fatal(err)
+					t.Fatalf("stop after completed projection: %v\n%s", err, process.output.String())
 				}
 				assertReleaseDeploymentAdmission(t, runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
 					"verify", contracts, "--config", config, "--json"))
@@ -235,7 +235,7 @@ func waitForPresenceEntity(t *testing.T, process *releaseServeProcess, runID, st
 		if len(list.Entities) == 1 {
 			var entity struct {
 				Entity struct {
-					CurrentState string `json:"current_state"`
+					CurrentState *string `json:"current_state"`
 				} `json:"entity"`
 				Fields map[string]any `json:"fields"`
 			}
@@ -244,7 +244,7 @@ func waitForPresenceEntity(t *testing.T, process *releaseServeProcess, runID, st
 				t.Fatal(err)
 			}
 			last = entity
-			if entity.Entity.CurrentState == stage && reflect.DeepEqual(entity.Fields, fields) {
+			if entity.Entity.CurrentState != nil && *entity.Entity.CurrentState == stage && reflect.DeepEqual(entity.Fields, fields) {
 				var aggregate struct {
 					Counts map[string]int `json:"counts"`
 				}

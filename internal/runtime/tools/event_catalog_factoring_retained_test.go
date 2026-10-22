@@ -89,8 +89,8 @@ func TestEventCatalogFactoringRetainedArtifactBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !bytes.Equal(initial.SourceArtifact.LogicalBlob(), artifact.LogicalBlob()) || artifact.BundleHash() != initial.SourceArtifact.BundleHash() || !reflect.DeepEqual(initial.ScopedEventEntries(), rebuilt.ScopedEventEntries()) || !reflect.DeepEqual(initial.EffectiveProvenance().Entries(), rebuilt.EffectiveProvenance().Entries()) {
-				t.Fatal("native retained artifact changed event values, provenance or exact bytes/hash")
+			if !bytes.Equal(initial.SourceArtifact.LogicalBlob(), artifact.LogicalBlob()) || artifact.BundleHash() != initial.SourceArtifact.BundleHash() || !reflect.DeepEqual(initial.ScopedEventEntries(), rebuilt.ScopedEventEntries()) {
+				t.Fatal("native retained artifact changed event values or exact bytes/hash")
 			}
 			for _, name := range []string{"signal.ping", "task.requested"} {
 				before, ok, err := initial.ResolveCompiledFlowEventSchema(".", name)

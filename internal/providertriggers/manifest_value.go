@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -33,6 +35,13 @@ func (m Manifest) Provider() string {
 		return ""
 	}
 	return m.value.definition.Provider
+}
+
+func (m Manifest) Transport() packs.ChannelTransport {
+	if m.value == nil {
+		return ""
+	}
+	return m.value.definition.Transport
 }
 
 func (m Manifest) RequiresSecret() bool {
@@ -75,12 +84,35 @@ func (m Manifest) Accept(req Request) (Delivery, error) {
 	return m.projectAdmission(admitted)
 }
 
+// ProjectNormalizedPayload consumes the admitted pack's existing projection
+// rules, but grants no request or provider-output authorization. Session callers
+// must separately prove their original account admission before publication.
+func (m Manifest) ProjectNormalizedPayload(body []byte) ([]DeliveryEvent, error) {
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
+	if _, err := canonicaljson.Decode(body); err != nil {
+		return nil, err
+	}
+	var payload any
+	if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
+		return nil, err
+	}
+	if err := m.value.definition.validatePayloadObject(payload); err != nil {
+		return nil, err
+	}
+	return m.value.definition.normalizedDeliveryEvents(payload)
+}
+
 func (m Manifest) admitRequest(req Request) (manifestAdmission, error) {
 	if err := m.Validate(); err != nil {
 		return manifestAdmission{}, err
 	}
 	if req.Provider != "" && req.Provider != m.Provider() {
 		return manifestAdmission{}, badRequest(fmt.Sprintf("provider trigger %q does not match request provider %q; use its exact directory key", m.Provider(), req.Provider))
+	}
+	if m.Transport() != packs.ChannelTransportWebhook {
+		return manifestAdmission{}, unauthorized("session trigger requires its retained account and activation authority, not a webhook request")
 	}
 	return m.value.definition.admitRequest(req)
 }

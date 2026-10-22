@@ -28,7 +28,7 @@ func TestServeProjectContextRegistrationWritesFinalDescriptor(t *testing.T) {
 	listener := listenLoopbackTestListener(t)
 	defer listener.Close()
 	storePath := filepath.Join(t.TempDir(), "dev.db")
-	if err := reg.WriteFinal("runtime-1", listener.Addr(), defaultLoopbackAuthResolution(), CLISourcePlatformSpecPaths{SourceRoot: project.contracts}, storebackend.Selection{
+	if err := reg.WriteFinal("runtime-1", listener.Addr(), defaultLoopbackAuthResolution(), CLISourcePaths{SourceRoot: project.contracts}, storebackend.Selection{
 		Backend:    storebackend.BackendSQLite,
 		SQLitePath: storePath,
 	}, WorkspaceMountSources{}); err != nil {
@@ -163,7 +163,7 @@ func TestServeProjectContextRegistrationRequiresMatchingEpochGrant(t *testing.T)
 	opts.SwarmDir = t.TempDir()
 	opts.SwarmDirSet = true
 
-	paths := CLISourcePlatformSpecPaths{SourceRoot: project.contracts}
+	paths := CLISourcePaths{SourceRoot: project.contracts}
 	if _, err := PrepareServeProjectContextRegistration(mustInvocationRootForTest(project.root), opts, paths, devscratch.RegistrationGrant{}); err == nil || !strings.Contains(err.Error(), "registration grant is required") {
 		t.Fatalf("zero grant error = %v, want fail-closed epoch admission", err)
 	}
@@ -204,7 +204,7 @@ func TestServeProjectContextRegistrationRejectsUnsafeAuthDescriptor(t *testing.T
 		Tokens:   []string{"secret"},
 		Source:   apiv1.AuthTokenSource("explicit-without-token-file"),
 		Explicit: true,
-	}, CLISourcePlatformSpecPaths{SourceRoot: project.contracts}, storebackend.Selection{Backend: storebackend.BackendSQLite}, WorkspaceMountSources{})
+	}, CLISourcePaths{SourceRoot: project.contracts}, storebackend.Selection{Backend: storebackend.BackendSQLite}, WorkspaceMountSources{})
 	if err == nil || !strings.Contains(err.Error(), "requires token-file auth") {
 		t.Fatalf("WriteFinal err = %v, want safe-auth rejection", err)
 	}
@@ -230,7 +230,7 @@ func TestServeProjectContextRegistrationWritesTokenFileAuthDescriptor(t *testing
 		Source:    apiv1.AuthTokenSource(serveAPITokenFileFlagSource),
 		Explicit:  true,
 		TokenFile: tokenFile,
-	}, CLISourcePlatformSpecPaths{SourceRoot: project.contracts}, storebackend.Selection{Backend: storebackend.BackendSQLite}, WorkspaceMountSources{})
+	}, CLISourcePaths{SourceRoot: project.contracts}, storebackend.Selection{Backend: storebackend.BackendSQLite}, WorkspaceMountSources{})
 	if err != nil {
 		t.Fatalf("WriteFinal: %v", err)
 	}
@@ -272,7 +272,7 @@ func prepareServeProjectContextRegistrationForTest(t *testing.T, project cliAPIT
 	if err != nil {
 		t.Fatal(err)
 	}
-	return PrepareServeProjectContextRegistration(mustInvocationRootForTest(project.root), opts, CLISourcePlatformSpecPaths{SourceRoot: project.contracts}, grant)
+	return PrepareServeProjectContextRegistration(mustInvocationRootForTest(project.root), opts, CLISourcePaths{SourceRoot: project.contracts}, grant)
 }
 
 func listenLoopbackTestListener(t *testing.T) net.Listener {

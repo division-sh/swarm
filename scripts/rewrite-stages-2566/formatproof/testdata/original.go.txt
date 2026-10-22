@@ -1,0 +1,410 @@
+package canonicalrouting
+
+import (
+	"path/filepath"
+	"testing"
+)
+
+const (
+	NotifyAllChildrenOwnerFlowID       = "portfolio"
+	NotifyAllChildrenOwnerOutputPin    = "account.notify.requested"
+	NotifyAllChildrenOwnerTriggerEvent = "portfolio.notify.requested"
+	NotifyAllChildrenEvent             = "account.notify.requested"
+	NotifyAllChildrenChildFlowID       = "account"
+	NotifyAllChildrenChildInputPin     = "account.notify.requested"
+)
+
+const canonicalNotifyAllChildrenAgents = `account-worker:
+  role: account_worker
+  intent: prompts/account-worker.md
+  model: regular
+  subscriptions:
+    - account.notify.requested
+  emit_events:
+    - account.notification.completed
+  mock:
+    kind: python
+    module: mocks/account-worker.py
+`
+
+// NotifyAllChildrenOptions identifies the closed negative and topology
+// overlays derived from the checked-in notify-all-children example.
+type NotifyAllChildrenOptions struct {
+	OmitOutputPin               bool
+	OmitConnect                 bool
+	MissingEmitField            bool
+	ProducerTarget              bool
+	ProducerBroadcast           bool
+	ObjectMembership            bool
+	UndeclaredPayloadMembership bool
+	ExplicitAgentName           bool
+	AgentTopologyRevision       int
+	AutoEmitOnCreate            bool
+	AutoEmitEventRevision       int
+	FanOutDeliveryBarrier       bool
+	NumericRegistrationRows     bool
+	NumericReporterSink         bool
+	NumericInternalSettlement   bool
+	RegistrationUUIDField       bool
+}
+
+// CopyNotifyAllChildren derives one closed variant from the checked-in owner.
+func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
+	t.Helper()
+	if opts.NumericReporterSink && opts.NumericInternalSettlement {
+		t.Fatal("numeric reporter and internal-settlement sinks are mutually exclusive")
+	}
+	if opts.RegistrationUUIDField && !opts.NumericRegistrationRows {
+		t.Fatal("registration UUID field requires numeric registration rows")
+	}
+	root := t.TempDir()
+	copyTree(t, filepath.Join(RepoRoot(t), "examples", "routing", "notify-all-children"), root)
+	manifestFile := filepath.Join(root, "manifest.yaml")
+	connectFile := filepath.Join(root, "schema.yaml")
+	ownerSchema := filepath.Join(root, NotifyAllChildrenOwnerFlowID, "schema.yaml")
+	ownerNodes := filepath.Join(root, NotifyAllChildrenOwnerFlowID, "nodes.yaml")
+	ownerEntities := filepath.Join(root, NotifyAllChildrenOwnerFlowID, "entities.yaml")
+	accountAgents := filepath.Join(root, NotifyAllChildrenChildFlowID, "agents.yaml")
+	accountNodes := filepath.Join(root, NotifyAllChildrenChildFlowID, "nodes.yaml")
+	accountEntities := filepath.Join(root, NotifyAllChildrenChildFlowID, "entities.yaml")
+	accountEvents := filepath.Join(root, NotifyAllChildrenChildFlowID, "events.yaml")
+	accountSchema := filepath.Join(root, NotifyAllChildrenChildFlowID, "schema.yaml")
+	if opts.OmitConnect {
+		applyClosedReplacement(t, connectFile, `  - event: account.notify.requested
+    from: portfolio
+    to: account
+    resolution: select
+`, "")
+	}
+	if opts.OmitOutputPin {
+		applyClosedReplacement(t, ownerSchema, "    - account.notify.requested\n", "")
+	}
+	if opts.MissingEmitField {
+		applyClosedReplacement(t, ownerNodes, "            command: payload.command\n", "")
+	}
+	if opts.ProducerTarget {
+		applyClosedReplacement(t, ownerNodes, "          event: account.notify.requested\n", `          event: account.notify.requested
+          target:
+            flow: account
+            match:
+              account_id: account_id
+`)
+	}
+	if opts.ProducerBroadcast {
+		applyClosedReplacement(t, ownerNodes, "          event: account.notify.requested\n", "          event: account.notify.requested\n          broadcast: true\n")
+	}
+	if opts.ObjectMembership {
+		applyClosedReplacement(t, ownerEntities, "  account_ids: {type: \"[text]\", initial: []}\n", "  account_ids: {type: \"[AccountRef]\", initial: []}\n")
+		writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(NotifyAllChildrenOwnerFlowID, "types.yaml")), `types:
+  AccountRef:
+    account_id: text
+`)
+		applyClosedReplacement(t, ownerNodes, "            account_id: account_id\n", "            account_id: account_id.account_id\n")
+	}
+	if opts.UndeclaredPayloadMembership {
+		applyClosedReplacement(t, ownerNodes, "        items_from: entity.account_ids\n", `        items_from: payload.account_ids
+        identity: account_id
+`)
+	}
+	if opts.AutoEmitOnCreate {
+		applyClosedReplacement(t, accountEvents, "account.notification.completed:\n", `account.notification.completed:
+account.created:
+  account_id: text
+  template_instance_key: text?
+  template_instance_source_event: text?
+`)
+		applyClosedReplacement(t, accountSchema, "  completed: {final: true}\n", `  completed: {final: true}
+auto_emit_on_create:
+  event: account.created
+`)
+		applyClosedReplacement(t, accountSchema, `    - account.notify.requested
+`, `    - account.notify.requested
+  outputs:
+    - account.created
+`)
+	}
+	if opts.FanOutDeliveryBarrier {
+		applyClosedReplacement(t, ownerNodes, `            command: payload.command
+`, `            command: payload.command
+      join:
+        id: all-account-notifications-delivered
+        members:
+          from_fan_out: true
+        on_complete:
+          emit:
+            event: portfolio.notify.completed
+            fields:
+              total: join.total
+              succeeded: join.dispositions.succeeded
+              dead_lettered: join.dispositions.dead_lettered
+              no_route: join.dispositions.no_route
+              semantic_rejected: join.dispositions.semantic_rejected
+              canceled: join.dispositions.canceled
+`)
+		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.notify.requested:
+  key: account_id
+  account_id: text
+  command: text
+`, `account.notify.requested:
+  key: account_id
+  account_id: text
+  command: text
+portfolio.notify.completed:
+  total: integer
+  succeeded: integer
+  dead_lettered: integer
+  no_route: integer
+  semantic_rejected: integer
+  canceled: integer
+`)
+		applyClosedReplacement(t, ownerSchema, `    - account.notify.requested
+`, `    - account.notify.requested
+    - portfolio.notify.completed
+`)
+		applyClosedReplacement(t, ownerNodes, "              canceled: join.dispositions.canceled\n", "              canceled: join.dispositions.canceled\n    portfolio.notify.completed: {}\n")
+	}
+	if opts.NumericRegistrationRows {
+		// Keep row fields addressable under the compiled structural-type contract.
+		// gem_score is deliberately JSON so hostile values reach emitted-schema admission.
+		writeClosedVariantFile(t, root, "types.yaml", `types:
+  NumericAccount:
+    account_id: text
+    eng_roles: integer
+    gem_score: json
+    external_id: text?
+`)
+		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `portfolio.opened:
+  portfolio_id: text
+`, `portfolio.opened:
+  portfolio_id: text
+  threshold: integer
+`)
+		applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `  account_ids: "[text]"
+`, `  account_ids: "[NumericAccount]"
+`)
+		applyClosedReplacement(t, ownerEntities, `  portfolio_id: text
+`, `  portfolio_id: text
+  threshold: integer
+`)
+		applyClosedReplacement(t, ownerEntities, `  account_ids: {type: "[text]", initial: []}
+`, `  account_ids: {type: "[NumericAccount]", initial: []}
+`)
+		applyClosedReplacement(t, ownerNodes, `          - source_field: portfolio_id
+            target_field: portfolio_id
+`, `          - source_field: portfolio_id
+            target_field: portfolio_id
+          - source_field: threshold
+            target_field: threshold
+`)
+		applyClosedReplacement(t, ownerNodes, "    portfolio.accounts.register.requested:\n", "    portfolio.accounts.register.requested:\n      guard: {check: has(entity.threshold)}\n")
+		applyClosedReplacement(t, ownerNodes, `        as: account_id
+        max_items: 100
+        emit:
+          event: account.registered
+          fields:
+            account_id: account_id
+`, `        as: account
+        identity: account.account_id
+        max_items: 100
+        emit:
+          event: account.registered
+          fields:
+            portfolio_id: payload.portfolio_id
+            account_id: account.account_id
+            eng_roles: account.eng_roles
+            gem_score: account.gem_score
+            eligible: entity.threshold >= 70
+`)
+		applyClosedReplacement(t, ownerNodes, `        as: account_id
+        max_items: 100
+        emit:
+          event: account.notify.requested
+          fields:
+            account_id: account_id
+`, `        as: account
+        identity: account.account_id
+        max_items: 100
+        emit:
+          event: account.notify.requested
+          fields:
+            account_id: account.account_id
+`)
+		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
+  key: account_id
+  account_id: text
+`, `account.registered:
+  key: account_id
+  portfolio_id: text
+  account_id: text
+  eng_roles: integer
+  gem_score: number
+  eligible: boolean
+`)
+		applyClosedReplacement(t, accountNodes, `    account.registered:
+      data_accumulation:
+        writes:
+          - source_field: account_id
+            target_field: account_id
+`, `    account.registered:
+      data_accumulation:
+        writes:
+          - source_field: account_id
+            target_field: account_id
+          - source_field: eng_roles
+            target_field: eng_roles
+          - source_field: gem_score
+            target_field: gem_score
+          - source_field: eligible
+            target_field: eligible
+`)
+		applyClosedReplacement(t, accountEntities, `account_state:
+  account_id: text
+  last_command: text
+`, `account_state:
+  account_id: text
+  eng_roles: integer
+  gem_score: number
+  eligible: boolean
+  last_command: text
+`)
+		if opts.NumericReporterSink || opts.NumericInternalSettlement {
+			applyClosedReplacement(t, accountNodes, "    - account.registered\n", "")
+			applyClosedReplacement(t, accountNodes, `    account.registered:
+      data_accumulation:
+        writes:
+          - source_field: account_id
+            target_field: account_id
+          - source_field: eng_roles
+            target_field: eng_roles
+          - source_field: gem_score
+            target_field: gem_score
+          - source_field: eligible
+            target_field: eligible
+`, "")
+			applyClosedReplacement(t, accountSchema, "    - account.registered\n", "")
+		}
+		if opts.NumericReporterSink {
+			applyClosedReplacement(t, connectFile, `  - event: account.registered
+    from: portfolio
+    to: account
+    resolution: select-or-create
+`, `  - event: account.registered
+    from: portfolio
+    to: .
+`)
+			applyClosedReplacement(t, connectFile, "    - portfolio.notify.requested\n", "    - portfolio.notify.requested\n    - account.registered\n")
+			applyClosedReplacement(t, connectFile, "    - portfolio.notify.requested\nconnect:\n", "    - portfolio.notify.requested\n    - account.registered\nconnect:\n")
+			writeClosedVariantFile(t, root, "nodes.yaml", `numeric-registration-reporter:
+  execution_type: system_node
+  subscribes_to: [account.registered]
+  event_handlers:
+    account.registered: {}
+`)
+		}
+		if opts.NumericInternalSettlement {
+			applyClosedReplacement(t, connectFile, `  - event: account.registered
+    from: portfolio
+    to: account
+    resolution: select-or-create
+`, "")
+			applyClosedReplacement(t, ownerNodes, "portfolio-coordinator:\n", `numeric-registration-observer:
+  execution_type: system_node
+  subscribes_to:
+    - account.registered
+  event_handlers:
+    account.registered: {}
+portfolio-coordinator:
+`)
+		}
+		if opts.RegistrationUUIDField {
+			applyClosedReplacement(t, filepath.Join(root, "types.yaml"), "    external_id: text?\n", "    external_id: text\n")
+			applyClosedReplacement(t, ownerNodes, `            gem_score: account.gem_score
+            eligible: entity.threshold >= 70
+`, `            gem_score: account.gem_score
+            external_id: account.external_id
+            eligible: entity.threshold >= 70
+`)
+			applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `  gem_score: number
+  eligible: boolean
+`, `  gem_score: number
+  external_id: uuid
+  eligible: boolean
+`)
+		}
+	}
+	if opts.AutoEmitEventRevision == 2 {
+		applyClosedReplacement(t, accountEvents, "account.created", "account.revised")
+		applyClosedReplacement(t, accountSchema, "account.created", "account.revised")
+		applyClosedReplacement(t, accountSchema, "account.created", "account.revised")
+	} else if opts.AutoEmitEventRevision != 0 && opts.AutoEmitEventRevision != 1 {
+		t.Fatalf("unsupported auto-emit event revision %d", opts.AutoEmitEventRevision)
+	}
+	switch opts.AgentTopologyRevision {
+	case 0:
+	case 1:
+		applyClosedReplacement(t, accountAgents, canonicalNotifyAllChildrenAgents, `reader:
+  id: account-reader
+  role: reader-v1
+  intent: {inline: "Read account registration events."}
+  model: regular
+  subscriptions:
+    - account.registered
+retired:
+  id: account-retired
+  role: retired
+  intent: {inline: "Handle account notification requests."}
+  model: regular
+  subscriptions:
+    - account.notify.requested
+`)
+	case 2:
+		applyClosedReplacement(t, manifestFile, `version: "1.0.0"`, `version: "2.0.0"`)
+		applyClosedReplacement(t, accountAgents, canonicalNotifyAllChildrenAgents, `reader:
+  id: account-reader
+  role: reader-v2
+  intent: {inline: "Read account registration and notification events."}
+  model: regular
+  subscriptions:
+    - account.registered
+    - account.notify.requested
+writer:
+  id: account-writer
+  role: writer
+  intent: {inline: "Write account notification results."}
+  model: regular
+  subscriptions:
+    - account.notify.requested
+`)
+	case 3:
+		applyClosedReplacement(t, manifestFile, `version: "1.0.0"`, `version: "3.0.0"`)
+		applyClosedReplacement(t, accountAgents, canonicalNotifyAllChildrenAgents, `reader:
+  id: account-reader
+  role: reader-v3
+  intent: {inline: "Read account registration and notification events."}
+  model: regular
+  subscriptions:
+    - account.registered
+    - account.notify.requested
+writer:
+  id: account-writer
+  role: writer
+  intent: {inline: "Write account notification results."}
+  model: regular
+  subscriptions:
+    - account.notify.requested
+retired:
+  id: account-retired
+  role: returned
+  intent: {inline: "Handle account notification requests."}
+  model: regular
+  subscriptions:
+    - account.notify.requested
+`)
+	default:
+		t.Fatalf("unsupported agent topology revision %d", opts.AgentTopologyRevision)
+	}
+	if opts.ExplicitAgentName {
+		applyClosedReplacement(t, accountAgents, "account-worker:\n", "account-worker:\n  id: account-handler\n")
+	}
+	return root
+}

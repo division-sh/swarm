@@ -19,22 +19,10 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			db := bootstrappedForkPointSchemaDB(t, backend)
 			ctx := context.Background()
-			sourceRunID := uuid.NewString()
-			source, _ := sourceartifactfixture.Rooted(t, "fork-schema", sourceartifactfixture.Artifact())
-			bundleHash, directory := source.Admission().BundleHash(), source.Admission().RootDirectory()
-			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,bundle_hash,origin_kind,source_root_directory) VALUES ($1,$2,'scenario_setup',$3)`, sourceRunID, bundleHash, directory); err != nil {
-				t.Fatalf("create source run: %v", err)
-			}
-			eventID := uuid.NewString()
-			if _, err := db.ExecContext(ctx, `INSERT INTO events
-				(event_class,event_id,run_id,event_name,scope,payload,payload_bytes,payload_schema_bundle_hash,
-				 payload_schema_event_key,payload_schema_digest,payload_schema_class,execution_mode,chain_depth,
-				 produced_by,produced_by_type,created_at,routing_source_kind,routing_source_authority,
-				 source_route,target_route,target_set,route_settlement)
-				VALUES ('root_ingress',$1,$2,'test.received','global','{}',$3,$4,'test.received',$5,
-				'schema_less','live',0,'external','external',CURRENT_TIMESTAMP,'external_ingress','test',
-				'{"flow_path":"."}','{}','[]','{}')`, eventID, sourceRunID, []byte("{}"), bundleHash, "sha256:"+strings.Repeat("b", 64)); err != nil {
-				t.Fatalf("create source event: %v", err)
+			sourceRunID, eventID, bundleHash := seedForkPointSchemaRunAndEvent(t, db)
+			var directory string
+			if err := db.QueryRowContext(ctx, `SELECT source_root_directory FROM runs WHERE run_id=$1`, sourceRunID).Scan(&directory); err != nil {
+				t.Fatal(err)
 			}
 			insertForkRun := func(kind string, revision int64, eventID any) (string, error) {
 				t.Helper()
@@ -222,6 +210,31 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Schema constraints share this existing physical prerequisite fixture; adding
+// a new matrix must not create a second run/event constructor.
+func seedForkPointSchemaRunAndEvent(t *testing.T, db *sql.DB) (sourceRunID, eventID, bundleHash string) {
+	t.Helper()
+	ctx := context.Background()
+	sourceRunID = uuid.NewString()
+	source, _ := sourceartifactfixture.Rooted(t, "fork-schema", sourceartifactfixture.Artifact())
+	bundleHash = source.Admission().BundleHash()
+	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,bundle_hash,origin_kind,source_root_directory) VALUES ($1,$2,'scenario_setup',$3)`, sourceRunID, bundleHash, source.Admission().RootDirectory()); err != nil {
+		t.Fatalf("create source run: %v", err)
+	}
+	eventID = uuid.NewString()
+	if _, err := db.ExecContext(ctx, `INSERT INTO events
+		(event_class,event_id,run_id,event_name,scope,payload,payload_bytes,payload_schema_bundle_hash,
+		 payload_schema_event_key,payload_schema_digest,payload_schema_class,execution_mode,chain_depth,
+		 produced_by,produced_by_type,created_at,routing_source_kind,routing_source_authority,
+		 source_route,target_route,target_set,route_settlement)
+		VALUES ('root_ingress',$1,$2,'test.received','global','{}',$3,$4,'test.received',$5,
+		'schema_less','live',0,'external','external',CURRENT_TIMESTAMP,'external_ingress','test',
+		'{"flow_path":"."}','{}','[]','{}')`, eventID, sourceRunID, []byte("{}"), bundleHash, "sha256:"+strings.Repeat("b", 64)); err != nil {
+		t.Fatalf("create source event: %v", err)
+	}
+	return sourceRunID, eventID, bundleHash
 }
 
 func bootstrappedForkPointSchemaDB(t *testing.T, backend string) *sql.DB {
