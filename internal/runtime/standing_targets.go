@@ -126,23 +126,12 @@ func resolveDirectoryStandingDeclarations(source semanticview.Source, bundle *ru
 		if err != nil {
 			return nil, err
 		}
-		for _, definition := range scope.HeldProviders() {
-			trigger, present := definition.TriggerCatalog()
-			if !present {
-				continue
-			}
-			entry, _ := trigger.EntryByProvider(definition.Provider().Key())
-			used := false
-			for _, pin := range source.FlowInputEventPins(flowID) {
-				for _, output := range entry.Manifest.OutputManifest() {
-					if output.Event == pin.EventType() || output.Kind == providertriggers.OutputKindRaw && output.EventName.Accepts(pin.EventType()) {
-						used = true
-					}
-				}
-			}
-			if !used {
-				continue
-			}
+		inputs := make([]string, 0)
+		for _, pin := range source.FlowInputEventPins(flowID) {
+			inputs = append(inputs, pin.EventType())
+		}
+		for _, definition := range scope.ConsumedTriggerProviders(inputs) {
+			entry, _ := catalog.EntryByProvider(definition.Provider().Key())
 			alias, present := bundle.FlowIngressAlias(flowID)
 			if !present {
 				return nil, fmt.Errorf("%s has no compiled directory webhook alias", location)

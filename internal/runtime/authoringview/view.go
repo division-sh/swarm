@@ -41,6 +41,7 @@ type RoutingTopologyView = routingtopology.Topology
 
 type RootView struct {
 	Constructors       []FlowConstructorView          `json:"constructors"`
+	Ingress            *StandingIngressView           `json:"ingress,omitempty"`
 	SourceFiles        RootSourceFiles                `json:"source_files"`
 	Events             []EventView                    `json:"events,omitempty"`
 	Agents             []AgentView                    `json:"agents,omitempty"`
@@ -354,11 +355,13 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 	if !ok || bundle == nil {
 		return View{}, fmt.Errorf("authoring view requires a workflow contract bundle source")
 	}
+	topology := BuildRoutingTopologyWithReport(source, bundle, opts.BootReport)
 	root, err := buildRoot(source, bundle)
 	if err != nil {
 		return View{}, err
 	}
-	flows, err := buildFlows(source, bundle)
+	root.Ingress = standingIngressView(topology.RootInputSources, ".")
+	flows, err := buildFlows(source, bundle, topology.RootInputSources)
 	if err != nil {
 		return View{}, err
 	}
@@ -376,7 +379,7 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		Flows:               flows,
 		ApprovalPoints:      approvalPoints,
 		ClockSchedules:      semanticview.ClockSchedules(source),
-		RoutingTopology:     BuildRoutingTopologyWithReport(source, bundle, opts.BootReport),
+		RoutingTopology:     topology,
 		Diagnostics:         buildDiagnostics(bundle, opts.BootReport),
 		EffectiveProvenance: bundle.EffectiveProvenance().Entries(),
 		Equivalence: EquivalenceView{
@@ -492,7 +495,7 @@ func buildRoot(source semanticview.Source, bundle *runtimecontracts.WorkflowCont
 	return out, nil
 }
 
-func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle) ([]FlowView, error) {
+func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, rootInputs []routingtopology.RootInputSource) ([]FlowView, error) {
 	opsByFlow := containedOperationsByFlow(source, bundle)
 	demandsByFlow := map[string][]runtimebootverify.SingletonCoordinatorDemand{}
 	for _, demand := range runtimebootverify.BuildSingletonCoordinatorDemandProjection(source) {
@@ -529,10 +532,7 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 			InputPins:  inputPinViews(source, flowID, source.FlowInputEventPins(flowID)),
 			OutputPins: outputPinViews(source, flowID, source.FlowOutputEventPins(flowID)),
 		}
-		item.Ingress, err = standingIngressView(bundle, flowID, schema.Ingress)
-		if err != nil {
-			return nil, err
-		}
+		item.Ingress = standingIngressView(rootInputs, flowID)
 		if primary, err := bundle.ResolveFlowPrimaryEntity(flowID); err == nil {
 			item.PrimaryEntity = primaryEntityView(primary, flow.Paths.EntitiesFile)
 		} else {
@@ -563,39 +563,20 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 	return out, nil
 }
 
-func standingIngressView(bundle *runtimecontracts.WorkflowContractBundle, flowID string, declaration *runtimecontracts.ProjectFlowIngress) (*StandingIngressView, error) {
-	if declaration == nil {
-		return nil, nil
-	}
-	alias, present := bundle.FlowIngressAlias(flowID)
-	if !present {
-		return nil, fmt.Errorf("flow %q has no compiled ingress alias", flowID)
-	}
-	view := &StandingIngressView{Alias: alias}
-	for _, provider := range declaration.Providers {
-		view.Providers = append(view.Providers, standingIngressProviderView(provider))
-	}
-	return view, nil
-}
-
-func standingIngressProviderView(provider runtimecontracts.ProjectFlowIngressProvider) StandingIngressProviderView {
-	kind := strings.ToLower(strings.TrimSpace(provider.Admission.Kind))
-	if kind == "" {
-		kind = "pack-required"
-	}
-	view := StandingIngressProviderView{
-		Provider: provider.Provider, SigningSecret: strings.TrimSpace(provider.SigningSecret),
-		AdmissionKind: kind, Event: strings.TrimSpace(provider.Admission.Event),
-		Acknowledgement: strings.TrimSpace(provider.Admission.Acknowledge),
-	}
-	if provider.Admission.Pack != nil {
-		view.PackID = strings.TrimSpace(provider.Admission.Pack.ID)
-	}
-	if provider.Admission.Authentication != nil {
-		view.RequestAuthentication = strings.ToUpper(strings.TrimSpace(provider.Admission.Authentication.Kind))
-		if view.RequestAuthentication == "NONE" {
-			view.RequestAuthentication = "UNAUTHENTICATED"
+func standingIngressView(rootInputs []routingtopology.RootInputSource, flowID string) *StandingIngressView {
+	var view *StandingIngressView
+	for _, input := range rootInputs {
+		if input.Target.FlowPath != flowID {
+			continue
 		}
+		if view == nil {
+			view = &StandingIngressView{Alias: input.Alias}
+		}
+		view.Providers = append(view.Providers, StandingIngressProviderView{
+			Provider: input.Provider, SigningSecret: input.SigningSecret,
+			AdmissionKind: input.Admission.Kind, PackID: input.Admission.PackID,
+			RequestAuthentication: input.Admission.DeclaredAuthentication,
+		})
 	}
 	return view
 }

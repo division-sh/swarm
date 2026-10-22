@@ -160,6 +160,30 @@ func (s ProviderScope) HeldProviders() []ProviderDefinition {
 	return out
 }
 
+// ConsumedTriggerProviders projects held declarations, not route activation.
+func (s ProviderScope) ConsumedTriggerProviders(inputs []string) []ProviderDefinition {
+	var out []ProviderDefinition
+	for _, definition := range s.HeldProviders() {
+		catalog, present := definition.TriggerCatalog()
+		if !present {
+			continue
+		}
+		entry, _ := catalog.EntryByProvider(definition.Provider().Key())
+		used := false
+		for _, input := range inputs {
+			for _, output := range entry.Manifest.OutputManifest() {
+				if output.Event == input || output.Kind == providertriggers.OutputKindRaw && output.EventName.Accepts(input) {
+					used = true
+				}
+			}
+		}
+		if used {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
 func (s ProviderScope) TriggerCatalog() (*providertriggers.CatalogSnapshot, error) {
 	if !s.source.Valid() {
 		return nil, fmt.Errorf("trigger catalog requires an admitted provider scope")

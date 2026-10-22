@@ -23,14 +23,32 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"gopkg.in/yaml.v3"
 )
 
 func TestA9DeclaredBindingProjectionParity(t *testing.T) {
 	repo := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyStandingRootTreePublic(t)
-	disk, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+	members := map[string][]byte{
+		"manifest.yaml":           []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":             []byte("stages: []\npins:\n  inputs: [inbound.team-bot.text_message]\n"),
+		"child/manifest.yaml":     []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"child/schema.yaml":       []byte("stages: []\npins:\n  inputs: [inbound.team_bot.text_message]\n"),
+		"inherited/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"inherited/schema.yaml":   []byte("stages: []\npins:\n  inputs: [inbound.team-bot.text_message]\n"),
+	}
+	provider := packfixture.NeutralProviderMembers()
+	for _, directory := range []string{"team-bot", "child/team_bot", "unused"} {
+		members[directory+"/manifest.yaml"] = []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n")
+		members[directory+"/trigger.yaml"] = provider["trigger.yaml"]
+	}
+	artifact, err := sourceartifact.AdmitMembers(members)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "standing-readback", artifact)
+	disk, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,6 +70,21 @@ func TestA9DeclaredBindingProjectionParity(t *testing.T) {
 		if len(view.RoutingTopology.RootInputSources) != 2 {
 			t.Fatalf("offline projection lost declaring bindings: %+v", view.RoutingTopology.RootInputSources)
 		}
+		if view.Root.Ingress == nil || view.Root.Ingress.Alias != "standing-readback" || len(view.Root.Ingress.Providers) != 1 || view.Root.Ingress.Providers[0].Provider != "team-bot" {
+			t.Fatalf("root holder readback lost exact captured declaration: %+v", view.Root.Ingress)
+		}
+		child := flowByID(t, view, "child")
+		if child.Ingress == nil || child.Ingress.Alias != "standing-readback.child" || len(child.Ingress.Providers) != 1 || child.Ingress.Providers[0].Provider != "team_bot" {
+			t.Fatalf("child holder readback collapsed a distinct provider key: %+v", child.Ingress)
+		}
+		if flowByID(t, view, "inherited").Ingress != nil {
+			t.Fatal("inherited provider visibility invented an ingress holder")
+		}
+		for _, input := range view.RoutingTopology.RootInputSources {
+			if !strings.HasSuffix(input.AuthoredLocation, "/trigger.yaml") || input.Admission.Kind != "pack" || input.Admission.DeclaredAuthentication != "TOKEN_EQUALITY" || input.SigningSecret != input.Provider+".webhook_signing_secret" {
+				t.Fatalf("standing readback lost captured BODY policy: %+v", input)
+			}
+		}
 		wire, err := json.Marshal(view)
 		if err != nil {
 			t.Fatal(err)
@@ -70,7 +103,7 @@ func TestA9DeclaredBindingProjectionParity(t *testing.T) {
 			}
 		}
 	}
-	if views[0].SourceHash != views[1].SourceHash || !reflect.DeepEqual(views[0].Flows, views[1].Flows) || !reflect.DeepEqual(views[0].RoutingTopology, views[1].RoutingTopology) {
+	if views[0].SourceHash != views[1].SourceHash || !reflect.DeepEqual(views[0].Root, views[1].Root) || !reflect.DeepEqual(views[0].Flows, views[1].Flows) || !reflect.DeepEqual(views[0].RoutingTopology, views[1].RoutingTopology) {
 		t.Fatal("retained source changed declaration or topology projection")
 	}
 }
