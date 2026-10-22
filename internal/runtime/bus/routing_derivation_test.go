@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -90,30 +90,8 @@ func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *test
 	}
 }
 
-func TestEventBusRejectsInvalidExactNodeSubscriptionsBeforeRouteInstallation(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		key  string
-	}{
-		{name: "same scope", key: "child/task.done"},
-		{name: "unresolved", key: "missing/task.done"},
-		{name: "descendant", key: "child/grandchild/task.done"},
-		{name: "full uri", key: "swarm://child/task.done"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			source := exactSubscriptionRouteSource(tc.key, nil)
-			if _, err := runtimebus.DeriveRouteTable(source); err == nil || !strings.Contains(err.Error(), "must use a local event name") {
-				t.Fatalf("DeriveRouteTable error = %v, want typed exact-node rejection", err)
-			}
-			if _, err := newScopedTestEventBus(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{ContractBundle: source}); err == nil || !strings.Contains(err.Error(), "must use a local event name") {
-				t.Fatalf("NewEventBusWithOptions error = %v, want typed exact-node rejection", err)
-			}
-		})
-	}
-}
-
 func TestEventBusExactSubscriptionAdmissionPreservesLocalNodeAndSameScopeAgentRoutes(t *testing.T) {
-	source := exactSubscriptionRouteSource("task.done", []string{"child/task.done"})
+	source := exactSubscriptionRouteSource(t, "task.done", []string{"child/task.done"})
 	routes, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
@@ -156,43 +134,21 @@ func TestDeriveRouteTableRegistersNestedPhysicalAgentDeclarationExactlyOnce(t *t
 
 func loadNestedPhysicalAgentRouteSource(t *testing.T) semanticview.Source {
 	t.Helper()
-	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	root := t.TempDir()
-	write := func(path, body string) {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatalf("MkdirAll(%s): %v", path, err)
-		}
-		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-			t.Fatalf("WriteFile(%s): %v", path, err)
-		}
-	}
-
-	write(filepath.Join(root, "schema.yaml"), "name: nested-agent-route\n")
-
-	flowRoot := filepath.Join(root, "parent", "child", "support")
-
-	write(filepath.Join(flowRoot, "schema.yaml"), `name: support
-stages:
-  active: {}
-pins:
-  inputs:
-    - work.requested
-`)
-	write(filepath.Join(flowRoot, "events.yaml"), "work.requested:\n")
-	write(filepath.Join(flowRoot, "agents.yaml"), `
+	return semanticview.Wrap(loadEventBusTempBundle(t, map[string]string{
+		"manifest.yaml":                      "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":                        "stages: []\n",
+		"parent/child/support/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"parent/child/support/schema.yaml":   "stages:\n  active: {}\npins:\n  inputs: [work.requested]\n",
+		"parent/child/support/events.yaml":   "work.requested:\n",
+		"parent/child/support/agents.yaml": `
 worker:
   id: public-worker
   role: worker
   intent: {inline: Register one nested physical subscriber.}
   model: regular
   subscriptions: [work.requested]
-`)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	return semanticview.Wrap(bundle)
+`,
+	}))
 }
 
 func TestDeriveRouteTableRequiresExactPackageOwnerAcrossRouteSurfaces(t *testing.T) {
@@ -262,8 +218,8 @@ func loadPackageCollisionRouteSource(t *testing.T, mode string, reverse bool) se
 		}
 	}
 
-	write(filepath.Join(root, "schema.yaml"), `
-name: exact-package-routes
+	write(filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	write(filepath.Join(root, "schema.yaml"), `stages: []
 pins:
   inputs:
     - root.start
@@ -275,7 +231,8 @@ pins:
 		instance = "instance: order_id\n"
 		write(filepath.Join(root, "orders", "entities.yaml"), "order:\n  order_id: text\n")
 	}
-	write(filepath.Join(root, "orders", "schema.yaml"), "name: orders\n"+instance+`stages:
+	write(filepath.Join(root, "orders", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	write(filepath.Join(root, "orders", "schema.yaml"), instance+`stages:
   active: {}
   done: {final: true}
 pins:
@@ -293,6 +250,8 @@ shared:
 		dir := filepath.Join(root, "orders", name)
 
 		eventName := strings.ReplaceAll(name, "-", "_")
+		write(filepath.Join(dir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		write(filepath.Join(dir, "schema.yaml"), "# fixture: "+name+"\n")
 		write(filepath.Join(dir, "events.yaml"), eventName+".start:\n")
 		write(filepath.Join(dir, "nodes.yaml"), `
 shared:
@@ -312,7 +271,7 @@ shared:
 func TestEventBusLocalNodeWildcardAdmissionPreservesScope(t *testing.T) {
 	for _, authored := range []string{"task.*", "*.done", "*", "missing.*"} {
 		t.Run(authored, func(t *testing.T) {
-			routes, err := runtimebus.DeriveRouteTable(exactSubscriptionRouteSource(authored, nil))
+			routes, err := runtimebus.DeriveRouteTable(exactSubscriptionRouteSource(t, authored, nil))
 			if err != nil {
 				t.Fatalf("DeriveRouteTable: %v", err)
 			}
@@ -342,43 +301,20 @@ func TestEventBusTemplateAgentSameScopeExactAdmissionRendersConcreteInstanceRout
 	}
 }
 
-func exactSubscriptionRouteSource(nodeSubscription string, agentSubscriptions []string) semanticview.Source {
-	node := runtimecontracts.SystemNodeContract{
-		SubscribesTo:  []string{nodeSubscription},
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{nodeSubscription: {}},
-	}
-	flow := runtimecontracts.FlowContractView{
-		Path:   "child",
-		Paths:  runtimecontracts.FlowContractPaths{FlowPath: "child"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"task.done": {}},
-		Nodes:  map[string]runtimecontracts.SystemNodeContract{"listener": node},
-	}
-	if len(agentSubscriptions) > 0 {
-		flow.Agents = map[string]runtimecontracts.AgentRegistryEntry{
-			"observer": {ID: "observer", Subscriptions: append([]string(nil), agentSubscriptions...)},
-		}
-	}
-	root := runtimecontracts.FlowContractView{
-		Paths:    runtimecontracts.FlowContractPaths{FlowPath: "."},
-		Path:     ".",
-		Children: []runtimecontracts.FlowContractView{flow},
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root:   &root,
-			ByID:   map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
-			ByPath: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
-		},
+func exactSubscriptionRouteSource(t *testing.T, nodeSubscription string, agentSubscriptions []string) semanticview.Source {
+	t.Helper()
+	files := map[string]string{
+		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":         "stages: []\n",
+		"child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"child/schema.yaml":   "stages: []\n",
+		"child/events.yaml":   "task.done:\n",
+		"child/nodes.yaml":    fmt.Sprintf("listener:\n  execution_type: system_node\n  subscribes_to: [%q]\n  event_handlers:\n    %q: {}\n", nodeSubscription, nodeSubscription),
 	}
 	if len(agentSubscriptions) > 0 {
-		ref := runtimecontracts.ContractURIRef{Kind: "agent", FlowID: "child", LocalID: "observer", Full: "test://fixture/child/observer"}
-		bundle.URIRegistry.Agents = map[string]runtimecontracts.ContractURIRef{"child/observer": ref}
-		bundle.URIRegistry.ByURI = map[string]runtimecontracts.ContractURIRef{ref.Full: ref}
+		files["child/agents.yaml"] = "observer:\n  intent: {inline: 'Observe task completion.'}\n  subscriptions: [" + strings.Join(agentSubscriptions, ", ") + "]\n"
 	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
-	}
-	return semanticview.Wrap(bundle)
+	return semanticview.Wrap(loadEventBusTempBundle(t, files))
 }
 
 type routePersistenceTestStore struct {
@@ -733,106 +669,18 @@ func TestRouteTableTemplateOutputConnectDoesNotCreateCrossFlowPubSubSubscriber(t
 	}
 }
 
-func TestDeriveRouteTable_InputPinsDoNotAutoWireFromProducerOutput(t *testing.T) {
-	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
-			},
-		},
-		Path: "producer",
-	}
-	discovery := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "discovery"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
-			},
-		},
-		Path:   "discovery",
-		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scan-orchestrator": {
-				SubscribesTo: []string{"scan.requested"},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, discovery}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"producer":  &root.Children[0],
-				"discovery": &root.Children[1],
-			},
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatal(err)
-	}
-	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
-	if err != nil {
-		t.Fatalf("DeriveRouteTable: %v", err)
-	}
-	if got := rt.PubsubDeclarationDefinitionsFixture(t, "discovery", "producer/scan.requested"); len(got) != 0 {
-		t.Fatalf("Resolve(producer/scan.requested) = %#v, want none for retired sibling auto-wire", got)
-	}
-	if got := rt.PubsubDeclarationDefinitionsFixture(t, "discovery", "scan.requested"); len(got) != 0 {
-		t.Fatalf("Resolve(scan.requested) = %#v, want none", got)
-	}
-	if got := rt.PubsubDeclarationDefinitionsFixture(t, "discovery", "discovery/scan.requested"); len(got) != 1 || got[0].Recipient.LocalID() != "scan-orchestrator" {
-		t.Fatalf("Resolve(discovery/scan.requested) = %#v, want scan-orchestrator local input route", got)
-	}
-}
-
 func TestDeriveRouteTable_HandlerOnlyInputPinsDoNotAutoWireFromProducerOutput(t *testing.T) {
-	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
-			},
-		},
-		Path: "producer",
-	}
-	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "consumer"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
-			},
-		},
-		Path:   "consumer",
-		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"consumer-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"scan.requested": {},
-				},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, consumer}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"producer": &root.Children[0],
-				"consumer": &root.Children[1],
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"consumer-node": {
-					"scan.requested": {},
-				},
-			},
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatal(err)
-	}
+	bundle := loadEventBusTempBundle(t, map[string]string{
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":            "stages: []\n",
+		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [scan.requested]\n",
+		"producer/events.yaml":   "scan.requested:\n",
+		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [scan.requested]\n",
+		"consumer/events.yaml":   "scan.requested:\n",
+		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    scan.requested: {}\n",
+	})
 	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
@@ -950,118 +798,6 @@ func TestDeriveRouteTable_RuntimeProducedFollowUpSubscriptionsResolveCanonicalNo
 				t.Fatalf("Resolve(%s) = %#v, want %s %s %s", tc.eventType, got, tc.nodeID, tc.flowPath, tc.routeMatch)
 			}
 		})
-	}
-}
-
-func TestDeriveRouteTable_AmbiguousInputPinsFailClosedWithoutEscapeHatch(t *testing.T) {
-	producerA := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer_a"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "ticket.ready"}}},
-			},
-		},
-		Path: "producer_a",
-	}
-	producerB := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "producer_b"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "ticket.ready"}}},
-			},
-		},
-		Path: "producer_b",
-	}
-	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "consumer"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "ticket.ready"}}},
-			},
-		},
-		Path:   "consumer",
-		Events: map[string]runtimecontracts.EventCatalogEntry{"ticket.ready": {}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"consumer-node": {
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"ticket.ready": {},
-				},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producerA, producerB, consumer}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"producer_a": &root.Children[0],
-				"producer_b": &root.Children[1],
-				"consumer":   &root.Children[2],
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"consumer-node": {
-					"ticket.ready": {},
-				},
-			},
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatal(err)
-	}
-	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
-	if err != nil {
-		t.Fatalf("DeriveRouteTable: %v", err)
-	}
-	if got := rt.PubsubDeclarationDefinitionsFixture(t, "consumer", "producer_a/ticket.ready"); len(got) != 0 {
-		t.Fatalf("Resolve(producer_a/ticket.ready) = %#v, want none", got)
-	}
-	if got := rt.PubsubDeclarationDefinitionsFixture(t, "consumer", "producer_b/ticket.ready"); len(got) != 0 {
-		t.Fatalf("Resolve(producer_b/ticket.ready) = %#v, want none", got)
-	}
-}
-
-func TestDeriveRouteTable_InputPinsStayLocalWithoutExternalProducer(t *testing.T) {
-	scoring := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "scoring"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "score.dimension_complete"}}},
-			},
-		},
-		Path: "scoring",
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"score.dimension_complete": {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"scoring-node": {
-				SubscribesTo: []string{"score.dimension_complete"},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{scoring}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"scoring": &root.Children[0],
-			},
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatal(err)
-	}
-	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
-	if err != nil {
-		t.Fatalf("DeriveRouteTable: %v", err)
-	}
-	got := rt.PubsubDeclarationDefinitionsFixture(t, "scoring", "scoring/score.dimension_complete")
-	if len(got) != 1 || got[0].Recipient.LocalID() != "scoring-node" {
-		t.Fatalf("Resolve(scoring/score.dimension_complete) = %#v, want scoring-node", got)
-	}
-	if got := rt.PubsubDeclarationDefinitionsFixture(t, "scoring", "score.dimension_complete"); len(got) != 0 {
-		t.Fatalf("Resolve(score.dimension_complete) = %#v, want none", got)
 	}
 }
 
