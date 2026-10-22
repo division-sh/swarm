@@ -19,7 +19,12 @@ func registrationChannelPlanForTest(t testing.TB, overrides map[string]runtimeco
 	if err != nil {
 		t.Fatal(err)
 	}
-	channels := packfixture.ChannelPacks(t)
+	var channels []packs.LoadedChannelPack
+	for _, channel := range packfixture.ChannelPacks(t) {
+		if channel.Envelope.ID == "provider.telegram.hitl_channel" {
+			channels = append(channels, channel)
+		}
+	}
 	if len(channels) != 1 || channels[0].Manifest.Provider != "telegram" {
 		t.Fatal("expected the shipped Telegram channel fixture")
 	}

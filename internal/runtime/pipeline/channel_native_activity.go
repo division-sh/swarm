@@ -34,9 +34,9 @@ func (d pipelineActivityDispatcher) executeClaimedNativeActivity(ctx context.Con
 	var stored ActivityAttemptRecord
 	var committed bool
 	if terminal.Status == ActivityAttemptStatusUncertain {
-		stored, committed, err = d.coordinator.workflowStore.MarkActivityAttemptUncertain(ctx, terminal)
+		stored, committed, err = d.journal.MarkActivityAttemptUncertain(ctx, terminal)
 	} else {
-		stored, committed, err = d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+		stored, committed, err = d.journal.CompleteActivityAttempt(ctx, terminal)
 	}
 	return d.publishCommittedActivityAttempt(ctx, intent, stored, committed, err, "complete_native_activity_attempt")
 }
