@@ -596,7 +596,8 @@ func writeMailboxDetailResult(out io.Writer, result mailboxDetailProjection) {
 		fmt.Fprintf(out, "activity_request_id=%s\n", result.Effect.RequestEventID)
 	}
 	fmt.Fprintf(out, "card_content_hash=%s\n", card.CardContentHash)
-	writeCLIFieldLine(out, cliDetailField{Key: "question", Value: card.Title}, cliDetailField{Key: "run", Value: card.RunID}, cliDetailField{Key: "flow", Value: card.Anchor.FlowID}, cliDetailField{Key: "instance", Value: card.Scope.FlowInstance})
+	question, _ := card.Snapshot["title"].(string)
+	writeCLIFieldLine(out, cliDetailField{Key: "question", Value: question}, cliDetailField{Key: "run", Value: card.RunID}, cliDetailField{Key: "flow", Value: card.Anchor.FlowID}, cliDetailField{Key: "instance", Value: card.Scope.FlowInstance})
 	if created, err := time.Parse(time.RFC3339Nano, card.CreatedAt); err == nil {
 		writeCLIFieldLine(out, cliDetailField{Key: "age", Value: time.Since(created).Round(time.Second).String()})
 	}

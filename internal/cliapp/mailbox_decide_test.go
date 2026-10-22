@@ -67,6 +67,10 @@ func TestMailboxDecideCommitsDeclaredOption(t *testing.T) {
 			}))
 			defer server.Close()
 			args := []string{"mailbox", "decide", "card-1", "reject", "--input", "reason=not today=x", "--input", "count=2", "--input", "ratio=1.5", "--input", "confirmed=false", "--input", "at=2026-10-22T12:00:00Z", "--input", "key=11111111-1111-4111-8111-111111111111"}
+			args = append(args, "--api-server", server.URL)
+			if err := validateCLIAPIConnectionFlagPlacement(args); err != nil {
+				t.Fatal(err)
+			}
 			var out, errOut bytes.Buffer
 			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &out, &errOut, testRootCommandOptions(server))
 			wantFields := map[string]any{"reason": "not today=x", "count": float64(2), "ratio": 1.5, "confirmed": false, "at": "2026-10-22T12:00:00Z", "key": "11111111-1111-4111-8111-111111111111"}
@@ -78,7 +82,7 @@ func TestMailboxDecideCommitsDeclaredOption(t *testing.T) {
 				if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), command, &out, &errOut, testRootCommandOptions(server)); code != 0 {
 					t.Fatalf("view code=%d stderr=%s", code, errOut.String())
 				}
-				for _, want := range []string{"Review request", "qa", "passed", "Option: reject - Reject request", "--input reason=<text> (required)", "instance=root", "age="} {
+				for _, want := range []string{"question=Review request", "qa", "passed", "Option: reject - Reject request", "--input reason=<text> (required)", "instance=root", "age="} {
 					if !strings.Contains(out.String(), want) {
 						t.Fatalf("view missing %q: %s", want, out.String())
 					}
