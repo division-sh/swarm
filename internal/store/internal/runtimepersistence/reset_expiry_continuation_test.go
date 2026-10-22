@@ -19,8 +19,8 @@ func TestResetContinuationReevaluatesDirectiveExpiryBothStores(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			forEachDirectiveAmbiguityBackend(t, func(t *testing.T, backend directiveAmbiguityBackend) {
-				ctx := testAuthorActivityContext()
-				seedDirectiveOperationRun(t, backend.db, backend.name == "postgres")
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), backend.store)
+				seedDirectiveOperationRun(t, ctx, backend.db, backend.name == "postgres")
 				created := time.Now().UTC()
 				reserved, err := backend.store.ReserveDirectiveOperation(ctx, directiveOperationReservationForTest(t, uuid.NewString(), uuid.NewString(), "reset-expiry", "reset-expiry", created))
 				if err != nil {

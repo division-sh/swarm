@@ -23,9 +23,8 @@ import (
 
 const directiveOperationTestRunID = "00000000-0000-0000-0000-000000001000"
 
-func seedDirectiveOperationRun(t *testing.T, db *sql.DB, postgres bool) {
+func seedDirectiveOperationRun(t *testing.T, ctx context.Context, db *sql.DB, postgres bool) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
 	if postgres {
 		requireRunningPostgresRunForTest(t, ctx, db, directiveOperationTestRunID, time.Now().UTC())
 	} else {
@@ -37,7 +36,8 @@ func seedDirectiveOperationRun(t *testing.T, db *sql.DB, postgres bool) {
 func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	seedDirectiveOperationRun(t, store.backend.ConstructionHandle(), false)
+	ctx = originalStoreFixtureContext(t, ctx, store)
+	seedDirectiveOperationRun(t, ctx, store.backend.ConstructionHandle(), false)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001001", "00000000-0000-0000-0000-000000001002", "idem-1", "hash-1", now)
 
@@ -108,7 +108,8 @@ func TestSQLiteDirectiveOperationOwnsReservationExecutionAndCompletion(t *testin
 func TestSQLiteDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	seedDirectiveOperationRun(t, store.backend.ConstructionHandle(), false)
+	ctx = originalStoreFixtureContext(t, ctx, store)
+	seedDirectiveOperationRun(t, ctx, store.backend.ConstructionHandle(), false)
 	now := time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC)
 
 	executingReq := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001101", "00000000-0000-0000-0000-000000001102", "idem-recovery", "hash-recovery", now)
@@ -170,7 +171,7 @@ func TestSQLiteDirectiveOperationConcurrentSameKeyHasOneReservation(t *testing.T
 	path := filepath.Join(t.TempDir(), "directive.db")
 	first := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 	ctx = originalStoreFixtureContext(t, ctx, first)
-	seedDirectiveOperationRun(t, first.backend.ConstructionHandle(), false)
+	seedDirectiveOperationRun(t, ctx, first.backend.ConstructionHandle(), false)
 	second := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 	now := time.Date(2026, 7, 10, 14, 0, 0, 0, time.UTC)
 	requests := []runtimeagentcontrol.ReserveDirectiveOperationRequest{
@@ -229,7 +230,8 @@ func TestSQLiteDirectiveOperationFinalizationFailuresRollbackToExecuted(t *testi
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-			seedDirectiveOperationRun(t, store.backend.ConstructionHandle(), false)
+			ctx = originalStoreFixtureContext(t, ctx, store)
+			seedDirectiveOperationRun(t, ctx, store.backend.ConstructionHandle(), false)
 			now := time.Date(2026, 7, 10, 14, 30, 0, 0, time.UTC)
 			reserved := reserveAndRecordExecutedDirectiveForTest(t, ctx, store, now)
 			if _, err := store.backend.Exec(tc.triggerSQL); err != nil {
@@ -269,7 +271,8 @@ func TestSQLiteDirectiveOperationFinalizationFailuresRollbackToExecuted(t *testi
 func TestSQLiteDirectiveOperationResultPersistenceFailureBecomesIndeterminate(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	seedDirectiveOperationRun(t, store.backend.ConstructionHandle(), false)
+	ctx = originalStoreFixtureContext(t, ctx, store)
+	seedDirectiveOperationRun(t, ctx, store.backend.ConstructionHandle(), false)
 	now := time.Date(2026, 7, 10, 14, 45, 0, 0, time.UTC)
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001251", "00000000-0000-0000-0000-000000001252", "result-failure", "result-hash", now)
 	reserved, err := store.ReserveDirectiveOperation(ctx, req)
@@ -307,7 +310,8 @@ func TestSQLiteDirectiveOperationResultPersistenceFailureBecomesIndeterminate(t 
 func TestSQLiteDirectiveOperationReservationFailureRollsBackEveryFact(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	seedDirectiveOperationRun(t, store.backend.ConstructionHandle(), false)
+	ctx = originalStoreFixtureContext(t, ctx, store)
+	seedDirectiveOperationRun(t, ctx, store.backend.ConstructionHandle(), false)
 	now := time.Date(2026, 7, 10, 14, 50, 0, 0, time.UTC)
 	if _, err := store.backend.Exec(`CREATE TRIGGER fail_directive_event BEFORE INSERT ON events WHEN NEW.event_name = 'platform.agent_directive' BEGIN SELECT RAISE(ABORT, 'injected event failure'); END`); err != nil {
 		t.Fatalf("create event trigger: %v", err)
@@ -335,7 +339,8 @@ func TestPostgresDirectiveOperationOwnsReservationExecutionAndCompletion(t *test
 	t.Cleanup(cleanup)
 	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
-	seedDirectiveOperationRun(t, db, true)
+	ctx = originalStoreFixtureContext(t, ctx, store)
+	seedDirectiveOperationRun(t, ctx, db, true)
 	now := time.Date(2026, 7, 10, 15, 0, 0, 0, time.UTC)
 	req := directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001301", "00000000-0000-0000-0000-000000001302", "pg-idem", "pg-hash", now)
 	reserved, err := store.ReserveDirectiveOperation(ctx, req)
@@ -371,7 +376,8 @@ func TestPostgresDirectiveOperationConcurrentSameKeyHasOneReservationAndAdmissio
 	t.Cleanup(cleanup)
 	ctx := testAuthorActivityContext()
 	stores := []*PostgresStore{admitTestPostgresStore(t, db), admitTestPostgresStore(t, db)}
-	seedDirectiveOperationRun(t, db, true)
+	ctx = originalStoreFixtureContext(t, ctx, stores[0])
+	seedDirectiveOperationRun(t, ctx, db, true)
 	now := time.Date(2026, 7, 10, 15, 15, 0, 0, time.UTC)
 	requests := []runtimeagentcontrol.ReserveDirectiveOperationRequest{
 		directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001311", "00000000-0000-0000-0000-000000001312", "pg-same-key", "pg-same-hash", now),
@@ -426,7 +432,8 @@ func TestPostgresDirectiveOperationRecoveryNeverReadmitsUncertainExecution(t *te
 	t.Cleanup(cleanup)
 	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
-	seedDirectiveOperationRun(t, db, true)
+	ctx = originalStoreFixtureContext(t, ctx, store)
+	seedDirectiveOperationRun(t, ctx, db, true)
 	now := time.Date(2026, 7, 10, 15, 30, 0, 0, time.UTC)
 
 	executing, err := store.ReserveDirectiveOperation(ctx, directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001321", "00000000-0000-0000-0000-000000001322", "pg-recovery", "pg-recovery-hash", now))
@@ -486,7 +493,8 @@ func TestPostgresDirectiveOperationFinalizationFailuresRollbackToExecuted(t *tes
 			t.Cleanup(cleanup)
 			ctx := testAuthorActivityContext()
 			store := admitTestPostgresStore(t, db)
-			seedDirectiveOperationRun(t, db, true)
+			ctx = originalStoreFixtureContext(t, ctx, store)
+			seedDirectiveOperationRun(t, ctx, db, true)
 			now := time.Date(2026, 7, 10, 15, 45, 0, 0, time.UTC)
 			reserved := reserveAndRecordExecutedPostgresDirectiveForTest(t, ctx, store, now)
 			dropTrigger := installPostgresDirectiveRejectInsertTrigger(t, db, tc.triggerName, tc.table)
@@ -521,7 +529,8 @@ func TestPostgresDirectiveOperationResultPersistenceFailureBecomesIndeterminate(
 	t.Cleanup(cleanup)
 	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
-	seedDirectiveOperationRun(t, db, true)
+	ctx = originalStoreFixtureContext(t, ctx, store)
+	seedDirectiveOperationRun(t, ctx, db, true)
 	now := time.Date(2026, 7, 10, 16, 0, 0, 0, time.UTC)
 	reserved, err := store.ReserveDirectiveOperation(ctx, directiveOperationReservationForTest(t, "00000000-0000-0000-0000-000000001341", "00000000-0000-0000-0000-000000001342", "pg-result-failure", "pg-result-hash", now))
 	if err != nil {
@@ -553,7 +562,8 @@ func TestPostgresDirectiveOperationReservationFailureRollsBackEveryFact(t *testi
 	t.Cleanup(cleanup)
 	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
-	seedDirectiveOperationRun(t, db, true)
+	ctx = originalStoreFixtureContext(t, ctx, store)
+	seedDirectiveOperationRun(t, ctx, db, true)
 	dropTrigger := installPostgresDirectiveRejectInsertTrigger(t, db, "fail_pg_directive_event", "events")
 	defer dropTrigger()
 	now := time.Date(2026, 7, 10, 16, 15, 0, 0, time.UTC)
@@ -584,11 +594,13 @@ func TestDirectiveExecutionAdmitsExactPersistedModeBeforeTransitionOnSQLiteAndPo
 				_, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				pg := admitTestPostgresStore(t, db)
-				seedDirectiveOperationRun(t, db, true)
+				ctx = originalStoreFixtureContext(t, ctx, pg)
+				seedDirectiveOperationRun(t, ctx, db, true)
 				store = pg
 			} else {
 				sqlite := newBootstrappedSQLiteRuntimeStoreForTest(t)
-				seedDirectiveOperationRun(t, sqlite.backend.ConstructionHandle(), false)
+				ctx = originalStoreFixtureContext(t, ctx, sqlite)
+				seedDirectiveOperationRun(t, ctx, sqlite.backend.ConstructionHandle(), false)
 				store = sqlite
 			}
 			now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)

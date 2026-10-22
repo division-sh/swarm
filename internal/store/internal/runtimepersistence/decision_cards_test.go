@@ -1464,59 +1464,6 @@ func admitDecisionCardTestObject(t *testing.T, object map[string]any) semanticva
 	return value
 }
 
-type storeDecisionSnapshotStructuralDriftCase struct {
-	name   string
-	want   string
-	mutate func(*testing.T, map[string]any)
-}
-
-func storeDecisionSnapshotStructuralDriftCases() []storeDecisionSnapshotStructuralDriftCase {
-	unexpected := "non-canonical semantic structure"
-	return []storeDecisionSnapshotStructuralDriftCase{
-		{name: "root_shadow", want: unexpected, mutate: func(_ *testing.T, root map[string]any) { root["shadow_semantics"] = true }},
-		{name: "root_missing", want: unexpected, mutate: func(_ *testing.T, root map[string]any) { delete(root, "title") }},
-		{name: "outcome_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise")["shadow_semantics"] = true
-		}},
-		{name: "outcome_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			delete(storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise"), "Label")
-		}},
-		{name: "input_shadow", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Input", "feedback")["shadow_semantics"] = true
-		}},
-		{name: "input_missing", want: unexpected, mutate: func(t *testing.T, root map[string]any) {
-			delete(storeDecisionSnapshotNestedObject(t, root, "outcomes", "revise", "Input", "feedback"), "label")
-		}},
-	}
-}
-
-func mutateStoreDecisionSnapshotJSON(t *testing.T, raw []byte, mutate func(*testing.T, map[string]any)) []byte {
-	t.Helper()
-	var root map[string]any
-	if err := json.Unmarshal(raw, &root); err != nil {
-		t.Fatal(err)
-	}
-	mutate(t, root)
-	corrupted, err := json.Marshal(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return corrupted
-}
-
-func storeDecisionSnapshotNestedObject(t *testing.T, root map[string]any, path ...string) map[string]any {
-	t.Helper()
-	current := root
-	for _, name := range path {
-		next, ok := current[name].(map[string]any)
-		if !ok {
-			t.Fatalf("snapshot path %s is %#v, want object", strings.Join(path, "."), current[name])
-		}
-		current = next
-	}
-	return current
-}
-
 func decisionCardTestStore(t *testing.T, backend string, probes ...*cardIntentRecheckProbe) (decisioncard.Store, string) {
 	t.Helper()
 	ctx := testAuthorActivityContext()

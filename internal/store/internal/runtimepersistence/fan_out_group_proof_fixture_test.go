@@ -425,7 +425,7 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 		}
 	})
 	if parent == nil {
-		catalog, err := f.raw.(selectedFanOutMixedRouteOwner).RegisterAuthorActivityEventCatalog(authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, f.seed.bundleHash), []authoractivity.EventDescriptor{{EventType: "producer/mixed.none", Disposition: authoractivity.StoryAuthored}})
+		catalog, err := f.raw.(selectedFanOutMixedRouteOwner).RegisterAuthorActivityEventCatalog(authoractivity.BundleScope(grantEvidence.RuntimeInstanceID, f.seed.bundleHash), []authoractivity.EventDescriptor{{EventType: "producer/mixed.none", Disposition: authoractivity.StoryAuthored}})
 		if err != nil {
 			t.Fatal(err)
 		}
