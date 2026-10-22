@@ -39,12 +39,22 @@ func activityTimestampDatabase(t *testing.T, backend string) *sql.DB {
 		run_id TEXT NOT NULL DEFAULT '', source_event_id TEXT, parent_event_id TEXT,
 		entity_id TEXT, flow_instance TEXT, node_id TEXT NOT NULL DEFAULT '',
 		handler_event_key TEXT NOT NULL DEFAULT '', activity_id TEXT NOT NULL DEFAULT '',
-		tool TEXT NOT NULL DEFAULT '', effect_class TEXT NOT NULL DEFAULT '',
+		tool TEXT NOT NULL DEFAULT '', effect_class TEXT NOT NULL DEFAULT 'non_idempotent_write',
 		attempt INTEGER NOT NULL DEFAULT 1, success_event TEXT NOT NULL DEFAULT '',
 		failure_event TEXT NOT NULL DEFAULT '', result_event_id TEXT, loop_generation TEXT,
-		loop_stage TEXT)`, stamp, stamp, stamp))
+		loop_stage TEXT, reply_context_id TEXT, reply_context_present BOOLEAN NOT NULL DEFAULT FALSE)`, stamp, stamp, stamp))
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`CREATE TABLE activity_attempt_live_parents (
+			request_event_id TEXT PRIMARY KEY REFERENCES activity_attempts(request_event_id),
+			run_id TEXT NOT NULL, reply_context_id TEXT, reply_context_present BOOLEAN NOT NULL)`,
+		`CREATE TABLE run_fork_selected_contract_activity_detachments (request_event_id TEXT PRIMARY KEY)`,
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return db
 }
@@ -56,6 +66,12 @@ func readActivityTimestampEvidence(t *testing.T, db *sql.DB, id string) (runFork
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO activity_attempt_live_parents
+		(request_event_id,run_id,reply_context_id,reply_context_present)
+		SELECT request_event_id,run_id,reply_context_id,reply_context_present
+		FROM activity_attempts WHERE request_event_id=$1`, id); err != nil {
+		t.Fatal(err)
+	}
 	return loadRunForkActivityAttemptEvidence(context.Background(), tx, id)
 }
 

@@ -117,13 +117,33 @@ func TestPreparedProcessReleaseFencesMutatingRecoveryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
-			healthy := newSelectedCompletionFixture(t, store, db, sqlite)
-			refused := newSelectedCompletionFixtureWithProcess(t, store, db, sqlite, healthy.process)
-			ctx := testAuthorActivityContext()
+			healthy := newSelectedProviderCompletionFixture(t, store, db, sqlite)
+			refused := newSelectedProviderCompletionFixtureWithProcess(t, store, db, sqlite, healthy.process)
+			ctx := testAuthorActivityContextForBundle(healthy.request.DeclarationPlan.BundleHash)
+			attempts := map[string]*effects.Handle{}
 			for _, fixture := range []selectedCompletionFixture{healthy, refused} {
-				if _, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request); err != nil {
+				issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
+				if err != nil {
 					t.Fatal(err)
 				}
+				authority, err := store.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, "prepared-release-recovery", time.Minute)
+				if err != nil {
+					t.Fatal(err)
+				}
+				admitSelectedProviderFixture(t, ctx, fixture, issued, authority)
+				authority.Target = selectedProviderTarget(fixture)
+				attemptCtx := effects.WithAuthority(effects.WithController(ctx, newCompletionControllerForTest(store)), authority)
+				attemptCtx = selectedProviderClaimContext(t, attemptCtx, fixture, authority)
+				attemptCtx = withManagedCompletionTestSurface(t, managedSelectedExecutionStoreTestContext(t, attemptCtx, authority), authority, "openai_responses")
+				handle, err := beginManagedCompletionForTest(t, attemptCtx, "openai_responses", []byte("prepared-release-recovery"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if handle.Attempt().Authority.ID != issued.ExecutionID || handle.Attempt().Authority.SelectedFork.ForkRunID != fixture.forkRun {
+					t.Fatalf("prelaunch attempt escaped its predecessor: %+v", handle.Attempt())
+				}
+				requirePreparedRecoveryAttemptPhase(t, store.(effects.OutcomeStore), handle.Attempt(), effects.StateAuthorized)
+				attempts[fixture.forkRun] = handle
 			}
 			if err := healthy.process.Release(ctx); err != nil {
 				t.Fatal(err)
@@ -135,6 +155,7 @@ func TestPreparedProcessReleaseFencesMutatingRecoveryBothStores(t *testing.T) {
 			}
 			recovery := store.(interface {
 				ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
+				InspectSelectedForkRecovery(context.Context, runfork.SelectedForkRecoveryEntry) (runfork.SelectedForkRecoveryInspection, error)
 				RecoverSelectedFork(context.Context, runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error)
 			})
 			entries, err := recovery.ListSelectedForkRecoveryEntries(ctx)
@@ -148,12 +169,23 @@ func TestPreparedProcessReleaseFencesMutatingRecoveryBothStores(t *testing.T) {
 					t.Fatalf("live admitted recovery request: %v", err)
 				}
 				requests[entry.Binding.ForkRunID] = request
+				attempt := attempts[entry.Binding.ForkRunID].Attempt()
+				inspection, err := recovery.InspectSelectedForkRecovery(ctx, entry)
+				if err != nil || attempt.Authority.ID != inspection.Plan.ExecutionID || inspection.Plan.Disposition != runfork.SelectedForkRecoveryFailed {
+					t.Fatalf("recovery inventory substituted prelaunch execution: %+v %v", inspection, err)
+				}
+				requirePreparedRecoveryAttemptPhase(t, store.(effects.OutcomeStore), attempt, effects.StateAuthorized)
 			}
 			beforeHealthy := snapshotForkHistoricalExecutionTables(t, db, !sqlite)
 			result, err := recovery.RecoverSelectedFork(ctx, requests[healthy.forkRun])
 			if err != nil || result.RunID != healthy.forkRun || result.Disposition != runfork.SelectedForkRecoveryFailed {
 				t.Fatalf("live mutating recovery: %+v %v", result, err)
 			}
+			if result.Effects.PrelaunchTerminal != 1 || result.Effects.OutcomeUncertain != 0 {
+				t.Fatalf("mutating recovery did not settle its one authorized prelaunch attempt: %+v", result.Effects)
+			}
+			requirePreparedRecoveryAttemptPhase(t, store.(effects.OutcomeStore), attempts[healthy.forkRun].Attempt(), effects.StateTerminalFailure)
+			requirePreparedRecoveryAttemptPhase(t, store.(effects.OutcomeStore), attempts[refused.forkRun].Attempt(), effects.StateAuthorized)
 			if reflect.DeepEqual(beforeHealthy, snapshotForkHistoricalExecutionTables(t, db, !sqlite)) {
 				t.Fatal("healthy recovery did not exercise its mutation owner")
 			}
@@ -172,6 +204,15 @@ func TestPreparedProcessReleaseFencesMutatingRecoveryBothStores(t *testing.T) {
 				t.Fatal("released mutating recovery changed durable evidence")
 			}
 		})
+	}
+}
+
+func requirePreparedRecoveryAttemptPhase(t *testing.T, reader effects.OutcomeStore, attempt effects.Attempt, want effects.State) {
+	t.Helper()
+	outcome, found, err := reader.GetExternalEffectOutcome(t.Context(), attempt.OperationID)
+	if err != nil || !found || outcome.OperationID != attempt.OperationID || outcome.AuthorityID != attempt.Authority.ID ||
+		outcome.AuthorityKind != attempt.Authority.Kind || outcome.State != want || outcome.AttemptState != want {
+		t.Fatalf("prelaunch recovery effect differs from its durable owner: %+v found=%t err=%v want=%s", outcome, found, err, want)
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
@@ -29,24 +30,29 @@ type runForkDeliveryEventReplayAdapter struct {
 	requireCurrent func() error
 	events         eventCommitOwner
 	deliveries     *storedelivery.Adapter
-	loadSource     func(context.Context, *sql.Tx, string, string) (events.Event, error)
 	commitScope    func(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.CommittedScope, time.Time) error
+	loadSnapshot   runForkLifecycleSnapshotLoader
+	sourceAt       func(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
 }
 
 func (s *RunForkPostgresOwner) deliveryEventReplayAdapter() runForkDeliveryEventReplayAdapter {
 	return runForkDeliveryEventReplayAdapter{
 		postgres:       true,
 		requireCurrent: s.requireCurrentSchema, events: s.events, deliveries: postgresDeliveryAdapter,
-		loadSource:  loadRunForkReplaySourceEvent,
 		commitScope: s.PipelinePostgresOwner.CommitScopeAtTx,
+		sourceAt:    s.RequirePresentSourceTx,
+		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runlifecycle.Snapshot, error) {
+			return s.LoadSnapshotTx(ctx, tx, runID, false)
+		},
 	}
 }
 
 func (s *RunForkSQLiteOwner) deliveryEventReplayAdapter() runForkDeliveryEventReplayAdapter {
 	return runForkDeliveryEventReplayAdapter{
 		requireCurrent: s.requireCurrentSchema, events: s.events, deliveries: sqliteDeliveryAdapter,
-		loadSource:  loadSQLiteRunForkReplaySourceEvent,
-		commitScope: s.PipelineSQLiteOwner.CommitScopeAtTx,
+		commitScope:  s.PipelineSQLiteOwner.CommitScopeAtTx,
+		loadSnapshot: s.LoadSnapshotTx,
+		sourceAt:     s.RequirePresentSourceTx,
 	}
 }
 
@@ -71,7 +77,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 		return result, fmt.Errorf("store.run_fork.delivery_event_replay requires at least one owner-authorized delivery")
 	}
 
-	if store.requireCurrent == nil || store.events == nil || store.deliveries == nil || store.loadSource == nil || store.commitScope == nil {
+	if store.requireCurrent == nil || store.events == nil || store.deliveries == nil || store.commitScope == nil {
 		return result, fmt.Errorf("run fork delivery/event replay adapters are required")
 	}
 	if err := store.requireCurrent(); err != nil {
@@ -87,7 +93,11 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 	if err := validateRunForkEntityMetadataOwners(snapshot); err != nil {
 		return result, err
 	}
-	admission := runForkSourceStateAdmission{carriage: original, forkRunID: lineage.ForkRunID, snapshot: snapshot, postgres: store.postgres}
+	cut, err := newRunForkReplayCut(snapshot)
+	if err != nil {
+		return result, err
+	}
+	admission := runForkSourceStateAdmission{carriage: original, forkRunID: lineage.ForkRunID, snapshot: snapshot, postgres: store.postgres, sourceAt: store.sourceAt}
 	sourceEvents := map[string]events.Event{}
 	bundleSource, err := runtimecorrelation.NewSourceArtifactFact(lineage.ForkBundleHash)
 	if err != nil {
@@ -117,7 +127,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 		}
 		sourceEvent, ok := sourceEvents[sourceEventID]
 		if !ok {
-			loaded, err := store.loadSource(ctx, tx, lineage.SourceRunID, sourceEventID)
+			loaded, err := cut.event(sourceEventID)
 			if err != nil {
 				return result, err
 			}
@@ -133,7 +143,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 			preparedEvents[forkEventID] = replayed
 			eventOrder = append(eventOrder, forkEventID)
 		}
-		sourceDelivery, err := store.deliveries.Snapshot(ctx, tx, sourceDeliveryID)
+		sourceDelivery, err := cut.delivery(sourceEventID, sourceDeliveryID)
 		if err != nil {
 			return result, fmt.Errorf("load source delivery %s for fork replay: %w", sourceDeliveryID, err)
 		}
@@ -164,8 +174,34 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 			if expected.WorkflowName != target.FlowID {
 				return result, fmt.Errorf("reconstructed replay receiver contradicts fixed-revision template")
 			}
-			if err := pipelinepersistence.RequireSelectedHistoricalWorkflowHeader(ctx, tx, store.postgres, expected); err != nil {
+			header, err := pipelinepersistence.RequireSelectedHistoricalWorkflowHeader(ctx, tx, store.postgres, expected)
+			if err != nil {
 				return result, fmt.Errorf("reconstructed replay receiver contradicts fixed-revision ownership: %w", err)
+			}
+			if store.loadSnapshot == nil {
+				return result, fmt.Errorf("replay construction requires its immutable lifecycle owner")
+			}
+			child, err := store.loadSnapshot(ctx, tx, lineage.ForkRunID)
+			if err != nil {
+				return result, err
+			}
+			observed, found, err := readProjectedReceiverConstructionReceiptTx(ctx, tx, child, header)
+			if err != nil {
+				return result, err
+			}
+			if !found {
+				return result, fmt.Errorf("replay receiver lacks admitted historical construction")
+			}
+			plan, err := constructionPlanAtSnapshot(snapshot)
+			if err != nil {
+				return result, err
+			}
+			receipt, err := projectRunForkConstructionReceiptTx(ctx, tx, plan, lineage.ForkRunID, state, header.CreatedAt)
+			if err != nil {
+				return result, err
+			}
+			if err := pipelinepersistence.RequireSelectedHistoricalWorkflowReceipt(ctx, tx, receipt, observed); err != nil {
+				return result, err
 			}
 		}
 		obligation, err := runtimedelivery.NewObligation(forkEventID, lineage.ForkRunID, forkRoute, deliveryAuthority)
@@ -222,7 +258,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 
 // Replay consumes fixed-cut construction independently of the actor's entity.
 // It never runs a constructor or borrows source-run attachment authority.
-func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, event events.Event, delivery runtimedelivery.Snapshot, forkRunID string) (events.DeliveryRoute, error) {
+func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, event events.Event, delivery runtimedelivery.HistoricalFact, forkRunID string) (events.DeliveryRoute, error) {
 	source := delivery.Route.Normalized()
 	if !source.Recipient.IsAgent() {
 		return events.DeliveryRoute{}, fmt.Errorf("ordinary replay receiver requires an admitted agent delivery")
@@ -530,7 +566,7 @@ func InsertRunForkReplayDelivery(ctx context.Context, attempt *mutationprotocol.
 }
 
 func deterministicRunForkReplayEventID(forkRunID, sourceEventID string) string {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm/run-fork/delivery-event-replay/event/"+strings.TrimSpace(forkRunID)+"/"+strings.TrimSpace(sourceEventID))).String()
+	return runfork.ProjectReplayEventID(forkRunID, sourceEventID)
 }
 
 func DeterministicRunForkReplayEventID(forkRunID, sourceEventID string) string {

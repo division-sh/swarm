@@ -1,0 +1,368 @@
+package runforkexecution
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"reflect"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
+)
+
+type liveWinnerOperationReader interface {
+	LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
+}
+
+type liveWinnerForkProbe struct {
+	SelectedContractForkLifecycle
+	reader       liveWinnerOperationReader
+	materialized chan struct{}
+	allowBinding chan struct{}
+	secondCreate chan struct{}
+	observed     chan struct{}
+	observedOnce sync.Once
+	secondOnce   sync.Once
+	creates      atomic.Int32
+}
+
+func (p *liveWinnerForkProbe) MaterializeRunForkForSelectedContractExecution(ctx context.Context, req runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error) {
+	if p.creates.Add(1) != 1 {
+		p.secondOnce.Do(func() { close(p.secondCreate) })
+		<-ctx.Done()
+		return runfork.RunForkMaterialization{}, ctx.Err()
+	}
+	result, err := p.SelectedContractForkLifecycle.MaterializeRunForkForSelectedContractExecution(ctx, req)
+	if err != nil {
+		return result, err
+	}
+	close(p.materialized)
+	<-p.allowBinding
+	return result, nil
+}
+
+func (p *liveWinnerForkProbe) LoadForkOperation(ctx context.Context, actor, key, hash string) (runfork.ForkOperationRecord, bool, error) {
+	record, found, err := p.reader.LoadForkOperation(ctx, actor, key, hash)
+	if err == nil && found {
+		p.observedOnce.Do(func() { close(p.observed) })
+	}
+	return record, found, err
+}
+
+type liveWinnerExecutionProbe struct {
+	SelectedContractRuntimeExecutionLifecycle
+	entered chan struct{}
+	allow   chan struct{}
+	issues  atomic.Int32
+}
+
+func (p *liveWinnerExecutionProbe) IssueRunForkSelectedContractRuntimeExecution(ctx context.Context, req runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error) {
+	if p.issues.Add(1) == 1 {
+		close(p.entered)
+		select {
+		case <-p.allow:
+		case <-ctx.Done():
+			return runfork.SelectedContractRuntimeExecution{}, ctx.Err()
+		}
+	}
+	return p.SelectedContractRuntimeExecutionLifecycle.IssueRunForkSelectedContractRuntimeExecution(ctx, req)
+}
+
+func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.T) {
+	for _, cell := range []struct {
+		backend         string
+		cancelDuplicate bool
+	}{
+		{"sqlite", false}, {"postgres", false}, {"sqlite", true}, {"postgres", true},
+	} {
+		name := cell.backend
+		if cell.cancelDuplicate {
+			name += "/loser_cancelled"
+		}
+		t.Run(name, func(t *testing.T) {
+			var selected startupownership.Store
+			var owner SelectedContractExecutionOwner
+			if cell.backend == "sqlite" {
+				s := storetest.StartSQLiteRuntimeStore(t)
+				selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
+			} else {
+				s, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
+			}
+			ctx, cancel := context.WithTimeout(runForkTestContext(t), 20*time.Second)
+			defer cancel()
+			capability := selectedContractTestProcessCapability(t, ctx, selected)
+			repo := runForkExecutionRepoRoot(t)
+			fixtureLoader := admittedFixtureSelectedContractSourceLoader{
+				RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"),
+			}
+			loaded, err := fixtureLoader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceID, eventID := uuid.NewString(), uuid.NewString()
+			at := time.Unix(1700002200, 0).UTC()
+			storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+				RunID: sourceID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
+				Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
+			})
+			event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0,
+				sourceID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event,
+				[]events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
+			commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
+			storetest.CaptureRunForkSnapshot(t, ctx, selected, sourceID)
+			selection := runforkadmission.SelectedContractSelection(loaded.Source)
+			operation := runfork.ForkOperationRequest{
+				OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "bound-live-winner", TransportHash: "sha256:same-request",
+				SourceRunID: sourceID, ForkEventID: eventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
+				AllowSourceFreeze: true, ContractSelection: selection,
+			}
+			request := SelectedContractExecutionRequest{
+				Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true,
+				ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection,
+				SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,
+					Store: selected.(SourceArtifactSelectedContractSourceStore)},
+				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
+			}
+			probe := &liveWinnerForkProbe{SelectedContractForkLifecycle: owner.ports.fork, reader: selected.(liveWinnerOperationReader),
+				materialized: make(chan struct{}), allowBinding: make(chan struct{}), secondCreate: make(chan struct{}), observed: make(chan struct{})}
+			execution := &liveWinnerExecutionProbe{SelectedContractRuntimeExecutionLifecycle: owner.ports.runtimeExecution,
+				entered: make(chan struct{}), allow: make(chan struct{})}
+			owner.ports.fork, owner.ports.runtimeExecution = probe, execution
+			type outcome struct {
+				result SelectedContractExecutionResult
+				err    error
+			}
+			var winner, duplicate outcome
+			winnerDone, duplicateDone := make(chan struct{}), make(chan struct{})
+			var releaseBinding, releaseExecution sync.Once
+			duplicateStarted := false
+			duplicateCtx, cancelDuplicate := context.WithCancel(ctx)
+			defer func() {
+				releaseBinding.Do(func() { close(probe.allowBinding) })
+				releaseExecution.Do(func() { close(execution.allow) })
+				cancelDuplicate()
+				cancel()
+				<-winnerDone
+				if duplicateStarted {
+					<-duplicateDone
+				}
+			}()
+			go func() {
+				defer close(winnerDone)
+				winner.result, winner.err = ExecuteSelectedContractRunFork(ctx, request)
+			}()
+			select {
+			case <-probe.materialized:
+			case <-winnerDone:
+				t.Fatalf("winner failed before native commit: %v", winner.err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			duplicateRequest := request
+			duplicateOperation := operation
+			duplicateOperation.OperationID = uuid.NewString()
+			duplicateRequest.ForkOperation = &duplicateOperation
+			duplicateStarted = true
+			go func() {
+				defer close(duplicateDone)
+				duplicate.result, duplicate.err = ExecuteSelectedContractRunFork(duplicateCtx, duplicateRequest)
+			}()
+			releaseBinding.Do(func() { close(probe.allowBinding) })
+			select {
+			case <-execution.entered:
+			case <-winnerDone:
+				t.Fatalf("winner failed before execution issue: %v", winner.err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			select {
+			case <-probe.observed:
+			case <-probe.secondCreate:
+				t.Fatal("duplicate entered materialization while the durable winner had a bound live preparation and no execution row")
+			case <-duplicateDone:
+				t.Fatalf("duplicate did not join the winning outcome: %+v err=%v", duplicate.result, duplicate.err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			if cell.cancelDuplicate {
+				cancelDuplicate()
+				select {
+				case <-duplicateDone:
+					if !errors.Is(duplicate.err, context.Canceled) {
+						t.Fatalf("loser cancellation was not retained: %v", duplicate.err)
+					}
+				case <-ctx.Done():
+					t.Fatal("loser cancellation waited for winner execution")
+				}
+			}
+			releaseExecution.Do(func() { close(execution.allow) })
+			for _, done := range []chan struct{}{winnerDone, duplicateDone} {
+				select {
+				case <-done:
+				case <-ctx.Done():
+					t.Fatal("operation outcome waited for retained-runtime retirement")
+				}
+			}
+			if winner.err != nil || !winner.result.Activation.Activated || winner.result.Materialization.ForkRunID == "" ||
+				probe.creates.Load() != 1 || execution.issues.Load() != 1 {
+				t.Fatalf("keyed join changed child/execution: winner=%+v/%v duplicate=%+v/%v materializations=%d issues=%d",
+					winner.result, winner.err, duplicate.result, duplicate.err, probe.creates.Load(), execution.issues.Load())
+			}
+			if !cell.cancelDuplicate && (duplicate.err != nil || !duplicate.result.Activation.Activated ||
+				winner.result.Materialization.ForkRunID != duplicate.result.Materialization.ForkRunID) {
+				t.Fatalf("duplicate changed acknowledged child: %+v err=%v", duplicate.result, duplicate.err)
+			}
+			owner.ports.contexts.mu.Lock()
+			remaining := len(owner.ports.contexts.entries)
+			owner.ports.contexts.mu.Unlock()
+			if remaining != 1 {
+				t.Fatalf("observer preparation leaked: got %d entries, want retained winner only", remaining)
+			}
+			if observed, err := observeSelectedRetainedExecution(t, ctx, owner, selected, winner.result.Materialization.ForkRunID); err != nil || observed.ExecutedEventCount != 1 {
+				t.Fatalf("join retained winner before replay conservation: %+v err=%v", observed, err)
+			}
+			before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			activated, err := ExecuteSelectedContractRunFork(ctx, duplicateRequest)
+			if err != nil || !activated.Activation.Activated || activated.Materialization.ForkRunID != winner.result.Materialization.ForkRunID {
+				t.Fatalf("activated replay changed outcome: %+v err=%v", activated, err)
+			}
+			hostile := duplicateOperation
+			hostile.TransportHash = "sha256:changed-request"
+			duplicateRequest.ForkOperation = &hostile
+			_, err = ExecuteSelectedContractRunFork(ctx, duplicateRequest)
+			var conflict *runfork.ForkOperationKeyConflictError
+			if !errors.As(err, &conflict) || probe.creates.Load() != 1 || execution.issues.Load() != 1 {
+				t.Fatalf("changed transport crossed original operation: materializations=%d issues=%d err=%v", probe.creates.Load(), execution.issues.Load(), err)
+			}
+			after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("activated/hostile replay mutated application storage: %v", err)
+			}
+			owner.ports.contexts.mu.Lock()
+			remaining = len(owner.ports.contexts.entries)
+			owner.ports.contexts.mu.Unlock()
+			if remaining != 0 {
+				t.Fatalf("replay retained execution after winner completion: got %d entries", remaining)
+			}
+		})
+	}
+}
+
+func TestSelectedForkSameKeyRecoversOwnerlessMaterializationBothStores(t *testing.T) {
+	t.Run("historical_source", proveSelectedQ1FrozenOwnerlessRecoveryBothStores)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx, request := ownerlessSelectedOperationFixture(t, backend)
+			materialized := abandonSelectedOperationPreparation(t, ctx, request)
+			replay := *request.ForkOperation
+			replay.OperationID = uuid.NewString()
+			request.ForkOperation = &replay
+			result, err := ExecuteSelectedContractRunFork(ctx, request)
+			if err != nil || !result.Activation.Activated || result.Materialization.ForkRunID != materialized.ForkRunID {
+				t.Fatalf("ownerless operation did not resume its committed child: result=%+v err=%v", result, err)
+			}
+			record, found, err := request.Owner.ports.fork.LoadForkOperation(ctx, replay.Actor, replay.IdempotencyKey, replay.TransportHash)
+			if err != nil || !found || record.Status != runfork.ForkOperationActivated || record.ForkRunID != materialized.ForkRunID ||
+				record.Request.OperationID == replay.OperationID {
+				t.Fatalf("recovery replaced the original operation: record=%+v found=%t err=%v", record, found, err)
+			}
+		})
+	}
+}
+
+func abandonSelectedOperationPreparation(t *testing.T, ctx context.Context, request SelectedContractExecutionRequest) runfork.RunForkMaterialization {
+	t.Helper()
+	prepared, err := request.Owner.Prepare(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := prepared.Close(); err != nil {
+			t.Error("close abandoned preparation:", err)
+		}
+	}()
+	materialized, acknowledged, err := request.Owner.materializePrepared(ctx, prepared)
+	if !acknowledged || err != nil {
+		t.Fatal("materialize exact operation:", err)
+	}
+	if err := prepared.Close(); err != nil {
+		t.Fatal("release abandoned preparation:", err)
+	}
+	return materialized
+}
+
+func ownerlessSelectedOperationFixture(t *testing.T, backend string) (context.Context, SelectedContractExecutionRequest) {
+	t.Helper()
+	return ownerlessSelectedOperationFixtureFromSource(t, backend, "tests/tier1-primitives/test-emits-multiple", "item.received")
+}
+
+func ownerlessSelectedOperationFixtureFromSource(t *testing.T, backend, sourceRoot, eventName string) (context.Context, SelectedContractExecutionRequest) {
+	t.Helper()
+	var selected startupownership.Store
+	var owner SelectedContractExecutionOwner
+	if backend == "sqlite" {
+		s := storetest.StartSQLiteRuntimeStore(t)
+		selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
+	} else {
+		s, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+		selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
+	}
+	ctx, cancel := context.WithTimeout(runForkTestContext(t), 20*time.Second)
+	t.Cleanup(cancel)
+	capability := selectedContractTestProcessCapability(t, ctx, selected)
+	repo := runForkExecutionRepoRoot(t)
+	loader := admittedFixtureSelectedContractSourceLoader{
+		RepoRoot: repo, SourceRoot: sourceRoot,
+	}
+	if !filepath.IsAbs(loader.SourceRoot) {
+		loader.SourceRoot = filepath.Join(repo, loader.SourceRoot)
+	}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceID, eventID := uuid.NewString(), uuid.NewString()
+	at := time.Unix(1700002200, 0).UTC()
+	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+		RunID: sourceID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
+		Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
+	})
+	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, events.EventType(eventName), "source-runtime", "", []byte(`{}`), 0,
+		sourceID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event,
+		[]events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
+	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
+	storetest.CaptureRunForkSnapshot(t, ctx, selected, sourceID)
+	selection := runforkadmission.SelectedContractSelection(loaded.Source)
+	operation := runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "ownerless-winner", TransportHash: "sha256:same-request",
+		SourceRunID: sourceID, ForkEventID: eventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
+		AllowSourceFreeze: true, ContractSelection: selection,
+	}
+	return ctx, SelectedContractExecutionRequest{
+		Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true,
+		ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection,
+		SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,
+			Store: selected.(SourceArtifactSelectedContractSourceStore)},
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
+	}
+}

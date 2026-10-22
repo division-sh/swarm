@@ -352,9 +352,32 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 			return independentPubsubSubscriber(subscriber) && input.AllowsSubscriber(subscriber)
 		}
 	}
+	if selected, ok := selectedForkRecipientPlanFromContext(ctx, evt); ok {
+		previous := include
+		include = func(subscriber Subscriber) bool {
+			return previous(subscriber) && selected.allowsSubscriber(subscriber, evt)
+		}
+	}
 	routing, err := p.routeResolver.resolve(ctx, localEvent, source, include)
 	if err != nil {
 		return RoutePlan{}, err
+	}
+	if selected, ok := selectedForkRecipientPlanFromContext(ctx, evt); ok {
+		candidates := routing.Recipients[:0]
+		for _, candidate := range routing.Recipients {
+			if !candidate.PersistAsDelivery {
+				candidates = append(candidates, candidate)
+				continue
+			}
+			for _, expected := range selected.recipients {
+				plan, err := candidate.AgentIdentity.Plan()
+				if err == nil && expected.Recipient.IsAgent() && expected.AgentPlan == plan {
+					candidates = append(candidates, candidate)
+					break
+				}
+			}
+		}
+		routing.Recipients = candidates
 	}
 	manifest, err := p.recipientPolicy.evaluate(ctx, localEvent, routing.Recipients, source)
 	if err != nil {
@@ -454,6 +477,8 @@ func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRout
 	routePlan.ReplyContextConsumed = connectPlan.ReplyContextConsumed
 	routePlan.ActivationPlans = append([]runtimepipeline.FlowInstanceActivationPlan(nil), connectPlan.ActivationPlans...)
 	routePlan.ReplyCreations = append([]runtimereplycontext.Record(nil), connectPlan.ReplyCreations...)
+	routePlan.ReplyContinuations = append([]runtimepinrouting.ReplyRequestContinuation(nil), connectPlan.ReplyContinuations...)
+	routePlan.ReplyReturns = append([]runtimepinrouting.ReplyReturnContinuation(nil), connectPlan.ReplyReturns...)
 	routePlan.ReplyClaims = append([]runtimereplycontext.ClaimCommand(nil), connectPlan.ReplyClaims...)
 	routePlan.unavailableReceiverError = connectPlan.unavailableReceiverError
 	return routePlan.Normalized()

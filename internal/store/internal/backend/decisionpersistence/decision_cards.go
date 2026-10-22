@@ -531,7 +531,7 @@ func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivit
 	if err := requireActiveDecisionCardRunTx(ctx, tx, req.CardID, postgres); err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
-	if err := RequireNormalCardControlTx(ctx, tx, req.CardID, runfork.ControlMailboxDecide, postgres); err != nil {
+	if err := RequireCardControlTx(ctx, tx, req.CardID, runfork.ControlMailboxDecide, postgres, true); err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
 	card, err := loadPendingDecisionCardMutation(ctx, tx, req.CardID, postgres)
@@ -686,7 +686,7 @@ func deferDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity
 	if err := requireActiveDecisionCardRunTx(ctx, tx, req.CardID, postgres); err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
-	if err := RequireNormalCardControlTx(ctx, tx, req.CardID, runfork.ControlMailboxDefer, postgres); err != nil {
+	if err := RequireCardControlTx(ctx, tx, req.CardID, runfork.ControlMailboxDefer, postgres, true); err != nil {
 		return decisioncard.DecisionOutcome{}, err
 	}
 	card, err := loadPendingDecisionCardMutation(ctx, tx, req.CardID, postgres)
@@ -754,7 +754,7 @@ func beginDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.Be
 	if err := requireActiveDecisionCardRunTx(ctx, tx, req.CardID, postgres); err != nil {
 		return decisioncard.InputDraft{}, err
 	}
-	if err := RequireNormalCardControlTx(ctx, tx, req.CardID, runfork.ControlMailboxBeginInput, postgres); err != nil {
+	if err := RequireCardControlTx(ctx, tx, req.CardID, runfork.ControlMailboxBeginInput, postgres, true); err != nil {
 		return decisioncard.InputDraft{}, err
 	}
 	card, err := loadPendingDecisionCardMutation(ctx, tx, req.CardID, postgres)
@@ -841,7 +841,7 @@ func cancelDecisionCardInput(ctx context.Context, tx *sql.Tx, req decisioncard.C
 	if draft.CardID != strings.TrimSpace(req.CardID) || draft.PrincipalID != strings.TrimSpace(req.PrincipalID) || draft.Status != decisioncard.DraftStatusActive || !draft.ExpiresAt.After(now) {
 		return decisioncard.InputDraft{}, decisioncard.ErrDraftNotAuthority
 	}
-	if err := storerunstate.RequireNormalControlTx(ctx, tx, draft.RunID, runfork.ControlMailboxCancelInput); err != nil {
+	if err := RequireCardRunControl(ctx, tx, draft.RunID, runfork.ControlMailboxCancelInput, postgres, true); err != nil {
 		return decisioncard.InputDraft{}, err
 	}
 	if err := updateDecisionCardDraftStatus(ctx, tx, draft.InputDraftID, decisioncard.DraftStatusCancelled, now, postgres); err != nil {

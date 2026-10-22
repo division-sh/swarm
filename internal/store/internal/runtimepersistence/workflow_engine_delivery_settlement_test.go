@@ -276,6 +276,7 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 				Source:      fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, EventID: event.ID(), Field: "candidate_ids"},
 				Cardinality: 3,
 				Capsule: fanoutobligation.Capsule{
+					SourcePlanRef:    runtimecontracts.FanOutPlanRef{BundleHash: fixture.bundle.SourceArtifact.BundleHash(), ElementRef: element, SemanticDigest: sourceDigest},
 					SourceProjection: sourceEvidence,
 					NodeKey:          node.Key(), ExecutionFlowID: flowID,
 					Route:    runtimeflowidentity.StoredRoute(flowID, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath),

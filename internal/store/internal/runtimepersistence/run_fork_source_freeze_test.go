@@ -339,12 +339,12 @@ func seedRunForkFreezeActivityAuthority(t *testing.T, ctx context.Context, db *s
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO activity_attempts (
-			request_event_id, run_id, execution_mode, node_id, handler_event_key, activity_id, tool, effect_class,
+			request_event_id, run_id, execution_mode, node_id, handler_event_key, activity_id, tool,
 			attempt, status, success_event, failure_event, result_event_id, result_event_type,
 			result_payload, input_hash, loop_generation, started_at, completed_at, updated_at
 		) VALUES (
 			$1::uuid, $2::uuid, 'live', 'freeze-node', 'freeze.handler', 'freeze-activity', 'test.tool',
-			'non_idempotent_write', 1, $3, 'activity.succeeded', 'activity.failed', $4::uuid, $5,
+			1, $3, 'activity.succeeded', 'activity.failed', $4::uuid, $5,
 			$6::jsonb, 'input-hash', '{}'::jsonb, $7, $8, $7
 		)
 	`, uuid.NewString(), lineage.SourceRunID, status, resultEventID, resultEventType, resultPayload, now, completedAt); err != nil {

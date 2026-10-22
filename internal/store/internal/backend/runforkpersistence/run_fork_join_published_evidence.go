@@ -1,0 +1,83 @@
+package runforkpersistence
+
+import (
+	"fmt"
+
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
+)
+
+// A source occurrence is read from its fixed cut, never from current timers or
+// a new schedule admission. Existing pending-work projection retains its exact
+// historical delivery rows independently of this immutable publication proof.
+func runForkPublishedJoinEvidence(snapshot *runForkRevisionSnapshot, activation genericschedule.Activation) (events.AdmittedEvent, error) {
+	if snapshot == nil || snapshot.RunID != activation.Command.RunID || snapshot.Revision <= 0 || activation.CurrentEventID == "" {
+		return events.AdmittedEvent{}, fmt.Errorf("published join evidence requires its exact source cut and occurrence")
+	}
+	var found *runForkRevisionEvent
+	for i := range snapshot.Events {
+		row := &snapshot.Events[i]
+		if row.EventID != activation.CurrentEventID {
+			continue
+		}
+		if found != nil || row.RunID != snapshot.RunID || row.FirstRevision <= 0 || row.Revision < row.FirstRevision || row.Revision > snapshot.Revision {
+			return events.AdmittedEvent{}, fmt.Errorf("published join event contradicts its exact historical cut")
+		}
+		found = row
+	}
+	if found == nil {
+		return events.AdmittedEvent{}, fmt.Errorf("published join lacks its exact historical event")
+	}
+	event, err := decodeRunForkRevisionEvent(*found)
+	if err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	if _, err := activation.ValidatePublishedOccurrence(event.Event()); err != nil {
+		return events.AdmittedEvent{}, err
+	}
+	return event, nil
+}
+
+func historicalArrivalPublications(snapshot *runForkRevisionSnapshot, arrivals []genericschedule.Activation) ([]runfork.PublishedJoinOccurrence, error) {
+	var publications []runfork.PublishedJoinOccurrence
+	for _, activation := range arrivals {
+		if activation.Status != genericschedule.StatusFired {
+			continue
+		}
+		admitted, err := runForkPublishedJoinEvidence(snapshot, activation)
+		if err != nil {
+			return nil, err
+		}
+		publication, err := runfork.NewPublishedJoinOccurrence(activation, admitted.Event())
+		if err != nil {
+			return nil, err
+		}
+		publications = append(publications, publication)
+	}
+	return publications, nil
+}
+
+func attachRunForkPublishedArrivals(snapshot *runForkRevisionSnapshot, entities []runfork.RunForkEntityState, arrivals []genericschedule.Activation) error {
+	publications, err := historicalArrivalPublications(snapshot, arrivals)
+	if err != nil {
+		return err
+	}
+	for _, publication := range publications {
+		found := false
+		for index := range entities {
+			if entities[index].EntityID != publication.Command().EntityID {
+				continue
+			}
+			if found {
+				return fmt.Errorf("published arrival has multiple historical entity owners")
+			}
+			found = true
+			entities[index].PublishedArrivals = append(entities[index].PublishedArrivals, publication)
+		}
+		if !found {
+			return fmt.Errorf("published arrival lacks its historical entity owner")
+		}
+	}
+	return nil
+}

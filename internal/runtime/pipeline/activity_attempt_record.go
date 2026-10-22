@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -46,6 +47,8 @@ type ActivityAttemptRecord struct {
 	StartedAt       time.Time
 	CompletedAt     *time.Time
 	UpdatedAt       time.Time
+
+	ExecutionBinding processbinding.ActivityExecutionBinding
 }
 
 func NormalizeActivityAttemptRecord(rec ActivityAttemptRecord) ActivityAttemptRecord {
@@ -173,6 +176,26 @@ func ValidateActivityAttemptTerminalMode(actual, expected ActivityAttemptRecord)
 		return nil
 	}
 	return fmt.Errorf("activity attempt %s execution_mode conflict: stored %q, terminal %q", expected.RequestEventID, actual.ExecutionMode, expected.ExecutionMode)
+}
+
+// Execution identity is stricter than historical result reuse. A copied terminal
+// row is not a new execution, and its attribution must never become a writer permit.
+func ValidateActivityAttemptExecutionIdentity(actual, expected ActivityAttemptRecord) error {
+	if actual.Attempt != expected.Attempt {
+		return fmt.Errorf("activity execution callback attempt differs from the original attempt")
+	}
+	if err := ValidateActivityAttemptClaimIdentity(actual, expected); err != nil {
+		return err
+	}
+	actual, expected = NormalizeActivityAttemptRecord(actual), NormalizeActivityAttemptRecord(expected)
+	if actual.SourceEventID == expected.SourceEventID && actual.ParentEventID == expected.ParentEventID &&
+		actual.ReplyContextID == expected.ReplyContextID && actual.Attempt == expected.Attempt &&
+		actual.Generation == expected.Generation && actual.ExecutionBinding == expected.ExecutionBinding {
+		return nil
+	}
+	return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "activity_execution_identity_conflict", "activity-runtime", "write_activity_attempt", map[string]any{
+		"activity_id": expected.ActivityID, "request_event_id": expected.RequestEventID,
+	})
 }
 
 func validateActivityAttemptUUID(value, field string) error {

@@ -53,7 +53,9 @@ type completionContinuationRow struct {
 	memoryEnabled      bool
 	entityID           string
 	surface            string
+	surfaceProjection  storemanagedcapability.StoredProjection
 	providerRequest    string
+	liveTurnParents    bool
 }
 
 func (s *EffectPostgresOwner) RecoverCompletionContinuation(ctx context.Context, req runtimeeffects.CompletionContinuationRequest) (runtimeeffects.Attempt, bool, error) {
@@ -167,7 +169,9 @@ const postgresCompletionContinuationSelect = `
 	SELECT o.operation_id::text,o.effect_class,o.request_fingerprint,COALESCE(o.capability_plan_fingerprint,''),o.bundle_hash,
 	       a.attempt_id::text,a.attempt_ordinal,a.adapter,a.transport,a.authorized_at,a.evidence::text,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn::text,''),
 	       t.turn_id::text,t.run_id::text,t.agent_id,t.agent_name_owner,t.agent_name_source,t.agent_route_presence,
-	       t.flow_scope_key,t.flow_instance_id,t.flow_instance,t.session_id::text,t.memory_enabled,COALESCE(t.entity_id::text,''),surface.surface::text,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),a.authority_evidence->'provider_request'
+	       t.flow_scope_key,t.flow_instance_id,t.flow_instance,t.session_id::text,t.memory_enabled,COALESCE(t.entity_id::text,''),surface.surface::text,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),a.authority_evidence->'provider_request',
+	       EXISTS (SELECT 1 FROM agent_turn_live_parents p WHERE ` + agentTurnLiveParentMatch + `),
+	       surface.execution_kind,surface.execution_authority_id,surface.run_id,surface.selected_execution_id,surface.selected_fork_run_id
 	FROM runtime_external_effect_attempts a
 	JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 	JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id
@@ -182,7 +186,9 @@ const sqliteCompletionContinuationSelect = `
 	SELECT o.operation_id,o.effect_class,o.request_fingerprint,COALESCE(o.capability_plan_fingerprint,''),o.bundle_hash,
 	       a.attempt_id,a.attempt_ordinal,a.adapter,a.transport,a.authorized_at,a.evidence,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn,''),
 	       t.turn_id,t.run_id,t.agent_id,t.agent_name_owner,t.agent_name_source,t.agent_route_presence,
-	       t.flow_scope_key,t.flow_instance_id,t.flow_instance,t.session_id,t.memory_enabled,COALESCE(t.entity_id,''),surface.surface,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),json_extract(a.authority_evidence,'$.provider_request')
+	       t.flow_scope_key,t.flow_instance_id,t.flow_instance,t.session_id,t.memory_enabled,COALESCE(t.entity_id,''),surface.surface,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),json_extract(a.authority_evidence,'$.provider_request'),
+	       EXISTS (SELECT 1 FROM agent_turn_live_parents p WHERE ` + agentTurnLiveParentMatch + `),
+	       surface.execution_kind,surface.execution_authority_id,surface.run_id,surface.selected_execution_id,surface.selected_fork_run_id
 	FROM runtime_external_effect_attempts a
 	JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 	JOIN agent_turns t ON t.completion_attempt_id=a.attempt_id
@@ -223,9 +229,14 @@ func scanCompletionContinuationRows(rows *sql.Rows) ([]completionContinuationRow
 			&row.attemptID, &row.attemptOrdinal, &row.adapter, &row.transport, &authorizedAt, &row.evidence, &row.phase, &row.successor,
 			&row.turnID, &row.runID, &row.agentID, &row.nameOwner, &row.nameSource, &row.routePresence,
 			&row.flowScopeKey, &row.flowInstanceID, &row.flowInstance, &row.sessionID, &row.memoryEnabled, &row.entityID, &row.surface, &row.sessionGrantID, &row.sessionLockOwner,
-			&row.providerRequest,
+			&row.providerRequest, &row.liveTurnParents,
+			&row.surfaceProjection.ExecutionKind, &row.surfaceProjection.ExecutionAuthorityID,
+			&row.surfaceProjection.RunID, &row.surfaceProjection.SelectedExecutionID, &row.surfaceProjection.SelectedForkRunID,
 		); err != nil {
 			return nil, err
+		}
+		if !row.liveTurnParents {
+			return nil, errors.New("completion turn lacks its exact live-parent association")
 		}
 		if !authorizedAt.Valid {
 			return nil, errors.New("settled completion continuation is missing authorized_at")
@@ -253,7 +264,7 @@ func admitCompletionContinuationRow(ctx context.Context, req runtimeeffects.Comp
 	if req.Memory != plan || (plan.Enabled && strings.TrimSpace(req.SessionID) != strings.TrimSpace(row.sessionID)) || row.bundleHash != bundleHash {
 		return runtimeeffects.Attempt{}, errors.New("settled completion continuation session, memory, or bundle identity is stale")
 	}
-	surface, err := storemanagedcapability.Decode([]byte(row.surface))
+	surface, err := storemanagedcapability.DecodeStored([]byte(row.surface), row.surfaceProjection)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
@@ -307,9 +318,14 @@ type lockedCompletionContinuation struct {
 	phase              runtimeeffects.CompletionProjectionPhase
 	successor          string
 	surface            managedcapabilities.Surface
+	surfaceProjection  storemanagedcapability.StoredProjection
+	liveTurnParents    bool
 }
 
 func admitSettledCompletionContinuation(ctx context.Context, attempt runtimeeffects.Attempt, row lockedCompletionContinuation, surfaceRaw string) (runtimeeffects.Attempt, error) {
+	if !row.liveTurnParents {
+		return runtimeeffects.Attempt{}, errors.New("completion turn lacks its exact live-parent association")
+	}
 	bundleHash, err := requiredExternalEffectBundleHash(ctx, attempt.Authority)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
@@ -317,7 +333,7 @@ func admitSettledCompletionContinuation(ctx context.Context, attempt runtimeeffe
 	if row.bundleHash != bundleHash || row.phase != runtimeeffects.CompletionProjectionResponseSettled {
 		return runtimeeffects.Attempt{}, errors.New("settled completion continuation bundle or phase is stale")
 	}
-	surface, err := storemanagedcapability.Decode([]byte(surfaceRaw))
+	surface, err := storemanagedcapability.DecodeStored([]byte(surfaceRaw), row.surfaceProjection)
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
@@ -335,14 +351,16 @@ func loadSettledCompletionContinuationPostgres(ctx context.Context, tx *sql.Tx, 
 	var row lockedCompletionContinuation
 	var surfaceRaw string
 	err := tx.QueryRowContext(ctx, `
-			SELECT o.request_fingerprint,o.capability_plan_fingerprint,o.bundle_hash,a.evidence::text,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn::text,''),surface.surface::text,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,'')
+			SELECT o.request_fingerprint,o.capability_plan_fingerprint,o.bundle_hash,a.evidence::text,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn::text,''),surface.surface::text,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),`+completionTurnLiveParentExists+`,
+			surface.execution_kind,surface.execution_authority_id,surface.run_id,surface.selected_execution_id,surface.selected_fork_run_id
 		FROM runtime_external_effect_attempts a
 		JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 		JOIN managed_agent_capability_surfaces surface ON surface.surface_id=a.capability_surface_id
 		WHERE a.attempt_id=$1::uuid AND a.operation_id=$2::uuid AND a.origin_delivery_id=$3::uuid
 		  AND a.state='settled' AND o.state='settled' AND o.effect_kind='provider_turn' AND o.authority_kind='normal_agent'
 		  AND a.completion_continuation_active=TRUE
-	`, attempt.AttemptID, attempt.OperationID, attempt.Origin.Delivery.DeliveryID()).Scan(&row.requestFingerprint, &row.planFingerprint, &row.bundleHash, &row.evidence, &row.phase, &row.successor, &surfaceRaw, &row.sessionGrantID, &row.sessionLockOwner)
+	`, attempt.AttemptID, attempt.OperationID, attempt.Origin.Delivery.DeliveryID()).Scan(&row.requestFingerprint, &row.planFingerprint, &row.bundleHash, &row.evidence, &row.phase, &row.successor, &surfaceRaw, &row.sessionGrantID, &row.sessionLockOwner, &row.liveTurnParents,
+		&row.surfaceProjection.ExecutionKind, &row.surfaceProjection.ExecutionAuthorityID, &row.surfaceProjection.RunID, &row.surfaceProjection.SelectedExecutionID, &row.surfaceProjection.SelectedForkRunID)
 	if err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("load committed completion continuation: %w", err)
 	}
@@ -353,14 +371,16 @@ func loadSettledCompletionContinuationSQLite(ctx context.Context, tx *sql.Tx, at
 	var row lockedCompletionContinuation
 	var surfaceRaw string
 	err := tx.QueryRowContext(ctx, `
-			SELECT o.request_fingerprint,o.capability_plan_fingerprint,o.bundle_hash,a.evidence,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn,''),surface.surface,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,'')
+			SELECT o.request_fingerprint,o.capability_plan_fingerprint,o.bundle_hash,a.evidence,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn,''),surface.surface,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),`+completionTurnLiveParentExists+`,
+			surface.execution_kind,surface.execution_authority_id,surface.run_id,surface.selected_execution_id,surface.selected_fork_run_id
 		FROM runtime_external_effect_attempts a
 		JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 		JOIN managed_agent_capability_surfaces surface ON surface.surface_id=a.capability_surface_id
 		WHERE a.attempt_id=? AND a.operation_id=? AND a.origin_delivery_id=?
 		  AND a.state='settled' AND o.state='settled' AND o.effect_kind='provider_turn' AND o.authority_kind='normal_agent'
 		  AND a.completion_continuation_active=1
-	`, attempt.AttemptID, attempt.OperationID, attempt.Origin.Delivery.DeliveryID()).Scan(&row.requestFingerprint, &row.planFingerprint, &row.bundleHash, &row.evidence, &row.phase, &row.successor, &surfaceRaw, &row.sessionGrantID, &row.sessionLockOwner)
+	`, attempt.AttemptID, attempt.OperationID, attempt.Origin.Delivery.DeliveryID()).Scan(&row.requestFingerprint, &row.planFingerprint, &row.bundleHash, &row.evidence, &row.phase, &row.successor, &surfaceRaw, &row.sessionGrantID, &row.sessionLockOwner, &row.liveTurnParents,
+		&row.surfaceProjection.ExecutionKind, &row.surfaceProjection.ExecutionAuthorityID, &row.surfaceProjection.RunID, &row.surfaceProjection.SelectedExecutionID, &row.surfaceProjection.SelectedForkRunID)
 	if err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("load committed sqlite completion continuation: %w", err)
 	}
@@ -608,7 +628,8 @@ func (s *EffectPostgresOwner) lockCompletionContinuationPostgres(ctx context.Con
 	var row lockedCompletionContinuation
 	var surfaceRaw string
 	err := tx.QueryRowContext(ctx, `
-		SELECT o.request_fingerprint,o.capability_plan_fingerprint,o.bundle_hash,a.evidence::text,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn::text,''),surface.surface::text,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,'')
+		SELECT o.request_fingerprint,o.capability_plan_fingerprint,o.bundle_hash,a.evidence::text,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn::text,''),surface.surface::text,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),`+completionTurnLiveParentExists+`,
+		surface.execution_kind,surface.execution_authority_id,surface.run_id,surface.selected_execution_id,surface.selected_fork_run_id
 		FROM runtime_external_effect_attempts a
 		JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 		JOIN managed_agent_capability_surfaces surface ON surface.surface_id=a.capability_surface_id
@@ -616,7 +637,8 @@ func (s *EffectPostgresOwner) lockCompletionContinuationPostgres(ctx context.Con
 		  AND a.state='settled' AND o.state='settled' AND o.effect_kind='provider_turn' AND o.authority_kind='normal_agent'
 		  AND a.completion_continuation_active=TRUE
 		FOR UPDATE
-	`, attempt.AttemptID, attempt.OperationID, attempt.Origin.Delivery.DeliveryID()).Scan(&row.requestFingerprint, &row.planFingerprint, &row.bundleHash, &row.evidence, &row.phase, &row.successor, &surfaceRaw, &row.sessionGrantID, &row.sessionLockOwner)
+	`, attempt.AttemptID, attempt.OperationID, attempt.Origin.Delivery.DeliveryID()).Scan(&row.requestFingerprint, &row.planFingerprint, &row.bundleHash, &row.evidence, &row.phase, &row.successor, &surfaceRaw, &row.sessionGrantID, &row.sessionLockOwner, &row.liveTurnParents,
+		&row.surfaceProjection.ExecutionKind, &row.surfaceProjection.ExecutionAuthorityID, &row.surfaceProjection.RunID, &row.surfaceProjection.SelectedExecutionID, &row.surfaceProjection.SelectedForkRunID)
 	if err != nil {
 		return lockedCompletionContinuation{}, fmt.Errorf("lock completion continuation: %w", err)
 	}
@@ -636,14 +658,16 @@ func (s *EffectSQLiteOwner) lockCompletionContinuationSQLite(ctx context.Context
 	var row lockedCompletionContinuation
 	var surfaceRaw string
 	err := tx.QueryRowContext(ctx, `
-		SELECT o.request_fingerprint,o.capability_plan_fingerprint,o.bundle_hash,a.evidence,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn,''),surface.surface,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,'')
+		SELECT o.request_fingerprint,o.capability_plan_fingerprint,o.bundle_hash,a.evidence,COALESCE(a.completion_projection_phase,''),COALESCE(a.completion_successor_turn,''),surface.surface,COALESCE(a.session_grant_id,''),COALESCE(a.session_lock_owner,''),`+completionTurnLiveParentExists+`,
+		surface.execution_kind,surface.execution_authority_id,surface.run_id,surface.selected_execution_id,surface.selected_fork_run_id
 		FROM runtime_external_effect_attempts a
 		JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id
 		JOIN managed_agent_capability_surfaces surface ON surface.surface_id=a.capability_surface_id
 		WHERE a.attempt_id=? AND a.operation_id=? AND a.origin_delivery_id=?
 		  AND a.state='settled' AND o.state='settled' AND o.effect_kind='provider_turn' AND o.authority_kind='normal_agent'
 		  AND a.completion_continuation_active=1
-	`, attempt.AttemptID, attempt.OperationID, attempt.Origin.Delivery.DeliveryID()).Scan(&row.requestFingerprint, &row.planFingerprint, &row.bundleHash, &row.evidence, &row.phase, &row.successor, &surfaceRaw, &row.sessionGrantID, &row.sessionLockOwner)
+	`, attempt.AttemptID, attempt.OperationID, attempt.Origin.Delivery.DeliveryID()).Scan(&row.requestFingerprint, &row.planFingerprint, &row.bundleHash, &row.evidence, &row.phase, &row.successor, &surfaceRaw, &row.sessionGrantID, &row.sessionLockOwner, &row.liveTurnParents,
+		&row.surfaceProjection.ExecutionKind, &row.surfaceProjection.ExecutionAuthorityID, &row.surfaceProjection.RunID, &row.surfaceProjection.SelectedExecutionID, &row.surfaceProjection.SelectedForkRunID)
 	if err != nil {
 		return lockedCompletionContinuation{}, fmt.Errorf("lock sqlite completion continuation: %w", err)
 	}
@@ -651,6 +675,9 @@ func (s *EffectSQLiteOwner) lockCompletionContinuationSQLite(ctx context.Context
 }
 
 func validateLockedCompletionContinuation(ctx context.Context, attempt runtimeeffects.Attempt, row lockedCompletionContinuation, surfaceRaw string) (lockedCompletionContinuation, error) {
+	if !row.liveTurnParents {
+		return lockedCompletionContinuation{}, errors.New("completion turn lacks its exact live-parent association")
+	}
 	if row.sessionGrantID != attempt.SessionGrantID || row.sessionLockOwner != attempt.SessionLockOwner {
 		return lockedCompletionContinuation{}, errors.New("completion continuation original grant attachment mismatch")
 	}
@@ -661,7 +688,7 @@ func validateLockedCompletionContinuation(ctx context.Context, attempt runtimeef
 	if row.bundleHash != bundleHash || !runtimeeffects.CompletionProjectionPhase(row.phase).Valid() {
 		return lockedCompletionContinuation{}, errors.New("completion continuation bundle or projection phase is stale")
 	}
-	surface, err := storemanagedcapability.Decode([]byte(surfaceRaw))
+	surface, err := storemanagedcapability.DecodeStored([]byte(surfaceRaw), row.surfaceProjection)
 	if err != nil {
 		return lockedCompletionContinuation{}, err
 	}

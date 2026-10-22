@@ -2,6 +2,7 @@ package semanticview
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -16,12 +17,14 @@ import (
 type OriginalLoopCarriage struct{ state *originalLoopCarriage }
 
 type originalLoopCarriage struct {
-	bundleHash string
-	rootFlow   string
-	inputs     map[loopInputScope]LoopRevisionRole
-	outputs    map[loopOutputScope][]loopOutputMeaning
-	activities map[loopActivityScope]LoopRevisionRole
-	fanOuts    map[contracts.FanOutPlanRef]loopFanOutMeaning
+	bundleHash      string
+	rootFlow        string
+	inputs          map[loopInputScope]LoopRevisionRole
+	outputs         map[loopOutputScope][]loopOutputMeaning
+	activities      map[loopActivityScope]originalActivityMeaning
+	activityHistory map[string]*originalLoopCarriage
+	activityOrigins map[activityRequestScope]ActivityRequestOrigin
+	fanOuts         map[contracts.FanOutPlanRef]loopFanOutMeaning
 }
 
 type loopInputScope struct{ flow, event string }
@@ -35,6 +38,11 @@ type loopOutputMeaning struct {
 type loopActivityScope struct {
 	node                    identity.ExecutableNode
 	handler, activity, tool string
+}
+
+type originalActivityMeaning struct {
+	role             LoopRevisionRole
+	approvalDecision string
 }
 
 type loopFanOutMeaning struct {
@@ -88,6 +96,36 @@ func (c OriginalLoopCarriage) RequireSource(bundleHash string) error {
 	return nil
 }
 
+// Historical fan-out declarations keep their original role after a selected
+// artifact removes them. Add only artifact-admitted evidence, never a guessed
+// role from the current contract or caller-authored capsule.
+func (c OriginalLoopCarriage) WithFanOutHistory(source Source) (OriginalLoopCarriage, error) {
+	if c.state == nil || c.state.bundleHash == "" {
+		return OriginalLoopCarriage{}, fmt.Errorf("fan-out history requires the original source carriage")
+	}
+	proofs, err := CompileFanOutPlanCarriage(source)
+	if err != nil {
+		return OriginalLoopCarriage{}, err
+	}
+	history, err := CompileOriginalLoopCarriage(source)
+	if err != nil {
+		return OriginalLoopCarriage{}, err
+	}
+	state := *c.state
+	state.fanOuts = maps.Clone(state.fanOuts)
+	for ref, meaning := range history.state.fanOuts {
+		proof, _, err := proofs.Resolve(ref.ElementRef)
+		if err != nil || proof != ref {
+			return OriginalLoopCarriage{}, fmt.Errorf("historical fan-out role lacks exact artifact evidence")
+		}
+		if prior, exists := state.fanOuts[ref]; exists && prior != meaning {
+			return OriginalLoopCarriage{}, fmt.Errorf("historical fan-out has conflicting original roles")
+		}
+		state.fanOuts[ref] = meaning
+	}
+	return OriginalLoopCarriage{state: &state}, nil
+}
+
 func (c OriginalLoopCarriage) Resolve(scope LoopEventScope) (LoopRevisionRole, bool, error) {
 	if c.state == nil || c.state.bundleHash == "" {
 		return LoopRevisionRole{}, false, fmt.Errorf("original loop carriage is not admitted")
@@ -135,15 +173,28 @@ func (c OriginalLoopCarriage) ResolveActivity(node identity.ExecutableNode, hand
 	if c.state == nil || c.state.bundleHash == "" {
 		return LoopRevisionRole{}, false, fmt.Errorf("original activity carriage is not admitted")
 	}
-	role, exists := c.state.activities[loopActivityScope{node, handler, activity, tool}]
+	meaning, exists := c.state.activities[loopActivityScope{node, handler, activity, tool}]
 	if !exists {
 		return LoopRevisionRole{}, false, fmt.Errorf("activity has no exact original declaration")
 	}
-	return role, role != (LoopRevisionRole{}), nil
+	return meaning.role, meaning.role != (LoopRevisionRole{}), nil
+}
+
+// ResolveActivityApproval returns declaration evidence, not a decided proposal
+// or permission to execute. Empty means an exact site declared no approval.
+func (c OriginalLoopCarriage) ResolveActivityApproval(node identity.ExecutableNode, handler, activity, tool string) (string, error) {
+	if c.state == nil || c.state.bundleHash == "" {
+		return "", fmt.Errorf("original activity carriage is not admitted")
+	}
+	meaning, exists := c.state.activities[loopActivityScope{node, handler, activity, tool}]
+	if !exists {
+		return "", fmt.Errorf("activity has no exact original declaration")
+	}
+	return meaning.approvalDecision, nil
 }
 
 func (c OriginalLoopCarriage) ResolveFanOut(ref contracts.FanOutPlanRef, node identity.ExecutableNode, handler string) (LoopRevisionRole, bool, error) {
-	if c.state == nil || c.state.bundleHash == "" || ref.BundleHash != c.state.bundleHash {
+	if c.state == nil || c.state.bundleHash == "" {
 		return LoopRevisionRole{}, false, fmt.Errorf("fan-out carriage requires its exact original artifact")
 	}
 	meaning, found := c.state.fanOuts[ref]
@@ -196,7 +247,7 @@ func compileLoopCarriage(source Source) (*originalLoopCarriage, error) {
 	if source == nil {
 		return nil, fmt.Errorf("loop carriage requires a semantic source")
 	}
-	state := &originalLoopCarriage{rootFlow: RootExecutionFlowID(source), inputs: map[loopInputScope]LoopRevisionRole{}, outputs: map[loopOutputScope][]loopOutputMeaning{}, activities: map[loopActivityScope]LoopRevisionRole{}, fanOuts: map[contracts.FanOutPlanRef]loopFanOutMeaning{}}
+	state := &originalLoopCarriage{rootFlow: RootExecutionFlowID(source), inputs: map[loopInputScope]LoopRevisionRole{}, outputs: map[loopOutputScope][]loopOutputMeaning{}, activities: map[loopActivityScope]originalActivityMeaning{}, fanOuts: map[contracts.FanOutPlanRef]loopFanOutMeaning{}}
 	type operationScope struct {
 		node    identity.ExecutableNode
 		handler string
@@ -249,10 +300,17 @@ func compileLoopCarriage(source Source) (*originalLoopCarriage, error) {
 			handler := ResolveFlowEventProof(source, node.FlowPath(), site.HandlerEventKey).Canonical
 			role := operations[operationScope{node, handler}]
 			key := loopActivityScope{node, site.HandlerEventKey, events.ActivityID, site.Spec.Tool}
-			if prior, exists := state.activities[key]; exists && prior != role {
-				return nil, fmt.Errorf("activity has conflicting original loop roles")
+			meaning := originalActivityMeaning{role: role}
+			if site.Spec.Approval != nil {
+				meaning.approvalDecision = strings.TrimSpace(site.Spec.Approval.Decision)
+				if meaning.approvalDecision == "" {
+					return nil, fmt.Errorf("original activity approval requires its exact decision")
+				}
 			}
-			state.activities[key] = role
+			if prior, exists := state.activities[key]; exists && prior != meaning {
+				return nil, fmt.Errorf("activity has conflicting original declarations")
+			}
+			state.activities[key] = meaning
 			// Result carriage is generated by the canonical activity projection,
 			// not by an authored emit expression.
 			resultEvents := []string{events.SuccessEvent, events.FailureEvent}

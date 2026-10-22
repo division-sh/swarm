@@ -248,10 +248,17 @@ func TestSelectedContractExecutionUsesSemanticPorts(t *testing.T) {
 	execution := readOwnershipSource(t, root, "internal/runtime/runforkexecution/execution.go")
 	assertOwnershipSourceContains(t, execution,
 		"Owner             SelectedContractExecutionOwner",
-		"prepared, err := req.Owner.Prepare(ctx, req)",
+		"return executeSelectedContractRunFork(ctx, req, nil)",
+		"prepared, err := req.Owner.prepareWithOperation(ctx, req, reserved)",
 	)
 	preparation := readOwnershipSource(t, root, "internal/runtime/runforkexecution/preparation.go")
-	assertOwnershipSourceContains(t, preparation, "ports, err := o.require()", "operation, err := o.beginPreparation(ctx)")
+	// #642 6186323965: fresh and reserved recovery share the same opaque owner.
+	assertOwnershipSourceContains(t, preparation,
+		"return o.prepareWithOperation(ctx, req, nil)",
+		"ports, err := o.require()",
+		"operation, err = o.beginPreparation(ctx)",
+		"req.Recovery != nil && entry.binding.ForkRunID == req.Recovery.RunID",
+	)
 	assertOwnershipSourceExcludes(t, execution,
 		"Store               SelectedContractExecutionStore",
 		"Store SelectedContractExecutionStore",

@@ -476,6 +476,7 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 	payload, err := json.Marshal(map[string]any{
 		"activity_id": "inspect", "tool": "provider.read", "input": input,
 		"effect_class": string(runtimecontracts.ActivityEffectClassReadOnly), "fork_policy": string(runtimecontracts.ActivityForkReexecuteRead),
+		"retry_max_attempts": 1, "retry_backoff": "",
 		"success_event": results.SuccessEvent, "failure_event": results.FailureEvent, "attempt": 1,
 		"entity_id": entityID, "node_id": fact.Owner.Key(), "flow_id": flowID, "flow_instance": activityFlow,
 		"handler_event_key": "review.inspect", "source_run_id": runID, "source_event_id": parentID,
@@ -573,6 +574,7 @@ func selectedActivityPersistedSourceEvidence(t *testing.T, db *sql.DB, eventID s
 type selectedActivityProjectionStore interface {
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	MaterializeRunForkForSelectedContractExecution(context.Context, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
+	RequireMaterializedRunForkForSelectedContractExecution(context.Context, string, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
 	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error)
 	LoadRunForkSelectedContractSourceEventModes(context.Context, string, []string) ([]executionmode.Mode, error)
 }

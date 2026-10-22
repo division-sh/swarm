@@ -13,6 +13,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
+	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -676,4 +677,46 @@ func commitUnrevisionedEventFixtureFactsForTest(ctx context.Context, selected an
 	default:
 		return fmt.Errorf("event fixture store %T is unsupported", selected)
 	}
+}
+
+type ActivityForkSourceStorage struct {
+	Flow, EntityType, Stage, AttemptStatus string
+	Fields, Accumulator, Payload           []byte
+}
+
+func ReadActivityForkSourceStorageForTest(ctx context.Context, selected any, runID, entityID, requestID string) (ActivityForkSourceStorage, error) {
+	var out ActivityForkSourceStorage
+	for _, id := range []string{runID, entityID, requestID} {
+		if err := validateStandaloneStorageEvent(selected, id); err != nil {
+			return ActivityForkSourceStorage{}, err
+		}
+	}
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		row, err := pipelinepersistence.ReadActivityForkEntityStorageTx(ctx, tx, runID, entityID)
+		out.Flow, out.EntityType, out.Stage = row.Flow, row.EntityType, row.Stage
+		out.Fields, out.Accumulator = row.Fields, row.Accumulator
+		return err
+	})
+	if err == nil {
+		err = readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			if _, postgres := selected.(*PostgresStore); postgres {
+				out.Payload, err = eventrecordpostgres.ReadActivityForkPayloadBytesStorage(ctx, tx, runID, requestID)
+			} else {
+				out.Payload, err = eventrecordsqlite.ReadActivityForkPayloadBytesStorage(ctx, tx, runID, requestID)
+			}
+			return err
+		})
+	}
+	if err == nil {
+		err = readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			out.AttemptStatus, err = activityjournal.ReadActivityForkAttemptStatusStorageTx(ctx, tx, runID, requestID)
+			return err
+		})
+	}
+	if err != nil {
+		return ActivityForkSourceStorage{}, err
+	}
+	return out, nil
 }

@@ -16,6 +16,13 @@ type ActivityAttemptJournal interface {
 	LoadActivityAttempt(context.Context, string) (ActivityAttemptRecord, bool, error)
 }
 
+// ActivityRecoverySummary carries results out of their owning recovery mutation,
+// not an ACK, work queue or execution grant. Publication consumes the durable
+// journal/readback obligation only after native transaction acknowledgement.
+type ActivityRecoverySummary struct {
+	Results []RecoveredHTTPActivity
+}
+
 func (s *workflowInstanceStore) recordedActivityResult(ctx context.Context, intent runtimeengine.ActivityIntent) (activityRecordedResult, bool, error) {
 	if s == nil || s.activityResults == nil {
 		return activityRecordedResult{}, false, fmt.Errorf("activity result reader is required")

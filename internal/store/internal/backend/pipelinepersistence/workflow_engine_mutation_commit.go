@@ -52,7 +52,8 @@ func commitWorkflowEngineState(
 				return fmt.Errorf("lock workflow engine state route: %w", err)
 			}
 			if record.Transition.PreservesState() {
-				return requireWorkflowHeaderProjection(ctx, tx, true, record, record.ExpectedRevision)
+				_, err := requireWorkflowHeaderProjection(ctx, tx, true, record, record.ExpectedRevision)
+				return err
 			}
 			written, err = commitPostgresWorkflowEngineState(ctx, tx, record, decision)
 		} else {
@@ -60,7 +61,8 @@ func commitWorkflowEngineState(
 				return err
 			}
 			if record.Transition.PreservesState() {
-				return requireWorkflowHeaderProjection(ctx, tx, false, record, record.ExpectedRevision)
+				_, err := requireWorkflowHeaderProjection(ctx, tx, false, record, record.ExpectedRevision)
+				return err
 			}
 			written, err = commitSQLiteWorkflowEngineState(ctx, tx, record, decision)
 		}
@@ -585,7 +587,7 @@ func commitWorkflowEngineMutation(
 			if command.FanOutBarrierCompletion != nil {
 				runID := command.State.Identity.RunID
 				updatedAt := command.State.UpdatedAt
-				if err := commitFanOutBarrierCompletionTx(txctx, attempt, postgres, runID, *command.FanOutBarrierCompletion, updatedAt); err != nil {
+				if err := commitFanOutBarrierCompletionTx(txctx, attempt, postgres, runID, *command.FanOutBarrierCompletion, command.DeliverySuccess.Claim, updatedAt); err != nil {
 					return err
 				}
 			}
@@ -600,6 +602,9 @@ func commitWorkflowEngineMutation(
 				)
 				if err != nil {
 					return fmt.Errorf("settle workflow node delivery with engine mutation: %w", err)
+				}
+				if command.FanOutIntent != nil && command.FanOutIntent.Capsule.Context.ReplyContextID() != settled.Route.Context.ReplyContextID() {
+					return fmt.Errorf("fan-out continuation differs from its exact native delivery settlement")
 				}
 				if !command.Lifecycle.RequestCompletionCandidate {
 					if _, err := attempt.RequestCompletion(txctx, candidateWriter, success.Claim.RunID(), nil); err != nil {

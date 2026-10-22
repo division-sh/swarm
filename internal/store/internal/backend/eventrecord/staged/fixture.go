@@ -58,13 +58,14 @@ func insertRecord(ctx context.Context, tx *sql.Tx, dialect authoractivity.Dialec
 			payload_schema_digest, payload_schema_class,
 			execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 			routing_source_kind, routing_source_authority, source_route, target_route, target_set,
-			route_settlement, operator_reference_event_id, inherited_fan_out_origin
+			route_settlement, operator_reference_event_id, inherited_fan_out_origin, run_owner_key
 		) VALUES (
 			$1, $2::uuid, NULLIF($3,'')::uuid, $4, NULLIF($5,''), NULLIF($6,'')::uuid, NULLIF($7,''), $8, $9::jsonb, $10::bytea,
 			$11, NULLIF($12,''), $13, $14, $15,
 			$16, $17, $18, $19, NULLIF($20,'')::uuid, $21,
 			$22, NULLIF($23,''), $24::jsonb, $25::jsonb, $26::jsonb,
-			$27::jsonb, NULLIF($28,'')::uuid, NULLIF($29,'')::jsonb
+			$27::jsonb, NULLIF($28,'')::uuid, NULLIF($29,'')::jsonb,
+			COALESCE('run:' || CAST(NULLIF($3,'')::uuid AS TEXT), '')
 		) ON CONFLICT (event_id) DO NOTHING`
 	if dialect == authoractivity.DialectSQLite {
 		query = `
@@ -74,20 +75,25 @@ func insertRecord(ctx context.Context, tx *sql.Tx, dialect authoractivity.Dialec
 				payload_schema_digest, payload_schema_class,
 				execution_mode, chain_depth, produced_by, produced_by_type, source_event_id, created_at,
 				routing_source_kind, routing_source_authority, source_route, target_route, target_set,
-				route_settlement, operator_reference_event_id, inherited_fan_out_origin
-			) VALUES (?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''))
+				route_settlement, operator_reference_event_id, inherited_fan_out_origin, run_owner_key
+			) VALUES (?, ?, NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, NULLIF(?, ''), ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), COALESCE('run:' || CAST(NULLIF(?, '') AS TEXT), ''))
 			ON CONFLICT(event_id) DO NOTHING`
 	} else if dialect != authoractivity.DialectPostgres {
 		return false, fmt.Errorf("unrevisioned event fixture dialect %q is unsupported", dialect)
 	}
-	result, err := tx.ExecContext(ctx, query,
+	args := []any{
 		record.Class, record.EventID, record.RunID, record.EventName, record.TaskID,
 		record.EntityID, record.FlowInstance, record.Scope, string(record.Payload), record.Payload,
 		record.PayloadSchemaBundleHash, record.PayloadSchemaFlowID,
 		record.PayloadSchemaEventKey, record.PayloadSchemaDigest, record.PayloadSchemaClass, record.ExecutionMode,
 		record.ChainDepth, record.ProducedBy, record.ProducedByType, record.SourceEventID, record.CreatedAt.UTC(),
 		record.RoutingSourceKind, record.RoutingSourceAuthority, string(record.SourceRoute),
-		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin))
+		string(record.TargetRoute), string(record.TargetSet), string(record.RouteSettlement), record.OperatorReferencedEventID, string(record.InheritedFanOutOrigin),
+	}
+	if dialect == authoractivity.DialectSQLite {
+		args = append(args, record.RunID)
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return false, fmt.Errorf("insert unrevisioned event fixture: %w", err)
 	}

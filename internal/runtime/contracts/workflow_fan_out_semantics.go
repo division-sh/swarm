@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -30,6 +31,18 @@ type FanOutPlanRef struct {
 	BundleHash     string           `json:"bundle_hash"`
 	ElementRef     FanOutElementRef `json:"element_ref"`
 	SemanticDigest string           `json:"semantic_digest"`
+}
+
+func (r FanOutPlanRef) Validate() error {
+	if _, err := r.ElementRef.DeclarationIdentity(); err != nil {
+		return err
+	}
+	digest := strings.TrimPrefix(r.SemanticDigest, "sha256:")
+	decoded, err := hex.DecodeString(digest)
+	if strings.TrimSpace(r.BundleHash) == "" || digest == r.SemanticDigest || err != nil || len(decoded) != 32 || digest != strings.ToLower(digest) {
+		return fmt.Errorf("fan-out plan reference requires a bundle and canonical SHA-256 semantic digest")
+	}
+	return nil
 }
 
 type FanOutElementRef struct {

@@ -2,6 +2,7 @@ package fanoutobligation
 
 import (
 	"fmt"
+	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
@@ -10,8 +11,18 @@ func (r IntentRequest) ValidateSourceProjection() error {
 	if r.Deployment != nil {
 		return nil
 	}
+	if err := r.PlanRef.Validate(); err != nil {
+		return err
+	}
 	semantics := r.Capsule.SourceProjection
-	if err := semantics.Validate(r.PlanRef); err != nil {
+	source := r.Capsule.SourcePlanRef
+	if source.ElementRef != r.PlanRef.ElementRef || strings.TrimSpace(source.BundleHash) == "" || strings.TrimSpace(source.SemanticDigest) == "" {
+		return fmt.Errorf("fan-out source witness requires its exact original plan reference")
+	}
+	if source.BundleHash == r.PlanRef.BundleHash && source != r.PlanRef {
+		return fmt.Errorf("fan-out source and execution references contradict the same artifact")
+	}
+	if err := semantics.Validate(source); err != nil {
 		return fmt.Errorf("fan-out admitted source evidence: %w", err)
 	}
 	var path string
@@ -30,13 +41,31 @@ func (r IntentRequest) ValidateSourceProjection() error {
 }
 
 func (r IntentRequest) ValidateCompiledPlan(plan runtimecontracts.FanOutCompiledPlan) error {
+	return r.ValidateExecutionProjection(plan.Ref, plan.SemanticEvidence())
+}
+
+func (r IntentRequest) AdmitSelectedPlan(ref runtimecontracts.FanOutPlanRef, semantics runtimecontracts.FanOutPlanSemantics) error {
+	if r.PlanRef.BundleHash == ref.BundleHash && r.PlanRef != ref {
+		return fmt.Errorf("unchanged bundle contradicts the retained fan-out execution reference")
+	}
+	r.PlanRef = ref
+	return r.ValidateExecutionProjection(ref, semantics)
+}
+
+func (r IntentRequest) ValidateExecutionProjection(ref runtimecontracts.FanOutPlanRef, semantics runtimecontracts.FanOutPlanSemantics) error {
 	if err := r.ValidateSourceProjection(); err != nil {
 		return err
 	}
-	if plan.Ref != r.PlanRef {
-		return fmt.Errorf("fan-out admitted source disagrees with loaded plan")
+	if ref != r.PlanRef {
+		return fmt.Errorf("fan-out selected execution reference disagrees with loaded plan")
 	}
-	return plan.SemanticEvidence().Validate(r.PlanRef)
+	if err := semantics.Validate(ref); err != nil {
+		return err
+	}
+	if r.Cardinality > semantics.MaxItems || !runtimecontracts.StructuralCatalogTypeAssignable(r.Capsule.SourceProjection.ItemType, semantics.ItemType) {
+		return fmt.Errorf("fan-out selected plan cannot accept the frozen source items or cardinality")
+	}
+	return nil
 }
 
 func (r IntentRequest) ProjectSource(value any) ([]any, error) {

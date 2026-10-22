@@ -47,7 +47,7 @@ func TestSelectedForkCommitOutcomeRequiresIsolatedTypedError(t *testing.T) {
 
 func TestSelectedForkCommittedOutputsRequireExactAdmittedScope(t *testing.T) {
 	eventID := uuid.NewString()
-	point := runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: eventID, Revision: 2}
+	point := runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: eventID, Revision: 2, Input: eventID}
 	req := runforkreadiness.MaterializeRequest{SourceRunID: "source", At: eventID, Preparation: runfork.SelectedForkPreparation{ForkPoint: point}, ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts"}}
 	valid := runfork.RunForkMaterialization{
 		SourceRunID: "source", ForkRunID: "fork", ForkPoint: point,
@@ -103,6 +103,26 @@ func TestSelectedForkCommittedOutputsRequireExactAdmittedScope(t *testing.T) {
 	} {
 		if err := requireExactSelectedForkSourceEvents([]string{"first", "second"}, events); err == nil {
 			t.Fatalf("foreign or incomplete source events accepted: %+v", events)
+		}
+	}
+}
+
+func TestSelectedForkCommittedLatestSelectorUsesCapturedInput(t *testing.T) {
+	eventID := uuid.NewString()
+	point := runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: eventID, Revision: 2}
+	req := runforkreadiness.MaterializeRequest{SourceRunID: "source", Preparation: runfork.SelectedForkPreparation{ForkPoint: point},
+		ContractSelection: runfork.RunForkContractSelection{Mode: "selected_contracts"}}
+	result := runfork.RunForkMaterialization{SourceRunID: req.SourceRunID, ForkRunID: "fork", ForkPoint: point,
+		SelectedContractBinding: &runfork.RunForkSelectedContractBinding{BindingID: "binding", ForkRunID: "fork", SourceRunID: req.SourceRunID,
+			ForkPoint: point, ForkEventID: eventID, ContractSelection: req.ContractSelection}}
+	if err := requireExactSelectedForkMaterialization(req, result); err != nil {
+		t.Fatalf("captured latest selector rejected after exact materialization: %v", err)
+	}
+	for _, at := range []string{eventID, uuid.NewString()} {
+		changed := req
+		changed.At = at
+		if err := requireExactSelectedForkMaterialization(changed, result); err == nil {
+			t.Fatalf("selector %q substituted for captured latest input", at)
 		}
 	}
 }

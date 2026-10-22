@@ -62,6 +62,7 @@ func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 				bus := newActivityJournalProofBus(t, selected, source)
 				pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}, Credentials: credentialStore})
 				intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
+				_, releaseJournal := installActivityReplayJournal(t, ctx, selected, bus, pc)
 				if err := runtimepipeline.ExecuteActivityIntentForTest(ctx, pc, nil, intent); err != nil {
 					t.Fatal(err)
 				}
@@ -84,6 +85,7 @@ func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 				if err := bus.WaitForQuiescence(ctx); err != nil {
 					t.Fatal(err)
 				}
+				releaseJournal()
 				if err := closeStore(); err != nil {
 					t.Fatal(err)
 				}

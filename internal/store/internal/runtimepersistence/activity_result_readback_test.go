@@ -39,7 +39,7 @@ func TestActivityResultPublicationEvidenceBothStores(t *testing.T) {
 			}
 			start := pipeline.ActivityAttemptRecord{
 				RequestEventID: uuid.NewString(), RunID: sibling, ExecutionMode: executionmode.Live,
-				ActivityID: "publication-evidence", Tool: "provider_write", EffectClass: "non_idempotent_write",
+				ActivityID: "publication-evidence", Tool: "provider_write",
 				Attempt: 1, SuccessEvent: "fixture.succeeded", FailureEvent: "fixture.failed", InputHash: "exact",
 			}
 			started, inserted, err := journal.StartActivityAttempt(ctx, start)

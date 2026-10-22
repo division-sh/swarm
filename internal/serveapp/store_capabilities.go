@@ -41,6 +41,7 @@ type selectedAPICapabilities struct {
 	RunForkOperations         apiv1.RunForkOperationReader
 	RunFork                   apiv1.RunForkExecutor
 	SelectedForkControls      apiv1.SelectedForkControlAdmission
+	SelectedForkDecisions     apiv1.SelectedForkDecisionControlOwner
 	SelectedForkRetirement    selectedForkContextRetirement
 	SelectedForkProcess       selectedForkProcessOwner
 	SelectedForkRecovery      runtimerunforkexecution.SelectedForkRecoveryEnvironment
@@ -85,7 +86,9 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 		caps.ConversationForkLifecycle = family.Lifecycle()
 	}
 	if _, available := owner.DestructiveReset(); available {
-		caps.ResetCoordinator = buildSelectedResetCoordinator(owner, req.ProcessCapability, req.RuntimeSupervisor)
+		caps.ResetCoordinator = buildSelectedResetCoordinator(owner, req.ProcessCapability, req.RuntimeSupervisor, runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{
+			RepoRoot: req.RepoRoot, Store: owner.SourceArtifactStore(), PlatformPackBases: req.PlatformPackBases,
+		})
 	}
 	family, available := owner.RunFork()
 	if req.SelectedFork != nil {
@@ -120,16 +123,23 @@ func constructSelectedAPICapabilities(owner *storeselected.Owner, req selectedAP
 		caps.RunForkOperations = family.Operations()
 		caps.RunFork = executor
 		caps.SelectedForkControls = family
+		caps.SelectedForkDecisions = family
 		caps.SelectedForkRetirement = family
 		caps.SelectedForkProcess = family
 	}
 	return caps, nil
 }
 
-func buildSelectedResetCoordinator(owner *storeselected.Owner, capability runtimestartupownership.ProcessCapability, supervisor *processLifecycleSupervisor) *runtimedestructivereset.Coordinator {
+func buildSelectedResetCoordinator(owner *storeselected.Owner, capability runtimestartupownership.ProcessCapability, supervisor *processLifecycleSupervisor, loader runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader) *runtimedestructivereset.Coordinator {
 	family, available := owner.DestructiveReset()
 	if !available {
 		return nil
+	}
+	cleanup := processOwnedDestructiveResetStore{capability: capability}
+	if forks, available := owner.RunFork(); available {
+		cleanup.prepareHistory = func(ctx context.Context, runIDs []string) ([]runfork.SelectedResetPreparation, error) {
+			return forks.PrepareResetHistory(ctx, runIDs, loader)
+		}
 	}
 	return &runtimedestructivereset.Coordinator{
 		Operations: capability,
@@ -137,7 +147,7 @@ func buildSelectedResetCoordinator(owner *storeselected.Owner, capability runtim
 			Reader: family.Inventory(), Containers: supervisor,
 		}},
 		Locks: family.Locks(), Quiescer: runtimedestructivereset.Quiescer{Store: family.Quiescence()},
-		Cleaner:    runtimedestructivereset.Cleaner{Store: processOwnedDestructiveResetStore{capability: capability}},
+		Cleaner:    runtimedestructivereset.Cleaner{Store: cleanup},
 		Containers: runtimedestructivereset.ManagedContainerStopper{Runtime: supervisor}, RuntimeContexts: supervisor,
 	}
 }

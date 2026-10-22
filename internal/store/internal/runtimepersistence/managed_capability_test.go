@@ -25,6 +25,7 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -600,6 +601,20 @@ func TestNormalStartupCapabilitySurfacePersistsRunlessActorPlanOnBothStores(t *t
 			if err := persisted.Validate(); err != nil || !persisted.MatchesActorPlan(actorPlan) || !persisted.ActorIdentity.IsZero() || runID.Valid {
 				t.Fatalf("normal startup readback = %#v run=%#v err=%v", persisted, runID, err)
 			}
+			if _, err := fixture.db.Exec(`UPDATE managed_agent_capability_surfaces SET execution_authority_id=$1 WHERE surface_id=$2`, "different-owner", surface.ID); err != nil {
+				t.Fatal(err)
+			}
+			before := historicalContextDatabaseRows(t, fixture.db, fixture.postgres)
+			if err := store.SaveManagedCapabilitySurface(testAuthorActivityContext(), surface); err == nil {
+				t.Fatal("same-integrity surface accepted contradictory stored execution authority")
+			}
+			historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, fixture.postgres))
+			if _, err := fixture.db.Exec(`UPDATE managed_agent_capability_surfaces SET execution_authority_id=$1 WHERE surface_id=$2`, surface.Authority.ExecutionAuthorityID, surface.ID); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SaveManagedCapabilitySurface(testAuthorActivityContext(), surface); err != nil {
+				t.Fatalf("exact repeated startup surface refused: %v", err)
+			}
 		})
 	}
 }
@@ -692,6 +707,11 @@ func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.
 
 	recovered.CapabilitySurfaceID = surfaceB.ID
 	recovered.CapabilitySurface = encodeSurface(surfaceB)
+	recovered.CapabilityProjection = storemanagedcapability.StoredProjection{
+		ExecutionKind:        sql.NullString{String: string(surfaceB.Authority.ExecutionKind), Valid: true},
+		ExecutionAuthorityID: sql.NullString{String: surfaceB.Authority.ExecutionAuthorityID, Valid: true},
+		RunID:                sql.NullString{String: surfaceB.Authority.RunID, Valid: surfaceB.Authority.RunID != ""},
+	}
 	if _, _, err := completionRecoverySettlement(
 		recovered, runtimeeffects.StateTerminalFailure, nil, time.Now().UTC(),
 	); err == nil {
@@ -700,6 +720,37 @@ func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.
 
 	recovered.CapabilitySurfaceID = surfaceA.ID
 	recovered.CapabilitySurface = encodeSurface(surfaceA)
+	recovered.CapabilityProjection = storemanagedcapability.StoredProjection{
+		ExecutionKind:        sql.NullString{String: string(surfaceA.Authority.ExecutionKind), Valid: true},
+		ExecutionAuthorityID: sql.NullString{String: surfaceA.Authority.ExecutionAuthorityID, Valid: true},
+		RunID:                sql.NullString{String: surfaceA.Authority.RunID, Valid: surfaceA.Authority.RunID != ""},
+	}
+	for _, fault := range []struct {
+		name   string
+		change func(*storemanagedcapability.StoredProjection)
+	}{
+		{"missing_kind", func(p *storemanagedcapability.StoredProjection) { p.ExecutionKind.Valid = false }},
+		{"different_kind", func(p *storemanagedcapability.StoredProjection) { p.ExecutionKind.String = "selected_contract_fork" }},
+		{"missing_execution", func(p *storemanagedcapability.StoredProjection) { p.ExecutionAuthorityID.Valid = false }},
+		{"different_execution", func(p *storemanagedcapability.StoredProjection) { p.ExecutionAuthorityID.String = "different-owner" }},
+		{"missing_run", func(p *storemanagedcapability.StoredProjection) { p.RunID.Valid = false }},
+		{"empty_run", func(p *storemanagedcapability.StoredProjection) { p.RunID = sql.NullString{Valid: true} }},
+		{"different_run", func(p *storemanagedcapability.StoredProjection) { p.RunID.String = uuid.NewString() }},
+		{"selected_execution_on_normal", func(p *storemanagedcapability.StoredProjection) {
+			p.SelectedExecutionID = sql.NullString{String: uuid.NewString(), Valid: true}
+		}},
+		{"selected_child_on_normal", func(p *storemanagedcapability.StoredProjection) {
+			p.SelectedForkRunID = sql.NullString{String: surfaceA.Authority.RunID, Valid: true}
+		}},
+	} {
+		t.Run("stored_projection_"+fault.name, func(t *testing.T) {
+			changed := recovered
+			fault.change(&changed.CapabilityProjection)
+			if _, _, err := completionRecoverySettlement(changed, runtimeeffects.StateTerminalFailure, nil, time.Now().UTC()); err == nil {
+				t.Fatal("completion recovery accepted contradictory stored surface projection")
+			}
+		})
+	}
 	if _, settlement, err := completionRecoverySettlement(
 		recovered, runtimeeffects.StateTerminalFailure, nil, time.Now().UTC(),
 	); err != nil {

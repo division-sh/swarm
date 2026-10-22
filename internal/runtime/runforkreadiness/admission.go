@@ -16,10 +16,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/timerobligation"
 )
 
 // MaterializeRequest carries an admitted relation, never caller-authored states.
@@ -37,7 +40,7 @@ type MaterializeRequest struct {
 	RecipientPlanning       runfork.RunForkSelectedContractRecipientPlanning
 	Readiness               Admission
 	DataPinOverrides        []durabledata.ExplicitPin
-	FanOutPlanRefs          []contracts.FanOutPlanRef
+	SelectedFanOutPlans     semanticview.FanOutPlanCarriage
 }
 
 // Binding is checked again against the transaction's fixed plan and event rows.
@@ -72,6 +75,8 @@ type admittedProjection struct {
 	planning          []byte
 	modes             []byte
 	projection        []byte
+	timers            map[inheritedTimerAdmissionKey]inheritedTimerAdmission
+	arrivals          map[string]inheritedArrivalAdmission
 }
 
 func Admit(req AdmissionRequest) (Admission, error) {
@@ -99,6 +104,14 @@ func Admit(req AdmissionRequest) (Admission, error) {
 	_, _, canonicalBinding, err := runfork.RunForkContractFrontierEvidenceBinding(canonical)
 	if err != nil || canonicalBinding != frontierBinding {
 		return Admission{}, fmt.Errorf("selected-contract readiness frontier disagrees with canonical source admission: %v", err)
+	}
+	timers, err := admitInheritedWorkflowTimers(req.Source, req.Plan)
+	if err != nil {
+		return Admission{}, err
+	}
+	arrivals, err := admitInheritedArrivals(req.Source, req.Plan)
+	if err != nil {
+		return Admission{}, err
 	}
 	prepared, err := Project(req.Plan, req.Source, req.RecipientPlanning, req.SourceModes, req.ModelOptions)
 	if err != nil {
@@ -139,6 +152,8 @@ func Admit(req AdmissionRequest) (Admission, error) {
 		planBinding:       planBinding, frontierBinding: frontierBinding,
 		selection: req.ContractSelection, sourceFact: req.SourceArtifactFact,
 		planning: planning, modes: modes, effectiveSource: req.EffectiveSourceIdentity, projection: projection,
+		timers:   timers,
+		arrivals: arrivals,
 	}}, nil
 }
 
@@ -311,11 +326,23 @@ func validateBinding(binding Binding) (string, string, error) {
 			return "", "", fmt.Errorf("selected-contract readiness is missing frontier event %s", id)
 		}
 	}
+	if err := validateFixedWorkflowTimers(plan); err != nil {
+		return "", "", err
+	}
 	// Bind the fixed entity state, including numeric kinds, without a parallel
 	// receiver-configuration projection. Current advancement is not authority.
 	entities, err := canonicaljson.MarshalPreservingNumberKinds(plan.Entities)
 	if err != nil {
 		return "", "", err
+	}
+	input, present, err := plan.OriginalStartFirstTurn()
+	if err != nil {
+		return "", "", err
+	}
+	var firstTurn *runfork.InputPublicationCoordinates
+	if present {
+		coordinates := input.Coordinates()
+		firstTurn = &coordinates
 	}
 	key, err := canonicaljson.Hash(struct {
 		RunID      string
@@ -324,6 +351,41 @@ func validateBinding(binding Binding) (string, string, error) {
 		Pending    []runfork.RunForkPendingWork
 		Historical []string
 		Inputs     []runfork.InputPublicationCoordinates
-	}{plan.SourceRunID, plan.ForkPoint, string(entities), plan.PendingWork, historical, plan.HistoricalInputCoordinates()})
+		FirstTurn  *runfork.InputPublicationCoordinates
+		Replies    []replycontext.Record
+		Timers     []timerobligation.WorkflowTimerActivationRecord
+	}{plan.SourceRunID, plan.ForkPoint, string(entities), plan.PendingWork, historical, plan.HistoricalInputCoordinates(), firstTurn, plan.ReplyContexts, plan.WorkflowTimers})
 	return key, frontier, err
+}
+
+func validateFixedWorkflowTimers(plan runfork.RunForkPlan) error {
+	seen := make(map[string]struct{}, len(plan.WorkflowTimers))
+	for _, record := range plan.WorkflowTimers {
+		timer, err := pipeline.DecodeWorkflowTimerActivationPersistenceRecord(record)
+		if err != nil {
+			return err
+		}
+		if timer.RunID != plan.SourceRunID {
+			return fmt.Errorf("fixed workflow timer has foreign source ownership")
+		}
+		if _, duplicate := seen[timer.Ref.ActivationID]; duplicate {
+			return fmt.Errorf("fixed workflow timer repeats activation identity")
+		}
+		seen[timer.Ref.ActivationID] = struct{}{}
+		found := false
+		for _, entity := range plan.Entities {
+			if entity.EntityID != timer.EntityID || entity.MaterializationMetadata == nil {
+				continue
+			}
+			meta := entity.MaterializationMetadata
+			if meta.FlowInstance != timer.Route.InstancePath || meta.FlowTemplate != timer.Route.ScopeKey {
+				return fmt.Errorf("fixed workflow timer contradicts captured construction owner")
+			}
+			found = true
+		}
+		if !found {
+			return fmt.Errorf("fixed workflow timer lacks captured construction owner")
+		}
+	}
+	return nil
 }

@@ -367,7 +367,7 @@ func seedActivityStoryAttempt(t *testing.T, fixture authorActivityReceiptFixture
 	record := runtimepipeline.ActivityAttemptRecord{
 		RequestEventID: uuid.NewString(), RunID: runID, ExecutionMode: mode, EntityID: uuid.NewString(), FlowInstance: "flow/" + uuid.NewString(),
 		NodeID: activityidentity.MustNodeOwner(mustPersistenceNode("flow", "writer")).Key(), HandlerEventKey: "request", ActivityID: "write", Tool: "provider.write",
-		EffectClass: "non_idempotent_write", Attempt: 1, SuccessEvent: "write.succeeded", FailureEvent: "write.failed", InputHash: "exact-input",
+		Attempt: 1, SuccessEvent: "write.succeeded", FailureEvent: "write.failed", InputHash: "exact-input",
 	}
 	if generated {
 		at := time.Now().UTC()

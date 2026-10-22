@@ -77,8 +77,9 @@ func TestProposedEffectOutcomeEventRoutesExactTypedVerdicts(t *testing.T) {
 			}
 			for fieldName, want := range map[string]string{
 				"card_id": card.CardID, "activity_id": continuation.ActivityID, "tool": continuation.Tool,
-				"effect_class": string(continuation.EffectClass), "effect_content_hash": continuation.EffectContentHash,
-				"decided_by": card.DecidedBy, "decided_at": now.Format(time.RFC3339Nano),
+				"effect_class":        string(continuation.EffectClass),
+				"effect_content_hash": continuation.EffectContentHash,
+				"decided_by":          card.DecidedBy, "decided_at": now.Format(time.RFC3339Nano),
 			} {
 				field, present := payload.Lookup(fieldName)
 				value, stringValue := field.String()

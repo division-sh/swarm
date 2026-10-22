@@ -125,3 +125,41 @@ func TestNativeCatalogPreconstructionRejectsLostAuthorityAndOrdering(t *testing.
 		}
 	}
 }
+
+func TestNativeCatalogChunkObserverSuccessorKeepsOriginalConstruction(t *testing.T) {
+	row := catalogPreconstructionRecipe(t)
+	const argument = "provider *terminalProviderProbe, chunkObserver func(context.Context, runtimepipeline.FanOutChunkCommand), additionalRunIDs"
+	const original = "provider *terminalProviderProbe, additionalRunIDs"
+	const observer = "\tif chunkObserver != nil {\n\t\tctx = runtimestartupownership.WithFanOutChunkObserverForTest(ctx, chunkObserver)\n\t}\n"
+	const boundary = "\tprocessOwner := worklifetime.NewProcess()"
+	validate := func(candidate string) bool {
+		if strings.Count(candidate, argument) != 1 || strings.Count(candidate, observer+boundary) != 1 {
+			return false
+		}
+		restored := strings.Replace(candidate, argument, original, 1)
+		restored = strings.Replace(restored, observer+boundary, boundary, 1)
+		actual, err := canonicalFunction(restored)
+		before, pinErr := canonicalFunction(row.After)
+		return err == nil && pinErr == nil && actual == before
+	}
+	if row.Successor == "" || !validate(row.Successor) {
+		t.Fatal("chunk observer changed work beyond its optional pre-construction context")
+	}
+	actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
+	want, pinErr := canonicalFunction(row.Successor)
+	if err != nil || pinErr != nil || actual != want {
+		t.Fatal("current harness differs from exact chunk-observer successor")
+	}
+	for _, mutation := range [][2]string{
+		{observer, ""},
+		{observer, observer + observer},
+		{"WithFanOutChunkObserverForTest(ctx, chunkObserver)", "WithFanOutChunkObserverForTest(context.Background(), chunkObserver)"},
+		{"storetest.RequireRun(t, fixtureCtx, runSetup, fixture)", "storetest.RequireRun(t, ctx, runSetup, fixture)"},
+		{"rt, err := runtime.NewRuntime(ctx, deps)", "rt, err := runtime.NewRuntime(context.Background(), deps)"},
+	} {
+		candidate := strings.Replace(row.Successor, mutation[0], mutation[1], 1)
+		if candidate == row.Successor || validate(candidate) {
+			t.Fatal("changed chunk-observer construction boundary accepted")
+		}
+	}
+}

@@ -281,6 +281,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			durable, selected.PipelineObligations(), selected, roles,
 			cut, cut, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 	case *store.PostgresStore:
 		workflow := pipeline.NewWorkflowPersistence(selected)
@@ -308,6 +309,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			durable, selected.PipelineObligations(), selected, roles,
 			cut, cut, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
+			selected, selected,
 		)
 	default:
 		t.Fatalf("unsupported selected store %T", f.selected)
@@ -411,7 +413,7 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					if failed != 0 || pending != 0 {
-						logSelectedDeploymentForkFailure(t, f.db, childID)
+						logSelectedDeploymentForkFailure(t, f.selected, childID)
 						t.Fatalf("R5 settled cut created incomplete delivery: failed=%d pending=%d", failed, pending)
 					}
 				}

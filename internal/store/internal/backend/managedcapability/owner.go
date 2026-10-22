@@ -82,14 +82,18 @@ func InsertPostgres(ctx context.Context, tx *sql.Tx, raw []byte) (managedcapabil
 	if err != nil {
 		return managedcapabilities.Surface{}, err
 	}
+	if err := requireSurfaceLiveParentsTx(ctx, tx, surface, true); err != nil {
+		return managedcapabilities.Surface{}, err
+	}
 	encoded, _ := json.Marshal(surface)
 	var existingRaw []byte
-	err = tx.QueryRowContext(ctx, `SELECT surface FROM managed_agent_capability_surfaces WHERE surface_id=$1::uuid FOR UPDATE`, surface.ID).Scan(&existingRaw)
+	var stored StoredProjection
+	err = tx.QueryRowContext(ctx, `SELECT surface,execution_kind,execution_authority_id,run_id,selected_execution_id,selected_fork_run_id FROM managed_agent_capability_surfaces WHERE surface_id=$1::uuid FOR UPDATE`, surface.ID).Scan(&existingRaw, &stored.ExecutionKind, &stored.ExecutionAuthorityID, &stored.RunID, &stored.SelectedExecutionID, &stored.SelectedForkRunID)
 	if err != nil && err != sql.ErrNoRows {
 		return managedcapabilities.Surface{}, fmt.Errorf("load existing managed capability surface: %w", err)
 	}
 	if err == nil {
-		existing, decodeErr := Decode(existingRaw)
+		existing, decodeErr := DecodeStored(existingRaw, stored)
 		if decodeErr != nil {
 			return managedcapabilities.Surface{}, decodeErr
 		}
@@ -108,15 +112,17 @@ func InsertPostgres(ctx context.Context, tx *sql.Tx, raw []byte) (managedcapabil
 		}
 		return surface, nil
 	}
+	run, execution, child := surfaceRunProjections(surface)
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO managed_agent_capability_surfaces (
 			surface_id, integrity_hash, authority_kind, authority_id, execution_kind,
-			execution_authority_id, run_id, actor_id, provider, transport, surface, created_at
-		) VALUES ($1::uuid,$2,$3,$4::uuid,$5,$6,NULLIF($7,'')::uuid,$8,$9,$10,$11::jsonb,$12)
+			execution_authority_id, run_id, actor_id, provider, transport, surface, created_at,
+			selected_execution_id, selected_fork_run_id
+		) VALUES ($1::uuid,$2,$3,$4::uuid,$5,$6,$7::uuid,$8,$9,$10,$11::jsonb,$12,$13::uuid,$14::uuid)
 		ON CONFLICT (surface_id) DO NOTHING
 	`, surface.ID, surface.IntegrityHash, surface.Authority.Kind, surface.Authority.ID, surface.Authority.ExecutionKind,
-		surface.Authority.ExecutionAuthorityID, strings.TrimSpace(surface.Authority.RunID), surface.ActorID, surface.Provider,
-		surface.Transport, string(encoded), surface.CreatedAt.UTC())
+		surface.Authority.ExecutionAuthorityID, run, surface.ActorID, surface.Provider,
+		surface.Transport, string(encoded), surface.CreatedAt.UTC(), execution, child)
 	if err != nil {
 		return managedcapabilities.Surface{}, fmt.Errorf("insert managed capability surface: %w", err)
 	}
@@ -130,10 +136,11 @@ func InsertPostgres(ctx context.Context, tx *sql.Tx, raw []byte) (managedcapabil
 
 func advanceConflictingManagedCapabilitySurfacePostgres(ctx context.Context, tx *sql.Tx, surface managedcapabilities.Surface, encoded []byte) (managedcapabilities.Surface, error) {
 	var existingRaw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT surface FROM managed_agent_capability_surfaces WHERE surface_id=$1::uuid FOR UPDATE`, surface.ID).Scan(&existingRaw); err != nil {
+	var stored StoredProjection
+	if err := tx.QueryRowContext(ctx, `SELECT surface,execution_kind,execution_authority_id,run_id,selected_execution_id,selected_fork_run_id FROM managed_agent_capability_surfaces WHERE surface_id=$1::uuid FOR UPDATE`, surface.ID).Scan(&existingRaw, &stored.ExecutionKind, &stored.ExecutionAuthorityID, &stored.RunID, &stored.SelectedExecutionID, &stored.SelectedForkRunID); err != nil {
 		return managedcapabilities.Surface{}, fmt.Errorf("load conflicting managed capability surface: %w", err)
 	}
-	existing, err := Decode(existingRaw)
+	existing, err := DecodeStored(existingRaw, stored)
 	if err != nil {
 		return managedcapabilities.Surface{}, err
 	}
@@ -158,14 +165,18 @@ func InsertSQLite(ctx context.Context, tx *sql.Tx, raw []byte) (managedcapabilit
 	if err != nil {
 		return managedcapabilities.Surface{}, err
 	}
+	if err := requireSurfaceLiveParentsTx(ctx, tx, surface, false); err != nil {
+		return managedcapabilities.Surface{}, err
+	}
 	encoded, _ := json.Marshal(surface)
 	var existingRaw []byte
-	err = tx.QueryRowContext(ctx, `SELECT surface FROM managed_agent_capability_surfaces WHERE surface_id=?`, surface.ID).Scan(&existingRaw)
+	var stored StoredProjection
+	err = tx.QueryRowContext(ctx, `SELECT surface,execution_kind,execution_authority_id,run_id,selected_execution_id,selected_fork_run_id FROM managed_agent_capability_surfaces WHERE surface_id=?`, surface.ID).Scan(&existingRaw, &stored.ExecutionKind, &stored.ExecutionAuthorityID, &stored.RunID, &stored.SelectedExecutionID, &stored.SelectedForkRunID)
 	if err != nil && err != sql.ErrNoRows {
 		return managedcapabilities.Surface{}, fmt.Errorf("load existing sqlite managed capability surface: %w", err)
 	}
 	if err == nil {
-		existing, decodeErr := Decode(existingRaw)
+		existing, decodeErr := DecodeStored(existingRaw, stored)
 		if decodeErr != nil {
 			return managedcapabilities.Surface{}, decodeErr
 		}
@@ -184,15 +195,17 @@ func InsertSQLite(ctx context.Context, tx *sql.Tx, raw []byte) (managedcapabilit
 		}
 		return surface, nil
 	}
+	run, execution, child := surfaceRunProjections(surface)
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO managed_agent_capability_surfaces (
 			surface_id, integrity_hash, authority_kind, authority_id, execution_kind,
-			execution_authority_id, run_id, actor_id, provider, transport, surface, created_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+			execution_authority_id, run_id, actor_id, provider, transport, surface, created_at,
+			selected_execution_id, selected_fork_run_id
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT (surface_id) DO NOTHING
 	`, surface.ID, surface.IntegrityHash, surface.Authority.Kind, surface.Authority.ID, surface.Authority.ExecutionKind,
-		surface.Authority.ExecutionAuthorityID, nullString(surface.Authority.RunID), surface.ActorID, surface.Provider,
-		surface.Transport, string(encoded), surface.CreatedAt.UTC())
+		surface.Authority.ExecutionAuthorityID, run, surface.ActorID, surface.Provider,
+		surface.Transport, string(encoded), surface.CreatedAt.UTC(), execution, child)
 	if err != nil {
 		return managedcapabilities.Surface{}, fmt.Errorf("insert sqlite managed capability surface: %w", err)
 	}
@@ -206,10 +219,11 @@ func InsertSQLite(ctx context.Context, tx *sql.Tx, raw []byte) (managedcapabilit
 
 func advanceConflictingManagedCapabilitySurfaceSQLite(ctx context.Context, tx *sql.Tx, surface managedcapabilities.Surface, encoded []byte) (managedcapabilities.Surface, error) {
 	var existingRaw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT surface FROM managed_agent_capability_surfaces WHERE surface_id=?`, surface.ID).Scan(&existingRaw); err != nil {
+	var stored StoredProjection
+	if err := tx.QueryRowContext(ctx, `SELECT surface,execution_kind,execution_authority_id,run_id,selected_execution_id,selected_fork_run_id FROM managed_agent_capability_surfaces WHERE surface_id=?`, surface.ID).Scan(&existingRaw, &stored.ExecutionKind, &stored.ExecutionAuthorityID, &stored.RunID, &stored.SelectedExecutionID, &stored.SelectedForkRunID); err != nil {
 		return managedcapabilities.Surface{}, fmt.Errorf("load conflicting sqlite managed capability surface: %w", err)
 	}
-	existing, err := Decode(existingRaw)
+	existing, err := DecodeStored(existingRaw, stored)
 	if err != nil {
 		return managedcapabilities.Surface{}, err
 	}

@@ -84,8 +84,13 @@ func TestServedLifecycleEmitterLoopEscapeJourney(t *testing.T) {
 
 func readLifecycleLoop(t *testing.T, rt servedControlProofRuntime, runID, entityID string) loopruntime.PublicActivation {
 	t.Helper()
+	return readLifecycleLoopFromEndpoint(t, rt.Endpoint, runID, entityID)
+}
+
+func readLifecycleLoopFromEndpoint(t *testing.T, endpoint, runID, entityID string) loopruntime.PublicActivation {
+	t.Helper()
 	var result operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &result)
+	requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &result)
 	if len(result.Loops) != 1 {
 		t.Fatalf("expected one public loop: %#v", result)
 	}

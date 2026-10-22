@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,6 +38,7 @@ func requireSelectedControlInstanceReaders(t *testing.T, owner SelectedContractE
 				p.pipelineObligations, p.manager, p.managerRoles, p.effects, p.completion,
 				p.completionHeartbeat, p.liveSessions, p.managedCapabilities, p.budget, p.logs,
 				p.decisionCards, p.proposedEffects, p.humanTasks, p.decisionCardDraftExpiry, p.humanTaskExpiry,
+				p.candidates, p.genericSchedules,
 			)
 			want := "selected-contract execution requires event " + role
 			if err == nil || err.Error() != want {
@@ -131,7 +133,14 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 				process, _ := worklifetime.ProcessFromContext(ctx)
 				capability := selectedContractTestProcessCapability(t, ctx, authorityStore)
 				root := runForkExecutionRepoRoot(t)
-				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: filepath.Join(root, "tests/tier1-primitives/test-emits-multiple")}
+				controlRoot := t.TempDir()
+				if err := os.CopyFS(controlRoot, os.DirFS(filepath.Join(root, "tests/tier1-primitives/test-emits-multiple"))); err != nil {
+					t.Fatal(err)
+				}
+				// Keep the child available for the stop/recovery being tested;
+				// automatic completion is a separate behavioral reach.
+				writeSelectedContractFixtureFile(t, filepath.Join(controlRoot, "schema.yaml"), "stages:\n  pending: {}\n  done: {}\npins:\n  inputs: [item.received]\n  outputs: [item.processed]\n")
+				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: controlRoot}
 				loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 				if err != nil {
 					t.Fatal(err)
@@ -141,6 +150,11 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 				request := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
+				claimed := make(chan effects.Authority, 1)
+				if phase == "reconstructed" {
+					owner.ports.runtimeExecution = selectedActivitySuccessorClaim{owner.ports.runtimeExecution, claimed}
+					request.Owner = owner
+				}
 				var forkRun string
 				if phase != "executing" && phase != "executing_retirement" {
 					result, err := ExecuteSelectedContractRunFork(ctx, request)
@@ -148,9 +162,51 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 						t.Fatal(err)
 					}
 					forkRun = result.Materialization.ForkRunID
+					wait, cancel := context.WithTimeout(ctx, selectedForkCapabilityProofQuiescenceTimeout)
+					observationTick := time.NewTicker(10 * time.Millisecond)
+					for {
+						outputs, err := storetest.ReadLifecycleEventCardinality(wait, selected, forkRun, "item.processed")
+						if err != nil || outputs > 1 {
+							cancel()
+							observationTick.Stop()
+							t.Fatalf("initial retained dispatch output: count=%d err=%v", outputs, err)
+						}
+						pending, err := storetest.ReadServedIncompletePipelineHandoffCount(wait, selected, forkRun)
+						if err != nil {
+							cancel()
+							observationTick.Stop()
+							t.Fatal(err)
+						}
+						if outputs == 1 && pending == 0 {
+							break
+						}
+						select {
+						case <-wait.Done():
+							observationTick.Stop()
+							cancel()
+							t.Fatalf("retained dispatch did not settle before control: outputs=%d pending=%d", outputs, pending)
+						case <-observationTick.C:
+						}
+					}
+					observationTick.Stop()
+					cancel()
 					if phase == "reconstructed" {
 						if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 							t.Fatal(err)
+						}
+						// This reach reconstructs a cleanly closed, nonterminal execution,
+						// not an interrupted running predecessor with uncertain work.
+						select {
+						case authority := <-claimed:
+							if err := owner.ports.runtimeExecution.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
+								t.Fatal(err)
+							}
+						default:
+							t.Fatal("control-only predecessor lacks its actual execution claim")
+						}
+						closed, err := owner.ports.runtimeExecution.CloseRunForkSelectedContractRuntimeExecution(ctx, result.ForkLocalRuntimeContainer.RuntimeExecutionID)
+						if err != nil || !closed {
+							t.Fatalf("close the joined control-only predecessor: acknowledged=%v err=%v", closed, err)
 						}
 						if err := capability.Release(context.Background()); err != nil {
 							t.Fatal(err)
@@ -236,10 +292,9 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 						t.Fatalf("stop lost independent cleanup failure: %+v", resultStop.Recovery)
 					}
 				} else {
-					entered, cancelled, release := make(chan string, 1), make(chan struct{}), make(chan struct{})
+					entered, cancelled, release := make(chan context.Context, 1), make(chan struct{}), make(chan struct{})
 					owner.ports.replay = selectedOperationPublicationProbe{SelectedContractReplayPersistence: owner.ports.replay, after: func(ctx context.Context) {
-						occurrence, _ := worklifetime.OccurrenceFromContext(ctx)
-						entered <- occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID
+						entered <- ctx
 						<-ctx.Done()
 						close(cancelled)
 						<-release
@@ -253,10 +308,16 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 						_, err := ExecuteSelectedContractRunFork(ctx, request)
 						finished <- errors.Join(err, driver.Done())
 					}()
+					if err := <-finished; err != nil {
+						t.Fatalf("activation ACK failed before retained publication: %v", err)
+					}
+					var publication context.Context
 					select {
-					case forkRun = <-entered:
-					case err := <-finished:
-						t.Fatalf("execution did not reach held publication: %v", err)
+					case publication = <-entered:
+						occurrence, _ := worklifetime.OccurrenceFromContext(publication)
+						forkRun = occurrence.(*worklifetime.SelectedForkOccurrence).Identity().RunID
+					case <-ctx.Done():
+						t.Fatal(context.Cause(ctx))
 					}
 					stopDriver, err := process.Begin(ctx)
 					if err != nil {
@@ -298,8 +359,11 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 						}
 					}
 					close(release)
-					if err := <-finished; err == nil {
-						t.Fatal("stopped execution reported success")
+					if publication.Err() == nil {
+						t.Fatal("stopped retained execution was not cancelled")
+					}
+					if _, err := observeSelectedRetainedExecution(t, ctx, owner, selected, forkRun); err != nil && !errors.Is(err, context.Canceled) {
+						t.Fatalf("join stopped retained execution: %v", err)
 					}
 					if err := <-stopped; err != nil {
 						t.Fatal(err)

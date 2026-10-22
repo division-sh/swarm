@@ -143,6 +143,14 @@ func (s *RunLifecycleSQLiteOwner) RequirePresentSourceTx(ctx context.Context, tx
 	return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequirePresentSource(ctx, runID)
 }
 
+func (s *RunLifecyclePostgresOwner) ReadPresentSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+	return (postgresRunLifecycleMutation{store: s, tx: tx, readOnly: true}).RequirePresentSource(ctx, runID)
+}
+
+func (s *RunLifecycleSQLiteOwner) ReadPresentSourceTx(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+	return (sqliteRunLifecycleMutation{store: s, tx: tx, readOnly: true}).RequirePresentSource(ctx, runID)
+}
+
 func runPostgresLifecycleOperation[T any](
 	ctx context.Context,
 	store *RunLifecyclePostgresOwner,
@@ -557,6 +565,9 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 		if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, forkRunID); err != nil {
 			return err
 		}
+		if err := attempt.DeclareRunStart(ctx, forkRunID, bundleHash, ""); err != nil {
+			return err
+		}
 		scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
 		if err != nil {
 			return err
@@ -605,6 +616,9 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 			return fmt.Errorf("insert fork run lifecycle: %w", err)
 		}
 		if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, forkRunID); err != nil {
+			return err
+		}
+		if err := attempt.DeclareRunStart(ctx, forkRunID, bundleHash, ""); err != nil {
 			return err
 		}
 		scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
@@ -846,6 +860,9 @@ func recordRunStarted(ctx context.Context, attempt *mutationprotocol.Attempt, re
 		},
 	}
 	if attempt != nil {
+		if err := attempt.DeclareRunStart(ctx, request.RunID, request.Source.BundleHash(), request.Origin.EventID()); err != nil {
+			return err
+		}
 		return attempt.Record(ctx, draft)
 	}
 	return errors.New("run lifecycle creation requires attempt")
