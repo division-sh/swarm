@@ -1204,8 +1204,8 @@
   ],
   "pack_inventory": {
     "base_mode": "embedded",
-    "base_digest": "sha256:8a24efde0b451665b2602ee116b23dc85e579558664dc75a9b822900c51dc119",
-    "effective_digest": "sha256:55a789287f2af9a3c6e1708a574dce67555df248af0c4ed41a1025aea6f88b4b",
+    "base_digest": "sha256:691355d39d186c2b308d0d989d53ca84f305bc8bf19cdc6e712174dd8e4551c7",
+    "effective_digest": "sha256:eaeb33cd601d9eb5685e3a780160d12263a6304dda3760f9d4cafb249276d5e9",
     "packs": [
       {
         "id": "provider.github",
@@ -1228,7 +1228,7 @@
         "id": "provider.github.connector",
         "type": "connector",
         "version": "0.1.0",
-        "manifest_hash": "sha256:95cf8119c6f2efdb6916298dc9162d117f60a4333120b5f4c7edbb951c512118",
+        "manifest_hash": "sha256:96a5ef923f72d653cce89b6e66112de9c2517f1b278cc37949668467b6ea3f59",
         "source": "embedded",
         "directory": "provider-connectors/github",
         "origin": {
@@ -1262,7 +1262,7 @@
         "id": "provider.microsoft_graph.connector",
         "type": "connector",
         "version": "0.1.0",
-        "manifest_hash": "sha256:0dda8e5ec0926f6c02c7ecd59d1f1472cf925f533bb1cf7c0e36adea88ab237f",
+        "manifest_hash": "sha256:3387268d4e3b0513755cd1743ea7b8353e78d686b32c8cd3f0ed58353b21407e",
         "source": "embedded",
         "directory": "provider-connectors/microsoft_graph",
         "origin": {
@@ -1279,7 +1279,7 @@
         "id": "provider.notion.connector",
         "type": "connector",
         "version": "0.1.0",
-        "manifest_hash": "sha256:328de3f664f038520499ef2296c0d80d694a597c16af03996b5e42e4bd5b6bab",
+        "manifest_hash": "sha256:f0b0ba2a4668e5610caa5d423348edfb02b2ba9bf2e6973455b33838cd39bd81",
         "source": "embedded",
         "directory": "provider-connectors/notion",
         "origin": {
@@ -1330,7 +1330,7 @@
         "id": "provider.slack.connector",
         "type": "connector",
         "version": "0.1.0",
-        "manifest_hash": "sha256:bf1865beb33355f78867b3506fb80b79d393c9e8c46d22449bb1764488dc3650",
+        "manifest_hash": "sha256:c8d484074522f5443dfb6996bc29f3b6fd2d3326ef85404d0cb43357472016b9",
         "source": "embedded",
         "directory": "provider-connectors/slack",
         "origin": {
@@ -1381,7 +1381,7 @@
         "id": "provider.telegram.connector",
         "type": "connector",
         "version": "0.1.0",
-        "manifest_hash": "sha256:c33fa6494ffaffc74e69885d26b97c90d5c13d7df0e8f1159ad4f8fbbd06d221",
+        "manifest_hash": "sha256:7452be939b35a4f23e1babe0bfffc9b1c3f80ddadccb3db53ff7386a8d015d8e",
         "source": "embedded",
         "directory": "provider-connectors/telegram",
         "origin": {
@@ -1466,7 +1466,7 @@
         "id": "provider.whatsapp.connector",
         "type": "connector",
         "version": "0.1.0",
-        "manifest_hash": "sha256:f7fdf6d3620a1b54b5cfe1c0ecd054daba7bd2cc77c9a263f16f55beee2ba1ea",
+        "manifest_hash": "sha256:aafbca7fc90239dee7d0342336b49caeba21048f75e6f282aee5a22241dd1078",
         "source": "embedded",
         "directory": "provider-connectors/whatsapp",
         "origin": {
