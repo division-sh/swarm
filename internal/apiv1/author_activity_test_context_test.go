@@ -62,6 +62,19 @@ func originalAPIFixtureContext(t testing.TB, ctx context.Context, selected any) 
 	return ctx
 }
 
+func testHandlerWithOriginalContext(t *testing.T, opts Options, original context.Context) *Handler {
+	t.Helper()
+	for name, handler := range opts.Handlers {
+		opts.Handlers[name] = func(ctx context.Context, req Request) (any, error) {
+			if startupownership.HasMutationAuthority(ctx) {
+				return handler(ctx, req)
+			}
+			return handler(startupownership.CarryMutationAuthority(ctx, original), req)
+		}
+	}
+	return testHandler(t, opts)
+}
+
 func mustAPITestSourceArtifactFact(bundleHash string) runtimecorrelation.SourceArtifactFact {
 	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {

@@ -69,6 +69,7 @@ func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores
 			source := semanticview.Wrap(bundle)
 			fact := sourceartifactfixture.RequireArtifact(t, context.Background(), selected, bundle.SourceArtifact)
 			ctx := testAuthorActivityContextForSource(context.Background(), fact)
+			ctx = originalAPIFixtureContext(t, ctx, selected)
 			fault := errors.New("scenario setup postcommit cleanup failed")
 			setup := &scenarioSetupPostCommitFaultStore{TestSetupStore: selected, fault: fault}
 			now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)

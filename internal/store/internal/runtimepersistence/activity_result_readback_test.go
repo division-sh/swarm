@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/google/uuid"
 )
@@ -21,7 +22,7 @@ func TestActivityResultPublicationEvidenceBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			selected, db, ctx := backend.open(t)
 			primaryRunID := runtimecorrelation.RunIDFromContext(ctx)
-			ctx = testAuthorActivityContext()
+			ctx = startupownership.CarryMutationAuthority(testAuthorActivityContext(), ctx)
 			sibling := uuid.NewString()
 			requireRunningRunForTest(t, ctx, selected, sibling, time.Now().UTC())
 			journal := selected.(pipeline.ActivityAttemptJournal)

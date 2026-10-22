@@ -41,7 +41,7 @@ func TestActivityJournalEarlyGlobalFenceNoOpAndRollbackBothStores(t *testing.T) 
 				t.Fatalf("completion story = %#v, previous head = %d", last, beforeHead)
 			}
 
-			duplicate, _, err := activityStoryOuter(fixture, "complete", request)
+			duplicate, _, err := activityStoryOuter(t, fixture, "complete", request)
 			if err != nil || !reflect.DeepEqual(duplicate, completed) {
 				t.Fatalf("duplicate completion = %#v, err=%v, want %#v", duplicate, err, completed)
 			}
@@ -57,7 +57,7 @@ func TestActivityJournalEarlyGlobalFenceNoOpAndRollbackBothStores(t *testing.T) 
 			rollbackBefore := activityStoryOccurrences(t, fixture, postgres, rollbackSource.RunID)
 			rollbackHead := activityJournalSequenceHead(t, fixture.db)
 			removeFailure := installActivityStoryFailure(t, fixture.db, postgres)
-			_, _, err = activityStoryOuter(fixture, "complete", rollbackRequest)
+			_, _, err = activityStoryOuter(t, fixture, "complete", rollbackRequest)
 			removeFailure()
 			if err == nil || !strings.Contains(err.Error(), "injected activity story persistence") {
 				t.Fatalf("story persistence failure = %v", err)
@@ -72,7 +72,7 @@ func TestActivityJournalEarlyGlobalFenceNoOpAndRollbackBothStores(t *testing.T) 
 			if head := activityJournalSequenceHead(t, fixture.db); head != rollbackHead {
 				t.Fatalf("rollback advanced sequence: %d, want %d", head, rollbackHead)
 			}
-			if _, _, err := activityStoryOuter(fixture, "complete", rollbackRequest); err != nil {
+			if _, _, err := activityStoryOuter(t, fixture, "complete", rollbackRequest); err != nil {
 				t.Fatalf("retry after rollback: %v", err)
 			}
 			retried := activityStoryOccurrences(t, fixture, postgres, rollbackSource.RunID)
@@ -90,7 +90,7 @@ type activityJournalCompletion struct {
 
 func completeActivityBehindPostgresCompetingLocks(t *testing.T, fixture authorActivityReceiptFixture, request runtimepipeline.ActivityAttemptRecord) runtimepipeline.ActivityAttemptRecord {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store), 15*time.Second)
 	defer cancel()
 	domain, err := fixture.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -120,7 +120,7 @@ func completeActivityBehindPostgresCompetingLocks(t *testing.T, fixture authorAc
 	}
 	done := make(chan activityJournalCompletion, 1)
 	go func() {
-		record, _, err := activityStoryOuter(fixture, "complete", request)
+		record, _, err := activityStoryOuter(t, fixture, "complete", request)
 		done <- activityJournalCompletion{record, err}
 	}()
 	// The owner must wait on the global story row before it can wait on the
@@ -176,7 +176,7 @@ func waitForActivityJournalPostgresBlocker(t *testing.T, ctx context.Context, db
 
 func completeActivityBehindSQLiteWriterFence(t *testing.T, fixture authorActivityReceiptFixture, request runtimepipeline.ActivityAttemptRecord) runtimepipeline.ActivityAttemptRecord {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store), 10*time.Second)
 	defer cancel()
 	global, err := fixture.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -190,7 +190,7 @@ func completeActivityBehindSQLiteWriterFence(t *testing.T, fixture authorActivit
 	started := make(chan struct{})
 	go func() {
 		close(started)
-		record, _, err := activityStoryOuter(fixture, "complete", request)
+		record, _, err := activityStoryOuter(t, fixture, "complete", request)
 		done <- activityJournalCompletion{record, err}
 	}()
 	<-started

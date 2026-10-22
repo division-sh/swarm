@@ -61,6 +61,7 @@ func TestExactStageCompletionPublicReadbackBothStores(t *testing.T) {
 					artifact := sourceartifactfixture.New("schema.yaml", []byte("name: exact-stage-completion\nstages:\n"+stages))
 					fact := sourceartifactfixture.FactFor(artifact)
 					ctx := testAuthorActivityContextForSource(context.Background(), fact)
+					ctx = originalAPIFixtureContext(t, ctx, selected)
 					repo := runCompletionRepoRoot(t)
 					bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 					if err != nil {
