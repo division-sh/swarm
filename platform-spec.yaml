@@ -42797,7 +42797,15 @@ agent_topology_authority:
       Exact revocable live grants bind one runtime instance/generation, bundle source coordinate,
       and source-set revision. Readiness, grant-state changes, execution admission, and every
       durable lifecycle mutation re-prove the retained session and that the grant's source-set
-      revision is still the complete current head. Retained-session failure retires the process
+      revision is still the complete current head. Every runtime-capable native mutation, including
+      system-node writes and Story, AuthorityFence and RevisionOnly attempts on pooled or retained
+      connections, checks its original process and execution-grant custody under the existing
+      mutation order before domain locks or writes. Retry preserves that original evidence;
+      a mutable current-grant lookup cannot lend successor authority to predecessor work.
+      An acknowledged generation cut follows completion or rollback of previously admitted
+      mutations. Successor readiness preparation therefore follows the final allowed predecessor
+      commit, while its transaction still rechecks the exact prepared plan and activation attempt.
+      Retained-session failure retires the process
       capability, every grant, and runtime readiness before return. Caller cancellation or deadline
       of an ordinary proof or operation is control-flow evidence only: the operation returns the exact
       caller error, rolls back any current transaction, and preserves the retained backend possession,

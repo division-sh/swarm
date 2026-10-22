@@ -37,7 +37,7 @@ func (g *generationGrant) RebindFlowReadinessSourceSet(ctx context.Context, req 
 		}
 	}
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(evidence.RuntimeInstanceID, evidence.BundleHash))
-	result, err := g.owner.session.RebindFlowReadinessSourceSet(ctx, req, binding)
+	result, err := g.owner.session.RebindFlowReadinessSourceSet(g.owner.processMutationContext(ctx), req, binding)
 	if err != nil {
 		return result, g.owner.retireOnPossessionFailure(err)
 	}
