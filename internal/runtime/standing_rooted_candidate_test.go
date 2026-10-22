@@ -10,6 +10,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
@@ -73,7 +74,7 @@ func TestS1StandingCandidatesRetainCompiledRoot(t *testing.T) {
 }
 
 func TestS1StandingCandidatesRefuseContradictoryContent(t *testing.T) {
-	bundle, _, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+	bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
 		"manifest.yaml":          []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":            []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
 		"telegram/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n"),
@@ -83,13 +84,23 @@ func TestS1StandingCandidatesRefuseContradictoryContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	foreign, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if foreign.BundleHash() == rooted.Artifact().BundleHash() {
+		t.Fatal("foreign source fact must differ from the compiled candidate source")
+	}
 	credentials, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	rt := &Runtime{Options: RuntimeOptions{
 		WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)}, ProviderTriggerCatalog: projection.ProviderTriggers, ProviderCredentials: credentials,
-		SourceArtifactFact: sourceartifactfixture.FactFor(sourceartifactfixture.New("schema.yaml", []byte("stages: []\n"))),
+		SourceArtifactFact: sourceartifactfixture.FactFor(foreign),
 	}}
 	if candidates, err := rt.PlanStandingServiceCandidates(); err == nil || len(candidates) != 0 {
 		t.Fatalf("contradictory source gained a standing candidate: %+v, %v", candidates, err)

@@ -36,7 +36,8 @@ func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
 	for i, event := range []string{"alpha.requested", "beta.requested"} {
 		bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
 			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-			"schema.yaml":   []byte("stages: []\nevents:\n  " + event + ":\n"),
+			"schema.yaml":   []byte("stages: []\n"),
+			"events.yaml":   []byte(event + ":\n"),
 		})
 		contexts[i] = rootedContextForSource(t, semanticview.Wrap(bundle), rooted)
 	}
