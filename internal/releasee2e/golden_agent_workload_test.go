@@ -1863,9 +1863,7 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 	}
 
 	conversations := listGoldenConversations(t, ctx, rpc, runID)
-	if len(conversations) != len(wantByTrigger) {
-		t.Fatalf("conversation.list count = %d, want exactly %d original/replayed trigger conversations: %#v", len(conversations), len(wantByTrigger), conversations)
-	}
+	successfulConversations := 0
 	seenSessions := map[string]bool{}
 	seenTriggers := map[string]int{}
 	for _, conversation := range conversations {
@@ -1892,6 +1890,9 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 		if !ok || conversation.AgentID != expectation.agentID || turns[0].TriggerEventType != expectation.eventName {
 			t.Errorf("conversation %s turn = %#v agent=%q, want exact routed trigger %#v", conversation.SessionID, turns[0], conversation.AgentID, expectation)
 		}
+		if !expectation.interrupted {
+			successfulConversations++
+		}
 		if turns[0].ParseOK == expectation.interrupted || (turns[0].Failure != nil) != expectation.interrupted {
 			t.Errorf("conversation %s turn = %#v, want interrupted=%t", conversation.SessionID, turns[0], expectation.interrupted)
 		}
@@ -1903,8 +1904,13 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 		}
 		seenTriggers[turns[0].TriggerEventID]++
 	}
+	if successfulConversations != len(candidateIDs)+1 {
+		t.Errorf("successful conversation count = %d, want exactly one scout and %d candidate conversations", successfulConversations, len(candidateIDs))
+	}
 	for triggerID, expectation := range wantByTrigger {
-		if seenTriggers[triggerID] != 1 {
+		// The public SQLite list omits terminated stateless audits. Dead-letter
+		// history is checked separately; every visible turn still has an exact owner.
+		if seenTriggers[triggerID] > 1 || (!expectation.interrupted && seenTriggers[triggerID] != 1) {
 			t.Errorf("concrete mock agent %s trigger %s (%s) turn count = %d, want 1", expectation.agentID, triggerID, expectation.eventName, seenTriggers[triggerID])
 		}
 	}
