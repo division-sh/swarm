@@ -23,6 +23,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -55,7 +56,8 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 							SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 						}))
 						before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID()))
+						original := originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint)
+						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, original)
 						hints.expect(t, 0)
 						wantErr := ""
 						if status == "started" {
@@ -118,7 +120,7 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 							t.Fatalf("source journal changed: found=%v err=%v", found, err)
 						}
 						afterFirst := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-						again, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID()))
+						again, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, original)
 						if err != nil || !reflect.DeepEqual(loaded, again) {
 							t.Fatalf("repeat changed prepared event: err=%v", err)
 						}
@@ -181,7 +183,7 @@ func TestOrdinaryForkActivityReplayCardDependencyBothStores(t *testing.T) {
 						}
 						t.Run(policy+"/"+status+"/"+presence, func(t *testing.T) {
 							child, event, sourceRecord := seedActivityEvidenceForFork(t, fixture, backend.name == "postgres", approved, status, 0, true, pendingCard)
-							original := originalCarriageForRun(t, fixture.store, event.RunID())
+							original := originalActivityCarriageAtPoint(t, fixture.store.(selectedActivityProjectionStore), event.RunID(), child.ForkPoint)
 							source := selectedActivityProducerSourceOptions(t, false, false, true, !approved)
 							bundle, _ := semanticview.Bundle(source)
 							ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
@@ -322,7 +324,7 @@ func TestSelectedForkRecordedActivityCardDependencyBothStores(t *testing.T) {
 						SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 					}))
 					store := fixture.store.(selectedActivityProjectionStore)
-					loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, event.RunID()))
+					loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint))
 					if err != nil || len(loaded) != 1 {
 						t.Fatalf("selected recorded preparation: %+v error=%v", loaded, err)
 					}
@@ -376,7 +378,8 @@ func TestRunForkActivityTimestampRejectsIncompleteReuseBothStores(t *testing.T) 
 						t.Fatal(err)
 					}
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-					_, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, event.RunID()))
+					store := fixture.store.(selectedActivityProjectionStore)
+					_, err := store.LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint))
 					if err == nil || !strings.Contains(err.Error(), column+" is required") {
 						t.Fatalf("incomplete recorded timestamp: got %v, want %s is required", err, column)
 					}
@@ -414,7 +417,8 @@ func TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores(t *testi
 				t.Fatalf("source precision fixture: %#v err=%v", original, err)
 			}
 			store := fixture.store.(selectedActivityProjectionStore)
-			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID())); err != nil {
+			originalCarriage := originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint)
+			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriage); err != nil {
 				t.Fatal(err)
 			}
 			var copiedID string
@@ -435,7 +439,7 @@ func TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores(t *testi
 				}
 			}
 			before := snapshotForkHistoricalExecutionTables(t, fixture.db, postgres)
-			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID())); err != nil {
+			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriage); err != nil {
 				t.Fatal(err)
 			}
 			if _, inserted, err := journal.StartActivityAttempt(ctx, copied); err == nil || inserted {
@@ -572,9 +576,16 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 			t.Fatal(err)
 		}
 	}
-	payload, err := json.Marshal(map[string]any{"activity_id": activity, "tool": tool, "input": input,
+	requestPayload := map[string]any{"activity_id": activity, "tool": tool, "input": input,
 		"success_event": success, "failure_event": failure, "entity_id": entityID, "node_id": owner.Key(), "flow_id": flow, "flow_instance": instance,
-		"handler_event_key": handler, "source_run_id": runID, "source_event_id": parentID, "loop_generation": generation, "loop_stage": loopStage})
+		"handler_event_key": handler, "source_run_id": runID, "source_event_id": parentID,
+		"source_task_id": "", "parent_event_id": "", "chain_depth": 0, "loop_generation": generation, "loop_stage": loopStage}
+	if approved {
+		requestPayload["bundle_hash"], requestPayload["workflow_version"] = continuation.BundleHash, continuation.WorkflowVersion
+		requestPayload["revision_event"], requestPayload["rejected_event"] = continuation.RevisionEvent, continuation.RejectedEvent
+		requestPayload["source_task_id"], requestPayload["parent_event_id"], requestPayload["chain_depth"] = continuation.SourceTaskID, continuation.ParentEventID, continuation.ChainDepth
+	}
+	payload, err := json.Marshal(requestPayload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,7 +596,9 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 		agent := bustest.IdentityForRun(t, runID, "activity-replay", "")
 		routes = []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(agent.AgentID()), AgentIdentity: agent}}
 	}
-	if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, routes); err != nil {
+	admitted := admitOriginalActivityRequestFixture(t, ctx, declarations, event, flow)
+	event = admitted.Event()
+	if _, err := commitAdmittedSemanticEventFixtureOutcome(ctx, fixture.store, admitted, canonicalDeliveryFixtureRoutes(runID, routes), pipelineobligation.ScopeSubscribed); err != nil {
 		t.Fatal(err)
 	}
 	if approved {

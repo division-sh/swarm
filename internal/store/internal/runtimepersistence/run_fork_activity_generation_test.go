@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -53,6 +54,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 		"success_event": "write.succeeded", "failure_event": "write.failed",
 		"entity_id": entityID, "node_id": writerOwner.Key(), "flow_id": "flow-a", "flow_instance": "flow-a", "handler_event_key": "review.accepted",
 		"source_event_id": sourceEventID, "source_run_id": sourceRunID,
+		"source_task_id": "", "parent_event_id": "", "chain_depth": 0,
 		"loop_generation": sourceGeneration, "loop_stage": "review",
 	}
 	requestJSON, _ := json.Marshal(requestPayload)
@@ -90,7 +92,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
-	events, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalCarriageForRun(t, pg, sourceRunID))
+	events, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +134,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	}
 }
 
-func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T) {
+func TestSelectedContractForkProjectsUnissuedActivityWithoutAttempt(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
 	pg := admitTestPostgresStore(t, db)
@@ -162,6 +164,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 		"success_event": "read.succeeded", "failure_event": "read.failed",
 		"entity_id": entityID, "node_id": readerOwner.Key(), "flow_id": "flow-a", "flow_instance": "flow-a", "handler_event_key": "review.inspect",
 		"source_event_id": sourceEventID, "source_run_id": sourceRunID,
+		"source_task_id": "", "parent_event_id": "", "chain_depth": 0,
 		"loop_generation": sourceGeneration, "loop_stage": "review",
 	})
 	seedDeclaredActivityRequestExecutionSource(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "reader", at, selectedActivityProducerSourceWithLoops(t, false, true), payload)
@@ -176,7 +179,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
-	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalCarriageForRun(t, pg, sourceRunID))
+	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +200,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 		t.Fatal(err)
 	}
 	if attempts != 0 {
-		t.Fatalf("fork read attempts = %d, want runtime reexecution rather than copied evidence", attempts)
+		t.Fatalf("unissued fork request has %d attempts, want none before execution", attempts)
 	}
 }
 
@@ -231,6 +234,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 		"success_event": "write.succeeded", "failure_event": "write.failed",
 		"entity_id": entityID, "node_id": writerOwner.Key(), "flow_id": "flow-a", "flow_instance": "flow-a", "handler_event_key": "review.accepted",
 		"source_event_id": sourceEventID, "source_run_id": sourceRunID,
+		"source_task_id": "", "parent_event_id": "", "chain_depth": 0,
 		"loop_generation": generation, "loop_stage": "review",
 	})
 	seedDeclaredActivityRequestExecutionSource(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer", at, selectedActivityProducerSourceWithLoops(t, false, true), requestPayload)
@@ -279,7 +283,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
-	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalCarriageForRun(t, pg, sourceRunID))
+	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +349,8 @@ func seedDeclaredActivityRequestExecutionSource(t *testing.T, db *sql.DB, runID,
 	if instance.EntityID != entityID || instance.InstancePath != "flow-a" {
 		t.Fatalf("activity fixture disagrees with its exact constructor: %+v", instance)
 	}
-	if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, nil); err != nil {
+	admitted := admitOriginalActivityRequestFixture(t, ctx, source, event, "flow-a")
+	if _, err := commitAdmittedSemanticEventFixtureOutcome(ctx, selected, admitted, nil, pipelineobligation.ScopeSubscribed); err != nil {
 		t.Fatal(err)
 	}
 }
