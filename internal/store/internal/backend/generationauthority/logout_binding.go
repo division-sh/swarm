@@ -1,4 +1,4 @@
-package startupownership
+package generationauthority
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 )
 
 // FreezeLogoutProcessTx joins the original SDK owner's grant to the current
@@ -19,7 +18,7 @@ func FreezeLogoutProcessTx(ctx context.Context, tx *sql.Tx, binding processbindi
 	if binding.Validate() != nil {
 		return zero, fmt.Errorf("logout requires its original generation binding")
 	}
-	current, err := generationauthority.ReadProcessGenerationTx(ctx, tx, sqlite)
+	current, err := ReadProcessGenerationTx(ctx, tx, sqlite)
 	if err != nil {
 		return zero, err
 	}
@@ -31,11 +30,11 @@ func FreezeLogoutProcessTx(ctx context.Context, tx *sql.Tx, binding processbindi
 	if err != nil {
 		return zero, err
 	}
-	plan, found, err := loadSourceSetTx(ctx, tx, sqlite)
+	plan, found, err := ReadSourceSetTx(ctx, tx, sqlite, true)
 	if err != nil {
 		return zero, err
 	}
-	if !found || plan.Revision != grant.SourceSetRevision || !sourceSetContains(plan, agenttopology.SourceCoordinate{BundleHash: binding.BundleHash}) {
+	if !found || plan.Revision != grant.SourceSetRevision || !SourceSetContains(plan, agenttopology.SourceCoordinate{BundleHash: binding.BundleHash}) {
 		return zero, fmt.Errorf("logout original generation source set is not current")
 	}
 	return current, ctx.Err()

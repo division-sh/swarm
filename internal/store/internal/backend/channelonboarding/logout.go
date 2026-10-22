@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
-	startupowner "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
 
 type teardownReservation struct {
@@ -72,7 +71,7 @@ func prepareTeardownReservationTx(ctx context.Context, tx *sql.Tx, d dialect, re
 		if err := admitLogoutTarget(prepared.logout, req); err != nil {
 			return prepared, err
 		}
-		stamp, err := startupowner.FreezeLogoutProcessTx(ctx, tx, req.Logout.ProcessBinding, d == dialectSQLite)
+		stamp, err := generationauthority.FreezeLogoutProcessTx(ctx, tx, req.Logout.ProcessBinding, d == dialectSQLite)
 		if err != nil {
 			return prepared, err
 		}

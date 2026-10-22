@@ -1,4 +1,4 @@
-package startupownership
+package generationauthority
 
 import (
 	"context"
@@ -8,12 +8,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 )
 
 // ProcessAuthorityCurrent checks the exact current stamp. Mutation callers must
 // use the canonical generation fence; retained data is never lock possession.
-func ProcessAuthorityCurrent(ctx context.Context, q authorityQueryer, expected processbinding.LeaseStamp, sqlite, lock bool) (bool, error) {
+func ProcessAuthorityCurrent(ctx context.Context, q processGenerationReader, expected processbinding.LeaseStamp, sqlite, lock bool) (bool, error) {
 	if err := expected.Validate(); err != nil {
 		return false, err
 	}
@@ -22,15 +21,15 @@ func ProcessAuthorityCurrent(ctx context.Context, q authorityQueryer, expected p
 		if !ok {
 			return false, errors.New("process mutation proof requires its transaction")
 		}
-		return generationauthority.ProcessGenerationCurrent(ctx, tx, expected, sqlite)
+		return ProcessGenerationCurrent(ctx, tx, expected, sqlite)
 	}
-	current, err := generationauthority.ReadProcessGeneration(ctx, q, sqlite)
+	current, err := ReadProcessGeneration(ctx, q, sqlite)
 	return err == nil && current == expected, err
 }
 
 // GenerationGrantProcessCurrent observes the exact current grant's process,
 // without conflating grant state or source permission with the physical lease.
-func GenerationGrantProcessCurrent(ctx context.Context, q authorityQueryer, grantID string, sqlite, lock bool) (bool, error) {
+func GenerationGrantProcessCurrent(ctx context.Context, q processGenerationReader, grantID string, sqlite, lock bool) (bool, error) {
 	var tx *sql.Tx
 	if lock {
 		var ok bool
@@ -38,7 +37,7 @@ func GenerationGrantProcessCurrent(ctx context.Context, q authorityQueryer, gran
 		if !ok {
 			return false, errors.New("grant process mutation proof requires its transaction")
 		}
-		if err := generationauthority.FenceMutation(ctx, tx, sqlite); err != nil {
+		if err := FenceMutation(ctx, tx, sqlite); err != nil {
 			return false, err
 		}
 	}
@@ -63,7 +62,7 @@ func GenerationGrantProcessCurrent(ctx context.Context, q authorityQueryer, gran
 		return false, nil
 	}
 	if lock {
-		return generationauthority.ProcessCoordinatesCurrentTx(ctx, tx, grant.ProcessCoordinates(), sqlite)
+		return ProcessCoordinatesCurrentTx(ctx, tx, grant.ProcessCoordinates(), sqlite)
 	}
-	return generationauthority.ProcessCoordinatesCurrent(ctx, q, grant.ProcessCoordinates(), sqlite)
+	return ProcessCoordinatesCurrent(ctx, q, grant.ProcessCoordinates(), sqlite)
 }

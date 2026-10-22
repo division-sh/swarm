@@ -7,35 +7,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/store/internal/adminpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 )
 
-type selectedResetHistory struct {
-	apply func(context.Context, *sql.Tx, destructivereset.CleanupRequest, bool) (destructivereset.SelectedHistoryDisposition, error)
-}
-
-func BindPostgresSelectedResetHistory(s *StartupPostgresOwner, apply func(context.Context, *sql.Tx, destructivereset.CleanupRequest, bool) (destructivereset.SelectedHistoryDisposition, error)) error {
-	if s == nil {
-		return errors.New("selected reset history requires its startup owner")
-	}
-	return s.selectedResetHistory.bindSelectedResetHistory(apply)
-}
-
-func BindSQLiteSelectedResetHistory(s *StartupSQLiteOwner, apply func(context.Context, *sql.Tx, destructivereset.CleanupRequest, bool) (destructivereset.SelectedHistoryDisposition, error)) error {
-	if s == nil {
-		return errors.New("selected reset history requires its startup owner")
-	}
-	return s.selectedResetHistory.bindSelectedResetHistory(apply)
-}
-
-func (s *selectedResetHistory) bindSelectedResetHistory(apply func(context.Context, *sql.Tx, destructivereset.CleanupRequest, bool) (destructivereset.SelectedHistoryDisposition, error)) error {
-	if apply == nil || s.apply != nil {
-		return errors.New("selected reset history must be bound exactly once")
-	}
-	s.apply = apply
-	return nil
-}
-
-func (s *selectedResetHistory) applySelectedResetHistoryTx(ctx context.Context, tx *sql.Tx, req destructivereset.CleanupRequest, sqlite bool) (destructivereset.SelectedHistoryDisposition, error) {
+func applySelectedResetHistoryTx(ctx context.Context, tx *sql.Tx, req destructivereset.CleanupRequest, sqlite bool) (destructivereset.SelectedHistoryDisposition, error) {
 	var absent destructivereset.SelectedHistoryDisposition
 	runIDs, err := adminpersistence.ValidateDestructiveResetCleanupRequest(req, req.RequestedAt)
 	if err != nil {
@@ -53,13 +28,7 @@ func (s *selectedResetHistory) applySelectedResetHistoryTx(ctx context.Context, 
 		}
 		seen[id] = true
 	}
-	if s.apply == nil {
-		if len(req.SelectedHistory) != 0 {
-			return absent, errors.New("selected reset history reader is not composed")
-		}
-		return absent, nil
-	}
-	return s.apply(ctx, tx, req, sqlite)
+	return runforkpersistence.ApplySelectedResetHistoryTx(ctx, tx, req, sqlite)
 }
 
 func attachSelectedResetDisposition(result *destructivereset.CleanupResult, history destructivereset.SelectedHistoryDisposition) error {

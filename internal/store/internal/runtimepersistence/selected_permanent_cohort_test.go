@@ -315,31 +315,20 @@ func reusePermanentCohortProcess(t *testing.T, store any, process runtimeownersh
 func openPermanentCohortNativeStore(t *testing.T, backend string, control *activityGrantHistoryConnector) authorActivityReceiptFixture {
 	t.Helper()
 	var native driver.Connector
+	var location string
 	if backend == "postgres" {
 		dsn, _, _ := testutil.StartPostgres(t)
+		location = dsn
 		var err error
 		native, err = pq.NewConnector(dsn)
 		if err != nil {
 			t.Fatal(err)
 		}
 	} else {
-		native = pipelineCrashSQLiteConnector{path: filepath.Join(t.TempDir(), "permanent.db")}
+		location = filepath.Join(t.TempDir(), "permanent.db")
+		native = pipelineCrashSQLiteConnector{path: location}
 	}
 	control.Connector = native
-	db := sql.OpenDB(control)
-	t.Cleanup(func() {
-		if err := db.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	if backend == "postgres" {
-		return authorActivityReceiptFixture{store: admitTestPostgresStore(t, db), db: db}
-	}
-	store := NewSQLiteRuntimeStoreForTest(db)
-	if err := store.BootstrapSchema(testAuthorActivityContext(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
-		t.Fatal(err)
-	}
-	store.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
-	registerTestAuthorActivityCatalog(t, store)
-	return authorActivityReceiptFixture{store: store, db: db}
+	opened, _ := openPipelineCrashStore(t, backend, location, control)
+	return opened
 }

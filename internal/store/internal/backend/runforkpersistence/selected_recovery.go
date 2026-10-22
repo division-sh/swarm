@@ -21,9 +21,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storeeffects "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
+	generationauthority "github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
-	storestartup "github.com/division-sh/swarm/internal/store/internal/startupownership"
 	"github.com/google/uuid"
 )
 
@@ -169,7 +169,7 @@ func admitSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, req runcontrol.Sel
 	if _, err := authoractivity.BundleScopeForSource(ctx, req.Entry.BundleHash); err != nil {
 		return err
 	}
-	current, err := storestartup.ProcessAuthorityCurrent(ctx, tx, req.Process, sqlite, true)
+	current, err := generationauthority.ProcessAuthorityCurrent(ctx, tx, req.Process, sqlite, true)
 	if err != nil {
 		return err
 	}
@@ -348,7 +348,7 @@ func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecove
 	if err != nil || complete && !pending && len(req.Cancellations) == 0 {
 		return settled, err
 	}
-	current, err := storestartup.PreparedProcessCurrent(ctx, tx, preparation.Coordinates, preparation.ProcessGeneration, sqlite, false)
+	current, err := generationauthority.PreparedProcessCurrent(ctx, tx, preparation.Coordinates, preparation.ProcessGeneration, sqlite, false)
 	if err != nil {
 		return result, err
 	}
