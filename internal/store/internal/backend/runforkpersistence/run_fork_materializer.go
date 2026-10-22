@@ -412,10 +412,7 @@ func loadExactRunForkMaterialization(
 		snapshot.BundleHash != bundleHash ||
 		snapshot.EventCount != 0 ||
 		snapshot.EntityCount != fieldRows {
-		return runfork.RunForkMaterialization{}, false, fmt.Errorf(
-			"fork materialization %s conflicts with persisted lifecycle state",
-			forkRunID,
-		)
+		return runfork.RunForkMaterialization{}, false, &runfork.RunForkMaterializationConflictError{ForkRunID: forkRunID}
 	}
 
 	metadata, err := loadRunForkEntityMetadata(plan)

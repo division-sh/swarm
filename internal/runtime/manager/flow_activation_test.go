@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	runtimestanding "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"

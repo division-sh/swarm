@@ -651,16 +651,8 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	if err := pipeline.RestoreWorkflowTimers(runCtx); err != nil {
 		return fmt.Errorf("restore selected child workflow timers: %w", err)
 	}
-	if req.Prepared.recoveryFromExecutionID != "" {
-		if err := bus.RecoverSelectedRunPipelineToExhaustion(runCtx, req.ForkRunID); err != nil {
-			return fmt.Errorf("recover selected child event pipeline: %w", err)
-		}
-		if err := c.ports.fork.ReconcileSelectedSuccessorDeliveryAuthority(runCtx, req.Prepared.recoveryFromExecutionID, attachment.deliveryAuthority); err != nil {
-			return fmt.Errorf("reconcile recovered selected child deliveries: %w", err)
-		}
-		if err := continuations.Synchronize(runCtx); err != nil {
-			return fmt.Errorf("synchronize recovered selected child deliveries: %w", err)
-		}
+	if err := c.reconcileRecoveredDeliveries(runCtx, continuations); err != nil {
+		return err
 	}
 	if err := agentRuntime.genericSchedules.ReconcileRunWakeups(runCtx, req.ForkRunID); err != nil {
 		return fmt.Errorf("restore selected child generic schedule wakeups: %w", err)
@@ -708,6 +700,22 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 		}
 	}
 	return c.awaitTerminalSettlement(runCtx, continuationFailures)
+}
+
+func (c selectedContractForkLocalRuntimeContainer) reconcileRecoveredDeliveries(ctx context.Context, continuations *runtimedeliverycontinuation.Coordinator) error {
+	if c.req.Prepared.recoveryFromExecutionID == "" {
+		return nil
+	}
+	if err := c.attachment.runtime.bus.RecoverSelectedRunPipelineToExhaustion(ctx, c.req.ForkRunID); err != nil {
+		return fmt.Errorf("recover selected child event pipeline: %w", err)
+	}
+	if err := c.ports.fork.ReconcileSelectedSuccessorDeliveryAuthority(ctx, c.req.Prepared.recoveryFromExecutionID, c.attachment.deliveryAuthority); err != nil {
+		return fmt.Errorf("reconcile recovered selected child deliveries: %w", err)
+	}
+	if err := continuations.Synchronize(ctx); err != nil {
+		return fmt.Errorf("synchronize recovered selected child deliveries: %w", err)
+	}
+	return nil
 }
 
 type committedSelectedInput struct {
