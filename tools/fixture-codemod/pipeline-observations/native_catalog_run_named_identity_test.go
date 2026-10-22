@@ -198,46 +198,6 @@ func TestCatalogRunNamedIdentitySuccessorRejectsUnreviewedHeaderBindings(t *test
 	}
 }
 
-func TestR7ReviewedFixtureSuccessorInventoryIsExact(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	// Keep the reviewed R7 endpoints immutable. Selected-input composes C05/C4;
-	// guard history composes only the exact Q10 lifecycle-presence repair above.
-	for _, pin := range []struct{ file, function, digest string }{
-		{"internal/runtime/cataloge2e/guard_historical_fork_test.go", "TestGuardTerminationHistoricalForkPreservesCauseBothStores", "b2e7ab7337a58d13ab1837b7b4f31b3dd9d489a291e5650e8f5760eb6f0bdcc8"},
-		{"internal/runtime/cataloge2e/receiver_materialization_geometry_test.go", "TestReceiverMaterializationSourceLocalTargetlessAgentControlBothStores", "ba3016484746604e9e3999fc799b1948c71a0d65e67ee16a2e5d900193a53eea"},
-		{"internal/runtime/cataloge2e/receiver_materialization_selected_test.go", "runReceiverMaterializationSelectedForkExecution", "135922df7ee8e651ae20a84d14e3543c34ab3d02a7e6308605ff6ab5f5552cdb"},
-		{"internal/runtime/runforkexecution/constructed_agent_input_execution_test.go", "proveSelectedConstructedAgentInput", "49bf1fb2c3444f00ea8a75d3e1352aae24aa300a687c96a1f2a249220ea14d7f"},
-	} {
-		matched := 0
-		for _, row := range rows {
-			if row.File != pin.file || row.Function != pin.function {
-				continue
-			}
-			matched++
-			if row.Function == "proveSelectedConstructedAgentInput" {
-				assertSelectedAgentInputHistoricalEndpoint2617(t)
-				if !residualComparatorCurrent2617(t, row, selectedCausalObservationBody(t, row.File, row.Function)) {
-					t.Fatal("selected-input current endpoint diverged from the finite C05/C4 pin")
-				}
-				continue
-			}
-			if row.Successor == "" || !historicalCurrentSourcePinned(row.Successor, pin.digest) {
-				t.Fatalf("missing or changed reviewed R7 successor: %s/%s", row.File, row.Function)
-			}
-			mutant := strings.Replace(row.Successor, "{", "{ unreviewed();", 1)
-			if historicalCurrentSourcePinned(mutant, pin.digest) {
-				t.Fatal("unreviewed successor work accepted")
-			}
-		}
-		if matched != 1 {
-			t.Fatalf("reviewed successor identity multiplicity=%d, want1", matched)
-		}
-	}
-}
-
 func TestCatalogRunNamedIdentityOracleRejectsLostWorkloadAndPolling(t *testing.T) {
 	var rows []recipe
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {

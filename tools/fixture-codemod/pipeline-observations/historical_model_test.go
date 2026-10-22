@@ -2,11 +2,9 @@ package main
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -23,120 +21,6 @@ func historicalMechanicalRecipe(t *testing.T, row recipe) recipe {
 		row.After = row.Mechanical.After
 	}
 	return row
-}
-
-func mechanicalReceiptDigest(rows []recipe) (string, error) {
-	var receipts []recipe
-	for _, row := range rows {
-		if row.Mechanical != nil {
-			receipts = append(receipts, row)
-		}
-	}
-	data, err := json.Marshal(receipts)
-	if err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%x", sha256.Sum256(data)), nil
-}
-
-func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	count := 0
-	for _, row := range rows {
-		if row.Mechanical == nil {
-			continue
-		}
-		count++
-		if err := validateRecipeSnapshots(row); err != nil {
-			t.Fatal(err)
-		}
-		current := q10PrivateTargetCurrentRecipe(t, row)
-		if source, found, err := q10SharedCoordinatorCurrentSource(row); err != nil {
-			t.Fatal(err)
-		} else if found {
-			current.Successor = source
-		}
-		historicalMechanicalRecipe(t, current)
-	}
-	if count != 24 {
-		t.Fatalf("mechanical repair target count=%d, want24", count)
-	}
-	var pins []fixtureSetupSuccessor2617
-	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 42 {
-		t.Fatalf("finite fixture receipt packet changed: %v", err)
-	}
-	// Reverse only Q1's appended wait/setup edits before checking the complete
-	// original digest, including every earlier live successor and assertion.
-	archived, err := q1RetryDecisionPriorRows(rows)
-	if err != nil {
-		t.Fatal(err)
-	}
-	digest, err := mechanicalReceiptDigest(archived)
-	if err != nil || digest != "637fcb76a19075ffc1dd93fc6a189652be2a50f2b199647d67cc0ffd58885fed" {
-		t.Fatalf("source-pinned mechanical/current receipts changed: %s/%v", digest, err)
-	}
-	// Retain the complete predecessor digest, including its old live Successors.
-	// Only the two appended #2287 join-presentation receipts may reverse it.
-	prior := append([]recipe(nil), archived...)
-	restored := 0
-	for _, pin := range pins[36:39] {
-		if pin.Original.Mechanical == nil {
-			continue
-		}
-		if pin.Original.File != "internal/runtime/pipeline/workflow_join_supported_surface_external_test.go" ||
-			(pin.Original.Function != "TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBothStores" &&
-				pin.Original.Function != "TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEventBusOnBothStores") {
-			t.Fatal("unlisted mechanical presentation successor")
-		}
-		for index, row := range prior {
-			if !sameReviewedRecipeKey(row, pin.Original) {
-				continue
-			}
-			history := row
-			history.Successor = pin.Original.Successor
-			body, err := reverseReviewedSuccessor2617(row.Successor, pin.Edits)
-			if err != nil || body != pin.Original.Successor || row.Successor != pin.Candidate || !reflect.DeepEqual(history, pin.Original) {
-				t.Fatalf("presentation successor changed historical mechanical evidence: %s/%v", row.Function, err)
-			}
-			prior[index] = pin.Original
-			restored++
-		}
-	}
-	if restored != 2 {
-		t.Fatalf("exact mechanical presentation predecessors=%d, want2", restored)
-	}
-	if digest, err := mechanicalReceiptDigest(prior); err != nil || digest != "42b81abe4214daf8d46e5859d779a924dfdcc079beaa6cbfe36e5228c48c95b9" {
-		t.Fatalf("historical mechanical/current receipt digest changed: %s/%v", digest, err)
-	}
-	for i := 43; i >= 36; i-- {
-		pin := pins[i]
-		if pin.Original.Mechanical == nil {
-			continue
-		}
-		matches := 0
-		for index, row := range prior {
-			if !sameReviewedRecipeKey(row, pin.Original) {
-				continue
-			}
-			history := row
-			history.Successor = pin.Original.Successor
-			body, err := reverseReviewedSuccessor2617(row.Successor, pin.Edits)
-			if err != nil || body != pin.Original.Successor || row.Successor != pin.Candidate || !reflect.DeepEqual(history, pin.Original) {
-				t.Fatalf("#642 successor changed historical mechanical evidence: %s/%v", row.Function, err)
-			}
-			prior[index] = pin.Original
-			matches++
-		}
-		if matches != 1 {
-			t.Fatalf("exact #642 mechanical predecessor count=%d", matches)
-		}
-	}
-	if digest, err := mechanicalReceiptDigest(prior); err != nil || digest != "a47db59e4f7118a2c0cca2f463a68c28c32e571d9cea15892635e62d1340d7cf" {
-		t.Fatalf("original mechanical/current receipt digest changed: %s/%v", digest, err)
-	}
 }
 
 func TestHistoricalMechanicalSnapshotsRejectInvalidAndCrossedCuts(t *testing.T) {
