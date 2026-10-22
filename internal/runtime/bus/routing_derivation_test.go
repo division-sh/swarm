@@ -646,7 +646,7 @@ func routeMaterializationNodeSource(t *testing.T, flowID, nodeBody string) seman
 
 func routeMaterializationConfigVarBundle(t *testing.T, publicName, subscription string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	agent := "ceo:\n  type: generic\n  role: ceo\n  intent: {inline: 'Observe product initialization.'}\n  subscriptions: [" + subscription + "]\n"
+	agent := "ceo:\n  role: ceo\n  intent: {inline: 'Observe product initialization.'}\n  subscriptions: [" + subscription + "]\n"
 	if publicName != "" {
 		agent += "  id: " + publicName + "\n"
 	}
