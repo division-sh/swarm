@@ -166,10 +166,6 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	assertUnsupportedHistoricalReplayFailsClosed(t, negativeFixtureRoot)
 }
 
-func selectedContractExecutionOwnerForCatalogTest(t testing.TB, selected *store.PostgresStore, forkOverride ...runtimerunforkexecution.SelectedContractForkLifecycle) runtimerunforkexecution.SelectedContractExecutionOwner {
-	return selectedContractExecutionOwnerForCatalogTestWithReplay(t, selected, nil, forkOverride...)
-}
-
 func selectedContractExecutionOwnerForCatalogTestWithReplay(t testing.TB, selected *store.PostgresStore, replay runtimerunforkexecution.SelectedContractReplayPersistence, forkOverride ...runtimerunforkexecution.SelectedContractForkLifecycle) runtimerunforkexecution.SelectedContractExecutionOwner {
 	t.Helper()
 	if replay == nil {

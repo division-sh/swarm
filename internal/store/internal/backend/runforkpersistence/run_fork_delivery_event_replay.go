@@ -19,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
-	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
@@ -454,24 +453,6 @@ func loadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, 
 
 func LoadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, sourceEventID string) (events.Event, error) {
 	return loadRunForkReplaySourceEvent(ctx, tx, sourceRunID, sourceEventID)
-}
-
-func loadSQLiteRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, sourceEventID string) (events.Event, error) {
-	row, found, err := eventrecordsqlite.Load(ctx, tx, sourceEventID)
-	if err != nil {
-		var event events.Event
-		return event, fmt.Errorf("load sqlite fork delivery/event replay source event: %w", err)
-	}
-	if !found || row.RunID != strings.TrimSpace(sourceRunID) {
-		var event events.Event
-		return event, fmt.Errorf("fork delivery/event replay source event %s not found in run %s", sourceEventID, sourceRunID)
-	}
-	admitted, err := row.Decode()
-	if err != nil {
-		var empty events.Event
-		return empty, fmt.Errorf("load sqlite fork delivery/event replay source event: %w", err)
-	}
-	return admitted.Event(), nil
 }
 
 func projectRunForkReplayEvent(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admission runForkSourceStateAdmission, source events.Event, lineage runForkActivationLineage, forkEventID string, now time.Time) (events.AdmittedEvent, error) {
