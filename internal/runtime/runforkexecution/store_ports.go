@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/events"
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebudgetspend "github.com/division-sh/swarm/internal/runtime/budgetspend"
@@ -16,6 +18,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -24,19 +27,22 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
 type SelectedDeploymentFanOutStore interface {
-	BindSelectedDeploymentFanOutGrant(startupownership.GrantEvidence) (runtimepipeline.FanOutObligationOwner, error)
 	ListSelectedDeploymentFeeds(context.Context, startupownership.GrantEvidence) ([]fanoutobligation.Intent, error)
+	LoadPinnedSource(context.Context, string, string, durabledata.DeclarationRef) (durabledata.PinnedSource, error)
 }
 
 // SelectedContractForkLifecycle owns planning, materialization, activation,
 // binding, and cleanup for one selected-contract fork.
 type SelectedContractForkLifecycle interface {
 	SelectedDeploymentFanOutStore
+	LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
+	LoadForkOperationByID(context.Context, string) (runfork.ForkOperationRecord, bool, error)
 	FailMaterializedSelectedContractExecutionFork(context.Context, string, runfork.ForkOperationFailure) error
 	ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
 	RecoverSelectedFork(context.Context, runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error)
@@ -45,6 +51,7 @@ type SelectedContractForkLifecycle interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	MaterializeRunForkForSelectedContractExecution(context.Context, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
+	RequireMaterializedRunForkForSelectedContractExecution(context.Context, string, runforkreadiness.MaterializeRequest) (runfork.RunForkMaterialization, error)
 	DiscardMaterializedSelectedContractExecutionFork(context.Context, string) error
 	ActivateRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)
 	LoadRunForkSelectedContractBinding(context.Context, string) (runfork.RunForkSelectedContractBinding, bool, error)
@@ -59,17 +66,19 @@ type SelectedContractRuntimeExecutionLifecycle interface {
 	IssueRunForkSelectedContractRuntimeExecution(context.Context, runfork.SelectedContractRuntimeExecutionIssueRequest) (runfork.SelectedContractRuntimeExecution, error)
 	ClaimRunForkSelectedContractRuntimeExecution(context.Context, runfork.SelectedContractRuntimeExecution, string, time.Duration) (runtimeeffects.Authority, error)
 	HeartbeatRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, time.Duration) error
+	RequireRunForkSelectedContractExecutionSettlement(context.Context, runtimeeffects.Authority, []string, semanticview.Source) error
 	QuiesceRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority) error
-	CloseRunForkSelectedContractRuntimeExecution(context.Context, string) error
+	CloseRunForkSelectedContractRuntimeExecution(context.Context, string) (bool, error)
 	FailRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, json.RawMessage) error
+	FailActivatedRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, json.RawMessage) (bool, error)
 }
 
 // SelectedContractReplayPersistence owns source replay admission and exact
 // selected-fork event commit.
 type SelectedContractReplayPersistence interface {
-	EnsureRunForkNoPostForkCommittedReplayScopeMarkers(context.Context, string, string) error
 	LoadRunForkSelectedContractSourceEventModes(context.Context, string, []string) ([]executionmode.Mode, error)
 	LoadRunForkSelectedContractSourceEvents(context.Context, string, string, []string, semanticview.OriginalLoopCarriage) ([]runfork.RunForkSelectedContractSourceEvent, error)
+	RequireSelectedForkInputPublished(context.Context, runtimeeffects.Authority, runfork.RunForkSelectedContractSourceEvent, events.PayloadSchemaBinding) (bool, error)
 	CommitSelectedForkEvent(context.Context, runtimebus.CommitSelectedForkEventRequest) (runtimebus.CommittedSelectedForkEvent, error)
 }
 
@@ -104,6 +113,9 @@ type selectedContractExecutionPorts struct {
 	humanTasks              decisioncard.HumanTaskStore
 	decisionCardDraftExpiry runtimepipeline.DecisionCardDraftExpiry
 	humanTaskExpiry         runtimepipeline.HumanTaskExpiry
+	candidates              runlifecycle.CandidateOwner
+	genericSchedules        genericschedule.Store
+	testFanOutExecutor      func(startupownership.FanOutExecutor) startupownership.FanOutExecutor
 }
 
 func NewSelectedContractExecutionOwner(
@@ -128,6 +140,8 @@ func NewSelectedContractExecutionOwner(
 	humanTasks decisioncard.HumanTaskStore,
 	decisionCardDraftExpiry runtimepipeline.DecisionCardDraftExpiry,
 	humanTaskExpiry runtimepipeline.HumanTaskExpiry,
+	candidates runlifecycle.CandidateOwner,
+	genericSchedules genericschedule.Store,
 ) (SelectedContractExecutionOwner, error) {
 	required := []struct {
 		name  string
@@ -152,6 +166,7 @@ func NewSelectedContractExecutionOwner(
 		{"managed capabilities", managedCapabilities}, {"budget", budget}, {"runtime logs", logs},
 		{"decision cards", decisionCards}, {"proposed effects", proposedEffects},
 		{"human tasks", humanTasks}, {"decision-card draft expiry", decisionCardDraftExpiry}, {"human-task expiry", humanTaskExpiry},
+		{"run completion candidates", candidates}, {"generic schedule lifecycle", genericSchedules},
 	}
 	for _, role := range required {
 		if role.value == nil {
@@ -170,6 +185,7 @@ func NewSelectedContractExecutionOwner(
 		budget: budget, logs: logs, decisionCards: decisionCards,
 		proposedEffects: proposedEffects, humanTasks: humanTasks,
 		decisionCardDraftExpiry: decisionCardDraftExpiry, humanTaskExpiry: humanTaskExpiry,
+		candidates: candidates, genericSchedules: genericSchedules,
 	}}, nil
 }
 

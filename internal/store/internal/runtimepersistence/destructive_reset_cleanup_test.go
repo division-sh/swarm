@@ -697,7 +697,6 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	lateRunID := deterministicRunForkMaterializationID(runID, eventID)
 	preservedRunID := uuid.NewString()
 	lateMutationID := uuid.NewString()
 	activeSessionID := uuid.NewString()
@@ -759,8 +758,10 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	if err != nil {
 		t.Fatalf("materialize dependent fork: %v", err)
 	}
-	if materialized.ForkRunID != lateRunID {
-		t.Fatalf("dependent fork run_id = %s, want %s", materialized.ForkRunID, lateRunID)
+	lateRunID := materialized.ForkRunID
+	childID, parseErr := uuid.Parse(lateRunID)
+	if parseErr != nil || childID == uuid.Nil || childID.String() != lateRunID || lateRunID == runID || materialized.SourceRunID != runID || materialized.ForkPoint.EventID != eventID {
+		t.Fatalf("dependent fork lost canonical child/origin identity: %+v err=%v", materialized, parseErr)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
 		INSERT INTO entity_mutations (mutation_id, run_id, entity_id, domain, path, caused_by_event, writer_type, writer_id)
@@ -783,12 +784,13 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		INSERT INTO reply_contexts (
 			reply_context_id, run_id, request_event_id, requester_flow_id, request_output_pin,
 			reply_input_pin, provider_flow_id, provider_input_pin, provider_output_pin,
-			origin_route, request_correlation_id, state
+			origin_route, request_correlation_id, state, source_run_id, source_request_event_id, source_run_owner_key
 		)
 		VALUES (
 			$1, $2::uuid, $3::uuid, 'requester', 'provider_requested', 'provider_replied',
 			'provider', 'provider_requested', 'provider_replied',
-			'{"flow_id":"requester","flow_instance":"requester/a"}'::jsonb, $3::text, 'open'
+			'{"flow_id":"requester","flow_instance":"requester/a"}'::jsonb, $3::text, 'open',
+			$2::uuid, $3::uuid, 'run:' || CAST($2::uuid AS TEXT)
 		)
 	`, replyContextID, runID, eventID); err != nil {
 		t.Fatalf("seed cleanup reply context: %v", err)

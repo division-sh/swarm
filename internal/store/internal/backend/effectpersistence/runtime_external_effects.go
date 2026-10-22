@@ -1011,6 +1011,10 @@ func loadExternalEffectStorySettlement(ctx context.Context, tx *sql.Tx, attemptI
 	if err := tx.QueryRowContext(ctx, query, strings.TrimSpace(attemptID), strings.TrimSpace(operationID)).Scan(&state, &failureRaw, &completedAtRaw); err != nil {
 		return "", nil, time.Time{}, fmt.Errorf("load settled external effect author activity source: %w", err)
 	}
+	return decodeExternalEffectStorySettlement(state, failureRaw, completedAtRaw)
+}
+
+func decodeExternalEffectStorySettlement(state string, failureRaw []byte, completedAtRaw any) (runtimeeffects.State, *runtimefailures.Envelope, time.Time, error) {
 	completedAt, ok, err := sqliteTimeValue(completedAtRaw)
 	if err != nil || !ok {
 		return "", nil, time.Time{}, fmt.Errorf("load settled external effect completion time: %w", firstNonNilError(err, fmt.Errorf("completed_at is required")))

@@ -98,8 +98,10 @@ func receiverConstructionEvidenceTx(ctx context.Context, tx *sql.Tx, flow flowid
 	if err != nil {
 		return false, err
 	}
-	if projected && recorded && (fixed.Identity != original.Identity || fixed.InstanceKey != original.InstanceKey) {
-		return false, fmt.Errorf("receiver native receipt contradicts fixed historical construction")
+	if projected && recorded {
+		if err := requireProjectedReceiverReceiptTx(ctx, tx, run, header, historical); err != nil {
+			return false, err
+		}
 	}
 	if recorded {
 		if err := original.ValidateStoredMode(header.Mode); err != nil {
@@ -120,6 +122,9 @@ func receiverConstructionEvidenceTx(ctx context.Context, tx *sql.Tx, flow flowid
 	if !recorded {
 		return false, fmt.Errorf("native receiver construction lacks its original receipt")
 	}
+	if projected {
+		return false, fmt.Errorf("native receiver dependency contradicts historical construction")
+	}
 	if original.Identity.TemplateID != target.FlowID {
 		return false, fmt.Errorf("receiver dependency contradicts original construction declaration")
 	}
@@ -127,4 +132,17 @@ func receiverConstructionEvidenceTx(ctx context.Context, tx *sql.Tx, flow flowid
 		return false, fmt.Errorf("receiver dependency contradicts original construction publication")
 	}
 	return true, nil
+}
+
+// The fixed-cut owner compares the entire independently projected receipt.
+// Physical presence alone neither establishes native provenance nor corrupts history.
+func requireProjectedReceiverReceiptTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance, historical HistoricalFlowInstanceReader) error {
+	_, found, err := historical.ReadProjectedReceiverConstructionReceiptTx(ctx, tx, run, header)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("historical receiver lost its admitted projected construction")
+	}
+	return nil
 }

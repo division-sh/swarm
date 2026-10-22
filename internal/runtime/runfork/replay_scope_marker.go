@@ -10,10 +10,11 @@ const RunForkSelectedContractCommittedReplayScopeMarkerPolicyOwner = "runtime.ru
 // RunForkSelectedContractReplayResumeAdmission applies the selected-contract
 // replay/resume policies that are allowed to reinterpret source-run facts before
 // any selected-contract fork mutation.
-func RunForkSelectedContractReplayResumeAdmission(plan RunForkPlan) RunForkReplayResumeAdmission {
+func RunForkSelectedContractReplayResumeAdmission(plan RunForkPlan) (RunForkReplayResumeAdmission, error) {
 	admission := RunForkSelectedContractActiveSourceDeliveryConversationCouplingAdmission(plan, plan.ReplayResumeAdmission)
 	admission = runForkSelectedContractSessionTurnAuditLineageAdmission(plan, admission)
-	return RunForkSelectedContractCommittedReplayScopeMarkerAdmission(admission)
+	admission = RunForkSelectedContractCommittedReplayScopeMarkerAdmission(admission)
+	return RunForkSelectedFanOutReplayAdmission(plan, admission)
 }
 
 // RunForkSelectedContractCommittedReplayScopeMarkerAdmission treats source

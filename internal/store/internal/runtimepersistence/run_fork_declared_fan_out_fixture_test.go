@@ -179,8 +179,8 @@ func seedDeclaredForkFanOutGenerationFromSource(t *testing.T, backend string, fi
 		Key: fanoutobligation.IntentKey{RunID: runID, TriggeringDeliveryID: claim.Claim.DeliveryID(), ElementRef: plans[0].Ref.ElementRef}, PlanRef: plans[0].Ref,
 		Source: fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEventPayloadField, EventID: trigger.ID(), Field: "items"}, Cardinality: cardinality,
 		Capsule: fanoutobligation.Capsule{NodeKey: node.Key(), ExecutionFlowID: ".", Route: flowidentity.StoredRoute(".", runID, runID), EntityID: runID,
-			SourceProjection: plans[0].SemanticEvidence(),
-			HandlerEventKey:  "items.ready", CurrentState: record.CurrentState, ProducerSource: trigger.RoutingSource(), Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: route.Target}, Lineage: events.LineageFromEvent(trigger)},
+			SourcePlanRef: plans[0].Ref, SourceProjection: plans[0].SemanticEvidence(),
+			HandlerEventKey: "items.ready", CurrentState: record.CurrentState, ProducerSource: trigger.RoutingSource(), Receiver: &fanoutobligation.ExecutionReceiver{Node: node, Target: route.Target}, Lineage: events.LineageFromEvent(trigger)},
 	}
 	if plans[0].ItemsFrom == "entity.items" {
 		request.Source = fanoutobligation.SourceRef{Kind: fanoutobligation.SourceEntityField, RunID: runID, EntityID: runID, Field: "items"}

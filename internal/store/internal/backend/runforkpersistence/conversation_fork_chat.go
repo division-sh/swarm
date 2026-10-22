@@ -674,7 +674,12 @@ func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkS
 			COALESCE(t.response_payload, '{}'),
 			COALESCE(t.tool_calls, '[]'),
 			c.surface,
-			t.created_at, CAST(t.completion_evidence AS TEXT), COALESCE(t.resolved_model,'')
+			t.created_at, CAST(t.completion_evidence AS TEXT), COALESCE(t.resolved_model,''),
+			EXISTS (SELECT 1 FROM agent_turn_live_parents p
+			 WHERE p.turn_id=t.turn_id AND p.run_id=t.run_id
+			 AND p.completion_attempt_id=t.completion_attempt_id AND p.capability_surface_id=t.capability_surface_id
+			 AND NOT EXISTS (SELECT 1 FROM run_fork_selected_contract_turn_detachments retained WHERE retained.turn_id=t.turn_id)),
+			c.execution_kind,c.execution_authority_id,c.run_id,c.selected_execution_id,c.selected_fork_run_id
 		FROM agent_turns t
 		JOIN managed_agent_capability_surfaces c ON c.surface_id = t.capability_surface_id
 		WHERE t.session_id = ?
@@ -691,11 +696,17 @@ func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkS
 	var out runtimerunfork.ConversationForkSourceTurn
 	var requestRaw, responseRaw, toolCallsRaw, capabilitySurfaceRaw, completionRaw []byte
 	var createdAt conversationForkTimeValue
-	if err := row.Scan(&out.TurnID, &requestRaw, &responseRaw, &toolCallsRaw, &capabilitySurfaceRaw, &createdAt, &completionRaw, &out.ResolvedModel); err != nil {
+	var liveParents bool
+	var stored storemanagedcapability.StoredProjection
+	if err := row.Scan(&out.TurnID, &requestRaw, &responseRaw, &toolCallsRaw, &capabilitySurfaceRaw, &createdAt, &completionRaw, &out.ResolvedModel, &liveParents,
+		&stored.ExecutionKind, &stored.ExecutionAuthorityID, &stored.RunID, &stored.SelectedExecutionID, &stored.SelectedForkRunID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return runtimerunfork.ConversationForkSourceTurn{}, &operatorread.EntityReadParamError{Field: "fork_id", Reason: "source turn is unavailable"}
 		}
 		return runtimerunfork.ConversationForkSourceTurn{}, fmt.Errorf("load conversation fork source turn: %w", err)
+	}
+	if !liveParents {
+		return runtimerunfork.ConversationForkSourceTurn{}, fmt.Errorf("conversation fork source turn lacks its exact live-parent association")
 	}
 	out.TurnIndex = fork.ForkPoint.TurnIndex
 	out.SelectedAt = fork.ForkPoint.SelectedAt
@@ -709,7 +720,7 @@ func loadConversationForkSourceTurn(ctx context.Context, owner conversationForkS
 	if out.ResolvedModel != out.CompletionEvidence.ResolvedModel() {
 		return runtimerunfork.ConversationForkSourceTurn{}, fmt.Errorf("fork source model contradicts historical completion evidence")
 	}
-	surface, err := storemanagedcapability.Decode(capabilitySurfaceRaw)
+	surface, err := storemanagedcapability.DecodeStored(capabilitySurfaceRaw, stored)
 	if err != nil {
 		return runtimerunfork.ConversationForkSourceTurn{}, fmt.Errorf("decode conversation fork source capability surface: %w", err)
 	}

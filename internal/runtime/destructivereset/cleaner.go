@@ -58,5 +58,7 @@ func (c Cleaner) now() time.Time {
 func copyCleanupResult(result CleanupResult) CleanupResult {
 	result.RunIDs = append([]string(nil), result.RunIDs...)
 	result.Tables = append([]CleanupTableResult(nil), result.Tables...)
+	result.SelectedHistory.Receipts = append([]SelectedHistoryReceipt(nil), result.SelectedHistory.Receipts...)
+	result.SelectedHistory.Tables = append([]SelectedHistoryTable(nil), result.SelectedHistory.Tables...)
 	return result
 }

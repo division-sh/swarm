@@ -1,8 +1,6 @@
 package activityjournal
 
-import (
-	"errors"
-)
+import "errors"
 
 // ValidateDisplacedRecovery checks the fixed journal before recovering its rows.
 // It exposes neither the transaction nor a callback seam.

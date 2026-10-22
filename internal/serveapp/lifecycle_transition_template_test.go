@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type lifecycleTemplateSibling struct {
@@ -45,46 +46,53 @@ func startLifecycleTemplateRuntime(t *testing.T, backend servedparity.Backend, r
 
 func readLifecycleTemplateGate(t *testing.T, rt servedControlProofRuntime, runID, entityID, flow string) gateruntime.Activation {
 	t.Helper()
-	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM flow_instances WHERE run_id=$1 AND entity_id=$2 AND flow_template=$3`, runID, entityID, flow).Scan(&raw); err != nil {
-		t.Fatal(err)
+	return readLifecycleTemplateGateFromReader(t, rt.ReceiverStateReader, runID, entityID, flow)
+}
+
+func readLifecycleTemplateGateFromReader(t *testing.T, reader receiverProofStateReader, runID, entityID, flow string) gateruntime.Activation {
+	t.Helper()
+	record, instance := requireSingleReceiverTargetState(t, reader, runID, flow)
+	if instance.EntityID != entityID {
+		t.Fatalf("gate entity=%s want=%s", instance.EntityID, entityID)
 	}
 	var buckets map[string]map[string]any
-	if err := json.Unmarshal([]byte(raw), &buckets); err != nil {
+	if err := json.Unmarshal(record.Lifecycle.State.Accumulator, &buckets); err != nil {
 		t.Fatal(err)
 	}
 	gate, found, err := gateruntime.Load(buckets, flow, "review_decision")
 	if err != nil || !found {
-		t.Fatalf("gate flow=%s: found=%t err=%v accumulator=%s", flow, found, err, raw)
+		t.Fatalf("gate flow=%s: found=%t err=%v accumulator=%+v", flow, found, err, instance.StateBuckets)
 	}
 	return gate
 }
 
-func requireLifecycleTemplateInstance(t *testing.T, rt servedControlProofRuntime, runID, instance, flow string) {
+func requireLifecycleTemplateInstance(t *testing.T, reader receiverProofStateReader, runID, instance, flow string) {
 	t.Helper()
-	var template string
-	if err := rt.DB.QueryRow(`SELECT flow_template FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, runID, instance).Scan(&template); err != nil {
-		t.Fatal(err)
-	}
-	if template != flow {
-		t.Fatalf("instance %s template=%s want=%s", instance, template, flow)
+	_, receiver := requireSingleReceiverTargetState(t, reader, runID, flow)
+	if receiver.StorageRef != instance {
+		t.Fatalf("instance %s template=%s want=%s", instance, receiver.WorkflowName, flow)
 	}
 }
 
-func requireLifecycleTemplateEntity(t *testing.T, rt servedControlProofRuntime, runID, flow, state string) (string, string) {
+func requireLifecycleTemplateEntity(t *testing.T, reader receiverProofStateReader, runID, flow, state string) (string, string) {
 	t.Helper()
 	for deadline := time.Now().Add(90 * time.Second); time.Now().Before(deadline); {
-		var entity, instance string
-		err := rt.DB.QueryRow(`SELECT f.entity_id,f.instance_path FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.entity_id=f.entity_id AND e.flow_instance=f.instance_path WHERE f.run_id=$1 AND f.flow_template=$2 AND f.current_state=$3`, runID, flow, state).Scan(&entity, &instance)
-		if err == nil {
-			return entity, instance
-		}
-		if err != sql.ErrNoRows {
+		instances, err := reader.ListWorkflowInstances(t.Context(), runID)
+		if err != nil {
 			t.Fatal(err)
+		}
+		for _, instance := range instances {
+			if instance.WorkflowName == flow && instance.CurrentState == state {
+				record, _ := requireReceiverTargetState(t, reader, runID, flow, instance.StorageRef, instance.EntityID)
+				if !record.Presence.HasState() {
+					t.Fatalf("template %s has no exact entity state", flow)
+				}
+				return instance.EntityID, instance.StorageRef
+			}
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("logical template %s did not reach %s\n%s", flow, state, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+	t.Fatalf("logical template %s did not reach %s", flow, state)
 	return "", ""
 }
 
@@ -130,6 +138,11 @@ func logLifecycleTemplateCompletionRows(t *testing.T, rt servedControlProofRunti
 // Inputs go through the root's compiled connects, never a seeded instance row.
 func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime) (string, string, []lifecycleTemplateSibling) {
 	t.Helper()
+	return prepareLifecycleTemplateSiblingsFromReader(t, lifecycleTemplateObservation{Endpoint: rt.Endpoint, BundleHash: rt.BundleHash, ReceiverStateReader: rt.ReceiverStateReader})
+}
+
+func prepareLifecycleTemplateSiblingsFromReader(t *testing.T, rt lifecycleTemplateObservation) (string, string, []lifecycleTemplateSibling) {
+	t.Helper()
 	var runID, sourceEvent string
 	var siblings []lifecycleTemplateSibling
 	for _, side := range []string{"left", "right"} {
@@ -165,28 +178,28 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 			t.Fatal("sibling escaped its run")
 		}
 		runID, sourceEvent = seed.RunID, seed.EventID
-		s.entity, s.instance = requireLifecycleTemplateEntity(t, rt, runID, s.flow, "drafting")
+		s.entity, s.instance = requireLifecycleTemplateEntity(t, rt.ReceiverStateReader, runID, s.flow, "drafting")
 		requireStep("start", seed, "waiting", "drafting")
-		requireLifecycleTemplateInstance(t, rt, runID, s.instance, s.flow)
+		requireLifecycleTemplateInstance(t, rt.ReceiverStateReader, runID, s.instance, s.flow)
 		var keyed operatorread.OperatorEntityFull
 		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": s.entity}, &keyed)
 		if keyed.Fields["case_id"] != "shared" || s.instance == s.flow {
 			t.Fatalf("actual template key/instance missing: entity=%#v instance=%s", keyed, s.instance)
 		}
 		for attempt := 1; attempt <= 2; attempt++ {
-			loop := readLifecycleLoop(t, rt, runID, s.entity)
+			loop := readLifecycleLoopFromEndpoint(t, rt.Endpoint, runID, s.entity)
 			if loop.Attempt != attempt {
 				t.Fatalf("%s loop attempt=%d want=%d", side, loop.Attempt, attempt)
 			}
 			admit := publish("admit", fmt.Sprintf("admit-%d", attempt), map[string]any{"revision_id": loop.RevisionID})
-			requireLifecycleTemplateEntity(t, rt, runID, s.flow, "review")
+			requireLifecycleTemplateEntity(t, rt.ReceiverStateReader, runID, s.flow, "review")
 			requireStep("admit", admit, "drafting", "review")
 			repeat := publish("repeat", fmt.Sprintf("repeat-%d", attempt), map[string]any{"revision_id": loop.RevisionID})
 			state := "drafting"
 			if attempt == 2 {
 				state = "escaped"
 			}
-			requireLifecycleTemplateEntity(t, rt, runID, s.flow, state)
+			requireLifecycleTemplateEntity(t, rt.ReceiverStateReader, runID, s.flow, state)
 			record := requireStep("repeat", repeat, "review", state)
 			compiled, ok := record.Evidence.Compiled()
 			wantSource := "loop.repeat"
@@ -197,15 +210,13 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 				t.Fatalf("%s ordinary/cap transition borrowed another template/carrier: %+v", side, record)
 			}
 		}
-		s.revision = readLifecycleLoop(t, rt, runID, s.entity).RevisionID
-		s.gateEntity, s.gateInstance = requireLifecycleTemplateEntity(t, rt, runID, s.flow+"/sink", "review")
-		requireLifecycleTemplateInstance(t, rt, runID, s.gateInstance, s.flow+"/sink")
-		var rawConfig string
-		if err := rt.DB.QueryRow(`SELECT CAST(config AS TEXT) FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, runID, s.gateInstance).Scan(&rawConfig); err != nil {
-			t.Fatal(err)
-		}
+		s.revision = readLifecycleLoopFromEndpoint(t, rt.Endpoint, runID, s.entity).RevisionID
+		s.gateEntity, s.gateInstance = requireLifecycleTemplateEntity(t, rt.ReceiverStateReader, runID, s.flow+"/sink", "review")
+		requireLifecycleTemplateInstance(t, rt.ReceiverStateReader, runID, s.gateInstance, s.flow+"/sink")
+		record, _ := requireReceiverTargetState(t, rt.ReceiverStateReader, runID, s.flow+"/sink", s.gateInstance, s.gateEntity)
+		rawConfig := record.Lifecycle.Config
 		var nestedConfig map[string]any
-		if err := json.Unmarshal([]byte(rawConfig), &nestedConfig); err != nil {
+		if err := json.Unmarshal(rawConfig, &nestedConfig); err != nil {
 			t.Fatal(err)
 		}
 		if nestedConfig["parent_flow_id"] != s.flow || nestedConfig["parent_flow_instance"] != s.instance || nestedConfig["parent_entity_id"] != s.entity {
@@ -229,7 +240,7 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 				t.Fatalf("%s ordinary/cap selection history[%d]=%#v", side, i, compiled)
 			}
 		}
-		s.gate = readLifecycleTemplateGate(t, rt, runID, s.gateEntity, s.flow+"/sink")
+		s.gate = readLifecycleTemplateGateFromReader(t, rt.ReceiverStateReader, runID, s.gateEntity, s.flow+"/sink")
 		var cards struct {
 			Items []struct {
 				DecisionCard struct {
@@ -241,7 +252,7 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 		if len(cards.Items) != 1 || cards.Items[0].DecisionCard.CardID != s.gate.CardID {
 			t.Fatalf("%s filtered mailbox does not identify exact activation: %#v gate=%#v", side, cards, s.gate)
 		}
-		s.decision = lifecycleDecisionParamsForCard(t, rt, s.gate.CardID, "approve")
+		s.decision = lifecycleDecisionParamsFromEndpoint(t, rt.Endpoint, s.gate.CardID, "approve")
 		s.decision["idempotency_key"] = side + "-template-decide"
 		t.Logf("TEMPLATE_PENDING run=%s side=%s instance=%s entity=%s revision=%s gate_instance=%s gate_entity=%s activation=%s card=%s routes=%s", runID, side, s.instance, s.entity, s.revision, s.gateInstance, s.gateEntity, s.gate.ActivationID, s.gate.CardID, s.gate.RoutesJSON)
 		siblings = append(siblings, s)
@@ -252,10 +263,10 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 	return runID, sourceEvent, siblings
 }
 
-func requireLifecycleTemplateVerdict(t *testing.T, rt servedControlProofRuntime, runID string, s lifecycleTemplateSibling) {
+func requireLifecycleTemplateVerdict(t *testing.T, rt lifecycleTemplateObservation, runID string, s lifecycleTemplateSibling) {
 	t.Helper()
-	requireLifecycleTemplateEntity(t, rt, runID, s.flow+"/sink", "approved")
-	final, _ := requireLifecycleTemplateEntity(t, rt, runID, s.flow+"/sink/final", "done")
+	requireLifecycleTemplateEntity(t, rt.ReceiverStateReader, runID, s.flow+"/sink", "approved")
+	final, _ := requireLifecycleTemplateEntity(t, rt.ReceiverStateReader, runID, s.flow+"/sink/final", "done")
 	var entity operatorread.OperatorEntityFull
 	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": final}, &entity)
 	if entity.Fields["result"] != s.side {
@@ -273,16 +284,22 @@ func requireLifecycleTemplateVerdict(t *testing.T, rt servedControlProofRuntime,
 	if !ok || !reflect.DeepEqual(compiled, frozen.Transition) || compiled.FlowID() != s.flow+"/sink" || compiled.Edge().DecisionID != "review_decision" || compiled.Edge().Verdict != "approve" {
 		t.Fatalf("%s gate lost exact frozen source: history=%#v frozen=%#v", s.side, history, frozen)
 	}
-	gate := readLifecycleTemplateGate(t, rt, runID, s.gateEntity, s.flow+"/sink")
+	gate := readLifecycleTemplateGateFromReader(t, rt.ReceiverStateReader, runID, s.gateEntity, s.flow+"/sink")
 	if gate.CardID != s.gate.CardID || gate.ActivationID != s.gate.ActivationID || gate.RoutesJSON != s.gate.RoutesJSON || gate.DecisionEventID != history[0].TriggerEventID {
 		t.Fatalf("%s gate receipt split activation/history: %#v", s.side, gate)
 	}
-	requireLifecycleEventCount(t, rt, runID, s.gateInstance+"/work.completed", 1)
-	requireLifecycleEventCount(t, rt, runID, s.flow+"/sink/work.completed", 0)
+	requireLifecycleTemplateEventCount(t, rt.ReceiverStateReader, runID, s.gateInstance+"/work.completed", 1)
+	requireLifecycleTemplateEventCount(t, rt.ReceiverStateReader, runID, s.flow+"/sink/work.completed", 0)
 	t.Logf("TEMPLATE_DECIDED run=%s side=%s card=%s event=%s final=%s compiled=%#v", runID, s.side, gate.CardID, gate.DecisionEventID, final, compiled)
 }
 
 func completeLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime, runID string, siblings []lifecycleTemplateSibling) {
+	t.Helper()
+	completeLifecycleTemplateSiblingsFromReader(t, lifecycleTemplateObservation{Endpoint: rt.Endpoint, BundleHash: rt.BundleHash, ReceiverStateReader: rt.ReceiverStateReader}, runID, siblings)
+	logLifecycleTemplateCompletionRows(t, rt, runID)
+}
+
+func completeLifecycleTemplateSiblingsFromReader(t *testing.T, rt lifecycleTemplateObservation, runID string, siblings []lifecycleTemplateSibling) {
 	t.Helper()
 	start := make(chan struct{})
 	var workers sync.WaitGroup
@@ -297,7 +314,13 @@ func completeLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntim
 	}
 	close(start)
 	workers.Wait()
-	logLifecycleTemplateCompletionRows(t, rt, runID)
+	stored, err := storetest.ReadSelectedForkSourceDomain(t.Context(), rt.ReceiverStateReader, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"events", "event_deliveries", "event_receipts"} {
+		t.Logf("TEMPLATE_COMPLETION run=%s table=%s columns=%v rows=%v", runID, table, stored[table].Columns, stored[table].Rows)
+	}
 	if t.Failed() {
 		t.FailNow()
 	}

@@ -84,6 +84,27 @@ func TestForkOperationDurableReplayAndConflictBothStores(t *testing.T) {
 					}
 				}
 			})
+			withForkOperationTx(t, db, func(tx *sql.Tx) {
+				var before, after []byte
+				if err := tx.QueryRowContext(ctx, `SELECT result_json FROM run_fork_operations WHERE operation_id=$1`, request.OperationID).Scan(&before); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_operation_live_parents WHERE operation_id=$1`, request.OperationID); err != nil {
+					t.Fatal(err)
+				}
+				if _, found, err := lookupForkOperationTx(ctx, tx, request.Actor, request.IdempotencyKey, request.TransportHash, backend == "postgres", false); err == nil || found {
+					t.Fatal("missing live parents became ordinary ownership or a successful replay")
+				}
+				if _, found, err := loadForkOperationByIDTx(ctx, tx, request.OperationID, false); err == nil || found {
+					t.Fatal("operation ID read accepted absent live parents")
+				}
+				if err := tx.QueryRowContext(ctx, `SELECT result_json FROM run_fork_operations WHERE operation_id=$1`, request.OperationID).Scan(&after); err != nil || string(before) != string(after) {
+					t.Fatalf("refused read changed immutable operation result: %v", err)
+				}
+				if err := insertForkOperationLiveParentsTx(ctx, tx, request.OperationID); err != nil {
+					t.Fatal(err)
+				}
+			})
 		})
 	}
 }
@@ -159,8 +180,17 @@ func TestForkOperationDeploymentRevisionIsDurableAndEventlessBothStores(t *testi
 					t.Fatalf("eventless result lost exact point: %+v found=%t err=%v", loaded, found, err)
 				}
 			})
+			if _, err := db.ExecContext(ctx, `UPDATE run_fork_operations SET fork_revision=8 WHERE operation_id=$1`, request.OperationID); err == nil {
+				t.Fatal("canonical revision changed beneath its exact live-parent association")
+			}
 			withForkOperationTx(t, db, func(tx *sql.Tx) {
+				if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_operation_live_parents WHERE operation_id=$1`, request.OperationID); err != nil {
+					t.Fatal(err)
+				}
 				if _, err := tx.ExecContext(ctx, `UPDATE run_fork_operations SET fork_revision=8 WHERE operation_id=$1`, request.OperationID); err != nil {
+					t.Fatal(err)
+				}
+				if err := insertForkOperationLiveParentsTx(ctx, tx, request.OperationID); err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -186,9 +216,19 @@ func forkOperationTestDatabase(t *testing.T, backend string) *sql.DB {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
+			t.Fatal(err)
+		}
 		t.Cleanup(func() { _ = db.Close() })
 	}
 	db.SetMaxOpenConns(1)
+	// These operation-only cuts have no detached history. Keep the positive
+	// detachment exclusion present rather than bypassing the native reader.
+	if _, err := db.Exec(`CREATE TABLE run_fork_selected_contract_execution_detachments (
+		execution_id TEXT PRIMARY KEY, binding_id TEXT NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
 	query := strings.ReplaceAll(`CREATE TABLE run_fork_operations (
 		operation_id TEXT PRIMARY KEY, actor TEXT NOT NULL, idempotency_key TEXT,
 		transport_hash TEXT NOT NULL, semantic_hash TEXT NOT NULL,
@@ -197,9 +237,21 @@ func forkOperationTestDatabase(t *testing.T, backend string) *sql.DB {
 		fork_run_id TEXT NOT NULL UNIQUE, selected_binding_id TEXT NOT NULL UNIQUE,
 		state TEXT NOT NULL, result_json JSON_TYPE, failure_json JSON_TYPE,
 		created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-		UNIQUE (actor, idempotency_key)
+		UNIQUE (actor, idempotency_key),
+		UNIQUE (operation_id, selected_binding_id, fork_run_id, source_run_id, fork_point_kind, fork_revision),
+		UNIQUE (operation_id, fork_event_id)
 	)`, "JSON_TYPE", jsonType)
 	if _, err := db.Exec(query); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE run_fork_operation_live_parents (
+		operation_id TEXT PRIMARY KEY REFERENCES run_fork_operations(operation_id),
+		selected_binding_id TEXT NOT NULL, fork_run_id TEXT NOT NULL, source_run_id TEXT NOT NULL,
+		fork_point_kind TEXT NOT NULL, fork_revision BIGINT NOT NULL, fork_event_id TEXT,
+		FOREIGN KEY (operation_id,selected_binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision)
+		REFERENCES run_fork_operations(operation_id,selected_binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision),
+		FOREIGN KEY (operation_id,fork_event_id) REFERENCES run_fork_operations(operation_id,fork_event_id)
+	)`); err != nil {
 		t.Fatal(err)
 	}
 	return db

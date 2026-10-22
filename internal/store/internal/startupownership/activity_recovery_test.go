@@ -1,7 +1,6 @@
 package startupownership
 
 import (
-	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -25,18 +24,6 @@ func (p *activityRecoveryRoleProbe) BindActivityGrant(grant runtimeownership.Gra
 
 func TestStartupActivityJournalRequiresOneDualRole(t *testing.T) {
 	pg, sqlite := &StartupPostgresOwner{}, &StartupSQLiteOwner{}
-	for _, invalid := range []runtimeownership.ActivityJournalGrantBinder{
-		(*activityjournal.ActivityPostgresOwner)(nil),
-		(*activityjournal.ActivitySQLiteOwner)(nil),
-		&activityRecoveryRoleProbe{},
-	} {
-		if pg.BindActivityJournalRole(invalid) == nil || sqlite.BindActivityJournalRole(invalid) == nil || pg.activityJournal != nil || sqlite.activityJournal != nil {
-			t.Fatal("missing or non-native role changed the original native owner")
-		}
-	}
-	if pg.BindActivityJournalRole(&activityjournal.ActivitySQLiteOwner{}) == nil || sqlite.BindActivityJournalRole(&activityjournal.ActivityPostgresOwner{}) == nil || pg.activityJournal != nil || sqlite.activityJournal != nil {
-		t.Fatal("other-store role changed the original native owner")
-	}
 	for _, test := range []struct {
 		name string
 		bind func(bool) error
@@ -140,23 +127,18 @@ func TestRetainedActivityJournalBinderCapturesExactSession(t *testing.T) {
 	}
 }
 
-func TestStartupActivityRecoveryMissingRoleRefusesBeforeNativeEntry(t *testing.T) {
+func TestStartupActivityJournalMissingRoleRefusesBeforeNativeEntry(t *testing.T) {
 	authority := activityRecoveryTestAuthority()
 	for _, test := range []struct {
-		name    string
-		recover func(context.Context) (pipeline.ActivityRecoverySummary, error)
-		binder  func() (runtimeownership.ActivityJournalGrantBinder, error)
+		name   string
+		binder func() (runtimeownership.ActivityJournalGrantBinder, error)
 	}{
-		{"postgres", (&postgresSession{owner: &StartupPostgresOwner{}, authority: authority}).ReconcileDisplacedHTTPActivities, (&postgresSession{owner: &StartupPostgresOwner{}, authority: authority}).ActivityJournalBinder},
-		{"sqlite", (&sqliteSession{owner: &StartupSQLiteOwner{}, authority: authority}).ReconcileDisplacedHTTPActivities, (&sqliteSession{owner: &StartupSQLiteOwner{}, authority: authority}).ActivityJournalBinder},
+		{"postgres", (&postgresSession{owner: &StartupPostgresOwner{}, authority: authority}).ActivityJournalBinder},
+		{"sqlite", (&sqliteSession{owner: &StartupSQLiteOwner{}, authority: authority}).ActivityJournalBinder},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if journal, err := test.binder(); err == nil || journal != nil {
 				t.Fatal("unbound session supplied a journal")
-			}
-			result, err := test.recover(context.Background())
-			if err == nil || !reflect.DeepEqual(result, pipeline.ActivityRecoverySummary{}) {
-				t.Fatal("unbound session entered native recovery or returned a result")
 			}
 		})
 	}

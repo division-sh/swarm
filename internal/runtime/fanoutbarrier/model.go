@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/google/uuid"
 )
 
@@ -191,12 +192,20 @@ func (r Registration) Validate() error {
 }
 
 type Barrier struct {
-	Registration         Registration
-	Status               Status
-	Summary              *Summary
-	ScheduleKey          string
-	ScheduleActivationID string
-	UpdatedAt            time.Time
+	Registration          Registration
+	Status                Status
+	Summary               *Summary
+	ScheduleKey           string
+	ScheduleActivationID  string
+	TransferredOccurrence *TransferredOccurrence
+	UpdatedAt             time.Time
+}
+
+// TransferredOccurrence preserves an already-published cause, not a schedule
+// or evidence that its child event is durably present or currently executable.
+type TransferredOccurrence struct {
+	Publication joinruntime.TransferredPublication `json:"publication"`
+	DueAt       time.Time                          `json:"due_at"`
 }
 
 type Completion struct {
@@ -238,6 +247,11 @@ func (b Barrier) Validate() error {
 	}
 	scheduleKey := strings.TrimSpace(b.ScheduleKey)
 	activationID := strings.TrimSpace(b.ScheduleActivationID)
+	if b.TransferredOccurrence != nil {
+		if err := b.validateTransferredOccurrence(); err != nil {
+			return err
+		}
+	}
 	if activationID != "" {
 		if _, err := uuid.Parse(activationID); err != nil {
 			return fmt.Errorf("fan-out barrier schedule activation identity is invalid")
@@ -264,10 +278,21 @@ func (b Barrier) Validate() error {
 	if (b.Status == StatusClosedPending || b.Status == StatusFired || b.Status == StatusOutcomeDeadLettered) && scheduleKey == "" {
 		return fmt.Errorf("scheduled fan-out barrier state requires its exact schedule key")
 	}
-	if b.Status == StatusClosedPending && activationID == "" {
+	if b.Status == StatusClosedPending && activationID == "" && b.TransferredOccurrence == nil {
 		return fmt.Errorf("pending fan-out barrier state requires its exact schedule activation")
 	}
 	return b.Summary.Validate()
+}
+
+func (b Barrier) validateTransferredOccurrence() error {
+	occurrence := b.TransferredOccurrence
+	if b.Status == StatusArmed || b.Summary == nil || b.ScheduleActivationID != "" ||
+		b.ScheduleKey != b.Registration.Handle.TaskID() || occurrence.DueAt.IsZero() ||
+		occurrence.Publication.ExecutionMode != b.Registration.ExecutionMode {
+		return fmt.Errorf("transferred barrier requires exact closed occurrence evidence without schedule authority")
+	}
+	ref, _ := b.Registration.Handle.JoinRef()
+	return occurrence.Publication.Validate(b.Registration.IntentKey.RunID, ref)
 }
 
 type RunSummary struct {

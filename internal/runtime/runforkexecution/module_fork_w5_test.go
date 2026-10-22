@@ -83,6 +83,9 @@ func TestW5ToolsPinnedModuleRunsThroughSelectedForkBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatalf("selected module execution: %v", err)
 			}
+			if _, err := observeSelectedRetainedExecution(t, ctx, owner, selected, result.Materialization.ForkRunID); err != nil {
+				t.Fatalf("selected module settlement: %v", err)
+			}
 			var payload []byte
 			if err := db.QueryRow(`SELECT payload_bytes FROM events WHERE run_id=$1 AND event_name='item.processed'`, result.Materialization.ForkRunID).Scan(&payload); err != nil {
 				t.Fatalf("persisted selected module output: %v", err)

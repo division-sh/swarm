@@ -33,6 +33,7 @@ import (
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -197,6 +198,16 @@ func newEmitRoutePlanStore() *emitRoutePlanStore {
 
 func newEmitRoutePlanEventBus(t *testing.T, store *emitRoutePlanStore, source semanticview.Source, sourceFact runtimecorrelation.SourceArtifactFact) *runtimebus.EventBus {
 	t.Helper()
+	return newEmitRoutePlanEventBusWithSourceAndReplyOwner(t, store, source, sourceFact, nil)
+}
+
+func newEmitRoutePlanEventBusWithReplyOwner(t *testing.T, store *emitRoutePlanStore, source semanticview.Source, replies replycontext.Store) *runtimebus.EventBus {
+	t.Helper()
+	return newEmitRoutePlanEventBusWithSourceAndReplyOwner(t, store, source, emitInstanceSourceFact(t, source), replies)
+}
+
+func newEmitRoutePlanEventBusWithSourceAndReplyOwner(t *testing.T, store *emitRoutePlanStore, source semanticview.Source, sourceFact runtimecorrelation.SourceArtifactFact, replies replycontext.Store) *runtimebus.EventBus {
+	t.Helper()
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: "emit-route-plan-test",
@@ -220,7 +231,7 @@ func newEmitRoutePlanEventBus(t *testing.T, store *emitRoutePlanStore, source se
 		ExecutionPosture:   executionposture.Live,
 		SourceArtifactFact: sourceFact,
 		ContractBundle:     source,
-		Durable:            runtimebus.DurableDependencies{Instances: store.instanceIndex, EmitFeedback: store},
+		Durable:            runtimebus.DurableDependencies{Instances: store.instanceIndex, EmitFeedback: store, ReplyContext: replies},
 		WorkOwner:          owner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {

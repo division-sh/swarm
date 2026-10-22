@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -97,47 +96,21 @@ func joinSchedule(source semanticview.Source, owner runtimeflowidentity.RunScope
 			return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("join schedule contradicts its retained lifecycle entry: %w", err)
 		}
 	}
-	payload := handle.PayloadMetadata()
 	flowID := ref.FlowPath()
 	if flowID != constructed.TemplateID {
 		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("join schedule declaration conflicts with its constructed owner")
 	}
 	route := events.RouteIdentity{FlowID: flowID, FlowInstance: instanceRoute.InstancePath, EntityID: entityID}
-	scheduleFlowInstance := ""
-	if flowID != semanticview.RootExecutionFlowID(source) {
-		scheduleFlowInstance = instanceRoute.InstancePath
-	}
 	executionSource, err := runtimepinrouting.AdmitFlowExecutionRoutingSource(source, owner.RunID, constructed, route)
 	if err != nil {
 		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("admit join schedule source: %w", err)
 	}
-	routingSource := executionSource
-	if flowID == semanticview.RootExecutionFlowID(source) {
-		routingSource, err = events.NewRootRoutingSource(entityID)
-		if err != nil {
-			return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("admit root join control source: %w", err)
-		}
-	} else {
-		routingSource, err = events.NewFlowOwnedControlRoutingSource(executionSource.Route())
-		if err != nil {
-			return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("admit join schedule control source: %w", err)
-		}
-	}
-	semanticPayload, err := canonicaljson.FromGo(payload)
+	command, err := runtimegenericschedule.WorkflowJoinAdmission(activation, mode)
 	if err != nil {
-		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("admit join schedule payload: %w", err)
+		return runtimegenericschedule.AdmissionCommand{}, err
 	}
-	return runtimegenericschedule.AdmissionCommand{
-		ScheduleKey:   handle.TaskID(),
-		OwnerID:       runtimeWorkflowID,
-		OwnerKind:     runtimegenericschedule.OwnerSystem,
-		EventType:     handle.EventType(),
-		EntityID:      strings.TrimSpace(entityID),
-		FlowInstance:  strings.Trim(strings.TrimSpace(scheduleFlowInstance), "/"),
-		TaskID:        handle.TaskID(),
-		Payload:       semanticPayload,
-		RoutingSource: routingSource,
-		ExecutionMode: mode,
-		Due:           runtimegenericschedule.AbsoluteDue(activation.FireAt),
-	}, nil
+	if command.RoutingSource.Route().EntityID != executionSource.Route().EntityID || command.RunID != owner.RunID {
+		return runtimegenericschedule.AdmissionCommand{}, fmt.Errorf("join schedule contradicts its admitted construction")
+	}
+	return command, nil
 }

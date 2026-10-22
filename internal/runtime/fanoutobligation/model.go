@@ -111,6 +111,7 @@ func ProjectExecutionReceiver(route events.DeliveryRoute) (ExecutionReceiver, er
 }
 
 type Capsule struct {
+	SourcePlanRef    runtimecontracts.FanOutPlanRef       `json:"source_plan_ref"`
 	SourceProjection runtimecontracts.FanOutPlanSemantics `json:"source_projection"`
 	NodeKey          string                               `json:"node_key"`
 	ExecutionFlowID  string                               `json:"execution_flow_id"`
@@ -121,6 +122,7 @@ type Capsule struct {
 	ChainDepth       int                                  `json:"chain_depth"`
 	ProducerSource   events.RoutingSource                 `json:"producer_source"`
 	Receiver         *ExecutionReceiver                   `json:"receiver,omitempty"`
+	Context          events.DeliveryContext               `json:"delivery_context"`
 	Lineage          events.EventLineage                  `json:"lineage"`
 	Entity           map[string]any                       `json:"entity,omitempty"`
 	PlatformEntity   map[string]any                       `json:"platform_entity,omitempty"`
@@ -164,6 +166,12 @@ func MarshalCapsule(c Capsule) ([]byte, error) {
 }
 
 func (c Capsule) Validate() error {
+	if err := c.Context.Validate(); err != nil {
+		return fmt.Errorf("fan-out continuation context: %w", err)
+	}
+	if len(c.Context.Joins) != 0 {
+		return errors.New("fan-out continuation cannot copy consumed join admissions")
+	}
 	if strings.TrimSpace(c.NodeKey) == "" || strings.TrimSpace(c.HandlerEventKey) == "" || strings.TrimSpace(c.Lineage.RunID) == "" || strings.TrimSpace(c.Lineage.ParentEventID) == "" {
 		return errors.New("fan-out capsule requires exact node, handler, run, and parent event identity")
 	}
@@ -580,8 +588,16 @@ type OutcomeKind string
 const (
 	OutcomeCommitted        OutcomeKind = "committed"
 	OutcomeSemanticRejected OutcomeKind = "semantic_rejected"
+	// OutcomeContinued records a child event and its immediate source publication,
+	// not execution permission. Projection and binding owners must prove the exact
+	// original ordinal, event, and unfinished recipient subset.
+	OutcomeContinued OutcomeKind = "continued"
 )
 
+// A continued outcome's inherited disposition describes ended source-partition
+// work, not whole-ordinal settlement. It cannot close an unfinished child: count
+// exactly one ordinal and reduce failure > canceled > success only after all
+// child recipients settle, through the canonical recipient-disposition owner.
 type Outcome struct {
 	Ordinal              int                          `json:"ordinal"`
 	Kind                 OutcomeKind                  `json:"kind"`
@@ -597,11 +613,12 @@ type InheritedTerminalDisposition string
 const (
 	InheritedSucceeded    InheritedTerminalDisposition = "succeeded"
 	InheritedDeadLettered InheritedTerminalDisposition = "dead_lettered"
+	InheritedCanceled     InheritedTerminalDisposition = "canceled"
 	InheritedNoRoute      InheritedTerminalDisposition = "no_route"
 )
 
 func (d InheritedTerminalDisposition) Valid() bool {
-	return d == InheritedSucceeded || d == InheritedDeadLettered || d == InheritedNoRoute
+	return d == InheritedSucceeded || d == InheritedDeadLettered || d == InheritedCanceled || d == InheritedNoRoute
 }
 
 func (o Outcome) Validate() error {
@@ -615,6 +632,14 @@ func (o Outcome) Validate() error {
 		}
 		if strings.TrimSpace(o.SourceEventID) == "" && o.InheritedDisposition != "" || strings.TrimSpace(o.SourceEventID) != "" && !o.InheritedDisposition.Valid() {
 			return errors.New("fan-out inherited event requires its exact terminal disposition")
+		}
+	case OutcomeContinued:
+		childEventID, sourceEventID := strings.TrimSpace(o.EventID), strings.TrimSpace(o.SourceEventID)
+		if childEventID == "" || sourceEventID == "" || childEventID == sourceEventID || len(o.Failure) != 0 {
+			return errors.New("continued fan-out outcome requires distinct child and immediate source events without failure")
+		}
+		if o.InheritedDisposition != "" && (!o.InheritedDisposition.Valid() || o.InheritedDisposition == InheritedNoRoute) {
+			return errors.New("continued fan-out outcome permits only a terminal source-partition delivery contribution")
 		}
 	case OutcomeSemanticRejected:
 		if o.EventID != "" || o.SourceEventID != "" || o.InheritedDisposition != "" {
