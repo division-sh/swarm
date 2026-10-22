@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -27,29 +26,15 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
-
-type connectRoutePlanTestFlow struct {
-	id           string
-	path         string
-	mode         string
-	inputs       []runtimecontracts.FlowInputEventPin
-	outputs      []runtimecontracts.FlowOutputEventPin
-	agents       map[string]runtimecontracts.AgentRegistryEntry
-	nodes        map[string]runtimecontracts.SystemNodeContract
-	entityFields map[string]runtimecontracts.EntityFieldDecl
-}
 
 type providerOutputAuthorizedTestSource struct {
 	semanticview.Source
@@ -4639,183 +4624,6 @@ func newConnectRoutePlanStaticStore() *targetRouteMemoryStore {
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(connectRoutePlanStaticOwner())
 	return store
-}
-
-func connectRoutePlanTestBundle(t testing.TB, flows []connectRoutePlanTestFlow, connects []runtimecontracts.FlowConnect) *runtimecontracts.WorkflowContractBundle {
-	t.Helper()
-	views := map[string]runtimecontracts.FlowContractView{
-		".": {
-			Paths:  runtimecontracts.FlowContractPaths{FlowPath: ".", SchemaFile: "schema.yaml"},
-			Schema: runtimecontracts.FlowSchemaDocument{},
-			Path:   ".",
-		},
-	}
-	flowSources := map[string]runtimecontracts.FlowSource{
-		".": {FlowPath: ".", Schema: "schema.yaml"},
-	}
-	flowSchemas := map[string]runtimecontracts.FlowSchemaDocument{}
-	agentRefs := map[string]runtimecontracts.ContractURIRef{}
-	agentRefsByURI := map[string]runtimecontracts.ContractURIRef{}
-	workflowName := ""
-	rootEntities := runtimecontracts.EntityContractsDocument{}
-	var templates []string
-	for _, flow := range flows {
-		flowPath := strings.TrimSpace(flow.path)
-		if flowPath == "" {
-			flowPath = flow.id
-		}
-		flowPath = connectRoutePlanFixturePath(flowPath)
-		for ancestor := flowPath; ancestor != "." && ancestor != ""; ancestor = connectRoutePlanFixtureParent(ancestor) {
-			if _, ok := views[ancestor]; !ok {
-				schemaFile := filepath.Join(ancestor, "schema.yaml")
-				views[ancestor] = runtimecontracts.FlowContractView{
-					Paths:  runtimecontracts.FlowContractPaths{FlowPath: ancestor, SchemaFile: schemaFile},
-					Schema: runtimecontracts.FlowSchemaDocument{},
-					Path:   ancestor,
-				}
-				flowSources[ancestor] = runtimecontracts.FlowSource{FlowPath: ancestor, Schema: schemaFile}
-				flowSchemas[ancestor] = runtimecontracts.FlowSchemaDocument{}
-			}
-		}
-		schema := runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs:  runtimecontracts.FlowInputPins{EventPins: flow.inputs},
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: flow.outputs},
-			},
-		}
-		view := views[flowPath]
-		if flow.mode == runtimecontracts.FlowModeTemplate {
-			schema.Instance = semanticviewtest.InstanceField("instance_key")
-			templates = append(templates, flowPath)
-		}
-		view.Paths = runtimecontracts.FlowContractPaths{
-			FlowPath: flowPath, SchemaFile: filepath.Join(flowPath, "schema.yaml"), EventsFile: filepath.Join(flowPath, "events.yaml"),
-		}
-		view.Schema = schema
-		view.Path = flowPath
-		view.Agents = flow.agents
-		view.Nodes = flow.nodes
-		view.Events = map[string]runtimecontracts.EventCatalogEntry{}
-		for _, pin := range flow.inputs {
-			view.Events[pin.EventType()] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Type: "object"}}
-		}
-		for _, pin := range flow.outputs {
-			view.Events[pin.EventType()] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Type: "object"}}
-		}
-		declareExact := func(eventType string) {
-			eventType = strings.TrimSpace(eventType)
-			if eventType == "" || strings.ContainsAny(eventType, "*/") {
-				return
-			}
-			view.Events[eventType] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Type: "object"}}
-		}
-		for _, agent := range flow.agents {
-			for _, subscription := range agent.Subscriptions {
-				declareExact(subscription)
-			}
-		}
-		for _, node := range flow.nodes {
-			for _, subscription := range runtimecontracts.EffectiveSystemNodeSubscriptions(node) {
-				declareExact(subscription)
-			}
-		}
-		views[flowPath] = view
-		flowSchemas[flowPath] = schema
-		flowSources[flowPath] = runtimecontracts.FlowSource{FlowPath: flowPath, Schema: view.Paths.SchemaFile}
-		for logicalID := range flow.agents {
-			ref := runtimecontracts.ContractURIRef{
-				Kind: "agent", FlowID: flowPath, LocalID: logicalID, Path: flowPath,
-				Full: "test://" + flowPath + "/" + logicalID,
-			}
-			agentRefs[flowPath+"/"+logicalID] = ref
-			agentRefsByURI[ref.Full] = ref
-		}
-		if len(flow.entityFields) > 0 && workflowName == "" {
-			workflowName = flowPath
-			rootEntities["test_entity"] = runtimecontracts.EntityContract{Fields: flow.entityFields}
-		}
-	}
-	for index, authored := range connects {
-		connect := authored
-		from := connectRoutePlanFixturePath(connect.From)
-		to := connectRoutePlanFixturePath(connect.To)
-		owner := connectRoutePlanFixtureLCA(from, to)
-		view, ok := views[owner]
-		if !ok {
-			panic(fmt.Sprintf("connect fixture owner %q is undeclared", owner))
-		}
-		connect.From = connectRoutePlanFixtureRelative(owner, from)
-		connect.To = connectRoutePlanFixtureRelative(owner, to)
-		connect.SourceFile = flowSources[owner].Schema
-		connect.SourceLine = index + 1
-		view.Schema.Connect = append(view.Schema.Connect, connect)
-		views[owner] = view
-		if owner != "." {
-			flowSchemas[owner] = view.Schema
-		}
-	}
-
-	childrenByParent := map[string][]string{}
-	for flowPath := range views {
-		if flowPath == "." {
-			continue
-		}
-		parent := connectRoutePlanFixtureParent(flowPath)
-		childrenByParent[parent] = append(childrenByParent[parent], flowPath)
-	}
-	for parent := range childrenByParent {
-		sort.Strings(childrenByParent[parent])
-		source := flowSources[parent]
-		source.Children = append([]string(nil), childrenByParent[parent]...)
-		flowSources[parent] = source
-	}
-	var buildView func(string) runtimecontracts.FlowContractView
-	buildView = func(flowPath string) runtimecontracts.FlowContractView {
-		view := views[flowPath]
-		for _, childPath := range childrenByParent[flowPath] {
-			view.Children = append(view.Children, buildView(childPath))
-		}
-		return view
-	}
-	root := buildView(".")
-	root.Schema.Name = workflowName
-	rootSchema := root.Schema
-	root.Schema = rootSchema
-	byID := make(map[string]*runtimecontracts.FlowContractView, len(views))
-	byPath := make(map[string]*runtimecontracts.FlowContractView, len(views))
-	var indexView func(*runtimecontracts.FlowContractView)
-	indexView = func(view *runtimecontracts.FlowContractView) {
-		byID[view.Paths.FlowPath] = view
-		byPath[view.Paths.FlowPath] = view
-		for childIndex := range view.Children {
-			view.Children[childIndex].Parent = view
-			indexView(&view.Children[childIndex])
-		}
-	}
-	indexView(&root)
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		SourceArtifact: sourceartifactfixture.Artifact(),
-		RootSchema:     &rootSchema,
-		RootEntities:   rootEntities,
-		FlowSources:    flowSources,
-		URIRegistry: runtimecontracts.ContractURIRegistry{
-			Agents: agentRefs,
-			ByURI:  agentRefsByURI,
-		},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root:   &root,
-			ByID:   byID,
-			ByPath: byPath,
-		},
-		FlowSchemas: flowSchemas,
-	}
-	if len(templates) > 0 {
-		bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, templates...))
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
-	}
-	return bundle
 }
 
 func connectRoutePlanFixturePath(raw string) string {
