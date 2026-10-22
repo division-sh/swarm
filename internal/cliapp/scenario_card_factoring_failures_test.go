@@ -58,7 +58,7 @@ func TestScenarioCardFactoringDetailAndMutationFailures(t *testing.T) {
 							writeJSONRPCResult(t, w, req.ID, result)
 						case action:
 							mutations.Add(1)
-							result := map[string]any{"ok": true, "card_id": "selected", "change_id": 1}
+							result := map[string]any{"ok": true, "card_id": "selected", "change_id": 1, "idempotency_replayed": false}
 							switch failure {
 							case "not_ok":
 								result["ok"] = false
