@@ -33,11 +33,11 @@ func eventOwnerDeclarationLocations(bundle *WorkflowContractBundle, node runtime
 	}
 	var locations []string
 	add := func(handler, slot, label string) {
-		path := NodeProvenanceMapPath("event_handlers", handler) + slot
-		proof := record.Entry.admissionProvenance[path]
+		nodePath := NodeProvenanceMapPath("", node.NodeID())
+		path := NodeProvenanceMapPath(nodePath+".event_handlers", handler) + slot
 		location := "location unavailable"
-		if proof.SourceFile != "" && proof.SourceLine > 0 && proof.SourceColumn > 0 {
-			location = fmt.Sprintf("%s:%d:%d", proof.SourceFile, proof.SourceLine, proof.SourceColumn)
+		if introduction, found := bundle.IntroductionLocation(record.Source.File, path, false); found {
+			location = fmt.Sprintf("%s:%d:%d", record.Source.File, introduction.Line, introduction.Column)
 		}
 		locations = append(locations, fmt.Sprintf("%s %q at %s", label, handler, location))
 	}
