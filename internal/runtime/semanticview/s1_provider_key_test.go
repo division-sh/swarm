@@ -5,11 +5,19 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestS1ProviderKeySpellingCannotMintInputOrSubscription(t *testing.T) {
-	rooted, _ := sourceartifactfixture.Rooted(t, "selected", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "selected", artifact)
 	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(filepath.Clean("../../.."), rooted, "", contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)

@@ -12,6 +12,7 @@ func CopyGeneratedActivity(t testing.TB, nested, subscribeResults bool) string {
 
 		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: nested-generated-activity-topology\nstages: []\npins:\n  inputs:\n    - request\n  outputs:\n    - request\nconnect:\n  - {event: request, from: ., to: child}\n")
 		flowRoot = "child/"
+		writeClosedVariantFile(t, root, flowRoot+"manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, flowRoot+"schema.yaml", "# fixture: child\nstages: []\npins:\n  inputs:\n    - request\n")
 	} else {
 

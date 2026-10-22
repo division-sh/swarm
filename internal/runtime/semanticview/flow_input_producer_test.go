@@ -55,8 +55,9 @@ func TestResolveNonConnectFlowInputProducer_DoesNotInterpretRootConnect(t *testi
 func rootInputProducerFixture(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
-		"schema.yaml": []byte("stages: []\npins: {inputs: [work.requested]}\n"),
-		"events.yaml": []byte("work.requested:\n"),
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":   []byte("stages: []\npins: {inputs: [work.requested]}\n"),
+		"events.yaml":   []byte("work.requested:\n"),
 	})
 	if err != nil {
 		t.Fatal(err)

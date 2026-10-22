@@ -229,6 +229,7 @@ func RewriteLifecycleEmitterAmbientSource(t testing.TB, root string) {
 func CopyLifecycleEmitterHandlerFamilies(t testing.TB) string {
 	t.Helper()
 	root := CopyLifecycleEmitter(t, LifecycleGateLocal)
+	writeClosedVariantFile(t, root, "families/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "families/schema.yaml", "stages: []\n# fixture: handler-families\n")
 	events := "direct:\nrouted:\naudit:\nescalated:\nspecialized:\n  bucket: text\nitem:\n  id: text\n"
 	nodes := `worker:
@@ -333,6 +334,7 @@ func CopyLifecycleEmitterExistingLifecycleFamilies(t testing.TB) string {
 	schema = strings.Replace(schema, "  dispatching: {}", "  dispatching:\n    timers:\n      - {id: reminder, after: 1h, emit: reminder}\n      - {id: expired, after: 2h, emit: expired, advances_to: attention}\n      - {id: internal, after: 3h, advances_to: attention}", 1)
 	schema += "auto_emit_on_create: {event: created}\n"
 	writeClosedVariantFile(t, root, "schema.yaml", schema)
+	writeClosedVariantFile(t, root, "child/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "child/schema.yaml", "# fixture: child\nauto_emit_on_create: {event: created}\n")
 	writeClosedVariantFile(t, root, "child/events.yaml", "created:\n")
 	return root
@@ -379,6 +381,7 @@ func CopyLifecycleEmitterHumanTaskObserver(t testing.TB, nested bool) string {
 	prefix := ""
 	if nested {
 		prefix = "child/"
+		writeClosedVariantFile(t, root, prefix+"manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, prefix+"schema.yaml", "stages: []\n# fixture: human-observer\n")
 	}
 	writeClosedVariantFile(t, root, prefix+"agents.yaml", `operator:
