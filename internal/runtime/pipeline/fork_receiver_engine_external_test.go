@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -39,8 +40,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -232,12 +235,23 @@ WHERE es.run_id=$1 AND es.entity_id=$2 AND es.flow_instance='consumer'`, claim.R
 					t.Fatalf("fixed-revision receiver was not reconstructed independently of current source: %s header revision=%d err=%v", before, beforeRevision, err)
 				}
 				if missing {
-					result, err := db.Exec(`DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID)
-					if err != nil {
-						t.Fatal(err)
+					dialect := authoractivityfixture.DialectSQLite
+					if backend == "postgres" {
+						dialect = authoractivityfixture.DialectPostgres
 					}
-					if count, err := result.RowsAffected(); err != nil || count != 1 {
-						t.Fatalf("remove exact required child: %d %v", count, err)
+					if err := eventfixture.RunMutation(forkCtx, db, dialect, func(ctx context.Context, attempt *eventfixture.Attempt) error {
+						return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+							result, err := tx.ExecContext(ctx, `DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID)
+							if err != nil {
+								return err
+							}
+							if count, err := result.RowsAffected(); err != nil || count != 1 {
+								return fmt.Errorf("remove exact required child: %d %v", count, err)
+							}
+							return nil
+						})
+					}).Err(); err != nil {
+						t.Fatal(err)
 					}
 				}
 				resume()

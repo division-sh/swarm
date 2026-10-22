@@ -228,6 +228,15 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 				winner.result.Materialization.ForkRunID != duplicate.result.Materialization.ForkRunID) {
 				t.Fatalf("duplicate changed acknowledged child: %+v err=%v", duplicate.result, duplicate.err)
 			}
+			owner.ports.contexts.mu.Lock()
+			remaining := len(owner.ports.contexts.entries)
+			owner.ports.contexts.mu.Unlock()
+			if remaining != 1 {
+				t.Fatalf("observer preparation leaked: got %d entries, want retained winner only", remaining)
+			}
+			if observed, err := observeSelectedRetainedExecution(t, ctx, owner, selected, winner.result.Materialization.ForkRunID); err != nil || observed.ExecutedEventCount != 1 {
+				t.Fatalf("join retained winner before replay conservation: %+v err=%v", observed, err)
+			}
 			before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 			if err != nil {
 				t.Fatal(err)
@@ -249,10 +258,10 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 				t.Fatalf("activated/hostile replay mutated application storage: %v", err)
 			}
 			owner.ports.contexts.mu.Lock()
-			remaining := len(owner.ports.contexts.entries)
+			remaining = len(owner.ports.contexts.entries)
 			owner.ports.contexts.mu.Unlock()
-			if remaining != 1 {
-				t.Fatalf("observer preparation leaked: got %d entries, want retained winner only", remaining)
+			if remaining != 0 {
+				t.Fatalf("replay retained execution after winner completion: got %d entries", remaining)
 			}
 		})
 	}

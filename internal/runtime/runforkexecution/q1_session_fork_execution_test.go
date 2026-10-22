@@ -148,6 +148,9 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 						t.Fatalf("selected session fork: source=%s point=%s result=%+v err=%v", sourceID, point, result, err)
 					}
 					inputID := waitSelectedQ1CompletedInput(t, ctx, selected, result, sourceInput)
+					if observed, err := observeSelectedRetainedExecution(t, ctx, owner, selected, result.Materialization.ForkRunID); err != nil || observed.ExecutedEventCount != 1 {
+						t.Fatalf("join completed session fork: %+v err=%v", observed, err)
+					}
 					recorded, found, err := selected.(liveWinnerOperationReader).LoadForkOperation(ctx, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
 					if err != nil || !found || recorded.Validate() != nil || recorded.Request.OperationID != operation.OperationID || recorded.Result == nil || recorded.Result.ForkRunID != result.Materialization.ForkRunID || recorded.Result.SourceFrozen != result.Activation.SourceFrozen || recorded.Result.SourceRunStatus != result.Activation.SourceRunStatus {
 						t.Fatalf("lost exact durable activation ACK: %+v found=%t err=%v", recorded, found, err)
