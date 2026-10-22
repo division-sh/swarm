@@ -33,6 +33,7 @@ func TestAdmissionFactoringDoctorReadback(t *testing.T) {
 	// Captured through compiled public doctor at pre-extraction49abcf245.
 	// Refreshed at 8ef9ebeada for #2577's installed WhatsApp trigger, connector,
 	// and channel packs; all prior subject, pack and finding rows are unchanged.
+	// #2700 changes only six connector manifest hashes and both inventory digests.
 	// This oracle imports no in-process admission or renderer implementation.
 	raw, err := os.ReadFile(filepath.Join(releaseE2ERepoRoot(t), "internal/releasee2e/testdata/doctor-installed.golden"))
 	if err != nil {
@@ -186,7 +187,8 @@ func factoringDoctorInstalledReadbackMatches(report, want factoringDoctorReport)
 func assertFactoringDoctorInstalledReadback(t *testing.T, report, want factoringDoctorReport) {
 	t.Helper()
 	if !factoringDoctorInstalledReadbackMatches(report, want) {
-		t.Fatalf("installed doctor readback does not match admitted inventory: subjects=%d want=%d packs=%d", len(report.CapabilitySubjects), len(want.CapabilitySubjects), len(report.PackInventory.Packs))
+		inventory, _ := json.Marshal(report.PackInventory)
+		t.Fatalf("installed doctor readback does not match admitted inventory: subjects=%d want=%d packs=%d\nactual_inventory=%s", len(report.CapabilitySubjects), len(want.CapabilitySubjects), len(report.PackInventory.Packs), inventory)
 	}
 	seen := map[string]bool{}
 	for _, finding := range report.Findings {
