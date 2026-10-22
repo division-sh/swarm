@@ -21,6 +21,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -450,6 +451,12 @@ func TestDeliveryContinuationDispatchTransfersToExactInternalCarrier(t *testing.
 }
 
 func TestDeliveryContinuationDispatchConsumesOnlyCommittedDeferredPublications(t *testing.T) {
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "custom.receiver_projection:\ncustom.continuation_parent:\n",
+		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.continuation_parent]\n  event_handlers:\n    custom.continuation_parent: {}\n",
+	}))
 	for _, test := range []struct {
 		name    string
 		outcome EventAppendOutcome
@@ -463,7 +470,7 @@ func TestDeliveryContinuationDispatchConsumesOnlyCommittedDeferredPublications(t
 			seedCommittedNoDeliveryForTest(t, store, deferred)
 			eventBus, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{
 				continuationCommittedDeferredInterceptor{event: deferred},
-			}})
+			}, ContractBundle: source})
 			if err != nil {
 				t.Fatalf("create event bus: %v", err)
 			}
@@ -515,6 +522,12 @@ func TestDeliveryContinuationDispatchRejectsDeferredPublicationWithoutCommitEvid
 }
 
 func TestDeliveryContinuationDispatchTransfersCommittedDeferredHandoffBeforeCarrier(t *testing.T) {
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "custom.receiver_projection:\ncustom.continuation_parent:\n",
+		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.continuation_parent]\n  event_handlers:\n    custom.continuation_parent: {}\n",
+	}))
 	store := newTargetRouteMemoryStore()
 	deferred := receiverProjectionEvent("continuation-deferred-handoff")
 	seedCommittedNoDeliveryForTest(t, store, deferred)
@@ -535,7 +548,7 @@ func TestDeliveryContinuationDispatchTransfersCommittedDeferredHandoffBeforeCarr
 	parent := deliveryContinuationProjectionEvent("continuation-handoff-parent", events.EventType("custom.continuation_parent"))
 	eventBus, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{
 		continuationCommittedDeferredInterceptor{triggerEventID: parent.ID(), event: deferred},
-	}})
+	}, ContractBundle: source})
 	if err != nil {
 		t.Fatalf("create event bus: %v", err)
 	}
