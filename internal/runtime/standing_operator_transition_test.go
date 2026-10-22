@@ -26,7 +26,7 @@ func (p *standingTransitionSignalProbe) Signal() { p.signals.Add(1) }
 
 func TestStandingRecoverySuppressionRequiresExactGenerationAndSignalsRestore(t *testing.T) {
 	manager, expected := standingOperatorProcessFixture(t)
-	entry := manager.contexts[runtimeContextTestHashA]
+	entry := manager.contexts[expected.BundleHash]
 	probe := &standingTransitionSignalProbe{}
 	if err := entry.runtime.Bus.SetDeliveryContinuationOwner(probe); err != nil {
 		t.Fatal(err)
@@ -102,8 +102,8 @@ func TestStandingRecoverySuppressionRequiresExactGenerationAndSignalsRestore(t *
 
 func standingOperatorProcessFixture(t *testing.T) (*RuntimeContextManager, runtimepipeline.StandingServiceReconciliation) {
 	t.Helper()
-	catalog := runtimeAdmissionTestCatalog(t, "a")
-	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
+	catalog, source := runtimeAdmissionTestCatalog(t, "a", "primary")
+	contextDef := runtimeAdmissionTestContext(t, source, catalog, uuid.NewString())
 	target := &contextDef.StandingTargets[0]
 	target.RunID = uuid.NewString()
 	contextDef.Runtime.Scheduler = runtimeContextTestScheduler(t, contextDef.WorkOwner, nil)
@@ -126,7 +126,7 @@ func standingOperatorProcessFixture(t *testing.T) (*RuntimeContextManager, runti
 
 func TestStandingOperatorActiveNoopPreservesExactChildAndSchedule(t *testing.T) {
 	manager, expected := standingOperatorProcessFixture(t)
-	entry := manager.contexts[runtimeContextTestHashA]
+	entry := manager.contexts[expected.BundleHash]
 	child := entry.standing[expected.ServiceID]
 	lease, err := child.Begin(context.Background())
 	if err != nil {
@@ -189,7 +189,7 @@ func TestStandingOperatorNoChildRestoresPriorSuppression(t *testing.T) {
 			if err := transition.Restore(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			if !manager.standingServiceSuppressedLocked(expected.ServiceID) || manager.contexts[runtimeContextTestHashA].standing[expected.ServiceID] != nil {
+			if !manager.standingServiceSuppressedLocked(expected.ServiceID) || manager.contexts[expected.BundleHash].standing[expected.ServiceID] != nil {
 				t.Fatal("no-child rollback published an executable target")
 			}
 			if _, err := manager.BeginStandingServiceTransition(context.Background(), expected.ServiceID); err == nil || !strings.Contains(err.Error(), "no process occurrence") {
@@ -203,7 +203,7 @@ func TestStandingOperatorRejectsInvalidChildComposition(t *testing.T) {
 	for _, mismatch := range []string{"missing", "stale-run", "stale-generation", "foreign-source", "stale-target", "fenced", "suppressed", "non-executable-live"} {
 		t.Run(mismatch, func(t *testing.T) {
 			manager, expected := standingOperatorProcessFixture(t)
-			entry := manager.contexts[runtimeContextTestHashA]
+			entry := manager.contexts[expected.BundleHash]
 			child := entry.standing[expected.ServiceID]
 			switch mismatch {
 			case "missing":
@@ -218,7 +218,12 @@ func TestStandingOperatorRejectsInvalidChildComposition(t *testing.T) {
 				expected.Generation++
 				expected.RestartDisposition.Generation = expected.Generation
 			case "foreign-source":
-				expected.BundleHash = runtimeContextTestHashB
+				foreignCatalog, foreignSource := runtimeAdmissionTestCatalog(t, "b", "foreign")
+				foreign := runtimeAdmissionTestContext(t, foreignSource, foreignCatalog, uuid.NewString())
+				if foreign.BundleHash() == expected.BundleHash {
+					t.Fatal("foreign-source refusal requires genuinely unequal captured content")
+				}
+				expected.BundleHash = foreign.BundleHash()
 			case "stale-target":
 				entry.context.StandingTargets[0].PublicationSequence++
 			case "fenced":
@@ -247,7 +252,7 @@ func TestStandingOperatorRejectsInvalidChildComposition(t *testing.T) {
 
 func TestStandingOperatorCancellationJoinsHeldChildBeforeRestore(t *testing.T) {
 	manager, expected := standingOperatorProcessFixture(t)
-	child := manager.contexts[runtimeContextTestHashA].standing[expected.ServiceID]
+	child := manager.contexts[expected.BundleHash].standing[expected.ServiceID]
 	work, err := child.Begin(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -274,7 +279,7 @@ func TestStandingOperatorCancellationJoinsHeldChildBeforeRestore(t *testing.T) {
 	if err := transition.Restore(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if manager.contexts[runtimeContextTestHashA].standing[expected.ServiceID] != child {
+	if manager.contexts[expected.BundleHash].standing[expected.ServiceID] != child {
 		t.Fatal("compensation replaced the captured child")
 	}
 	lease, err := child.Begin(context.Background())
@@ -288,7 +293,7 @@ func TestStandingOperatorCancellationJoinsHeldChildBeforeRestore(t *testing.T) {
 
 func TestStandingOperatorCancelledSchedulerParkRetainsExactOwnerUntilJoin(t *testing.T) {
 	manager, expected := standingOperatorProcessFixture(t)
-	entry := manager.contexts[runtimeContextTestHashA]
+	entry := manager.contexts[expected.BundleHash]
 	child := entry.standing[expected.ServiceID]
 	started, release := make(chan struct{}), make(chan struct{})
 	var releaseOnce sync.Once
