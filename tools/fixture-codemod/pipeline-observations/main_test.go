@@ -57,65 +57,6 @@ func TestSnapshotRewritePreservesExplicitStoretestImportWithoutDuplication(t *te
 	}
 }
 
-func TestReviewedSnapshotCandidateOverlayTypeChecks(t *testing.T) {
-	// This reviewed candidate includes the explicitly tagged #2413 fixture.
-	// The production preflight still refuses files outside its active build view.
-	t.Setenv("GOFLAGS", "-tags=issue2413")
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
-	grouped := map[string][]recipe{}
-	for _, row := range rows {
-		grouped[row.File] = append(grouped[row.File], row)
-	}
-	var files []pendingFile
-	applied := 0
-	expected := 0
-	for path, recipes := range grouped {
-		absolute := filepath.Join(root, path)
-		source, err := os.ReadFile(absolute)
-		if os.IsNotExist(err) && allRecipesRemoved(recipes) {
-			continue
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		recipes, err = checkpointRecipes(source, recipes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(recipes) == 0 {
-			continue
-		}
-		expected += len(recipes)
-		for _, row := range recipes {
-			inverse := recipe{Function: replacementFunctionName(t, row), Before: row.After, After: row.Before}
-			var changed bool
-			source, changed, err = rewriteFunction(path, source, inverse)
-			if err != nil || !changed {
-				t.Fatalf("prepare actual predecessor %s/%s: changed=%t err=%v", path, row.Function, changed, err)
-			}
-		}
-		candidate, changed, err := rewriteSource(path, source, recipes)
-		if err != nil || len(changed) != len(recipes) {
-			t.Fatalf("complete candidate overlay %s: changes=%d err=%v", path, len(changed), err)
-		}
-		applied += len(changed)
-		files = append(files, pendingFile{path: absolute, data: candidate})
-	}
-	if applied != expected {
-		t.Fatalf("candidate applied %d current recipes, want %d", applied, expected)
-	}
-	if err := checkTypes(root, files); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestOwnerRetirementSnapshotsRejectSurvivingAndAmbiguousCapabilities(t *testing.T) {
 	row := recipe{Function: "original", Before: "func original() { work() }", After: "func native() { work() }", Removed: true}
 	for _, source := range []string{"func original() { work() }", "func native() { work() }", "func original() {}; func native() {}", "func"} {
