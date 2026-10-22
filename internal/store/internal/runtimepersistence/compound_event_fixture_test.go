@@ -62,6 +62,7 @@ func TestCompoundEventFixturesAtomicReplayAndRevisionBothStores(t *testing.T) {
 				selected, runID := decisionCardTestStore(t, backend)
 				db, _ := decisionCardStoreDB(t, selected)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				at := time.Now().UTC().Truncate(time.Microsecond)
 				commit := func(event events.AdmittedEvent, settlement events.RouteSettlement, routes []events.DeliveryRoute, scope runtimepipelineobligation.CommittedScope, disposition *runtimepipelineobligation.Disposition) (bool, error) {
 					if revisioned {

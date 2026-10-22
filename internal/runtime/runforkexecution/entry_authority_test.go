@@ -17,7 +17,7 @@ func executeSelectedContractRunForkForTest(ctx context.Context, req SelectedCont
 }
 
 func selectedFixtureEntryContext(ctx context.Context, owner SelectedContractExecutionOwner) (context.Context, error) {
-	if startupownership.HasMutationAuthority(ctx) || owner.ports.contexts == nil || owner.ports.contexts.capability == nil {
+	if startupownership.HasMutationAuthority(ctx) || owner.ports == nil || owner.ports.contexts == nil || owner.ports.contexts.capability == nil {
 		return ctx, nil
 	}
 	return startupownership.WithProcessMutationAuthority(ctx, owner.ports.contexts.capability)

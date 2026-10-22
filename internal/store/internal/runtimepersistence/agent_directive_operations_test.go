@@ -169,6 +169,7 @@ func TestSQLiteDirectiveOperationConcurrentSameKeyHasOneReservation(t *testing.T
 	ctx := testAuthorActivityContext()
 	path := filepath.Join(t.TempDir(), "directive.db")
 	first := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+	ctx = originalStoreFixtureContext(t, ctx, first)
 	seedDirectiveOperationRun(t, first.backend.ConstructionHandle(), false)
 	second := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 	now := time.Date(2026, 7, 10, 14, 0, 0, 0, time.UTC)

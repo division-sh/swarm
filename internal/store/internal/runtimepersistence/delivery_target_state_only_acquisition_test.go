@@ -441,12 +441,14 @@ func openStateOnlyAcquisitionStoreWithSource(t *testing.T, backend string, sourc
 	if backend == "sqlite" {
 		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		db := selected.backend.ConstructionHandle()
+		ctx = originalStoreFixtureContext(t, ctx, selected)
 		requireRunFixtureForTest(t, ctx, selected, fixture)
 		return selected, db, ctx, runID
 	}
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := newTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, fixture)
 	return selected, db, ctx, runID
 }

@@ -67,6 +67,7 @@ func TestSQLiteLifecycleCandidateCommitBusyResetsOuterHandoff(t *testing.T) {
 	}
 	defer restore()
 	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	defer cancel()
 	disposition, err := store.RequestCompletionCandidate(ctx, runlifecycle.ImmediateCandidate(f.runID))
 	if err != nil || disposition != runlifecycle.CandidateRequested {

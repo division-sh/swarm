@@ -30,6 +30,7 @@ func proveA2JoinHeaderOnlyReceiverRefusal(t *testing.T, backend string) {
 	flowID, path := "native-join", "native-join/one"
 	ctx, cancel := context.WithTimeout(correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContext()), runID), time.Minute)
 	defer cancel()
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, path, at)

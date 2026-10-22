@@ -63,6 +63,7 @@ func TestDeliveryAuthorityActivationSerializesWithFreezeBothStores(t *testing.T)
 			t.Run(backend.name+"/"+first, func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 25*time.Second)
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				defer cancel()
 				source, child := uuid.NewString(), uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, source)

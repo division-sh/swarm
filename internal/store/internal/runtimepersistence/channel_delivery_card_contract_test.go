@@ -5,10 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/packs"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/packs"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -421,6 +422,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 				probe = &cardIntentRecheckProbe{}
 			}
 			cards, runID := decisionCardTestStore(t, backend, probe)
+			ctx = originalStoreFixtureContext(t, ctx, cards)
 			selected := cards.(selectedChannelDeliveryTestStore)
 			postgres := backend == "postgres"
 			var runTx func(func(context.Context, *sql.Tx) error) error

@@ -226,6 +226,7 @@ func TestRecordDeadLetterExactDuplicateAndConflictParity(t *testing.T) {
 				t.Fatalf("fixture store %T does not expose dead-letter delivery operations", fixture.store)
 			}
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			entityID := uuid.NewString()
 			event := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "deadletter.identity", "runtime", "", []byte(`{"text":"canonical","value":1}`), 2,

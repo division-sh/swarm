@@ -143,6 +143,7 @@ func TestChannelPostCommitActivityHintsBothStores(t *testing.T) {
 				t.Run(backend+"/"+name+operation, func(t *testing.T) {
 					ctx := testAuthorActivityContext()
 					cards, runID := decisionCardTestStore(t, backend)
+					ctx = originalStoreFixtureContext(t, ctx, cards)
 					card, continuation := newRootProposedEffectTestCard(t, runID, time.Now().UTC())
 					if linked {
 						if err := cards.(decisioncard.ProposedEffectStore).CreateProposedEffectCard(ctx, card, continuation); err != nil {
