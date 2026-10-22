@@ -28,6 +28,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	sourceRunID, entityID := uuid.NewString(), flowidentity.EntityID("flow-a")
 	sourceEventID := uuid.NewString()
 	activation, err := loopruntime.New(sourceRunID, entityID, "flow-a", "revision", "revision_id", uuid.NewString(), "review", 3, time.Now().UTC())
@@ -139,6 +140,7 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	sourceRunID, entityID, sourceEventID := uuid.NewString(), flowidentity.EntityID("flow-a"), uuid.NewString()
 	activation, err := loopruntime.New(sourceRunID, entityID, "flow-a", "revision", "revision_id", uuid.NewString(), "review", 3, time.Now().UTC())
 	if err != nil {
@@ -210,6 +212,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	sourceRunID, entityID, sourceEventID := uuid.NewString(), flowidentity.EntityID("flow-a"), uuid.NewString()
 	activation, err := loopruntime.New(sourceRunID, entityID, "flow-a", "revision", "revision_id", uuid.NewString(), "review", 3, time.Now().UTC())
 	if err != nil {

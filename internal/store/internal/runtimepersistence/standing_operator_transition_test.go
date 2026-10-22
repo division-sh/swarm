@@ -19,6 +19,7 @@ func TestStandingFreshNoopRejectsCorruptRelationBothStores(t *testing.T) {
 				t.Run(command, func(t *testing.T) {
 					f := openStandingDispositionParityFixture(t, backend)
 					ctx := testAuthorActivityRuntimeContext()
+					ctx = originalStoreFixtureContext(t, ctx, f.selected)
 					current := f.create(t, ctx, "corrupt-noop-"+command)
 					operation := runtimepipeline.StandingServiceOperation{ServiceID: current.ServiceID}
 					call := f.workflow.ResumeStandingService
@@ -59,6 +60,7 @@ func TestStandingOperatorRefusesEveryChangedAuthorityBothStores(t *testing.T) {
 						t.Run(command, func(t *testing.T) {
 							f := openStandingDispositionParityFixture(t, backend)
 							ctx := testAuthorActivityRuntimeContext()
+							ctx = originalStoreFixtureContext(t, ctx, f.selected)
 							candidate := f.candidate("authority-race-" + change + "-" + command)
 							observed, err := f.workflow.ReconcileStandingService(ctx, candidate)
 							if err != nil {
@@ -137,6 +139,7 @@ func TestStandingOperatorAcknowledgesFreshNoopBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			f := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, f.selected)
 			candidate := f.candidate("fresh-noop")
 			current, err := f.workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
@@ -180,6 +183,7 @@ func TestStandingOperatorRefusesStaleAuthorityBothStores(t *testing.T) {
 				t.Run(command, func(t *testing.T) {
 					f := openStandingDispositionParityFixture(t, backend)
 					ctx := testAuthorActivityRuntimeContext()
+					ctx = originalStoreFixtureContext(t, ctx, f.selected)
 					candidate := f.candidate("stale-" + command)
 					observed, err := f.workflow.ReconcileStandingService(ctx, candidate)
 					if err != nil {

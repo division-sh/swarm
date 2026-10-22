@@ -822,6 +822,7 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 			t.Run(backend+"/"+gateStatus, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				cardStore, runID := decisionCardTestStore(t, backend)
+				ctx = originalStoreFixtureContext(t, ctx, cardStore)
 				db, postgres := decisionCardStoreDB(t, cardStore)
 				now := time.Date(2026, 7, 14, 16, 0, 0, 0, time.UTC)
 				entityID := uuid.NewString()
@@ -876,6 +877,7 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 		t.Run(backend+"/eligible_no_gate", func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 14, 16, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()

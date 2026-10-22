@@ -18,7 +18,7 @@ func TestCommittedPipelineScopeObservationUsesOriginalOwnerBothStores(t *testing
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, _, _ := selectedForkDiscardTestStore(t, backend)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			for _, expected := range []runtimepipelineobligation.CommittedScope{runtimepipelineobligation.ScopeDirect, runtimepipelineobligation.ScopeSubscribed} {
 				t.Run(string(expected), func(t *testing.T) {
 					runID, at := uuid.NewString(), time.Now().UTC()

@@ -901,6 +901,7 @@ func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres
 	store := admitTestPostgresStore(t, db)
 	fixture := newSelectedProviderCompletionFixture(t, store, db, false)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, store)
 
 	issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 	if err != nil {
@@ -1091,6 +1092,7 @@ func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *t
 	store := admitTestPostgresStore(t, db)
 	fixture := newSelectedCompletionFixture(t, store, db, false)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	finishHistory := beginForkDeliveryHistoryFixture(t, ctx, store, fixture.forkRun)
 	route := testAgentDeliveryRoute(t, fixture.forkRun, "selected-agent", "fixture/selected-agent")
 	eventsByState := []events.Event{
@@ -1145,6 +1147,7 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	store := admitTestPostgresStore(t, db)
 	fixture := newSelectedCompletionFixture(t, store, db, false)
 	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	defer cancel()
 
 	issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
@@ -1286,6 +1289,7 @@ func TestSelectedForkRetainedDiscardRollbackIncludesRevisionPublicationPostgres(
 			store := admitTestPostgresStore(t, db)
 			fixture := newSelectedCompletionFixture(t, store, db, false)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 			if err != nil {
 				t.Fatalf("issue retained selected execution: %v", err)
@@ -1361,6 +1365,7 @@ func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	now := time.Now().UTC()
 	sourceRunID := uuid.NewString()
 	forkRunID := uuid.NewString()

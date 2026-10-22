@@ -27,6 +27,7 @@ func TestRetryDoesNotFreezeFinalSelectionBothStores(t *testing.T) {
 				fixture := backend.open(t)
 				selected := fixture.store.(deliveryReadProjectionStore)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				runID := uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				event := eventtest.PersistedProjection(uuid.NewString(), "projection.retry", "gateway", "", json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())

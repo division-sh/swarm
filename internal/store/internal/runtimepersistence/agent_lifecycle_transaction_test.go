@@ -39,22 +39,22 @@ func TestLifecycleSubordinateTransactionPostgres(t *testing.T) {
 	proveLifecycleSubordinateTransaction(t, admitTestPostgresStore(t, db), db, false)
 }
 
-func seedLifecycleRun(t *testing.T, db *sql.DB, sqlite bool, runID string) {
+func seedLifecycleRun(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, runID string) {
 	t.Helper()
 	if sqlite {
-		requireRunningSQLiteRunForTest(t, testAuthorActivityContext(), db, runID, time.Now().UTC())
+		requireRunningSQLiteRunForTest(t, ctx, db, runID, time.Now().UTC())
 	} else {
-		requireRunningPostgresRunForTest(t, testAuthorActivityContext(), db, runID, time.Now().UTC())
+		requireRunningPostgresRunForTest(t, ctx, db, runID, time.Now().UTC())
 	}
 }
 
 func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordinateStore, db *sql.DB, sqlite bool) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
 	agentID := "subordinate-transaction-agent"
 	activeRunID := uuid.NewString()
-	seedLifecycleRun(t, db, sqlite, activeRunID)
+	seedLifecycleRun(t, ctx, db, sqlite, activeRunID)
 	identity := mustTestAgentIdentityForRun(activeRunID, agentID, "global")
 	rec := runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
@@ -172,7 +172,7 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	staleToken := runtimeeffects.LifecycleToken{RuntimeEpoch: started.RuntimeEpoch, Identity: identity, AgentID: agentID, Generation: started.Generation}
 	staleCtx := runtimeeffects.WithLifecycleToken(ctx, staleToken)
 	suspendedRunID := uuid.NewString()
-	seedLifecycleRun(t, db, sqlite, suspendedRunID)
+	seedLifecycleRun(t, ctx, db, sqlite, suspendedRunID)
 	suspendedIdentity := mustTestAgentIdentityForRun(suspendedRunID, agentID, "global")
 	seedTestAgentRow(t, ctx, db, !sqlite, suspendedIdentity, "active")
 	activeIdentity := testAgentMemoryIdentity(t, activeRunID, agentID, "global")

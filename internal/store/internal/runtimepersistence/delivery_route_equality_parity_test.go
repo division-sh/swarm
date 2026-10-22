@@ -154,7 +154,7 @@ func TestMixedPubsubConnectCompositionPublicReadbackOnBothBackends(t *testing.T)
 				ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error)
 				LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
 			})
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 

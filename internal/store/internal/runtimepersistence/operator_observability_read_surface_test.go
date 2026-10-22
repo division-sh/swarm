@@ -294,6 +294,7 @@ func TestPostgresRuntimeLogSourceFilterUsesCanonicalAgentOrRuntime(t *testing.T)
 	ctx := testAuthorActivityContext()
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	runID := uuid.NewString()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)

@@ -17,6 +17,8 @@ func TestForkGenerationRepeatedActivityEvidenceBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
+			fixtureTest := t
 			for _, status := range []string{"succeeded", "failed", "uncertain"} {
 				for _, field := range []string{
 					"unchanged", "equivalent_json", "result_payload", "failure", "input_hash", "loop_generation", "generation_unknown_field", "loop_stage",
@@ -25,8 +27,7 @@ func TestForkGenerationRepeatedActivityEvidenceBothStores(t *testing.T) {
 					"started_at", "completed_at", "updated_at",
 				} {
 					t.Run(status+"/"+field, func(t *testing.T) {
-						ctx := testAuthorActivityContext()
-						child, event, source := seedActivityTimestampReuse(t, fixture, backend.name == "postgres", false, status)
+						child, event, source := seedActivityTimestampReuse(fixtureTest, fixture, backend.name == "postgres", false, status)
 						store := fixture.store.(selectedActivityProjectionStore)
 						first, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID()))
 						if err != nil || len(first) != 1 {

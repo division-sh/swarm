@@ -378,6 +378,7 @@ func TestGoldenRuntimeRunsRemainForkPlannablePostgres(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			fixture := newRunForkRevisionMatrixFixture()
 			selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
 				Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: fixture.at,
 			})

@@ -28,6 +28,7 @@ func TestChannelDeliveryOpenCardPlanningUsesCanonicalStatusAndEpochBothStores(t 
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cards, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cards)
 			selected := cards.(operatorchannel.Store)
 			delivery := cards.(render.Store)
 			if cursor, current, err := delivery.CurrentChannelCardChangeCursor(ctx); err != nil || current || cursor != 0 {

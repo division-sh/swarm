@@ -33,6 +33,7 @@ func TestRecordDeadLetterExactOnceParity(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(deadLetterRecorderFixtureStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
@@ -156,6 +157,7 @@ func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	entityID := uuid.NewString()
 	evt := eventtest.RunCreatingRootIngress(
@@ -357,6 +359,7 @@ func TestRecordDeadLetter_RejectsNonUUIDEntityIDWithoutRepair(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 		"deadletter.test",
@@ -402,6 +405,7 @@ func TestRecordDeadLetter_PersistsTargetResolutionFailureContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),

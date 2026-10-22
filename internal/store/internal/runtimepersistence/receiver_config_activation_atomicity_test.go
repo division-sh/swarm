@@ -209,6 +209,11 @@ func (f receiverConfigActivationFixture) newRuntimeEventBus(t *testing.T, option
 	options.ContractBundle = semanticview.Wrap(f.bundle)
 	options.SourceArtifactFact = mustStoreTestSourceArtifactFact(f.bundle.SourceArtifact.BundleHash())
 	options.RuntimeInstanceID = evidence.RuntimeInstanceID
+	if options.MutationContext == nil {
+		options.MutationContext = func(ctx context.Context) (context.Context, error) {
+			return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(ctx, f.ctx))
+		}
+	}
 	options.DeliveryAuthority, err = deliverylifecycle.NewNormalExecutionAuthority(options.SourceArtifactFact, evidence.GrantID, evidence.RuntimeGeneration)
 	if err != nil {
 		t.Fatal(err)

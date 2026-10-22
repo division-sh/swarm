@@ -59,6 +59,7 @@ func TestProposedEffectNativeSelectionPersistenceBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, cards)
 			for range 2 {
 				if err := store.CreateProposedEffectCard(ctx, card, continuation); err != nil {
 					t.Fatal(err)
@@ -88,6 +89,7 @@ func TestProposedEffectCardLifecycleParity(t *testing.T) {
 			t.Run(backend+"/"+verdict, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				cards, runID := decisionCardTestStore(t, backend)
+				ctx = originalStoreFixtureContext(t, ctx, cards)
 				store := cards.(decisioncard.ProposedEffectStore)
 				now := time.Date(2026, 7, 14, 15, 0, 0, 0, time.UTC)
 				card, continuation := newProposedEffectTestCard(t, runID, now, attemptgeneration.Generation{})
@@ -332,6 +334,7 @@ func TestProposedEffectContractPinParticipatesInDuplicateIdentityOnBothStores(t 
 			t.Run(backend+"/"+mutate.name, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				cards, runID := decisionCardTestStore(t, backend)
+				ctx = originalStoreFixtureContext(t, ctx, cards)
 				proposed := cards.(decisioncard.ProposedEffectStore)
 				card, continuation := newProposedEffectTestCard(t, runID, time.Date(2026, 7, 14, 16, 0, 0, 0, time.UTC), attemptgeneration.Generation{})
 				if err := proposed.CreateProposedEffectCard(ctx, card, continuation); err != nil {
@@ -371,6 +374,7 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 			t.Run(backend+"/"+status, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				cards, runID := decisionCardTestStore(t, backend)
+				ctx = originalStoreFixtureContext(t, ctx, cards)
 				store := cards.(decisioncard.ProposedEffectStore)
 				now := time.Date(2026, 7, 14, 17, 0, 0, 0, time.UTC)
 				card, continuation := newProposedEffectTestCard(t, runID, now, attemptgeneration.Generation{})
@@ -522,6 +526,7 @@ func TestProposedEffectDecisionAndSupersessionWinnerParity(t *testing.T) {
 			t.Run(backend+"/"+winner, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				cards, runID := decisionCardTestStore(t, backend)
+				ctx = originalStoreFixtureContext(t, ctx, cards)
 				store := cards.(decisioncard.ProposedEffectStore)
 				now := time.Date(2026, 7, 14, 15, 30, 0, 0, time.UTC)
 				generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: uuid.NewString(), RevisionField: "revision_id", RevisionID: uuid.NewString(), Attempt: 1}
@@ -600,6 +605,7 @@ func TestProposedEffectSupersessionScopesParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cards, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cards)
 			store := cards.(decisioncard.ProposedEffectStore)
 			now := time.Date(2026, 7, 14, 16, 0, 0, 0, time.UTC)
 			generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: uuid.NewString(), RevisionField: "revision_id", RevisionID: uuid.NewString(), Attempt: 1}

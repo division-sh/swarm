@@ -17,7 +17,7 @@ func TestForkGenerationPreparationReconstructedOwnersBothStores(t *testing.T) {
 		for _, status := range []string{"succeeded", "failed", "uncertain"} {
 			t.Run(backend.name+"/"+status, func(t *testing.T) {
 				fixture := backend.open(t)
-				ctx := testAuthorActivityContext()
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 				child, event, source := seedActivityEvidenceReuse(t, fixture, backend.name == "postgres", false, status, 2)
 				owner := fixture.store.(selectedActivityProjectionStore)
 				first, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, owner, event.RunID()))

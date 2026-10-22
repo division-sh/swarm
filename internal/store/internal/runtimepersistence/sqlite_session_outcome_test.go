@@ -16,6 +16,7 @@ func TestSQLiteSessionMutationRetainsAcknowledgedHandoffOutcome(t *testing.T) {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				fixture := newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true)
 				ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+				ctx = originalStoreFixtureContext(t, ctx, store)
 				identity := fixture.authority.Target.AgentIdentity
 				var predecessor *runtimesessions.Lease
 				var err error

@@ -86,7 +86,14 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 		terminalDone <- terminalResult{status: string(snapshot.State), err: result.Err()}
 	}()
 
-	terminalPID := <-terminalPIDReady
+	var terminalPID int
+	select {
+	case terminalPID = <-terminalPIDReady:
+	case result := <-terminalDone:
+		t.Fatalf("terminal mutation ended before run-lock observation: %v", result.err)
+	case <-ctx.Done():
+		t.Fatalf("terminal mutation did not reach run-lock observation: %v", context.Cause(ctx))
+	}
 	query := observePostgresTerminalRunLock(t, ctx, db, terminalPID)
 	upperQuery := strings.ToUpper(query)
 	if !strings.Contains(upperQuery, "FROM RUNS") || !strings.Contains(upperQuery, "FOR UPDATE") {

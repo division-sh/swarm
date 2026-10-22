@@ -307,6 +307,7 @@ func TestPostgresHistoricalReplayPreservesProducerIdentity(t *testing.T) {
 	fixture := openPostgresAuthorActivityReceiptFixture(t)
 	surface := fixture.store.(eventProducerIdentityLifecycleStore)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	createdAt := time.Date(2026, 7, 14, 13, 0, 0, 0, time.UTC)
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()

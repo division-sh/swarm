@@ -21,6 +21,7 @@ import (
 func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 	now := time.Unix(1700000000, 0).UTC()
 	newer := uuid.NewString()
 	older := uuid.NewString()
@@ -251,6 +252,7 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 	sqliteStore.nowFn = func() time.Time { return now }
 

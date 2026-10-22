@@ -202,6 +202,7 @@ func TestCommitSelectedForkEventHostileRepeatPostgres(t *testing.T) {
 func TestSQLiteCommitSelectedForkEventSerializesWithClaimAbandonment(t *testing.T) {
 	fixture := openSQLiteAuthorActivityReceiptFixture(t)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	selected := fixture.store.(*SQLiteRuntimeStore)
 	owner := selected.PipelineObligations()
 	req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)

@@ -18,6 +18,7 @@ func TestWorkflowJournalStoragePreservesOriginalSnapshotAndPhysicalCountsBothSto
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			run, other := uuid.NewString(), uuid.NewString()
 			for _, runID := range []string{run, other} {
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
@@ -93,6 +94,7 @@ func TestWorkflowJournalStorageRefusesInvalidClosedAndLateFailingOwnersBothStore
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			run := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, run)
 			for _, invalid := range []string{"", "invalid", uuid.Nil.String()} {

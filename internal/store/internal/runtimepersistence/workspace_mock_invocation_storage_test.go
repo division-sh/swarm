@@ -16,6 +16,7 @@ func TestWorkspaceMockInvocationStorageRetainsExactCountsBothStores(t *testing.T
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			if got, err := ReadWorkspaceMockInvocationStorageForTest(ctx, fixture.store); err != nil || got != (WorkspaceMockInvocationStorage{}) {
 				t.Fatalf("fresh invocation counts: %+v %v", got, err)
 			}

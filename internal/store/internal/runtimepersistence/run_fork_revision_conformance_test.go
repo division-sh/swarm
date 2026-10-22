@@ -625,6 +625,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	requireDefaultSourceArtifactForTest(t, ctx, store)
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	runID := uuid.NewString()
@@ -811,6 +812,7 @@ func TestGenericScheduleDuplicateCancellationDoesNotPublishRunForkRevision(t *te
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	store := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	command := testAgentGenericScheduleCommand(
 		t, runID, "revision-agent", "revision-flow/instance", uuid.NewString(), "revision-task",
 		runtimegenericschedule.AbsoluteDue(time.Now().Add(time.Hour)),

@@ -385,7 +385,7 @@ func TestProviderAttemptCompletionAfterOriginalOriginExpiryParity(t *testing.T) 
 				}
 				if !candidate.drained {
 					deliveryStore := fixture.store.(runtimedelivery.Store)
-					if _, err := deliveryStore.SettleSuccess(testAuthorActivityContext(), fixture.origin, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
+					if _, err := deliveryStore.SettleSuccess(fixture.original, fixture.origin, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 						t.Fatalf("settle renewed current origin: %v", err)
 					}
 				}
@@ -643,7 +643,7 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 				if candidate.expire {
 					now = now.Add(10 * time.Minute)
 				}
-				summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now))
+				summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now))
 				if err != nil {
 					t.Fatalf("recover completion: %v", err)
 				}
@@ -663,7 +663,7 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 					requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, wantDrain)
 					requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleTerminated, transition.Generation)
 				}
-				again, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(time.Second)))
+				again, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now.Add(time.Second)))
 				if err != nil || again != (runtimeeffects.RecoverySummary{}) {
 					t.Fatalf("idempotent recovery summary=%+v err=%v", again, err)
 				}
@@ -683,7 +683,7 @@ func TestProviderAttemptDrainPreTopologyRecoveryParity(t *testing.T) {
 		requireAgentCoarseStatus(t, fixture, "terminated")
 
 		now := time.Now().UTC()
-		summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now))
+		summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now))
 		if err != nil {
 			t.Fatalf("recover terminal drain before topology readback: %v", err)
 		}
@@ -696,7 +696,7 @@ func TestProviderAttemptDrainPreTopologyRecoveryParity(t *testing.T) {
 		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleTerminated, transition.Generation)
 		requireAgentCoarseStatus(t, fixture, "terminated")
 
-		again, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(time.Second)))
+		again, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now.Add(time.Second)))
 		if err != nil || again != (runtimeeffects.RecoverySummary{}) {
 			t.Fatalf("idempotent pre-topology recovery summary=%+v err=%v", again, err)
 		}
@@ -710,7 +710,7 @@ func TestProviderAttemptDrainRejectsTransitionWhilePendingParity(t *testing.T) {
 		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleFailed)
 		for _, operation := range []string{"restart", "reconfigure"} {
 			state := providerDrainFixtureState(t, fixture)
-			_, err := fixture.lifecycle.CommitAgentLifecycleTransition(testAuthorActivityContext(), runtimemanager.AgentLifecycleTransition{
+			_, err := fixture.lifecycle.CommitAgentLifecycleTransition(fixture.original, runtimemanager.AgentLifecycleTransition{
 				OperationID: uuid.NewString(), OperationKind: operation, RequestHash: "pending-drain-" + operation,
 				Identity: fixture.authority.Normal.Identity, AgentID: fixture.agentID, Trigger: "provider_drain_test",
 				ExpectedEpoch: fixture.authority.Normal.RuntimeEpoch, ExpectedGeneration: transition.Generation,
@@ -742,7 +742,7 @@ func TestProviderAttemptDrainTerminalRunRecoveryParity(t *testing.T) {
 		if !ok {
 			t.Fatalf("completion store %T does not expose run quiescence", fixture.store)
 		}
-		quiesced, err := selected.ApplyActiveRunQuiescence(testAuthorActivityContext(), runtimerunquiescence.Request{
+		quiesced, err := selected.ApplyActiveRunQuiescence(fixture.original, runtimerunquiescence.Request{
 			OperationName: "provider_attempt_terminal_run_recovery", RequestedAt: time.Now().UTC(),
 			RunIDs: []string{fixture.authority.Target.RunID}, ReasonCode: runtimerunquiescence.ServeAbandonReasonCode,
 			ControlledBy: "provider-drain-test", DeliveryNote: "terminal provider drain recovery proof",
@@ -753,7 +753,7 @@ func TestProviderAttemptDrainTerminalRunRecoveryParity(t *testing.T) {
 		requireTerminalizedOriginDelivery(t, fixture, runtimerunquiescence.ServeAbandonReasonCode)
 
 		now := time.Now().UTC()
-		summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now))
+		summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now))
 		if err != nil || summary.OutcomeUncertain != 1 {
 			t.Fatalf("recover terminal-run provider drain: summary=%+v err=%v", summary, err)
 		}
@@ -762,7 +762,7 @@ func TestProviderAttemptDrainTerminalRunRecoveryParity(t *testing.T) {
 		assertCompletionFrameBytes(t, fixture, "agent_turns", "turn_id", handle.Attempt().Authority.Target.ID, wantFrame)
 		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleRunning, transition.Generation)
 		requireTerminalizedOriginDelivery(t, fixture, runtimerunquiescence.ServeAbandonReasonCode)
-		again, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(time.Second)))
+		again, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(now.Add(time.Second)))
 		if err != nil || again != (runtimeeffects.RecoverySummary{}) {
 			t.Fatalf("repeat terminal-run recovery: summary=%+v err=%v", again, err)
 		}
@@ -776,7 +776,7 @@ func TestProviderAttemptDrainRecoveryRejectsNewerOriginClaimParity(t *testing.T)
 		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
 		expireProviderOriginLease(t, fixture, fixture.origin)
 		replaceProviderOriginClaim(t, fixture, fixture.origin)
-		if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC())); err == nil {
+		if _, err := fixture.store.ReconcileExternalEffectAttempts(fixture.original, liveExternalEffectRecoveryRequest(time.Now().UTC())); err == nil {
 			t.Fatal("provider recovery accepted a newer origin claim")
 		}
 		requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateResponseObserved)
@@ -878,14 +878,14 @@ func commitProviderDrainTransition(t testing.TB, fixture completionSettlementFix
 	}
 	if kind == "teardown" {
 		transition.Topology = runtimeagenttopology.Admission{}
-		return agentfixture.CommitStatic(fixture.agentOwner, testAuthorActivityContext(), fixture.store, transition)
+		return agentfixture.CommitStatic(fixture.agentOwner, fixture.original, fixture.store, transition)
 	}
-	return fixture.lifecycle.CommitAgentLifecycleTransition(testAuthorActivityContext(), transition)
+	return fixture.lifecycle.CommitAgentLifecycleTransition(fixture.original, transition)
 }
 
 func providerDrainFixtureState(t testing.TB, fixture completionSettlementFixture) runtimemanager.AgentLifecycleState {
 	t.Helper()
-	state, found, err := fixture.store.LoadAgentLifecycleState(testAuthorActivityContext(), fixture.authority.Normal.Identity)
+	state, found, err := fixture.store.LoadAgentLifecycleState(fixture.original, fixture.authority.Normal.Identity)
 	if err != nil || !found {
 		t.Fatalf("load provider-drain fixture topology: found=%v err=%v", found, err)
 	}
@@ -1022,7 +1022,7 @@ func replaceProviderOriginClaim(t *testing.T, fixture completionSettlementFixtur
 	if !ok {
 		t.Fatalf("completion store %T does not expose delivery reclaim", fixture.store)
 	}
-	ctx := testAuthorActivityContext()
+	ctx := fixture.original
 	snapshot, err := deliveryStore.Snapshot(ctx, claim.DeliveryID())
 	if err != nil {
 		t.Fatalf("load provider origin before reclaim: %v", err)
@@ -1047,7 +1047,7 @@ func requireAgentLifecycleState(t *testing.T, fixture completionSettlementFixtur
 	if !ok {
 		t.Fatalf("completion store %T does not expose lifecycle state", fixture.store)
 	}
-	state, found, err := reader.LoadAgentLifecycleState(testAuthorActivityContext(), fixture.authority.Normal.Identity)
+	state, found, err := reader.LoadAgentLifecycleState(fixture.original, fixture.authority.Normal.Identity)
 	if err != nil || !found || state.Phase != wantPhase || state.Generation != wantGeneration {
 		t.Fatalf("lifecycle state=%+v found=%v err=%v, want %s generation %d", state, found, err, wantPhase, wantGeneration)
 	}
@@ -1130,10 +1130,10 @@ func newProviderDrainOriginClaim(t *testing.T, fixture completionSettlementFixtu
 		Recipient:     events.MustAgentDeliveryRecipient(fixture.agentID),
 		AgentIdentity: fixture.authority.Normal.Identity,
 	}
-	if err := commitSemanticEventFixtureWithRoutes(testAuthorActivityContext(), fixture.store, event, []events.DeliveryRoute{route}); err != nil {
+	if err := commitSemanticEventFixtureWithRoutes(fixture.original, fixture.store, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatalf("commit provider-drain origin %d: %v", ordinal, err)
 	}
-	claimed, err := claimDeliveryFixture(testAuthorActivityContext(), fixture.store.(deliveryFixtureStore), event, route)
+	claimed, err := claimDeliveryFixture(fixture.original, fixture.store.(deliveryFixtureStore), event, route)
 	if err != nil {
 		t.Fatalf("claim provider-drain origin %d: %v", ordinal, err)
 	}
@@ -1160,7 +1160,7 @@ func newProviderDrainSiblingFixture(t *testing.T, fixture completionSettlementFi
 		t.Fatalf("same-slug sibling identity: %v", err)
 	}
 	now := time.Now().UTC()
-	if err := agentfixture.UpsertStatic(fixture.agentOwner, testAuthorActivityContext(), fixture.store, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(fixture.agentOwner, fixture.original, fixture.store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: fields.AgentID, Identity: sibling.authority.Normal.Identity,
 			Role: "worker", Type: "managed", Model: "regular", LLMBackend: "claude_cli",
@@ -1170,7 +1170,7 @@ func newProviderDrainSiblingFixture(t *testing.T, fixture completionSettlementFi
 	}); err != nil {
 		t.Fatalf("admit provider-drain sibling agent: %v", err)
 	}
-	lifecycle, found, err := fixture.store.LoadAgentLifecycleState(testAuthorActivityContext(), sibling.authority.Normal.Identity)
+	lifecycle, found, err := fixture.store.LoadAgentLifecycleState(fixture.original, sibling.authority.Normal.Identity)
 	if err != nil || !found {
 		t.Fatalf("load provider-drain sibling lifecycle: found=%v err=%v", found, err)
 	}

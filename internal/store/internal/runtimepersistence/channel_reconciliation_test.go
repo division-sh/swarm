@@ -244,6 +244,7 @@ func TestChannelPostCommitCardCreationAndTerminalHintsBothStores(t *testing.T) {
 			t.Run(backend+"/"+kind, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				cards, runID := decisionCardTestStore(t, backend)
+				ctx = originalStoreFixtureContext(t, ctx, cards)
 				proof := observeChannelHints(t, cards.(interface {
 					SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 				}))

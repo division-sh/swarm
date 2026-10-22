@@ -13,11 +13,11 @@ func TestForkRecordedActivityGenerationEvidenceBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			fixtureTest := t
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			for _, field := range []string{"unchanged", "run_id", "entity_id", "source_event_id", "parent_event_id", "flow_instance", "node_id", "handler_event_key", "activity_id", "tool", "loop_flow", "loop_id", "loop_activation", "loop_revision", "loop_attempt", "loop_field", "loop_unknown", "result_event_id"} {
 				t.Run(field, func(t *testing.T) {
-					ctx := testAuthorActivityContext()
-					child, event, record := seedActivityEvidenceReuse(t, fixture, backend.name == "postgres", false, "succeeded", 2)
-					ctx = originalStoreFixtureContext(t, ctx, fixture.store)
+					child, event, record := seedActivityEvidenceReuse(fixtureTest, fixture, backend.name == "postgres", false, "succeeded", 2)
 					store := fixture.store.(selectedActivityProjectionStore)
 					original := originalCarriageForRun(t, fixture.store, event.RunID())
 					column, value := field, any("")

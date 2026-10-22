@@ -330,6 +330,7 @@ func TestPendingEventDeltaVisibleThroughUnboundTerminalLoanBothStores(t *testing
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			writer := selectedAdmissionLifecycleWriter(fixture.store)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			started := time.Now().UTC().Round(time.Microsecond)
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, started)

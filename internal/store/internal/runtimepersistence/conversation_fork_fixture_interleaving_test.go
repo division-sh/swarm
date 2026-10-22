@@ -137,7 +137,7 @@ func TestConversationForkSourceFixtureAtomicBothStores(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			store, db := newLifecycleDiagnosticTestStore(t, sqlite)
 			bundle := conversationForkConstructionBundle(t)
-			ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), store)
 			seedStoreTestPersistedArtifact(t, db, bundle.SourceArtifact)
 			item := createConversationForkLifecycleDiagnostic(t, ctx, store, bundle)
 			now := time.Now().UTC().Truncate(time.Second)

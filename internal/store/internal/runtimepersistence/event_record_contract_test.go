@@ -133,6 +133,7 @@ func TestPreparedPublishOutboxReadbackPreservesExactPayloadBytesParity(t *testin
 			fixture := backend.open(t)
 			store := fixture.store.(eventRecordContractStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			payload := []byte("{\n  \"numeric\": 1.0, \"first\": true\n}")
 			event := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "outbox.payload_bytes", "gateway", "", payload, 0,
@@ -226,6 +227,7 @@ func TestW2CompiledRouteClaimPersistenceRestartAndGraphMutationParity(t *testing
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			event := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "routing.claim.roundtrip", "gateway", "", []byte(`{}`), 0,
 				uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 18, 16, 45, 0, 0, time.UTC),
@@ -629,6 +631,7 @@ func TestPostgresEventRecordReadbackNormalizesSessionTimezone(t *testing.T) {
 	fixture := openPostgresAuthorActivityReceiptFixture(t)
 	store := fixture.store.(semanticEventFixtureStore)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	createdAt := time.Date(2026, 7, 18, 18, 45, 12, 123456000, time.UTC)
 	event := eventtest.RunCreatingRootIngress(
 		uuid.NewString(), "timezone.contract", "gateway", "timezone-task", []byte(`{"timezone":true}`),

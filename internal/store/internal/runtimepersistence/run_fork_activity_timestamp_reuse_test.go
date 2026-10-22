@@ -41,6 +41,8 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			fixtureTest := t
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			for _, approved := range []bool{false, true} {
 				policy := "ordinary"
 				if approved {
@@ -48,8 +50,7 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 				}
 				for _, status := range []string{"succeeded", "failed", "uncertain", "started"} {
 					t.Run(policy+"/"+status, func(t *testing.T) {
-						ctx := testAuthorActivityContext()
-						child, event, sourceRecord := seedActivityTimestampReuse(t, fixture, backend.name == "postgres", approved, status)
+						child, event, sourceRecord := seedActivityTimestampReuse(fixtureTest, fixture, backend.name == "postgres", approved, status)
 						store := fixture.store.(selectedActivityProjectionStore)
 						journal := fixture.store.(activityTimestampJournal)
 						hints := observeChannelHints(t, fixture.store.(interface {
@@ -367,14 +368,16 @@ func TestRunForkActivityTimestampRejectsIncompleteReuseBothStores(t *testing.T) 
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			fixtureTest := t
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			for _, column := range []string{"started_at", "completed_at", "updated_at"} {
 				t.Run(column, func(t *testing.T) {
-					child, event, sourceRecord := seedActivityTimestampReuse(t, fixture, backend.name == "postgres", false, "succeeded")
+					child, event, sourceRecord := seedActivityTimestampReuse(fixtureTest, fixture, backend.name == "postgres", false, "succeeded")
 					if _, err := fixture.db.Exec(`UPDATE activity_attempts SET `+column+`=$1 WHERE request_event_id=$2`, time.Time{}, sourceRecord.RequestEventID); err != nil {
 						t.Fatal(err)
 					}
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-					_, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, event.RunID()))
+					_, err := fixture.store.(selectedActivityProjectionStore).LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, fixture.store, event.RunID()))
 					if err == nil || !strings.Contains(err.Error(), column+" is required") {
 						t.Fatalf("incomplete recorded timestamp: got %v, want %s is required", err, column)
 					}
@@ -391,6 +394,7 @@ func TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores(t *testi
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			postgres := backend.name == "postgres"
 			child, event, source := seedActivityTimestampReuse(t, fixture, postgres, false, "succeeded")
 			fraction := 123456789
@@ -405,7 +409,6 @@ func TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores(t *testi
 			if _, err := fixture.db.Exec(`UPDATE activity_attempts SET started_at=$1, completed_at=$2, updated_at=$3 WHERE request_event_id=$4`, start.Format(time.RFC3339Nano), completed.Format(time.RFC3339Nano), updated.Format(time.RFC3339Nano), source.RequestEventID); err != nil {
 				t.Fatal(err)
 			}
-			ctx := testAuthorActivityContext()
 			journal := fixture.store.(activityTimestampJournal)
 			original, found, err := journal.LoadActivityAttempt(ctx, source.RequestEventID)
 			if err != nil || !found || !original.StartedAt.Equal(start) || original.CompletedAt == nil || !original.CompletedAt.Equal(completed) || !original.UpdatedAt.Equal(updated) {

@@ -15,6 +15,7 @@ func TestWorkspaceInvocationPhasesRetainNativeStateWithoutMutationBothStores(t *
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			active := seedDeliveryRecoveryClaim(t, fixture, ctx)
 			closed := seedDeliveryRecoveryClaim(t, fixture, ctx)
 			if _, err := fixture.store.SettleSuccess(ctx, closed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {

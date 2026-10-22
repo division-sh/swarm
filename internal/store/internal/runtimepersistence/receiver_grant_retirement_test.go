@@ -144,11 +144,9 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 				defer cancel()
 				source := grantReceiverEntitySource(t)
 				bundle, _ := semanticview.Bundle(source)
-				if !selectedFork {
-					fact := sourceartifactfixture.RequireArtifact(t, ctx, selected, bundle.SourceArtifact)
-					ctx = correlation.WithSourceArtifactFact(ctx, fact)
-					ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
-				}
+				fact := sourceartifactfixture.RequireArtifact(t, ctx, selected, bundle.SourceArtifact)
+				ctx = correlation.WithSourceArtifactFact(ctx, fact)
+				ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 				runID := uuid.NewString()
 				ctx = correlation.WithRunID(ctx, runID)
 				identity := mustTestAgentIdentityForRun(runID, "grant-receiver", "global")
@@ -181,6 +179,12 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					}
 				}
 				evidence, err := grant.Evidence()
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx = correlation.WithRuntimeInstanceID(ctx, evidence.RuntimeInstanceID)
+				ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(evidence.RuntimeInstanceID, evidence.BundleHash))
+				ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -274,8 +278,8 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 						t.Fatal(err)
 					}
 					result, err := selected.ClaimDelivery(ctx, authority, event, route)
-					if err != nil {
-						t.Fatal(err)
+					if err != nil && (err.Error() != "runtime generation grant is retired" || !reflect.DeepEqual(result, deliverylifecycle.ClaimResult{})) {
+						t.Fatalf("retired original must refuse before claim evidence: %+v err=%v", result, err)
 					}
 					if _, acquired := result.Acquired(); acquired {
 						t.Fatal("retired grant accepted delivery")

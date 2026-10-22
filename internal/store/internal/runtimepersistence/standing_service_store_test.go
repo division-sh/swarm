@@ -163,6 +163,7 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 func TestSQLiteStandingServiceReconcileDoesNotRepairRestartAbandon(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	packageKey := "project"
 	flowID := "ingress"
@@ -233,6 +234,7 @@ func TestSQLiteStandingServiceReconcileDoesNotRepairRestartAbandon(t *testing.T)
 func TestSQLiteStandingServiceReconcileProjectsTerminalityWithCommand(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("standing-unknown-terminality")
@@ -264,6 +266,7 @@ func TestSQLiteStandingServiceReconcileProjectsTerminalityWithCommand(t *testing
 func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore, genericReconciler := newGenericScheduleAwareWorkflowTestCoordinator(t, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("sqlite-standing-operator-lifecycle")
@@ -416,6 +419,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("sqlite-standing-orphan")
@@ -958,6 +962,7 @@ func countStandingCensusFamily(t *testing.T, fixture authorActivityReceiptFixtur
 func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("sqlite-standing-run-stop")

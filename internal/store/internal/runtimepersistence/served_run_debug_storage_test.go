@@ -20,6 +20,7 @@ func TestServedRunDebugStoragePreservesFourNativeFieldsBothStores(t *testing.T) 
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Now().UTC())
 			for _, cut := range []string{"null-candidate", "due-candidate", "paused", "completed", "missing"} {
@@ -100,6 +101,7 @@ func TestServedRunDebugStorageRefusesUnavailableSnapshotsBothStores(t *testing.T
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Now().UTC())
 			cancelled, cancel := context.WithCancel(ctx)

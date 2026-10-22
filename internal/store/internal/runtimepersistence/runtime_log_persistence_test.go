@@ -21,6 +21,7 @@ import (
 func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
@@ -185,6 +186,7 @@ func computeModuleReplayEvidenceTestEnvelope() computemodule.ReplayEnvelope {
 func TestSQLiteRuntimeLogSourceProjectionAndFilterParity(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	runID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 

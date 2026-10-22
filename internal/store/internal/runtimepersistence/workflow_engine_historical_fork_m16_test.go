@@ -23,6 +23,7 @@ func TestWorkflowEngineHistoricalForkM16BothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx, preRequest := forkWorkflowOwnershipRequest(t, fixture, backend.name == "postgres")
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			owner := fixture.store.(forkWorkflowOwnershipStore)
 			preFork, err := owner.MaterializeRunForkForSelectedContractExecution(ctx, preRequest)
 			if err != nil {
