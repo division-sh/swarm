@@ -25,6 +25,7 @@ func TestEventBusRunControlPauseQueuesOnlyTargetRunAndContinueReleases(t *testin
 	pg := storetest.StartPostgresRuntimeStore(t)
 	source := runControlPublicationSource(t)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -108,6 +109,7 @@ func TestEventBusRunControlContinueReleasesPendingDeliveryWithPipelineReceipt(t 
 	pg := storetest.StartPostgresRuntimeStore(t)
 	source := runControlPublicationSource(t)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -170,6 +172,7 @@ func TestEventBusRunControlPauseQueuesBeforeInterceptorsAndContinueReplaysThem(t
 	pg := storetest.StartPostgresRuntimeStore(t)
 	source := runControlPublicationSource(t)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	eventType := events.EventType("custom.run_control.intercepted")
 	deferredType := events.EventType("custom.run_control.deferred")
 	recorder := &runControlRecordingInterceptor{
@@ -240,6 +243,7 @@ func TestEventBusRunControlPauseQueuesPostCommitEmitBeforeInterceptors(t *testin
 	pg := storetest.StartPostgresRuntimeStore(t)
 	source := runControlPublicationSource(t)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
+	ctx = originalEventBusFixtureContext(t, ctx, pg)
 	eventType := events.EventType("custom.run_control.postcommit")
 	deferredType := events.EventType("custom.run_control.postcommit.deferred")
 	recorder := &runControlRecordingInterceptor{

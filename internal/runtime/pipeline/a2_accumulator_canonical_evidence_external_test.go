@@ -1,6 +1,7 @@
 package pipeline_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/google/uuid"
@@ -346,7 +348,12 @@ func restartA2CanonicalAccumulatorProof(t *testing.T, proof *a2AccumulatorPersis
 	if !ok {
 		t.Fatal("canonical evidence proof lost its actual runtime lifetime")
 	}
-	bus, err := newScopedTestEventBus(t, reconstructed, runtimebus.EventBusOptions{ContractBundle: proof.module.source, SourceArtifactFact: proof.fact, PayloadAdmitter: admitter, WorkOwner: work, Logger: proof.logger})
+	bus, err := newScopedTestEventBus(t, reconstructed, runtimebus.EventBusOptions{
+		ContractBundle: proof.module.source, SourceArtifactFact: proof.fact, PayloadAdmitter: admitter, WorkOwner: work, Logger: proof.logger,
+		MutationContext: func(ctx context.Context) (context.Context, error) {
+			return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(ctx, proof.ctx))
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

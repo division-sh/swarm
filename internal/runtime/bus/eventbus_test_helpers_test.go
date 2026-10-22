@@ -29,6 +29,12 @@ import (
 // source metadata or a delivery tag alone is not mutation admission.
 func originalEventBusFixtureContext(t *testing.T, ctx context.Context, selected any) context.Context {
 	t.Helper()
+	if startupownership.HasMutationAuthority(ctx) {
+		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return ctx
+	}
 	original, ok := selected.(agentfixture.Store)
 	if !ok {
 		t.Fatalf("native event-bus fixture lacks its original process owner: %T", selected)

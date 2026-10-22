@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -118,7 +119,8 @@ func selectedContractTestProcessCapability(
 	fixture := value.(*runForkTestWorkFixture)
 	fixture.mu.Lock()
 	defer fixture.mu.Unlock()
-	if capability := fixture.capabilities[selected]; capability != nil {
+	db := storetest.Database(selected)
+	if capability := fixture.capabilities[db]; capability != nil {
 		select {
 		case <-capability.Done():
 		default:
@@ -135,15 +137,30 @@ func selectedContractTestProcessCapability(
 		t.Fatalf("acquire selected-contract process capability: %v", err)
 	}
 	if fixture.capabilities == nil {
-		fixture.capabilities = make(map[runtimestartupownership.Store]runtimestartupownership.ProcessCapability)
+		fixture.capabilities = make(map[*sql.DB]runtimestartupownership.ProcessCapability)
 	}
-	fixture.capabilities[selected] = capability
+	fixture.capabilities[db] = capability
 	t.Cleanup(func() {
 		if err := capability.Release(context.Background()); err != nil {
 			t.Errorf("release selected-contract process capability: %v", err)
 		}
 	})
 	return capability
+}
+
+func originalSelectedFixtureContext(t testing.TB, ctx context.Context, selected runtimestartupownership.Store) context.Context {
+	t.Helper()
+	if runtimestartupownership.HasMutationAuthority(ctx) {
+		if _, err := runtimestartupownership.CaptureMutationAuthority(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return ctx
+	}
+	ctx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, selectedContractTestProcessCapability(t, ctx, selected))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
 }
 
 func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredecessorRetirement(t *testing.T) {
@@ -502,7 +519,7 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 		},
 	}
 	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, bundle.SourceArtifact, forkRunID, agents)
-	ctx = selectedForkExecutionTestContext(t, ctx, authority)
+	ctx = selectedForkExecutionTestContext(t, ctx, authority, sourceFact)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
 	admission, ok := managedexecution.FromContext(ctx)

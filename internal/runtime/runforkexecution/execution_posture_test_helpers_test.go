@@ -11,7 +11,7 @@ func executeLiveSelectedContractRunFork(ctx context.Context, req SelectedContrac
 	if !req.AgentRuntime.ExecutionPosture.Valid() {
 		req.AgentRuntime.ExecutionPosture = executionposture.Live
 	}
-	return ExecuteSelectedContractRunFork(ctx, req)
+	return executeSelectedContractRunForkForTest(ctx, req)
 }
 
 func activateLiveSelectedContractRunFork(ctx context.Context, req SelectedContractActivationGateRequest) (SelectedContractActivationGateResult, error) {

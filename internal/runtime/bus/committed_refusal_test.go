@@ -42,6 +42,7 @@ func TestCommittedTargetRefusalDirectAndEngineBothStores(t *testing.T) {
 				} else {
 					selected = storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 				}
+				ctx = originalEventBusFixtureContext(t, ctx, selected)
 				at := time.Now().UTC()
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: at})
 				for _, flowID := range []string{".", "consumer"} {
