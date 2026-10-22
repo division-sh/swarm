@@ -212,6 +212,14 @@ func TestFlowConstructionPublicationFieldsSharesStrictReceiptAdmission(t *testin
 		{"foreign_captured_entity", func(r *workflowInitialMaterializationProjection) {
 			r.Identity.EntityID = "33333333-3333-4333-8333-333333333333"
 		}},
+		{"foreign_identity_route", func(r *workflowInitialMaterializationProjection) {
+			r.Identity.InstancePath = "account/foreign"
+		}},
+		{"foreign_identity_entity", func(r *workflowInitialMaterializationProjection) {
+			r.Identity.EntityID = "33333333-3333-4333-8333-333333333333"
+		}},
+		{"missing_bundle", func(r *workflowInitialMaterializationProjection) { r.BundleHash = "" }},
+		{"missing_mode", func(r *workflowInitialMaterializationProjection) { r.ExecutionMode = "" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			receipt, owner := constructionPublicationFieldsFixture(t)

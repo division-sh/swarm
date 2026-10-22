@@ -60,7 +60,7 @@ func selectedContractActivityLineage(ctx context.Context, tx *sql.Tx, postgres b
 		}
 		eventsByID[record.EventID] = admitted.Event()
 	}
-	rows, err = tx.QueryContext(ctx, `SELECT CAST(fork_event_id AS TEXT), CAST(source_event_id AS TEXT) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1`, runID)
+	rows, err = tx.QueryContext(ctx, `SELECT CAST(fork_event_id AS TEXT), CAST(COALESCE(source_obligation_event_id,source_event_id) AS TEXT) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1`, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +159,23 @@ func selectedContractActivityLineage(ctx context.Context, tx *sql.Tx, postgres b
 				return reject(id, err)
 			}
 		}
+		if roots[id] {
+			// These are exact selected physical inputs, not newly emitted
+			// results under a reminted journal identity. Recheck their source
+			// partition through the publication owner before final settlement.
+			binding, err := loadRunForkSelectedContractBinding(ctx, tx, runID)
+			if err != nil {
+				return reject(id, err)
+			}
+			lineage, selected := event.SelectedForkLineage()
+			if !selected || lineage.SourceRunID() != binding.SourceRunID {
+				return reject(id, fmt.Errorf("selected input has foreign publication binding"))
+			}
+			if err := requireSelectedActivityResultPublishedTx(ctx, tx, binding, lineage.SourceEventID(), postgres); err != nil {
+				return reject(id, err)
+			}
+			continue
+		}
 		resultType, validResult := false, false
 		for _, request := range requests {
 			if !request.OwnsResultType(event.Type()) {
@@ -177,33 +194,3 @@ func selectedContractActivityLineage(ctx context.Context, tx *sql.Tx, postgres b
 	return freshIDs, nil
 }
 
-func readSelectedForkInputLineageTx(ctx context.Context, tx *sql.Tx, childRunID, sourceEventID, eventID string) (runfork.RunForkSelectedContractExecutionLineage, bool, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT CAST(fork_run_id AS TEXT), CAST(source_run_id AS TEXT),
-		CAST(source_event_id AS TEXT), CAST(fork_event_id AS TEXT), event_name, selection_authority, created_at
-		FROM run_fork_selected_contract_executions
-		WHERE (fork_run_id=$1 AND source_event_id=$2) OR fork_event_id=$3`, childRunID, sourceEventID, eventID)
-	if err != nil {
-		return runfork.RunForkSelectedContractExecutionLineage{}, false, err
-	}
-	defer rows.Close()
-	var lineage runfork.RunForkSelectedContractExecutionLineage
-	var found bool
-	for rows.Next() {
-		if found {
-			return lineage, false, eventrecord.Corrupt(eventID, fmt.Errorf("selected input publication has multiple lineage owners"))
-		}
-		var rawTime any
-		if err := rows.Scan(&lineage.ForkRunID, &lineage.SourceRunID, &lineage.SourceEventID, &lineage.ForkEventID, &lineage.EventName, &lineage.SelectionAuthority, &rawTime); err != nil {
-			return lineage, false, err
-		}
-		createdAt, present, err := sqliteTimeValue(rawTime)
-		if err != nil || !present {
-			return lineage, false, eventrecord.Corrupt(eventID, fmt.Errorf("selected input lineage has invalid creation time: %v", err))
-		}
-		lineage.CreatedAt, found = createdAt, true
-	}
-	if err := rows.Err(); err != nil {
-		return lineage, false, err
-	}
-	return lineage, found, rows.Close()
-}

@@ -43,7 +43,7 @@ func settleProviderCanceledOrigin(ctx context.Context, mutation *mutationprotoco
 				return deliverylifecycle.Snapshot{}, err
 			}
 			var fenced bool
-			if err := tx.QueryRowContext(ctx, `SELECT state IN ('failed','closed') AND lease_expires_at IS NULL FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, recoveryExecutionID).Scan(&fenced); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT state IN ('failed','closed','quiesced') AND lease_expires_at IS NULL FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, recoveryExecutionID).Scan(&fenced); err != nil {
 				return deliverylifecycle.Snapshot{}, err
 			}
 			if !fenced {

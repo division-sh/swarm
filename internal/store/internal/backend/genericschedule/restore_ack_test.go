@@ -40,6 +40,7 @@ func TestMalformedScheduleAcknowledgedTerminalizationContinuesRestoreScan(t *tes
 					terminalized++
 					return testCase.acknowledged, cleanupErr
 				},
+				func(context.Context, string) (bool, error) { return true, nil },
 			)
 			if scanned != testCase.wantScanned || terminalized != 1 || len(active) != testCase.wantActive {
 				t.Fatalf("scan = scanned:%d terminalized:%d active:%+v err:%v", scanned, terminalized, active, err)

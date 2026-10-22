@@ -224,9 +224,13 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 					if executeErr != nil || !result.Activation.Activated {
 						t.Fatalf("execution: %v", executeErr)
 					}
+					observed, cleanupErr := observeSelectedRetainedExecution(t, ctx, owner, selected, result.Materialization.ForkRunID)
+					if !errors.Is(cleanupErr, errSourceRelease) || observed.ExecutedEventCount != 1 {
+						t.Fatalf("native terminal cleanup did not retain its failed artifact: count=%d error=%v", observed.ExecutedEventCount, cleanupErr)
+					}
 					beforeStop := selectedPreparationDatabaseSnapshot(t, db, backend)
-					_, selected, stopErr := owner.StopSelectedFork(ctx, runcontrol.TransitionRequest{RunID: result.Materialization.ForkRunID})
-					if !selected {
+					_, matched, stopErr := owner.StopSelectedFork(ctx, runcontrol.TransitionRequest{RunID: result.Materialization.ForkRunID})
+					if !matched {
 						t.Fatal("stop lost exact selected context")
 					}
 					if afterStop := selectedPreparationDatabaseSnapshot(t, db, backend); !reflect.DeepEqual(beforeStop, afterStop) {
@@ -262,7 +266,11 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 						t.Fatal("preparation/cleanup mutated domain state")
 					}
 				}
-				if err == nil || process.ActiveCount() <= baseline || probe.calls[tc.at] != 1 {
+				failedReleases := 1
+				if tc.phase == "retained_stop" {
+					failedReleases++ // Native terminal cleanup preceded the explicit stop retry.
+				}
+				if err == nil || process.ActiveCount() <= baseline || probe.calls[tc.at] != failedReleases {
 					t.Fatalf("lost source owner: calls=%v active=%d err=%v", probe.calls, process.ActiveCount(), err)
 				}
 				if _, err := os.Stat(probe.roots[tc.at]); err != nil {
@@ -272,7 +280,7 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 					t.Fatalf("sibling changed: %v", err)
 				}
 				if tc.phase != "panic" && tc.phase != "fail_once" {
-					if err := owner.RetireSelectedContexts(context.Background()); !errors.Is(err, errSourceRelease) || probe.calls[tc.at] != 2 {
+					if err := owner.RetireSelectedContexts(context.Background()); !errors.Is(err, errSourceRelease) || probe.calls[tc.at] != failedReleases+1 {
 						t.Fatalf("persistent retry: %v %v", probe.calls, err)
 					}
 				}
@@ -295,7 +303,7 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 				for i := 0; i < probe.loads; i++ {
 					want := 1
 					if i == tc.at {
-						want = 3
+						want = failedReleases + 2
 						if tc.phase == "panic" || tc.phase == "fail_once" {
 							want = 2
 						}

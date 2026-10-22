@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"database/sql"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -107,21 +108,21 @@ func TestRunForkHistoricalContextTombstoneFoldBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			var absent, malformedTombstones int
-			if err := f.db.QueryRow(`SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=3 AND NOT present`, f.source.runID).Scan(&absent); err != nil || absent != 15 {
+			if err := f.db.QueryRow(`SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=4 AND NOT present`, f.source.runID).Scan(&absent); err != nil || absent != 15 {
 				t.Fatalf("canonical tombstone census=%d err=%v, want all 13 subjects plus selector and later event", absent, err)
 			}
-			if err := f.db.QueryRow(`SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=3 AND NOT present AND CAST(fact AS TEXT)<>'{}'`, f.source.runID).Scan(&malformedTombstones); err != nil || malformedTombstones != 0 {
+			if err := f.db.QueryRow(`SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=4 AND NOT present AND CAST(fact AS TEXT)<>'{}'`, f.source.runID).Scan(&malformedTombstones); err != nil || malformedTombstones != 0 {
 				t.Fatalf("canonical deletion payload is not {}: count=%d err=%v", malformedTombstones, err)
 			}
-			// Both old present revisions are discarded at R3. They are deliberately
+			// Both old present revisions are discarded at R4. They are deliberately
 			// invalid live bodies, and must never be decoded around the tombstone.
-			if _, err := f.db.Exec(`UPDATE run_fork_fact_revisions SET fact='{}' WHERE run_id=$1 AND revision<3`, f.source.runID); err != nil {
+			if _, err := f.db.Exec(`UPDATE run_fork_fact_revisions SET fact='{}' WHERE run_id=$1 AND revision<4`, f.source.runID); err != nil {
 				t.Fatal(err)
 			}
 			f.requireLatestComplete(t)
 			before := historicalContextDatabaseRows(t, f.db, f.postgres)
 			got, err := f.planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: f.source.runID, At: checkpoint})
-			if err != nil || got.ForkPoint.Revision != 3 || got.EventCountAtFork != 1 || len(got.Entities) != 0 || len(got.PendingWork) != 0 || len(got.FanOutObligations) != 0 {
+			if err != nil || got.ForkPoint.Revision != 4 || got.EventCountAtFork != 1 || len(got.Entities) != 0 || len(got.PendingWork) != 0 || len(got.FanOutObligations) != 0 {
 				t.Fatalf("tombstone fold resurrected discarded facts or decoded dead bodies: plan=%#v err=%v", got, err)
 			}
 			historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, f.db, f.postgres))
@@ -143,11 +144,11 @@ func TestRunForkHistoricalContextTombstoneFoldBothStores(t *testing.T) {
 			}
 			f.requireLatestComplete(t)
 			var present bool
-			if err := f.db.QueryRow(`SELECT present FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=4 AND family='timers' AND fact_key=$2`, s.runID, s.timerID).Scan(&present); err != nil || !present {
+			if err := f.db.QueryRow(`SELECT present FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=5 AND family='timers' AND fact_key=$2`, s.runID, s.timerID).Scan(&present); err != nil || !present {
 				t.Fatalf("canonical reappearance missing: present=%v err=%v", present, err)
 			}
 			later, err := f.planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: s.runID, At: reappearedAt})
-			if err != nil || later.ForkPoint.Revision != 4 || later.EventCountAtFork != 2 {
+			if err != nil || later.ForkPoint.Revision != 5 || later.EventCountAtFork != 2 {
 				t.Fatalf("lawful reappearance rejected: %#v err=%v", later.ForkPoint, err)
 			}
 		})
@@ -224,26 +225,47 @@ func TestRunForkHistoricalContextTombstonedLocalEventBothStores(t *testing.T) {
 					seedRunForkRevisionMatrixEvent(t, ctx, tx, f.source.runID, uuid.NewString(), f.source.at.Add(2*time.Second), f.postgres)
 					f.finalize(t, tx)
 					// Exact diagnostic later retention for immutable events/families.
-					mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) SELECT run_id,3,family,fact_key,fact,present FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=2`, f.source.runID)
+					mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) SELECT run_id,4,family,fact_key,fact,present FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=3`, f.source.runID)
 					if err := tx.Commit(); err != nil {
 						t.Fatal(err)
 					}
 					request := runfork.RunForkPlanRequest{SourceRunID: f.source.runID, At: f.latestID}
-					if healthy, err := f.planner.PlanRunFork(ctx, request); err != nil || healthy.ForkPoint.Revision != 2 {
+					if healthy, err := f.planner.PlanRunFork(ctx, request); err != nil || healthy.ForkPoint.Revision != 3 {
 						t.Fatalf("healthy second-cut prerequisite: %#v err=%v", healthy.ForkPoint, err)
 					}
-					if _, err := f.db.Exec(`UPDATE run_fork_fact_revisions SET present=FALSE,fact='{}' WHERE run_id=$1 AND revision=2 AND family='events' AND fact_key=$2`, f.source.runID, f.source.eventID); err != nil {
+					if family == "event_deliveries" {
+						matched := false
+						for _, fact := range f.facts {
+							if fact.family == family && fact.key == f.source.deliveryID {
+								matched = historicalContextFields(t, fact.raw)["event_id"] == f.source.eventID
+							}
+						}
+						if !matched {
+							t.Fatal("selected delivery must reference the exact event being tombstoned")
+						}
+					}
+					if _, err := f.db.Exec(`UPDATE run_fork_fact_revisions SET present=FALSE,fact='{}' WHERE run_id=$1 AND revision=3 AND family='events' AND fact_key=$2`, f.source.runID, f.source.eventID); err != nil {
 						t.Fatal(err)
 					}
 					if family == "event_receipts" {
-						if _, err := f.db.Exec(`UPDATE run_fork_fact_revisions SET present=FALSE,fact='{}' WHERE run_id=$1 AND revision=2 AND family='event_deliveries'`, f.source.runID); err != nil {
+						if _, err := f.db.Exec(`UPDATE run_fork_fact_revisions SET present=FALSE,fact='{}' WHERE run_id=$1 AND revision=3 AND family='event_deliveries'`, f.source.runID); err != nil {
 							t.Fatal(err)
 						}
 					}
 					f.requireLatestComplete(t)
 					before := historicalContextDatabaseRows(t, f.db, f.postgres)
 					_, err = f.planner.PlanRunFork(ctx, request)
-					if err == nil || !strings.Contains(err.Error(), family) || !strings.Contains(err.Error(), f.source.eventID) {
+					if err == nil {
+						t.Fatalf("accepted %s referencing tombstoned event %s", family, f.source.eventID)
+					}
+					if family == "event_deliveries" {
+						// Fixed-cut admission precedes the projection reader and names
+						// the exact delivery whose source event was removed above.
+						want := fmt.Sprintf("fork replay delivery %s has no publication at the cut", f.source.deliveryID)
+						if err.Error() != want {
+							t.Fatalf("expected exact fixed-cut delivery refusal %q, got %v", want, err)
+						}
+					} else if !strings.Contains(err.Error(), family) || !strings.Contains(err.Error(), f.source.eventID) {
 						t.Fatalf("expected exact %s local membership refusal for tombstoned %s, got %v", family, f.source.eventID, err)
 					}
 					historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, f.db, f.postgres))

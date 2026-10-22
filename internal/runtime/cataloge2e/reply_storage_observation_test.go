@@ -40,6 +40,9 @@ func TestCatalogReplyStorageObservationRequiresOriginalNativeOwnerBothStores(t *
 			if ids, err := storetest.ReadReplyContextRequestIDs(ctx, reader, catalogRuntimeRunID); err != nil || len(ids) != 0 {
 				t.Fatalf("empty reply ID witness=%v err=%v", ids, err)
 			}
+			if records, err := storetest.ReadReplyContextRecords(ctx, reader, catalogRuntimeRunID); err != nil || len(records) != 0 {
+				t.Fatalf("empty exact reply row inventory=%v err=%v", records, err)
+			}
 			if rows, err := storetest.ReadEarliestEventPipelineReceiptRows(ctx, reader); err != nil || len(rows) != 0 {
 				t.Fatalf("empty reply diagnostic=%+v err=%v", rows, err)
 			}
@@ -51,11 +54,17 @@ func TestCatalogReplyStorageObservationRequiresOriginalNativeOwnerBothStores(t *
 			if ids, err := storetest.ReadReplyContextRequestIDs(canceled, reader, catalogRuntimeRunID); !errors.Is(err, context.Canceled) || ids != nil {
 				t.Fatalf("canceled reply IDs=%v err=%v", ids, err)
 			}
+			if records, err := storetest.ReadReplyContextRecords(canceled, reader, catalogRuntimeRunID); !errors.Is(err, context.Canceled) || records != nil {
+				t.Fatalf("canceled reply records=%v err=%v", records, err)
+			}
 			if err := closeOwner(); err != nil {
 				t.Fatal(err)
 			}
 			if counts, err := storetest.ReadReplyContextStorageCounts(ctx, reader, catalogRuntimeRunID); err == nil || counts != (storetest.ReplyContextStorageCounts{}) {
 				t.Fatalf("closed reply count=%+v err=%v", counts, err)
+			}
+			if records, err := storetest.ReadReplyContextRecords(ctx, reader, catalogRuntimeRunID); err == nil || records != nil {
+				t.Fatalf("closed reply records=%v err=%v", records, err)
 			}
 			if rows, err := storetest.ReadEarliestEventPipelineReceiptRows(ctx, reader); err == nil || rows != nil {
 				t.Fatalf("closed reply diagnostic=%+v err=%v", rows, err)
@@ -64,5 +73,8 @@ func TestCatalogReplyStorageObservationRequiresOriginalNativeOwnerBothStores(t *
 	}
 	if counts, err := storetest.ReadReplyContextStorageCounts(context.Background(), struct{}{}, catalogRuntimeRunID); err == nil || counts != (storetest.ReplyContextStorageCounts{}) {
 		t.Fatalf("foreign reply owner returned counts=%+v err=%v", counts, err)
+	}
+	if records, err := storetest.ReadReplyContextRecords(context.Background(), struct{}{}, catalogRuntimeRunID); err == nil || records != nil {
+		t.Fatalf("foreign reply owner returned records=%v err=%v", records, err)
 	}
 }

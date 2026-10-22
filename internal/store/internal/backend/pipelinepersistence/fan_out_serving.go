@@ -84,9 +84,6 @@ func (s *PipelineSQLiteOwner) NewFanOutServingStore(admission FanOutAdmission) (
 }
 
 func (s *fanOutServingStore) BindFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
-	if grant.SelectedFork != nil {
-		return nil, errors.New("selected deployment serving requires its selected-only binding")
-	}
 	return s.bindFanOutGrant(grant)
 }
 
@@ -104,16 +101,16 @@ func (s *fanOutServingStore) bindFanOutGrant(grant startupownership.GrantEvidenc
 	return &fanOutSQLiteOwner{PipelineSQLiteOwner: s.sqlite, grant: grant, admission: s.admission}, nil
 }
 
-func (s *PipelinePostgresOwner) BindSelectedDeploymentFanOutGrant(admission FanOutAdmission, grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+func (s *PipelinePostgresOwner) BindSelectedFanOutGrant(admission FanOutAdmission, grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
 	if s == nil || s.backend == nil || admission == nil || grant.SelectedFork == nil {
-		return nil, errors.New("selected deployment serving requires selected grant and admission")
+		return nil, errors.New("selected fan-out serving requires selected grant and admission")
 	}
 	return (&fanOutServingStore{postgres: s, admission: admission}).bindFanOutGrant(grant)
 }
 
-func (s *PipelineSQLiteOwner) BindSelectedDeploymentFanOutGrant(admission FanOutAdmission, grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+func (s *PipelineSQLiteOwner) BindSelectedFanOutGrant(admission FanOutAdmission, grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
 	if s == nil || s.backend == nil || admission == nil || grant.SelectedFork == nil {
-		return nil, errors.New("selected deployment serving requires selected grant and admission")
+		return nil, errors.New("selected fan-out serving requires selected grant and admission")
 	}
 	return (&fanOutServingStore{sqlite: s, admission: admission}).bindFanOutGrant(grant)
 }
@@ -367,7 +364,7 @@ func fanOutObservationFrom(grants []startupownership.GrantEvidence, args *[]any)
 		AND g.state_version=(SELECT MAX(head.state_version) FROM runtime_generation_grants head WHERE head.grant_id=g.grant_id)
 		AND g.state='admitted' AND (
 			(g.selected_binding_id IS NULL AND b.binding_id IS NULL)
-			OR (i.origin_kind='deployment' AND g.selected_binding_id=b.binding_id
+			OR (g.selected_binding_id=b.binding_id
 				AND g.selected_fork_run_id=r.run_id AND g.selected_execution_id=e.execution_id
 				AND g.runtime_generation=e.generation AND e.state='running'
 				AND e.lease_expires_at>$1))`
@@ -410,8 +407,8 @@ func validateFanOutCandidate(request pipeline.FanOutClaimRequest, grant startupo
 	if request.Candidate == nil || request.BundleHash != grant.BundleHash {
 		return errors.New("fan-out claim requires the exact candidate and granted bundle")
 	}
-	if grant.SelectedFork != nil && (request.Candidate.DeploymentFeedID == "" || request.Candidate.RunID != grant.SelectedFork.ForkRunID) {
-		return errors.New("selected fan-out grant requires a deployment feed in its exact fork run")
+	if grant.SelectedFork != nil && request.Candidate.RunID != grant.SelectedFork.ForkRunID {
+		return errors.New("selected fan-out grant requires its exact fork run")
 	}
 	return nil
 }
@@ -429,10 +426,6 @@ func fanOutRunAcceptsTurnTx(ctx context.Context, tx *sql.Tx, grant startupowners
 	var status, control string
 	if err := tx.QueryRowContext(ctx, `SELECT r.status,COALESCE(c.control_status,'') FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, runID).Scan(&status, &control); err != nil {
 		return false, err
-	}
-	if grant.SelectedFork != nil && grant.State == startupownership.GrantAdmitted &&
-		grant.SelectedFork.ForkRunID == runID && status == "paused" && control == "" {
-		return true, nil
 	}
 	return (status == "running" || (!newTurn && status == "paused")) && control != "stopped" && (!newTurn || control != "paused"), nil
 }
@@ -494,7 +487,7 @@ func admitFanOutClaim(ctx context.Context, tx *sql.Tx, admission FanOutAdmission
 }
 
 func requireFanOutGrantOrigin(request fanoutobligation.IntentRequest, grant startupownership.GrantEvidence) error {
-	if grant.SelectedFork != nil && (request.Deployment == nil || request.Key.RunID != grant.SelectedFork.ForkRunID) {
+	if grant.SelectedFork != nil && request.Key.RunID != grant.SelectedFork.ForkRunID {
 		return fanoutobligation.ErrStaleClaim
 	}
 	return nil

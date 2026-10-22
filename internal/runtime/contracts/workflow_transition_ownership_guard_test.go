@@ -394,6 +394,9 @@ func transitionBoundaryProblems(uses []transitionBoundaryUse) []string {
 
 func allowedTransitionBoundaryUses() map[string]int {
 	return map[string]int{
+		// #642 6190024778: select an already-narrowed plan by its exact inbound
+		// event and selected-fork lineage, never select a transition or grant.
+		"internal/runtime/bus.selectedForkRecipientPlanForInbound::call internal/runtime/correlation.InboundEventFromContext": 1,
 		// Existing typed-event context producers/readers. These exact diagnostic,
 		// lineage and dispatch uses do not grant transition selection authority.
 		"internal/runtime/bus.EventBus.activeAgentDescriptorsWithReader::call internal/runtime/correlation.InboundEventFromContext":                   1, // Same exact inbound-run check; scoped reader composition (2617:6179711140).

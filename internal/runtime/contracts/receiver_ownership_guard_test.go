@@ -39,6 +39,13 @@ func receiverOwnerConstructorBudget() map[string]int {
 		"store/internal/backend/runforkpersistence::projectRunForkReplayInitializedReceiver": 1,
 		// Fixed-cut replay projects captured actor ownership separately from construction (2617:6177786309).
 		"store/internal/backend/runforkpersistence::projectRunForkReplayActorTarget": 2,
+		// #642 6190024778: admitted join continuation projects only its exact
+		// child command's receiver and construction context after admission.
+		"store/internal/backend/runforkpersistence::projectRunForkPublishedJoinRoute": 1,
+		// Fixed-cut unfinished-recipient selection and materialization validation
+		// precede these two captured entityless/entity-bearing projections; the
+		// latter checks template/path before ProjectEntityOwnership.
+		"store/internal/backend/runforkpersistence::projectSelectedFanOutNodeReceiver": 2,
 	}
 }
 

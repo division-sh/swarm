@@ -14,6 +14,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
 
@@ -33,7 +34,7 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 		err := q.QueryRowContext(ctx, `
 			SELECT execution_id::text, fork_run_id::text, generation, admission_fingerprint,
 			       container_plan_fingerprint, actor_census_fingerprint, effective_config_fingerprint,
-			       state, COALESCE(execution_owner,''), lease_expires_at > CURRENT_TIMESTAMP, fence_generation
+			       state, COALESCE(execution_owner,''), lease_expires_at > clock_timestamp(), fence_generation
 			FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1::uuid
 		`, authority.SelectedFork.ExecutionID).Scan(&current.executionID, &current.forkRunID, &current.generation, &current.admissionFingerprint,
 			&current.containerFingerprint, &current.actorFingerprint, &current.configFingerprint, &current.state,
@@ -251,7 +252,7 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 			  AND state='running' AND execution_owner=$4 AND fence_generation=$5
 			  AND admission_fingerprint=$6 AND container_plan_fingerprint=$7
 			  AND actor_census_fingerprint=$8 AND effective_config_fingerprint=$9
-			  AND lease_expires_at>CURRENT_TIMESTAMP
+			  AND lease_expires_at>clock_timestamp()
 		`, selected.ExecutionID, selected.ForkRunID, selected.Generation, authority.ExecutionOwner, authority.FenceGeneration,
 			selected.AdmissionFingerprint, selected.ContainerPlanFingerprint, selected.ActorCensusFingerprint, selected.EffectiveConfigFingerprint)
 	case runtimeeffects.AuthorityConversationForkChat:
@@ -330,6 +331,10 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 
 func (s *EffectPostgresOwner) RequireCurrentExternalEffectAuthorityTx(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
 	return requireCurrentExternalEffectAuthorityPostgres(ctx, tx, authority)
+}
+
+func (s *EffectPostgresOwner) ObserveCurrentExternalEffectAuthority(ctx context.Context, q sourceadmission.ExecutionQuery, authority runtimeeffects.Authority) (bool, error) {
+	return externalEffectAuthorityCurrentPostgres(ctx, q, authority)
 }
 
 func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority) error {
@@ -441,6 +446,10 @@ func requireCurrentNormalAgentTx(ctx context.Context, tx *sql.Tx, authority runt
 	return nil
 }
 
+func (s *EffectSQLiteOwner) ObserveCurrentExternalEffectAuthority(ctx context.Context, q sourceadmission.ExecutionQuery, authority runtimeeffects.Authority) (bool, error) {
+	return externalEffectAuthorityCurrentSQLite(ctx, q, authority)
+}
+
 func requireCurrentExternalEffectAuthorityMutation(res sql.Result, err error, authority runtimeeffects.Authority) error {
 	if err != nil {
 		return fmt.Errorf("lock current external effect authority: %w", err)
@@ -456,30 +465,49 @@ func requireCurrentExternalEffectAuthorityMutation(res sql.Result, err error, au
 }
 
 func requireCompletionAuthorityNoLiveAttempts(ctx context.Context, tx *sql.Tx, sqlite bool, authority runtimeeffects.Authority) error {
-	var query string
 	var coordinate string
 	switch authority.Kind {
 	case runtimeeffects.AuthoritySelectedContractFork:
 		coordinate = authority.SelectedFork.ExecutionID
+	case runtimeeffects.AuthorityConversationForkChat:
+		coordinate = authority.ForkChat.ForkTurnID
+	default:
+		return fmt.Errorf("completion authority %q has no container terminalization", authority.Kind)
+	}
+	return requireNoLiveCompletionAttempts(ctx, tx, sqlite, authority.Kind, coordinate)
+}
+
+// This is a negative history guard, not completion evidence or an execution
+// authority. The reset owner must independently prove the complete closed cohort.
+func RequireSelectedHistoryNoLiveAttemptsTx(ctx context.Context, tx *sql.Tx, executionID string, sqlite bool) error {
+	return requireNoLiveCompletionAttempts(ctx, tx, sqlite, runtimeeffects.AuthoritySelectedContractFork, executionID)
+}
+
+func requireNoLiveCompletionAttempts(ctx context.Context, tx *sql.Tx, sqlite bool, kind runtimeeffects.AuthorityKind, coordinate string) error {
+	if tx == nil || coordinate == "" {
+		return fmt.Errorf("completion attempt guard requires its transaction and exact coordinate")
+	}
+	var query string
+	switch kind {
+	case runtimeeffects.AuthoritySelectedContractFork:
 		query = `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.selected_execution_id=$1::uuid AND a.state IN ('authorized','launched','response_observed')`
 		if sqlite {
 			query = `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.selected_execution_id=? AND a.state IN ('authorized','launched','response_observed')`
 		}
 	case runtimeeffects.AuthorityConversationForkChat:
-		coordinate = authority.ForkChat.ForkTurnID
 		query = `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.fork_turn_id=$1::uuid AND a.state IN ('authorized','launched','response_observed')`
 		if sqlite {
 			query = `SELECT COUNT(*) FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.fork_turn_id=? AND a.state IN ('authorized','launched','response_observed')`
 		}
 	default:
-		return fmt.Errorf("completion authority %q has no container terminalization", authority.Kind)
+		return fmt.Errorf("completion authority %q has no container terminalization", kind)
 	}
 	var count int
 	if err := tx.QueryRowContext(ctx, query, coordinate).Scan(&count); err != nil {
-		return fmt.Errorf("count live completion attempts for %s: %w", authority.Kind, err)
+		return fmt.Errorf("count live completion attempts for %s: %w", kind, err)
 	}
 	if count != 0 {
-		return fmt.Errorf("%s authority has %d non-terminal completion attempts", authority.Kind, count)
+		return fmt.Errorf("%s authority has %d non-terminal completion attempts", kind, count)
 	}
 	return nil
 }

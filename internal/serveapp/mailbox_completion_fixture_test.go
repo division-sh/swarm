@@ -112,6 +112,11 @@ func newRetainedMailboxCompletionRuntimeConfigured(t *testing.T, backend servedp
 		runtime := servedTestProcessRuntime(t, process)
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 		rt := servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: name, Runtime: runtime, Postgres: pg, SQLite: sq, BundleHash: runtime.Options.SourceArtifactFact.BundleHash()}
+		rt.joinAndAssertExit = func() {
+			if code := process.stop(); code != 0 {
+				t.Errorf("joined mailbox runtime exit=%d\n%s", code, process.outputString())
+			}
+		}
 		var owner cursorMailboxStore = sq
 		if pg != nil {
 			owner = pg

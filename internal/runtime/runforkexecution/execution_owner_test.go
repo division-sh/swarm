@@ -35,6 +35,7 @@ func TestSelectedContractExecutionOwnerRequiresEmitFeedback(t *testing.T) {
 				ports.effects, ports.completion, ports.completionHeartbeat, ports.liveSessions, ports.managedCapabilities,
 				ports.budget, ports.logs, ports.decisionCards, ports.proposedEffects, ports.humanTasks,
 				ports.decisionCardDraftExpiry, ports.humanTaskExpiry,
+				ports.candidates, ports.genericSchedules,
 			)
 			if err == nil || !strings.Contains(err.Error(), "event emit feedback") {
 				t.Fatalf("missing emit feedback admitted past selected construction: %v", err)
@@ -80,6 +81,7 @@ func newSelectedContractExecutionOwnerForTest(t testing.TB, selected *store.Post
 		workflow, selected, selected, selected,
 		selected, durable, selected.PipelineObligations(), selected, roles,
 		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+		selected, selected,
 	)
 	if err != nil {
 		t.Fatalf("NewSelectedContractExecutionOwner: %v", err)
@@ -119,6 +121,7 @@ func newSelectedContractSQLiteExecutionOwnerForTest(t testing.TB, selected *stor
 		workflow, selected, selected, selected,
 		selected, durable, selected.PipelineObligations(), selected, roles,
 		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
+		selected, selected,
 	)
 	if err != nil {
 		t.Fatal(err)

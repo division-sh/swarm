@@ -40,7 +40,7 @@ func admitRunForkTerminalBarrierHistory(snapshot *runForkRevisionSnapshot, oblig
 		if timer == nil {
 			return fmt.Errorf("terminal barrier has no fixed-revision activation")
 		}
-		activation, err := projectRunForkBarrierActivation(*timer)
+		activation, err := projectRunForkGenericActivation(*timer)
 		if err != nil {
 			return err
 		}

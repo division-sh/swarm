@@ -86,7 +86,7 @@ func TestDeploymentFanOutRevisionProjectionBothStores(t *testing.T) {
 					target_flow_path TEXT, target_node_id TEXT, handler_event TEXT, join_id TEXT,
 					route_scope_key TEXT, route_instance_id TEXT, route_instance_path TEXT, entity_id TEXT,
 					routing_source TEXT, execution_mode TEXT, timer_handle TEXT, status TEXT,
-					summary TEXT, schedule_key TEXT, schedule_activation_id TEXT, updated_at TIMESTAMP)`,
+					summary TEXT, schedule_key TEXT, schedule_activation_id TEXT, updated_at TIMESTAMP, transferred_occurrence TEXT)`,
 			} {
 				if _, err := db.Exec(ddl); err != nil {
 					t.Fatal(err)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -24,7 +25,7 @@ func executionIdentityRecord(t *testing.T) runtimepipeline.ActivityAttemptRecord
 		RequestEventID: uuid.NewString(), RunID: uuid.NewString(), ExecutionMode: "live",
 		SourceEventID: uuid.NewString(), ParentEventID: uuid.NewString(), EntityID: uuid.NewString(),
 		FlowInstance: "review", NodeID: "review/check", HandlerEventKey: "work.received",
-		ActivityID: "check:1", Tool: "provider.check", Attempt: 1,
+		ActivityID: "check:1", Tool: "provider.check", EffectClass: string(contracts.ActivityEffectClassNonIdempotentWrite), Attempt: 1,
 		Status: runtimepipeline.ActivityAttemptStatusUncertain, SuccessEvent: "check.done", FailureEvent: "check.failed",
 		ResultEventID: uuid.NewString(), ResultEventType: "check.failed", ResultPayload: map[string]any{},
 		Failure: &failure, InputHash: "exact-input", ReplyContextID: "reply-original",
@@ -32,7 +33,7 @@ func executionIdentityRecord(t *testing.T) runtimepipeline.ActivityAttemptRecord
 	}
 }
 
-func executionIdentityRows(t *testing.T, record runtimepipeline.ActivityAttemptRecord) *sqlmock.Rows {
+func executionIdentityRows(t *testing.T, record runtimepipeline.ActivityAttemptRecord, paired ...bool) *sqlmock.Rows {
 	t.Helper()
 	binding, err := activityExecutionBindingValue(record.ExecutionBinding)
 	if err != nil {
@@ -40,14 +41,15 @@ func executionIdentityRows(t *testing.T, record runtimepipeline.ActivityAttemptR
 	}
 	now := time.Unix(100, 0).UTC()
 	columns := strings.Fields(`request_event_id run_id source_event_id parent_event_id entity_id flow_instance
-		node_id handler_event_key activity_id tool attempt status success_event failure_event
+		node_id handler_event_key activity_id tool effect_class attempt status success_event failure_event
 		result_event_id result_event_type result_payload failure input_hash loop_generation loop_stage reply_context_id execution_mode
-		started_at completed_at updated_at execution_binding`)
+		started_at completed_at updated_at execution_binding live_parents_match`)
+	liveParents := len(paired) == 0 || paired[0]
 	return sqlmock.NewRows(columns).AddRow(
 		record.RequestEventID, record.RunID, record.SourceEventID, record.ParentEventID, record.EntityID, record.FlowInstance,
-		record.NodeID, record.HandlerEventKey, record.ActivityID, record.Tool, record.Attempt, "started",
+		record.NodeID, record.HandlerEventKey, record.ActivityID, record.Tool, string(record.EffectClass), record.Attempt, "started",
 		record.SuccessEvent, record.FailureEvent, nil, nil, nil, nil, record.InputHash, "{}", record.LoopStage, record.ReplyContextID, string(record.ExecutionMode),
-		now, nil, now, binding,
+		now, nil, now, binding, liveParents,
 	)
 }
 

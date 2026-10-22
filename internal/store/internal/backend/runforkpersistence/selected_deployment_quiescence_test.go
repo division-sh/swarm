@@ -51,10 +51,12 @@ func TestSelectedDeploymentQuiescenceRequiresFeedPipelineAndReceiverExhaustionBo
 				t.Fatal(err)
 			}
 			check("noncommitted ordinal")
-			if _, err := db.Exec(`UPDATE fan_out_outcomes SET outcome_kind='committed',event_id=$2 WHERE run_id=$1`, runID, eventID); err != nil {
-				t.Fatal(err)
+			for _, kind := range []string{"committed", "continued"} {
+				if _, err := db.Exec(`UPDATE fan_out_outcomes SET outcome_kind=$3,event_id=$2 WHERE run_id=$1`, runID, eventID, kind); err != nil {
+					t.Fatal(err)
+				}
+				check("committed ordinal without event scope")
 			}
-			check("committed ordinal without event scope")
 			if _, err := db.Exec(`INSERT INTO committed_replay_scopes VALUES ($1,$2)`, runID, eventID); err != nil {
 				t.Fatal(err)
 			}

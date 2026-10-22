@@ -43,6 +43,15 @@ func CaptureRunForkSnapshot(t testing.TB, ctx context.Context, selected any, run
 	}
 }
 
+func CaptureSelectedRunForkRevision(t testing.TB, ctx context.Context, selected any, runID string, families ...runforkrevisionfixture.Family) int64 {
+	t.Helper()
+	revision, err := private.CaptureSelectedRunForkRevisionForTest(ctx, selected, runID, families...)
+	if err != nil {
+		t.Fatalf("capture selected run-fork revision: %v", err)
+	}
+	return revision
+}
+
 // RequireRunForkReplayResumeBlocker inspects the store's typed refusal without
 // turning its private error representation into a production API.
 func RequireRunForkReplayResumeBlocker(t testing.TB, err error, code, fact string) {
@@ -69,11 +78,4 @@ func ReadSelectedForkExecutableCardinality(ctx context.Context, selected any, ru
 	return private.ReadSelectedForkExecutableCardinalityForTest(ctx, selected, runID)
 }
 
-func CaptureSelectedRunForkRevision(t testing.TB, ctx context.Context, selected any, runID string, families ...runforkrevisionfixture.Family) int64 {
-	t.Helper()
-	revision, err := private.CaptureSelectedRunForkRevisionForTest(ctx, selected, runID, families...)
-	if err != nil {
-		t.Fatalf("capture selected run-fork revision: %v", err)
-	}
-	return revision
-}
+

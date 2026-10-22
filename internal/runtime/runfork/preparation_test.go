@@ -63,6 +63,20 @@ func TestSelectedPreparationBindingClosedCensus(t *testing.T) {
 	if err := base.ValidateSurface(base.Actors[0], surface); err != nil {
 		t.Fatal(err)
 	}
+	// Reach: retained narrowed evidence is inspectable but cannot re-admit work.
+	narrowed, err := surface.ObserveMismatch(managedcapabilities.DeliveryMismatch{BindingKind: managedcapabilities.BindingAPIDefinition, ExactName: "completion", Kind: "unavailable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := narrowed.CanAdvanceFrom(surface); err != nil {
+		t.Fatal(err)
+	}
+	if err := base.ValidateHistoricalSurface(base.Actors[0], narrowed); err != nil {
+		t.Fatalf("valid narrowed history became fresh-admission refusal: %v", err)
+	}
+	if err := base.ValidateSurface(base.Actors[0], narrowed); err == nil {
+		t.Fatal("historical narrowing restored fresh preparation authority")
+	}
 	for _, test := range []struct {
 		name   string
 		mutate func(*SelectedForkPreparationBinding)
