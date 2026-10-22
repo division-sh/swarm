@@ -14,8 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -23,7 +21,6 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 )
 
 const (
@@ -727,11 +724,6 @@ func capturedOrdinaryRuntimeContext(t *testing.T, eventName string) BundleContex
 	return runtimeAdmissionTestContext(t, semanticview.Wrap(bundle), catalog, "")
 }
 
-func testBundleContext(t *testing.T, bundleHash, eventName string) BundleContext {
-	t.Helper()
-	return testBundleContextWithAgents(t, bundleHash, eventName)
-}
-
 func newTestRuntimeContextManager(t testing.TB, availability RunBundleAvailabilityReader, contexts ...BundleContext) (*RuntimeContextManager, error) {
 	t.Helper()
 	manager, err := NewRuntimeContextManager(availability, contexts...)
@@ -751,47 +743,6 @@ func registerRuntimeContextManagerCleanup(t testing.TB, manager *RuntimeContextM
 			}
 		}
 	})
-}
-
-func testBundleContextWithAgents(t *testing.T, bundleHash, eventName string, agentIDs ...string) BundleContext {
-	t.Helper()
-	agents := map[string]runtimecontracts.AgentRegistryEntry{}
-	for _, agentID := range agentIDs {
-		agentID = strings.TrimSpace(agentID)
-		if agentID == "" {
-			continue
-		}
-		agents[agentID] = runtimecontracts.AgentRegistryEntry{ID: agentID, Role: agentID}
-	}
-	return testBundleContextWithAgentEntries(t, bundleHash, eventName, agents)
-}
-
-func testBundleContextWithAgentEntries(t *testing.T, bundleHash, eventName string, agents map[string]runtimecontracts.AgentRegistryEntry) BundleContext {
-	t.Helper()
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			eventName: {},
-		},
-		Agents: agents,
-	}
-	source := semanticviewtest.WrapRootAgents(bundle)
-	workOwner := runtimeTestOccurrence(t, bundleHash)
-	bus, err := newRuntimeTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{
-		WorkOwner:          workOwner,
-		ContractBundle:     source,
-		SourceArtifactFact: testSourceArtifactFact(t, bundleHash),
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	return BundleContext{
-		SourceArtifactFact: testSourceArtifactFact(t, bundleHash),
-		BundleIdentity:     runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
-		Source:             source,
-		WorkOwner:          workOwner,
-		Runtime:            &Runtime{Bus: bus, workOccurrence: workOwner},
-	}
 }
 
 type fakeRunBundleAvailability struct {

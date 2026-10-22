@@ -12,9 +12,10 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -171,8 +172,24 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossOrdinaryUnloa
 }
 
 func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenceAndAbort(t *testing.T) {
-	module := loadRuntimeOwnershipWorkflowModule(t)
-	ctx, fact := runtimeOwnershipFixtureContext(t, module)
+	catalog, source := runtimeAdmissionTestCatalog(t, "source-set", "source-set-fixture")
+	module := semanticOnlyWorkflowRuntime{source: source}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		t.Fatal("source-set fixture requires its compiled captured source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
+	ctx := testAuthorActivityContextForBundle(context.Background(), fact.BundleHash())
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	authority, err := runtimeTestProcessAttribution(runtimestartupownership.AcquireRequest{
 		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 	})
@@ -189,10 +206,12 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 		},
 		Options: RuntimeOptions{
 			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
-			ExecutionPosture:   executionposture.Live,
-			RuntimeInstanceID:  authorActivityTestRuntimeInstanceID,
-			SourceArtifactFact: fact,
-			ProcessWorkOwner:   runtimeTestProcessWorkOwner(t),
+			ProviderTriggerCatalog: catalog,
+			ProviderCredentials:    identityInboundCredentialStore{},
+			ExecutionPosture:       executionposture.Live,
+			RuntimeInstanceID:      authorActivityTestRuntimeInstanceID,
+			SourceArtifactFact:     fact,
+			ProcessWorkOwner:       runtimeTestProcessWorkOwner(t),
 		},
 	}))
 	if err != nil {
@@ -203,11 +222,30 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 			t.Errorf("Shutdown: %v", shutdownErr)
 		}
 	})
-	capability, grant, err := newRuntimeTestProcessCapabilityWithSession(t, rt.Manager, module.source, fact, authorActivityTestRuntimeInstanceID, selected, func(session *runtimeTestRetainedSession) runtimestartupownership.RetainedSession {
-		return &startupRecoveryFanOutSession{runtimeTestRetainedSession: session, capacity: runtimestartupownership.SQLiteFanOutCapacity()}
+	desired, err := rt.Manager.CompileStaticTopologyDesiredAgents(source, coordinate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourcePlan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected.mu.Lock()
+	selected.plan = sourcePlan
+	selected.mu.Unlock()
+	capability, err := runtimestartupownership.NewProcessCapability(&startupRecoveryFanOutSession{
+		runtimeTestRetainedSession: selected, capacity: runtimestartupownership.SQLiteFanOutCapacity(),
 	})
 	if err != nil {
 		t.Fatalf("new process capability: %v", err)
+	}
+	t.Cleanup(func() { _ = capability.Release(context.Background()) })
+	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: fact.BundleHash(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+		RuntimeGeneration: 1, SourceSetRevision: sourcePlan.Revision,
+	})
+	if err != nil {
+		t.Fatalf("issue generation grant: %v", err)
 	}
 	if err := rt.InstallStartupGrant(grant); err != nil {
 		t.Fatalf("InstallStartupGrant: %v", err)
@@ -222,35 +260,23 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 	if err := plan.Validate(); err != nil {
 		t.Fatalf("source-set plan: %v", err)
 	}
-	bundleHash := fact.BundleHash()
-	if len(plan.Sources) != 1 || plan.Sources[0].BundleHash != bundleHash {
+	if len(plan.Sources) != 1 || plan.Sources[0] != coordinate {
 		t.Fatalf("source-set coordinates = %#v, want exact runtime coordinate", plan.Sources)
 	}
 
-	bundle, ok := semanticview.Bundle(module.source)
-	if !ok || bundle == nil || bundle.PackInventory == nil {
-		t.Fatal("runtime bundle effective pack inventory is required")
+	contextDef := BundleContext{
+		SourceArtifactFact: fact, RootAdmission: rooted.Admission(), Source: source,
+		Runtime: rt, WorkOwner: rt.WorkOccurrence(), ProviderTriggerCatalog: catalog,
 	}
-	catalog, _, err := providertriggers.NewCatalogSnapshotFromInventory(bundle.PackInventory, bundle.Platform.Platform.Version)
+	contextDef.BundleIdentity, err = runtimecontracts.BootBundleIdentity(bundle)
 	if err != nil {
-		t.Fatalf("derive runtime bundle provider-trigger catalog: %v", err)
+		t.Fatal(err)
 	}
-	planAdmission, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
-		Alias: "primary", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
-	})
+	contextDef.StandingTargets, err = rt.PlanStandingTargets()
 	if err != nil {
-		t.Fatalf("compile bundle-owned admission: %v", err)
+		t.Fatal(err)
 	}
-	contextDef := testBundleContext(t, bundleHash, "inbound.telegram")
-	contextDef.SourceArtifactFact = fact
-	contextDef.Source = module.source
-	contextDef.Runtime = rt
-	contextDef.WorkOwner = rt.WorkOccurrence()
-	contextDef.StandingTargets = []StandingTarget{{
-		BundleHash: bundleHash, ServiceID: runtimeflowidentity.StandingServiceID("telegram-flow"), FlowPath: "telegram-flow", Alias: "primary", Provider: "telegram",
-		RunID: "run-primary", Generation: 1,
-		SigningSecret: "webhook_signing.telegram", AdmissionPlan: planAdmission,
-	}}
+	contextDef.StandingTargets = bindStandingContextFixtureTargets(t, source, contextDef.StandingTargets, "run-primary")
 	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
 	contextDef.PackInventoryDigest = bundle.PackInventory.Digest()
 	freezeTestStandingCredentialAdmission(t, contextDef, identityInboundCredentialStore{})
@@ -259,6 +285,12 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 		t.Fatal(err)
 	}
 	blocking, owner := runtimeAdmissionBlockingCredentialOwner(t, "secret")
+	if len(contextDef.StandingTargets) != 1 {
+		t.Fatal("source-set fixture requires one captured standing declaration")
+	}
+	if err := blocking.Set(ctx, contextDef.StandingTargets[0].SigningSecret, "secret"); err != nil {
+		t.Fatal(err)
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		_, projectionErr := manager.EvaluatedCapabilitySubjects(ctx, owner)
