@@ -42,7 +42,7 @@ func TestEventProducerIdentityPersistenceToReadbackParity(t *testing.T) {
 			if !ok {
 				t.Fatalf("%T does not implement event producer identity lifecycle surface", fixture.store)
 			}
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			createdAt := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
 			eventID := uuid.NewString()

@@ -22,6 +22,7 @@ func TestForkReceiverHeaderDoneFaultExactAndRollbackBothStores(t *testing.T) {
 		for _, name := range []string{"exact", "wrong_run", "wrong_entity", "inactive", "multiple"} {
 			t.Run(backend.name+"/"+name, func(t *testing.T) {
 				fixture, ctx := backend.open(t), testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				runID, entityID := seedWorkflowProjectionFaultCut(t, fixture, ctx)
 				seedWorkflowProjectionFaultCut(t, fixture, ctx)
 				if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET current_state='active' WHERE run_id=$1`, runID); err != nil {
@@ -100,6 +101,7 @@ func TestExactDeliveryClaimAgeFaultExactAndRollbackBothStores(t *testing.T) {
 		for _, name := range []string{"exact", "wrong_run", "wrong_version", "wrong_token", "closed_attempt", "missing_attempt", "closed_second_row", "multiple_attempts", "second_statement_error"} {
 			t.Run(backend.name+"/"+name, func(t *testing.T) {
 				fixture, ctx := backend.open(t), testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				claimed := seedDeliveryRecoveryClaim(t, fixture, ctx)
 				sibling := seedDeliveryRecoveryClaim(t, fixture, ctx)
 				owner := fixture.store.(deliveryFixtureStore)
@@ -244,6 +246,7 @@ func TestForkReceiverFaultsRefuseInvalidCancelledAndClosedOwnersBothStores(t *te
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID, entityID := seedWorkflowProjectionFaultCut(t, fixture, ctx)
 			claimed := seedDeliveryRecoveryClaim(t, fixture, ctx)
 			before := forkReceiverFaultSnapshot(t, ctx, fixture.store)

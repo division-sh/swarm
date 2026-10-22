@@ -1,11 +1,13 @@
 package runtimepersistence
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
@@ -27,7 +29,10 @@ func TestForkedRunSelectedContractExecutionRefusesAdmissionAndAllowsExactFinaliz
 				surface = base.sqlite
 				fixture = newSelectedCompletionFixture(t, surface, base.db, true)
 			}
-			ctx := testAuthorActivitySourceArtifactContext()
+			ctx, err := startupownership.WithProcessMutationAuthority(testAuthorActivitySourceArtifactContext(), fixture.process)
+			if err != nil {
+				t.Fatal(err)
+			}
 			issued, err := surface.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 			if err != nil {
 				t.Fatal(err)
@@ -36,7 +41,7 @@ func TestForkedRunSelectedContractExecutionRefusesAdmissionAndAllowsExactFinaliz
 			if err != nil {
 				t.Fatal(err)
 			}
-			markSelectedTestRunForked(t, fixture, time.Now().UTC())
+			markSelectedTestRunForked(t, ctx, fixture, time.Now().UTC())
 
 			lateRequest := fixture.request
 			lateRequest.Admission.ForkRunID = fixture.forkRun
@@ -67,10 +72,9 @@ func TestForkedRunSelectedContractExecutionRefusesAdmissionAndAllowsExactFinaliz
 	}
 }
 
-func markSelectedTestRunForked(t *testing.T, fixture selectedCompletionFixture, now time.Time) {
+func markSelectedTestRunForked(t *testing.T, ctx context.Context, fixture selectedCompletionFixture, now time.Time) {
 	t.Helper()
 	continuedRunID := uuid.NewString()
-	ctx := testAuthorActivitySourceArtifactContext()
 	var selected any
 	if fixture.sqlite {
 		selected = NewSQLiteRuntimeStoreForTest(fixture.db)

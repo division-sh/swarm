@@ -29,6 +29,7 @@ func TestDirectiveEventPersistsTypedNoSubscriberByDesign(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			payload := json.RawMessage("{\n  \"directive\": \"continue\", \"attempt\": 1.0\n}")
@@ -81,6 +82,7 @@ func TestRuntimeLogEventPersistsTypedNoSubscriberByDesign(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			for _, run := range []string{"", runID} {

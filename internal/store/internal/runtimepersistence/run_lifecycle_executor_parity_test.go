@@ -139,6 +139,7 @@ func TestRunLifecycleSameRevisionCommittedHandoffParity(t *testing.T) {
 			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
 			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC))
 			if err := materializeCompletedRunEntityForTest(ctx, fixture.store, runID); err != nil {
@@ -207,6 +208,7 @@ func TestRunLifecyclePauseResumeSuccessorRaceParity(t *testing.T) {
 			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
 			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			startedAt := time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC)
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
@@ -279,6 +281,7 @@ func TestRunLifecycleTerminalClearDuringAttemptDoesNotReviveCandidateParity(t *t
 			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
 			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			startedAt := time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC)
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
@@ -347,6 +350,7 @@ func TestRunLifecycleCrossBundleSameRevisionHandoffParity(t *testing.T) {
 			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
 			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC))
 			if err := materializeCompletedRunEntityForTest(ctx, fixture.store, runID); err != nil {
@@ -441,7 +445,7 @@ func TestRunLifecycleServedDeliverySameRevisionHandoffParity(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			process := worklifetime.NewProcess()
 			occurrence := newRunLifecycleExecutorOccurrence(t, process)
 			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
@@ -575,7 +579,7 @@ func TestRunLifecycleExecutorNoGapParity(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s store does not expose candidate registration", backend)
 			}
-			baseCtx := testAuthorActivitySourceArtifactContext()
+			baseCtx := originalStoreFixtureContext(t, testAuthorActivitySourceArtifactContext(), fixture.store)
 			runID := uuid.NewString()
 			startedAt := time.Date(2026, 7, 29, 16, 0, 0, 0, time.UTC)
 			ensureRunLifecycleCandidateParityRun(t, fixture, baseCtx, runID, startedAt)
@@ -694,7 +698,7 @@ func TestRunLifecycleDirectHandoffCommitAcrossSinkRegistrationParity(t *testing.
 			if !ok {
 				t.Fatalf("%s store does not expose candidate registration", backend)
 			}
-			baseCtx := testAuthorActivitySourceArtifactContext()
+			baseCtx := originalStoreFixtureContext(t, testAuthorActivitySourceArtifactContext(), fixture.store)
 			runID := uuid.NewString()
 			ensureRunLifecycleCandidateParityRun(
 				t,
@@ -799,7 +803,7 @@ func TestPostgresPipelineCompletionHandoffSurvivesPostCommitCleanupError(t *test
 			if !ok {
 				t.Fatalf("fixture store = %T, want *PostgresStore", fixture.store)
 			}
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))

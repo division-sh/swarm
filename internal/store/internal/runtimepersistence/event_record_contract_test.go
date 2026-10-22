@@ -185,6 +185,7 @@ func TestEventRoutingSourceRoundTripParity(t *testing.T) {
 			fixture := backend.open(t)
 			store := fixture.store.(eventRecordContractStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			now := time.Date(2026, 7, 18, 16, 30, 0, 0, time.UTC)
 			for _, source := range routingSourceRoundTripFixtures(t) {
 				t.Run(source.Kind().StorageCode(), func(t *testing.T) {
@@ -407,6 +408,7 @@ func TestEventRecordEveryFieldDuplicateParity(t *testing.T) {
 			fixture := backend.open(t)
 			store := fixture.store.(semanticEventFixtureStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			outcome, err := commitSemanticEventFixtureOutcome(ctx, store, baseEvent, nil, "direct")
 			if err != nil || outcome != runtimebus.EventAppendInserted {
 				t.Fatalf("initial commit: outcome=%v err=%v", outcome, err)
@@ -469,6 +471,7 @@ func TestEventRecordPayloadByteIdentityParity(t *testing.T) {
 					fixture := backend.open(t)
 					store := fixture.store.(semanticEventFixtureStore)
 					ctx := testAuthorActivityContext()
+					ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 					now := time.Date(2026, 8, 13, 18, 0, 0, 0, time.UTC)
 					event := eventtest.RunCreatingRootIngress(
 						uuid.NewString(), "payload.bytes", "gateway", "", tc.original, 0,

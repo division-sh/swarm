@@ -68,7 +68,7 @@ func TestDurableDataFixturesCommitReplayAndRefuseBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			store, db := newDurableDataFixtureStore(t, backend)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			catalog := durableDataFixtureCatalog(t)
 			collector, restore, err := InstallTransactionProbeForTest(store, transactiontest.Options{})
 			if err != nil {

@@ -141,11 +141,11 @@ func TestQ10ServedDiagnosticsPreserveMembershipAndAbsentLifecycleBothStores(t *t
 				fieldless = "96000000-0000-4000-8000-000000000003"
 				noStage   = "96000000-0000-4000-8000-000000000004"
 			)
-			seedEntityToolStorageWitness(t, fixture, run, fielded, true, true)
-			seedEntityToolStorageWitness(t, fixture, run, imported, false, true)
-			seedEntityToolStorageWitness(t, fixture, run, fieldless, true, false)
-			seedEntityToolStorageWitness(t, fixture, run, noStage, true, true)
-			seedEntityToolStorageWitness(t, fixture, sibling, imported, true, true)
+			seedEntityToolStorageWitness(t, ctx, fixture, run, fielded, true, true)
+			seedEntityToolStorageWitness(t, ctx, fixture, run, imported, false, true)
+			seedEntityToolStorageWitness(t, ctx, fixture, run, fieldless, true, false)
+			seedEntityToolStorageWitness(t, ctx, fixture, run, noStage, true, true)
+			seedEntityToolStorageWitness(t, ctx, fixture, sibling, imported, true, true)
 			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
 				_, err := tx.ExecContext(ctx, `UPDATE flow_instances SET stage_defined=FALSE, current_state='pending' WHERE run_id=$1 AND entity_id=$2`, run, noStage)
 				return err

@@ -79,6 +79,7 @@ func TestFinalSelectionLiveTraceAndHistoricalLifetimeBothStores(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(boundedRunDebugTraceStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.PersistedProjection(uuid.NewString(), "trace.retry", "gateway", "", json.RawMessage("{\n \"fixed\": true\n}"), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -172,6 +173,7 @@ func TestFinalSelectionTerminalPresenceReadMatrixBothStores(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(boundedRunDebugTraceStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			for _, terminal := range []runtimedelivery.Status{runtimedelivery.StatusDelivered, runtimedelivery.StatusDeadLetter} {
 				t.Run(string(terminal), func(t *testing.T) {
 					runID := uuid.NewString()

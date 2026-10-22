@@ -29,6 +29,7 @@ func TestDormantStandingQuiescenceDoesNotReplayOnRestorationBothStores(t *testin
 				f := openStandingDispositionParityFixture(t, backend)
 				f.workflow, _ = newGenericScheduleAwareWorkflowTestCoordinator(t, f.selected)
 				ctx := testAuthorActivityRuntimeContext()
+				ctx = originalStoreFixtureContext(t, ctx, f.selected)
 				candidate := f.candidate("credential-loss")
 				created, err := f.workflow.ReconcileStandingService(ctx, candidate)
 				if err != nil {

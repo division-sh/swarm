@@ -135,6 +135,7 @@ func TestDecisionCardStoreRejectsNonCanonicalDecisionIdentityWithoutPersistenceO
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			card := newDecisionCardTestCard(t, runID, time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC))
 			card.Snapshot.Decision = " launch_review "
 
@@ -158,6 +159,7 @@ func TestDecisionCardStoreRejectsSnapshotHashDriftOnCreateAndReadbackOnBothStore
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			now := time.Date(2026, 7, 13, 11, 0, 0, 0, time.UTC)
 
 			staleCreate := newDecisionCardTestCard(t, runID, now)
@@ -222,6 +224,7 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			card, err := decisioncard.New(decisioncard.Card{
 				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
 				ExecutionMode: "live",
@@ -425,6 +428,7 @@ func TestDecisionCardStoreDeferDraftCancelAndSupersedeParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			now := time.Date(2026, 7, 12, 14, 0, 0, 0, time.UTC)
 			card := newDecisionCardTestCard(t, runID, now)
 			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
@@ -462,6 +466,7 @@ func TestDecisionCardOptionalOnlyInputStartsDraftOnBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			now := time.Date(2026, 7, 12, 14, 30, 0, 0, time.UTC)
 			card := newDecisionCardTestCard(t, runID, now)
 			outcome := card.Snapshot.Outcomes["revise"]

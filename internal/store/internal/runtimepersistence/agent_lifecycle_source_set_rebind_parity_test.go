@@ -629,11 +629,17 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	acquire := runtimestartupownership.AcquireRequest{
 		OwnerID: "process-binding-successor", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
 	}
+	ctx = correlation.WithRuntimeInstanceID(testAuthorActivityContextForBundle(coordinate.BundleHash), acquire.RuntimeInstanceID)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(acquire.RuntimeInstanceID, coordinate.BundleHash))
 	successor, err := store.AcquireProcessCapability(ctx, acquire)
 	if err != nil {
 		t.Fatalf("acquire successor process capability: %v", err)
 	}
 	t.Cleanup(func() { _ = successor.Release(context.Background()) })
+	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, successor)
+	if err != nil {
+		t.Fatal(err)
+	}
 	grant, err := successor.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
 		BundleHash:        coordinate.BundleHash,
 		RuntimeInstanceID: acquire.RuntimeInstanceID, RuntimeGeneration: 2, SourceSetRevision: plan.Revision,

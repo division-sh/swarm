@@ -1006,7 +1006,7 @@ func TestRunStopUsesDeclarationAwareStandingGuidanceParity(t *testing.T) {
 			stopper := selected.(interface {
 				StopRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 			})
-			ctx := testAuthorActivityRuntimeContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), selected)
 			flowPath := "run-stop-guidance/" + backend
 			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 			artifact := storeTestSourceArtifact("standing-run-stop-guidance-" + backend)

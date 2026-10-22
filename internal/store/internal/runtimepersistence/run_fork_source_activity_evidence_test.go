@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -16,8 +15,9 @@ func TestForkRecordedActivityGenerationEvidenceBothStores(t *testing.T) {
 			fixture := backend.open(t)
 			for _, field := range []string{"unchanged", "run_id", "entity_id", "source_event_id", "parent_event_id", "flow_instance", "node_id", "handler_event_key", "activity_id", "tool", "loop_flow", "loop_id", "loop_activation", "loop_revision", "loop_attempt", "loop_field", "loop_unknown", "result_event_id"} {
 				t.Run(field, func(t *testing.T) {
-					ctx := context.Background()
+					ctx := testAuthorActivityContext()
 					child, event, record := seedActivityEvidenceReuse(t, fixture, backend.name == "postgres", false, "succeeded", 2)
+					ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 					store := fixture.store.(selectedActivityProjectionStore)
 					original := originalCarriageForRun(t, fixture.store, event.RunID())
 					column, value := field, any("")
@@ -75,7 +75,7 @@ func TestForkRecordedActivityGenerationEvidenceBothStores(t *testing.T) {
 						}
 					}
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-					loaded, err := store.LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), event.RunID(), child.ForkRunID, []string{event.ID()}, original)
+					loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, original)
 					if field != "unchanged" {
 						if err == nil {
 							t.Fatalf("source %s corruption authorized copied activity evidence", field)
