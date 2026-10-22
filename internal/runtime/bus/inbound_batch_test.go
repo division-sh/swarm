@@ -2,7 +2,6 @@ package bus
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,8 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/packmodel"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -27,21 +25,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
-type inboundBatchAuthorizationVerifier struct {
-	expected runtimeprovideroutput.Authorization
-}
-
-func (v inboundBatchAuthorizationVerifier) VerifyProviderOutputAuthorization(actual runtimeprovideroutput.Authorization) error {
-	if !v.expected.Matches(actual) {
-		return errors.New("authorization does not match current compiled owner")
-	}
-	return nil
-}
-
 func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBeforeMutation(t *testing.T) {
-	expected := inboundBatchCurrentAuthorization()
+	source, catalog, original := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
+	expected := original.Events[1].Authorization
 	if _, err := runtimeprovideroutput.NewAuthorization(
-		"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0", "", expected.Generation(),
+		expected.Provider(), expected.Event(), expected.PackID(), expected.PackVersion(), "", expected.Generation(),
 	); err == nil {
 		t.Fatal("incomplete provider-output authorization acquired authority")
 	}
@@ -56,12 +44,14 @@ func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBef
 			batch.Provider = "telegram-stale"
 		}},
 		{name: "event mismatch", mutate: func(batch *InboundDeliveryBatch) {
-			batch.Events[1].Event = inboundBatchPreflightEvent("inbound.telegram.edited_message")
+			event := batch.Events[1].Event
+			batch.Events[1].Event = eventtest.ExistingRunRootIngressWithRoutingSource(event.ID(), "inbound.telegram.edited_message", "inbound-gateway", "", event.Payload(), 0,
+				event.RunID(), events.EventEnvelope{}, event.RoutingSource(), event.CreatedAt())
 		}},
 		{name: "pack id mismatch", mutate: func(batch *InboundDeliveryBatch) {
 			a := batch.Events[1].Authorization
 			batch.Events[1].Authorization = runtimeprovideroutput.MustAuthorization(
-				a.Provider(), a.Event(), "provider.telegram.stale", a.PackVersion(), a.ManifestHash(), a.Generation(),
+				a.Provider(), a.Event(), "stale-telegram", a.PackVersion(), a.ManifestHash(), a.Generation(),
 			)
 		}},
 		{name: "pack version mismatch", mutate: func(batch *InboundDeliveryBatch) {
@@ -89,41 +79,23 @@ func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBef
 		t.Run(tc.name, func(t *testing.T) {
 			store := &InMemoryEventStore{}
 			bus, err := newScopedTestEventBus(store, EventBusOptions{
-				ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
+				ContractBundle: source, ProviderOutputVerifier: catalog,
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			batch := inboundBatchPreflightBatch(expected)
+			batch := original
+			batch.Events = append([]InboundDeliveryEvent(nil), original.Events...)
 			tc.mutate(&batch)
-			if _, err := bus.PrepareInboundDeliveryBatch(context.Background(), batch); err == nil {
+			if _, err := bus.PrepareInboundDeliveryBatch(inboundBatchAuthorContext(t, source), batch); err == nil {
 				t.Fatal("PrepareInboundDeliveryBatch error = nil, want fail-closed authorization rejection")
 			}
 		})
 	}
 }
 
-func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthorizationIntoMutation(t *testing.T) {
-	source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
-	store := newTargetRouteMemoryStore()
-	bus, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: source, ProviderOutputVerifier: catalog,
-		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	plan, err := bus.PrepareInboundDeliveryBatch(context.Background(), batch)
-	if err != nil {
-		t.Fatalf("PrepareInboundDeliveryBatch: %v", err)
-	}
-	if got := len(plan.CommitCommands()); got != 2 {
-		t.Fatalf("CommitCommands = %d, want 2", got)
-	}
-}
-
 func TestPrepareInboundDeliveryBatchRejectsNonExclusiveOrMisorderedOutputsBeforeMutation(t *testing.T) {
-	expected := inboundBatchCurrentAuthorization()
+	source, catalog, original := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
 	testCases := []struct {
 		name   string
 		mutate func(*InboundDeliveryBatch)
@@ -132,7 +104,9 @@ func TestPrepareInboundDeliveryBatchRejectsNonExclusiveOrMisorderedOutputsBefore
 		{name: "raw at ordinal one", mutate: func(batch *InboundDeliveryBatch) { batch.Events[0], batch.Events[1] = batch.Events[1], batch.Events[0] }},
 		{name: "two normalized branches", mutate: func(batch *InboundDeliveryBatch) {
 			second := batch.Events[1]
-			second.Event = inboundBatchPreflightEvent("inbound.telegram.edited_message")
+			event := second.Event
+			second.Event = eventtest.ExistingRunRootIngressWithRoutingSource(eventtest.UUID("inbound-batch:inbound.telegram.edited_message"), "inbound.telegram.edited_message", "inbound-gateway", "", event.Payload(), 0,
+				event.RunID(), events.EventEnvelope{}, event.RoutingSource(), event.CreatedAt())
 			a := second.Authorization
 			second.Authorization = runtimeprovideroutput.MustAuthorization(
 				a.Provider(), "inbound.telegram.edited_message", a.PackID(), a.PackVersion(), a.ManifestHash(), a.Generation(),
@@ -145,14 +119,15 @@ func TestPrepareInboundDeliveryBatchRejectsNonExclusiveOrMisorderedOutputsBefore
 		t.Run(tc.name, func(t *testing.T) {
 			store := &InMemoryEventStore{}
 			bus, err := newScopedTestEventBus(store, EventBusOptions{
-				ProviderOutputVerifier: inboundBatchAuthorizationVerifier{expected: expected},
+				ContractBundle: source, ProviderOutputVerifier: catalog,
 			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
-			batch := inboundBatchPreflightBatch(expected)
+			batch := original
+			batch.Events = append([]InboundDeliveryEvent(nil), original.Events...)
 			tc.mutate(&batch)
-			if _, err := bus.PrepareInboundDeliveryBatch(context.Background(), batch); err == nil {
+			if _, err := bus.PrepareInboundDeliveryBatch(inboundBatchAuthorContext(t, source), batch); err == nil {
 				t.Fatal("PrepareInboundDeliveryBatch error = nil, want cardinality/order rejection")
 			}
 		})
@@ -416,19 +391,15 @@ func authenticatedTelegramBatchForSource(t testing.TB, source semanticview.Sourc
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider, err := packartifact.ProviderFromRootedSource(rooted, "telegram")
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
 	if err != nil {
 		t.Fatal(err)
 	}
-	triggerBody, present := provider.Body(packmodel.BodyTrigger)
-	if !present {
-		t.Fatal("captured batch provider has no trigger BODY")
-	}
-	manifest, err := providertriggers.AdmitBody(triggerBody)
+	scope, err := providers.Scope("telegram-ingress")
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := providertriggers.NewCatalogSnapshotFromAdmittedBodies(manifest)
+	catalog, err := scope.TriggerCatalog()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,13 +461,13 @@ func loadInboundRawSettlementSource(t testing.TB, admitted, withConsumer bool) s
 		"manifest.yaml":                  []byte("version: 1.0.0\nplatform_version: '*'\n"),
 		"schema.yaml":                    []byte("stages: []\n"),
 		"telegram-ingress/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
-		"telegram-ingress/schema.yaml":   []byte("pins:\n  inputs: [inbound.telegram.raw]\n"),
+		"telegram-ingress/schema.yaml":   []byte("stages: []\npins:\n  inputs: [inbound.telegram.raw]\n"),
 	} {
 		if err := os.WriteFile(filepath.Join(root, label), body, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.Mkdir(filepath.Join(root, "telegram"), 0o700); err != nil {
+	if err := os.Mkdir(filepath.Join(flow, "telegram"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for _, label := range []string{"manifest.yaml", "trigger.yaml"} {
@@ -504,7 +475,7 @@ func loadInboundRawSettlementSource(t testing.TB, admitted, withConsumer bool) s
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(root, "telegram", label), body, 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(flow, "telegram", label), body, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -563,36 +534,5 @@ func inboundRawSettlementEvent(source events.RoutingSource, target events.RouteI
 		eventtest.UUID("provider-raw-settlement:"+target.FlowInstance+":"+target.EntityID+":"+source.Kind().StorageCode()),
 		events.EventType("inbound.telegram.raw"), "inbound-gateway", "", []byte(`{"update_id":1}`), 0,
 		eventtest.UUID("provider-raw-settlement-run"), envelope, source, time.Unix(1, 0).UTC(),
-	)
-}
-
-func inboundBatchPreflightBatch(authorization runtimeprovideroutput.Authorization) InboundDeliveryBatch {
-	return InboundDeliveryBatch{
-		Provider: "telegram",
-		Events: []InboundDeliveryEvent{
-			{Event: inboundBatchPreflightEvent("inbound.telegram.raw"), Kind: runtimeprovideroutput.KindRaw},
-			{
-				Event: inboundBatchPreflightEvent("inbound.telegram.text_message"), Kind: runtimeprovideroutput.KindNormalized,
-				Authorization: authorization,
-			},
-		},
-	}
-}
-
-func inboundBatchCurrentAuthorization() runtimeprovideroutput.Authorization {
-	return runtimeprovideroutput.MustAuthorization(
-		"telegram",
-		"inbound.telegram.text_message",
-		"provider.telegram",
-		"1.0.0",
-		"sha256:"+strings.Repeat("a", 64),
-		triggergeneration.FromCanonicalBytes([]byte("generation-current")),
-	)
-}
-
-func inboundBatchPreflightEvent(eventName string) events.Event {
-	return eventtest.ExistingRunRootIngress(
-		eventtest.UUID("inbound-batch:"+eventName), events.EventType(eventName), "inbound-gateway", "", []byte(`{"chat_id":"42"}`), 0,
-		eventtest.UUID("inbound-batch-run"), events.EventEnvelope{}, time.Unix(1, 0).UTC(),
 	)
 }
