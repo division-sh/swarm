@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 )
 
@@ -21,6 +22,7 @@ type DeploymentConnectionOptions struct {
 	Store       channelonboarding.Store
 	Credentials operatorchannel.CredentialCurrentness
 	Plan        packs.SatisfactionPlan
+	Trigger     providertriggers.InboundAdmissionPlan
 }
 
 // OpenDeploymentConnection reuses private SDK possession and pairing under the
@@ -48,6 +50,9 @@ func OpenDeploymentConnection(ctx context.Context, opts DeploymentConnectionOpti
 	if err := QualifyBootstrapPlan(opts.Plan); err != nil {
 		return nil, err
 	}
+	if opts.Trigger.Valid() && (opts.Trigger.Provider() != op.Provider || opts.Trigger.Transport() != packs.ChannelTransportSession) {
+		return nil, errPairingScope
+	}
 	work, err := opts.Process.BeginStanding(ctx)
 	if err != nil {
 		return nil, err
@@ -61,7 +66,11 @@ func OpenDeploymentConnection(ctx context.Context, opts DeploymentConnectionOpti
 		c.account.Store(&account)
 	}
 	go c.joinRetirement()
-	if err := c.open(nil); err != nil {
+	var incoming *RuntimeIncomingOptions
+	if opts.Trigger.Valid() {
+		incoming = &RuntimeIncomingOptions{Trigger: opts.Trigger}
+	}
+	if err := c.open(incoming); err != nil {
 		return c, errors.Join(err, c.Close(context.WithoutCancel(ctx)))
 	}
 	return c, nil

@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/sessionprovider/authority"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
@@ -2047,21 +2048,28 @@ func providerIdentityAuthority(op Operation, candidate Candidate) (operatorchann
 		if err := op.ValidateSessionAccount(); err != nil {
 			return operatorchannel.ProviderAuthority{}, err
 		}
-		authority := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: op.SessionAccount}
+		provider := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: op.SessionAccount}
+		if op.DeploymentRegistration {
+			provider.Scope = authority.DeploymentParent
+		}
 		if candidate.ProviderCredentialRole != "" {
 			evidence, err := providerIdentityEvidence(op, candidate)
 			if err != nil {
 				return operatorchannel.ProviderAuthority{}, err
 			}
-			authority.Credential = evidence
+			provider.Credential = evidence
 		}
-		return authority, authority.Validate()
+		return provider, provider.Validate()
 	}
 	evidence, err := providerIdentityEvidence(op, candidate)
 	if err != nil {
 		return operatorchannel.ProviderAuthority{}, err
 	}
-	return operatorchannel.CredentialProviderAuthority(evidence)
+	provider, err := operatorchannel.CredentialProviderAuthority(evidence)
+	if op.DeploymentRegistration {
+		provider.Scope = authority.DeploymentParent
+	}
+	return provider, err
 }
 
 func providerIdentityEvidence(op Operation, candidate Candidate) (runtimecredentials.ValueEvidence, error) {

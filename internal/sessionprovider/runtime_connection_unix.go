@@ -42,10 +42,8 @@ type RuntimeConnectionOptions struct {
 // RuntimeConnection owns the actual SDK state and socket, not a registration
 // promise. Neither its zero value nor its readback can manufacture execution.
 type RuntimeConnection struct {
-	lifecycle chan struct{}
-	parent    interface {
-		Begin(context.Context) (*worklifetime.Lease, error)
-	}
+	lifecycle      chan struct{}
+	parent         sessionWorkParent
 	work           *worklifetime.Lease
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -444,7 +442,7 @@ func (c *RuntimeConnection) AdmitSessionAccount(ctx context.Context, expected op
 	if err != nil {
 		return authority.Admission{}, err
 	}
-	owner, err := newSessionAuthorityOwner(c.state, c.store, op, c.credentials)
+	owner, err := newSessionAuthorityOwner(c.state, c.operations, op, c.credentials, c.parent)
 	if err != nil {
 		return authority.Admission{}, err
 	}
@@ -472,6 +470,9 @@ func (c *RuntimeConnection) ObserveSession(ctx context.Context) (operatorchannel
 	}
 	account := c.sessionAccount()
 	provider := operatorchannel.ProviderAuthority{Kind: operatorchannel.ProviderAuthoritySession, Session: account}
+	if c.operation.DeploymentRegistration {
+		provider.Scope = authority.DeploymentParent
+	}
 	admitted, current, err := provider.AdmitExecution(ctx, c)
 	if err != nil || !current {
 		return operatorchannel.ProviderAuthority{}, empty, errors.Join(errRuntimeConnection, err)
@@ -498,7 +499,7 @@ func (c *RuntimeConnection) ExecuteChannelWrite(ctx context.Context, operation, 
 	if err != nil {
 		return result, err
 	}
-	owner, err := newSessionAuthorityOwner(c.state, c.store, op, c.credentials)
+	owner, err := newSessionAuthorityOwner(c.state, c.operations, op, c.credentials, c.parent)
 	if err != nil {
 		return result, err
 	}
@@ -518,7 +519,7 @@ func (c *RuntimeConnection) ExecuteChannelActivity(ctx context.Context, operatio
 	if err != nil {
 		return nil, err
 	}
-	owner, err := newSessionAuthorityOwner(c.state, c.store, op, c.credentials)
+	owner, err := newSessionAuthorityOwner(c.state, c.operations, op, c.credentials, c.parent)
 	if err != nil {
 		return nil, err
 	}

@@ -39,13 +39,20 @@ type Scope struct {
 	PrincipalID         string
 	BindingRevision     int64
 	AccountOnly         bool `json:",omitempty"`
+
+	DeploymentRegistration bool `json:",omitempty"`
 }
 
 func (s Scope) Validate() error {
 	if err := s.Session.Validate(); err != nil {
 		return err
 	}
-	if err := s.Source.Validate(); err != nil {
+	if s.DeploymentRegistration {
+		if s.Source != (channelonboarding.ChannelDurableContextIdentity{}) || s.TargetSelector != "" ||
+			s.Kind != channelonboarding.SessionInputOnboarding || s.BindingRevision != 0 {
+			return ErrCaptureScopeChanged
+		}
+	} else if err := s.Source.Validate(); err != nil {
 		return err
 	}
 	switch s.Kind {
@@ -64,7 +71,7 @@ func (s Scope) Validate() error {
 		return fmt.Errorf("WhatsApp capture requires explicit onboarding or business scope")
 	}
 	if s.Session.Provider != "whatsapp" || uuid.Validate(s.OnboardingOperation) != nil ||
-		uuid.Validate(s.PrincipalID) != nil || s.BindingRevision < 0 || s.OperationRevision < 1 || s.TargetSelector == "" {
+		uuid.Validate(s.PrincipalID) != nil || s.BindingRevision < 0 || s.OperationRevision < 1 || !s.DeploymentRegistration && s.TargetSelector == "" {
 		return fmt.Errorf("WhatsApp capture requires its exact existing onboarding/principal/source scope")
 	}
 	return nil
@@ -84,14 +91,39 @@ type Event struct {
 type Source struct {
 	Coordinate        channelonboarding.ChannelRuntimeContextCoordinate
 	CatalogGeneration triggergeneration.Generation
+
+	DeploymentRegistration bool `json:",omitempty"`
+}
+
+func (s Scope) MarshalJSON() ([]byte, error) {
+	type scope Scope
+	if s.DeploymentRegistration {
+		return json.Marshal(struct {
+			scope
+			Source *channelonboarding.ChannelDurableContextIdentity `json:"Source,omitempty"`
+		}{scope: scope(s)})
+	}
+	return json.Marshal(scope(s))
+}
+
+func (s Source) MarshalJSON() ([]byte, error) {
+	type source Source
+	if s.DeploymentRegistration {
+		return json.Marshal(struct {
+			source
+			Coordinate *channelonboarding.ChannelRuntimeContextCoordinate `json:"Coordinate,omitempty"`
+		}{source: source(s)})
+	}
+	return json.Marshal(source(s))
 }
 
 func (e Event) Validate() error {
 	if err := e.Scope.Validate(); err != nil {
 		return err
 	}
-	if e.Source.Coordinate.ValidateContext() != nil || !e.Source.CatalogGeneration.Valid() ||
-		!e.Scope.Source.Matches(e.Source.Coordinate.DurableIdentity()) {
+	if !e.Source.CatalogGeneration.Valid() || e.Scope.DeploymentRegistration != e.Source.DeploymentRegistration ||
+		e.Source.DeploymentRegistration && e.Source.Coordinate != (channelonboarding.ChannelRuntimeContextCoordinate{}) ||
+		!e.Source.DeploymentRegistration && (e.Source.Coordinate.ValidateContext() != nil || !e.Scope.Source.Matches(e.Source.Coordinate.DurableIdentity())) {
 		return fmt.Errorf("WhatsApp capture requires its frozen exact source and catalog")
 	}
 	if e.Scope.Kind == channelonboarding.SessionInputBusiness &&
@@ -142,9 +174,13 @@ var ErrCaptureMissing = errors.New("WhatsApp original capture is not pending")
 var ErrCapturePublicationPending = errors.New("WhatsApp capture has no verified committed publication")
 
 func (e Event) SameCapture(other Event) bool {
+	sourceCurrent := e.Source.Coordinate.MatchesDeclaration(other.Source.Coordinate)
+	if e.Source.DeploymentRegistration && other.Source.DeploymentRegistration {
+		sourceCurrent = e.Source.Coordinate == (channelonboarding.ChannelRuntimeContextCoordinate{}) && e.Source.Coordinate == other.Source.Coordinate
+	}
 	return e.Scope == other.Scope && e.OccurrenceID == other.OccurrenceID && e.Conversation == other.Conversation &&
 		e.EventID == other.EventID && e.Kind == other.Kind && e.ReceivedAt.Equal(other.ReceivedAt) &&
-		e.Source.Coordinate.MatchesDeclaration(other.Source.Coordinate) && e.Source.CatalogGeneration.Equal(other.Source.CatalogGeneration) && bytes.Equal(e.Body, other.Body)
+		sourceCurrent && e.Source.CatalogGeneration.Equal(other.Source.CatalogGeneration) && bytes.Equal(e.Body, other.Body)
 }
 
 func (e Event) PublicationFingerprint() (string, error) {
@@ -174,11 +210,25 @@ type publicationAuthority struct {
 	OperationRevision   int64
 	ActivationRevision  int64
 	AccountOnly         bool `json:",omitempty"`
+
+	DeploymentRegistration bool `json:",omitempty"`
+}
+
+func (a publicationAuthority) MarshalJSON() ([]byte, error) {
+	type record publicationAuthority
+	if a.DeploymentRegistration {
+		return json.Marshal(struct {
+			record
+			Source *channelonboarding.ChannelDurableContextIdentity `json:"Source,omitempty"`
+		}{record: record(a)})
+	}
+	return json.Marshal(record(a))
 }
 
 func (s Scope) publicationAuthority() publicationAuthority {
 	result := publicationAuthority{Kind: s.Kind, Session: s.Session, PublicationBinding: s.PublicationBinding,
-		Source: s.Source, OnboardingOperation: s.OnboardingOperation, ActivationID: s.ActivationID,
+		DeploymentRegistration: s.DeploymentRegistration,
+		Source:                 s.Source, OnboardingOperation: s.OnboardingOperation, ActivationID: s.ActivationID,
 		TargetSelector: s.TargetSelector, PrincipalID: s.PrincipalID, BindingRevision: s.BindingRevision}
 	result.AccountOnly = s.AccountOnly
 	if s.Kind != channelonboarding.SessionInputBusiness {
