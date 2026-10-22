@@ -508,6 +508,14 @@ func TestRun_MapsMissingRuntimeExternalCredentialsToCredentialKeyExistsWarnings(
 			t.Fatalf("expected credential_key_exists warning containing %q, got %#v", expected, report.Warnings())
 		}
 	}
+	for _, finding := range report.Warnings() {
+		if finding.CheckID == "credential_key_exists" {
+			command := "swarm secrets set " + finding.Location
+			if rendered := FormatSurfaceFinding(finding, true); !strings.Contains(rendered, "remediation:") || !strings.Contains(rendered, command) {
+				t.Fatalf("missing credential does not explain provisioning: %s", rendered)
+			}
+		}
+	}
 }
 
 func TestRun_MissingCredentialStoreIsUnavailableNotUncheckedSuccess(t *testing.T) {

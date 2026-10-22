@@ -148,14 +148,14 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 	if result.BootReport.HasErrors() {
 		reportBlocks = true
 		blockingPrerequisite = result.BootReport.Errors()[0].CheckID
-		return result, fmt.Errorf("boot verification failed:\n%s", formatWorkflowValidationFindings(result.BootReport.Errors(), true))
+		return result, fmt.Errorf("boot verification failed: %s", formatWorkflowValidationFindings(result.BootReport.Errors(), true))
 	}
 	if opts.FatalBootWarnings {
 		warnings := filterWorkflowValidationFindings(result.BootReport.Warnings(), opts.ExcludedFatalBootWarningChecks...)
 		if len(warnings) > 0 {
 			reportBlocks = true
 			blockingPrerequisite = warnings[0].CheckID
-			return result, fmt.Errorf("boot verification blocked by policy-escalated findings:\n%s", formatWorkflowValidationFindings(warnings, true))
+			return result, fmt.Errorf("boot verification blocked by policy-escalated findings: %s", formatWorkflowValidationFindings(warnings, true))
 		}
 	}
 
