@@ -603,7 +603,10 @@ func requireServedNativeInboxReply(t *testing.T, endpoint string, peer *serveNat
 	if err != nil {
 		t.Fatal(err)
 	}
-	bounds := packfixture.ChannelPlanByID(t, projection.ChannelPlans, "provider.whatsapp.hitl_channel").PresentationBounds()
+	bounds, err := packfixture.ChannelPlanByID(t, projection.ChannelPlans, "provider.whatsapp.hitl_channel").PresentationBounds()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var sent servedNativeMessage
 	var cards []servedNativeMessage
 	deadline := time.After(5 * time.Second)
