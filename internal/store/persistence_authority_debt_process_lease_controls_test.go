@@ -14,7 +14,8 @@ import (
 )
 
 // Excluded from the collector payload to avoid a self-referential fingerprint.
-const debtProcessLeaseCollectorTo = "1a353f6c8e5cfe2e2fce2163231e4ac4832df0776daa8dbea177c6edb274bd90"
+const debtProcessLeaseCollectorFrom = "1a353f6c8e5cfe2e2fce2163231e4ac4832df0776daa8dbea177c6edb274bd90"
+const debtProcessLeaseCollectorTo = "6847bd84b8ef61a1b21aa8d063e0a8abe77dff964642060c7bb4d3b819d3ff74"
 
 func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 	root, base := persistenceAuthorityRepoRoot(t), t.TempDir()
@@ -115,7 +116,7 @@ func TestPersistenceAuthorityDebtProcessLeaseRelocationsAreOneWay(t *testing.T) 
 }
 
 func TestPersistenceAuthorityDebtProcessLeaseCollectorTransitionIsBounded(t *testing.T) {
-	for _, donor := range []string{debtForkProofCollectorTo} {
+	for _, donor := range []string{debtForkProofCollectorTo, debtProcessLeaseCollectorFrom} {
 		t.Run(donor[:8], func(t *testing.T) {
 			before, after := debtControlSet(), debtControlSet()
 			for _, pair := range debtProcessLeaseRelocations() {
@@ -123,6 +124,9 @@ func TestPersistenceAuthorityDebtProcessLeaseCollectorTransitionIsBounded(t *tes
 			}
 			inherited := debtControlSite("call:QueryRow", 2)
 			before[inherited.identity()], after[inherited.identity()] = inherited, inherited
+			if donor == debtProcessLeaseCollectorFrom {
+				before = maps.Clone(after)
+			}
 			trusted := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: donor, Sites: before}
 			head := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: debtProcessLeaseCollectorTo, Sites: after}
 			for _, mutation := range []string{"exact", "downward", "landed-successor", "reverse", "unlanded-role-predecessor", "foreign-base", "foreign-destination", "unrotated", "rebootstrap", "missing-donor", "addition", "increase"} {
@@ -148,7 +152,9 @@ func TestPersistenceAuthorityDebtProcessLeaseCollectorTransitionIsBounded(t *tes
 					case "rebootstrap":
 						candidate.BootstrapSource = strings.Repeat("c", 40)
 					case "missing-donor":
-						delete(base.Sites, debtProcessLeaseRelocations()[0][0].identity())
+						pair := debtProcessLeaseRelocations()[0]
+						delete(base.Sites, pair[0].identity())
+						delete(base.Sites, pair[1].identity())
 					case "addition":
 						added := debtControlSite("call:Exec", 1)
 						candidate.Sites[added.identity()] = added
@@ -156,7 +162,8 @@ func TestPersistenceAuthorityDebtProcessLeaseCollectorTransitionIsBounded(t *tes
 						inherited.Multiplicity++
 						candidate.Sites[inherited.identity()] = inherited
 					}
-					accept := mutation == "exact" || mutation == "downward" || mutation == "landed-successor"
+					accept := mutation == "exact" || mutation == "landed-successor" ||
+						(mutation == "downward" && donor == debtForkProofCollectorTo)
 					if err := debtValidateCollectorIdentity(base.Collector, current, base, candidate, ""); (err == nil) != accept {
 						t.Fatalf("accept=%v error=%v", accept, err)
 					}
