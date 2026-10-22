@@ -33,6 +33,7 @@ func TestClockScheduleHTTPReadbackOnBothStores(t *testing.T) {
 			}
 			artifact := sourceartifactfixture.New("schema.yaml", []byte("name: clock-readback\n"))
 			ctx := testAuthorActivityContextForSource(context.Background(), sourceartifactfixture.FactFor(artifact))
+			ctx = originalAPIFixtureContext(t, ctx, selected)
 			runID := uuid.NewString()
 			fixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: artifact, StartedAt: time.Now().UTC()}
 			storetest.RequireRun(t, ctx, selected, fixture)
