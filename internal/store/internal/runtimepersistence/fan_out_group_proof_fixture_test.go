@@ -334,6 +334,8 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 		if err != nil {
 			t.Fatal(err)
 		}
+	} else {
+		ctx = originalStoreFixtureContext(t, ctx, f.raw)
 	}
 	artifact, bundle := fanOutMixedRouteSource(t)
 	f.seed = seedFanOutOwnerFixtureWithArtifact(t, ctx, f.db, f.raw, f.postgres, count, time.Now().UTC().Truncate(time.Microsecond), artifact)
@@ -428,7 +430,7 @@ func newGroupProofFixtureOn(t *testing.T, backend string, count int, parent *gro
 			t.Fatal(err)
 		}
 		t.Cleanup(catalog.Release)
-		f.bus, err = newStoreTestEventBus(t, f.raw.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: mustStoreTestSourceArtifactFact(f.seed.bundleHash), RuntimeInstanceID: authorActivityTestRuntimeInstanceID})
+		f.bus, err = newStoreTestEventBus(t, f.raw.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: mustStoreTestSourceArtifactFact(f.seed.bundleHash), RuntimeInstanceID: grantEvidence.RuntimeInstanceID})
 		if err != nil {
 			t.Fatal(err)
 		}

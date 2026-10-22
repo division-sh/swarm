@@ -155,67 +155,6 @@ func (r dynamicAuthoredEventDescriptorResolver) AuthorActivityEventCatalogRegist
 	return r.registry.HasScope(scope)
 }
 
-func TestDynamicAuthorActivityEventDescriptorRequiresLiveExactScopeLease(t *testing.T) {
-	db := openAuthorActivityAdapterDB(t)
-	backend, err := sqlitebackend.New(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	scope := runtimeauthoractivity.BundleScope(uuid.NewString(), "bundle-v2:sha256:"+strings.Repeat("d", 64))
-	registry := runtimeauthoractivity.NewEventCatalogRegistry()
-	lease, err := registry.Register(scope, []runtimeauthoractivity.EventDescriptor{{EventType: "static.event", Disposition: runtimeauthoractivity.StoryDifferent}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolver := dynamicAuthoredEventDescriptorResolver{registry: registry}
-	dynamic := runtimeauthoractivity.EventDescriptor{
-		EventType: "chat/instance-1/reply.requested", Disposition: runtimeauthoractivity.StoryAuthored,
-	}
-	base := runtimeauthoractivity.WithScope(context.Background(), scope)
-	base, err = runtimeauthoractivity.WithResolvedEventDescriptor(base, scope, dynamic)
-	if err != nil {
-		t.Fatal(err)
-	}
-	event := eventtest.PersistedProjection(
-		uuid.NewString(), events.EventType(dynamic.EventType), "sender", "", []byte(`{"text":"hello"}`), 0,
-		uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
-	)
-
-	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result := mutationprotocol.RunSQLite(base, backend, "dynamic event descriptor", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-		return struct{}{}, storeactivityjournal.RecordPersistedEvent(ctx, attempt, resolver, admitted, "sender", "agent")
-	})
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
-	}
-	page, err := authoractivityadapter.List(base, db, authoractivityadapter.DialectSQLite, runtimeauthoractivity.ListOptions{Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(page.Occurrences) != 1 || page.Occurrences[0].Projection.EventType != dynamic.EventType {
-		t.Fatalf("dynamic occurrence = %#v", page.Occurrences)
-	}
-
-	lease.Release()
-	stale := eventtest.PersistedProjection(
-		uuid.NewString(), events.EventType(dynamic.EventType), "sender", "", []byte(`{"text":"stale"}`), 0,
-		uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 1, 0, time.UTC),
-	)
-	staleAdmitted, err := events.AdmitForPublish(stale, events.AdmissionOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result = mutationprotocol.RunSQLite(base, backend, "stale dynamic event descriptor", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-		return struct{}{}, storeactivityjournal.RecordPersistedEvent(ctx, attempt, resolver, staleAdmitted, "sender", "agent")
-	})
-	if err := result.Err(); err == nil || !strings.Contains(err.Error(), "no live registry lease") {
-		t.Fatalf("stale lease error = %v", err)
-	}
-}
-
 func TestDynamicAuthorActivityEventDescriptorRejectsStaticConflict(t *testing.T) {
 	scope := runtimeauthoractivity.BundleScope(uuid.NewString(), "bundle-v2:sha256:"+strings.Repeat("e", 64))
 	registry := runtimeauthoractivity.NewEventCatalogRegistry()

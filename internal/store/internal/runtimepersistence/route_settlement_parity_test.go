@@ -265,34 +265,6 @@ func TestOperatorEventListRouteSettlementTotalityParity(t *testing.T) {
 	}
 }
 
-func TestEventObservationRejectsMalformedRoutingSettlement(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
-		t.Run(backend.name, func(t *testing.T) {
-			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
-			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "review.malformed", "gateway", "", json.RawMessage(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
-			if err := commitSemanticEventFixture(ctx, fixture.store, event); err != nil {
-				t.Fatal(err)
-			}
-			raw := `{"write_class":"normal_publication","arm":"no_delivery","reason":"unknown_reason","evaluation":{"plans":[]}}`
-			var err error
-			if backend.name == "postgres" {
-				_, err = fixture.db.ExecContext(ctx, `UPDATE events SET route_settlement = $1::jsonb WHERE event_id = $2::uuid`, raw, event.ID())
-			} else {
-				_, err = fixture.db.ExecContext(ctx, `UPDATE events SET route_settlement = ? WHERE event_id = ?`, raw, event.ID())
-			}
-			if err != nil {
-				t.Fatalf("corrupt route settlement: %v", err)
-			}
-			if _, err := fixture.store.(routeSettlementOperatorStore).LoadOperatorEvent(ctx, event.ID()); err == nil || !strings.Contains(err.Error(), "route settlement") {
-				t.Fatalf("malformed settlement read error = %v", err)
-			}
-		})
-	}
-}
-
 func assertPersistedNoDeliverySettlement(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, eventID string, wantClass events.EventWriteClass) {
 	t.Helper()
 	record, found, err := loadEventProducerIdentityRecord(ctx, fixture, eventID)

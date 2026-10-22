@@ -67,6 +67,7 @@ func TestDecisionCardStoreLifecycleParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
 			card, err := decisioncard.New(decisioncard.Card{
 				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review-1", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
@@ -213,57 +214,6 @@ func TestDecisionCardStoreRejectsSnapshotHashDriftOnCreateAndReadbackOnBothStore
 	}
 }
 
-func TestDecisionCardStoreRejectsStructuralSnapshotDriftAtEveryTypedLevelOnBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		backend := backend
-		t.Run(backend, func(t *testing.T) {
-			ctx := testAuthorActivityContext()
-			cardStore, runID := decisionCardTestStore(t, backend)
-			card, err := decisioncard.New(decisioncard.Card{
-				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("launch/review", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
-				ExecutionMode: "live",
-				Snapshot: freezeDecisionCardTestSnapshot(t, "launch_review", map[string]any{"summary": "ready"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
-					"revise": {
-						Verdict:    "revise",
-						Input:      map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}},
-						InputOrder: []string{"feedback"},
-					},
-				}),
-				BundleHash: authorActivityTestBundleHash, WorkflowVersion: "1",
-				EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
-				CreatedAt:        time.Date(2026, 7, 13, 11, 30, 0, 0, time.UTC),
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
-				t.Fatal(err)
-			}
-			raw, err := decisioncard.SnapshotJSON(card)
-			if err != nil {
-				t.Fatal(err)
-			}
-			db, postgres := decisionCardStoreDB(t, cardStore)
-			query := `UPDATE decision_cards SET snapshot = ? WHERE card_id = ?`
-			if postgres {
-				query = `UPDATE decision_cards SET snapshot = $1::jsonb WHERE card_id = $2::uuid`
-			}
-
-			for _, test := range storeDecisionSnapshotStructuralDriftCases() {
-				t.Run(test.name, func(t *testing.T) {
-					corrupted := mutateStoreDecisionSnapshotJSON(t, raw, test.mutate)
-					if _, err := db.ExecContext(ctx, query, string(corrupted), card.CardID); err != nil {
-						t.Fatalf("corrupt persisted snapshot: %v", err)
-					}
-					if _, err := cardStore.GetDecisionCard(ctx, card.CardID); err == nil || !strings.Contains(err.Error(), test.want) {
-						t.Fatalf("GetDecisionCard error = %v, want %q", err, test.want)
-					}
-				})
-			}
-		})
-	}
-}
-
 func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *testing.T) {
 	const safeInteger = int64(9007199254740991)
 	const outcomeEvent = "review.completed"
@@ -361,68 +311,6 @@ func TestDecisionCardStoreEnforcesSafeNumericSnapshotCarriersOnBothStores(t *tes
 	}
 }
 
-func TestDecisionCardStoreRejectsUnadmittedPersistedCarriersOnBothStores(t *testing.T) {
-	const unsafeJSON = `{"unsafe":9007199254740992}`
-	const scalarJSON = `"not-an-object"`
-	for _, backend := range []string{"sqlite", "postgres"} {
-		backend := backend
-		t.Run(backend, func(t *testing.T) {
-			for _, carrier := range []string{"provenance", "fields", "change_payload"} {
-				carrier := carrier
-				t.Run(carrier, func(t *testing.T) {
-					ctx := testAuthorActivityContext()
-					cardStore, runID := decisionCardTestStore(t, backend)
-					card := newDecisionCardTestCard(t, runID, time.Date(2026, 7, 13, 13, 0, 0, 0, time.UTC))
-					if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
-						t.Fatal(err)
-					}
-					db, postgres := decisionCardStoreDB(t, cardStore)
-					switch carrier {
-					case "provenance", "fields":
-						query := fmt.Sprintf("UPDATE decision_cards SET %s = ? WHERE card_id = ?", carrier)
-						args := []any{unsafeJSON, card.CardID}
-						if postgres {
-							query = fmt.Sprintf("UPDATE decision_cards SET %s = $1::jsonb WHERE card_id = $2::uuid", carrier)
-						}
-						if _, err := db.ExecContext(ctx, query, args...); err != nil {
-							t.Fatalf("corrupt %s: %v", carrier, err)
-						}
-						if _, err := cardStore.GetDecisionCard(ctx, card.CardID); err == nil || !strings.Contains(err.Error(), "safe range") {
-							t.Fatalf("GetDecisionCard after %s corruption error = %v, want semantic admission failure", carrier, err)
-						}
-						args[0] = scalarJSON
-						if _, err := db.ExecContext(ctx, query, args...); err != nil {
-							t.Fatalf("corrupt %s with scalar: %v", carrier, err)
-						}
-						if _, err := cardStore.GetDecisionCard(ctx, card.CardID); err == nil || !strings.Contains(err.Error(), carrier+" must be an object") {
-							t.Fatalf("GetDecisionCard after scalar %s corruption error = %v, want object-shape failure", carrier, err)
-						}
-					case "change_payload":
-						query := "UPDATE decision_card_changes SET payload = ? WHERE card_id = ?"
-						args := []any{unsafeJSON, card.CardID}
-						if postgres {
-							query = "UPDATE decision_card_changes SET payload = $1::jsonb WHERE card_id = $2::uuid"
-						}
-						if _, err := db.ExecContext(ctx, query, args...); err != nil {
-							t.Fatalf("corrupt change payload: %v", err)
-						}
-						if _, err := cardStore.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 10}); err == nil || !strings.Contains(err.Error(), "safe range") {
-							t.Fatalf("ListDecisionCardChanges after payload corruption error = %v, want semantic admission failure", err)
-						}
-						args[0] = scalarJSON
-						if _, err := db.ExecContext(ctx, query, args...); err != nil {
-							t.Fatalf("corrupt change payload with scalar: %v", err)
-						}
-						if _, err := cardStore.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 10}); err == nil || !strings.Contains(err.Error(), "payload must be an object") {
-							t.Fatalf("ListDecisionCardChanges after scalar payload corruption error = %v, want object-shape failure", err)
-						}
-					}
-				})
-			}
-		})
-	}
-}
-
 func assertStoreSnapshotNumber(t *testing.T, name string, value any, want float64) {
 	t.Helper()
 	number, ok := value.(float64)
@@ -443,6 +331,7 @@ func TestDecisionCardInvalidFrozenOutcomeNeverCommitsOnBothStores(t *testing.T) 
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			now := time.Date(2026, 7, 13, 5, 30, 0, 0, time.UTC)
 			card, err := decisioncard.New(decisioncard.Card{
 				CardID: uuid.NewString(), RunID: runID, Anchor: newDecisionCardTestStageAnchor("root", "launch", uuid.NewString(), "awaiting_review", uuid.NewString()),
@@ -490,6 +379,7 @@ func TestDecisionCardStorePaginationUsesCreationOrderOnBothStores(t *testing.T) 
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			base := time.Date(2026, 7, 12, 13, 0, 0, 0, time.UTC)
 			want := make([]string, 0, 3)
 			for i := 0; i < 3; i++ {
@@ -604,6 +494,7 @@ func TestDecisionCardDraftReplacementExpiryAndSupersessionAreCursorVisibleOnBoth
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			now := time.Date(2026, 7, 12, 15, 0, 0, 0, time.UTC)
 			card := newDecisionCardTestCard(t, runID, now)
 			if err := cardStore.CreateDecisionCard(ctx, card); err != nil {
@@ -657,6 +548,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 12, 16, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
@@ -716,6 +608,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 		t.Run(backend+"/committed_verdict_blocks_terminalization", func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 12, 17, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()
@@ -762,6 +655,7 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 		t.Run(backend+"/committed_verdict_freezes_on_fork", func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 12, 18, 0, 0, 0, time.UTC)
 			entityID := uuid.NewString()

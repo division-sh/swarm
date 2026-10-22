@@ -17,6 +17,7 @@ func TestDecisionCardInputProgressIsDurableAndOrderedBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			now := time.Date(2026, 9, 27, 20, 0, 0, 0, time.UTC)
 			card := newDecisionCardTestCard(t, runID, now)
 			outcome := card.Snapshot.Outcomes["revise"]

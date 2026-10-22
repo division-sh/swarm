@@ -821,7 +821,7 @@ func providerDrainAttemptContext(
 	operation string,
 ) context.Context {
 	t.Helper()
-	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), authority.ExecutionMode)
+	ctx := runtimeeffects.WithExecutionMode(fixture.original, authority.ExecutionMode)
 	controller := runtimeeffects.NewCompletionController(fixture.store, fixture.store, fixture.store, nil)
 	posture := executionposture.Live
 	if authority.ExecutionMode == runtimeeffects.ExecutionModeMock {
