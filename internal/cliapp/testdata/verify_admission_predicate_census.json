@@ -783,7 +783,7 @@
     "owner": "internal/channelonboarding/session_activity.go::compileSessionActivityDeclaration",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "fe8fdf85b52e9067813125d52d5bd6a349fee894f638943f4ac5b5f96dc324b6"
+    "body_sha256": "7128449db2c10fe1fe67fb8f36690778911bd647df3b5ff3e32da44eaa8bd3d9"
   },
   {
     "owner": "internal/channelonboarding/session_activity.go::matchSessionActivityConnector",
@@ -1599,7 +1599,7 @@
     "owner": "internal/runtime/activity_validation.go::validateActivitySpec",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "b15fc320f170cc67c0098325b7198eba9317cb2d3900733c6ece028a82c71283"
+    "body_sha256": "46102e59a18ad968603c8883e64969e5ae87271a228ac95b424f296cda9aa5dd"
   },
   {
     "owner": "internal/runtime/activity_validation.go::validateActivityToolTransport",
@@ -3987,7 +3987,7 @@
     "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.installNativeInboxCommands",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-inbox",
-    "body_sha256": "3c23809d65911bd8d9ae8699f7d8cfa3894626e0c783700b69747dcce1e1f2b9"
+    "body_sha256": "ba06aa0769a79f9b2e23839eac90c5851d2daca2970915f94ceb26617093c94d"
   },
   {
     "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.qualifyInstalledInboxEntry",
@@ -4017,7 +4017,7 @@
     "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxAddress",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-inbox",
-    "body_sha256": "b460aa6dd9a8d2c5f4ce9a5c32a56fd98c1c814555736e921b0440b1b92be576"
+    "body_sha256": "c53b75f019436d789d6d727e09391163255794ec3958707e050616cd39990c98"
   },
   {
     "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxCommands",
@@ -4029,13 +4029,13 @@
     "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxLanguageCommands",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-inbox",
-    "body_sha256": "018cc6170e8e0a2209806e3a936cd0815ce81425f5059162bc0b9ab65c958c06"
+    "body_sha256": "8bd205039b8c5ad0938c8038594c77a7ac28bec84cd72a66697ec457bf87a16a"
   },
   {
     "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxLauncher",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-inbox",
-    "body_sha256": "4eb7464206056621bbf4bdb3664e58a98aafc0982e7cd791aabf20776adbfa67"
+    "body_sha256": "be6ea2406ec8c04e7b530f63e2f4c7613618147627a88f308d981bf42340e694"
   },
   {
     "owner": "internal/serveapp/channel_native.go::*serveChannelDeliveryDispatcher.readNativeInboxQualification",
@@ -4622,7 +4622,7 @@
   {
     "owner": "internal/serveapp/main.go::buildRecoveredSelectedAPICapabilities",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "a2a1a22abe451eeaf2ffd336cbb84afc74fb573589e9a8c9cea37ff905427d42"
   },
   {

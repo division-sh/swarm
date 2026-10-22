@@ -6,12 +6,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func workflowClosedOwnerNativeFixture(t *testing.T, backend string) pipeline.WorkflowClosedOwnerNativeFixtureForTest {
 	t.Helper()
 	selected, closeOwner, _ := openTimerReplayNativeStore(t, backend)
-	native := workflowActivityNativeFixtureFromSelected(t, selected, nil)
+	native := workflowStorageNativeFixtureFromSelectedSource(t, selected, sourceartifactfixture.Artifact())
 	ctx := withLiveGateExecution(correlation.WithRunID(native.Context, "77777777-7777-7777-7777-777777777777"))
 	if err := native.RequireRun(ctx, correlation.RunIDFromContext(ctx)); err != nil {
 		t.Fatal(err)
