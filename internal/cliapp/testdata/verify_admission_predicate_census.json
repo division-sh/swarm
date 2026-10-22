@@ -3825,7 +3825,7 @@
     "owner": "internal/runtime/workflow_validation.go::ValidateWorkflowContractSurface",
     "audit_rows": "A05,A06,A07,A08,A09,A10,A13,A14,A29",
     "proof_families": "P00,P04,P05,P06,P07,P08,P11,P12",
-    "body_sha256": "1ae43dfe10c285f6f5ca4e78e5b11a82ffce82125beaf6af4d24d0448b76610e"
+    "body_sha256": "c370a54ea2456ecf248ff521cc3784ee60edf711516b47e45b4ad94e2aba835e"
   },
   {
     "owner": "internal/runtime/workflow_validation.go::WorkflowContractValidationResult.CredentialSources",
