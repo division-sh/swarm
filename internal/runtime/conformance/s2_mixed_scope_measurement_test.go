@@ -3,7 +3,6 @@ package conformance
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -29,6 +28,7 @@ func measureS2SingleScope(t *testing.T, backend, mode string) {
 	f := newSupplementalServingFixture(t, backend, p)
 	ctx, runID := f.startRun(t, 0)
 	rt := f.runtimes[0]
+	installSupplementalScanObserver(t, f, p, nil)
 	batchCount, liveWorkers := 20, 4
 	const rowsPerBatch, livePerWorker = 25, 25
 	if mode == "batch_only" {
@@ -67,10 +67,7 @@ func measureS2SingleScope(t *testing.T, backend, mode string) {
 				publishNotifyAllChildrenEventAsync(t, ctx, rt, f.sources[0], runID,
 					"portfolio.membership.seeded", map[string]any{
 						"portfolio_id": runID,
-						"account_ids": []map[string]any{{
-							"account_id": fmt.Sprintf("live-%d-%d", worker, item),
-							"eng_roles":  1, "gem_score": 1.0,
-						}},
+						"account_ids":  []any{},
 					})
 				liveDurations[worker*livePerWorker+item] = time.Since(began)
 				if int64(p.snapshot().Finished) < submitted.Load() {
