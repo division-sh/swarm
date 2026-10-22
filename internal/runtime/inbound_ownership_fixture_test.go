@@ -43,7 +43,11 @@ func inboundTransportSource(t testing.TB, targets []InboundTarget, observe bool)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return semanticview.Wrap(bundle)
+	source, err := SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return source
 }
 
 // Keep provider-aware fixture assembly beside its runtime-only caller, not in

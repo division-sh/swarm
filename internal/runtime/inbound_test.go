@@ -2234,7 +2234,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 			configure:  func(*http.Request, []byte) {},
 			wantStatus: http.StatusBadRequest,
 			wantBodyParts: []string{
-				"provider.telegram", "version=0.1.0", "manifest_hash=sha256:",
+				"pack telegram", "version=0.1.0", "manifest_hash=sha256:",
 				`normalized event "inbound.telegram.text_message"`, `path "message.chat.id"`,
 				"number_to_text requires a numeric value",
 			},
@@ -2245,7 +2245,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 			configure:  func(*http.Request, []byte) {},
 			wantStatus: http.StatusBadRequest,
 			wantBodyParts: []string{
-				"provider.telegram", "version=0.1.0", "manifest_hash=sha256:",
+				"pack telegram", "version=0.1.0", "manifest_hash=sha256:",
 				`normalized event "inbound.telegram.text_message"`, `path "message.message_id"`,
 				"projected value violates its declared output schema", "$ must be integer",
 			},
@@ -2256,7 +2256,7 @@ func TestInboundGateway_TelegramRejectsInvalidInputsBeforeMarkerAndPublish(t *te
 			configure:  func(*http.Request, []byte) {},
 			wantStatus: http.StatusBadRequest,
 			wantBodyParts: []string{
-				"provider.telegram", "version=0.1.0", "manifest_hash=sha256:",
+				"pack telegram", "version=0.1.0", "manifest_hash=sha256:",
 				`normalized event "inbound.telegram.text_message"`, `path "message.text"`,
 				"pattern requires text, got json.Number",
 			},
