@@ -11,6 +11,23 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 )
 
+// WorkflowJoinScopeKey projects retained identity without admitting execution.
+func WorkflowJoinScopeKey(activation joinruntime.Activation) (string, error) {
+	if err := activation.Validate(); err != nil {
+		return "", err
+	}
+	ref := activation.JoinRef()
+	entry := ref.StageEntry()
+	if ref.Mode() != timeridentity.JoinRefModeArrival || entry.Empty() || entry.FlowScope != ref.FlowPath() || activation.FireAt.IsZero() {
+		return "", fmt.Errorf("arrival join scope requires its exact lifecycle entry and due coordinate")
+	}
+	command := AdmissionCommand{RunID: entry.RunID, EntityID: entry.EntityID, OwnerKind: OwnerSystem, OwnerID: "workflow-runtime"}
+	if ref.FlowPath() != "." {
+		command.FlowInstance = entry.InstancePath
+	}
+	return command.scopeKey()
+}
+
 // WorkflowJoinAdmission projects an already admitted arrival arm. It neither
 // re-evaluates membership nor calculates a deadline from the current contract.
 func WorkflowJoinAdmission(activation joinruntime.Activation, mode executionmode.Mode) (AdmissionCommand, error) {

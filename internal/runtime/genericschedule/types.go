@@ -336,6 +336,10 @@ func (c AdmissionCommand) ScopeKey() (string, error) {
 	if err := c.Validate(); err != nil {
 		return "", err
 	}
+	return c.scopeKey()
+}
+
+func (c AdmissionCommand) scopeKey() (string, error) {
 	identity := agentidentity.StorageFields{}
 	if !c.AgentIdentity.IsZero() {
 		var err error
