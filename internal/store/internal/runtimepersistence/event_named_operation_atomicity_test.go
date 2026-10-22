@@ -152,6 +152,7 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 func TestCommitSelectedForkEventHostileRepeatPostgres(t *testing.T) {
 	fixture := openPostgresAuthorActivityReceiptFixture(t)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	store := fixture.store.(eventRecordContractStore)
 	req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
 	req.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, req.Commit.Event.Event().RunID(), "worker", "fixture/worker")}

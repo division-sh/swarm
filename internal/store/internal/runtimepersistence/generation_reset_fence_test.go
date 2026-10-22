@@ -19,6 +19,7 @@ func TestGenerationMutationFenceRetainedResetBothStores(t *testing.T) {
 				selected, mutationStore, db, postgres := newFanOutOwnerPairForTest(t, backend)
 				sqlite := !postgres
 				ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 15*time.Second)
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				defer cancel()
 				process := selectedPreparationProcessForTest(t, selected)
 				runA, runB := uuid.NewString(), uuid.NewString()

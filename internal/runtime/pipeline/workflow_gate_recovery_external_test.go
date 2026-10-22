@@ -1218,6 +1218,7 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 
 func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, runID string, at time.Time) string {
 	t.Helper()
+	ctx := originalPipelineFixtureContext(t, testAuthorActivityContext(t, context.Background()), tc.events)
 	snapshot, err := decisioncard.FreezeSnapshot("launch_review", "", nil, map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "operating"}})
 	if err != nil {
 		t.Fatal(err)
@@ -1239,18 +1240,18 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := tc.cards.CreateDecisionCard(testAuthorActivityContext(t, context.Background()), card); err != nil {
+	if err := tc.cards.CreateDecisionCard(ctx, card); err != nil {
 		t.Fatal(err)
 	}
 	eventID := uuid.NewString()
-	if _, err := storetest.DecisionCardDomain(tc.cards).ApplyDecisionForTest(testAuthorActivityContext(t, context.Background()), decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: eventID, Now: at}); err != nil {
+	if _, err := storetest.DecisionCardDomain(tc.cards).ApplyDecisionForTest(ctx, decisioncard.DecideRequest{CardID: card.CardID, Verdict: "approve", PrincipalID: "operator", ObservedContentHash: card.CardContentHash, DecisionEventID: eventID, Now: at}); err != nil {
 		t.Fatal(err)
 	}
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 	stageAnchor := recoveryStageAnchor(t, card)
 	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, stageAnchor.EntityID), stageAnchor.Route.InstancePath), at)
-	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(t, context.Background()), tc.events, evt, nil, runtimepipelineobligation.ScopeSubscribed)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, tc.events, evt, nil, runtimepipelineobligation.ScopeSubscribed)
 	return eventID
 }
 
@@ -1750,7 +1751,8 @@ stages:
 
 func insertGateRecoveryRun(t *testing.T, tc gateRecoverySelectedStore, runID string) {
 	t.Helper()
-	storetest.RequireRun(t, testAuthorActivityContext(t, context.Background()), tc.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	ctx := originalPipelineFixtureContext(t, testAuthorActivityContext(t, context.Background()), tc)
+	storetest.RequireRun(t, ctx, tc.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 }
 
 func assertGateRecoveryActivation(t *testing.T, workflowStore *runtimepipeline.PipelineCoordinator, ctx context.Context, entityID, stage string, status gateruntime.Status) {

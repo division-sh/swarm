@@ -33,6 +33,7 @@ func TestInstanceClockOccurrenceCommitUncertaintyBothStores(t *testing.T) {
 					selected := owner.(selectedScheduleStore)
 					runID := uuid.NewString()
 					ctx := selectedScheduleTestContext(t, runID)
+					ctx = originalStoreFixtureContext(t, ctx, owner)
 					requireRunningRunForTest(t, ctx, selected, runID, time.Now().UTC())
 					registerTestAuthorActivityCatalogForContext(t, owner.(testAuthorActivityCatalogRegistrar), testAuthorActivityContext())
 					publisher, err := newStoreTestEventBus(t, owner.(storeTestDurableEventBusStore))

@@ -12,6 +12,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	swruntime "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/agentintent"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -33,9 +35,11 @@ import (
 	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
@@ -52,7 +56,7 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
 
-	published := rpcCall(t, handler, eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"context-b"}`, "", "idem-context-publish"))
+	published := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"context-b"}`, "", "idem-context-publish"))
 	if published.Error != nil {
 		t.Fatalf("event.publish error = %#v", published.Error)
 	}
@@ -70,7 +74,7 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 	fixture.probeA.requireNone(t, "primary context selected bundle route")
 
 	runID := uuid.NewString()
-	started := rpcCall(t, handler, runStartBodyWithBundleHash(runID, runtimeContextTestBundleHashB, "triage.requested", `{"topic":"context-b-start"}`, "idem-context-start"))
+	started := rpcCallWithPlainRequestContext(t, handler, runStartBodyWithBundleHash(runID, runtimeContextTestBundleHashB, "triage.requested", `{"topic":"context-b-start"}`, "idem-context-start"))
 	if started.Error != nil {
 		t.Fatalf("run.start error = %#v", started.Error)
 	}
@@ -85,7 +89,7 @@ func TestOperatorEventPublishIdempotencyReplayDoesNotRequireLoadedRuntimeContext
 	handler := fixture.handler(t)
 	body := eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"replay-after-unload"}`, "", "idem-context-replay-after-unload")
 
-	first := rpcCall(t, handler, body)
+	first := rpcCallWithPlainRequestContext(t, handler, body)
 	if first.Error != nil {
 		t.Fatalf("first event.publish error = %#v", first.Error)
 	}
@@ -99,7 +103,7 @@ func TestOperatorEventPublishIdempotencyReplayDoesNotRequireLoadedRuntimeContext
 		t.Fatalf("deactivate selected runtime = %#v", deactivated)
 	}
 
-	replay := rpcCall(t, handler, body)
+	replay := rpcCallWithPlainRequestContext(t, handler, body)
 	if replay.Error != nil {
 		t.Fatalf("event.publish replay after runtime unload error = %#v", replay.Error)
 	}
@@ -130,7 +134,7 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 		`{"jsonrpc":"2.0","id":"publish-existing","method":"event.publish","params":{"run_id":%q,"event_name":"triage.requested","payload":{"topic":"existing-run"},"idempotency_key":"idem-existing-context"}}`,
 		runID,
 	)
-	resp := rpcCall(t, handler, body)
+	resp := rpcCallWithPlainRequestContext(t, handler, body)
 	if resp.Error != nil {
 		t.Fatalf("event.publish existing run error = %#v", resp.Error)
 	}
@@ -206,7 +210,7 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunUnavailableSourceStates(
 				},
 			}
 			for _, call := range calls {
-				resp := rpcCall(t, handler, call.body)
+				resp := rpcCallWithPlainRequestContext(t, handler, call.body)
 				assertRuntimeContextBundleError(t, resp, call.method, tt.wantCode, tt.wantCause)
 				if got := countEventRowsByRunID(t, fixture.pg, runID); got != 0 {
 					t.Fatalf("%s event rows for unavailable run = %d, want 0", call.method, got)
@@ -241,7 +245,7 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunRequestedHashMismatch(t 
 			runID := uuid.NewString()
 			seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB)
 
-			resp := rpcCall(t, handler, tt.body(runID))
+			resp := rpcCallWithPlainRequestContext(t, handler, tt.body(runID))
 			assertRuntimeContextBundleError(t, resp, tt.method, BundleMismatchCode, "")
 			if got := countEventRowsByRunID(t, fixture.pg, runID); got != 0 {
 				t.Fatalf("%s event rows for mismatched run = %d, want 0", tt.method, got)
@@ -253,21 +257,21 @@ func TestOperatorRuntimeContextManagerRejectsExistingRunRequestedHashMismatch(t 
 func TestOperatorRuntimeContextManagerRoutesEventReplayByOriginalRunBundle(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
-	ctx := testAuthorActivityContext(context.Background())
+	ctx := originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), fixture.pg)
 	seedActiveOperatorReplayAgent(t, ctx, fixture.pg, "agent-a")
 	chPrimary := subscribeOperatorReplayAgent(t, fixture.busA, "agent-a")
 	defer runtimebustest.Unsubscribe(fixture.busA, "agent-a")
 	chSelected := subscribeOperatorReplayAgent(t, fixture.busB, "agent-a")
 	defer runtimebustest.Unsubscribe(fixture.busB, "agent-a")
 	original := seedReplayableOperatorEvent(t, ctx, fixture.pg, "triage.requested", []string{"agent-a"}, runtimedelivery.StatusDelivered)
-	if _, err := storetest.ReviseRunSource(testAuthorActivityContext(context.Background()), fixture.pg, storerunlifecycle.SourceRevisionRequest{
+	if _, err := storetest.ReviseRunSource(ctx, fixture.pg, storerunlifecycle.SourceRevisionRequest{
 		RunID:  original.RunID,
 		Source: runtimeContextTestSourceFact(runtimeContextTestBundleHashB),
 	}); err != nil {
 		t.Fatalf("revise replay source run bundle: %v", err)
 	}
 
-	resp := rpcCall(t, handler, eventReplayBody(original.EventID, []string{"agent-a"}, "idem-context-event-replay"))
+	resp := rpcCallWithPlainRequestContext(t, handler, eventReplayBody(original.EventID, []string{"agent-a"}, "idem-context-event-replay"))
 	if resp.Error != nil {
 		t.Fatalf("event.replay error = %#v", resp.Error)
 	}
@@ -303,7 +307,7 @@ func TestOperatorRuntimeContextManagerRoutesRunControlByStoredBundle(t *testing.
 	for _, method := range []string{"run.pause", "run.continue", "run.stop"} {
 		runID := uuid.NewString()
 		seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB)
-		resp := rpcCall(t, handler, runControlBody(method, runID, "idem-context-"+method))
+		resp := rpcCallWithPlainRequestContext(t, handler, runControlBody(method, runID, "idem-context-"+method))
 		if resp.Error != nil {
 			t.Fatalf("%s error = %#v", method, resp.Error)
 		}
@@ -340,7 +344,7 @@ func TestOperatorRuntimeContextManagerRoutesAgentDirectiveByStoredBundle(t *test
 			RuntimeContexts:  manager,
 		}),
 	})
-	resp := rpcCall(t, handler, agentDirectiveBodyWithRun("agent-1", runID, "inspect context", "idem-context-agent-directive"))
+	resp := rpcCallWithPlainRequestContext(t, handler, agentDirectiveBodyWithRun("agent-1", runID, "inspect context", "idem-context-agent-directive"))
 	if resp.Error != nil {
 		t.Fatalf("agent.send_directive error = %#v", resp.Error)
 	}
@@ -407,24 +411,24 @@ func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelected
 		Bundle: runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0", BundleHash: runStartTestBundleHash},
 	})})
 
-	begin := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"begin","method":"mailbox.begin_input","params":{"card_id":%q,"verdict":"reject","observed_content_hash":%q,"idempotency_key":"selected-begin"}}`, card.CardID, card.CardContentHash))
+	begin := rpcCallWithPlainRequestContext(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"begin","method":"mailbox.begin_input","params":{"card_id":%q,"verdict":"reject","observed_content_hash":%q,"idempotency_key":"selected-begin"}}`, card.CardID, card.CardContentHash))
 	if begin.Error != nil {
 		t.Fatalf("selected mailbox.begin_input error = %#v", begin.Error)
 	}
 	draftID := stringValue(t, asMap(t, begin.Result)["input_draft_id"], "input_draft_id")
-	cancel := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"cancel","method":"mailbox.cancel_input","params":{"card_id":%q,"input_draft_id":%q,"idempotency_key":"selected-cancel"}}`, card.CardID, draftID))
+	cancel := rpcCallWithPlainRequestContext(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"cancel","method":"mailbox.cancel_input","params":{"card_id":%q,"input_draft_id":%q,"idempotency_key":"selected-cancel"}}`, card.CardID, draftID))
 	if cancel.Error != nil {
 		t.Fatalf("selected mailbox.cancel_input error = %#v", cancel.Error)
 	}
 	deferBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":"defer","method":"mailbox.defer","params":{"card_id":%q,"until":"2026-07-15T14:00:00Z","idempotency_key":"selected-defer"}}`, card.CardID)
-	if deferred := rpcCall(t, handler, deferBody); deferred.Error != nil {
+	if deferred := rpcCallWithPlainRequestContext(t, handler, deferBody); deferred.Error != nil {
 		t.Fatalf("selected mailbox.defer error = %#v", deferred.Error)
 	}
 	decideBody := fmt.Sprintf(`{"jsonrpc":"2.0","id":"decide","method":"mailbox.decide","params":{"card_id":%q,"verdict":"approve","fields":{},"observed_content_hash":%q,"idempotency_key":"selected-decide"}}`, card.CardID, card.CardContentHash)
-	if decided := rpcCall(t, handler, decideBody); decided.Error != nil {
+	if decided := rpcCallWithPlainRequestContext(t, handler, decideBody); decided.Error != nil {
 		t.Fatalf("selected mailbox.decide error = %#v", decided.Error)
 	}
-	replay := rpcCall(t, handler, decideBody)
+	replay := rpcCallWithPlainRequestContext(t, handler, decideBody)
 	if replay.Error != nil || asMap(t, replay.Result)["idempotency_replayed"] != true {
 		t.Fatalf("selected mailbox.decide replay = result %#v error %#v", replay.Result, replay.Error)
 	}
@@ -436,7 +440,7 @@ func TestOperatorRuntimeContextManagerRoutesEveryDecisionMutationThroughSelected
 func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T) {
 	fixture := newOperatorRuntimeContextFixture(t)
 	handler := fixture.handler(t)
-	resp := rpcCall(t, handler, eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashC, "triage.requested", `{"topic":"missing"}`, "", "idem-unloaded-context"))
+	resp := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashC, "triage.requested", `{"topic":"missing"}`, "", "idem-unloaded-context"))
 	if resp.Error == nil {
 		t.Fatal("event.publish unloaded bundle error = nil")
 	}
@@ -461,7 +465,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForUnloadedBundle(t *testing.T)
 			RuntimeContexts:     fixture.manager,
 		}),
 	})
-	forkResp := rpcCall(t, forkHandler, fmt.Sprintf(
+	forkResp := rpcCallWithPlainRequestContext(t, forkHandler, fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-unloaded-context"}}`,
 		runForkTestSourceRunID,
 		runForkTestEventID,
@@ -483,7 +487,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 	}
 	handler := fixture.handler(t)
 
-	explicit := rpcCall(t, handler, eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"deactivated"}`, "", "idem-deactivated-context"))
+	explicit := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithBundleHash("", runtimeContextTestBundleHashB, "triage.requested", `{"topic":"deactivated"}`, "", "idem-deactivated-context"))
 	if explicit.Error == nil {
 		t.Fatal("event.publish deactivated explicit hash error = nil")
 	}
@@ -498,7 +502,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 
 	runID := uuid.NewString()
 	seedRuntimeContextRunBundle(t, fixture.pg, runID, runtimeContextTestBundleHashB)
-	existing := rpcCall(t, handler, eventPublishBodyWithoutBundle(runID, "triage.requested", `{"topic":"existing-deactivated"}`, "", "idem-existing-deactivated-context"))
+	existing := rpcCallWithPlainRequestContext(t, handler, eventPublishBodyWithoutBundle(runID, "triage.requested", `{"topic":"existing-deactivated"}`, "", "idem-existing-deactivated-context"))
 	if existing.Error == nil {
 		t.Fatal("event.publish deactivated run context error = nil")
 	}
@@ -523,7 +527,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForDeactivatedBundle(t *testing
 			RuntimeContexts:     fixture.manager,
 		}),
 	})
-	forkResp := rpcCall(t, forkHandler, fmt.Sprintf(
+	forkResp := rpcCallWithPlainRequestContext(t, forkHandler, fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-deactivated-context"}}`,
 		runForkTestSourceRunID,
 		runForkTestEventID,
@@ -570,7 +574,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 		}),
 	})
 	for _, method := range []string{"runtime.pause", "runtime.resume"} {
-		runtimeResp := rpcCall(t, runtimeHandler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"runtime-control","method":%q,"params":{"idempotency_key":%q}}`, method, "idem-"+method))
+		runtimeResp := rpcCallWithPlainRequestContext(t, runtimeHandler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"runtime-control","method":%q,"params":{"idempotency_key":%q}}`, method, "idem-"+method))
 		if runtimeResp.Error == nil {
 			t.Fatalf("%s error = nil", method)
 		}
@@ -608,7 +612,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 			RuntimeContexts:     fixture.manager,
 		}),
 	})
-	forkResp := rpcCall(t, forkHandler, fmt.Sprintf(
+	forkResp := rpcCallWithPlainRequestContext(t, forkHandler, fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":"fork","method":"run.fork","params":{"source_run_id":%q,"fork_event_id":%q,"bundle_hash":%q,"allow_source_freeze":true,"idempotency_key":"fork-context"}}`,
 		runForkTestSourceRunID,
 		runForkTestEventID,
@@ -637,7 +641,7 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 			RuntimeContexts: fixture.manager,
 		}),
 	})
-	resp := rpcCall(t, agentHandler, `{"jsonrpc":"2.0","id":"agent-control","method":"agent.restart","params":{"agent_id":"agent-1","idempotency_key":"idem-agent.restart"}}`)
+	resp := rpcCallWithPlainRequestContext(t, agentHandler, `{"jsonrpc":"2.0","id":"agent-control","method":"agent.restart","params":{"agent_id":"agent-1","idempotency_key":"idem-agent.restart"}}`)
 	if resp.Error == nil {
 		t.Fatal("agent.restart error = nil")
 	}
@@ -685,14 +689,14 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 			SourceArtifactFact: runtimeContextTestSourceFact(runStartTestBundleHash),
 			BundleIdentity:     runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 			Source:             sourceA,
-			Runtime:            runtimeContextTestRuntime(&swruntime.Runtime{Bus: busA}, runStartTestBundleHash),
+			Runtime:            runtimeContextTestRuntime(t, pg, &swruntime.Runtime{Bus: busA}, runStartTestBundleHash),
 			WorkOwner:          ownerA,
 		},
 		swruntime.BundleContext{
 			SourceArtifactFact: runtimeContextTestSourceFact(runtimeContextTestBundleHashB),
 			BundleIdentity:     runtimecontracts.BundleIdentity{WorkflowName: "review", WorkflowVersion: "1.0.0"},
 			Source:             sourceB,
-			Runtime:            runtimeContextTestRuntime(&swruntime.Runtime{Bus: busB}, runtimeContextTestBundleHashB),
+			Runtime:            runtimeContextTestRuntime(t, pg, &swruntime.Runtime{Bus: busB}, runtimeContextTestBundleHashB),
 			WorkOwner:          ownerB,
 		},
 	)
@@ -748,7 +752,8 @@ func (f operatorRuntimeContextFixture) handler(t *testing.T) *Handler {
 
 func seedRuntimeContextRunBundle(t *testing.T, pg *store.PostgresStore, runID, bundleHash string) {
 	t.Helper()
-	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+	ctx := originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg)
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID:      runID,
 		BundleHash: strings.TrimSpace(bundleHash),
 	})
@@ -756,8 +761,8 @@ func seedRuntimeContextRunBundle(t *testing.T, pg *store.PostgresStore, runID, b
 
 func runtimeContextManagerWithRuntimes(t *testing.T, fixture operatorRuntimeContextFixture, runtimeA, runtimeB *swruntime.Runtime) *swruntime.RuntimeContextManager {
 	t.Helper()
-	runtimeA = runtimeContextTestRuntime(runtimeA, runStartTestBundleHash)
-	runtimeB = runtimeContextTestRuntime(runtimeB, runtimeContextTestBundleHashB)
+	runtimeA = runtimeContextTestRuntime(t, fixture.pg, runtimeA, runStartTestBundleHash)
+	runtimeB = runtimeContextTestRuntime(t, fixture.pg, runtimeB, runtimeContextTestBundleHashB)
 	manager, err := swruntime.NewRuntimeContextManager(fixture.pg,
 		swruntime.BundleContext{
 			SourceArtifactFact: runtimeContextTestSourceFact(runStartTestBundleHash),
@@ -802,17 +807,87 @@ func runtimeContextTestAgentManager(t *testing.T, pg *store.PostgresStore, bus *
 		}
 	})
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), fact), runID)
-	materializeAPITestAgent(t, ctx, pg, manager, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
+	_ = admitAPITestAgent(t, ctx, pg, withAPITestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.id, Model: "regular", ResolvedLLMBackend: "anthropic", Config: json.RawMessage(`{}`)}))
 	return manager
 }
 
-func runtimeContextTestRuntime(rt *swruntime.Runtime, bundleHash string) *swruntime.Runtime {
+func runtimeContextTestRuntime(t *testing.T, selected *store.PostgresStore, rt *swruntime.Runtime, bundleHash string) *swruntime.Runtime {
+	t.Helper()
 	if rt == nil {
 		return nil
 	}
 	rt.ExecutionPosture = executionposture.Live
 	rt.Options.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
 	rt.Options.SourceArtifactFact = runtimeContextTestSourceFact(bundleHash)
+	ctx := testAuthorActivityContextForSource(context.Background(), rt.Options.SourceArtifactFact)
+	process, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, found, err := process.CurrentSourceSet(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		plan, err = agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{
+			{BundleHash: runStartTestBundleHash}, {BundleHash: runtimeContextTestBundleHashB},
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, agenttopology.SourceCoordinate{BundleHash: bundleHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := grant.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.State == startupownership.GrantPrepared {
+		if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if evidence.State != startupownership.GrantAdmitted {
+		if _, err := grant.AdmitExecution(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.Manager == nil {
+		rt.Manager = runtimemanager.NewAgentManagerWithOptions(rt.Bus, nil, runtimemanager.AgentManagerOptions{
+			BaseContext: ctx, SourceArtifactFact: rt.Options.SourceArtifactFact,
+			ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
+			PersistenceRoles: runtimemanager.PersistenceRoles{LifecycleState: selected, LifecycleOutcome: selected},
+		}, selected)
+		t.Cleanup(func() {
+			if err := rt.Manager.Shutdown(); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	if err := rt.InstallStartupGrant(grant); err != nil {
+		t.Fatal(err)
+	}
+	agents, err := selected.LoadAgents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, agent := range agents {
+		if agent.ProcessBinding.BundleHash == bundleHash {
+			agent.Config.Prompt, err = agentintent.IntentOnlyPrompt(agent.Config.Intent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := rt.Manager.MaterializeAdmittedAgentForExecution(runtimecorrelation.WithRunID(ctx, agent.Config.Identity.RunID), agent); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	return rt
 }
 

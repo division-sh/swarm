@@ -349,6 +349,7 @@ func TestFanOutBatchDeliveryMembershipHostileBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)
 			other := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)

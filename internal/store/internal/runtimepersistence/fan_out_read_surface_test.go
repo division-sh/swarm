@@ -187,6 +187,7 @@ func TestFanOutReadLeaseRetryAndRestartBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, restarted, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			base := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 64, time.Now().UTC())
 			reader := restarted.(operatorread.FanOutReader)
 			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "read-lease", BundleHash: base.bundleHash, Now: time.Now().UTC(), Lease: time.Minute})

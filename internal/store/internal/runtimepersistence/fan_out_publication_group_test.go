@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
 )
@@ -33,7 +34,7 @@ func TestFanOutPublicationGroupClaimLifetimeBothStores(t *testing.T) {
 			raw, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, raw, postgres, 3, time.Now().UTC())
 			owner, _, _, _ := grantedFanOutOwnerForTest(t, ctx, raw, fixture)
-			ctx = testAuthorActivityContextForBundle(fixture.bundleHash)
+			ctx = startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(fixture.bundleHash), ctx)
 			key := fanoutobligation.IntentKey{RunID: fixture.runID, TriggeringDeliveryID: fixture.deliveryID, ElementRef: contracts.FanOutElementRef{FlowPath: fixture.flowPath, Family: "fan_out", SemanticPath: fixture.semanticPath}}
 			intent, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "publication-group-test", BundleHash: fixture.bundleHash, Candidate: &key, Now: time.Now().UTC(), Lease: time.Minute})
 			if err != nil || !found {
@@ -176,9 +177,10 @@ func TestFanOutPublicationGroupSettlementBothStores(t *testing.T) {
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 30*time.Second)
 			defer cancel()
 			raw, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, raw)
 			artifact, bundle := fanOutMixedRouteSource(t)
 			fixture := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, raw, postgres, 3, time.Now().UTC().Truncate(time.Microsecond), artifact)
-			ctx = authoractivity.WithScope(testAuthorActivityContextForBundle(fixture.bundleHash), authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fixture.bundleHash))
+			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fixture.bundleHash))
 			ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, fixture.runID), mustStoreTestSourceArtifactFact(fixture.bundleHash))
 			sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}.Normalized()
 			source, err := events.NewStaticFlowRoutingSource(sourceRoute)
@@ -311,9 +313,10 @@ func TestFanOutPublicationGroupBatchBusyReleasesPrefixBothStores(t *testing.T) {
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 15*time.Second)
 			defer cancel()
 			raw, sibling, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, raw)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, raw, postgres, 3, time.Now().UTC())
 			owner, _, _, _ := grantedFanOutOwnerForTest(t, ctx, raw, fixture)
-			ctx = testAuthorActivityContextForBundle(fixture.bundleHash)
+			ctx = startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(fixture.bundleHash), ctx)
 			key := fanoutobligation.IntentKey{RunID: fixture.runID, TriggeringDeliveryID: fixture.deliveryID, ElementRef: contracts.FanOutElementRef{FlowPath: fixture.flowPath, Family: "fan_out", SemanticPath: fixture.semanticPath}}
 			intent, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "group-busy-prefix", BundleHash: fixture.bundleHash, Candidate: &key, Now: time.Now().UTC(), Lease: time.Minute})
 			if err != nil || !found {
