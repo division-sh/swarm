@@ -441,18 +441,3 @@ func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string
 	}
 	return semanticview.Wrap(bundle), projection.ProviderTriggers
 }
-
-func mutateStandingCoordinatorSchema(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, mutate func(*runtimecontracts.FlowSchemaDocument)) {
-	t.Helper()
-	schema, ok := bundle.FlowSchemas["coordinator"]
-	if !ok {
-		t.Fatal("fixture coordinator schema missing")
-	}
-	mutate(&schema)
-	bundle.FlowSchemas["coordinator"] = schema
-	view, ok := bundle.FlowViewByID("coordinator")
-	if !ok {
-		t.Fatal("fixture coordinator flow missing")
-	}
-	view.Schema = schema
-}
