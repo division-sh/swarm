@@ -2,7 +2,7 @@ id: provider.whatsapp.connector
 version: 0.1.0
 platform_version: '>=0.7.0 <0.8.0'
 type: connector
-manifest_hash: sha256:f7fdf6d3620a1b54b5cfe1c0ecd054daba7bd2cc77c9a263f16f55beee2ba1ea
+manifest_hash: sha256:aafbca7fc90239dee7d0342336b49caeba21048f75e6f282aee5a22241dd1078
 provenance:
   source: platform
 capabilities:

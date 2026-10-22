@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -12,14 +13,28 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
+
+func workflowStorageNativeFixtureFromSelectedSource(t *testing.T, selected timerReplaySelectedStore, artifact *sourceartifact.AdmittedSourceArtifact) pipeline.WorkflowActivityNativeFixtureForTest {
+	t.Helper()
+	fixture := workflowActivityNativeFixtureFromSelectedSource(t, selected, nil, artifact)
+	// Workflow storage does not execute activities or acquire a journal grant.
+	fixture.RequireRun = func(ctx context.Context, runID string) error {
+		return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{
+			RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(), Artifact: artifact,
+		})
+	}
+	return fixture
+}
 
 func workflowStorageIdentityNativeFixture(t *testing.T, backend string, wantCommits uint64) pipeline.WorkflowActivityNativeFixtureForTest {
 	t.Helper()
-	selected, _, reopen := openTimerReplayNativeStore(t, backend)
-	fixture := workflowActivityNativeFixtureFromSelected(t, selected, reopen)
+	selected, _, _ := openTimerReplayNativeStore(t, backend)
+	fixture := workflowStorageNativeFixtureFromSelectedSource(t, selected, sourceartifactfixture.Artifact())
 	fixture.Context = withLiveGateExecution(fixture.Context)
 	// The first run also persists the canonical source artifact once.
 	probe := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
@@ -78,8 +93,8 @@ func workflowParentRouteControlNativeFixture(t *testing.T, backend string, sourc
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("parent-route proof requires its exact declared source")
 	}
-	selected, _, reopen := openTimerReplayNativeStore(t, backend)
-	fixture := workflowActivityNativeFixtureFromSelectedSource(t, selected, reopen, bundle.SourceArtifact)
+	selected, _, _ := openTimerReplayNativeStore(t, backend)
+	fixture := workflowStorageNativeFixtureFromSelectedSource(t, selected, bundle.SourceArtifact)
 	fixture.Context = withLiveGateExecution(fixture.Context)
 	probe := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 	t.Cleanup(func() {
