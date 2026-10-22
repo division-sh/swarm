@@ -135,9 +135,10 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 }
 
 func TestSelectedContractForkProjectsUnissuedActivityWithoutAttempt(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
+	fixture := openPostgresAuthorActivityReceiptFixture(t)
+	db := fixture.db
 	ctx := testAuthorActivityContext()
-	pg := admitTestPostgresStore(t, db)
+	pg := fixture.store.(selectedActivityProjectionStore)
 	sourceRunID, entityID, sourceEventID := uuid.NewString(), flowidentity.EntityID("flow-a"), uuid.NewString()
 	activation, err := loopruntime.New(sourceRunID, entityID, "flow-a", "revision", "revision_id", uuid.NewString(), "review", 3, time.Now().UTC())
 	if err != nil {
@@ -355,7 +356,7 @@ func seedDeclaredActivityRequestExecutionSource(t *testing.T, db *sql.DB, runID,
 	}
 }
 
-func materializeSelectedActivityAtCheckpoint(t *testing.T, ctx context.Context, store *PostgresStore, sourceRunID, entityID string) runfork.RunForkMaterialization {
+func materializeSelectedActivityAtCheckpoint(t *testing.T, ctx context.Context, store selectedActivityProjectionStore, sourceRunID, entityID string) runfork.RunForkMaterialization {
 	t.Helper()
 	checkpointID := uuid.NewString()
 	checkpoint := semanticEventRecordFixture(checkpointID, sourceRunID, "review.accepted", eventtest.Producer(events.EventProducerPlatform, "workflow"), []byte(`{}`),
