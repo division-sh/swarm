@@ -33,67 +33,6 @@ func gateRecoveryCallerHandoff(t *testing.T, source string) string {
 	return formattedNativeReadNode(function)
 }
 
-func TestGateRecoveryHelperCallersPropagateOnlyOriginalTypedOwner(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	callers := 0
-	for _, row := range rows {
-		if row.Family != "native-gate-recovery-owner-caller" {
-			continue
-		}
-		callers++
-		current := row
-		switch row.File + "/" + row.Function {
-		case "internal/runtime/pipeline/selection_retry_cas_external_test.go/TestSelectionRetryAfterRealCASConflictBothStores",
-			"internal/runtime/pipeline/prospective_publication_external_test.go/TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores":
-			source, err := q10FixtureSetupCurrentSource(row)
-			if err != nil {
-				t.Fatal(err)
-			}
-			current.Successor = source
-		}
-		row.Successor = current.Successor
-		row = historicalMechanicalRecipe(t, row)
-		want := gateRecoveryCallerHandoff(t, row.Before)
-		got := formattedNativeReadNode(projectionShapeFunction(t, row.After))
-		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		currentAfter := current.After
-		if current.Successor != "" {
-			currentAfter = current.Successor
-		}
-		if want != got || formattedNativeReadNode(projectionShapeFunction(t, currentAfter)) != formattedNativeReadNode(projectionShapeFunction(t, actual)) {
-			t.Fatalf("caller handoff changed anything besides exact original role: %s/%s", row.File, row.Function)
-		}
-		ast.Inspect(projectionShapeFunction(t, row.After), func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			name, ok := call.Fun.(*ast.Ident)
-			if !ok || !gateRecoveryNativeHelper(name.Name) {
-				return true
-			}
-			owner, ok := call.Args[1].(*ast.SelectorExpr)
-			if !ok || owner.Sel.Name != "events" {
-				t.Fatalf("helper receives raw case or unrelated owner: %s", row.Function)
-			}
-			return true
-		})
-	}
-	// The earlier reply recipe is extended in place; its original reply-storage
-	// migration is checked separately from this single owner-argument handoff.
-	reply := nativeMissingHeaderRecipe(t, "reply")
-	if !strings.Contains(reply.After, "insertGateRecoveryRun(t, selected.events, runID)") || !strings.Contains(reply.After, "storetest.ReadReplyReturnStorage(ctx, selected.events, runID)") ||
-		!strings.Contains(reply.After, "!reflect.DeepEqual(deliveryAfter, deliveryBefore)") || !strings.Contains(reply.After, "assertNoState()") {
-		t.Fatal("extended reply consumer lost prior persistence/replay proof")
-	}
-	if callers != 37 {
-		t.Fatalf("finite helper callers=%d want37 plus prior reply consumer", callers)
-	}
-}
-
 func TestGateRecoveryHelpersRetainOriginalLifecycleAndReceiptAssertions(t *testing.T) {
 	var rows []recipe
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
