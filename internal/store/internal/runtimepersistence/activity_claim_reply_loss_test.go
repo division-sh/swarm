@@ -4,8 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/google/uuid"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestWorkflowActivityAttemptStatusDiagnosticDiscardsPartialRowsBothStores(t *testing.T) {

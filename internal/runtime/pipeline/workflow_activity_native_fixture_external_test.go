@@ -130,8 +130,15 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 	}
 	return pipeline.WorkflowActivityNativeFixtureForTest{
 		Persistence: persistence,
-		Context:     ctx,
-		Runs:        selected,
+		CaptureActivityJournal: func() pipeline.ActivityAttemptJournal {
+			journal, err := original.original(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return journal
+		},
+		Context: ctx,
+		Runs:    selected,
 		RequireRun: func(ctx context.Context, runID string) error {
 			if err := storetest.MaterializeRun(ctx, selected, storetest.RunFixture{
 				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(), Artifact: artifact,
@@ -143,10 +150,6 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		},
 		NewCoordinator: func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions) *pipeline.PipelineCoordinator {
 			return coordinator(bus, options, persistence, original)
-		},
-		CleanupFault: func(fault error) (pipeline.WorkflowPersistence, func() int32) {
-			journal, count := cleanupFault(fault)
-			return journalPersistence(journal), count
 		},
 		CleanupFaultCoordinator: func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions, fault error) (*pipeline.PipelineCoordinator, func() int32) {
 			journal, count := cleanupFault(fault)
@@ -257,10 +260,6 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 	}
 }
 
-func TestActivityJournalFixtureTerminalNoopBothStores(t *testing.T) {
-	pipeline.VerifyActivityJournalFixtureTerminalNoopBothStoresForTest(t, workflowActivityNativeFixture)
-}
-
 func TestHumanTaskExpiryUsesClosedSelectedStoreCommitEvidence(t *testing.T) {
 	verifyNativeActivityBothStores(t, pipeline.VerifyHumanTaskExpiryUsesClosedSelectedStoreCommitEvidenceForTest)
 }
@@ -319,10 +318,6 @@ func TestChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossS
 
 func TestActivityTerminalPostCommitErrorPublishesJournaledResultBothStores(t *testing.T) {
 	pipeline.VerifyActivityTerminalPostCommitErrorPublishesJournaledResultBothStoresForTest(t, workflowActivityNativeFixture)
-}
-
-func TestActivityJournalFixtureTerminalAcknowledgementSurvivesPostCommitError(t *testing.T) {
-	pipeline.VerifyActivityJournalFixtureTerminalAcknowledgementSurvivesPostCommitErrorForTest(t, workflowActivityNativeFixture)
 }
 
 func TestLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStores(t *testing.T) {

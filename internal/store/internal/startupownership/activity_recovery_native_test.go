@@ -58,12 +58,12 @@ func TestDisplacedActivityRecoveryRefusesAbsentCutBeforeDomainMutation(t *testin
 				mock.ExpectQuery("SELECT last_sequence FROM author_activity_order").WillReturnRows(sqlmock.NewRows([]string{"last_sequence"}).AddRow(5))
 				mock.ExpectQuery("SELECT request_event_id FROM activity_attempts WHERE execution_mode = 'live'").WillReturnRows(sqlmock.NewRows([]string{"request_event_id"}).AddRow(id))
 				columns := strings.Fields(`request_event_id run_id source_event_id parent_event_id entity_id flow_instance
-					node_id handler_event_key activity_id tool effect_class attempt status success_event failure_event
+					node_id handler_event_key activity_id tool attempt status success_event failure_event
 					result_event_id result_event_type result_payload failure input_hash loop_generation loop_stage reply_context_id execution_mode
 					started_at completed_at updated_at execution_binding live_parents_match`)
 				now := time.Unix(100, 0).UTC()
 				rows := sqlmock.NewRows(columns).AddRow(id, uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), "review",
-					"review/check", "work.received", "check:1", "provider.check", "non_idempotent_write", 1, "started", "check.done", "check.failed",
+					"review/check", "work.received", "check:1", "provider.check", 1, "started", "check.done", "check.failed",
 					nil, nil, nil, nil, "exact-input", "{}", "", "reply-original", "live", now, nil, now, rawBinding, true)
 				mock.ExpectQuery("SELECT .* FROM activity_attempts WHERE request_event_id").WithArgs(id).WillReturnRows(rows)
 				mock.ExpectRollback()

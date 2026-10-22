@@ -2,9 +2,10 @@ package runtimepersistence
 
 import (
 	"context"
-	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/runfork"

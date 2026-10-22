@@ -1560,6 +1560,14 @@ type RunForkSelectedContractRouteRecovery struct {
 var ErrRunForkSourceFreezeConfirmationRequired = errors.New("run fork source freeze confirmation required")
 var ErrRunForkSourceFreezeBusy = errors.New("run fork source has in-flight execution authority")
 
+type RunForkMaterializationConflictError struct {
+	ForkRunID string
+}
+
+func (e *RunForkMaterializationConflictError) Error() string {
+	return fmt.Sprintf("fork point already has materialized fork run %s", e.ForkRunID)
+}
+
 type RunForkSourceFreezeConfirmationError struct {
 	SourceRunID string
 	ForkRunID   string

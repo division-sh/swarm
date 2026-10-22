@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -146,12 +145,8 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 	defer server.Close()
 	selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
 	advanced := os.Getenv("SWARM_SELECTED_CRASH_CUT") == "retained_activity_read_result_consumed"
-	readOnly := advanced || os.Getenv("SWARM_SELECTED_CRASH_CUT") == "retained_activity_read_result_committed"
-	effectClass, forkPolicy, wantCalls := contracts.ActivityEffectClassNonIdempotentWrite, "reuse_recorded_result", int64(0)
-	if readOnly {
-		effectClass, forkPolicy, wantCalls = contracts.ActivityEffectClassReadOnly, "reexecute_read", 1
-	}
-	loaded := selectedContractActivityDeclaredSourceWithResultConsumer(t, server.URL, effectClass, selection, advanced)
+	wantCalls := int64(0)
+	loaded := selectedContractActivityDeclaredSourceWithResultConsumer(t, server.URL, http.MethodPost, selection, advanced)
 	sourceRun, initiatingID, entityID := uuid.NewString(), uuid.NewString(), flowidentity.EntityID("flow_a")
 	at := time.Now().UTC().Truncate(time.Microsecond)
 	activation, err := loopruntime.New(sourceRun, entityID, "flow_a", "revision", "revision_id", uuid.NewString(), "review", 3, at.Add(-time.Minute))
@@ -165,16 +160,15 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 	source := eventtest.StaticFlowRoutingSource("flow_a", "flow_a", entityID)
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow_a", FlowInstance: "flow_a", EntityID: entityID})}
 	request := selectedContractActivityRequestPayload{
-		ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"}, EffectClass: string(effectClass),
-		SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed", RetryMaxAttempts: 1, ForkPolicy: string(forkPolicy),
+		ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
+		SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
 		EntityID: entityID, FlowInstance: "flow_a", NodeID: fact.Owner.Key(), FlowID: "flow_a", HandlerEventKey: "review.requested", SourceEventID: initiatingID,
-		SourceRunID: sourceRun, Attempt: 1, Generation: activation.Generation(), LoopStage: "review"}
-	sourceEvent := seedSelectedContractActivitySource(t, selected, loaded, sourceRun, entityID, requestID, at, route, source, request)
-	seedSelectedContractActivityLoop(t, selected, loaded, sourceEvent, entityID, activation, at)
+		SourceRunID: sourceRun, Generation: activation.Generation(), LoopStage: "review"}
+	fixture := activityForkFixture{owner: owner}
+	sourceEvent := fixture.seedSource(t, loaded, sourceRun, entityID, requestID, at, route, source, request)
+	seedSelectedContractActivityLoop(t, fixture, loaded, sourceEvent, entityID, activation, at)
 	storetest.CaptureSelectedRunForkRevision(t, context.Background(), selected, sourceRun)
-	if !readOnly {
-		seedSelectedContractActivityAttempt(t, selected, fact, activation.Generation(), "succeeded", "flow_a/connector.succeeded", "", "", at)
-	}
+	seedSelectedContractActivityAttempt(t, selected, fact, activation.Generation(), "succeeded", "flow_a/connector.succeeded", "", "", at)
 	t.Logf("ACTIVITY_CRASH_SOURCE_READY source=%s request=%s", sourceRun, requestID)
 	after := func(ctx context.Context, event events.Event, consumed attemptgeneration.Generation) {
 		t.Logf("ACTIVITY_CRASH_PUBLICATION_ACK event=%s type=%s run=%s", event.ID(), event.Type(), event.RunID())
@@ -283,7 +277,6 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 				t.Fatalf("SIGKILL did not preserve unsettled input accounting: %+v %v", receipt, err)
 			}
 			advanced := cut == "retained_activity_read_result_consumed"
-			readOnly := advanced || cut == "retained_activity_read_result_committed"
 			if advanced && (!checkpoint.Activity.ConsumedGeneration.Valid() || checkpoint.Activity.ConsumedGeneration.Attempt != 2) {
 				t.Fatalf("cut lacks exact consumed-result loop advancement: %+v", checkpoint.Activity)
 			}
@@ -291,15 +284,12 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 				requireSelectedActivityConsumedState(t, read, selected, checkpoint, resultID)
 			}
 			wantAttempts, wantCalls := 1, int64(0)
-			if readOnly {
-				wantAttempts, wantCalls = 0, 1
-			}
 			attempts, err := storetest.ReadActivityAttemptStorage(read, selected, checkpoint.ForkRun)
 			if err != nil || len(attempts) != wantAttempts || checkpoint.Activity.ProviderCalls != wantCalls {
 				t.Fatalf("crash lost the exact copied terminal journal: %+v %v", attempts, err)
 			}
 			var journal pipeline.ActivityAttemptRecord
-			if !readOnly {
+			{
 				var found bool
 				journal, found, err = selected.(pipeline.ActivityAttemptJournal).LoadActivityAttempt(read, attempts[0].RequestEventID)
 				if err != nil || !found || journal.Status != pipeline.ActivityAttemptStatusSucceeded || journal.ResultEventID != resultID {
@@ -421,13 +411,11 @@ func proveSelectedActivityResultCrashRecovery(t *testing.T, cut string) {
 			if advanced {
 				requireSelectedActivityConsumedState(t, wait, selected, checkpoint, resultID)
 			}
-			if !readOnly {
+			{
 				retained, found, err := selected.(pipeline.ActivityAttemptJournal).LoadActivityAttempt(wait, journal.RequestEventID)
 				if err != nil || !found || !reflect.DeepEqual(journal, retained) {
 					t.Fatalf("successor replay modified copied journal bytes or clocks: %+v %v", retained, err)
 				}
-			} else if attempts, err := storetest.ReadActivityAttemptStorage(wait, selected, checkpoint.ForkRun); err != nil || len(attempts) != 0 {
-				t.Fatalf("read-only successor fabricated a journal: %+v %v", attempts, err)
 			}
 			t.Logf("ISSUE642_ACTIVITY_SIGKILL_REACTIVATED backend=%s input=%s result=%s old_generation=%d new_generation=%d settlement=%s leases=%d", backend,
 				inputID, resultID, checkpoint.Activity.Selection.Generation, current.SelectedFork.Generation, receipt.Outcome, process.ActiveCount())

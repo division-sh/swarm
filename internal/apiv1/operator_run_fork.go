@@ -528,6 +528,12 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 			"conflicting_request_hash": operationConflict.ConflictingRequestHash,
 		})
 	}
+	var materializationConflict *runfork.RunForkMaterializationConflictError
+	if errors.As(err, &materializationConflict) {
+		return NewInvalidParamsError(map[string]any{
+			"field": "fork_event_id", "reason": materializationConflict.Error(), "fork_run_id": materializationConflict.ForkRunID,
+		})
+	}
 	msg := err.Error()
 	switch {
 	case errors.Is(err, runfork.ErrRunForkSourceFreezeConfirmationRequired):
