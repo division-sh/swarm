@@ -391,6 +391,7 @@ func seedActivityStoryAttempt(t *testing.T, fixture authorActivityReceiptFixture
 		record.Generation, record.LoopStage = activation.Generation(), "review"
 	}
 	if status == "absent" {
+		record.ExecutionBinding = fixture.activityJournal.binding
 		return record
 	}
 	op := "start"

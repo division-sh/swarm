@@ -49,7 +49,8 @@ func TestSelectedContractSourceRejectsRehomedChildStateBothStores(t *testing.T) 
 						ctx := testAuthorActivityContext()
 						sourceRun, child, event := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", owner == "root", true, false, json.RawMessage(`{"value":"unchanged"}`))
 						store := fixture.store.(selectedActivityProjectionStore)
-						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, sourceRun))
+						original := originalActivityCarriageAtPoint(t, store, sourceRun, child.ForkPoint)
+						loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, original)
 						if err != nil || len(loaded) != 1 {
 							t.Fatalf("valid materialized child: count=%d err=%v", len(loaded), err)
 						}
@@ -71,7 +72,7 @@ func TestSelectedContractSourceRejectsRehomedChildStateBothStores(t *testing.T) 
 							t.Fatalf("corrupt exact child row: rows=%d err=%v", rows, err)
 						}
 						before := selectedActivityPersistedSourceEvidence(t, fixture.db, event.ID())
-						loaded, err = store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, sourceRun))
+						loaded, err = store.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, original)
 						if err == nil || !strings.Contains(err.Error(), "exact child route/type") {
 							t.Fatalf("rehomed child supplied source generations: events=%#v err=%v", loaded, err)
 						}
@@ -96,7 +97,7 @@ func TestSelectedContractAbsentSourcePersistenceRejectsContradictoryEnvelopeBoth
 			ctx := testAuthorActivityContext()
 			sourceRun, child, event := seedSelectedActivityProjectionFixture(t, fixture, backend.name == "postgres", true, true, false, json.RawMessage(`{"value":"unchanged"}`))
 			owner := fixture.store.(selectedActivityProjectionStore)
-			original := originalCarriageForRun(t, owner, sourceRun)
+			original := originalActivityCarriageAtPoint(t, owner, sourceRun, child.ForkPoint)
 			if _, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, sourceRun, child.ForkRunID, []string{event.ID()}, original); err != nil {
 				t.Fatalf("typed source control: %v", err)
 			}
@@ -501,22 +502,8 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 	}
 	event := eventtest.ChildForProducerWithRoutingSource(eventID, "platform.activity_requested", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
 		events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: executionmode.Live}, envelope, source, at.Add(time.Second))
-	artifact, found := correlation.SourceArtifactFactFromContext(ctx)
-	if !found {
-		t.Fatal("activity projection requires its exact admitted source")
-	}
-	admission, err := runtimepkg.NewRuntimePayloadAdmitter(nil, declarations, artifact)(ctx, event, flowID)
-	if err != nil {
-		t.Fatalf("admit original activity projection request: %v", err)
-	}
-	event, err = events.ApplyPayloadAdmission(event, admission)
-	if err != nil {
-		t.Fatal(err)
-	}
-	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-	if err != nil {
-		t.Fatal(err)
-	}
+	admitted := admitOriginalActivityRequestFixture(t, ctx, declarations, event, flowID)
+	event = admitted.Event()
 	if _, err := commitAdmittedSemanticEventFixtureOutcome(ctx, fixture.store, admitted, nil, pipelineobligation.ScopeSubscribed); err != nil {
 		t.Fatal(err)
 	}
@@ -782,6 +769,27 @@ func seedSelectedActivitySourceRun(t *testing.T, fixture authorActivityReceiptFi
 		StartedAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
 	})
 	return ctx
+}
+
+func admitOriginalActivityRequestFixture(t *testing.T, ctx context.Context, declarations semanticview.Source, event events.Event, flowID string) events.AdmittedEvent {
+	t.Helper()
+	artifact, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("activity projection requires its exact admitted source")
+	}
+	admission, err := runtimepkg.NewRuntimePayloadAdmitter(nil, declarations, artifact)(ctx, event, flowID)
+	if err != nil {
+		t.Fatalf("admit original activity projection request: %v", err)
+	}
+	event, err = events.ApplyPayloadAdmission(event, admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return admitted
 }
 
 func originalCarriageForRun(t testing.TB, selected any, runID string) semanticview.OriginalLoopCarriage {
