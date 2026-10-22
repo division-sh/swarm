@@ -62,7 +62,7 @@ hard:
 
 func TestCommittedUnitCommandBudgetsAreExactAndDeclared(t *testing.T) {
 	budget, proof := committedTimingPolicies(t)
-	want := map[string]float64{"broad-03": 300, "catalog-required-verify": 360, "conformance-2394-core": 300, "conformance-2394-reporter": 480, "pipeline-rest": 374, "serveapp-i-reporter-all-commit": 780, "persistence-authority-debt-census": 600, "store-runtime-full-03-i-l": 335}
+	want := map[string]float64{"broad-03": 300, "catalog-required-verify": 360, "conformance-2394-core": 300, "conformance-2394-reporter": 480, "pipeline-rest": 374, "serveapp-i-reporter-all-commit": 780, "persistence-authority-debt-census": 600, "store-runtime-full-03": 404, "store-runtime-full-03-i-l": 335}
 	if len(budget.Hard.UnitCommandSeconds) != len(want) {
 		t.Fatalf("unit command budgets = %v, want only named units", budget.Hard.UnitCommandSeconds)
 	}
@@ -174,7 +174,7 @@ func TestStoreRuntimeIToLBudgetBoundariesAndIsolation(t *testing.T) {
 					seconds := 10.0
 					if unit.ID == id {
 						seconds = tc.seconds
-					} else if unit.ID == "store-runtime-full-03" {
+					} else if unit.ID == "store-runtime-full-04" {
 						seconds = tc.siblingSeconds
 					}
 					evidence = append(evidence, timingTestEvidence(plan, unit.ID, AttemptPrimary, seconds))
