@@ -59,6 +59,7 @@ import (
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
@@ -3088,9 +3089,29 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	if err != nil {
 		t.Fatalf("provider-failure activation ACK was refused: %v", err)
 	}
-	_, err = observeSelectedRetainedExecution(t, ctx, selectedContractExecutionOwnerForTest(t, pg), pg, result.Materialization.ForkRunID)
-	if err == nil || !strings.Contains(err.Error(), "fork_selected_contract_agent_delivery_incomplete") {
-		t.Fatalf("retained execution error = %v, want failure after terminal selected-agent delivery", err)
+	wait, cancel := context.WithTimeout(ctx, selectedForkCapabilityProofQuiescenceTimeout)
+	defer cancel()
+	observationTick := time.NewTicker(10 * time.Millisecond)
+	defer observationTick.Stop()
+	for {
+		delivery, readErr := storetest.ReadManagedDeliveryStorage(wait, pg, result.Materialization.ForkRunID, "")
+		if readErr != nil || delivery.AgentDeliveries > 1 || delivery.Delivered != 0 || len(delivery.Failures) > 1 {
+			t.Fatalf("provider-failure delivery: %+v error=%v", delivery, readErr)
+		}
+		if delivery.AgentDeliveries == 1 && len(delivery.Failures) == 1 {
+			if _, err := runtimefailures.UnmarshalEnvelope(delivery.Failures[0].Failure); err != nil {
+				t.Fatalf("terminal provider delivery lost its failure evidence: %v", err)
+			}
+			break
+		}
+		select {
+		case <-wait.Done():
+			t.Fatalf("provider failure did not settle its delivery: %+v cause=%v", delivery, context.Cause(wait))
+		case <-observationTick.C:
+		}
+	}
+	if _, selected, err := selectedContractExecutionOwnerForTest(t, pg).StopSelectedFork(wait, runcontrol.TransitionRequest{RunID: result.Materialization.ForkRunID}); err != nil || !selected {
+		t.Fatalf("cleanup after the terminal provider delivery: selected=%v err=%v", selected, err)
 	}
 	if providerCalls.Load() != 1 {
 		t.Fatalf("provider failure dispatches = %d, want exactly 1", providerCalls.Load())

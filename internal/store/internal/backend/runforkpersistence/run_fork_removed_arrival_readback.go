@@ -96,15 +96,15 @@ func requireRunForkRemovedArrivalArm(ctx context.Context, attempt *mutationproto
 		if !entityType.Valid {
 			return nil
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3 AND entity_type=$4`,
-			entry.RunID, entry.EntityID, instancePath, entityType.String).Scan(&raw); err != nil {
+		var companionID string
+		if err := tx.QueryRowContext(ctx, `SELECT CAST(entity_id AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3 AND entity_type=$4`,
+			entry.RunID, entry.EntityID, instancePath, entityType.String).Scan(&companionID); err != nil {
 			return err
 		}
-		accumulator, err = storeentity.DecodeJSONMap(raw)
-		if err != nil {
-			return err
+		if companionID != entry.EntityID {
+			return fmt.Errorf("removed arrival dependent changed its required field companion")
 		}
-		return requireRunForkRemovedArrivalArmEvidence(accumulator, ref, expected)
+		return nil
 	})
 }
 

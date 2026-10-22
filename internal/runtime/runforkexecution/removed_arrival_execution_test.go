@@ -164,7 +164,7 @@ func TestIssue642RemovedPreparedArrivalRuleSettlesDependentsBothStores(t *testin
 			}
 			header, found, err := owner.ports.workflow.LoadWorkflowInstance(wait, flowidentity.RunScopedFlowInstance{RunID: child, Route: projected.Route()})
 			if err != nil || !found || header.CurrentState != "awaiting" || header.EntityID != projected.EntityID ||
-				header.ParentFlowInstance != child || header.ParentEntityID != child || header.WorkflowVersion != target.Source.WorkflowVersion() {
+				header.ParentFlowInstance != child || header.ParentEntityID != child || header.WorkflowVersion != original.Source.WorkflowVersion() {
 				t.Fatalf("rule removal changed the retained receiver/parent: %+v found=%v err=%v", header, found, err)
 			}
 			buckets, err := joinruntime.PersistedBuckets(header.StateBuckets)

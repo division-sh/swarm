@@ -36,7 +36,7 @@ func TestForkRemovedArrivalNativeReadbackRequiresBothExactStateOwners(t *testing
 	}
 	entry := ref.StageEntry()
 	for _, postgres := range []bool{false, true} {
-		for _, fault := range []string{"exact", "fieldless", "missing_header", "wrong_path", "wrong_template", "missing_type", "wrong_type", "missing_entity", "missing_arm", "read_failure"} {
+		for _, fault := range []string{"exact", "fieldless", "missing_header", "wrong_path", "wrong_template", "missing_type", "wrong_type", "missing_entity", "foreign_entity", "missing_arm", "read_failure"} {
 			t.Run(map[bool]string{false: "sqlite/", true: "postgres/"}[postgres]+fault, func(t *testing.T) {
 				db, mock, err := sqlmock.New()
 				if err != nil {
@@ -59,22 +59,26 @@ func TestForkRemovedArrivalNativeReadbackRequiresBothExactStateOwners(t *testing
 				}
 				rows := sqlmock.NewRows([]string{"instance_path", "flow_template", "entity_type", "accumulator"})
 				if fault != "missing_header" {
-					rows.AddRow(path, template, entityType, string(raw))
+					arm := string(raw)
+					if fault == "missing_arm" {
+						arm = `{}`
+					}
+					rows.AddRow(path, template, entityType, arm)
 				}
 				mock.ExpectQuery(regexp.QuoteMeta(`SELECT instance_path, flow_template, entity_type, accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$2`)).
 					WithArgs(entry.RunID, entry.EntityID).WillReturnRows(rows)
-				if fault == "exact" || fault == "missing_entity" || fault == "missing_arm" || fault == "read_failure" {
-					query := mock.ExpectQuery(regexp.QuoteMeta(`SELECT accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3 AND entity_type=$4`)).
+				if fault == "exact" || fault == "missing_entity" || fault == "foreign_entity" || fault == "read_failure" {
+					query := mock.ExpectQuery(regexp.QuoteMeta(`SELECT CAST(entity_id AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3 AND entity_type=$4`)).
 						WithArgs(entry.RunID, entry.EntityID, path, entityType)
-					state := sqlmock.NewRows([]string{"accumulator"})
+					state := sqlmock.NewRows([]string{"entity_id"})
 					switch fault {
 					case "missing_entity":
-					case "missing_arm":
-						state.AddRow(`{}`)
+					case "foreign_entity":
+						state.AddRow("foreign")
 					case "read_failure":
 						query.WillReturnError(errors.New("original entity read failed"))
 					default:
-						state.AddRow(string(raw))
+						state.AddRow(entry.EntityID)
 					}
 					if fault != "read_failure" {
 						query.WillReturnRows(state)
