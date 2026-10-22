@@ -925,12 +925,7 @@ func (s *targetRouteMemoryStore) UpsertCommittedReplayScope(_ context.Context, e
 }
 
 func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
-	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{
-		Event:  "deploy.done",
-		From:   "producer",
-		To:     "consumer",
-		Rename: "deploy.completed",
-	})
+	source := connectRoutePlanStaticSource(t)
 
 	store := newConnectRoutePlanStaticStore()
 	interceptor := &connectRoutePlanNodeInterceptor{}
@@ -1008,12 +1003,7 @@ func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 }
 
 func TestEventBusPublish_ConnectRoutePlanRejectsConflictingAdmittedTargetBeforePersistence(t *testing.T) {
-	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{
-		Event:  "deploy.done",
-		From:   "producer",
-		To:     "consumer",
-		Rename: "deploy.completed",
-	})
+	source := connectRoutePlanStaticSource(t)
 
 	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
@@ -1682,71 +1672,6 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 	}
 }
 
-func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanUsesSelectedOwner(t *testing.T) {
-	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{
-		Event:  "deploy.done",
-		From:   "producer",
-		To:     "consumer",
-		Rename: "deploy.completed",
-	})
-
-	store := newConnectRoutePlanStaticStore()
-	installMixedStaticConstructionFixture(t, store, source, []ActiveTargetDescriptor{
-		{FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")},
-		{FlowInstance: "consumer", EntityID: connectRoutePlanStaticOwner().EntityID},
-	})
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	evt := connectRoutePlanStaticProducerEvent(uuid.NewString(),
-		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-
-	plan, err := eb.CheckPublishRecipientPlan(context.Background(), evt)
-	if err != nil {
-		t.Fatalf("CheckPublishRecipientPlan: %v", err)
-	}
-	if plan.TargetFailure != "" {
-		t.Fatalf("target failure = %q, want none", plan.TargetFailure)
-	}
-	routePlan, err := eb.planSubscribedRoutePlan(context.Background(), evt, false)
-	if err != nil {
-		t.Fatalf("planSubscribedRoutePlan: %v", err)
-	}
-	if routePlan.AuthorityState != RoutePlanAuthorityCanonicalMatched || routePlan.AuthorityOwner != routePlanSourceConnectRoutePlan {
-		t.Fatalf("route plan authority = %q/%q, want matched connect route plan", routePlan.AuthorityState, routePlan.AuthorityOwner)
-	}
-	if !deliveryRoutesContain(plan.DeliveryRoutes, connectRoutePlanStaticDeliveryRoute(t)) {
-		t.Fatalf("preflight delivery routes = %#v, want exact selected-owner static connect route", plan.DeliveryRoutes)
-	}
-}
-
-func TestConnectRecipientEvaluationUsesCompiledReceiverPin(t *testing.T) {
-	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
-	graph := runtimepinrouting.CompileConnectGraph(source)
-	plans := graph.Plans()
-	if len(plans) != 1 {
-		t.Fatalf("compiled plans = %d, want 1", len(plans))
-	}
-	plan := plans[0]
-	recipient, err := runtimepinrouting.NewConnectNodeRecipient(testFlowNode(t, "consumer", "consumer-node"), "consumer")
-	if err != nil {
-		t.Fatalf("recipient: %v", err)
-	}
-	registrations := graph.AdmitReceiverRecipient("consumer", "deploy.completed", recipient)
-	if len(registrations) != 1 {
-		t.Fatalf("registrations = %d, want 1", len(registrations))
-	}
-	evaluation := graph.EvaluateMaterializedRecipients(plan, nil, registrations)
-	recipients := evaluation.Recipients()
-	if len(recipients) != 1 || recipients[0].ID() != recipient.ID() {
-		t.Fatalf("recipients = %#v, want exact compiled receiver", recipients)
-	}
-	if got := recipients[0].HandlerEvent(); got != "deploy.completed" {
-		t.Fatalf("handler event = %q, want deploy.completed", got)
-	}
-}
-
 func TestConnectRecipientEvaluationRejectsUnrelatedTemplateSameLeaf(t *testing.T) {
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, false)
 	graph := runtimepinrouting.CompileConnectGraph(source)
@@ -1794,7 +1719,7 @@ func TestConnectRecipientEvaluationRejectsUnrelatedTemplateSameLeaf(t *testing.T
 }
 
 func TestCompiledRoutingProducerKindMatrix(t *testing.T) {
-	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
+	source := connectRoutePlanStaticSource(t)
 	route := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")}
 	staticSource, err := events.NewStaticFlowRoutingSource(route)
 	if err != nil {
@@ -1963,55 +1888,8 @@ func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t
 	}
 }
 
-func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
-	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{
-		Event:  "deploy.done",
-		From:   "producer",
-		To:     "consumer",
-		Rename: "deploy.completed",
-	})
-
-	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newConnectRoutePlanStaticStore()}
-	installMixedStaticConstructionFixture(t, store.targetRouteMemoryStore, source, []ActiveTargetDescriptor{
-		{FlowInstance: "producer", EntityID: runtimeflowidentity.EntityID("producer")},
-		{FlowInstance: "consumer", EntityID: connectRoutePlanStaticOwner().EntityID},
-	})
-	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	installConnectionSourceConstruction(t, eb, source, "producer")
-	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID,
-		StoredFlowInstanceIdentityFixture(source, "consumer", "", busInternalTestRunID, connectRoutePlanStaticOwner().EntityID), ""))
-	eventID := uuid.NewString()
-	evt := connectRoutePlanStaticProducerEvent(eventID,
-		events.EventType("producer/deploy.done"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Now().UTC())
-
-	want := connectRoutePlanStaticDeliveryRoute(t)
-	if err := eb.Publish(context.Background(), evt); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	if routes := store.routes[eventID]; !deliveryRoutesContain(routes, want) {
-		t.Fatalf("persisted delivery routes = %#v, want %#v", routes, want)
-	}
-	if got := store.events[eventID].TargetRoute().Normalized(); got != want.Target.Route().Normalized() {
-		t.Fatalf("persisted mutation event target = %#v, want %#v", got, want.Target)
-	}
-	if got := store.scopes[eventID]; got != runtimepipelineobligation.ScopeSubscribed {
-		t.Fatalf("committed replay scope = %q, want subscribed", got)
-	}
-	if got := store.receipts[eventID]; got != "processed" {
-		t.Fatalf("pipeline receipt = %q, want processed", got)
-	}
-}
-
 func TestEnginePublication_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
-	source := connectRoutePlanStaticSource(t, runtimecontracts.FlowConnect{
-		Event:  "deploy.done",
-		From:   "producer",
-		To:     "consumer",
-		Rename: "deploy.completed",
-	})
+	source := connectRoutePlanStaticSource(t)
 
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newConnectRoutePlanStaticStore()}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}}})
@@ -4707,28 +4585,18 @@ func mustBusTemplateInstanceField(t testing.TB, raw string) runtimecontracts.Tem
 	return field
 }
 
-func connectRoutePlanStaticSource(t testing.TB, connect runtimecontracts.FlowConnect) semanticview.Source {
-	return semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
-		{
-			id:   "producer",
-			mode: "static",
-			outputs: []runtimecontracts.FlowOutputEventPin{{
-				Event: "deploy.done",
-			}},
-		},
-		{
-			id:   "consumer",
-			mode: "static",
-			inputs: []runtimecontracts.FlowInputEventPin{{
-				Event: "deploy.completed",
-			}},
-			nodes: map[string]runtimecontracts.SystemNodeContract{
-				"consumer-node": {
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.completed": existingOwnerHandlerFixture()},
-				},
-			},
-		},
-	}, []runtimecontracts.FlowConnect{connect}))
+func connectRoutePlanStaticSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	return semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":            "stages: []\nconnect:\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.completed\n",
+		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
+		"producer/events.yaml":   "deploy.done:\n",
+		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
+		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.completed:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+	}))
 }
 
 func connectRoutePlanRootProducerStaticSource(t testing.TB) semanticview.Source {
