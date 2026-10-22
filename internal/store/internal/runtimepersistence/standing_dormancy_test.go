@@ -14,6 +14,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -39,6 +40,7 @@ func TestDormantStandingQuiescenceDoesNotReplayOnRestorationBothStores(t *testin
 					t.Fatal(err)
 				}
 				workCtx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), created.RunID)
+				workCtx = runtimestartupownership.CarryMutationAuthority(workCtx, ctx)
 				eventID, unsettledID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 				identity := mustTestAgentIdentityForRun(created.RunID, "standing-agent", "standing/ingress")
 				fields := testAgentIdentityStorageFields(t, identity)

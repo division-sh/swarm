@@ -108,7 +108,7 @@ func TestForkRecordedActivityGenerationEvidenceBothStores(t *testing.T) {
 						t.Fatalf("copied result did not consume exact correspondence: %#v found=%v err=%v", copied, found, err)
 					}
 					before = snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-					again, err := store.LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), event.RunID(), child.ForkRunID, []string{event.ID()}, original)
+					again, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, original)
 					if err != nil || !reflect.DeepEqual(loaded, again) || !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
 						t.Fatalf("repeated generation copy was not stable: %v", err)
 					}

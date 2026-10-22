@@ -58,7 +58,7 @@ func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T)
 			sourceB := sourceartifactfixture.FactFor(sourceBArtifact)
 			hashB := sourceB.BundleHash()
 			runA, runB := uuid.NewString(), uuid.NewString()
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runA, BundleHash: hashA})
 			storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runB, Artifact: sourceBArtifact})
 			seedExactFlowInstanceDescriptorOwner(t, ctx, store, runA, uuid.NewString(), "account/a", hashA)
@@ -112,7 +112,7 @@ func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothSto
 			foreignArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  foreign: {}\n"))
 			foreign := sourceartifactfixture.FactFor(foreignArtifact)
 			foreignHash := foreign.BundleHash()
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 			type seeded struct {
 				runID, path, planHash string
 				complete              bool

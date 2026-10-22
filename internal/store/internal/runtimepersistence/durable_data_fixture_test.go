@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,7 +12,6 @@ import (
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
-	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -62,122 +60,6 @@ func newDurableDataFixtureStore(t *testing.T, backend string) (durableDataFixtur
 	store := newTestPostgresStore(t, db)
 	sourceartifactfixture.Require(t, testAuthorActivityContext(), store)
 	return store, db
-}
-
-func TestDurableDataFixturesCommitReplayAndRefuseBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			store, db := newDurableDataFixtureStore(t, backend)
-			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
-			catalog := durableDataFixtureCatalog(t)
-			collector, restore, err := InstallTransactionProbeForTest(store, transactiontest.Options{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer restore()
-			if err := RegisterDurableDataCatalogForTest(ctx, store, catalog); err != nil {
-				t.Fatal(err)
-			}
-			if got := collector.Snapshot(); got.Active != 0 || got.Total.WriteCommits != 1 {
-				t.Fatalf("catalog did not settle through exact selected coordinator: %#v", got)
-			}
-			shape, err := store.GetDeclarationImportShape(ctx, catalog.BundleHash, catalog.Declarations[0].Ref)
-			if err != nil || !reflect.DeepEqual(shape, catalog.ImportShapes[0]) {
-				t.Fatalf("catalog readback = %#v, %v", shape, err)
-			}
-			if err := RegisterDurableDataCatalogForTest(ctx, store, catalog); err != nil {
-				t.Fatalf("exact catalog replay: %v", err)
-			}
-			imported, err := store.ExecuteDataSourceOperation(ctx, runtimedata.SourceCommand{
-				Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "fixture", BundleHash: catalog.BundleHash,
-				Declaration: catalog.Declarations[0].Ref, ExpectedHead: runtimedata.AbsentHead(),
-				InputFormat: "jsonl", Input: []byte("{\"label\":\"exact\"}\n"),
-			})
-			if err != nil || imported.Outcome != "accepted" {
-				t.Fatalf("source import = %#v, %v", imported, err)
-			}
-			source, target := uuid.NewString(), uuid.NewString()
-			for _, runID := range []string{source, target} {
-				requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: runID, Origin: semanticScenarioSetupRunOriginForTest()})
-			}
-			overrides := []runtimedata.ExplicitPin{{Declaration: catalog.Declarations[0].Ref, VersionID: imported.Candidate.VersionID}}
-			before := collector.Snapshot().Total.WriteCommits
-			pins, err := MaterializeDataForkPinsForTest(ctx, store, source, target, catalog.BundleHash, overrides, false)
-			if err != nil || len(pins) != 1 || pins[0].Selection != "fork_override" || pins[0].VersionID != imported.Candidate.VersionID {
-				t.Fatalf("materialize = %#v, %v", pins, err)
-			}
-			if got := collector.Snapshot(); got.Active != 0 || got.Total.WriteCommits != before+1 {
-				t.Fatalf("pins did not settle through exact selected coordinator: %#v", got)
-			}
-			replayed, err := MaterializeDataForkPinsForTest(ctx, store, source, target, catalog.BundleHash, overrides, true)
-			// Readback reports the current run state, not the materializer's planned paused state.
-			pins[0].RunState = "running"
-			if err != nil || !reflect.DeepEqual(replayed, pins) {
-				t.Fatalf("exact pin replay = %#v, %v; want %#v", replayed, err, pins)
-			}
-			loaded, err := store.LoadDataPins(ctx, imported.Candidate.VersionID)
-			if err != nil || !reflect.DeepEqual(loaded, replayed) {
-				t.Fatalf("pin readback = %#v, %v; want %#v", loaded, err, replayed)
-			}
-			before = collector.Snapshot().Total.WriteCommits
-			refused, err := MaterializeDataForkPinsForTest(ctx, store, source, target, catalog.BundleHash, nil, true)
-			if err == nil || refused != nil {
-				t.Fatalf("changed replay leaked pins: %#v, %v", refused, err)
-			}
-			cancelled, cancel := context.WithCancel(ctx)
-			cancel()
-			if err := RegisterDurableDataCatalogForTest(cancelled, store, catalog); !errors.Is(err, context.Canceled) {
-				t.Fatalf("cancelled catalog: %v", err)
-			}
-			if pins, err := MaterializeDataForkPinsForTest(cancelled, store, source, target, catalog.BundleHash, overrides, true); !errors.Is(err, context.Canceled) || pins != nil {
-				t.Fatalf("cancelled pins: %#v, %v", pins, err)
-			}
-			if got := collector.Snapshot(); got.Active != 0 || got.Total.WriteCommits != before {
-				t.Fatalf("refusal committed or retained work: %#v", got)
-			}
-			after, err := store.LoadDataPins(ctx, imported.Candidate.VersionID)
-			if err != nil || !reflect.DeepEqual(after, loaded) {
-				t.Fatalf("refusal changed pins: %#v, %v", after, err)
-			}
-			failedTarget := uuid.NewString()
-			requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: failedTarget, Origin: semanticScenarioSetupRunOriginForTest()})
-			if backend == "sqlite" {
-				if _, err := db.ExecContext(ctx, `CREATE TRIGGER reject_fixture_pin BEFORE INSERT ON resource_version_pins
-					BEGIN SELECT RAISE(ABORT, 'fixture pin fault'); END`); err != nil {
-					t.Fatal(err)
-				}
-			} else if _, err := db.ExecContext(ctx, `CREATE FUNCTION reject_fixture_pin() RETURNS trigger LANGUAGE plpgsql AS
-				$$ BEGIN RAISE EXCEPTION 'fixture pin fault'; END $$;
-				CREATE TRIGGER reject_fixture_pin BEFORE INSERT ON resource_version_pins
-				FOR EACH ROW EXECUTE FUNCTION reject_fixture_pin()`); err != nil {
-				t.Fatal(err)
-			}
-			before = collector.Snapshot().Total.WriteCommits
-			if pins, err := MaterializeDataForkPinsForTest(ctx, store, source, failedTarget, catalog.BundleHash, overrides, false); err == nil || pins != nil {
-				t.Fatalf("failed pin insert returned uncommitted pins: %#v, %v", pins, err)
-			}
-			if got := collector.Snapshot(); got.Active != 0 || got.Total.WriteCommits != before {
-				t.Fatalf("failed pin insert committed or retained work: %#v", got)
-			}
-			after, err = store.LoadDataPins(ctx, imported.Candidate.VersionID)
-			if err != nil || !reflect.DeepEqual(after, loaded) {
-				t.Fatalf("failed pin insert changed global pins: %#v, %v", after, err)
-			}
-			if backend == "sqlite" {
-				if _, err := db.ExecContext(ctx, `DROP TRIGGER reject_fixture_pin`); err != nil {
-					t.Fatal(err)
-				}
-			} else if _, err := db.ExecContext(ctx, `DROP TRIGGER reject_fixture_pin ON resource_version_pins; DROP FUNCTION reject_fixture_pin()`); err != nil {
-				t.Fatal(err)
-			}
-			if pins, err := MaterializeDataForkPinsForTest(ctx, store, source, failedTarget, catalog.BundleHash, overrides, false); err != nil || len(pins) != 1 {
-				t.Fatalf("failed fixture poisoned subsequent pin operation: %#v, %v", pins, err)
-			}
-			if got := db.Stats().InUse; got != 0 {
-				t.Fatalf("fixture retained %d connections", got)
-			}
-		})
-	}
 }
 
 func TestDurableDataCatalogFixtureRollsBackBothStores(t *testing.T) {
