@@ -3696,12 +3696,6 @@ func TestStartSelectedContractAgentRuntimeGatewayDoesNotConsumeAmbientToken(t *t
 	}
 }
 
-type selectedContractCleanupRuntime struct{ runtimellm.NoopRuntime }
-
-func (selectedContractCleanupRuntime) ProviderContract() runtimellm.ProviderContract {
-	return runtimellm.AnthropicAPIProviderContract()
-}
-
 func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -5101,58 +5095,6 @@ func assertSelectedContractRuntimeContainerProof(t *testing.T, proof *SelectedCo
 	}
 }
 
-func assertSelectedContractExecutionCleanup(t *testing.T, db *sql.DB, sourceRunID, forkRunID string) {
-	t.Helper()
-	ctx := context.Background()
-	var sourceStatus string
-	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
-		t.Fatalf("load source status: %v", err)
-	}
-	if sourceStatus != "running" {
-		t.Fatalf("source status = %q, want running", sourceStatus)
-	}
-	var forkRows, forkEvents, forkDeliveries, forkReceipts, forkState, forkMutations, bindingRows, lineageRows, routeRecoveryRows int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`, sourceRunID).Scan(&forkRows); err != nil {
-		t.Fatalf("count fork rows: %v", err)
-	}
-	if forkRunID != "" {
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`, forkRunID).Scan(&forkEvents); err != nil {
-			t.Fatalf("count fork events: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid`, forkRunID).Scan(&forkDeliveries); err != nil {
-			t.Fatalf("count fork deliveries: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts`).Scan(&forkReceipts); err != nil {
-			t.Fatalf("count event receipts after cleanup: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid`, forkRunID).Scan(&forkState); err != nil {
-			t.Fatalf("count fork state: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`, forkRunID).Scan(&forkMutations); err != nil {
-			t.Fatalf("count fork mutations: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_bindings WHERE fork_run_id = $1::uuid`, forkRunID).Scan(&bindingRows); err != nil {
-			t.Fatalf("count fork binding: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`, forkRunID).Scan(&lineageRows); err != nil {
-			t.Fatalf("count fork lineage: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE fork_run_id = $1::uuid`, forkRunID).Scan(&routeRecoveryRows); err != nil {
-			t.Fatalf("count fork route recoveries: %v", err)
-		}
-	}
-	var forkStatus string
-	if forkRunID != "" {
-		if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id=$1::uuid`, forkRunID).Scan(&forkStatus); err != nil {
-			t.Fatalf("load retained fork tombstone: %v", err)
-		}
-	}
-	if forkRows != 1 || forkStatus != "cancelled" || forkEvents != 0 || forkDeliveries != 0 || forkReceipts != 0 || forkState != 0 || forkMutations != 0 || bindingRows != 1 || lineageRows != 0 || routeRecoveryRows != 0 {
-		t.Fatalf("cleanup left fork rows runs:%d events:%d deliveries:%d receipts:%d state:%d mutations:%d bindings:%d lineage:%d route_recoveries:%d",
-			forkRows, forkEvents, forkDeliveries, forkReceipts, forkState, forkMutations, bindingRows, lineageRows, routeRecoveryRows)
-	}
-}
-
 type selectedContractForkTestAgent struct {
 	mu       sync.Mutex
 	cfg      runtimeactors.AgentConfig
@@ -5667,34 +5609,6 @@ func seedSelectedExecutionSourceReplayScopeMarker(t *testing.T, db *sql.DB, sour
 		WHERE committed_replay_scopes.scope = EXCLUDED.scope
 	`, sourceEventID, sourceRunID, string(scope), at); err != nil {
 		t.Fatalf("seed source replay-scope marker: %v", err)
-	}
-}
-
-func seedSelectedExecutionPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRunID, sourceEventID, entityID string, at time.Time) {
-	t.Helper()
-	storetest.InsertExistingRunRootEventRecord(t, context.Background(), db, authoractivityfixture.DialectPostgres, sourceEventID, sourceRunID, "source.after",
-		eventtest.Producer(events.EventProducerExternal, "source-runtime"), []byte(`{}`),
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), at)
-}
-
-func assertNoForkExecutionRowsForRun(t *testing.T, db *sql.DB, forkRunID string) {
-	t.Helper()
-	ctx := context.Background()
-	for name, query := range map[string]string{
-		"events":                                  `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`,
-		"event_deliveries":                        `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid`,
-		"run_fork_selected_contract_executions":   `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE fork_run_id = $1::uuid`,
-		"run_fork_selected_contract_divergences":  `SELECT COUNT(*) FROM run_fork_selected_contract_branch_divergences WHERE fork_run_id = $1::uuid`,
-		"run_fork_selected_contract_route_rows":   `SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE fork_run_id = $1::uuid`,
-		"run_fork_delivery_event_replay_lineages": `SELECT COUNT(*) FROM run_fork_delivery_event_replays WHERE fork_run_id = $1::uuid`,
-	} {
-		var count int
-		if err := db.QueryRowContext(ctx, query, forkRunID).Scan(&count); err != nil {
-			t.Fatalf("count %s rows: %v", name, err)
-		}
-		if count != 0 {
-			t.Fatalf("%s rows for blocked selected fork = %d, want 0", name, count)
-		}
 	}
 }
 
