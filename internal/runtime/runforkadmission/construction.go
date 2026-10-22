@@ -193,6 +193,50 @@ func validateCapturedConstructionBinding(entity runfork.RunForkEntityState, evid
 	return pipeline.ValidateCapturedConstructionModeKey(meta.Mode, evidence.InstanceKey)
 }
 
+// ValidateFixedConstructionTree checks the original source's atomic keyless
+// construction, not future keyed instances or the selected target's new graph.
+func ValidateFixedConstructionTree(original semanticview.Source, plan runfork.RunForkPlan) error {
+	if original == nil {
+		return fmt.Errorf("fixed construction tree requires its original immutable source")
+	}
+	if err := validateFixedConstructionMetadata(plan.Entities); err != nil {
+		return err
+	}
+	instances := make(map[string]flowidentity.Instance, len(plan.Entities))
+	for _, entity := range plan.Entities {
+		receipt, err := fixedConstructionEvidence(plan, entity)
+		if err != nil {
+			return err
+		}
+		if err := receipt.Identity.ValidateConstruction(original, plan.SourceRunID); err != nil {
+			return err
+		}
+		instances[receipt.Identity.InstancePath] = receipt.Identity
+	}
+	for _, instance := range instances {
+		if parent := instance.ParentRoute; !parent.Empty() {
+			owner, present := instances[parent.FlowInstance]
+			if !present || owner.TemplateID != parent.FlowID || owner.EntityID != parent.EntityID {
+				return fmt.Errorf("captured constructor has missing or conflicting exact parent %s", parent.FlowInstance)
+			}
+		}
+		children, err := flowidentity.KeylessChildFlowIDs(original, instance.TemplateID)
+		if err != nil {
+			return err
+		}
+		for _, flowID := range children {
+			expected, err := flowidentity.KeylessChild(original, instance, flowID)
+			if err != nil {
+				return err
+			}
+			if actual, present := instances[expected.InstancePath]; !present || actual != expected {
+				return fmt.Errorf("captured atomic constructor tree lacks exact keyless descendant %s", expected.InstancePath)
+			}
+		}
+	}
+	return nil
+}
+
 func validateFixedConstructionMetadata(entities []runfork.RunForkEntityState) error {
 	seen := make(map[string]struct{}, len(entities))
 	routes := make(map[string]struct{}, len(entities))
