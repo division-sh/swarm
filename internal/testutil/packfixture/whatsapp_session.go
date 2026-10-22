@@ -60,7 +60,6 @@ events:
 	connector := packs.ConnectorPackDescriptor{Identity: packs.MustPackIdentity("provider.whatsapp.fixture_connector", "0.1.0", packs.ManifestHash([]byte("fixture-connector")), packs.TypeConnector, packs.MustPackSource("test", "active-native-input")),
 		Provider: "whatsapp", Tools: map[string]contracts.ToolSchemaEntry{"whatsapp.fixture_send": contracts.MustToolSchemaEntry(
 			contracts.WithToolCategory(contracts.ToolCategoryProviderConnector.String()), contracts.WithToolHandler(contracts.ToolHandlerInProcess),
-			contracts.WithToolEffect(contracts.ActivityEffectClassNonIdempotentWrite),
 			contracts.WithToolSchemas(object(map[string]contracts.ToolInputSchema{"destination": text, "text": presentationText}, "destination", "text"), object(map[string]contracts.ToolInputSchema{"id": text}, "id")),
 			contracts.WithToolInProcessTarget(contracts.ToolInProcessWhatsAppSendText))}}
 	snapshot, err := yamlsource.LoadFile(platformSpecPath)

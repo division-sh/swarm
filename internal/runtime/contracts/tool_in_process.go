@@ -82,9 +82,9 @@ func (e ToolSchemaEntry) validateInProcess() error {
 	if e.value.handler != ToolHandlerInProcess {
 		return fmt.Errorf("in_process target requires handler_type in_process")
 	}
-	category, effect := target.contract()
-	if target.String() == "" || e.value.category != category || e.value.effect != effect {
-		return fmt.Errorf("in_process %s requires category %s and effect_class %s", target.String(), category.String(), effect)
+	category, _ := target.contract()
+	if target.String() == "" || e.value.category != category {
+		return fmt.Errorf("in_process %s requires category %s", target.String(), category.String())
 	}
 	if len(e.value.credentials) != 0 {
 		return fmt.Errorf("in_process %s uses its exact admitted session, not authored credential substitutes", target.String())

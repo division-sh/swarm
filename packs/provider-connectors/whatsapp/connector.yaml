@@ -5,7 +5,6 @@ tools:
     description: send English text through the owned WhatsApp connection
     handler_type: in_process
     in_process: whatsapp.send_text
-    effect_class: non_idempotent_write
     input_schema:
       type: object
       additionalProperties: false

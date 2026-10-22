@@ -79,10 +79,10 @@ func nativeActivityHandoffFixture(t *testing.T) (channelonboarding.CompiledActiv
 	runID := uuid.NewString()
 	intent := engine.ActivityIntent{ActivityID: "native-activity", Tool: private.ToolID(), Input: value,
 		BundleHash: activation.Coordinate.BundleHash, PlanGeneration: private.Generation(),
-		EffectClass: contracts.ActivityEffectClassNonIdempotentWrite, SuccessEvent: "channel.deliver.succeeded", FailureEvent: "channel.deliver.failed",
+		SuccessEvent: "channel.deliver.succeeded", FailureEvent: "channel.deliver.failed",
 		SourceRunID: runID, SourceEventID: uuid.NewString(), ParentEventID: uuid.NewString(), EntityID: identity.NormalizeEntityID(uuid.NewString()),
 		ExecutionFlowID: identity.NormalizeFlowID("."), FlowInstance: runID, Owner: activityidentity.MustAgentOwner("agent"),
-		HandlerEventKey: "channel.deliver", Attempt: 1, ExecutionMode: effects.ExecutionModeLive}
+		HandlerEventKey: "channel.deliver", ExecutionMode: effects.ExecutionModeLive}
 	started := activityAttemptStartRecord(intent, activityInputHash(value))
 	started.StartedAt = time.Now().UTC()
 	return activation, tool, intent, started, input

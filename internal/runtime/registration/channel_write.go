@@ -14,7 +14,7 @@ import (
 )
 
 func ChannelWriteFingerprint(toolID string, tool runtimecontracts.ToolSchemaEntry, input map[string]any) ([]byte, error) {
-	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector {
 		return nil, fmt.Errorf("channel write tool %q has an invalid contract", toolID)
 	}
 	if err := tool.InputSchema().Validate(input); err != nil {
