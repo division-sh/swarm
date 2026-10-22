@@ -393,10 +393,14 @@ func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req 
 			}
 		}
 		var err error
-		if err := s.owner.validateSelectedResetPreparationsTx(txctx, tx, req, false); err != nil {
+		history, err := s.owner.applySelectedResetHistoryTx(txctx, tx, req, false)
+		if err != nil {
 			return err
 		}
 		result, err = storeadmin.ApplyDestructiveResetCleanupInRetainedTransaction(s.owner.destructiveReset, txctx, tx, req)
+		if err == nil {
+			err = attachSelectedResetDisposition(&result, history)
+		}
 		if err == nil && !req.Result.DryRun {
 			err = storeadmin.CommitResetCleanupTx(txctx, tx, req, result, false)
 		}
@@ -591,10 +595,14 @@ func (s *sqliteSession) ApplyDestructiveResetCleanup(ctx context.Context, req ru
 			}
 		}
 		var err error
-		if err := s.owner.validateSelectedResetPreparationsTx(txctx, tx, req, true); err != nil {
+		history, err := s.owner.applySelectedResetHistoryTx(txctx, tx, req, true)
+		if err != nil {
 			return err
 		}
 		result, err = storeadmin.ApplyDestructiveResetSQLiteCleanupInRetainedTransaction(txctx, tx, req)
+		if err == nil {
+			err = attachSelectedResetDisposition(&result, history)
+		}
 		if err == nil && !req.Result.DryRun {
 			err = storeadmin.CommitResetCleanupTx(txctx, tx, req, result, true)
 		}

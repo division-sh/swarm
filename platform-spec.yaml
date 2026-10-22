@@ -16762,6 +16762,11 @@ platform_tables:
       - agent_directive_operations is retained replay/outcome authority rather than ordinary run history. Cleanup must fail closed while prepared, executing, executed, indeterminate, or unexpired succeeded/failed rows exist for a planned run; it may remove succeeded/failed rows only after expires_at.
       - Concrete agents and flow instances are run-owned live execution state and are deleted before their planned runs. Compiled routing law derives from the admitted source artifact, not a persisted instance-route mirror. Retained source artifacts remain governed by the request-scoped retention policy.
       - Agent lifecycle operations, transition facts, diagnostic outbox rows, external-effect operation/attempt evidence, provider-attempt drain evidence, and spend/cost rows are replay, reconciliation, no-redispatch, or audit authority. Their complete run-scoped agent coordinates are immutable snapshots rather than live foreign-key selectors, so they survive deletion of the concrete agent and run. Cleanup rejects nonterminal attempts or pending drains before deleting mutable origin history.
+      - A CLOSED selected execution is detached historical evidence after reset, not a run or binding tombstone. The existing reset owner validates every generation, retired grant version, installed or copied terminal journal, effect operation/attempt, capability surface, completion audit and logical origin under its existing process/reset and generation fences. Pending attempts, unresolved authored cancellation or origins, and contradictory normal-agent drain authority refuse cleanup.
+      - The finite detachment manifest records canonical identities and complete row fingerprints, never a second archive of payloads or source artifacts. Runless preparation probes are preserved without counting another detachment. Canonical execution, grant, journal, effect, turn and surface facts remain unchanged; only their exact live-parent associations are removed. Receipt append, association removal, planned mutable-parent deletion and the reset cleanup acknowledgment commit in one native transaction or all roll back.
+      - Dry-run reports projected preserved/detached rows, association deletions and receipt additions; apply reports their acknowledged disposition, with detached rows a subset of preserved rows. Replaying the same cleanup returns its durable result without another receipt, count or channel notification. A later reset validates existing detached history without detaching it again.
+      - Historical observation requires a positive exact receipt, the original acknowledged cleanup revision and an unchanged complete canonical manifest at one consistent read cut. A later containers_settled or completed reset revision does not invalidate that original acknowledgment. Missing associations are never history; live parents plus a receipt, missing or crossed membership, malformed facts and changed fingerprints refuse. Observation does not reopen bindings, runs, events, source artifacts, packs or host paths.
+      - Exact permanent activated-ACK replay remains available after planned mutable parents and optional source artifacts are deleted. Detached materialized, failed or uncertain observations never become an activated ACK, grant, executable recovery, provider call, feed, delivery or fresh activation. Original live-association and execution-authority fences remain mandatory for every such mutation.
       - Generated node-state tables remain split-preserved under their contract-owned identity. Runtime boot may create a
         missing generated node-state table only after platform-schema acceptance.
       - Schema, auth/idempotency-like, operator/system, authored product config/topology, global timers, mailbox, and spend/cost audit state must survive this internal cleanup slice unless a later gate defines an exact run-scoped owner.
@@ -16781,7 +16786,6 @@ platform_tables:
       delete_by_run_lineage:
         - inbound_publication_events
         - run_fork_delivery_event_replays
-        - run_fork_operations
         - run_fork_selected_contract_executions
         - run_fork_selected_contract_branch_divergences
         - run_fork_selected_contract_route_recoveries
@@ -16797,7 +16801,8 @@ platform_tables:
         - run_fork_revisions
         - run_fork_revision_heads
         - inbound_publications
-        - activity_attempts
+        - activity_attempt_live_parents
+        - agent_turn_live_parents
         - decision_card_route_obligations
         - decision_card_changes
         - decision_card_input_drafts
@@ -16805,7 +16810,6 @@ platform_tables:
         - human_task_continuations
         - decision_cards
         - reply_contexts
-        - agent_turns
         - agent_sessions
         - entity_mutations
         - entity_state
@@ -16820,6 +16824,9 @@ platform_tables:
       retain_directive_authority:
         - agent_directive_operations
       delete_mixed_row_policy:
+        - run_fork_operations
+        - activity_attempts
+        - agent_turns
         - event_delivery_handler_rule_selections
         - event_delivery_attempts
         - event_deliveries
@@ -16883,6 +16890,11 @@ platform_tables:
         - channel_delivery_actions
         - channel_onboarding_teardowns
         - run_fork_selected_contract_runtime_executions
+        - run_fork_selected_contract_execution_live_parents
+        - run_fork_operation_live_parents
+        - run_fork_selected_contract_execution_detachments
+        - run_fork_selected_contract_activity_detachments
+        - run_fork_selected_contract_turn_detachments
         - budget_admission_scopes
         - runtime_effect_budget_reservations
         - managed_agent_capability_surfaces

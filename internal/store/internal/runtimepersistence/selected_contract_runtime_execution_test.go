@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -627,6 +628,17 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	if err := fixture.db.QueryRowContext(ctx, `SELECT fence_generation FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, issued.ExecutionID).Scan(&repeatedFence); err != nil || repeatedFence != fence {
 		t.Fatalf("repeat recovery mutated fence: %d -> %d %v", fence, repeatedFence, err)
 	}
+	// Reach: real recovered terminal/uncertain provider facts remain admissible
+	// as immutable history, without restoring their provider or origin authority.
+	closed := issued
+	closed.State, closed.FenceGeneration = "closed", uint64(fence)
+	beforeHistory := historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite)
+	if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(txctx context.Context, tx *sql.Tx) error {
+		return effectpersistence.RequireClosedSelectedEffectHistoryTx(txctx, tx, closed, fixture.request.Preparation.Coordinates.BundleHash, fixture.sqlite)
+	}); err != nil {
+		t.Fatalf("closed selected provider history rejected original terminal evidence: %v", err)
+	}
+	historicalContextRequireUnchanged(t, beforeHistory, historicalContextDatabaseRows(t, fixture.db, !fixture.sqlite))
 	proveCompletionMembershipCannotBecomeLiveEvidence(t, ctx, fixture, issued.ExecutionID, handles["launched"].Attempt().AttemptID, retainedSurface)
 }
 

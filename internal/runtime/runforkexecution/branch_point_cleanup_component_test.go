@@ -2,16 +2,19 @@ package runforkexecution
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
@@ -27,6 +30,9 @@ func TestSelectedBranchPointCleanupIsolationBothStores(t *testing.T) {
 					proveQ1BranchPointCleanup(t, backend, kind, operation)
 				})
 			}
+			t.Run(backend+"/"+string(kind)+"/reset_source_artifacts", func(t *testing.T) {
+				proveQ1DetachedAcknowledgmentWithoutSource(t, backend, kind)
+			})
 		}
 	}
 }
@@ -61,7 +67,24 @@ func proveQ1BranchPointCleanup(t *testing.T, backend string, kind runfork.RunFor
 	if operation == "discard" {
 		q1DiscardBranchPointComponent(t, ctx, owner, victimAttachment)
 	} else {
-		q1ResetBranchPointComponent(t, ctx, owner, victim)
+		q1ResetBranchPointComponent(t, ctx, owner, []string{victim}, false)
+		permanent := victimAttachment.prepared.forkOperation
+		if permanent == nil {
+			t.Fatal("reset fixture lost its actual permanent operation")
+		}
+		beforeReplay := q1ComponentSnapshot(t, selected)
+		recorded, found, err := selected.LoadForkOperation(ctx, permanent.Actor, permanent.IdempotencyKey, permanent.TransportHash)
+		if err != nil || !found || recorded.Status != runfork.ForkOperationActivated || recorded.ForkRunID != victim ||
+			recorded.Result == nil || recorded.Result.ForkRunID != victim || victimAttachment.materialized.SelectedContractBinding == nil ||
+			recorded.BindingID != victimAttachment.materialized.SelectedContractBinding.BindingID {
+			t.Fatalf("reset lost exact immutable activated acknowledgment: %+v found=%t err=%v", recorded, found, err)
+		}
+		if _, err := victimAttachment.activate(); err == nil {
+			t.Fatal("detached historical acknowledgment restored fresh activation authority")
+		}
+		if !reflect.DeepEqual(beforeReplay, q1ComponentSnapshot(t, selected)) {
+			t.Fatal("detached acknowledgment read or refused fresh activation changed durable state")
+		}
 	}
 	after := q1ComponentSnapshot(t, selected)
 	if count := len(q1ComponentBranchRows(t, after, victim)); count != 0 {
@@ -74,6 +97,52 @@ func proveQ1BranchPointCleanup(t *testing.T, backend string, kind runfork.RunFor
 		if !reflect.DeepEqual(q1ComponentRowsForRun(t, before, preserved), q1ComponentRowsForRun(t, after, preserved)) {
 			t.Fatalf("%s mutated preserved source/sibling %s", operation, preserved)
 		}
+	}
+}
+
+// Reach: the real execution entrypoint returns its immutable operation ACK
+// after source, child, event, binding and admitted source bytes are gone.
+func proveQ1DetachedAcknowledgmentWithoutSource(t *testing.T, backend string, kind runfork.RunForkPointKind) {
+	t.Helper()
+	fixture := newActivityForkFixture(t, backend)
+	owner, selected := fixture.owner, fixture.owner.ports.fork
+	build := q1DeploymentComponentSource
+	if kind == runfork.RunForkPointEvent {
+		build = func(t *testing.T, owner SelectedContractExecutionOwner) (context.Context, SelectedContractExecutionRequest, func()) {
+			return q1GateComponentSource(t, owner, false)
+		}
+	}
+	ctx, request, advance := build(t, owner)
+	attachment := q1StageBranchPointComponent(t, ctx, request)
+	advance()
+	activation, err := attachment.activate()
+	if err != nil || !activation.Activated {
+		t.Fatalf("source-removal control did not activate: %+v err=%v", activation, err)
+	}
+	attachment.close(t)
+	runRows, err := storetest.DecodeSelectedForkSnapshotRows(q1ComponentSnapshot(t, selected)["runs"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runs []string
+	for _, row := range runRows {
+		id, err := row["run_id"].Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		runs = append(runs, id)
+	}
+	q1ResetBranchPointComponent(t, ctx, owner, runs, true)
+	if _, err := selected.(SourceArtifactSelectedContractSourceStore).GetSourceArtifact(ctx, request.ForkOperation.TargetBundleHash); !errors.Is(err, sourceartifact.ErrNotFound) {
+		t.Fatalf("reset did not remove the original source artifact: %v", err)
+	}
+	before := q1ComponentSnapshot(t, selected)
+	replayed, err := ExecuteSelectedContractRunFork(ctx, request)
+	if err != nil || replayed.Materialization.ForkRunID != attachment.materialized.ForkRunID || !replayed.Activation.Activated || replayed.ForkLocalRuntimeContainer != nil {
+		t.Fatalf("detached operation needed a deleted source to replay its recorded ACK: %+v err=%v", replayed, err)
+	}
+	if !reflect.DeepEqual(before, q1ComponentSnapshot(t, selected)) {
+		t.Fatal("source-less operation replay recreated or mutated durable state")
 	}
 }
 
@@ -168,20 +237,30 @@ func TestSelectedBranchPointPermanentUnattachedOperationRefusesDiscardBothStores
 	}
 }
 
-func q1ResetBranchPointComponent(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, victim string) {
+func q1ResetBranchPointComponent(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, runs []string, includeSource bool) {
 	t.Helper()
 	capability, now := owner.ports.contexts.capability, time.Now().UTC().Add(time.Minute)
 	operation, err := capability.AdmitResetOperation(ctx, destructivereset.Request{
 		OperationID: uuid.NewString(), ActorTokenID: "operator-token", RequestHash: "cleanup-guard",
-		RequestedAt: now, IncludeSourceArtifactsSet: true,
+		RequestedAt: now, IncludeSourceArtifacts: includeSource, IncludeSourceArtifactsSet: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	planned := operation
 	planned.Phase, planned.Revision = destructivereset.PhasePlanned, operation.Revision+1
-	planned.Plan = &destructivereset.Result{OperationName: destructivereset.DefaultOperationName, PlannedAt: now,
-		Plan: destructivereset.Plan{CleanupRunSetKnown: true, CleanupRuns: []destructivereset.RunRef{{RunID: victim}}, ActiveRuns: []destructivereset.RunRef{{RunID: victim, Status: "running"}}}}
+	planned.Plan = &destructivereset.Result{OperationName: destructivereset.DefaultOperationName, PlannedAt: now, IncludeSourceArtifacts: includeSource,
+		Plan: destructivereset.Plan{CleanupRunSetKnown: true, IncludeSourceArtifacts: includeSource}}
+	for _, run := range runs {
+		planned.Plan.Plan.CleanupRuns = append(planned.Plan.Plan.CleanupRuns, destructivereset.RunRef{RunID: run})
+		state, err := storetest.ReadRuntimeLogRunSnapshot(ctx, owner.ports.fork, run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.State == runlifecycle.StateRunning {
+			planned.Plan.Plan.ActiveRuns = append(planned.Plan.Plan.ActiveRuns, destructivereset.RunRef{RunID: run, Status: "running"})
+		}
+	}
 	if err := capability.AdvanceResetOperation(ctx, operation, planned); err != nil {
 		t.Fatal(err)
 	}
@@ -198,26 +277,38 @@ func q1ResetBranchPointComponent(t *testing.T, ctx context.Context, owner Select
 	loader := SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: runForkExecutionRepoRoot(t), Store: owner.ports.fork.(SourceArtifactSelectedContractSourceStore), PlatformPackBases: bases,
 	}
-	history, err := owner.PrepareResetHistory(ctx, []string{victim}, loader)
+	history, err := owner.PrepareResetHistory(ctx, runs, loader)
 	if err != nil || len(history) != 1 {
 		t.Fatalf("prepare original selected reset history: cohorts=%d err=%v", len(history), err)
 	}
 	missingResolver := loader
 	missingResolver.PlatformPackBases = nil
-	if _, err := owner.PrepareResetHistory(ctx, []string{victim}, missingResolver); err == nil {
+	if _, err := owner.PrepareResetHistory(ctx, runs, missingResolver); err == nil {
 		t.Fatal("selected reset silently used a default pack resolver")
 	}
 	request := destructivereset.CleanupRequest{
 		OperationID: operation.Request.OperationID, ActorTokenID: operation.Request.ActorTokenID, RequestedAt: now, Result: *planned.Plan, Quiescence: quiesced,
 		SelectedHistory: history,
 	}
+	var topology *agenttopology.SourceSetCommitRequest
+	if includeSource && operation.SourceSet != nil {
+		empty, err := agenttopology.EmptySourceSetPlan()
+		if err != nil {
+			t.Fatal(err)
+		}
+		topology = &agenttopology.SourceSetCommitRequest{OperationID: request.OperationID, ExpectedRevision: operation.SourceSet.Revision, Plan: empty}
+	}
 	before := q1ComponentSnapshot(t, owner.ports.fork)
 	dry := request
 	dry.Result.DryRun = true
-	if _, err := capability.ApplyDestructiveResetCleanup(ctx, dry, nil); err != nil {
+	projected, err := capability.ApplyDestructiveResetCleanup(ctx, dry, nil)
+	if err != nil {
 		t.Fatalf("validate original reset source/cut without mutation: %v", err)
 	}
-	for _, corruption := range []string{"source", "cut", "origin", "duplicate"} {
+	if !projected.SelectedHistory.Projected || len(projected.SelectedHistory.Receipts) != 1 {
+		t.Fatalf("dry-run lost its explicit projected retained disposition: %+v", projected.SelectedHistory)
+	}
+	for _, corruption := range []string{"source", "cut", "origin", "duplicate", "omitted"} {
 		invalid := dry
 		invalid.SelectedHistory = append([]runfork.SelectedResetPreparation(nil), history...)
 		switch corruption {
@@ -229,6 +320,8 @@ func q1ResetBranchPointComponent(t *testing.T, ctx context.Context, owner Select
 			invalid.SelectedHistory[0].Original = semanticview.OriginalLoopCarriage{}
 		case "duplicate":
 			invalid.SelectedHistory = append(invalid.SelectedHistory, history[0])
+		case "omitted":
+			invalid.SelectedHistory = nil
 		}
 		if _, err := capability.ApplyDestructiveResetCleanup(ctx, invalid, nil); err == nil {
 			t.Fatalf("selected reset admitted %s preparation", corruption)
@@ -237,7 +330,32 @@ func q1ResetBranchPointComponent(t *testing.T, ctx context.Context, owner Select
 	if !reflect.DeepEqual(before, q1ComponentSnapshot(t, owner.ports.fork)) {
 		t.Fatal("reset preparation/current-cut controls mutated the application")
 	}
-	if _, err := capability.ApplyDestructiveResetCleanup(ctx, request, nil); err != nil {
+	applied, err := capability.ApplyDestructiveResetCleanup(ctx, request, topology)
+	if err != nil {
 		t.Fatal(err)
+	}
+	projected.SelectedHistory.Projected = false
+	if !reflect.DeepEqual(projected.SelectedHistory, applied.SelectedHistory) {
+		t.Fatalf("projected and acknowledged selected reset dispositions differ: planned=%+v applied=%+v", projected.SelectedHistory, applied.SelectedHistory)
+	}
+	committed := q1ComponentSnapshot(t, owner.ports.fork)
+	replayed, err := capability.ApplyDestructiveResetCleanup(ctx, request, topology)
+	if err != nil {
+		t.Fatalf("cleanup acknowledgment replay failed: %v", err)
+	}
+	// The durable acknowledgment excludes this process-local notification flag;
+	// replay must not issue the original channel-change notification again.
+	expected := applied
+	expected.ChannelSourcesChanged = false
+	if !reflect.DeepEqual(expected, replayed) {
+		t.Fatal("cleanup acknowledgment replay changed its durable disposition or repeated notification")
+	}
+	if after := q1ComponentSnapshot(t, owner.ports.fork); !reflect.DeepEqual(committed, after) {
+		for name, table := range committed {
+			if !reflect.DeepEqual(table, after[name]) {
+				t.Errorf("cleanup acknowledgment replay changed table %s", name)
+			}
+		}
+		t.FailNow()
 	}
 }

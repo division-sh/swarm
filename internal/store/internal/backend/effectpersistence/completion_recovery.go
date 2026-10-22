@@ -70,6 +70,10 @@ type completionRecoveryAttempt struct {
 type CompletionRecoveryAttempt = completionRecoveryAttempt
 
 type completionRecoveryAuthorityEvidence struct {
+	AuthorityKind              string                           `json:"authority_kind,omitempty"`
+	AuthorityID                string                           `json:"authority_id,omitempty"`
+	ExecutionOwner             string                           `json:"execution_owner,omitempty"`
+	FenceGeneration            uint64                           `json:"fence_generation,omitempty"`
 	ProviderRequest            runtimeeffects.CompletionRequest `json:"provider_request"`
 	ExecutionID                string                           `json:"execution_id"`
 	ForkRunID                  string                           `json:"fork_run_id"`

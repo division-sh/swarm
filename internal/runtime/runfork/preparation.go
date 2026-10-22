@@ -231,7 +231,19 @@ func (b SelectedForkPreparation) ValidateSurface(actor SelectedForkPreparedActor
 	if err := surface.ValidateEffective(); err != nil {
 		return err
 	}
-	if !actor.RequiresProbe() || surface.ID != actor.SurfaceID || surface.IntegrityHash != actor.SurfaceIntegrity ||
+	if surface.IntegrityHash != actor.SurfaceIntegrity {
+		return fmt.Errorf("selected preparation receipt differs from its exact bound actor or preparation")
+	}
+	return b.ValidateHistoricalSurface(actor, surface)
+}
+
+// Historical inspection preserves a valid narrower observation without turning
+// it back into an effective startup receipt or execution permission.
+func (b SelectedForkPreparation) ValidateHistoricalSurface(actor SelectedForkPreparedActor, surface managedcapabilities.Surface) error {
+	if err := surface.Validate(); err != nil {
+		return err
+	}
+	if !actor.RequiresProbe() || surface.ID != actor.SurfaceID ||
 		surface.Authority.Kind != managedcapabilities.AuthorityStartupProbe ||
 		surface.Authority.ExecutionKind != managedcapabilities.ExecutionSelectedForkPreparation ||
 		surface.Authority.ExecutionAuthorityID != b.PreparationID || surface.Authority.Preparation == nil ||

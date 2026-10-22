@@ -109,6 +109,17 @@ func bindResolvedForkOperation(operation *runfork.ForkOperationRequest, point ru
 // this before source resolution, but materialization must recheck it under its
 // own transaction before writing child state.
 func lookupForkOperationTx(ctx context.Context, tx *sql.Tx, actor, key, transportHash string, postgres, lock bool) (runfork.ForkOperationRecord, bool, error) {
+	record, found, err := readForkOperationKeyTx(ctx, tx, actor, key, transportHash, postgres, lock)
+	if err != nil || !found {
+		return record, found, err
+	}
+	if err := requireForkLiveParentsTx(ctx, tx, record.Request.OperationID, false); err != nil {
+		return runfork.ForkOperationRecord{}, false, err
+	}
+	return record, true, nil
+}
+
+func readForkOperationKeyTx(ctx context.Context, tx *sql.Tx, actor, key, transportHash string, postgres, lock bool) (runfork.ForkOperationRecord, bool, error) {
 	if tx == nil || strings.TrimSpace(actor) == "" || strings.TrimSpace(key) == "" || strings.TrimSpace(transportHash) == "" {
 		return runfork.ForkOperationRecord{}, false, fmt.Errorf("keyed fork operation lookup requires transaction, actor, key and request hash")
 	}
@@ -128,8 +139,22 @@ func lookupForkOperationTx(ctx context.Context, tx *sql.Tx, actor, key, transpor
 			OriginalRequestHash: record.Request.TransportHash, ConflictingRequestHash: transportHash,
 		}
 	}
-	if err := requireForkLiveParentsTx(ctx, tx, record.Request.OperationID, false); err != nil {
+	return record, true, nil
+}
+
+func observeForkOperationTx(ctx context.Context, tx *sql.Tx, actor, key, hash string, postgres bool) (runfork.ForkOperationRecord, bool, error) {
+	record, found, err := readForkOperationKeyTx(ctx, tx, actor, key, hash, postgres, false)
+	if err != nil || !found {
+		return record, found, err
+	}
+	detached, err := readDetachedSelectedHistoryTx(ctx, tx, record.ForkRunID)
+	if err != nil {
 		return runfork.ForkOperationRecord{}, false, err
+	}
+	if !detached {
+		if err := requireForkLiveParentsTx(ctx, tx, record.Request.OperationID, false); err != nil {
+			return runfork.ForkOperationRecord{}, false, err
+		}
 	}
 	return record, true, nil
 }
@@ -219,7 +244,7 @@ func (s *RunForkPostgresOwner) LoadForkOperation(ctx context.Context, actor, key
 		return runfork.ForkOperationRecord{}, false, err
 	}
 	defer tx.Rollback()
-	return lookupForkOperationTx(ctx, tx, actor, key, transportHash, true, false)
+	return observeForkOperationTx(ctx, tx, actor, key, transportHash, true)
 }
 
 func (s *RunForkSQLiteOwner) LoadForkOperation(ctx context.Context, actor, key, transportHash string) (runfork.ForkOperationRecord, bool, error) {
@@ -233,7 +258,7 @@ func (s *RunForkSQLiteOwner) LoadForkOperation(ctx context.Context, actor, key, 
 	var found bool
 	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
-		record, found, err = lookupForkOperationTx(txctx, tx, actor, key, transportHash, false, false)
+		record, found, err = observeForkOperationTx(txctx, tx, actor, key, transportHash, false)
 		return err
 	})
 	return record, found, err

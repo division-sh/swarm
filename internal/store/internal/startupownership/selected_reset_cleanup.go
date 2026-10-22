@@ -10,21 +10,22 @@ import (
 )
 
 type selectedResetHistory struct {
-	validate func(context.Context, *sql.Tx, destructivereset.CleanupRequest, bool) error
+	apply func(context.Context, *sql.Tx, destructivereset.CleanupRequest, bool) (destructivereset.SelectedHistoryDisposition, error)
 }
 
-func (s *selectedResetHistory) BindSelectedResetHistory(validate func(context.Context, *sql.Tx, destructivereset.CleanupRequest, bool) error) error {
-	if validate == nil || s.validate != nil {
+func (s *selectedResetHistory) BindSelectedResetHistory(apply func(context.Context, *sql.Tx, destructivereset.CleanupRequest, bool) (destructivereset.SelectedHistoryDisposition, error)) error {
+	if apply == nil || s.apply != nil {
 		return errors.New("selected reset history must be bound exactly once")
 	}
-	s.validate = validate
+	s.apply = apply
 	return nil
 }
 
-func (s *selectedResetHistory) validateSelectedResetPreparationsTx(ctx context.Context, tx *sql.Tx, req destructivereset.CleanupRequest, sqlite bool) error {
+func (s *selectedResetHistory) applySelectedResetHistoryTx(ctx context.Context, tx *sql.Tx, req destructivereset.CleanupRequest, sqlite bool) (destructivereset.SelectedHistoryDisposition, error) {
+	var absent destructivereset.SelectedHistoryDisposition
 	runIDs, err := adminpersistence.ValidateDestructiveResetCleanupRequest(req, req.RequestedAt)
 	if err != nil {
-		return err
+		return absent, err
 	}
 	planned := make(map[string]bool, len(runIDs))
 	for _, id := range runIDs {
@@ -34,15 +35,38 @@ func (s *selectedResetHistory) validateSelectedResetPreparationsTx(ctx context.C
 	for _, prepared := range req.SelectedHistory {
 		id := prepared.Binding.ForkRunID
 		if !planned[id] || seen[id] {
-			return errors.New("selected reset preparation repeats or crosses the planned run set")
+			return absent, errors.New("selected reset preparation repeats or crosses the planned run set")
 		}
 		seen[id] = true
 	}
-	if s.validate == nil {
+	if s.apply == nil {
 		if len(req.SelectedHistory) != 0 {
-			return errors.New("selected reset history reader is not composed")
+			return absent, errors.New("selected reset history reader is not composed")
 		}
+		return absent, nil
+	}
+	return s.apply(ctx, tx, req, sqlite)
+}
+
+func attachSelectedResetDisposition(result *destructivereset.CleanupResult, history destructivereset.SelectedHistoryDisposition) error {
+	result.SelectedHistory = history
+	if !history.Projected {
 		return nil
 	}
-	return s.validate(ctx, tx, req, sqlite)
+	for i := range result.Tables {
+		row := &result.Tables[i]
+		if row.Table != "run_fork_operations" && row.Table != "activity_attempts" && row.Table != "agent_turns" {
+			continue
+		}
+		for _, retained := range history.Tables {
+			if retained.Table == row.Table {
+				if row.MatchedRows < retained.PreservedRows {
+					return errors.New("selected dry-run retention exceeds its planned mutable cohort")
+				}
+				row.MatchedRows -= retained.PreservedRows
+				row.PreservedRows += retained.PreservedRows
+			}
+		}
+	}
+	return nil
 }

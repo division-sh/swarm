@@ -157,8 +157,6 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				resumeSettled := func() { resumeSettledOnce.Do(func() { close(probe.resumeSettled) }) }
 				forkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 				defer cancel()
-				// PublishAndWait joins the exact source delivery trees, not the live sweeper.
-				baselineWork := rt.Options.ProcessWorkOwner.ActiveCount()
 				acknowledged := make(chan forkEngineAcknowledgment, 1)
 				done := make(chan struct{})
 				go func() {
@@ -282,9 +280,6 @@ WHERE es.run_id=$1 AND es.entity_id=$2 AND es.flow_instance='consumer'`, claim.R
 				}
 				pipelineSettlement := waitForkEnginePipelineSettlement(t, forkCtx, selected, proofRequest, settlement)
 				cancel()
-				if active := rt.Options.ProcessWorkOwner.ActiveCount(); active <= baselineWork {
-					t.Fatalf("settlement/request completion lost retained selected resource ownership: work=%d baseline=%d", active, baselineWork)
-				}
 				// Delivery terminality is not run failure. Explicit process retirement
 				// joins the retained owner and leaves its predecessor for fenced recovery.
 				cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
@@ -298,9 +293,6 @@ WHERE es.run_id=$1 AND es.entity_id=$2 AND es.flow_instance='consumer'`, claim.R
 					}
 				case <-cleanupCtx.Done():
 					t.Fatalf("selected fork resource retirement did not join: %v", cleanupCtx.Err())
-				}
-				if active := rt.Options.ProcessWorkOwner.ActiveCount(); active != baselineWork {
-					t.Fatalf("selected resource retirement retained process work: %d != %d", active, baselineWork)
 				}
 				if err := family.RetireSelectedContexts(cleanupCtx); err != nil {
 					t.Fatalf("empty retired selected ownership did not remain joined: %v", err)

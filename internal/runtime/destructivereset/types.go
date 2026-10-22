@@ -91,13 +91,38 @@ type CleanupRequest struct {
 }
 
 type CleanupResult struct {
-	OperationName          string               `json:"operation_name"`
-	DryRun                 bool                 `json:"dry_run"`
-	IncludeSourceArtifacts bool                 `json:"include_source_artifacts"`
-	AppliedAt              time.Time            `json:"applied_at"`
-	RunIDs                 []string             `json:"run_ids"`
-	Tables                 []CleanupTableResult `json:"tables"`
-	ChannelSourcesChanged  bool                 `json:"-"`
+	OperationName          string                     `json:"operation_name"`
+	DryRun                 bool                       `json:"dry_run"`
+	IncludeSourceArtifacts bool                       `json:"include_source_artifacts"`
+	AppliedAt              time.Time                  `json:"applied_at"`
+	RunIDs                 []string                   `json:"run_ids"`
+	Tables                 []CleanupTableResult       `json:"tables"`
+	ChannelSourcesChanged  bool                       `json:"-"`
+	SelectedHistory        SelectedHistoryDisposition `json:"selected_history"`
+}
+
+// Projected counts are plans. Only the reset's cleanup acknowledgment certifies
+// the exact receipts; neither representation grants historical execution rights.
+type SelectedHistoryDisposition struct {
+	Projected bool                     `json:"projected"`
+	Receipts  []SelectedHistoryReceipt `json:"receipts"`
+	Tables    []SelectedHistoryTable   `json:"tables"`
+}
+
+type SelectedHistoryReceipt struct {
+	ExecutionID          string `json:"execution_id"`
+	ForkRunID            string `json:"fork_run_id"`
+	ResetRevision        int64  `json:"reset_revision"`
+	ExecutionFingerprint string `json:"execution_fingerprint"`
+	ManifestFingerprint  string `json:"manifest_fingerprint"`
+}
+
+type SelectedHistoryTable struct {
+	Table               string `json:"table"`
+	PreservedRows       int64  `json:"preserved_rows"`
+	DetachedRows        int64  `json:"detached_rows"`
+	DeletedAssociations int64  `json:"deleted_associations"`
+	AddedReceipts       int64  `json:"added_receipts"`
 }
 
 type CleanupTableResult struct {
