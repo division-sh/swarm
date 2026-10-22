@@ -39,14 +39,18 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected stageCompletionJourneyStore
+			var reopen func() stageCompletionJourneyStore
 			var db *sql.DB
 			if backend == "sqlite" {
-				s := storetest.StartSQLiteRuntimeStore(t)
+				s, open := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background())
 				selected, db = s, storetest.DatabaseForTest(s)
+				reopen = func() stageCompletionJourneyStore { return open() }
 			} else {
-				_, opened, cleanup := testutil.StartPostgres(t)
+				dsn, opened, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				selected, db = storetest.AdmitPostgresRuntimeStore(t, opened), opened
+				s, open := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)
+				selected, db = s, opened
+				reopen = func() stageCompletionJourneyStore { return open() }
 			}
 			bundle := exactStageCompletionJourneyBundle(t)
 			source := semanticview.Wrap(bundle)
@@ -79,7 +83,8 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			stageCompletionWaitForDelivery(t, db, backend, runID, "flow.started")
 			stageCompletionAssertStoredState(t, selected, runID, "ready")
 
-			recovered, recoveredSource := stageCompletionRehydrate(t, selected, db, backend, runID, fact.BundleHash())
+			recovered := reopen()
+			recoveredSource := stageCompletionRehydrate(t, recovered, runID, fact.BundleHash())
 			stageCompletionAssertStoredState(t, recovered, runID, "ready")
 			catalog := stageCompletionCatalog(t, recoveredSource)
 			ctx := testAuthorActivityContextForSource(context.Background(), fact)
@@ -98,7 +103,8 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			}
 			stageCompletionWaitForDelivery(t, db, backend, runID, "flow.finish")
 			stageCompletionAssertStoredState(t, selected, runID, "Ready")
-			recovered, recoveredSource = stageCompletionRehydrate(t, selected, db, backend, runID, fact.BundleHash())
+			recovered = reopen()
+			recoveredSource = stageCompletionRehydrate(t, recovered, runID, fact.BundleHash())
 			stageCompletionAssertStoredState(t, recovered, runID, "Ready")
 			catalog = stageCompletionCatalog(t, recoveredSource)
 			if _, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
@@ -124,7 +130,7 @@ func exactStageCompletionJourneyBundle(t *testing.T) *runtimecontracts.WorkflowC
 	return bundle
 }
 
-func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore, db *sql.DB, backend, runID, hash string) (stageCompletionJourneyStore, semanticview.Source) {
+func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore, runID, hash string) semanticview.Source {
 	t.Helper()
 	record, err := selected.GetSourceArtifact(context.Background(), hash)
 	if err != nil {
@@ -146,10 +152,7 @@ func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore
 	if err != nil {
 		t.Fatalf("recompile retained selected source: %v", err)
 	}
-	if backend == "sqlite" {
-		return storetest.AdmitSQLiteRuntimeStore(t, db), semanticview.Wrap(bundle)
-	}
-	return storetest.AdmitPostgresRuntimeStore(t, db), semanticview.Wrap(bundle)
+	return semanticview.Wrap(bundle)
 }
 
 func stageCompletionCatalog(t *testing.T, source semanticview.Source) runtimerunlifecycle.FinalCatalog {
