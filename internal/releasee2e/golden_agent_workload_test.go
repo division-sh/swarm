@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -1129,6 +1128,16 @@ func goldenActiveWork(quiescence goldenQuiescence) int {
 	return quiescence.ActiveDeliveries + quiescence.UnsettledPipelineEvents + quiescence.FanOutOwed + quiescence.DueTimers + quiescence.ActiveSessionLeases
 }
 
+type goldenRecoveryFailure struct {
+	SchemaVersion string `json:"schema_version"`
+	Class         string `json:"class"`
+	Component     string `json:"component"`
+	Operation     string `json:"operation"`
+	Detail        struct {
+		Code string `json:"code"`
+	} `json:"detail"`
+}
+
 func replayGoldenInterruptedTurns(t *testing.T, process *releaseServeProcess, runID string, deadline time.Duration, binary, project string, env []string) map[string]goldenEvent {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
@@ -1156,19 +1165,17 @@ func replayGoldenInterruptedTurns(t *testing.T, process *releaseServeProcess, ru
 		}
 		delivery := event.Deliveries[0]
 		var deadLetter struct {
-			DeliveryID string            `json:"delivery_id"`
-			Failure    failures.Envelope `json:"failure"`
+			DeliveryID string                `json:"delivery_id"`
+			Failure    goldenRecoveryFailure `json:"failure"`
 		}
 		if err := json.Unmarshal(event.DeadLetters[0], &deadLetter); err != nil {
-			t.Fatal(err)
-		}
-		if err := failures.ValidateEnvelope(deadLetter.Failure); err != nil {
 			t.Fatal(err)
 		}
 		if !strings.HasSuffix(event.EventName, "/candidate.work.requested") || delivery.SubscriberType != "agent" ||
 			delivery.SubscriberID != "candidate-worker" || delivery.Status != "dead_letter" || !delivery.Terminal ||
 			delivery.ReasonCode != "effect_recovery_outcome_unconfirmed" || deadLetter.DeliveryID != delivery.DeliveryID ||
-			deadLetter.Failure.Class != failures.ClassOutcomeUncertain || deadLetter.Failure.Operation != "startup_reconcile" ||
+			deadLetter.Failure.SchemaVersion != "platform.failure/v1" || deadLetter.Failure.Class != "platform.outcome_uncertain" ||
+			deadLetter.Failure.Component != "external-effects" || deadLetter.Failure.Operation != "startup_reconcile" ||
 			deadLetter.Failure.Detail.Code != "effect_recovery_outcome_unconfirmed" {
 			t.Fatalf("interrupted turn did not retain the ruled recovery failure: %#v / %#v", event, deadLetter)
 		}
@@ -1889,7 +1896,9 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 			t.Errorf("conversation %s turn = %#v, want interrupted=%t", conversation.SessionID, turns[0], expectation.interrupted)
 		}
 		if expectation.interrupted && turns[0].Failure != nil &&
-			(turns[0].Failure.Class != failures.ClassOutcomeUncertain || turns[0].Failure.Detail.Code != "effect_recovery_outcome_unconfirmed") {
+			(turns[0].Failure.SchemaVersion != "platform.failure/v1" || turns[0].Failure.Class != "platform.outcome_uncertain" ||
+				turns[0].Failure.Component != "external-effects" || turns[0].Failure.Operation != "startup_reconcile" ||
+				turns[0].Failure.Detail.Code != "effect_recovery_outcome_unconfirmed") {
 			t.Errorf("interrupted conversation lost its canonical recovery failure: %#v", turns[0])
 		}
 		seenTriggers[turns[0].TriggerEventID]++
@@ -1931,13 +1940,13 @@ func listGoldenConversations(t *testing.T, ctx context.Context, rpc *releaseRPCC
 }
 
 type goldenTurn struct {
-	TurnID           string             `json:"turn_id"`
-	ExecutionMode    string             `json:"execution_mode"`
-	Ordinal          int                `json:"ordinal"`
-	TriggerEventID   string             `json:"trigger_event_id"`
-	TriggerEventType string             `json:"trigger_event_type"`
-	ParseOK          bool               `json:"parse_ok"`
-	Failure          *failures.Envelope `json:"failure"`
+	TurnID           string                 `json:"turn_id"`
+	ExecutionMode    string                 `json:"execution_mode"`
+	Ordinal          int                    `json:"ordinal"`
+	TriggerEventID   string                 `json:"trigger_event_id"`
+	TriggerEventType string                 `json:"trigger_event_type"`
+	ParseOK          bool                   `json:"parse_ok"`
+	Failure          *goldenRecoveryFailure `json:"failure"`
 }
 
 func listGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient, sessionID string) []goldenTurn {
