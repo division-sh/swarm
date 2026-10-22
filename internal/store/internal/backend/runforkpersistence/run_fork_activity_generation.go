@@ -5,7 +5,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -275,6 +277,16 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 		return event, err
 	}
 	evidence, err := loadRunForkActivityAttemptEvidence(ctx, tx, event.SourceEventID)
+	// An unissued request has neither an attempt nor issued work at the cut.
+	if errors.Is(err, sql.ErrNoRows) &&
+		!slices.ContainsFunc(admission.snapshot.Deliveries, func(delivery runForkRevisionDelivery) bool {
+			return delivery.Snapshot.EventID == event.SourceEventID
+		}) &&
+		!slices.ContainsFunc(admission.snapshot.Receipts, func(receipt runForkRevisionReceipt) bool {
+			return receipt.EventID == event.SourceEventID
+		}) {
+		return event, nil
+	}
 	if err != nil {
 		return event, fmt.Errorf("approved proposed effect %s cannot authorize a fork-local call: %w", event.SourceEventID, err)
 	}
@@ -454,7 +466,7 @@ func loadRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, request
 		&evidence.SourceRequest.ActivityID, &evidence.SourceRequest.Tool, &evidence.Attempt,
 		&evidence.SourceRequest.SuccessEvent, &evidence.SourceRequest.FailureEvent, &evidence.ResultEventID, &generation, &evidence.SourceRequest.LoopStage)
 	if err == sql.ErrNoRows {
-		return evidence, fmt.Errorf("activity request %s has no recorded attempt evidence for fork reuse", requestEventID)
+		return evidence, fmt.Errorf("activity request %s has no recorded attempt evidence for fork reuse: %w", requestEventID, err)
 	}
 	if err != nil {
 		return evidence, fmt.Errorf("load activity request %s fork evidence: %w", requestEventID, err)
