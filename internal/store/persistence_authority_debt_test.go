@@ -872,6 +872,10 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		len(authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites)) == 0 {
 		return nil
 	}
+	if base == debtProcessLeaseCollectorFrom && trusted.Collector == base && current == debtProcessLeaseCollectorTo && head.Collector == current &&
+		debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil
+	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {
 		if base == debtFixtureRoleCollectorFrom {
 			if trusted.Collector == base && debtSitesEqual(head.Sites, trusted.Sites) {
