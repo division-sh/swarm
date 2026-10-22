@@ -84,6 +84,7 @@ func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
 		{"mailbox", "list"},
 		{"mailbox", "view"},
 		{"mailbox", "defer"},
+		{"mailbox", "decide"},
 		{"channel", "connect"},
 		{"channel", "reconnect"},
 		{"channel", "rebind"},
