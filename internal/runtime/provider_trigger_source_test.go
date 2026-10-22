@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packmodel"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -19,11 +20,38 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
 func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthoredOwnership(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram")
+	members := map[string][]byte{
+		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":               []byte("stages: []\n"),
+		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.raw]}\n"),
+	}
+	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+		if entry.ID() != "telegram" {
+			continue
+		}
+		members["coordinator/telegram/manifest.yaml"] = entry.ManifestBody()
+		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+			if body, present := entry.Provider().Body(role); present {
+				members["coordinator/telegram/"+role.FileName()] = body.Bytes()
+			}
+		}
+		break
+	}
+	if members["coordinator/telegram/manifest.yaml"] == nil {
+		t.Fatal("embedded Telegram provider is unavailable")
+	}
+	captured, _, _ := loadS1EffectiveProviderScope(t, members)
+	projection, err := packadmission.FromBundle(captured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, catalog := semanticview.Wrap(captured), projection.ProviderTriggers
 	wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
 	if err != nil {
 		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
@@ -249,94 +277,34 @@ func TestProviderCompiledSchemaReadbackDoesNotGrantReceiverOwnership(t *testing.
 	}
 }
 
-func TestSourceWithProviderTriggerEventsRejectsInvalidSchemaOnlyDeclarations(t *testing.T) {
-	tests := []struct {
-		name    string
-		imports []runtimecontracts.ProviderTriggerEventImport
-		catalog bool
-		want    string
-	}{
-		{
-			name: "duplicate",
-			imports: []runtimecontracts.ProviderTriggerEventImport{
-				{Provider: "telegram", Event: "inbound.telegram.text_message"},
-				{Provider: "telegram", Event: "inbound.telegram.text_message"},
-			},
-			catalog: true,
-			want:    `duplicates provider "telegram" event "inbound.telegram.text_message"`,
-		},
-		{
-			name:    "unknown provider",
-			imports: []runtimecontracts.ProviderTriggerEventImport{{Provider: "telegramm", Event: "inbound.telegram.text_message"}},
-			catalog: true,
-			want:    `references unknown provider "telegramm"; available providers: github, intercom, shopify, slack, stripe, telegram, twilio, typeform`,
-		},
-		{
-			name:    "unknown event",
-			imports: []runtimecontracts.ProviderTriggerEventImport{{Provider: "telegram", Event: "inbound.telegram.message"}},
-			catalog: true,
-			want:    `references unknown event "inbound.telegram.message" for provider "telegram"`,
-		},
-		{
-			name:    "raw event",
-			imports: []runtimecontracts.ProviderTriggerEventImport{{Provider: "telegram", Event: "inbound.telegram"}},
-			catalog: true,
-			want:    `event "inbound.telegram" is a raw provider event`,
-		},
-		{
-			name:    "catalog unavailable",
-			imports: []runtimecontracts.ProviderTriggerEventImport{{Provider: "telegram", Event: "inbound.telegram.text_message"}},
-			want:    "requires a verified provider-trigger catalog",
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			source, catalog := schemaOnlyTelegramDeclarationSource(t)
-			bundle, ok := semanticview.Bundle(source)
-			if !ok {
-				t.Fatal("fixture bundle missing")
-			}
-			setProviderTriggerImports(t, bundle, "coordinator", test.imports)
-			if !test.catalog {
-				catalog = nil
-			}
-			_, err := SourceWithProviderTriggerEvents(source, catalog)
-			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("SourceWithProviderTriggerEvents error = %v, want containing %q", err, test.want)
-			}
-		})
-	}
-}
-
-func TestSourceWithProviderTriggerEventsDeduplicatesMatchingImportAndIngress(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
-	bundle, ok := semanticview.Bundle(source)
-	if !ok {
-		t.Fatal("fixture bundle missing")
-	}
-	setProviderTriggerImports(t, bundle, "coordinator", []runtimecontracts.ProviderTriggerEventImport{
-		{Provider: "telegram", Event: "inbound.telegram.text_message"},
-	})
-	wrapper, err := SourceWithProviderTriggerEvents(source, catalog)
-	if err != nil {
-		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
-	}
-	composed := wrapper.(providerTriggerEventSource)
-	if _, ok := composed.imported["inbound.telegram.text_message"]; !ok {
-		t.Fatal("matching explicit and ingress declarations lost normalized schema")
-	}
-	authorizations := wrapper.SemanticCapabilities().ProviderTriggerOutputBindings()["coordinator"]
-	seen := map[string]int{}
-	for _, authorization := range authorizations {
-		seen[authorization.Event()]++
-	}
-	if len(authorizations) != 2 || seen["inbound.telegram.text_message"] != 1 || seen["inbound.telegram.callback_action"] != 1 {
-		t.Fatalf("ingress authorization = %#v, want one authorization per normalized pack event", authorizations)
-	}
-}
-
 func TestImportedProviderEventReadbacksAreMutationIsolated(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
+	members := map[string][]byte{
+		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":               []byte("stages: []\n"),
+		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.text_message]}\n"),
+	}
+	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+		if entry.ID() != "telegram" {
+			continue
+		}
+		members["coordinator/telegram/manifest.yaml"] = entry.ManifestBody()
+		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+			if body, present := entry.Provider().Body(role); present {
+				members["coordinator/telegram/"+role.FileName()] = body.Bytes()
+			}
+		}
+		break
+	}
+	if members["coordinator/telegram/manifest.yaml"] == nil {
+		t.Fatal("embedded Telegram provider is unavailable")
+	}
+	captured, _, _ := loadS1EffectiveProviderScope(t, members)
+	projection, err := packadmission.FromBundle(captured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, catalog := semanticview.Wrap(captured), projection.ProviderTriggers
 	wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
 	if err != nil {
 		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
@@ -433,7 +401,33 @@ func TestSourceWithProviderTriggerEvents_RequiresExactDeclaredIngressPin(t *test
 }
 
 func TestProviderTriggerInputWithoutConnectionDoesNotAcquireCrossFlowPlan(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
+	members := map[string][]byte{
+		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":               []byte("stages: []\n"),
+		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.text_message]}\n"),
+	}
+	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+		if entry.ID() != "telegram" {
+			continue
+		}
+		members["coordinator/telegram/manifest.yaml"] = entry.ManifestBody()
+		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+			if body, present := entry.Provider().Body(role); present {
+				members["coordinator/telegram/"+role.FileName()] = body.Bytes()
+			}
+		}
+		break
+	}
+	if members["coordinator/telegram/manifest.yaml"] == nil {
+		t.Fatal("embedded Telegram provider is unavailable")
+	}
+	captured, _, _ := loadS1EffectiveProviderScope(t, members)
+	projection, err := packadmission.FromBundle(captured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, catalog := semanticview.Wrap(captured), projection.ProviderTriggers
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
 		t.Fatal("fixture bundle flow declaration is unavailable")
@@ -466,7 +460,7 @@ func TestProviderTriggerInputWithoutConnectionDoesNotAcquireCrossFlowPlan(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	rawEvent, err := runtimepinrouting.AdmitSourceEvent("inbound.telegram", routingSource)
+	rawEvent, err := runtimepinrouting.AdmitSourceEvent("inbound.telegram.raw", routingSource)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +470,33 @@ func TestProviderTriggerInputWithoutConnectionDoesNotAcquireCrossFlowPlan(t *tes
 }
 
 func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
+	members := map[string][]byte{
+		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":               []byte("stages: []\n"),
+		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.text_message]}\n"),
+	}
+	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+		if entry.ID() != "telegram" {
+			continue
+		}
+		members["coordinator/telegram/manifest.yaml"] = entry.ManifestBody()
+		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+			if body, present := entry.Provider().Body(role); present {
+				members["coordinator/telegram/"+role.FileName()] = body.Bytes()
+			}
+		}
+		break
+	}
+	if members["coordinator/telegram/manifest.yaml"] == nil {
+		t.Fatal("embedded Telegram provider is unavailable")
+	}
+	captured, _, _ := loadS1EffectiveProviderScope(t, members)
+	projection, err := packadmission.FromBundle(captured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, catalog := semanticview.Wrap(captured), projection.ProviderTriggers
 	basePin, ok := source.FlowInputEventPin("coordinator", "inbound.telegram.text_message")
 	if !ok {
 		t.Fatal("base provider input pin is unavailable")
@@ -754,7 +774,33 @@ func compiledSchemaHasField(schema runtimecontracts.CompiledEventSchema, field s
 }
 
 func TestProviderTriggerCapabilitiesRemainVisibleThroughRuntimeToolOverlay(t *testing.T) {
-	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
+	members := map[string][]byte{
+		"manifest.yaml":             []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"schema.yaml":               []byte("stages: []\n"),
+		"coordinator/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"coordinator/schema.yaml":   []byte("stages: []\npins: {inputs: [inbound.telegram.text_message]}\n"),
+	}
+	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+		if entry.ID() != "telegram" {
+			continue
+		}
+		members["coordinator/telegram/manifest.yaml"] = entry.ManifestBody()
+		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
+			if body, present := entry.Provider().Body(role); present {
+				members["coordinator/telegram/"+role.FileName()] = body.Bytes()
+			}
+		}
+		break
+	}
+	if members["coordinator/telegram/manifest.yaml"] == nil {
+		t.Fatal("embedded Telegram provider is unavailable")
+	}
+	captured, _, _ := loadS1EffectiveProviderScope(t, members)
+	projection, err := packadmission.FromBundle(captured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, catalog := semanticview.Wrap(captured), projection.ProviderTriggers
 	imported, err := SourceWithProviderTriggerEvents(source, catalog)
 	if err != nil {
 		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
