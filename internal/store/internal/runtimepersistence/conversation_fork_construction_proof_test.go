@@ -30,6 +30,7 @@ func TestConversationForkFixtureCompleteReadinessBothStores(t *testing.T) {
 				selected, _ := newLifecycleDiagnosticTestStore(t, sqlite)
 				bundle := conversationForkConstructionBundle(t)
 				ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				item := createConversationForkLifecycleDiagnostic(t, ctx, selected, bundle)
 				at := time.Now().UTC().Truncate(time.Second)
 				fixture := ConversationForkSourceFixture{Identity: item.Identity, RunID: item.Identity.RunID, EntityID: uuid.NewString(), SessionID: uuid.NewString(), Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), CreatedAt: at, Turn1At: at.Add(-2 * time.Minute), Turn2At: at.Add(-time.Minute), kind: kind}
@@ -85,6 +86,7 @@ func TestConversationForkHistoricalConstructionRefusalsBothStores(t *testing.T) 
 			selected, _ := newLifecycleDiagnosticTestStore(t, sqlite)
 			bundle := conversationForkConstructionBundle(t)
 			ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			item := createConversationForkLifecycleDiagnostic(t, ctx, selected, bundle)
 			at := time.Now().UTC().Truncate(time.Second)
 			fixture := ConversationForkSourceFixture{RunID: item.Identity.RunID, EntityID: uuid.NewString(), Turn1At: at.Add(-time.Minute), kind: conversationForkNativeChat}

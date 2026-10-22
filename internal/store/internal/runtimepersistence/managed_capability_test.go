@@ -25,6 +25,7 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -258,6 +259,7 @@ func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store comple
 func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context.Context, store completionSettlementTestStore, rec runtimellm.AgentTurnRecord, options managedAgentTurnFixtureOptions) error {
 	t.Helper()
 	fixtureCtx := testAuthorActivityContext()
+	fixtureCtx = originalStoreFixtureContext(t, runtimestartupownership.CarryMutationAuthority(fixtureCtx, ctx), store)
 	plan := rec.Memory
 	if rec.Identity == (agentmemory.Identity{}) {
 		rec.Identity = testAgentMemoryIdentity(t, rec.RunID, rec.AgentID, rec.FlowInstance)

@@ -29,6 +29,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -59,6 +60,8 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 					flowInstance := boundedProviderFlowID
 					secret := provider.provider + "-raw-settlement-secret"
 					ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+					ctx = originalRuntimeFixtureContext(t, ctx, selected)
+					fixtureOwner := t
 					source := providerRawSettlementSemanticSource(t, runtimepkg.InboundTarget{FlowPath: flowInstance, Alias: entityID}, provider, secret)
 					target := seedProviderRawSettlementRuntime(t, ctx, selected, source, runID, entityID, flowInstance, provider.provider, secret, "")
 					for _, realSubscriber := range []bool{false, true} {
@@ -71,9 +74,18 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 							agentID := ""
 							if realSubscriber {
 								agentID = provider.provider + "-" + backend + "-raw-subscriber"
-								seedProviderRawSettlementAgent(t, ctx, selected, runID, target.FlowPath, flowInstance, entityID, agentID, provider.eventName)
+								seedProviderRawSettlementAgent(t, fixtureOwner, ctx, selected, runID, target.FlowPath, flowInstance, entityID, agentID, provider.eventName)
 							}
-							bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
+							bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
+								ContractBundle: source,
+								MutationContext: func(child context.Context) (context.Context, error) {
+									if !runtimestartupownership.HasMutationAuthority(child) {
+										child = runtimestartupownership.CarryMutationAuthority(child, ctx)
+									}
+									_, err := runtimestartupownership.CaptureMutationAuthority(child)
+									return child, err
+								},
+							})
 							if err != nil {
 								t.Fatalf("NewEventBus: %v", err)
 							}
@@ -124,7 +136,7 @@ func TestInboundGatewayProviderRawSettlementSQLitePostgres(t *testing.T) {
 
 							if !realSubscriber {
 								replayAgentID := provider.provider + "-" + backend + "-current-topology-only"
-								seedProviderRawSettlementAgent(t, ctx, selected, runID, target.FlowPath, flowInstance, entityID, replayAgentID, provider.eventName)
+								seedProviderRawSettlementAgent(t, fixtureOwner, ctx, selected, runID, target.FlowPath, flowInstance, entityID, replayAgentID, provider.eventName)
 								replayDeliveries := subscribeProviderRawSettlementAgent(t, bus, source, runID, target.FlowPath, flowInstance, replayAgentID, provider.eventName)
 								if _, err := bus.RecoverPersistedPipeline(ctx, runtimepipelineobligation.ClaimedWork{
 									Event: record.Events[0].Event, Scope: runtimepipelineobligation.ScopeSubscribed,
@@ -212,7 +224,7 @@ func assertProviderRawSettlementListReadback(t testing.TB, ctx context.Context, 
 	}
 }
 
-func seedProviderRawSettlementAgent(t *testing.T, ctx context.Context, selected providerRawSettlementProofStore, runID, flowID, flowInstance, entityID, agentID, eventName string) {
+func seedProviderRawSettlementAgent(t *testing.T, fixtureOwner testing.TB, ctx context.Context, selected providerRawSettlementProofStore, runID, flowID, flowInstance, entityID, agentID, eventName string) {
 	t.Helper()
 	agent := runtimemanager.PersistedAgent{
 		Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
@@ -226,9 +238,9 @@ func seedProviderRawSettlementAgent(t *testing.T, ctx context.Context, selected 
 	var err error
 	switch typed := selected.(type) {
 	case *store.PostgresStore:
-		err = storetest.UpsertStaticAgentFixture(t, ctx, typed, agent)
+		err = storetest.UpsertStaticAgentFixture(fixtureOwner, ctx, typed, agent)
 	case *store.SQLiteRuntimeStore:
-		err = storetest.UpsertStaticAgentFixture(t, ctx, typed, agent)
+		err = storetest.UpsertStaticAgentFixture(fixtureOwner, ctx, typed, agent)
 	default:
 		t.Fatalf("unsupported provider raw agent store %T", selected)
 	}

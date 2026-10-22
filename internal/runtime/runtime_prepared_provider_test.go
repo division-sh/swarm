@@ -29,6 +29,22 @@ type preparedProtocolProbe struct {
 	authorities    []effects.Authority
 }
 
+type preparedSurfacePhaseStore struct {
+	startupCapabilityStore
+	phases []managedcapabilities.Surface
+}
+
+func (s *preparedSurfacePhaseStore) SaveManagedCapabilitySurface(ctx context.Context, surface managedcapabilities.Surface) error {
+	if !startupownership.PreparedOperationEntered(ctx, startupownership.PreparedManagedCapabilitySurface, s) {
+		return errors.New("prepared surface save omitted its exact command owner")
+	}
+	if err := s.startupCapabilityStore.SaveManagedCapabilitySurface(ctx, surface); err != nil {
+		return err
+	}
+	s.phases = append(s.phases, surface.Clone())
+	return nil
+}
+
 func (p *preparedProtocolProbe) ProbeStartupVisibleToolSurface(ctx context.Context, actor actors.AgentConfig, prompt string, tools []llm.ToolDefinition) (*llm.Response, error) {
 	if p.before != nil {
 		if err := p.before(ctx); err != nil {
@@ -151,12 +167,12 @@ func TestPreparedProviderPreflightUsesRunlessPlansWithoutManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	probe := &preparedProtocolProbe{}
+	probe := &preparedProtocolProbe{before: process.ProveCurrent}
 	runtimes, err := llm.NewAgentRuntimeSet(profile, llm.RuntimeFactory{}, startupProbeRuntime{ClaudeCLIRuntime: &llm.ClaudeCLIRuntime{}, probe: probe})
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &startupCapabilityStore{}
+	store := &preparedSurfacePhaseStore{}
 	preparationID := uuid.NewString()
 	catalog := preparedProviderTestCatalog(t, runtimes, exec, plans)
 	ids, err := ValidatePreparedSelectedForkProviderPreflight(testAuthorActivityContext(context.Background()), cfg, binding, catalog, turns, preparationID, process, plans, liveTestEffectController(&startupEffectStore{}), store)
@@ -165,6 +181,16 @@ func TestPreparedProviderPreflightUsesRunlessPlansWithoutManager(t *testing.T) {
 	}
 	if len(ids) != 2 || ids[0] == ids[1] || len(probe.authorities) != 2 || len(exec.executed) != 2 {
 		t.Fatalf("lost same-name prospective actors: ids=%v authorities=%d tool calls=%v", ids, len(probe.authorities), exec.executed)
+	}
+	if len(store.phases) != 6 {
+		t.Fatalf("prepared plan/provider/listed phases = %d, want6", len(store.phases))
+	}
+	for offset := 0; offset < len(store.phases); offset += 3 {
+		for phase := 1; phase < 3; phase++ {
+			if err := store.phases[offset+phase].CanAdvanceFrom(store.phases[offset+phase-1]); err != nil {
+				t.Fatalf("prepared save changed immutable surface identity: %v", err)
+			}
+		}
 	}
 	for _, id := range ids {
 		surface := store.surfaces[id]

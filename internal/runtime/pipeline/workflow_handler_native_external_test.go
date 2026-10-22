@@ -53,6 +53,7 @@ func workflowHandlerNativeFixtureFromSelected(t *testing.T, source semanticview.
 	fact := sourceartifactfixture.FactFor(bundle.SourceArtifact)
 	persistence := pipeline.NewWorkflowPersistence(selected)
 	ctx := withLiveGateExecution(testAuthorActivityContextForSource(t, context.Background(), fact))
+	ctx = originalPipelineFixtureContext(t, ctx, selected)
 	probe := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 	t.Cleanup(func() {
 		counts := probe.Snapshot()
@@ -91,7 +92,7 @@ func workflowHandlerNativeFixtureFromSelected(t *testing.T, source semanticview.
 			return nil
 		},
 		NewCoordinator: func(options pipeline.PipelineCoordinatorOptions) *pipeline.PipelineCoordinator {
-			pc, _ := workflowHandlerNativeCoordinator(t, selected, options, fact)
+			pc, _, _ := workflowHandlerNativeCoordinator(t, selected, options, fact)
 			return pc
 		},
 		Publish: func(ctx context.Context, event events.Event, route events.DeliveryRoute) {
@@ -223,7 +224,7 @@ func commitWorkflowNativeStructuralParent(t *testing.T, ctx context.Context, sou
 	if err != nil {
 		return err
 	}
-	coordinator, _ := workflowHandlerNativeCoordinator(t, selected, pipeline.PipelineCoordinatorOptions{
+	coordinator, _, _ := workflowHandlerNativeCoordinator(t, selected, pipeline.PipelineCoordinatorOptions{
 		Module: proposedEffectProofModule{source: source, nodes: nodes},
 	}, fact)
 	prepared, lifecycle, err := coordinator.PrepareInitialEntryLifecycle(ctx, owner, initial, child.CreatedAt)

@@ -31,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -50,10 +51,25 @@ func (b *activityResultPublicationCut) Publish(ctx context.Context, event events
 
 func openActivityReplayStore(t *testing.T, backend string) (gateRecoveryStoreCase, func() error, func() gateRecoveryStoreCase) {
 	t.Helper()
+	closePhase := func(selected interface {
+		agentfixture.Store
+		Close() error
+	}) func() error {
+		return func() error {
+			original, err := agentfixture.ProcessCapability(t, context.Background(), selected)
+			if err != nil {
+				return err
+			}
+			if err := original.Release(context.Background()); err != nil {
+				return err
+			}
+			return selected.Close()
+		}
+	}
 	if backend == "sqlite" {
 		selected, reopen := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background())
 		first := gateRecoveryStoreCase{name: backend, events: selected, cards: selected, lifecycle: selected, persistence: runtimepipeline.NewWorkflowPersistence(selected), trace: selected}
-		return first, selected.Close, func() gateRecoveryStoreCase {
+		return first, closePhase(selected), func() gateRecoveryStoreCase {
 			reopened := reopen()
 			return gateRecoveryStoreCase{name: backend, events: reopened, cards: reopened, lifecycle: reopened, persistence: runtimepipeline.NewWorkflowPersistence(reopened), trace: reopened}
 		}
@@ -63,7 +79,7 @@ func openActivityReplayStore(t *testing.T, backend string) (gateRecoveryStoreCas
 	}
 	selected, reopen := storetest.StartPostgresRuntimeStoreWithReopen(t)
 	first := gateRecoveryStoreCase{name: backend, events: selected, cards: selected, lifecycle: selected, persistence: runtimepipeline.NewWorkflowPersistence(selected), trace: selected}
-	return first, selected.Close, func() gateRecoveryStoreCase {
+	return first, closePhase(selected), func() gateRecoveryStoreCase {
 		reopened := reopen()
 		return gateRecoveryStoreCase{name: backend, events: reopened, cards: reopened, lifecycle: reopened, persistence: runtimepipeline.NewWorkflowPersistence(reopened), trace: reopened}
 	}
@@ -142,6 +158,7 @@ func TestActivityTerminalResultUsesDurableTimestampBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					selected = reopen()
+					ctx = activityReplayContext(t, selected, source, runID)
 					bus = newActivityJournalProofBus(t, selected, source)
 					pc = newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
 					if err := runtimepipeline.ExecuteActivityIntentForTest(ctx, pc, nil, intent); err != nil {
@@ -367,16 +384,23 @@ func activityJournalProofSource(t *testing.T, tools map[string]runtimecontracts.
 
 func requireActivityReplayRun(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source, runID string) context.Context {
 	t.Helper()
+	ctx := activityReplayContext(t, selected, source, runID)
+	bundle, _ := semanticview.Bundle(source)
+	storetest.RequireRun(t, ctx, selected.events.(storetest.RunFixtureStore), storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC(),
+	})
+	return ctx
+}
+
+func activityReplayContext(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source, runID string) context.Context {
+	t.Helper()
 	bundle, found := semanticview.Bundle(source)
 	if !found || bundle.SourceArtifact == nil {
 		t.Fatal("activity journal fixture requires its actual compiled artifact")
 	}
 	fact := sourceartifactfixture.RequireArtifact(t, context.Background(), selected.events.(sourceartifactfixture.Writer), bundle.SourceArtifact)
 	ctx := withLiveGateExecution(testAuthorActivityContextForSource(t, correlation.WithRunID(context.Background(), runID), fact))
-	storetest.RequireRun(t, ctx, selected.events.(storetest.RunFixtureStore), storetest.RunFixture{
-		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC(),
-	})
-	return ctx
+	return originalPipelineFixtureContext(t, ctx, selected.events)
 }
 
 func loadActivityResultForProof(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, eventID string) runtimebus.PreparedPublishEvent {
