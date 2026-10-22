@@ -18,6 +18,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -113,7 +114,7 @@ func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostg
 
 					Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash),
 				}
-				standing, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate)
+				standing, err := workflow.ReconcileStandingService(originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), fixture.store), candidate)
 				if err != nil {
 					t.Fatalf("create standing recovery owner: %v", err)
 				}
@@ -123,7 +124,7 @@ func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostg
 					setStandingRecoveryOwnerDesiredState(t, fixture.db, fixture.sqlite, standing.ServiceID, "suspended", "suspended")
 				} else {
 					candidate.BindingEnabled, candidate.BindingBlockReason = false, reason
-					if _, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate); err != nil {
+					if _, err := workflow.ReconcileStandingService(originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), fixture.store), candidate); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -145,7 +146,7 @@ func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostg
 					setStandingRecoveryOwnerDesiredState(t, fixture.db, fixture.sqlite, standing.ServiceID, "none", "active")
 				} else {
 					candidate.BindingEnabled, candidate.BindingBlockReason = true, ""
-					if _, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate); err != nil {
+					if _, err := workflow.ReconcileStandingService(originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), fixture.store), candidate); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -233,7 +234,7 @@ func bindNeutralEffectFixtureToRun(t *testing.T, fixture neutralEffectParityFixt
 		fixture.authority.LeaseExpiresAt,
 	)
 	fixture.ctx = runtimeeffects.WithController(
-		runtimeeffects.WithLifecycleToken(fixture.ctx, token),
+		runtimeeffects.WithLifecycleToken(startupownership.CarryMutationAuthority(testAuthorActivityContext(), fixture.ctx), token),
 		liveTestEffectController(fixture.store),
 	)
 	fixture.ctx = managedNormalEffectStoreTestContext(t, fixture.ctx, fixture.authority)
