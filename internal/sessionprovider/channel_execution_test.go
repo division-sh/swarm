@@ -378,7 +378,7 @@ func TestWhatsAppChannelPrelaunchResumeAndRecoveryBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				handle, err := runtimeeffects.BeginInProcessChannelConfirmation(ctx, contracts.ToolInProcessWhatsAppSendText, fingerprint, nil)
+				handle, err := runtimeeffects.BeginInProcessChannelConfirmation(ctx, fingerprint, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

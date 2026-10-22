@@ -13,7 +13,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -961,10 +960,7 @@ func BeginChannelConfirmation(ctx context.Context, request []byte, lineage map[s
 	return beginChannelConfirmation(ctx, request, lineage, "channel_confirmation")
 }
 
-func BeginInProcessChannelConfirmation(ctx context.Context, target runtimecontracts.ToolInProcessTarget, request []byte, lineage map[string]string) (*Handle, error) {
-	if target != runtimecontracts.ToolInProcessWhatsAppSendText {
-		return nil, fmt.Errorf("channel confirmation requires the closed WhatsApp send target")
-	}
+func BeginInProcessChannelConfirmation(ctx context.Context, request []byte, lineage map[string]string) (*Handle, error) {
 	return beginChannelConfirmation(ctx, request, lineage, "channel_confirmation_whatsapp")
 }
 
@@ -996,10 +992,7 @@ func BeginChannelDelivery(ctx context.Context, request []byte, lineage map[strin
 	return beginChannelDelivery(ctx, request, lineage, "channel_delivery")
 }
 
-func BeginInProcessChannelDelivery(ctx context.Context, target runtimecontracts.ToolInProcessTarget, request []byte, lineage map[string]string) (*Handle, error) {
-	if target != runtimecontracts.ToolInProcessWhatsAppSendText {
-		return nil, fmt.Errorf("channel delivery requires the closed WhatsApp send target")
-	}
+func BeginInProcessChannelDelivery(ctx context.Context, request []byte, lineage map[string]string) (*Handle, error) {
 	return beginChannelDelivery(ctx, request, lineage, "channel_delivery_whatsapp")
 }
 
