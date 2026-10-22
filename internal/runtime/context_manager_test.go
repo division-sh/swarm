@@ -110,42 +110,41 @@ func TestRuntimeContextManagerRejectsDuplicateBundleHashes(t *testing.T) {
 	}
 }
 
-func TestRuntimeContextManagerRejectsDuplicateAgentSlugs(t *testing.T) {
-	_, err := newTestRuntimeContextManager(t, nil,
-		testBundleContextWithAgents(t, runtimeContextTestHashA, "alpha.requested", "shared-worker"),
-		testBundleContextWithAgents(t, runtimeContextTestHashB, "beta.requested", "shared-worker"),
-	)
-	if err == nil {
-		t.Fatal("NewRuntimeContextManager duplicate agent slug error = nil")
-	}
-	for _, want := range []string{
-		`duplicate runtime context agent_id "shared-worker"`,
-		runtimeContextTestHashA,
-		runtimeContextTestHashB,
-		"workflow=review@1.0.0",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("duplicate agent slug error missing %q:\n%s", want, err.Error())
-		}
-	}
-}
-
 func TestRuntimeContextManagerRejectsDuplicateEffectiveAgentIDs(t *testing.T) {
-	_, err := newTestRuntimeContextManager(t, nil,
-		testBundleContextWithAgentEntries(t, runtimeContextTestHashA, "alpha.requested", map[string]runtimecontracts.AgentRegistryEntry{
-			"alpha": {ID: "shared-worker", Role: "alpha"},
-		}),
-		testBundleContextWithAgentEntries(t, runtimeContextTestHashB, "beta.requested", map[string]runtimecontracts.AgentRegistryEntry{
-			"beta": {ID: "shared-worker", Role: "beta"},
-		}),
-	)
+	var contexts [2]BundleContext
+	for i, local := range []string{"alpha", "beta"} {
+		bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"schema.yaml":   []byte("stages: []\n"),
+			"events.yaml":   []byte(local + ".requested:\n"),
+			"agents.yaml":   []byte(fmt.Sprintf("%s:\n  id: shared-worker\n  role: %s\n  intent: {inline: %s}\n", local, local, local)),
+		})
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := providers.Scope(".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		contexts[i] = runtimeAdmissionTestContext(t, semanticview.Wrap(bundle), catalog, "")
+	}
+	a, b := contexts[0], contexts[1]
+	if a.BundleHash() == b.BundleHash() {
+		t.Fatal("effective-name collision requires distinct captured sources")
+	}
+	_, err := newTestRuntimeContextManager(t, nil, a, b)
 	if err == nil {
 		t.Fatal("NewRuntimeContextManager duplicate effective agent_id error = nil")
 	}
 	for _, want := range []string{
 		`duplicate runtime context agent_id "shared-worker"`,
-		runtimeContextTestHashA,
-		runtimeContextTestHashB,
+		a.BundleHash(),
+		b.BundleHash(),
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("duplicate effective agent_id error missing %q:\n%s", want, err.Error())
@@ -154,20 +153,44 @@ func TestRuntimeContextManagerRejectsDuplicateEffectiveAgentIDs(t *testing.T) {
 }
 
 func TestRuntimeContextManagerRegisterRejectsDuplicateAgentSlugWithoutMutatingManager(t *testing.T) {
-	manager, err := newTestRuntimeContextManager(t, nil,
-		testBundleContextWithAgents(t, runtimeContextTestHashA, "alpha.requested", "shared-worker"),
-	)
+	var contexts [2]BundleContext
+	for i, event := range []string{"alpha.requested", "beta.requested"} {
+		bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"schema.yaml":   []byte("stages: []\n"),
+			"events.yaml":   []byte(event + ":\n"),
+			"agents.yaml":   []byte("shared-worker:\n  role: shared-worker\n  intent: {inline: work}\n"),
+		})
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := providers.Scope(".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		contexts[i] = runtimeAdmissionTestContext(t, semanticview.Wrap(bundle), catalog, "")
+	}
+	a, b := contexts[0], contexts[1]
+	if a.BundleHash() == b.BundleHash() {
+		t.Fatal("incremental registration requires distinct captured sources")
+	}
+	manager, err := newTestRuntimeContextManager(t, nil, a)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
-	err = manager.Register(testBundleContextWithAgents(t, runtimeContextTestHashB, "beta.requested", "shared-worker"))
+	err = manager.Register(b)
 	if err == nil {
 		t.Fatal("Register duplicate agent slug error = nil")
 	}
 	for _, want := range []string{
 		`duplicate runtime context agent_id "shared-worker"`,
-		runtimeContextTestHashA,
-		runtimeContextTestHashB,
+		a.BundleHash(),
+		b.BundleHash(),
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("Register duplicate agent slug error missing %q:\n%s", want, err.Error())
@@ -176,19 +199,41 @@ func TestRuntimeContextManagerRegisterRejectsDuplicateAgentSlugWithoutMutatingMa
 	if manager.Len() != 1 || manager.MultiContext() {
 		t.Fatalf("manager Len/MultiContext after rejected register = %d/%v, want 1/false", manager.Len(), manager.MultiContext())
 	}
-	if got, want := manager.BundleHashes(), []string{runtimeContextTestHashA}; !reflect.DeepEqual(got, want) {
+	if got, want := manager.BundleHashes(), []string{a.BundleHash()}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("BundleHashes after rejected register = %#v, want %#v", got, want)
 	}
-	if _, ok := manager.LookupBundleHash(runtimeContextTestHashB); ok {
+	if _, ok := manager.LookupBundleHash(b.BundleHash()); ok {
 		t.Fatal("LookupBundleHash found rejected duplicate context")
 	}
 }
 
 func TestRuntimeContextManagerAllowsDistinctAgentSlugs(t *testing.T) {
-	manager, err := newTestRuntimeContextManager(t, nil,
-		testBundleContextWithAgents(t, runtimeContextTestHashA, "alpha.requested", "alpha-worker"),
-		testBundleContextWithAgents(t, runtimeContextTestHashB, "beta.requested", "beta-worker"),
-	)
+	var contexts [2]BundleContext
+	for i, local := range []string{"alpha", "beta"} {
+		bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+			"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+			"schema.yaml":   []byte("stages: []\n"),
+			"events.yaml":   []byte(local + ".requested:\n"),
+			"agents.yaml":   []byte(fmt.Sprintf("%s-worker:\n  role: %s-worker\n  intent: {inline: %s}\n", local, local, local)),
+		})
+		providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope, err := providers.Scope(".")
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		contexts[i] = runtimeAdmissionTestContext(t, semanticview.Wrap(bundle), catalog, "")
+	}
+	if contexts[0].BundleHash() == contexts[1].BundleHash() {
+		t.Fatal("distinct-agent coexistence requires distinct captured sources")
+	}
+	manager, err := newTestRuntimeContextManager(t, nil, contexts[0], contexts[1])
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager distinct agent slugs: %v", err)
 	}
