@@ -2528,13 +2528,7 @@ func TestRouteTableRootInputDoesNotSubscribePrivateChildren(t *testing.T) {
 	for _, mode := range []string{"static"} {
 		for _, rootInput := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/root_input=%t", mode, rootInput), func(t *testing.T) {
-				bundle := routedRootInputFlowNodeBundle()
-				if !rootInput {
-					bundle.RootSchema.Pins.Inputs.EventPins = nil
-				}
-				if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-					t.Fatal(err)
-				}
+				bundle := routedRootInputFlowNodeBundle(t, rootInput)
 				rt, err := DeriveRouteTable(semanticview.Wrap(bundle))
 				if err != nil {
 					t.Fatal(err)
@@ -2625,7 +2619,7 @@ func TestEventBusPublish_ProviderIngressRejectsForeignSourceBeforePersistence(t 
 		FlowID: "validation", FlowInstance: "validation", EntityID: eventtest.UUID("internal-root-input-owner"),
 	})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: semanticview.Wrap(routedRootInputFlowNodeBundle()),
+		ContractBundle: semanticview.Wrap(routedRootInputFlowNodeBundle(t, true)),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -2660,7 +2654,7 @@ func TestEventBusPublish_ProviderIngressRejectsForeignSourceWithExplicitTarget(t
 	}.Normalized()
 	store.setTargetOwnerRoutes(target)
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: semanticview.Wrap(routedRootInputFlowNodeBundle()),
+		ContractBundle: semanticview.Wrap(routedRootInputFlowNodeBundle(t, true)),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -3255,12 +3249,6 @@ func TestEventBusPublish_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 func TestEventBusRejectsWrongRunRootTargetBeforePersistenceAndAfterReconstruction(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	bundle := loadTargetRouteTempBundle(t, routedRootNodeFixtureFiles())
-	root := runtimecontracts.FlowContractView{
-		Schema: runtimecontracts.FlowSchemaDocument{Name: "authored-root"},
-		Nodes:  bundle.Nodes,
-		Events: bundle.Events,
-	}
-	bundle.FlowTree.Root = &root
 	source := semanticview.Wrap(bundle)
 	const (
 		currentRunID = "11111111-1111-1111-1111-111111111111"
@@ -3539,11 +3527,10 @@ func loadTargetRouteTempBundle(t *testing.T, files map[string]string) *runtimeco
 
 func routedRootNodeFixtureFiles() map[string]string {
 	return map[string]string{
-		"manifest.yaml": `name: test
-version: 1.0.0
+		"manifest.yaml": `version: 1.0.0
 platform_version: '*'
 `,
-		"schema.yaml": "name: test\n",
+		"schema.yaml": "stages: []\n",
 		"events.yaml": `opco.spinup_requested:
   entity_id: string
 `,
@@ -3559,57 +3546,21 @@ platform_version: '*'
 	}
 }
 
-func routedRootInputFlowNodeBundle() *runtimecontracts.WorkflowContractBundle {
-	validation := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{
-			FlowPath:   "validation",
-			SchemaFile: "validation/schema.yaml",
-			EventsFile: "validation/events.yaml",
-		},
-		Path: "validation",
-		Schema: runtimecontracts.FlowSchemaDocument{
-
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"thing.created": {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"entity-writer": {
-				ExecutionType: "system_node",
-				SubscribesTo:  []string{"thing.created"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"thing.created": existingOwnerHandlerFixture(),
-				},
-			},
-		},
+func routedRootInputFlowNodeBundle(t *testing.T, rootInput bool) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	schema := "stages: []\n"
+	if rootInput {
+		schema += "pins:\n  inputs: [thing.created]\n"
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{validation}}
-	root.Schema.Pins = runtimecontracts.FlowPins{
-		Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
-	}
-	root.Children[0].Parent = &root
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &root.Schema,
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				".": &root, "validation": &root.Children[0],
-			},
-			ByPath: map[string]*runtimecontracts.FlowContractView{
-				".": &root, "validation": &root.Children[0],
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"validation": validation.Schema,
-		},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
-	}
-	return bundle
+	return loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml":            "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":              schema,
+		"events.yaml":              "thing.created:\n",
+		"validation/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"validation/schema.yaml":   "stages: []\npins:\n  inputs: [thing.created]\n",
+		"validation/events.yaml":   "thing.created:\n",
+		"validation/nodes.yaml":    "entity-writer:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+	})
 }
 
 func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {

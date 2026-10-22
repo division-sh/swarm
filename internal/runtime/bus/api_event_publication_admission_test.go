@@ -19,7 +19,7 @@ import (
 )
 
 func TestRootInputAPIEventPublicationAdmissionIsExactAndClosed(t *testing.T) {
-	source := semanticview.Wrap(routedRootInputFlowNodeBundle())
+	source := semanticview.Wrap(routedRootInputFlowNodeBundle(t, true))
 	endpoint, err := NewRootInputAPIEventPublicationEndpoint(source, "thing.created")
 	if err != nil {
 		t.Fatalf("admit root-input endpoint: %v", err)
