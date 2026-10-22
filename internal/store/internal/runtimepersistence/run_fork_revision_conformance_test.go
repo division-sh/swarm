@@ -56,7 +56,7 @@ func TestRunForkRevisionRegistryIsClosed(t *testing.T) {
 
 func TestRunForkRevisionCapturePreservesExactEventPayloadBytes(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), admitTestPostgresStore(t, db))
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	payload := []byte("{\n  \"numeric\": 1.0, \"ordered\": [2, 1]\n}")
@@ -112,7 +112,7 @@ func TestRunForkRevisionCapturePreservesExactEventPayloadBytes(t *testing.T) {
 
 func TestRunForkRevisionEqualityIncludesExactEventPayloadBytes(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), admitTestPostgresStore(t, db))
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	firstPayload := []byte(`{"numeric":1,"ordered":{"a":1,"b":2}}`)
@@ -243,7 +243,7 @@ func TestRunForkRevisionStateAccessorInventoryIsClosed(t *testing.T) {
 
 func TestRunForkRevisionCaptureReusesTransactionRevisionAndRollbackPublishesNothing(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), admitTestPostgresStore(t, db))
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
@@ -311,7 +311,7 @@ func TestRunForkRevisionCaptureReusesTransactionRevisionAndRollbackPublishesNoth
 
 func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), admitTestPostgresStore(t, db))
 	runID := uuid.NewString()
 	firstEventID := uuid.NewString()
 	secondEventID := uuid.NewString()
@@ -383,7 +383,7 @@ func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 
 func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(originalStoreFixtureContext(t, testAuthorActivityContext(), admitTestPostgresStore(t, db)), 10*time.Second)
 	defer cancel()
 	runID := uuid.NewString()
 	seedEventID := uuid.NewString()
@@ -555,7 +555,7 @@ func waitForPostgresQueryLock(t *testing.T, ctx context.Context, db *sql.DB, que
 
 func TestRunForkRevisionCaptureOrdersMultiRunLocksDeterministically(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(originalStoreFixtureContext(t, testAuthorActivityContext(), admitTestPostgresStore(t, db)), 5*time.Second)
 	defer cancel()
 	runIDs := []string{uuid.NewString(), uuid.NewString()}
 	sort.Strings(runIDs)
@@ -623,9 +623,8 @@ func TestRunForkRevisionCaptureOrdersMultiRunLocksDeterministically(t *testing.T
 
 func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
-	ctx = originalStoreFixtureContext(t, ctx, store)
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	requireDefaultSourceArtifactForTest(t, ctx, store)
 	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
 	runID := uuid.NewString()
@@ -730,8 +729,8 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 
 func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStatusPresence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext()
 	store := admitTestPostgresStore(t, db)
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	agentID := "revision-session-agent"
@@ -742,7 +741,7 @@ func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStat
 	seedRunForkSessionProjection(t, db, runID, agentID, sessionID, "active", at)
 	firstRevision := captureRunForkTestRevision(t, db, runID)
 
-	exerciseRunForkSessionExcludedWriters(t, store, runID, agentID, sessionID)
+	exerciseRunForkSessionExcludedWriters(t, ctx, store, runID, agentID, sessionID)
 	var afterExcluded int64
 	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&afterExcluded); err != nil {
 		t.Fatalf("load revision after excluded writers: %v", err)
@@ -810,9 +809,9 @@ func TestGenericScheduleDuplicateCancellationDoesNotPublishRunForkRevision(t *te
 	_, db, _ := testutil.StartPostgres(t)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	store := admitTestPostgresStore(t, db)
 	ctx = originalStoreFixtureContext(t, ctx, store)
+	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	command := testAgentGenericScheduleCommand(
 		t, runID, "revision-agent", "revision-flow/instance", uuid.NewString(), "revision-task",
 		runtimegenericschedule.AbsoluteDue(time.Now().Add(time.Hour)),
@@ -884,7 +883,7 @@ func TestGenericScheduleDuplicateCancellationDoesNotPublishRunForkRevision(t *te
 
 func TestRunForkRevisionDeletionPublishesTombstoneAndUnrevisionedDriftFailsClosed(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), admitTestPostgresStore(t, db))
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})

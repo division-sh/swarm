@@ -76,6 +76,8 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			fixtureTest := t
+			original := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			for _, cell := range []struct {
 				name      string
 				route     events.DeliveryRoute
@@ -90,7 +92,7 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 				{"agent_nonconnect", agentRoute, false, "existing"},
 			} {
 				t.Run(cell.name, func(t *testing.T) {
-					ctx := testAuthorActivityContext()
+					ctx := original
 					runID := uuid.NewString()
 					seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 					publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, backend.name == "postgres", runID)
@@ -115,14 +117,14 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 						if !found {
 							t.Fatal("component receiver requires the exact run source")
 						}
-						if err := agentfixture.UpsertStaticForSource(t, ctx, selected, record, fact); err != nil {
+						if err := agentfixture.UpsertStaticForSource(fixtureTest, ctx, selected, record, fact); err != nil {
 							t.Fatalf("admit exact component receiver: %v", err)
 						}
-						plan := currentAgentFixtureSourceSet(t, ctx, selected)
+						plan := currentAgentFixtureSourceSet(fixtureTest, ctx, selected)
 						if len(plan.Sources) != 1 {
 							t.Fatalf("component receiver sources=%#v, want one", plan.Sources)
 						}
-						grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, plan.Sources[0])
+						grant, err := agentfixture.AdmitGeneration(fixtureTest, ctx, selected, plan, plan.Sources[0])
 						if err != nil {
 							t.Fatal(err)
 						}

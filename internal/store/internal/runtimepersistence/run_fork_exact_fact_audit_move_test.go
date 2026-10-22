@@ -17,7 +17,7 @@ import (
 func TestRunForkExactFactsAdmittedAuditMoveBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, s exactFactStore) {
 		old, next := newExactFactFixture(t, s), newExactFactFixture(t, s)
-		ctx := testAuthorActivityContext()
+		ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), s.selected)
 		ensure := func(ctx context.Context, attempt *mutationprotocol.Attempt, f runForkRevisionMatrixFixture) error {
 			identity := mustTestAgentIdentityForRun(f.runID, "revision-matrix-agent", "")
 			record := llm.AgentTurnRecord{RunID: f.runID, AgentID: identity.AgentID(), Identity: identity, Memory: agentmemory.Plan{}, SessionID: old.auditID}

@@ -123,8 +123,8 @@ func newHistoricalContextFixture(t *testing.T, backend eventRecordContractBacken
 
 func newHistoricalContextFixtureWithSeed(t *testing.T, backend eventRecordContractBackend, prepare func(*testing.T, *sql.Tx, historicalContextFixture)) historicalContextFixture {
 	t.Helper()
-	ctx := testAuthorActivityContext()
 	opened := backend.open(t)
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), opened.store)
 	f := historicalContextFixture{db: opened.db, planner: opened.store.(historicalContextPlanner), postgres: backend.name == "postgres", source: newRunForkRevisionMatrixFixture(), latestID: uuid.NewString(), foreignID: uuid.NewString(), anchorID: uuid.NewString()}
 	s := f.source
 	requireRunFixtureForTest(t, ctx, opened.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: s.runID, StartedAt: s.at})

@@ -36,7 +36,8 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 			if backend == "postgres" {
 				_, db, _ = testutil.StartPostgres(t)
 				pg := admitTestPostgresStore(t, db)
-				requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+				ctx = originalStoreFixtureContext(t, ctx, pg)
+				requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 				mark = func(ctx context.Context, runID, status string, at time.Time) error {
 					_, err := markRunTerminalStatusForTest(ctx, pg, runID, status, nil, at)
 					return err
@@ -44,7 +45,8 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 			} else {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				db = store.backend.ConstructionHandle()
-				requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
+				ctx = originalStoreFixtureContext(t, ctx, store)
+				requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 				mark = func(ctx context.Context, runID, status string, at time.Time) error {
 					_, err := markRunTerminalStatusForTest(ctx, store, runID, status, nil, at)
 					return err
@@ -74,9 +76,9 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 func TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivitySourceArtifactContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivitySourceArtifactContext(), pg)
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	lineage := seedRunForkSourceFreezePair(t, db, "running", runfork.RunForkMaterializedStatus, now)
+	lineage := seedRunForkSourceFreezePair(t, ctx, db, "running", runfork.RunForkMaterializedStatus, now)
 
 	stageCard := newDecisionCardTestCard(t, lineage.SourceRunID, now)
 	if err := pg.CreateDecisionCard(ctx, stageCard); err != nil {
@@ -174,9 +176,9 @@ func TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome(t 
 func TestRunForkSourceFreezeRollbackLeavesNoPartialOutcome(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivitySourceArtifactContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivitySourceArtifactContext(), pg)
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	lineage := seedRunForkSourceFreezePair(t, db, "running", "completed", now)
+	lineage := seedRunForkSourceFreezePair(t, ctx, db, "running", "completed", now)
 	card := newDecisionCardTestCard(t, lineage.SourceRunID, now)
 	if err := pg.CreateDecisionCard(ctx, card); err != nil {
 		t.Fatal(err)
@@ -218,9 +220,9 @@ func TestRunForkSourceFreezeRollbackLeavesNoPartialOutcome(t *testing.T) {
 func TestRunForkSourceFreezeRequiresConfirmationBeforeMutation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivitySourceArtifactContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivitySourceArtifactContext(), pg)
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	lineage := seedRunForkSourceFreezePair(t, db, "running", runfork.RunForkMaterializedStatus, now)
+	lineage := seedRunForkSourceFreezePair(t, ctx, db, "running", runfork.RunForkMaterializedStatus, now)
 
 	err := commitRunForkSourceFreezeForTest(ctx, pg, lineage, now.Add(time.Second), false)
 	if !errors.Is(err, runfork.ErrRunForkSourceFreezeConfirmationRequired) {
@@ -232,9 +234,9 @@ func TestRunForkSourceFreezeRequiresConfirmationBeforeMutation(t *testing.T) {
 func TestRunForkSourceFreezeRejectsCompletedSourceWithoutConfirmationCeremony(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivitySourceArtifactContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivitySourceArtifactContext(), pg)
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	lineage := seedRunForkSourceFreezePair(t, db, "completed", runfork.RunForkMaterializedStatus, now)
+	lineage := seedRunForkSourceFreezePair(t, ctx, db, "completed", runfork.RunForkMaterializedStatus, now)
 
 	err := commitRunForkSourceFreezeForTest(ctx, pg, lineage, now.Add(time.Second), false)
 	if !errors.Is(err, storerunlifecycle.ErrRunNotActive) || errors.Is(err, runfork.ErrRunForkSourceFreezeConfirmationRequired) {
@@ -266,9 +268,9 @@ func TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority(t *testing.T) {
 			t.Run(test.name+"/"+label, func(t *testing.T) {
 				_, db, _ := testutil.StartPostgres(t)
 				pg := admitTestPostgresStore(t, db)
-				ctx := testAuthorActivitySourceArtifactContext()
+				ctx := originalStoreFixtureContext(t, testAuthorActivitySourceArtifactContext(), pg)
 				now := time.Now().UTC().Truncate(time.Microsecond)
-				lineage := seedRunForkSourceFreezePair(t, db, "running", runfork.RunForkMaterializedStatus, now)
+				lineage := seedRunForkSourceFreezePair(t, ctx, db, "running", runfork.RunForkMaterializedStatus, now)
 				test.seed(t, ctx, db, lineage, now, live)
 
 				err := commitRunForkSourceFreezeForTest(ctx, pg, lineage, now.Add(time.Second), true)
@@ -476,7 +478,7 @@ func sourceFreezeToolEffectSurface(t testing.TB, authority runtimeeffects.Author
 	return surface
 }
 
-func seedRunForkSourceFreezePair(t *testing.T, db *sql.DB, sourceStatus, forkStatus string, now time.Time) runForkActivationLineage {
+func seedRunForkSourceFreezePair(t *testing.T, ctx context.Context, db *sql.DB, sourceStatus, forkStatus string, now time.Time) runForkActivationLineage {
 	t.Helper()
 	lineage := runForkActivationLineage{
 		SourceRunID: uuid.NewString(), ForkRunID: uuid.NewString(), ForkEventID: uuid.NewString(),
@@ -493,7 +495,6 @@ func seedRunForkSourceFreezePair(t *testing.T, db *sql.DB, sourceStatus, forkSta
 		t.Fatalf("parse fork run state %q: %v", forkStatus, err)
 	}
 	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
-	ctx := testAuthorActivitySourceArtifactContext()
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: lineage.SourceRunID, State: sourceState,
 		BundleHash: authorActivityTestBundleHash, StartedAt: now.Add(-time.Hour), EndedAt: now,
