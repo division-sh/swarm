@@ -91,14 +91,18 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 			}
 			api := strings.TrimSuffix(served.Endpoint, "/v1/rpc") + route
 			const body = `{"delivery_id":"public-route-proof","account_id":"account-7"}`
-			for _, path := range []string{"/v1/rpc", "/healthz", "/readyz", "/mcp", "/tools/", "/webhooks/foreign/partner", "/webhooks/keyed-shop/foreign"} {
-				response, err := http.Post("http://"+publicAddress+path, "application/json", strings.NewReader(body))
+			publicClient := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+			for _, path := range []string{
+				"/v1/rpc", "/healthz", "/readyz", "/mcp", "/tools/", "/webhooks/foreign/partner", "/webhooks/keyed-shop/foreign",
+				"/webhooks/keyed-shop%2fpartner", route + "/", "/" + route, "/webhooks/../v1/rpc",
+			} {
+				response, err := publicClient.Post("http://"+publicAddress+path, "application/json", strings.NewReader(body))
 				if err != nil {
 					t.Fatal(err)
 				}
 				_, _ = io.Copy(io.Discard, response.Body)
 				_ = response.Body.Close()
-				if response.StatusCode != http.StatusNotFound {
+				if response.StatusCode != http.StatusNotFound || response.Header.Get("Location") != "" {
 					t.Errorf("public listener exposed foreign route %s: %d", path, response.StatusCode)
 				}
 			}
