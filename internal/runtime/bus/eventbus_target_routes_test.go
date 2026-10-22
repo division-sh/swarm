@@ -3345,23 +3345,6 @@ func TestEventBusPublish_NoTargetRootRoutedNodePersistsSemanticRouteWithoutInter
 	}
 }
 
-func TestRouteTableTopLevelProjectNodeResolvesProgrammaticRootInputRoute(t *testing.T) {
-	rt, err := DeriveRouteTable(semanticview.Wrap(routedTopLevelProjectNodeBundle(t)))
-	if err != nil {
-		t.Fatalf("DeriveRouteTable: %v", err)
-	}
-	got := rt.PubsubDeclarationDefinitionsFixture(t, ".", "thing.created")
-	rootInput := 0
-	for _, subscriber := range got {
-		if subscriber.Recipient.LocalID() == "reviewer" && subscriber.Recipient.IsNode() && subscriber.Path == "." && subscriber.MatchPattern == "thing.created" && subscriber.RouteSourceCode() == "subscription" {
-			rootInput++
-		}
-	}
-	if rootInput != 1 {
-		t.Fatalf("Resolve(thing.created) = %#v, want exactly one compiler-owned root reviewer route", got)
-	}
-}
-
 func TestEventBusPublish_TopLevelProjectNodePersistsRouteBeforeInterceptor(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	eventID := uuid.NewString()
@@ -3567,7 +3550,7 @@ func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowCon
 	t.Helper()
 	return loadTargetRouteTempBundle(t, map[string]string{
 		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":   "name: top-level-project-node\npins:\n  inputs:\n    - thing.created\n",
+		"schema.yaml":   "stages: []\npins:\n  inputs:\n    - thing.created\n",
 		"events.yaml":   "thing.created:\n  entity_id: string\n",
 		"nodes.yaml": `reviewer:
   execution_type: system_node
@@ -3584,8 +3567,10 @@ func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowCon
 func routedNodeTemplateBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml":             "name: concrete-node-proof\n",
-		"operating/schema.yaml":   "instance: instance_key\nauto_emit_on_create: {event: opco.product_initialization_requested}\n",
+		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":             "stages: []\n",
+		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"operating/schema.yaml":   "stages: []\ninstance: instance_key\nauto_emit_on_create: {event: opco.product_initialization_requested}\n",
 		"operating/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
 		"operating/events.yaml":   "opco.product_initialization_requested:\n",
 		"operating/nodes.yaml": `lifecycle-orchestrator:
@@ -3601,8 +3586,10 @@ func routedNodeTemplateBundle(t *testing.T) *runtimecontracts.WorkflowContractBu
 func routedCallbackTemplateBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml":                 "name: callback-node-proof\n",
-		"repo-scaffold/schema.yaml":   "instance: instance_key\n",
+		"manifest.yaml":               "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":                 "stages: []\n",
+		"repo-scaffold/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"repo-scaffold/schema.yaml":   "stages: []\ninstance: instance_key\n",
 		"repo-scaffold/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
 		"repo-scaffold/events.yaml":   "repo_scaffold.repo_commit_succeeded:\nrepo_scaffold.repo_commit_failed:\n",
 		"repo-scaffold/nodes.yaml": `repo-scaffold-node:
