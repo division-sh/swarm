@@ -38,7 +38,6 @@ func TestNativeChannelWriteDispatchNeverFallsBackToHTTP(t *testing.T) {
 	ctx := runtimeeffects.WithAuthority(context.Background(), authority)
 	tool := runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"),
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerInProcess),
-		runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
 		runtimecontracts.WithToolInProcessTarget(runtimecontracts.ToolInProcessWhatsAppSendText))
 	var requests atomic.Int64

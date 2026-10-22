@@ -127,7 +127,7 @@ func withNativeChannelActivityLaunch(ctx context.Context, started ActivityAttemp
 		return nil, nil, err
 	}
 	target, native := tool.InProcess()
-	if !native || target != runtimecontracts.ToolInProcessWhatsAppSendText || tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+	if !native || target != runtimecontracts.ToolInProcessWhatsAppSendText {
 		return nil, nil, fmt.Errorf("native activity has no installed exact write target")
 	}
 	if err := tool.InputSchema().Validate(intent.Input.Interface()); err != nil {

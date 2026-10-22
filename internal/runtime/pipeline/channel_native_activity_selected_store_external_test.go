@@ -23,7 +23,6 @@ func TestNativeActivityWithoutOriginalActivationJournalsRefusalBothStores(t *tes
 				contracts.WithToolHandler(contracts.ToolHandlerInProcess),
 				contracts.WithToolCategory("provider_connector"),
 				contracts.WithToolInProcessTarget(contracts.ToolInProcessWhatsAppSendText),
-				contracts.WithToolEffect(contracts.ActivityEffectClassNonIdempotentWrite),
 				contracts.WithToolSchemas(contracts.MustToolInputSchema(contracts.ToolSchemaObject), contracts.MustToolInputSchema(contracts.ToolSchemaObject)),
 			)
 			source := activityJournalProofSource(t, map[string]contracts.ToolSchemaEntry{"provider_write": tool})
@@ -38,6 +37,7 @@ func TestNativeActivityWithoutOriginalActivationJournalsRefusalBothStores(t *tes
 			pc := newGateRecoveryCoordinator(bus, selected, options)
 			intent := pipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
 			intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
+			_, releaseJournal := installActivityReplayJournal(t, ctx, selected, bus, pc)
 			if err := pipeline.ExecuteActivityIntentForTest(ctx, pc, nil, intent); err != nil {
 				t.Fatal(err)
 			}
@@ -48,6 +48,7 @@ func TestNativeActivityWithoutOriginalActivationJournalsRefusalBothStores(t *tes
 			if err := bus.WaitForQuiescence(ctx); err != nil {
 				t.Fatal(err)
 			}
+			releaseJournal()
 			if err := closeStore(); err != nil {
 				t.Fatal(err)
 			}

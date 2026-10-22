@@ -23,14 +23,14 @@ func TestWhatsAppAuthoredReplyFixtureUsesInstalledPrivateConnector(t *testing.T)
 	}
 	tool, found := module.SemanticSource().ToolEntries()["whatsapp.send_text"]
 	native, installed := tool.InProcess()
-	if !found || !installed || native != contracts.ToolInProcessWhatsAppSendText || tool.AgentExposable() || tool.Effect() != contracts.ActivityEffectClassNonIdempotentWrite {
+	if !found || !installed || native != contracts.ToolInProcessWhatsAppSendText || tool.AgentExposable() {
 		t.Fatal("authored fixture did not consume its exact private connector")
 	}
 	if warnings, err := tools.ValidateToolImplementations(module.SemanticSource()); err != nil || len(warnings) != 0 {
 		t.Fatal("declaration-first native activity admission failed", warnings, err)
 	}
 	readAccount := contracts.MustToolSchemaEntry(contracts.WithToolHandler(contracts.ToolHandlerInProcess),
-		contracts.WithToolCategory(contracts.ToolCategoryProviderRegistration.String()), contracts.WithToolEffect(contracts.ActivityEffectClassReadOnly),
+		contracts.WithToolCategory(contracts.ToolCategoryProviderRegistration.String()),
 		contracts.WithToolSchemas(contracts.MustToolInputSchema(contracts.ToolSchemaObject), contracts.MustToolInputSchema(contracts.ToolSchemaObject)),
 		contracts.WithToolInProcessTarget(contracts.ToolInProcessWhatsAppReadAccount))
 	if _, err := tools.ValidateToolImplementations(semanticview.Wrap(&contracts.WorkflowContractBundle{Tools: map[string]contracts.ToolSchemaEntry{"whatsapp.read_account": readAccount}})); err == nil {
