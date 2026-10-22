@@ -163,6 +163,7 @@ func TestA2RetainedPayloadMapSourceLineageOnBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					intent.Request.Capsule.SourcePlanRef = intent.Request.PlanRef
 				}},
 			} {
 				t.Run(tc.name, func(t *testing.T) {

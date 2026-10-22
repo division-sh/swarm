@@ -563,6 +563,9 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, llm *storel
 	if err != nil {
 		return fmt.Errorf("insert completion agent turn: %w", err)
 	}
+	if err := insertTurnLiveParentsTx(ctx, tx, storedTurnID); err != nil {
+		return err
+	}
 	return effects.AddFact(storedRunID, privaterunforkrevision.FamilyAgentTurns, storedTurnID)
 }
 
@@ -626,6 +629,9 @@ func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, llm *storellm
 		return fmt.Errorf("insert sqlite completion agent turn: %w", err)
 	}
 	if err := requireCompletionEvidenceInsert(result); err != nil {
+		return err
+	}
+	if err := insertTurnLiveParentsTx(ctx, tx, t.TurnID); err != nil {
 		return err
 	}
 	return effects.AddFact(t.RunID, privaterunforkrevision.FamilyAgentTurns, t.TurnID)

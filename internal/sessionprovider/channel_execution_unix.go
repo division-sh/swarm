@@ -126,9 +126,9 @@ func (e sessionChannelExecutor) deliver(ctx context.Context, operation string, i
 	}
 	var handle *runtimeeffects.Handle
 	if kind == runtimeeffects.AuthorityChannelConfirmation {
-		handle, err = runtimeeffects.BeginInProcessChannelConfirmation(ctx, target, fingerprint, lineage)
+		handle, err = runtimeeffects.BeginInProcessChannelConfirmation(ctx, fingerprint, lineage)
 	} else {
-		handle, err = runtimeeffects.BeginInProcessChannelDelivery(ctx, target, fingerprint, lineage)
+		handle, err = runtimeeffects.BeginInProcessChannelDelivery(ctx, fingerprint, lineage)
 	}
 	if err != nil {
 		return registration.DeliveryResult{}, err

@@ -71,11 +71,6 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		schemaOwner:            schemaOwner,
 	}
 	store.timerObligationPostgresReader = timerObligations
-	genericSchedules, err := storegenericschedule.NewPostgres(backend, store.requireCurrentSchema)
-	if err != nil {
-		return nil, err
-	}
-	store.genericSchedulePostgresOwner = genericSchedules
 	apiIdempotency, err := storeapiidempotency.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -202,6 +197,14 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := effectOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
+	if err := runLifecycle.BindExecutionAuthority(effectOwner); err != nil {
+		return nil, err
+	}
+	genericSchedules, err := storegenericschedule.NewPostgres(backend, store.requireCurrentSchema, runLifecycle)
+	if err != nil {
+		return nil, err
+	}
+	store.genericSchedulePostgresOwner = genericSchedules
 	deliveryOwner, err := storedelivery.NewDeliveryPostgresOwner(deadLetterOwner, runLifecycle, candidates, agentOwner)
 	if err != nil {
 		return nil, err
@@ -282,7 +285,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := pipelineOwner.BindSelectedForkWriter(eventOwner); err != nil {
 		return nil, err
 	}
-	runForkOwner, err := storerunfork.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, durableData, apiIdempotency, candidates)
+	runForkOwner, err := storerunfork.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, replyContexts, durableData, apiIdempotency, candidates)
 	if err != nil {
 		return nil, err
 	}
@@ -304,6 +307,15 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	}
 	startupOwner, err := storestartupownership.NewPostgres(backend, store.requireCurrentSchema, schemaOwner.CatalogEmpty, agentOwner, destructiveResetOwner, pipelineOwner)
 	if err != nil {
+		return nil, err
+	}
+	if err := startupOwner.BindLifecycleCandidates(candidates); err != nil {
+		return nil, err
+	}
+	if err := startupOwner.BindActivityJournalRole(activityJournal); err != nil {
+		return nil, err
+	}
+	if err := storestartupownership.BindPostgresSelectedResetHistory(startupOwner, storerunfork.ApplySelectedResetHistoryTx); err != nil {
 		return nil, err
 	}
 	store.startupPostgresOwner = startupOwner
@@ -377,11 +389,6 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.destructiveResetSQLiteOwner = destructiveReset
-	genericSchedules, err := storegenericschedule.NewSQLite(backend, store.requireCurrentSchema)
-	if err != nil {
-		return nil, err
-	}
-	store.genericScheduleSQLiteOwner = genericSchedules
 	apiIdempotency, err := storeapiidempotency.NewSQLite(backend, schema.Path(), store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -500,6 +507,14 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err := effectOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
 	}
+	if err := runLifecycle.BindExecutionAuthority(effectOwner); err != nil {
+		return nil, err
+	}
+	genericSchedules, err := storegenericschedule.NewSQLite(backend, store.requireCurrentSchema, runLifecycle)
+	if err != nil {
+		return nil, err
+	}
+	store.genericScheduleSQLiteOwner = genericSchedules
 	deliveryOwner, err := storedelivery.NewDeliverySQLiteOwner(deadLetterOwner, runLifecycle, candidates, agentOwner, store.now)
 	if err != nil {
 		return nil, err
@@ -527,6 +542,15 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	}
 	startupOwner, err := storestartupownership.NewSQLiteWithBackendIdentity(backend, schema.Path(), backendIdentity, store.requireCurrentSchema, schema.CatalogEmpty, agentOwner, pipelineOwner)
 	if err != nil {
+		return nil, err
+	}
+	if err := startupOwner.BindLifecycleCandidates(candidates); err != nil {
+		return nil, err
+	}
+	if err := startupOwner.BindActivityJournalRole(activityJournal); err != nil {
+		return nil, err
+	}
+	if err := storestartupownership.BindSQLiteSelectedResetHistory(startupOwner, storerunfork.ApplySelectedResetHistoryTx); err != nil {
 		return nil, err
 	}
 	store.startupSQLiteOwner = startupOwner
@@ -588,7 +612,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err := pipelineOwner.BindSelectedForkWriter(eventOwner); err != nil {
 		return nil, err
 	}
-	runForkOwner, err := storerunfork.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, durableData, apiIdempotency, candidates, store.now)
+	runForkOwner, err := storerunfork.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, replyContexts, durableData, apiIdempotency, candidates, store.now)
 	if err != nil {
 		return nil, err
 	}

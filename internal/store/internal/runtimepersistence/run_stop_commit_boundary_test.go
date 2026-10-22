@@ -37,11 +37,14 @@ import (
 // SQL, lifecycle mutations, rollback, and owner finalizers are production code.
 // No global driver registration or production transaction-wrapper hook exists.
 type stopCommitConnector struct {
-	driver driver.Driver
-	dsn    string
-	mu     sync.Mutex
-	next   func(driver.Tx) error
-	begin  chan struct{}
+	driver       driver.Driver
+	dsn          string
+	mu           sync.Mutex
+	next         func(driver.Tx) error
+	begin        chan struct{}
+	fork         *stopCommitForkWitness
+	commits      atomic.Int32
+	writeCommits atomic.Int32
 }
 
 func (c *stopCommitConnector) Driver() driver.Driver { return c.driver }
@@ -65,6 +68,7 @@ func (c *stopCommitConnector) arm(next func(driver.Tx) error) {
 type stopCommitConn struct {
 	diagnosticSQLConn
 	owner *stopCommitConnector
+	tx    *stopCommitTx
 }
 
 func (c *stopCommitConn) Begin() (driver.Tx, error) {
@@ -72,7 +76,7 @@ func (c *stopCommitConn) Begin() (driver.Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &stopCommitTx{Tx: tx, owner: c.owner}, nil
+	return c.observeTransaction(tx, false), nil
 }
 
 func (c *stopCommitConn) BeginTx(ctx context.Context, options driver.TxOptions) (driver.Tx, error) {
@@ -87,7 +91,7 @@ func (c *stopCommitConn) BeginTx(ctx context.Context, options driver.TxOptions) 
 			c.owner.begin = nil
 		}
 		c.owner.mu.Unlock()
-		return &stopCommitTx{Tx: tx, owner: c.owner}, nil
+		return c.observeTransaction(tx, options.ReadOnly), nil
 	}
 	if options.Isolation != 0 || options.ReadOnly {
 		return nil, errors.New("test driver requires native transaction options")
@@ -97,10 +101,18 @@ func (c *stopCommitConn) BeginTx(ctx context.Context, options driver.TxOptions) 
 
 type stopCommitTx struct {
 	driver.Tx
-	owner *stopCommitConnector
+	owner    *stopCommitConnector
+	conn     *stopCommitConn
+	fork     *stopCommitForkWitness
+	readOnly bool
 }
 
 func (tx *stopCommitTx) Commit() error {
+	defer func() { tx.conn.tx = nil }()
+	tx.owner.commits.Add(1)
+	if !tx.readOnly {
+		tx.owner.writeCommits.Add(1)
+	}
 	tx.owner.mu.Lock()
 	next := tx.owner.next
 	tx.owner.next = nil
@@ -109,6 +121,11 @@ func (tx *stopCommitTx) Commit() error {
 		return next(tx.Tx)
 	}
 	return tx.Tx.Commit()
+}
+
+func (tx *stopCommitTx) Rollback() error {
+	defer func() { tx.conn.tx = nil }()
+	return tx.Tx.Rollback()
 }
 
 func newStopCommitStore(t *testing.T, backend string, readProbe ...*operatorSnapshotProbe) (selectedFanOutLifecycleOwner, *sql.DB, *stopCommitConnector) {

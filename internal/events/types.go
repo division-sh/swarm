@@ -1128,6 +1128,15 @@ type Event struct {
 
 type deliveryContextKey struct{}
 
+// WithoutDeliveryContext masks only the carried delivery facts, retaining caller
+// cancellation and all other ownership bindings.
+func WithoutDeliveryContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, deliveryContextKey{}, DeliveryContext{})
+}
+
 func WithDeliveryContext(ctx context.Context, deliveryContext DeliveryContext) context.Context {
 	deliveryContext = deliveryContext.Normalized()
 	if deliveryContext.Empty() {

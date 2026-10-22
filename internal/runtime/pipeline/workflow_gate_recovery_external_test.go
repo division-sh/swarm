@@ -414,6 +414,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				})
 			}
 			coordinator := newCoordinator(bundleHash)
+			installActivityReplayJournal(t, ctx, selected, bus, coordinator)
 			bus.SetInterceptors(coordinator)
 
 			enteredAt := time.Now().UTC()

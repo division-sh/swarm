@@ -33,6 +33,7 @@ import (
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
+	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -93,9 +94,11 @@ func (w pipelineActivityIntentWriter) WriteActivityIntents(ctx context.Context, 
 }
 
 type pipelineActivityDispatcher struct {
-	coordinator *PipelineCoordinator
-	client      *http.Client
-	emissions   *pipelineEmissionPlan
+	coordinator              *PipelineCoordinator
+	client                   *http.Client
+	emissions                *pipelineEmissionPlan
+	publicationParentEventID string
+	journal                  ActivityAttemptJournal
 }
 
 func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, intent runtimeengine.ActivityIntent) (decisioncard.Card, decisioncard.ProposedEffectContinuation, error) {
@@ -205,6 +208,7 @@ func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, inte
 }
 
 func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent) error {
+	d.captureActivityJournal()
 	intent = intent.Normalized()
 	if err := d.coordinator.executionPosture.Admit(intent.ExecutionMode, "activity attempt claim, credential lookup, and launch"); err != nil {
 		return runtimefailures.Wrap(runtimefailures.ClassAuthorizationDenied, "process_execution_posture_rejected", "activity-runtime", "execute_activity", map[string]any{
@@ -271,6 +275,16 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 			"tool": intent.Tool, "effect_class": string(toolEffectClass),
 		}))
 	}
+	if toolEffectClass == runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		if intent.ExecutionMode == runtimeeffects.ExecutionModeMock {
+			if _, _, err := d.coordinator.admittedScenarioExecutionProfileForRun(ctx, intent.SourceRunID); err != nil {
+				return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "scenario_execution_profile_not_admitted", "activity-runtime", "admit_mock_activity", map[string]any{"tool": intent.Tool, "run_id": intent.SourceRunID}, err))
+			}
+		}
+		if reused, err := d.reuseExistingNonIdempotentActivityAttempt(ctx, intent); err != nil || reused {
+			return err
+		}
+	}
 	var mockResponse *providerconnectors.AdmittedMockResponse
 	if intent.ExecutionMode == runtimeeffects.ExecutionModeMock {
 		if toolEffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
@@ -282,9 +296,6 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 		if err != nil {
 			return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "scenario_execution_profile_not_admitted", "activity-runtime", "admit_mock_activity", map[string]any{"tool": intent.Tool, "run_id": intent.SourceRunID}, err))
 		}
-		if reused, err := d.reuseExistingNonIdempotentActivityAttempt(ctx, intent); err != nil || reused {
-			return err
-		}
 		admitted, err := responsePlan.Admit(intent.Tool, tool)
 		if err != nil {
 			return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "mock_connector_response_not_admitted", "activity-runtime", "admit_mock_activity", map[string]any{"tool": intent.Tool}, err))
@@ -292,6 +303,23 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 		mockResponse = &admitted
 	}
 	if toolEffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		// An exact publication is accounting, not permission to start work in
+		// the current loop generation. Validate it before fresh-work admission.
+		if _, published, err := selectedActivityInputPublication(ctx, intent); err != nil || published {
+			return err
+		}
+		if recorded, ok, err := d.recordedActivityResult(ctx, intent); err != nil {
+			return err
+		} else if ok {
+			d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{
+				"activity_id":       intent.ActivityID,
+				"tool":              intent.Tool,
+				"effect_class":      string(intent.EffectClass),
+				"result_event_id":   recorded.EventID,
+				"result_event_type": recorded.EventType,
+			})
+			return nil
+		}
 		if err := d.admitReadOnlyActivityGeneration(ctx, intent); err != nil {
 			return d.publishActivityFailure(ctx, intent, err)
 		}
@@ -302,18 +330,6 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	client := d.client
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
-	}
-	if recorded, ok, err := d.recordedActivityResult(ctx, intent); err != nil {
-		return err
-	} else if ok {
-		d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{
-			"activity_id":       intent.ActivityID,
-			"tool":              intent.Tool,
-			"effect_class":      string(intent.EffectClass),
-			"result_event_id":   recorded.EventID,
-			"result_event_type": recorded.EventType,
-		})
-		return nil
 	}
 	maxAttempts := activityRetryMaxAttempts(intent, toolEffectClass)
 	var lastErr error
@@ -356,35 +372,46 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 }
 
 func (pc *PipelineCoordinator) mockResponsePlanForRun(ctx context.Context, runID string, source semanticview.Source) (*providerconnectors.MockResponsePlan, error) {
-	if pc.scenarioProfiles == nil {
-		return pc.mockConnectorResponses, nil
-	}
-	profile, found, err := pc.scenarioProfiles.LoadScenarioExecutionProfile(ctx, strings.TrimSpace(runID))
+	profile, found, err := pc.admittedScenarioExecutionProfileForRun(ctx, runID)
 	if err != nil {
-		return nil, fmt.Errorf("load scenario execution profile for run %s: %w", runID, err)
+		return nil, err
 	}
 	if !found {
 		return pc.mockConnectorResponses, nil
 	}
-	if pc.executionPosture != executionposture.MockOnly {
-		return nil, fmt.Errorf("run %s has a scenario execution profile but runtime posture is %q", runID, pc.executionPosture)
-	}
-	if err := pc.effectiveSource.Validate(); err != nil {
-		return nil, fmt.Errorf("runtime effective source identity is unavailable: %w", err)
-	}
-	if !profile.EffectiveSourceIdentity().Equal(pc.effectiveSource) {
-		return nil, fmt.Errorf("run %s scenario execution effective source mismatch: persisted=%s runtime=%s", runID, profile.EffectiveSourceIdentity().Digest(), pc.effectiveSource.Digest())
-	}
 	return providerconnectors.OverlayMockResponsePlan(pc.mockConnectorResponses, source, profile.ConnectorResponses())
 }
 
+func (pc *PipelineCoordinator) admittedScenarioExecutionProfileForRun(ctx context.Context, runID string) (scenarioexecution.Profile, bool, error) {
+	if pc.scenarioProfiles == nil {
+		return scenarioexecution.Profile{}, false, nil
+	}
+	profile, found, err := pc.scenarioProfiles.LoadScenarioExecutionProfile(ctx, strings.TrimSpace(runID))
+	if err != nil {
+		return scenarioexecution.Profile{}, false, fmt.Errorf("load scenario execution profile for run %s: %w", runID, err)
+	}
+	if !found {
+		return scenarioexecution.Profile{}, false, nil
+	}
+	if pc.executionPosture != executionposture.MockOnly {
+		return scenarioexecution.Profile{}, false, fmt.Errorf("run %s has a scenario execution profile but runtime posture is %q", runID, pc.executionPosture)
+	}
+	if err := pc.effectiveSource.Validate(); err != nil {
+		return scenarioexecution.Profile{}, false, fmt.Errorf("runtime effective source identity is unavailable: %w", err)
+	}
+	if !profile.EffectiveSourceIdentity().Equal(pc.effectiveSource) {
+		return scenarioexecution.Profile{}, false, fmt.Errorf("run %s scenario execution effective source mismatch: persisted=%s runtime=%s", runID, profile.EffectiveSourceIdentity().Digest(), pc.effectiveSource.Digest())
+	}
+	return profile, true, nil
+}
+
 func (d pipelineActivityDispatcher) reuseExistingNonIdempotentActivityAttempt(ctx context.Context, intent runtimeengine.ActivityIntent) (bool, error) {
-	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.enabled() {
+	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.enabled() || d.journal == nil {
 		return false, nil
 	}
 	intent.Attempt = 1
 	expected := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
-	existing, ok, err := d.coordinator.workflowStore.LoadActivityAttempt(ctx, expected.RequestEventID)
+	existing, ok, err := d.journal.LoadActivityAttempt(ctx, expected.RequestEventID)
 	if err != nil {
 		return true, d.publishActivityFailure(ctx, intent, activityDependencyFailure(err, intent.Tool, "load_activity_attempt"))
 	}
@@ -393,6 +420,17 @@ func (d pipelineActivityDispatcher) reuseExistingNonIdempotentActivityAttempt(ct
 	}
 	if err := validateActivityAttemptClaimIdentity(existing, expected); err != nil {
 		return true, err
+	}
+	if existing.Status == ActivityAttemptStatusStarted && d.coordinator.activityJournalRole.Load() == nil {
+		if err := ctx.Err(); err != nil {
+			return true, err
+		}
+		// An unbound reader can report the retained attempt, but cannot wait as
+		// its admitted owner or reconcile it into a terminal result.
+		return true, runtimefailures.New(runtimefailures.ClassOutcomeUncertain, "activity_provider_outcome_uncertain", "activity-runtime", "reconcile_activity_attempt", map[string]any{"request_event_id": existing.RequestEventID})
+	}
+	if existing.Status != ActivityAttemptStatusStarted {
+		d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{"result_event_id": existing.ResultEventID})
 	}
 	return true, d.publishExistingActivityAttempt(ctx, intent, existing)
 }
@@ -486,6 +524,7 @@ func (d pipelineActivityDispatcher) admitReadOnlyActivityGeneration(ctx context.
 }
 
 func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx context.Context, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry, mockResponse *providerconnectors.AdmittedMockResponse) error {
+	d.captureActivityJournal()
 	intent.Attempt = 1
 	success, err := admitActivityPublication(intent, intent.SuccessEvent)
 	if err != nil {
@@ -495,15 +534,15 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 	if err != nil {
 		return err
 	}
-	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.enabled() {
+	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.enabled() || d.journal == nil {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "activity_journal_unavailable", "activity-runtime", "load_activity_attempt", map[string]any{"tool": strings.TrimSpace(intent.Tool)}))
 	}
 	startRecord := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
 	unlock := d.coordinator.lockWorkflowEntity(intent.EntityID.String())
-	started, inserted, err := d.coordinator.workflowStore.ClaimActivityAttemptForLoopGeneration(ctx, startRecord)
+	started, inserted, err := d.journal.ClaimActivityAttemptForLoopGeneration(ctx, startRecord)
 	unlock()
 	if err != nil {
-		if reconciled, ok, loadErr := d.coordinator.workflowStore.LoadActivityAttempt(ctx, startRecord.RequestEventID); loadErr == nil && ok {
+		if reconciled, ok, loadErr := d.journal.LoadActivityAttempt(ctx, startRecord.RequestEventID); loadErr == nil && ok {
 			if claimErr := validateActivityAttemptClaimIdentity(reconciled, startRecord); claimErr != nil {
 				return claimErr
 			}
@@ -514,6 +553,7 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 	if !inserted {
 		return d.publishExistingActivityAttempt(ctx, intent, started)
 	}
+	d.logActivityRuntime(ctx, intent, "attempt_started", nil)
 	if mockResponse != nil {
 		result, err := mockResponse.Materialize()
 		if err != nil {
@@ -526,7 +566,7 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 			activitySuccessPayload(intent, result),
 			nil,
 		)
-		stored, committed, err := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+		stored, committed, err := d.journal.CompleteActivityAttempt(ctx, terminal)
 		return d.publishCommittedActivityAttempt(ctx, intent, stored, committed, err, "complete_activity_attempt")
 	}
 	if _, native := tool.InProcess(); native {
@@ -546,7 +586,7 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 			activityFailurePayload(intent, cause),
 			&cause.Failure,
 		)
-		stored, committed, journalErr := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+		stored, committed, journalErr := d.journal.CompleteActivityAttempt(ctx, terminal)
 		return d.publishCommittedActivityAttempt(ctx, intent, stored, committed, journalErr, "complete_activity_attempt")
 	}
 	result, err := executePreparedActivityHTTPTool(ctx, prepared)
@@ -570,9 +610,9 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 	var stored ActivityAttemptRecord
 	var committed bool
 	if terminal.Status == ActivityAttemptStatusUncertain {
-		stored, committed, err = d.coordinator.workflowStore.MarkActivityAttemptUncertain(ctx, terminal)
+		stored, committed, err = d.journal.MarkActivityAttemptUncertain(ctx, terminal)
 	} else {
-		stored, committed, err = d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+		stored, committed, err = d.journal.CompleteActivityAttempt(ctx, terminal)
 	}
 	return d.publishCommittedActivityAttempt(ctx, intent, stored, committed, err, "complete_activity_attempt")
 }
@@ -581,7 +621,8 @@ func (d pipelineActivityDispatcher) rejectChannelActivityTarget(ctx context.Cont
 	if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		return d.publishActivityFailure(ctx, intent, cause)
 	}
-	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.enabled() {
+	d.captureActivityJournal()
+	if d.coordinator == nil || d.coordinator.workflowStore == nil || !d.coordinator.workflowStore.enabled() || d.journal == nil {
 		return d.publishActivityFailure(ctx, intent, cause)
 	}
 	intent.Attempt = 1
@@ -591,10 +632,10 @@ func (d pipelineActivityDispatcher) rejectChannelActivityTarget(ctx context.Cont
 	}
 	startRecord := activityAttemptStartRecord(intent, activityInputHash(intent.Input))
 	unlock := d.coordinator.lockWorkflowEntity(intent.EntityID.String())
-	started, inserted, err := d.coordinator.workflowStore.ClaimActivityAttemptForLoopGeneration(ctx, startRecord)
+	started, inserted, err := d.journal.ClaimActivityAttemptForLoopGeneration(ctx, startRecord)
 	unlock()
 	if err != nil {
-		if reconciled, ok, loadErr := d.coordinator.workflowStore.LoadActivityAttempt(ctx, startRecord.RequestEventID); loadErr == nil && ok {
+		if reconciled, ok, loadErr := d.journal.LoadActivityAttempt(ctx, startRecord.RequestEventID); loadErr == nil && ok {
 			if claimErr := validateActivityAttemptClaimIdentity(reconciled, startRecord); claimErr != nil {
 				return claimErr
 			}
@@ -613,7 +654,7 @@ func (d pipelineActivityDispatcher) rejectChannelActivityTarget(ctx context.Cont
 		activityFailurePayload(intent, failure),
 		&failure.Failure,
 	)
-	stored, committed, err := d.coordinator.workflowStore.CompleteActivityAttempt(ctx, terminal)
+	stored, committed, err := d.journal.CompleteActivityAttempt(ctx, terminal)
 	return d.publishCommittedActivityAttempt(ctx, intent, stored, committed, err, "complete_rejected_channel_activity_target")
 }
 
@@ -641,6 +682,61 @@ func (d pipelineActivityDispatcher) recordedActivityResult(ctx context.Context, 
 		return activityRecordedResult{}, false, nil
 	}
 	return d.coordinator.workflowStore.recordedActivityResult(ctx, intent)
+}
+
+func activityRetryMaxAttempts(intent runtimeengine.ActivityIntent, effectClass runtimecontracts.ActivityEffectClass) int {
+	if intent.RetryMaxAttempts > 0 {
+		return intent.RetryMaxAttempts
+	}
+	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
+	if defaults.MaxAttempts > 0 {
+		return defaults.MaxAttempts
+	}
+	return 1
+}
+
+func waitActivityRetryBackoff(ctx context.Context, backoff string, completedAttempt int) error {
+	delay := activityRetryDelay(backoff, completedAttempt)
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func activityRetryDelay(backoff string, completedAttempt int) time.Duration {
+	switch strings.TrimSpace(strings.ToLower(backoff)) {
+	case "", "none":
+		return 0
+	case "exponential":
+		if completedAttempt < 1 {
+			completedAttempt = 1
+		}
+		delay := 10 * time.Millisecond
+		for i := 1; i < completedAttempt && delay < time.Second; i++ {
+			delay *= 2
+		}
+		if delay > time.Second {
+			return time.Second
+		}
+		return delay
+	default:
+		return 10 * time.Millisecond
+	}
+}
+
+func (d pipelineActivityDispatcher) executeActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (any, error) {
+	prepared, err := d.prepareActivityHTTPTool(ctx, client, intent, tool)
+	if err != nil {
+		return nil, err
+	}
+	return executePreparedActivityHTTPTool(ctx, prepared)
 }
 
 func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, intent runtimeengine.ActivityIntent, action string, detail map[string]any) {
@@ -686,7 +782,8 @@ func (pc *PipelineCoordinator) handleActivityRequestEventWithEmissionPlan(ctx co
 	if err != nil {
 		return true, runtimepipelineobligation.Continue(), err
 	}
-	dispatcher := pipelineActivityDispatcher{coordinator: pc, emissions: emissions}
+	intent.Context = events.DeliveryContextFromContext(ctx).ReplyOnly()
+	dispatcher := pipelineActivityDispatcher{coordinator: pc, emissions: emissions, publicationParentEventID: evt.ParentEventID()}
 	if failure := dispatcher.activityContractPinFailure(ctx, intent, pc.SemanticSource()); failure != nil {
 		if failure.Class == runtimefailures.ClassDependencyUnavailable {
 			return true, runtimepipelineobligation.ReleaseForRetry(failure.Detail.Code, failure), nil
@@ -807,6 +904,12 @@ func (pc *PipelineCoordinator) ExecuteDurableActivity(ctx context.Context, inten
 }
 
 func activityRequestEmitIntentFromAdmittedSource(intent runtimeengine.ActivityIntent) (runtimeengine.EmitIntent, error) {
+	return activityRequestEmitIntentWithParent(intent, firstNonEmptyString(intent.SourceEventID, intent.ParentEventID))
+}
+
+// Approval resumes an existing activity identity. Its physical causal parent is
+// the new decision, not an inherited source identity without a child event row.
+func activityRequestEmitIntentWithParent(intent runtimeengine.ActivityIntent, parentEventID string) (runtimeengine.EmitIntent, error) {
 	intent = intent.Normalized()
 	if err := validateSessionActivityRequestSelection(intent); err != nil {
 		return runtimeengine.EmitIntent{}, err
@@ -843,7 +946,7 @@ func activityRequestEmitIntentFromAdmittedSource(intent runtimeengine.ActivityIn
 		},
 		Lineage: events.EventLineage{
 			RunID:         intent.SourceRunID,
-			ParentEventID: firstNonEmptyString(intent.SourceEventID, intent.ParentEventID),
+			ParentEventID: parentEventID,
 			TaskID:        intent.SourceTaskID,
 			ExecutionMode: intent.ExecutionMode,
 		},
@@ -881,53 +984,6 @@ func activityEventProducer(owner activityidentity.Owner) events.ProducerClaim {
 		return events.ProducerClaim{Type: events.EventProducerAgent, ID: agentID}
 	}
 	return events.ProducerClaim{}
-}
-
-func activityRetryMaxAttempts(intent runtimeengine.ActivityIntent, effectClass runtimecontracts.ActivityEffectClass) int {
-	if intent.RetryMaxAttempts > 0 {
-		return intent.RetryMaxAttempts
-	}
-	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
-	if defaults.MaxAttempts > 0 {
-		return defaults.MaxAttempts
-	}
-	return 1
-}
-
-func waitActivityRetryBackoff(ctx context.Context, backoff string, completedAttempt int) error {
-	delay := activityRetryDelay(backoff, completedAttempt)
-	if delay <= 0 {
-		return nil
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func activityRetryDelay(backoff string, completedAttempt int) time.Duration {
-	switch strings.TrimSpace(strings.ToLower(backoff)) {
-	case "", "none":
-		return 0
-	case "exponential":
-		if completedAttempt < 1 {
-			completedAttempt = 1
-		}
-		delay := 10 * time.Millisecond
-		for i := 1; i < completedAttempt && delay < time.Second; i++ {
-			delay *= 2
-		}
-		if delay > time.Second {
-			return time.Second
-		}
-		return delay
-	default:
-		return 10 * time.Millisecond
-	}
 }
 
 func activityRequestPayloadFromIntent(intent runtimeengine.ActivityIntent) activityRequestPayload {
@@ -1068,14 +1124,6 @@ type preparedActivityHTTPTool struct {
 	hasCompiledResult  bool
 	inputHash          string
 	validateAdmission  func(context.Context) error
-}
-
-func (d pipelineActivityDispatcher) executeActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (any, error) {
-	prepared, err := d.prepareActivityHTTPTool(ctx, client, intent, tool)
-	if err != nil {
-		return nil, err
-	}
-	return executePreparedActivityHTTPTool(ctx, prepared)
 }
 
 func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (preparedActivityHTTPTool, error) {
@@ -1590,7 +1638,7 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 		},
 		Lineage: events.EventLineage{
 			RunID:         intent.SourceRunID,
-			ParentEventID: firstNonEmptyString(intent.SourceEventID, intent.ParentEventID),
+			ParentEventID: firstNonEmptyString(d.publicationParentEventID, intent.SourceEventID, intent.ParentEventID),
 			TaskID:        intent.SourceTaskID,
 			ExecutionMode: intent.ExecutionMode,
 		},
@@ -1599,12 +1647,10 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 		return fmt.Errorf("construct activity result event: %w", err)
 	}
 	if d.emissions != nil {
-		d.emissions.appendEvent(evt)
+		d.emissions.appendIntents([]runtimeengine.EmitIntent{{Event: evt, Context: intent.Context.ReplyOnly()}})
 		d.logActivityRuntime(ctx, intent, "result_published", map[string]any{
 			"activity_id":       intent.ActivityID,
 			"tool":              intent.Tool,
-			"effect_class":      string(intent.EffectClass),
-			"attempt":           intent.Attempt,
 			"result_event_id":   evt.ID(),
 			"result_event_type": string(evt.Type()),
 		})
@@ -1616,8 +1662,6 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 	d.logActivityRuntime(ctx, intent, "result_published", map[string]any{
 		"activity_id":       intent.ActivityID,
 		"tool":              intent.Tool,
-		"effect_class":      string(intent.EffectClass),
-		"attempt":           intent.Attempt,
 		"result_event_id":   evt.ID(),
 		"result_event_type": string(evt.Type()),
 	})
@@ -1640,12 +1684,18 @@ func (d pipelineActivityDispatcher) publishJournaledActivityResult(ctx context.C
 	if rec.CompletedAt == nil || rec.CompletedAt.IsZero() {
 		return fmt.Errorf("activity attempt %s has no valid terminal completion timestamp", rec.RequestEventID)
 	}
-	intent.Attempt = rec.Attempt
+	if owned, err := selectedActivityPublicationOwnsResult(ctx, intent, rec); err != nil || owned {
+		// Its exact publication is continuing independently. The input still
+		// completes through the normal pipeline settlement owner.
+		return err
+	}
 	intent.Generation = rec.Generation
+	intent.Attempt = rec.Attempt
+	intent.Context = events.DeliveryContext{}
 	if id := strings.TrimSpace(rec.ReplyContextID); id != "" {
 		intent.Context = events.DeliveryContext{Reply: &events.ReplyContextRef{ID: id}}
 	}
-	return d.publishActivityResultWithID(ctx, intent, rec.ResultEventID, rec.ResultEventType, rec.ResultPayload, *rec.CompletedAt)
+	return d.publishActivityResultWithID(events.WithoutDeliveryContext(ctx), intent, rec.ResultEventID, rec.ResultEventType, rec.ResultPayload, *rec.CompletedAt)
 }
 
 func activityAttemptStartRecord(intent runtimeengine.ActivityIntent, inputHash string) ActivityAttemptRecord {

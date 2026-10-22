@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -24,6 +23,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -108,7 +108,7 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 						if approved {
 							wantEntity, wantFlow = child.ForkRunID, child.ForkRunID
 						}
-						if payload.SourceRunID != child.ForkRunID || copied.EntityID != wantEntity || copied.FlowInstance != wantFlow || copied.Generation.Valid() || payload.Generation.Valid() || (approved && payload.ForkPolicy != string(runtimecontracts.ActivityForkRequireConfirmation)) {
+						if payload.SourceRunID != child.ForkRunID || copied.EntityID != wantEntity || copied.FlowInstance != wantFlow || copied.Generation.Valid() || payload.Generation.Valid() {
 							t.Fatalf("source/child owner or approval policy changed: payload=%#v copied=%#v", payload, copied)
 						}
 						sourceAfter, found, err := journal.LoadActivityAttempt(ctx, sourceRecord.RequestEventID)
@@ -457,6 +457,10 @@ func seedActivityEvidenceReuse(t *testing.T, fixture authorActivityReceiptFixtur
 }
 
 func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixture, postgres, approved bool, status string, loopAttempt int, ordinaryReplay, pendingCard bool) (runfork.RunForkMaterialization, events.Event, runtimepipeline.ActivityAttemptRecord) {
+	return seedActivityEvidenceForForkWithReply(t, fixture, postgres, approved, status, loopAttempt, ordinaryReplay, pendingCard, false)
+}
+
+func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityReceiptFixture, postgres, approved bool, status string, loopAttempt int, ordinaryReplay, pendingCard, carryReply bool) (runfork.RunForkMaterialization, events.Event, runtimepipeline.ActivityAttemptRecord) {
 	t.Helper()
 	runID, parentID := uuid.NewString(), uuid.NewString()
 	entityID := ""
@@ -474,7 +478,6 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 	flow, instance := "flow-a", "flow-a"
 	node := mustPersistenceNode(flow, "writer")
 	owner := activityidentity.MustNodeOwner(node)
-	policy := runtimecontracts.ActivityForkReuseRecordedResult
 	activity, tool, handler, success, failure := "commit", "provider.write", "review.accepted", "flow-a/commit.succeeded", "flow-a/commit.failed"
 	if ordinaryReplay && !approved {
 		flow, instance, entityID = ".", runID, runID
@@ -493,7 +496,6 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 		if err != nil {
 			t.Fatal(err)
 		}
-		policy = continuation.ForkPolicy
 		activity, tool, handler, success, failure = continuation.ActivityID, continuation.Tool, continuation.HandlerEventKey, continuation.SuccessEvent, continuation.FailureEvent
 		anchor, err := card.Anchor.ProposedEffect()
 		if err != nil {
@@ -507,6 +509,16 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 	}
 	constructed := constructSelectedActivityProducerFixture(t, ctx, fixture.store.(agentFixtureFlowStore), declarations, parent, flow, at)
 	instance, entityID = constructed.InstancePath, constructed.EntityID
+	var replyID string
+	if carryReply {
+		record := replyContextFreezeTestRecord(parent.ID(), runID, "activity", at)
+		record.RequesterFlowID, record.Origin = flow, events.RouteIdentity{FlowID: flow, FlowInstance: instance, EntityID: entityID}
+		record.ID = replycontext.DeterministicID(record.RequestEventID, record.RequesterFlowID, record.RequestOutputPin, record.ReplyInputPin, record.ProviderFlowID, record.Origin)
+		if err := fixture.store.(replycontext.Store).CreateReplyContext(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+		replyID = record.ID
+	}
 	if !approved {
 		if ordinaryReplay {
 			source = eventtest.RootRoutingSource(runID)
@@ -552,6 +564,9 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 	decisionID := ""
 	if approved {
 		requestID, input = continuation.RequestEventID, continuation.Input.Interface()
+		if carryReply {
+			card, continuation = bindActivityFixtureProposedReply(t, card, continuation, replyID)
+		}
 		cards := fixture.store.(decisioncard.ProposedEffectStore)
 		if err := cards.CreateProposedEffectCard(ctx, card, continuation); err != nil {
 			t.Fatal(err)
@@ -564,6 +579,9 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 	if pendingCard {
 		pendingAt := at.Add(time.Minute)
 		pending, continuation := newDeclaredRootActivityCard(t, runID, pendingAt, declarations)
+		if carryReply {
+			pending, continuation = bindActivityFixtureProposedReply(t, pending, continuation, replyID)
+		}
 		parent := eventtest.ExistingRunRootIngress(continuation.SourceEventID, "activity.seeded", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, pendingAt)
 		if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, parent); err != nil {
 			t.Fatal(err)
@@ -572,8 +590,8 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 			t.Fatal(err)
 		}
 	}
-	payload, err := json.Marshal(map[string]any{"activity_id": activity, "tool": tool, "input": input, "effect_class": "non_idempotent_write", "fork_policy": string(policy),
-		"success_event": success, "failure_event": failure, "attempt": 1, "entity_id": entityID, "node_id": owner.Key(), "flow_id": flow, "flow_instance": instance,
+	payload, err := json.Marshal(map[string]any{"activity_id": activity, "tool": tool, "input": input,
+		"success_event": success, "failure_event": failure, "entity_id": entityID, "node_id": owner.Key(), "flow_id": flow, "flow_instance": instance,
 		"handler_event_key": handler, "source_run_id": runID, "source_event_id": parentID, "loop_generation": generation, "loop_stage": loopStage})
 	if err != nil {
 		t.Fatal(err)
@@ -597,8 +615,8 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 	record, inserted, err := journal.StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptRecord{
 		RequestEventID: requestID, RunID: runID, SourceEventID: parentID, ExecutionMode: executionmode.Live,
 		EntityID: entityID, FlowInstance: instance, NodeID: owner.Key(), HandlerEventKey: handler, ActivityID: activity, Tool: tool,
-		EffectClass: "non_idempotent_write", Attempt: 1, SuccessEvent: success, FailureEvent: failure, InputHash: "recorded-input-hash",
-		Generation: generation, LoopStage: loopStage,
+		Attempt: 1, SuccessEvent: success, FailureEvent: failure, InputHash: "recorded-input-hash",
+		Generation: generation, LoopStage: loopStage, ReplyContextID: replyID,
 	})
 	if err != nil || !inserted {
 		t.Fatalf("canonical journal start: inserted=%v err=%v", inserted, err)
@@ -655,6 +673,9 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 func newDeclaredRootActivityCard(t *testing.T, runID string, at time.Time, declarations semanticview.Source) (decisioncard.Card, decisioncard.ProposedEffectContinuation) {
 	t.Helper()
 	card, continuation := newRootProposedEffectTestCard(t, runID, at)
+	// This declaration fixture has no admitted incoming request. Reply-bearing
+	// fork proofs bind an actual captured row before sealing the effect.
+	continuation.ReplyContextID = ""
 	bundle, ok := semanticview.Bundle(declarations)
 	if !ok || bundle.SourceArtifact == nil {
 		t.Fatal("proposed activity requires its admitted declaration artifact")
@@ -688,6 +709,25 @@ func newDeclaredRootActivityCard(t *testing.T, runID string, at time.Time, decla
 		t.Fatal(err)
 	}
 	card.CardID, card.BundleHash, card.Anchor = continuation.CardID, continuation.BundleHash, anchor
+	card.EffectContentHash, card.CardContentHash = continuation.EffectContentHash, ""
+	card, err = decisioncard.New(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return card, continuation
+}
+
+func bindActivityFixtureProposedReply(t *testing.T, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation, replyID string) (decisioncard.Card, decisioncard.ProposedEffectContinuation) {
+	t.Helper()
+	continuation.ReplyContextID = replyID
+	value, err := continuation.EffectValue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	continuation.EffectContentHash, err = canonicaljson.HashValue(value)
+	if err != nil {
+		t.Fatal(err)
+	}
 	card.EffectContentHash, card.CardContentHash = continuation.EffectContentHash, ""
 	card, err = decisioncard.New(card)
 	if err != nil {

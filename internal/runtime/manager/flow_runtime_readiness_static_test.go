@@ -145,6 +145,12 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 	requireStaticReadinessCalls(t, calls, "reconcileDynamicFlowRuntimeReadinessPlan", map[string]int{
 		"flow_readiness_plan.go": 1,
 	})
+	requireStaticReadinessCalls(t, calls, "startReadinessReconciliation", map[string]int{
+		"runtime.go": 2,
+	})
+	requireStaticReadinessCalls(t, calls, "readinessReconciliationLoop", map[string]int{
+		"runtime.go": 1,
+	})
 	requireStaticReadinessCalls(t, calls, "dynamicFlowRuntimeReadinessSource", map[string]int{
 		"flow_activation.go":          3, // Includes process-only standing preparation before executable publication.
 		"flow_readiness_admission.go": 4,
@@ -184,6 +190,7 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 		// FinalizeCommittedAgentReadiness observes its exact accepted attachment;
 		// it cannot advance readiness or construct an absent actor.
 		"committed_agent_attachment.go": 1,
+		"activation_gateway.go":         1,
 		"flow_attachment_execution.go":  1,
 		"flow_readiness_admission.go":   2,
 		"flow_readiness_plan.go":        1,
@@ -209,6 +216,8 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 		}
 	}
 	requireStaticReadinessCalls(t, calls, "VerifyDynamicFlowRuntimeActivationAttempt", map[string]int{
+		// The gateway proves the same exact current attachment before publication.
+		"activation_gateway.go":            1,
 		"committed_agent_attachment.go":    1,
 		"dynamic_flow_activation_owner.go": 2,
 		"flow_readiness_startup.go":        1,

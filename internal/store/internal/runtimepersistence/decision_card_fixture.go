@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 )
@@ -14,6 +15,9 @@ type DecisionCardDomainFixture interface {
 	ApplyDeferralForTest(context.Context, decisioncard.DeferRequest) (decisioncard.DecisionOutcome, error)
 	BeginInputForTest(context.Context, decisioncard.BeginInputRequest) (decisioncard.InputDraft, error)
 	CancelInputForTest(context.Context, decisioncard.CancelInputRequest) (decisioncard.InputDraft, error)
+	PreviewInputTextForTest(context.Context, string, string, string, time.Time) (decisioncard.InputFieldProgress, error)
+	AdvanceInputTextForTest(context.Context, string, string, string, time.Time) (decisioncard.InputFieldProgress, error)
+	AdvanceInputSkipForTest(context.Context, string, string, time.Time) (decisioncard.InputFieldProgress, error)
 }
 
 func DecisionCardDomainForTest(selected any) DecisionCardDomainFixture {

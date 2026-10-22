@@ -108,8 +108,34 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 	if restored != 2 {
 		t.Fatalf("exact mechanical presentation predecessors=%d, want2", restored)
 	}
-	if digest, err := mechanicalReceiptDigest(prior); err != nil || digest != "a47db59e4f7118a2c0cca2f463a68c28c32e571d9cea15892635e62d1340d7cf" {
+	if digest, err := mechanicalReceiptDigest(prior); err != nil || digest != "42b81abe4214daf8d46e5859d779a924dfdcc079beaa6cbfe36e5228c48c95b9" {
 		t.Fatalf("historical mechanical/current receipt digest changed: %s/%v", digest, err)
+	}
+	for i := 43; i >= 36; i-- {
+		pin := pins[i]
+		if pin.Original.Mechanical == nil {
+			continue
+		}
+		matches := 0
+		for index, row := range prior {
+			if !sameReviewedRecipeKey(row, pin.Original) {
+				continue
+			}
+			history := row
+			history.Successor = pin.Original.Successor
+			body, err := reverseReviewedSuccessor2617(row.Successor, pin.Edits)
+			if err != nil || body != pin.Original.Successor || row.Successor != pin.Candidate || !reflect.DeepEqual(history, pin.Original) {
+				t.Fatalf("#642 successor changed historical mechanical evidence: %s/%v", row.Function, err)
+			}
+			prior[index] = pin.Original
+			matches++
+		}
+		if matches != 1 {
+			t.Fatalf("exact #642 mechanical predecessor count=%d", matches)
+		}
+	}
+	if digest, err := mechanicalReceiptDigest(prior); err != nil || digest != "a47db59e4f7118a2c0cca2f463a68c28c32e571d9cea15892635e62d1340d7cf" {
+		t.Fatalf("original mechanical/current receipt digest changed: %s/%v", digest, err)
 	}
 }
 

@@ -17,7 +17,7 @@ import (
 
 const (
 	runForkMethod       = "run.fork"
-	runForkCommandShape = "swarm run fork <source-run-id> [--source <directory>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]"
+	runForkCommandShape = "swarm run fork <source-run-id> [--source <directory>] [--at-start | --at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--allow-source-freeze] [--idempotency-key <key>]"
 )
 
 type forkCommandOptions struct {
@@ -26,12 +26,14 @@ type forkCommandOptions struct {
 
 	source            string
 	atEvent           string
+	atStart           bool
 	allowSourceFreeze bool
 	idempotencyKey    string
 	pins              []string
 
 	sourceSet         bool
 	atEventSet        bool
+	atStartSet        bool
 	idempotencyKeySet bool
 }
 
@@ -56,12 +58,13 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "fork <source-run-id>",
 		Short:   "Branch a run to replay it with changed contracts or policy.",
-		Example: `  swarm run fork <source-run-id> --at-event <event-id>`,
-		Long:    runForkCommandShape + "\n\nBranch a run to replay it with changed contracts or policy.",
+		Example: "  swarm run fork <source-run-id> --at-start\n  swarm run fork <source-run-id> --at-event <event-id>",
+		Long:    runForkCommandShape + "\n\nBranch a run to replay it with changed contracts or policy. --at-start selects the original committed start, before creating ingress. --at-start and --at-event are mutually exclusive; omitting both preserves the current latest-point selection.",
 		Args:    argcount.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			forkOpts.sourceSet = cmd.Flags().Changed("source")
 			forkOpts.atEventSet = cmd.Flags().Changed("at-event")
+			forkOpts.atStartSet = cmd.Flags().Changed("at-start")
 			forkOpts.idempotencyKeySet = cmd.Flags().Changed("idempotency-key")
 			if err := forkOpts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
@@ -72,6 +75,7 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 	argcount.SetDiscoveryHint(cmd, "List run ids with `swarm run list`.")
 	cmd.Flags().StringVar(&forkOpts.source, "source", "", "Select a target source directory already served into the selected store; defaults to the source run")
 	cmd.Flags().StringVar(&forkOpts.atEvent, "at-event", "", "Fork at this source event id")
+	cmd.Flags().BoolVar(&forkOpts.atStart, "at-start", false, "Fork at the original committed run start, before creating ingress; mutually exclusive with --at-event")
 	cmd.Flags().StringArrayVar(&forkOpts.pins, "pin", nil, "Exact data version override: name@vN or name@ResourceVersionID (repeatable)")
 	cmd.Flags().BoolVar(&forkOpts.allowSourceFreeze, "allow-source-freeze", false, "Allow permanent source freeze if it has not advanced beyond the fork point; a frozen source cannot resume. An advanced source stays independently live. Omit and decline the prompt to cancel")
 	cmd.Flags().StringVar(&forkOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for retry-safe fork creation")
@@ -164,6 +168,12 @@ func (opts forkCommandOptions) params(rawSourceRunID string) (map[string]any, er
 		return nil, err
 	}
 	params := map[string]any{"source_run_id": sourceRunID}
+	if (opts.atStartSet || opts.atStart) && (opts.atEventSet || opts.atEvent != "") {
+		return nil, fmt.Errorf("--at-start and --at-event are mutually exclusive")
+	}
+	if opts.atStart {
+		params["at_start"] = true
+	}
 	if opts.allowSourceFreeze {
 		params["allow_source_freeze"] = true
 	}

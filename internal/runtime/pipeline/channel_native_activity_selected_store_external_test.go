@@ -36,6 +36,7 @@ func TestNativeActivityWithoutOriginalActivationJournalsRefusalBothStores(t *tes
 				}}
 			bus := newActivityJournalProofBus(t, selected, source)
 			pc := newGateRecoveryCoordinator(bus, selected, options)
+			_, release := installActivityReplayJournal(t, ctx, selected, bus, pc)
 			intent := pipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
 			intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
 			if err := pipeline.ExecuteActivityIntentForTest(ctx, pc, nil, intent); err != nil {
@@ -48,6 +49,7 @@ func TestNativeActivityWithoutOriginalActivationJournalsRefusalBothStores(t *tes
 			if err := bus.WaitForQuiescence(ctx); err != nil {
 				t.Fatal(err)
 			}
+			release()
 			if err := closeStore(); err != nil {
 				t.Fatal(err)
 			}

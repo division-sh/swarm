@@ -38,7 +38,7 @@ func TestChannelActivityNativeAcknowledgementCutsBothStores(t *testing.T) {
 						RequestEventID: continuation.RequestEventID, RunID: continuation.RunID, ExecutionMode: continuation.ExecutionMode,
 						SourceEventID: continuation.SourceEventID, EntityID: continuation.EntityID, FlowInstance: continuation.FlowInstance,
 						NodeID: continuation.NodeID, HandlerEventKey: continuation.HandlerEventKey, ActivityID: continuation.ActivityID,
-						Tool: continuation.Tool, EffectClass: string(continuation.EffectClass), Attempt: 1,
+						Tool: continuation.Tool, Attempt: 1,
 						SuccessEvent: continuation.SuccessEvent, FailureEvent: continuation.FailureEvent, InputHash: continuation.EffectContentHash,
 					}
 					journal := fixture.store.(activityStoryJournal)
@@ -153,7 +153,7 @@ func TestChannelPostCommitActivityHintsBothStores(t *testing.T) {
 						RequestEventID: continuation.RequestEventID, RunID: runID, ExecutionMode: continuation.ExecutionMode,
 						SourceEventID: continuation.SourceEventID, EntityID: continuation.EntityID, FlowInstance: continuation.FlowInstance,
 						NodeID: continuation.NodeID, HandlerEventKey: continuation.HandlerEventKey, ActivityID: continuation.ActivityID,
-						Tool: continuation.Tool, EffectClass: string(continuation.EffectClass), Attempt: 1,
+						Tool: continuation.Tool, Attempt: 1,
 						SuccessEvent: continuation.SuccessEvent, FailureEvent: continuation.FailureEvent, InputHash: continuation.EffectContentHash,
 					}
 					proof := observeChannelHints(t, cards.(interface {
