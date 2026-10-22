@@ -385,13 +385,22 @@ func preparedProjectionEvent(label string, envelope events.EventEnvelope) events
 }
 
 func TestTargetlessReceiverViewClearsJournalTargetAcrossDispatchModes(t *testing.T) {
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\npins:\n  inputs: [validation.requested]\n",
+		"events.yaml":   "validation.requested:\n",
+	}))
 	for _, mode := range []string{"direct", "subscribed_post_commit"} {
 		t.Run(mode, func(t *testing.T) {
 			var store *targetRouteMemoryStore
 			if mode == "subscribed_post_commit" {
 				store = newTargetRouteMemoryStore()
 			}
-			bus, err := newScopedTestEventBus(store)
+			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err := bus.AdmitSourceArtifactFact(context.Background())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -412,7 +421,7 @@ func TestTargetlessReceiverViewClearsJournalTargetAcrossDispatchModes(t *testing
 
 			switch mode {
 			case "direct":
-				_, err = bus.deliverToRecipientsWithRoutes(context.Background(), evt, []string{"observer"}, []events.DeliveryRoute{route})
+				_, err = bus.deliverToRecipientsWithRoutes(ctx, evt, []string{"observer"}, []events.DeliveryRoute{route})
 			case "subscribed_post_commit":
 				dispatchEvent, err = events.ResolveEnvelope(evt, events.EnvelopeForBroadcast(evt.NormalizedEnvelope()))
 				if err != nil {
@@ -422,7 +431,7 @@ func TestTargetlessReceiverViewClearsJournalTargetAcrossDispatchModes(t *testing
 				store.settlements[evt.ID()] = exactSiblingDeliverySettlement(t)
 				store.routes[evt.ID()] = []events.DeliveryRoute{route}
 				_, _, err = (engineDispatcher{bus: bus}).dispatchIntent(
-					context.Background(), runtimeengine.EmitIntent{Event: dispatchEvent},
+					ctx, runtimeengine.EmitIntent{Event: dispatchEvent},
 				)
 			}
 			if err != nil {

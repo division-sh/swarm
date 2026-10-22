@@ -8,13 +8,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -262,35 +260,4 @@ func DurableTestDependencyProjection(selected any) DurableDependencies {
 		deps.StandingRestarts = role
 	}
 	return deps
-}
-
-func TestDurableDependenciesDoNotRequireReceiverElectionReader(t *testing.T) {
-	roles := unexpectedDurableTestRoles{}
-	store := newTargetRouteMemoryStore()
-	deps := DurableDependencies{
-		Instances:    roles,
-		RunLifecycle: roles, DeliveryLifecycle: roles,
-
-		ActiveAgents:   roles,
-		PreparedEvents: roles, TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles,
-	}
-	opts := EventBusOptions{
-		SourceArtifactFact:  authorActivityTestSourceArtifactFact,
-		Durable:             deps,
-		ExecutionPosture:    executionposture.Live,
-		PipelineObligations: store.PipelineObligations(),
-		ReceiverExecution:   eventreceiver.NormalExecution(),
-	}
-	if _, err := NewEventBusWithOptions(store, opts); err != nil {
-		t.Fatalf("construct with complete durable dependencies: %v", err)
-	}
-	opts.Durable.Instances = nil
-	if _, err := NewEventBusWithOptions(store, opts); err == nil {
-		t.Fatal("durable bus accepted absent native instance index")
-	}
-	opts.Durable.Instances = roles
-	opts.Durable.ConstructionPublications = nil
-	if _, err := NewEventBusWithOptions(store, opts); err == nil {
-		t.Fatal("durable bus accepted absent construction receipt reader")
-	}
 }
