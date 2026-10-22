@@ -91,6 +91,12 @@ func fixtureSessionFor(t testing.TB, ctx context.Context, selected Store) (*fixt
 	runtimeInstanceID, hasRuntimeInstanceID := runtimecorrelation.RuntimeInstanceIDFromContext(ctx)
 	if existing, ok := fixtureSessions.Load(key); ok {
 		session := existing.(*fixtureSession)
+		select {
+		case <-session.capability.Done():
+			fixtureSessions.CompareAndDelete(key, session)
+			return fixtureSessionFor(t, ctx, selected)
+		default:
+		}
 		if hasRuntimeInstanceID && session.runtimeInstanceID != runtimeInstanceID {
 			return nil, errors.New("agent fixture session runtime differs from caller runtime")
 		}
@@ -112,7 +118,7 @@ func fixtureSessionFor(t testing.TB, ctx context.Context, selected Store) (*fixt
 		return actual.(*fixtureSession), nil
 	}
 	t.Cleanup(func() {
-		fixtureSessions.Delete(key)
+		fixtureSessions.CompareAndDelete(key, created)
 		_ = capability.Release(context.Background())
 	})
 	return created, nil
