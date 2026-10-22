@@ -285,7 +285,7 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	targetHandler := runtimepipeline.MustDeliveryTargetHandler(targetNode)
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(materializedTargetBundleWithHandler(
-		t, "worker", "target-node", "work.started", existingOwnerHandlerFixture(),
+		t, "worker", "target-node", "work.started", map[string]any{"guard": map[string]string{"id": "selected_owner", "check": `_entity.id != ""`}}, false,
 	))
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source,

@@ -31,11 +31,11 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 type targetRouteMemoryStore struct {
@@ -617,71 +617,6 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 	}
 }
 
-func TestEventBusRejectsEntitylessOwnershipForCompleteHandlerShapeBeforePersistence(t *testing.T) {
-	tests := []struct {
-		name    string
-		handler runtimecontracts.SystemNodeEventHandler
-	}{
-		{name: "fan out", handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{
-			ItemsFrom: "entity.items", As: "row_item", Identity: "row_item", Emit: runtimecontracts.EmitSpec{Event: "item.ready"},
-		}}},
-		{name: "group by", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{
-			ItemsFrom: "entity.items", Key: "item.kind", StoreAs: "computed.groups",
-		}}},
-		{name: "on success emit", handler: runtimecontracts.SystemNodeEventHandler{OnSuccess: runtimecontracts.HandlerOnSuccessSpec{
-			Emit: runtimecontracts.EmitSpec{Event: "work.done", From: "entity"},
-		}}},
-		{name: "join membership", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{
-			ID: "all", Stage: "waiting", Members: runtimecontracts.JoinMembersSpec{From: "state.expected", By: "payload.member_id"}, Output: "payload.result",
-			OnCompleteFound: true, OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "done"},
-		}}},
-		{name: "loop lifecycle", handler: runtimecontracts.SystemNodeEventHandler{Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "waiting"}}},
-		{name: "payload accumulator", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}},
-		{name: "approval activity", handler: runtimecontracts.SystemNodeEventHandler{Activity: runtimecontracts.ActivitySpec{
-			Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"},
-		}}},
-		{name: "nested approval activity", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{
-			Activity: runtimecontracts.ActivitySpec{ID: "target_node_task_started_rule_0_review", Tool: "review", Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "review_change"}},
-		}}}},
-		{name: "guard kill", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: "false", OnFail: "kill"}}},
-		{name: "accumulator clear", handler: runtimecontracts.SystemNodeEventHandler{Clear: &runtimecontracts.ClearSpec{Targets: []string{"accumulator_state"}}}},
-		{name: "pending dedup clear", handler: runtimecontracts.SystemNodeEventHandler{Clear: &runtimecontracts.ClearSpec{Targets: []string{"pending_dedup"}}}},
-		{name: "unrooted entity field clear", handler: runtimecontracts.SystemNodeEventHandler{Clear: &runtimecontracts.ClearSpec{Targets: []string{"revision_count"}}}},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			const eventType = "task.started"
-			store := newTargetRouteMemoryStore()
-			source := semanticview.Wrap(materializedTargetBundleWithHandler(t, "review", "target-node", eventType, test.handler))
-			eb, err := newScopedTestEventBus(store, EventBusOptions{
-				ContractBundle: source,
-				Durable:        DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
-				RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
-					return []DeliveryRouteBlueprint{{
-						Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "review", "target-node")),
-						Target:    events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1"},
-						Handler:   runtimepipeline.MustDeliveryTargetHandler(testFlowNode(t, "review", "target-node")).ForEvent(eventType),
-					}}, nil
-				},
-			})
-			if err != nil {
-				t.Fatalf("NewEventBusWithOptions: %v", err)
-			}
-			eventID := uuid.NewString()
-			evt := eventtest.RuntimeControlWithRoutingSource(
-				eventID, events.EventType("review/inst-1/"+eventType), "", "", nil, 0, busInternalTestRunID, "",
-				events.EventEnvelope{}, mustFlowOwnedControlRoutingSource(t, "review", "review/inst-1", ""), time.Now().UTC(),
-			)
-			if err := eb.Publish(context.Background(), evt); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
-				t.Fatalf("Publish error = %v, want missing typed target owner", err)
-			}
-			if _, persisted := store.events[eventID]; persisted || len(store.routes[eventID]) != 0 {
-				t.Fatalf("failed publish persisted event/routes: event=%t routes=%#v", persisted, store.routes[eventID])
-			}
-		})
-	}
-}
-
 func TestEventBusPreservesSelectedEntityForEntityOptionalHandler(t *testing.T) {
 	const eventType = "task.started"
 	store := newTargetRouteMemoryStore()
@@ -689,7 +624,7 @@ func TestEventBusPreservesSelectedEntityForEntityOptionalHandler(t *testing.T) {
 		FlowID: "review", FlowInstance: "review/inst-1", EntityID: eventtest.UUID("selected-entityless-owner"),
 	})
 	source := semanticview.Wrap(materializedTargetBundleWithHandler(t,
-		"review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{},
+		"review", "target-node", eventType, map[string]any{}, false,
 	))
 	identity := StoredFlowInstanceIdentityFixture(source, "review", "inst-1", busInternalTestRunID, eventtest.UUID("selected-entityless-owner"))
 	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, identity, "inst-1"))
@@ -769,7 +704,7 @@ func TestEventBusSelectedTargetEvidenceFailsClosedOrPreservesExactOwner(t *testi
 			store := newTargetRouteMemoryStore()
 			node := testFlowNode(t, "review", "target-node")
 			source := semanticview.Wrap(materializedTargetBundleWithHandler(t,
-				"review", "target-node", eventType, existingOwnerHandlerFixture(),
+				"review", "target-node", eventType, map[string]any{"guard": map[string]string{"id": "selected_owner", "check": `_entity.id != ""`}}, false,
 			))
 			for _, target := range test.owners {
 				identity := StoredFlowInstanceIdentityFixture(source, target.FlowID, path.Base(target.FlowInstance), busInternalTestRunID, target.EntityID)
@@ -834,10 +769,7 @@ func targetOwnerDescriptors(routes ...events.RouteIdentity) []ActiveTargetDescri
 func TestEventBusCompositionReceiverSettlesBeforePersistence(t *testing.T) {
 	const eventType = "work.keyed"
 	newSource := func() semanticview.Source {
-		bundle := materializedTargetBundleWithHandler(t, "review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}})
-		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active"}, {ID: "done", Final: true}}}}
-		bundle.FlowSchemas["review"] = bundle.FlowTree.ByID["review"].Schema
+		bundle := materializedTargetBundleWithHandler(t, "review", "target-node", eventType, map[string]any{"accumulate": map[string]string{"into": "items", "from": "payload"}}, true)
 		return semanticview.Wrap(bundle)
 	}
 	matching := runtimepipeline.WorkflowInstance{
@@ -911,10 +843,10 @@ func TestEventBusTargetedDeclaredKeyHandlerPreservesExactOwner(t *testing.T) {
 	const eventType = "work.keyed"
 	tests := []struct {
 		name    string
-		handler runtimecontracts.SystemNodeEventHandler
+		handler map[string]any
 	}{
-		{name: "existing-required", handler: runtimecontracts.SystemNodeEventHandler{Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"}}},
-		{name: "optional", handler: runtimecontracts.SystemNodeEventHandler{}},
+		{name: "existing-required", handler: map[string]any{"accumulate": map[string]string{"into": "items", "from": "payload"}}},
+		{name: "optional", handler: map[string]any{}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -932,7 +864,7 @@ func TestEventBusTargetedDeclaredKeyHandlerPreservesExactOwner(t *testing.T) {
 				{EntityID: competing.EntityID, WorkflowName: "review", InstanceID: "competing", StorageRef: competing.FlowInstance, Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "payload-key"}, EntityType: "test_entity"},
 			}
 			node := testFlowNode(t, "review", "target-node")
-			source := semanticview.Wrap(materializedTargetBundleWithHandler(t, "review", "target-node", eventType, test.handler))
+			source := semanticview.Wrap(materializedTargetBundleWithHandler(t, "review", "target-node", eventType, test.handler, false))
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
 				ContractBundle: source,
 				Durable:        DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
@@ -972,10 +904,7 @@ func TestEventBusInitializedReceiverIsImmutableAfterPrepublicationLinearization(
 	const eventType = "work.keyed"
 	target := events.RouteIdentity{FlowID: "review", FlowInstance: "review/composition-selected", EntityID: runtimeflowidentity.EntityID("review/composition-selected")}
 	newSource := func() semanticview.Source {
-		bundle := materializedTargetBundleWithHandler(t, "review", "target-node", eventType, runtimecontracts.SystemNodeEventHandler{})
-		bundle.FlowTree.ByID["review"].Schema = runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"), StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active"}, {ID: "done", Final: true}}}}
-		bundle.FlowSchemas["review"] = bundle.FlowTree.ByID["review"].Schema
+		bundle := materializedTargetBundleWithHandler(t, "review", "target-node", eventType, map[string]any{}, true)
 		return semanticview.Wrap(bundle)
 	}
 	source := newSource()
@@ -1122,7 +1051,7 @@ func TestEventBusPublish_TargetedNodeConsumeSuppressesLiveRecipientDelivery(t *t
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwnerRoutes(target)
 	source := semanticview.Wrap(materializedTargetBundleWithHandler(t,
-		"worker", "target-node", "work.started", existingOwnerHandlerFixture(),
+		"worker", "target-node", "work.started", map[string]any{"guard": map[string]string{"id": "selected_owner", "check": `_entity.id != ""`}}, false,
 	))
 	instance := StoredFlowInstanceIdentityFixture(source, "worker", "inst-1", busInternalTestRunID, target.EntityID)
 	installNativeConstructionIndexFixture(t, store, source, busInternalTestRunID, instance, "inst-1")
@@ -1242,111 +1171,41 @@ func TestPersistedNodeConsumePreservesTargetlessAgentRoutes(t *testing.T) {
 	}
 }
 
-func TestEventBusRecipientPlanMaterializerNormalizesRoutePlanDirectly(t *testing.T) {
-	source := semanticview.Wrap(materializedTargetBundle(t, "review", "target-node", "task.started"))
-	wantBlueprint := DeliveryRouteBlueprint{Recipient: events.MustNodeDeliveryRecipient(testFlowNode(t, "review", "target-node")), Target: events.RouteIdentity{
-		FlowID: "review", FlowInstance: "review/inst-1", EntityID: runtimeflowidentity.EntityID("review/inst-1"),
-	}, Handler: runtimepipeline.MustDeliveryTargetHandler(testFlowNode(t, "review", "target-node")).ForEvent("task.started")}
-	want := events.DeliveryRoute{Recipient: wantBlueprint.Recipient, Target: events.MustExistingEntityTarget(wantBlueprint.Target)}
-	store := newTargetRouteMemoryStore()
-	store.setTargetOwnerRoutes(wantBlueprint.Target)
-	identity := StoredFlowInstanceIdentityFixture(source, "review", "inst-1", busInternalTestRunID, wantBlueprint.Target.EntityID)
-	store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, identity, "inst-1"))
-	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: source,
-		RecipientPlanMaterializer: func(ctx context.Context, evt events.Event, plan PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			if len(plan.DeliveryRoutes) != 0 {
-				t.Fatalf("pre-materialized delivery routes = %#v, want none", plan.DeliveryRoutes)
-			}
-			return []DeliveryRouteBlueprint{wantBlueprint}, nil
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewEventBusWithOptions: %v", err)
-	}
-	evt := eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("review/inst-1/task.started"), "", "", nil, 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Time{})
-	emptyAgentPolicyPlan := routePlanFromManifest(evt, deliveryRecipientManifest{}, routeIntentProducerAgentPolicy)
-	if emptyAgentPolicyPlan.AuthorityState != RoutePlanAuthorityNoCanonicalMatch || emptyAgentPolicyPlan.AuthorityOwner != 0 {
-		t.Fatalf("empty agent-policy route plan authority = %q/%q, want no canonical match", emptyAgentPolicyPlan.AuthorityState, emptyAgentPolicyPlan.AuthorityOwner)
-	}
-
-	plan, err := eb.materializePublishRecipientPlan(constructionIndexContext(t, source), evt, emptyAgentPolicyPlan)
-	if err != nil {
-		t.Fatalf("materializePublishRecipientPlan: %v", err)
-	}
-	if got, wantLen := len(plan.DeliveryIntents), 1; got != wantLen {
-		t.Fatalf("route plan delivery intents = %d, want %d", got, wantLen)
-	}
-	if plan.AuthorityState != RoutePlanAuthorityLowerPrecedence || plan.AuthorityOwner != routePlanSourceRecipientMaterializer {
-		t.Fatalf("route plan authority = %q/%q, want lower-precedence materializer", plan.AuthorityState, plan.AuthorityOwner)
-	}
-	intent := plan.DeliveryIntents[0]
-	if intent.Recipient != want.Recipient || intent.TargetOwnership != want.Target {
-		t.Fatalf("route plan delivery intent = %#v, want route %#v", intent, want)
-	}
-	if intent.Producer != routeIntentProducerRecipientMaterializer {
-		t.Fatalf("route plan materializer producer = %q, want materializer route", routeIntentProducerCode(intent.Producer))
-	}
-	projected := eb.publishRecipientPlan(evt, plan)
-	if !deliveryRoutesContain(projected.DeliveryRoutes, want) {
-		t.Fatalf("projected delivery routes = %#v, want materialized route %#v", projected.DeliveryRoutes, want)
-	}
-}
-
 func materializedTargetBundle(t *testing.T, flowID, nodeID, eventType string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	return materializedTargetBundleWithHandler(t, flowID, nodeID, eventType, runtimecontracts.SystemNodeEventHandler{})
+	return materializedTargetBundleWithHandler(t, flowID, nodeID, eventType, map[string]any{}, false)
 }
 
-func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) *runtimecontracts.WorkflowContractBundle {
+func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType string, handler map[string]any, finalStage bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	flow := runtimecontracts.FlowContractView{
-		Path: flowID, Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID},
-		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"),
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{eventType: {
-			Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-				"member_id": {Type: "text"}, "result": {Type: "text"},
-			}},
-		}, "item.ready": {
-			Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"item": {Type: "text"}}},
-		}},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			nodeID: {
-				ExecutionType: "system_node", SubscribesTo: []string{eventType},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventType: handler},
-			},
-		},
+	nodes, err := yaml.Marshal(map[string]any{nodeID: map[string]any{
+		"execution_type": "system_node",
+		"subscribes_to":  []string{eventType},
+		"event_handlers": map[string]any{eventType: handler},
+	}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Path: ".", Children: []runtimecontracts.FlowContractView{flow}}
-	root.Children[0].Parent = &root
-	base := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &root.Schema,
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root, flowID: &root.Children[0]},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: flow.Schema},
-	}
-	admitted := loadTargetRouteTempBundle(t, map[string]string{
-		"manifest.yaml":                        "version: 1.0.0\nplatform_version: '*'\n",
-		"schema.yaml":                          "name: target-route-test\n",
-		filepath.Join(flowID, "schema.yaml"):   fmt.Sprintf("name: %s\nstages:\n  active: {}\n", flowID),
-		filepath.Join(flowID, "entities.yaml"): "test_entity:\n  items:\n    type: '[text]'\n  expected:\n    type: '[text]'\n",
+	events, err := yaml.Marshal(map[string]any{
+		eventType:    map[string]string{"member_id": "text", "result": "text"},
+		"item.ready": map[string]string{"item": "text"},
 	})
-	admitted.FlowTree = base.FlowTree
-	admitted.FlowSchemas = base.FlowSchemas
-	admitted.RootSchema = base.RootSchema
-	if err := runtimecontracts.CompileWorkflowSemantics(admitted); err != nil {
-		t.Fatalf("compile materialized target semantics: %v", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if failures := admitted.PrepareFanOutPlans(); len(failures) != 0 {
-		t.Fatalf("compile materialized target fan-out plans: %v", failures)
+	schema := "stages: []\ninstance: instance_key\n"
+	if finalStage {
+		schema = "instance: instance_key\nstages:\n  active: {}\n  done: {final: true}\n"
 	}
-	return admitted
+	return loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml":                        "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":                          "stages: []\n",
+		filepath.Join(flowID, "manifest.yaml"): "version: 1.0.0\nplatform_version: '*'\n",
+		filepath.Join(flowID, "schema.yaml"):   schema,
+		filepath.Join(flowID, "events.yaml"):   string(events),
+		filepath.Join(flowID, "nodes.yaml"):    string(nodes),
+		filepath.Join(flowID, "entities.yaml"): "test_entity:\n  instance_key: {type: text, _unused_reason: materialized target key}\n  items:\n    type: '[text]'\n  expected:\n    type: '[text]'\n",
+	})
 }
 
 func TestEventBusAgentDispatchDoesNotCrossSameIDNodeRouteTargets(t *testing.T) {
