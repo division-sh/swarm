@@ -281,7 +281,7 @@ func (p *processCapability) IssueGenerationGrant(ctx context.Context, req GrantR
 	if err := evidence.Validate(); err != nil {
 		return nil, err
 	}
-	if err := p.session.RecordGenerationGrantTransition(ctx, nil, evidence); err != nil {
+	if err := p.session.RecordGenerationGrantTransition(p.processMutationContext(ctx), nil, evidence); err != nil {
 		err = p.retireOnPossessionFailure(err)
 		return nil, err
 	}
@@ -326,7 +326,7 @@ func (p *processCapability) ApplyDestructiveResetCleanup(ctx context.Context, re
 	if err := p.proveCurrent(ctx); err != nil {
 		return runtimedestructivereset.CleanupResult{}, err
 	}
-	result, err := p.session.ApplyDestructiveResetCleanup(ctx, req, topology)
+	result, err := p.session.ApplyDestructiveResetCleanup(p.processMutationContext(ctx), req, topology)
 	if err != nil {
 		err = p.retireOnPossessionFailure(err)
 	}
@@ -347,7 +347,7 @@ func (p *processCapability) commitSourceSet(ctx context.Context, operation runti
 	if err := p.proveCurrent(ctx); err != nil {
 		return runtimeagenttopology.SourceSetCommitResult{}, err
 	}
-	result, err := p.session.CommitSourceSet(ctx, req)
+	result, err := p.session.CommitSourceSet(p.processMutationContext(ctx), req)
 	if err != nil {
 		err = p.retireOnPossessionFailure(err)
 		return result, err
@@ -381,7 +381,7 @@ func (p *processCapability) Release(ctx context.Context) error {
 			return err
 		}
 	}
-	err := p.session.Release(ctx)
+	err := p.session.Release(p.processMutationContext(ctx))
 	if err == nil {
 		p.terminalize(TerminalResult{Cause: TerminalReleased})
 		return nil
@@ -670,7 +670,9 @@ func (g *liveGenerationGrant) SourceSetPlan(ctx context.Context) (runtimeagentto
 // requireCurrentSourceSetLocked is called while the process operation lock is
 // held, so the source-set head cannot change between this proof and a mutation.
 func (g *generationGrant) requireCurrentSourceSetLocked(ctx context.Context, evidence GrantEvidence) (runtimeagenttopology.SourceSetPlan, error) {
-	plan, exists, err := g.owner.session.LoadSourceSet(ctx)
+	// This closed process read checks the replacement's source plan; it does
+	// not borrow mutation authority from the caller's predecessor generation.
+	plan, exists, err := g.owner.session.LoadSourceSet(g.owner.processMutationContext(ctx))
 	if err != nil {
 		err = g.owner.retireOnPossessionFailure(err)
 		return runtimeagenttopology.SourceSetPlan{}, err
@@ -755,7 +757,7 @@ func (g *generationGrant) transition(ctx context.Context, from, to GrantState, p
 	if err := next.Validate(); err != nil {
 		return GrantEvidence{}, err
 	}
-	if err := g.owner.session.RecordGenerationGrantTransition(ctx, &previous, next); err != nil {
+	if err := g.owner.session.RecordGenerationGrantTransition(g.owner.processMutationContext(ctx), &previous, next); err != nil {
 		err = g.owner.retireOnPossessionFailure(err)
 		return GrantEvidence{}, err
 	}
@@ -817,6 +819,10 @@ func (g *generationGrant) CommitAgentLifecycleTransition(ctx context.Context, re
 		}
 	}
 	mutationCtx := runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(evidence.RuntimeInstanceID, evidence.BundleHash))
+	mutationCtx, err := WithRuntimeMutationAuthority(mutationCtx, g)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	result, err := g.owner.session.CommitAgentLifecycleTransition(mutationCtx, req)
 	if err != nil {
 		err = g.owner.retireOnPossessionFailure(err)
@@ -861,7 +867,7 @@ func (g *generationGrant) retireWithSession(ctx context.Context) error {
 	// The retained session can terminalize the process capability while the
 	// store call is in flight. Do not hold the grant lock across that callback;
 	// local terminalization must be able to settle every accepted grant.
-	if err := g.owner.session.RecordGenerationGrantTransition(ctx, &previous, next); err != nil {
+	if err := g.owner.session.RecordGenerationGrantTransition(g.owner.processMutationContext(ctx), &previous, next); err != nil {
 		return err
 	}
 	g.mu.Lock()

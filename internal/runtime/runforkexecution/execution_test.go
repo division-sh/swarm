@@ -3597,7 +3597,7 @@ func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("startSelectedContractAgentRuntimeGateway: %v", err)
 	}
@@ -3652,7 +3652,7 @@ func TestStartSelectedContractAgentRuntimeGatewayDoesNotConsumeAmbientToken(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil)
+	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, turns, work, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

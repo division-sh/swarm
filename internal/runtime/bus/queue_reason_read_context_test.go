@@ -66,7 +66,7 @@ func TestDispatchQueueReasonReadContextAndLiveDecisions(t *testing.T) {
 				})
 				ctx := parent
 				if owned {
-					ctx = bindWorkContext(parent, lease, owner)
+					ctx = bindWorkContext(parent, lease, owner, nil)
 				}
 				probe := &queueReasonReadProbe{paused: state == "ingress_paused", blocked: state == "run_blocked" || state == "run_parked", parked: state == "run_parked"}
 				independent := errors.New("independent gate read failure")

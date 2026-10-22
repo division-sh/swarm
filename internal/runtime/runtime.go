@@ -245,6 +245,7 @@ type Runtime struct {
 	fanOutContext               context.Context
 	startupLifecyclePrepared    bool
 	replacementQuiesced         bool
+	stopResult                  error
 	workOccurrence              *worklifetime.RuntimeOccurrence
 	runLifecycleExecutor        *runtimerunlifecycle.Executor
 	runLifecycleRegistration    runtimerunlifecycle.CandidateRegistration
@@ -434,6 +435,10 @@ func (rt *Runtime) prepareStartupLifecycleLocked(ctx context.Context) error {
 	rt.lifecycleMu.Unlock()
 	if grant == nil {
 		return errors.New("runtime generation grant is required before startup preparation")
+	}
+	ctx, err := runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
+	if err != nil {
+		return err
 	}
 	evidence, err := grant.Evidence()
 	if err != nil {
@@ -1106,6 +1111,19 @@ func (rt *Runtime) authorActivityContext(ctx context.Context) context.Context {
 	return runtimeauthoractivity.WithScope(ctx, rt.authorActivityScope)
 }
 
+func (rt *Runtime) mutationContext(ctx context.Context) (context.Context, error) {
+	if runtimestartupownership.HasMutationAuthority(ctx) {
+		original, err := runtimestartupownership.CaptureMutationAuthority(ctx)
+		if err != nil || original.HasRuntimeGrant() {
+			return ctx, err
+		}
+	}
+	rt.lifecycleMu.Lock()
+	grant := rt.startupGrant
+	rt.lifecycleMu.Unlock()
+	return runtimestartupownership.WithRuntimeMutationAuthority(ctx, grant)
+}
+
 func NewRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	return newRuntime(ctx, deps)
 }
@@ -1188,7 +1206,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 			return nil
 		}
 		return []runtimebus.EventInterceptor{rt.Pipeline}
-	}, payloadAdmitter, constructionOwner, constructionOwner, opts.ProviderTriggerCatalog, opts.TestLifecycleProbe)
+	}, payloadAdmitter, constructionOwner, constructionOwner, opts.ProviderTriggerCatalog, opts.TestLifecycleProbe, rt.mutationContext)
 	if err != nil {
 		return nil, fmt.Errorf("build event bus: %w", err)
 	}
@@ -1449,14 +1467,16 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	}
 	factory := runtimeagents.NewLLMAgentFactory(rt.LLMRuntimes, rt.ToolExecutor, runtimeagents.LLMAgentOptions{})
 	managerOptions := runtimemanager.AgentManagerOptions{
-		ExecutionPosture:   boot.ExecutionPosture,
-		BaseContext:        rt.authorActivityContext(context.Background()),
-		SourceArtifactFact: rt.Options.SourceArtifactFact,
-		DeliveryStore:      runtimeDeps.DeliveryStore,
-		TestLifecycleProbe: opts.TestLifecycleProbe,
-		Workspaces:         rt.Workspace,
-		Sessions:           runtimeDeps.SessionRegistry,
-		SessionResetter:    runtimeDeps.SessionResetter,
+		ExecutionPosture:     boot.ExecutionPosture,
+		BaseContext:          rt.authorActivityContext(context.Background()),
+		MutationContext:      rt.mutationContext,
+		CarryMutationContext: runtimestartupownership.CarryMutationAuthority,
+		SourceArtifactFact:   rt.Options.SourceArtifactFact,
+		DeliveryStore:        runtimeDeps.DeliveryStore,
+		TestLifecycleProbe:   opts.TestLifecycleProbe,
+		Workspaces:           rt.Workspace,
+		Sessions:             runtimeDeps.SessionRegistry,
+		SessionResetter:      runtimeDeps.SessionResetter,
 		PersistenceRoles: func() runtimemanager.PersistenceRoles {
 			roles := runtimeDeps.ManagerPersistenceRoles
 			roles.AgentRoutes = rt.Bus
@@ -1622,6 +1642,11 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 		return nil, err
 	}
 	ctx = rt.authorActivityContext(ctx)
+	var err error
+	ctx, err = rt.mutationContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	ctx = worklifetime.WithRuntimeOccurrence(ctx, rt.workOccurrence)
 	bootStartedAt := rt.Options.BootStartedAt
 	if bootStartedAt.IsZero() {
@@ -1695,7 +1720,6 @@ func (rt *Runtime) prepareStartLocked(ctx context.Context) (*PreparedStartup, er
 		RecoveryOnStartup:  rt != nil && rt.Config != nil && rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery,
 		InspectionComplete: true,
 	}
-	var err error
 	if skipPersistentStartupRecovery {
 		startupRecoverySnapshot.Delivery, startupRecoverySnapshot.StandingDeliveryObligations, err = rt.inspectDeliveryRecoveryInventory(ctx)
 		if err != nil {
@@ -2170,6 +2194,18 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	if err != nil {
 		return err
 	}
+	rt.lifecycleMu.Lock()
+	completed := rt.replacementQuiesced && rt.startupGrant == nil
+	completedResult := rt.stopResult
+	rt.lifecycleMu.Unlock()
+	if completed {
+		return completedResult
+	}
+	return rt.stopWithGraceLocked(grace)
+}
+
+// The caller retains generationMu through this complete shutdown join.
+func (rt *Runtime) stopWithGraceLocked(grace time.Duration) error {
 	if rt.Manager != nil {
 		if err := rt.Manager.CheckShutdownAdmission(); err != nil {
 			return err
@@ -2290,6 +2326,7 @@ func (rt *Runtime) stopWithOptions(opts ShutdownOptions) error {
 	}
 	rt.lifecycleMu.Lock()
 	rt.replacementQuiesced = true
+	rt.stopResult = shutdownErr
 	rt.lifecycleMu.Unlock()
 	rt.releaseAuthorActivityCatalog()
 	return shutdownErr
