@@ -321,16 +321,10 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 			source := capturedTelegramOperatorSource(t)
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			var selected operatorChannelInboundSelectedStore
-			var db *sql.DB
 			if backend == "postgres" {
-				_, postgresDB, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				db = postgresDB
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			} else {
-				sqlite := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				selected = sqlite
-				db = storetest.DatabaseForTest(sqlite)
+				selected = storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 			}
 			ctx, target := seedCapturedProviderTarget(t, ctx, selected, source, runID, entityID, boundedProviderFlowID, "ack-operator", "telegram", "telegram-secret", "")
 			plan := compileEmbeddedTelegramOperatorChannelPlan(t)
@@ -420,8 +414,8 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 				t.Fatalf("missing-ack claim persisted: found=%v err=%v", found, err)
 			}
 			requireOperatorChannelOperationState(t, selected, principal.ID, operation.OperationID, operatorchannel.StateAwaitingConfirmation, 2)
-			var deliveries int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM event_deliveries`).Scan(&deliveries); err != nil || deliveries != 0 {
+			deliveries, err := storetest.CountPhysicalEventDeliveries(ctx, selected)
+			if err != nil || deliveries != 0 {
 				t.Fatalf("operator claim deliveries=%d err=%v, want 0", deliveries, err)
 			}
 		})
