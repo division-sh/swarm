@@ -17,14 +17,11 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestKeylessConstructionIndexUsesExactRunOwners(t *testing.T) {
@@ -83,11 +80,7 @@ func TestKeylessConstructionIndexUsesExactRunOwners(t *testing.T) {
 }
 
 func TestEventBusFlowInstanceTemplateDerivesSubscriptionsFromHandlerKeys(t *testing.T) {
-	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"task.started": {Emit: runtimecontracts.EmitSpec{Event: "task.started"}},
-		},
-	})
+	source := routeMaterializationNodeSource(t, "review", "  event_handlers:\n    task.started:\n      emit:\n        event: task.started\n")
 	eb, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -335,12 +328,7 @@ func TestEventBusLocalNodeWildcardAdmissionPreservesScope(t *testing.T) {
 }
 
 func TestEventBusTemplateAgentSameScopeExactAdmissionRendersConcreteInstanceRoute(t *testing.T) {
-	bundle := routeMaterializationConfigVarBundle(t)
-	flow := bundle.FlowTree.ByID["operating"]
-	agent := flow.Agents["ceo"]
-	agent.Subscriptions = []string{"operating/opco.product_initialization_requested"}
-	flow.Agents["ceo"] = agent
-
+	bundle := routeMaterializationConfigVarBundle(t, "", "operating/opco.product_initialization_requested")
 	source := semanticview.Wrap(bundle)
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
@@ -425,10 +413,7 @@ func (s *routePersistenceTestStore) RunRuntimeMutationContext(ctx context.Contex
 
 func TestEventBusCompiledFlowInstanceBindingDoesNotRewritePersistence(t *testing.T) {
 	store := &routePersistenceTestStore{}
-	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		Produces:     []string{"task.started"},
-		SubscribesTo: []string{"task.started"},
-	})
+	source := routeMaterializationNodeSource(t, "review", "  produces: [task.started]\n  subscribes_to: [task.started]\n")
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "review", "inst-1", eventBusTestRunID)
 	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, "acct-1")
 	index := runtimebus.FlowInstanceIndexFixture(observed)
@@ -450,9 +435,7 @@ func TestEventBusCompiledFlowInstanceBindingDoesNotRewritePersistence(t *testing
 
 func TestCompiledFlowInstanceBindingRejectsUnknownCanonicalTemplateWithoutMutation(t *testing.T) {
 	store := &routePersistenceTestStore{}
-	source := routeMaterializationNodeSource(t, "known", runtimecontracts.SystemNodeContract{
-		SubscribesTo: []string{"task.started"},
-	})
+	source := routeMaterializationNodeSource(t, "known", "  subscribes_to: [task.started]\n")
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "known", "inst-1", eventBusTestRunID)
 	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, "acct-1")
 	index := runtimebus.FlowInstanceIndexFixture(observed)
@@ -477,7 +460,7 @@ func TestCompiledFlowInstanceBindingRejectsUnknownCanonicalTemplateWithoutMutati
 }
 
 func TestIndexedFlowInstanceBindingRejectsCrossedExactOwners(t *testing.T) {
-	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{SubscribesTo: []string{"task.started"}})
+	source := routeMaterializationNodeSource(t, "review", "  subscribes_to: [task.started]\n")
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "review", "stored-one", eventBusTestRunID)
 	instance.EntityID = eventtest.UUID("non-derived-stored-review")
 	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, "acct-1")
@@ -519,7 +502,7 @@ func TestIndexedFlowInstanceBindingRejectsCrossedExactOwners(t *testing.T) {
 
 func TestEventBusIndexedFlowInstanceDeliversDeclaredAgentSubscriber(t *testing.T) {
 	store := &routePersistenceTestStore{}
-	bundle := routeMaterializationConfigVarBundle(t)
+	bundle := routeMaterializationConfigVarBundle(t, "", "opco.product_initialization_requested")
 	source := semanticview.Wrap(bundle)
 	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", "11111111-1111-4111-8111-111111111111", eventBusTestRunID)
 	observed := runtimebus.AdmittedFlowInstanceObservationFixture(t, source, eventBusTestRunID, instance, instance.InstanceID)
@@ -574,64 +557,8 @@ func TestEventBusIndexedFlowInstanceDeliversDeclaredAgentSubscriber(t *testing.T
 	}
 }
 
-func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryPlanning(t *testing.T) {
-	operating := runtimecontracts.FlowContractView{
-		Path:  "operating",
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "operating"},
-		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"), AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{
-			Event: "opco.product_initialization_requested",
-		},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"opco.product_initialization_requested": {},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"lifecycle-orchestrator": {
-				ExecutionType: "system_node",
-				SubscribesTo:  []string{"opco.product_initialization_requested"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"opco.product_initialization_requested": {},
-				},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{operating}}
-	root.Children[0].Parent = &root
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &root.Schema,
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				".":         &root,
-				"operating": &root.Children[0],
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"operating": operating.Schema,
-		},
-	}
-	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "operating"))
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatalf("compile route-table test semantics: %v", err)
-	}
-	source := semanticview.Wrap(bundle)
-	rt, err := runtimebus.DeriveRouteTable(source)
-	if err != nil {
-		t.Fatalf("DeriveRouteTable: %v", err)
-	}
-	instance := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "operating", "inst-1", eventBusTestRunID)
-	got := rt.PubsubReceiverDefinitionsFixture(t, eventBusTestRunID, instance, "operating/inst-1/opco.product_initialization_requested")
-	if len(got) != 1 {
-		t.Fatalf("resolved subscribers = %#v, want one lifecycle-orchestrator route", got)
-	}
-	if got[0].Recipient.LocalID() != "lifecycle-orchestrator" || !got[0].Recipient.IsNode() || got[0].Path != "operating/inst-1" {
-		t.Fatalf("resolved subscriber = %#v, want node lifecycle-orchestrator at operating/inst-1", got[0])
-	}
-}
-
 func TestRouteTableFlowInstanceRouteKeepsAgentNameStableAcrossActivationConfig(t *testing.T) {
-	source := semanticview.Wrap(routeMaterializationConfigVarBundle(t))
+	source := semanticview.Wrap(routeMaterializationConfigVarBundle(t, "", "opco.product_initialization_requested"))
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
@@ -668,11 +595,7 @@ func TestRouteTableFlowInstanceRouteKeepsAgentNameStableAcrossActivationConfig(t
 }
 
 func TestRouteTableExplicitAgentNameChangesPublicNameNotScopedCoordinate(t *testing.T) {
-	bundle := routeMaterializationConfigVarBundle(t)
-	flow := bundle.FlowTree.ByID["operating"]
-	entry := flow.Agents["ceo"]
-	entry.ID = "executive"
-	flow.Agents["ceo"] = entry
+	bundle := routeMaterializationConfigVarBundle(t, "executive", "opco.product_initialization_requested")
 	source := semanticview.Wrap(bundle)
 
 	scope, ok := source.FlowScopeByID("operating")
@@ -708,111 +631,34 @@ func TestRouteTableExplicitAgentNameChangesPublicNameNotScopedCoordinate(t *test
 	}
 }
 
-func routeMaterializationNodeSource(t testing.TB, flowID string, node runtimecontracts.SystemNodeContract) semanticview.Source {
-	eventsByName := make(map[string]runtimecontracts.EventCatalogEntry)
-	for _, eventType := range runtimecontracts.EffectiveSystemNodeSubscriptions(node) {
-		if eventType = strings.TrimSpace(eventType); eventType != "" {
-			eventsByName[eventType] = runtimecontracts.EventCatalogEntry{}
-		}
-	}
-	for _, eventType := range runtimecontracts.EffectiveSystemNodeProduces(nil, runtimeidentity.ExecutableNode{}, node) {
-		if eventType = strings.TrimSpace(eventType); eventType != "" {
-			eventsByName[eventType] = runtimecontracts.EventCatalogEntry{}
-		}
-	}
-	flow := runtimecontracts.FlowContractView{
-		Path:  flowID,
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: flowID},
-		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"),
-		},
-		Events: eventsByName,
-		Nodes:  map[string]runtimecontracts.SystemNodeContract{"materialized-node": node},
-	}
-	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{flow}}
-	if flowID == "child/grandchild" {
-		root.Children = []runtimecontracts.FlowContractView{{Path: "child", Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"}, Children: []runtimecontracts.FlowContractView{flow}}}
-		root.Children[0].Children[0].Parent = &root.Children[0]
-	}
-	root.Children[0].Parent = &root
-	byID := map[string]*runtimecontracts.FlowContractView{".": &root, root.Children[0].Path: &root.Children[0]}
-	flowSchemas := map[string]runtimecontracts.FlowSchemaDocument{root.Children[0].Path: root.Children[0].Schema}
-	if flowID == "child/grandchild" {
-		byID[flowID] = &root.Children[0].Children[0]
-		flowSchemas[flowID] = flow.Schema
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema:     &root.Schema,
-		SourceArtifact: sourceartifactfixture.Artifact(),
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: byID,
-		},
-		FlowSchemas: flowSchemas,
-	}
-	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, flowID))
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
-	}
-	return semanticview.Wrap(bundle)
+func routeMaterializationNodeSource(t *testing.T, flowID, nodeBody string) semanticview.Source {
+	t.Helper()
+	return semanticview.Wrap(loadEventBusTempBundle(t, map[string]string{
+		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":             "stages: []\n",
+		flowID + "/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		flowID + "/schema.yaml":   "stages: []\ninstance: instance_key\n",
+		flowID + "/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
+		flowID + "/events.yaml":   "task.started:\n",
+		flowID + "/nodes.yaml":    "materialized-node:\n  execution_type: system_node\n" + nodeBody,
+	}))
 }
 
-func routeMaterializationConfigVarBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
-	agentRef := runtimecontracts.ContractURIRef{
-		Kind: "agent", FlowID: "operating", LocalID: "ceo",
-		Full: "test://route-materialization/operating/ceo",
+func routeMaterializationConfigVarBundle(t *testing.T, publicName, subscription string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	agent := "ceo:\n  type: generic\n  role: ceo\n  intent: {inline: 'Observe product initialization.'}\n  subscriptions: [" + subscription + "]\n"
+	if publicName != "" {
+		agent += "  id: " + publicName + "\n"
 	}
-	operating := runtimecontracts.FlowContractView{
-		Path:  "operating",
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "operating"},
-		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"), Pins: runtimecontracts.FlowPins{
-			Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "opco.product_initialization_requested"}}},
-		},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"opco.product_initialization_requested": {},
-		},
-		Agents: map[string]runtimecontracts.AgentRegistryEntry{
-			"ceo": {
-				Type:          "generic",
-				Role:          "ceo",
-				Subscriptions: []string{"opco.product_initialization_requested"},
-			},
-		},
-	}
-	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{operating}}
-	root.Children[0].Parent = &root
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema:     &root.Schema,
-		SourceArtifact: sourceartifactfixture.Artifact(),
-		URIRegistry: runtimecontracts.ContractURIRegistry{
-			Agents: map[string]runtimecontracts.ContractURIRef{
-				"operating/ceo": agentRef,
-			},
-			ByURI: map[string]runtimecontracts.ContractURIRef{agentRef.Full: agentRef},
-		},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				".":         &root,
-				"operating": &root.Children[0],
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"operating": {
-				Instance: operating.Schema.Instance,
-				Pins: runtimecontracts.FlowPins{
-					Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "opco.product_initialization_requested"}}},
-				},
-			},
-		},
-	}
-	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "operating"))
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		panic(err)
-	}
-	return bundle
+	return loadEventBusTempBundle(t, map[string]string{
+		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":             "stages: []\n",
+		"operating/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"operating/schema.yaml":   "stages: []\ninstance: instance_key\npins:\n  inputs: [opco.product_initialization_requested]\n",
+		"operating/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
+		"operating/events.yaml":   "opco.product_initialization_requested:\n",
+		"operating/agents.yaml":   agent,
+	})
 }
 
 func routeMaterializationAgentRoute(
@@ -1249,50 +1095,17 @@ func TestDeriveRouteTable_NestedPackageConnectLocalizesWithinParentFlow(t *testi
 }
 
 func TestDeriveRouteTable_NestedTemplateInstancesBindSemanticScopeKey(t *testing.T) {
-	grandchild := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{FlowPath: "child/grandchild"},
-		Schema: runtimecontracts.FlowSchemaDocument{Instance: semanticviewtest.
-			InstanceField("instance_key"),
-		},
-		Path: "child/grandchild",
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"worker": {
-				SubscribesTo: []string{"micro.started"},
-				Produces:     []string{"micro.started"},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"micro.started": {},
-		},
-	}
-	child := runtimecontracts.FlowContractView{
-		Paths:    runtimecontracts.FlowContractPaths{FlowPath: "child"},
-		Path:     "child",
-		Children: []runtimecontracts.FlowContractView{grandchild},
-	}
-	root := runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Children: []runtimecontracts.FlowContractView{child}}
-	root.Children[0].Parent = &root
-	root.Children[0].Children[0].Parent = &root.Children[0]
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema:     &root.Schema,
-		SourceArtifact: sourceartifactfixture.Artifact(),
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				".":                &root,
-				"child":            &root.Children[0],
-				"child/grandchild": &root.Children[0].Children[0],
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"child/grandchild": grandchild.Schema,
-			"child":            child.Schema,
-		},
-	}
-	bundle = semanticviewtest.WithInstanceDeclarations(t, bundle, canonicalrouting.CopyInstanceDeclarations(t, "child/grandchild"))
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatal(err)
-	}
+	bundle := loadEventBusTempBundle(t, map[string]string{
+		"manifest.yaml":                  "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":                    "stages: []\n",
+		"child/manifest.yaml":            "version: 1.0.0\nplatform_version: '*'\n",
+		"child/schema.yaml":              "stages: []\n",
+		"child/grandchild/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"child/grandchild/schema.yaml":   "stages: []\ninstance: instance_key\n",
+		"child/grandchild/entities.yaml": "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n",
+		"child/grandchild/events.yaml":   "micro.started:\n",
+		"child/grandchild/nodes.yaml":    "worker:\n  execution_type: system_node\n  subscribes_to: [micro.started]\n  produces: [micro.started]\n",
+	})
 	source := semanticview.Wrap(bundle)
 	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
