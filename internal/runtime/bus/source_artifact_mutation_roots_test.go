@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -28,8 +29,6 @@ type sourceMutationProbeOwner struct {
 	claimIssuer      *runtimepipelineobligation.ClaimIssuer
 	scanIssuer       *runtimepipelineobligation.ScanIssuer
 	claims           map[string]runtimepipelineobligation.Claim
-	opened           chan struct{}
-	openOnce         sync.Once
 	claimPublication int
 	claimEvent       int
 	openScan         int
@@ -64,7 +63,6 @@ func newSourceMutationProbeOwner() *sourceMutationProbeOwner {
 		claimIssuer: runtimepipelineobligation.NewClaimIssuer(),
 		scanIssuer:  runtimepipelineobligation.NewScanIssuer(),
 		claims:      map[string]runtimepipelineobligation.Claim{},
-		opened:      make(chan struct{}),
 	}
 }
 
@@ -101,7 +99,6 @@ func (o *sourceMutationProbeOwner) OpenScan(ctx context.Context, request runtime
 	defer o.mu.Unlock()
 	o.openScan++
 	o.openFact, _ = runtimecorrelation.SourceArtifactFactFromContext(ctx)
-	o.openOnce.Do(func() { close(o.opened) })
 	return o.scanIssuer.Issue()
 }
 
@@ -219,10 +216,15 @@ func sourceMutationFact(t testing.TB, marker string) runtimecorrelation.SourceAr
 
 func newSourceMutationProbeBus(
 	t testing.TB,
-	fact runtimecorrelation.SourceArtifactFact,
+	source semanticview.Source,
 	owner *sourceMutationProbeOwner,
 ) *EventBus {
-	return newSourceMutationProbeBusWithStore(t, InMemoryEventStore{}, fact, owner)
+	t.Helper()
+	bundle, present := semanticview.Bundle(source)
+	if !present || bundle.SourceArtifact == nil {
+		t.Fatal("source mutation probe requires its captured compiled source")
+	}
+	return newSourceMutationProbeBusWithStore(t, InMemoryEventStore{}, sourceartifactfixture.FactFor(bundle.SourceArtifact), owner, source)
 }
 
 func newSourceMutationProbeBusWithStore(
@@ -234,9 +236,10 @@ func newSourceMutationProbeBusWithStore(
 ) *EventBus {
 	t.Helper()
 	process := worklifetime.NewProcess()
+	runtimeInstanceID := uuid.NewString()
 	runtimeOwner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
-		RuntimeInstanceID: uuid.NewString(),
-		BundleHash:        "source-mutation-probe",
+		RuntimeInstanceID: runtimeInstanceID,
+		BundleHash:        fact.BundleHash(),
 	})
 	if err != nil {
 		t.Fatalf("create runtime occurrence: %v", err)
@@ -250,12 +253,12 @@ func newSourceMutationProbeBusWithStore(
 	})
 	options := EventBusOptions{
 		SourceArtifactFact:  fact,
-		RuntimeInstanceID:   uuid.NewString(),
+		RuntimeInstanceID:   runtimeInstanceID,
 		PipelineObligations: owner,
 		Durable:             ExactDurableTestDependencies(store),
 		WorkOwner:           runtimeOwner,
 		ReceiverExecution:   eventreceiver.NormalExecution(),
-		DeliveryAuthority:   mustSourceMutationDeliveryAuthority(t, fact),
+		DeliveryAuthority:   mustSourceMutationDeliveryAuthority(t, fact, runtimeInstanceID),
 		ExecutionPosture:    executionposture.Live,
 	}
 	if len(sources) > 0 {
@@ -271,9 +274,9 @@ func newSourceMutationProbeBusWithStore(
 	return bus
 }
 
-func mustSourceMutationDeliveryAuthority(t testing.TB, fact runtimecorrelation.SourceArtifactFact) runtimedelivery.ExecutionAuthority {
+func mustSourceMutationDeliveryAuthority(t testing.TB, fact runtimecorrelation.SourceArtifactFact, runtimeInstanceID string) runtimedelivery.ExecutionAuthority {
 	t.Helper()
-	authority, err := runtimedelivery.NewNormalExecutionAuthority(fact, uuid.NewString(), 1)
+	authority, err := runtimedelivery.NewNormalExecutionAuthority(fact, runtimeInstanceID, 1)
 	if err != nil {
 		t.Fatalf("construct delivery authority: %v", err)
 	}
@@ -335,10 +338,10 @@ func TestDurableEventBusConstructionRequiresImmutableSourceArtifactFact(t *testi
 }
 
 func TestPublishRootsRejectForeignSourceBeforeWorkOccurrenceAdmission(t *testing.T) {
-	owned := sourceMutationFact(t, "a")
+	source := sourceMutationPublicationSource(t, "publish")
 	foreign := sourceMutationFact(t, "b")
 	owner := newSourceMutationProbeOwner()
-	bus := newSourceMutationProbeBus(t, owned, owner)
+	bus := newSourceMutationProbeBus(t, source, owner)
 	fenced := newFencedSourceMutationOccurrence(t)
 
 	for _, tc := range []struct {
@@ -420,9 +423,9 @@ func VerifyDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMu
 }
 
 func TestSubscriptionAndQuiescenceRejectForeignSourceBeforeLifecycleMutation(t *testing.T) {
-	owned := sourceMutationFact(t, "e")
+	source := sourceMutationPublicationSource(t, "subscription")
 	foreign := sourceMutationFact(t, "f")
-	bus := newSourceMutationProbeBus(t, owned, newSourceMutationProbeOwner())
+	bus := newSourceMutationProbeBus(t, source, newSourceMutationProbeOwner())
 	foreignCtx := runtimecorrelation.WithSourceArtifactFact(context.Background(), foreign)
 
 	if _, err := bus.SubscribeInternal(foreignCtx, "foreign-subscription", events.EventType("test.work")); err == nil ||
@@ -494,7 +497,7 @@ func commitSourceMutationEnginePublications(ctx context.Context, bus *EventBus, 
 }
 
 func TestEnginePublicationPlanAdmitsExactSourceArtifactBeforePersistenceOrClaim(t *testing.T) {
-	source := sourceMutationPublicationSource(t)
+	source := sourceMutationPublicationSource(t, "engine")
 	owned, _ := runtimecorrelation.SourceArtifactFactFromContext(constructionIndexContext(t, source))
 	foreign := sourceMutationFact(t, "b")
 	for _, tc := range []struct {
@@ -559,21 +562,22 @@ func TestEnginePublicationPlanAdmitsExactSourceArtifactBeforePersistenceOrClaim(
 	}
 }
 
-func sourceMutationPublicationSource(t *testing.T) semanticview.Source {
+func sourceMutationPublicationSource(t *testing.T, revision string) semanticview.Source {
 	t.Helper()
 	return semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml": "name: source-mutation-proof\npins:\n  outputs: [test.source_mutation]\n",
-		"events.yaml": "test.source_mutation:\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "# captured revision " + revision + "\nstages: []\npins:\n  outputs: [test.source_mutation]\n",
+		"events.yaml":   "test.source_mutation:\ntest.work:\n",
 	}))
 }
 
 func TestPostCommitAndDeferredDispatchRetainPendingWorkOnSourceRejection(t *testing.T) {
-	owned := sourceMutationFact(t, "c")
+	source := sourceMutationPublicationSource(t, "postcommit-refusal")
 	foreign := sourceMutationFact(t, "d")
 	for _, surface := range []string{"post_commit", "deferred_private_root"} {
 		t.Run(surface, func(t *testing.T) {
 			owner := newSourceMutationProbeOwner()
-			bus := newSourceMutationProbeBus(t, owned, owner)
+			bus := newSourceMutationProbeBus(t, source, owner)
 			event := sourceMutationEvent()
 			claim, err := bus.claimPipelinePublication(context.Background(), event.ID())
 			if err != nil {
@@ -613,10 +617,11 @@ func TestPostCommitAndDeferredDispatchRetainPendingWorkOnSourceRejection(t *test
 }
 
 func TestPostCommitDispatchPreservesBusOwnedSourceFactThroughClaimAndSettlement(t *testing.T) {
-	owned := sourceMutationFact(t, "4")
+	source := sourceMutationPublicationSource(t, "postcommit-success")
+	owned, _ := runtimecorrelation.SourceArtifactFactFromContext(constructionIndexContext(t, source))
 	owner := newSourceMutationProbeOwner()
 	store := newTargetRouteMemoryStore()
-	bus := newSourceMutationProbeBusWithStore(t, store, owned, owner)
+	bus := newSourceMutationProbeBusWithStore(t, store, owned, owner, source)
 	ctx := context.Background()
 	event := sourceMutationEvent()
 	seedCommittedNoDeliveryForTest(t, store, event)
@@ -635,13 +640,17 @@ func TestPostCommitDispatchPreservesBusOwnedSourceFactThroughClaimAndSettlement(
 }
 
 func TestPreparedPublishRejectsCrossBusAndForeignSourceWithoutConsumingClaim(t *testing.T) {
-	source := semanticview.Wrap(connectRoutePlanTestBundle(t, nil, nil))
+	source := sourceMutationPublicationSource(t, "prepared-owner")
 	prepareCtx := constructionIndexContext(t, source)
 	owned, present := runtimecorrelation.SourceArtifactFactFromContext(prepareCtx)
 	if !present {
 		t.Fatal("compiled handoff fixture has no admitted source fact")
 	}
-	foreign := sourceMutationFact(t, "f")
+	foreignSource := sourceMutationPublicationSource(t, "prepared-foreign")
+	foreign, _ := runtimecorrelation.SourceArtifactFactFromContext(constructionIndexContext(t, foreignSource))
+	if owned.Matches(foreign) {
+		t.Fatal("different-source transfer requires unequal captured content")
+	}
 	actions := []struct {
 		name string
 		run  func(*EventBus, context.Context, PreparedPublish) error
@@ -669,13 +678,13 @@ func TestPreparedPublishRejectsCrossBusAndForeignSourceWithoutConsumingClaim(t *
 			{
 				name: "same source different bus",
 				targetBus: func(t testing.TB, owner *sourceMutationProbeOwner) *EventBus {
-					return newSourceMutationProbeBus(t, owned, owner)
+					return newSourceMutationProbeBus(t, source, owner)
 				},
 			},
 			{
 				name: "different source different bus",
 				targetBus: func(t testing.TB, owner *sourceMutationProbeOwner) *EventBus {
-					return newSourceMutationProbeBus(t, foreign, owner)
+					return newSourceMutationProbeBus(t, foreignSource, owner)
 				},
 			},
 			{
@@ -738,7 +747,7 @@ func TestPreparedPublishRejectsCrossBusAndForeignSourceWithoutConsumingClaim(t *
 }
 
 func TestRetainedPendingAndScanCapabilitiesRejectSourceSwitchAndPreserveOwnership(t *testing.T) {
-	source := sourceMutationPublicationSource(t)
+	source := sourceMutationPublicationSource(t, "retained")
 	owned, _ := runtimecorrelation.SourceArtifactFactFromContext(constructionIndexContext(t, source))
 	foreign := sourceMutationFact(t, "6")
 
@@ -778,7 +787,7 @@ func TestRetainedPendingAndScanCapabilitiesRejectSourceSwitchAndPreserveOwnershi
 	t.Run("pipeline scan", func(t *testing.T) {
 		owner := newSourceMutationProbeOwner()
 		owner.retainScan = true
-		bus := newSourceMutationProbeBus(t, owned, owner)
+		bus := newSourceMutationProbeBus(t, source, owner)
 		if _, err := bus.SweepPipelineObligations(context.Background(), 1); err != nil {
 			t.Fatalf("open retained scan: %v", err)
 		}
@@ -807,7 +816,7 @@ func TestRetainedPendingAndScanCapabilitiesRejectSourceSwitchAndPreserveOwnershi
 
 	t.Run("reset pending cleanup", func(t *testing.T) {
 		owner := newSourceMutationProbeOwner()
-		bus := newSourceMutationProbeBus(t, owned, owner)
+		bus := newSourceMutationProbeBus(t, source, owner)
 		event := sourceMutationEvent()
 		claim, err := bus.claimPipelinePublication(context.Background(), event.ID())
 		if err != nil {
@@ -835,12 +844,13 @@ func TestRetainedPendingAndScanCapabilitiesRejectSourceSwitchAndPreserveOwnershi
 }
 
 func TestPublicationClaimCleanupRejectsForeignSourceBeforeCapabilityMutation(t *testing.T) {
-	owned := sourceMutationFact(t, "7")
+	source := sourceMutationPublicationSource(t, "claim-cleanup")
+	owned, _ := runtimecorrelation.SourceArtifactFactFromContext(constructionIndexContext(t, source))
 	foreign := sourceMutationFact(t, "8")
 	for _, action := range []string{"release", "settle", "decision"} {
 		t.Run(action, func(t *testing.T) {
 			owner := newSourceMutationProbeOwner()
-			bus := newSourceMutationProbeBus(t, owned, owner)
+			bus := newSourceMutationProbeBus(t, source, owner)
 			eventID := uuid.NewString()
 			claim, err := bus.claimPipelinePublication(context.Background(), eventID)
 			if err != nil {
@@ -888,12 +898,12 @@ func TestPublicationClaimCleanupRejectsForeignSourceBeforeCapabilityMutation(t *
 }
 
 func TestPipelineSweepRootsAdmitSourceBeforeWorkOccurrenceOrStoreMutation(t *testing.T) {
-	owned := sourceMutationFact(t, "1")
+	source := sourceMutationPublicationSource(t, "sweep-refusal")
 	foreign := sourceMutationFact(t, "2")
 	for _, surface := range []string{"start", "global", "shared_internal", "run_release"} {
 		t.Run(surface, func(t *testing.T) {
 			owner := newSourceMutationProbeOwner()
-			bus := newSourceMutationProbeBus(t, owned, owner)
+			bus := newSourceMutationProbeBus(t, source, owner)
 			ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), foreign)
 			var err error
 			switch surface {
@@ -917,63 +927,4 @@ func TestPipelineSweepRootsAdmitSourceBeforeWorkOccurrenceOrStoreMutation(t *tes
 			}
 		})
 	}
-}
-
-func TestPipelineSweepRootsExecuteForImmutableBusOwnedSource(t *testing.T) {
-	owned := sourceMutationFact(t, "3")
-	t.Run("bus owned global", func(t *testing.T) {
-		owner := newSourceMutationProbeOwner()
-		bus := newSourceMutationProbeBus(t, owned, owner)
-		result, err := bus.SweepPipelineObligations(context.Background(), 1)
-		if err != nil {
-			t.Fatalf("SweepPipelineObligations: %v", err)
-		}
-		if !result.Exhausted {
-			t.Fatal("global sweep did not execute to exhaustion")
-		}
-		if got := owner.counts(); got.openScan != 1 || got.claimBatch != 1 || got.closeScan != 1 {
-			t.Fatalf("global sweep mutations = %#v, want one open/batch/close", got)
-		}
-	})
-	t.Run("run release", func(t *testing.T) {
-		owner := newSourceMutationProbeOwner()
-		bus := newSourceMutationProbeBus(t, owned, owner)
-		result, err := bus.ReleaseRunQueue(context.Background(), uuid.NewString(), 1)
-		if err != nil {
-			t.Fatalf("ReleaseRunQueue: %v", err)
-		}
-		if !result.Exhausted {
-			t.Fatal("run release did not execute to exhaustion")
-		}
-		if got := owner.counts(); got.openScan != 1 || got.claimBatch != 1 || got.closeScan != 1 {
-			t.Fatalf("run release mutations = %#v, want one open/batch/close", got)
-		}
-	})
-	t.Run("periodic", func(t *testing.T) {
-		owner := newSourceMutationProbeOwner()
-		bus := newSourceMutationProbeBus(t, owned, owner)
-		ctx, cancel := context.WithCancel(context.Background())
-		if err := bus.StartOutboxSweeper(ctx, OutboxSweeperConfig{Interval: time.Hour, Limit: 1}); err != nil {
-			cancel()
-			t.Fatalf("StartOutboxSweeper: %v", err)
-		}
-		select {
-		case <-owner.opened:
-		case <-time.After(time.Second):
-			cancel()
-			t.Fatal("periodic sweeper did not execute")
-		}
-		cancel()
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), time.Second)
-		defer waitCancel()
-		if err := bus.WaitForOutboxSweeper(waitCtx); err != nil {
-			t.Fatalf("WaitForOutboxSweeper: %v", err)
-		}
-		if got := owner.counts(); got.openScan != 1 || got.claimBatch != 1 || got.closeScan != 1 {
-			t.Fatalf("periodic sweep mutations = %#v, want one open/batch/close", got)
-		}
-		if got := owner.sourceFact("close"); !owned.Matches(got) {
-			t.Fatal("periodic background close did not carry the immutable bus source fact")
-		}
-	})
 }

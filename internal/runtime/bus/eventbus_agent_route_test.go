@@ -433,7 +433,8 @@ func TestEventBusAgentRouteFailedHandoffRetainsCarrierForExactRetry(t *testing.T
 }
 
 func TestNoContextRouteCleanupReturnsExactDeliveryContinuation(t *testing.T) {
-	owned := sourceMutationFact(t, "9")
+	source := sourceMutationPublicationSource(t, "route-cleanup")
+	owned, _ := runtimecorrelation.SourceArtifactFactFromContext(constructionIndexContext(t, source))
 	for _, tc := range []struct {
 		name           string
 		subscriberType string
@@ -456,7 +457,7 @@ func TestNoContextRouteCleanupReturnsExactDeliveryContinuation(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			bus := newSourceMutationProbeBusWithStore(t, InMemoryEventStore{}, owned, newSourceMutationProbeOwner())
+			bus := newSourceMutationProbeBusWithStore(t, InMemoryEventStore{}, owned, newSourceMutationProbeOwner(), source)
 			continuations := &controlledTestDeliveryOwner{}
 			if err := bus.SetDeliveryContinuationOwner(continuations); err != nil {
 				t.Fatalf("install recording delivery continuation owner: %v", err)
