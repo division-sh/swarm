@@ -1530,9 +1530,10 @@ func nodeOnlyDeliveryPlan(t testing.TB, evt events.Event, nodeID string) RoutePl
 func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml": "name: node-only-proof\npins:\n  inputs: [custom.node_only]\n",
-		"events.yaml": "custom.node_only:\n",
-		"nodes.yaml":  "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.node_only]\n  event_handlers:\n    custom.node_only: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\npins:\n  inputs: [custom.node_only]\n",
+		"events.yaml":   "custom.node_only:\n",
+		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.node_only]\n  event_handlers:\n    custom.node_only: {}\n",
 	}))
 	runID := uuid.NewString()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -1652,9 +1653,10 @@ func TestSweepPipelineObligations_NodeOnlyRouteDoesNotRequireAgentChannel(t *tes
 func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml": "name: mixed-delivery\npins:\n  inputs: [custom.mixed_node_agent]\n",
-		"events.yaml": "custom.mixed_node_agent:\n",
-		"nodes.yaml":  "workflow-node:\n  execution_type: system_node\n  event_handlers:\n    custom.mixed_node_agent: {}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\npins:\n  inputs: [custom.mixed_node_agent]\n",
+		"events.yaml":   "custom.mixed_node_agent:\n",
+		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  event_handlers:\n    custom.mixed_node_agent: {}\n",
 	}))
 	runID := agentidentitytest.RootRuntime(t, "agent-missing", "eventbus-target-test").RunID
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
@@ -1685,12 +1687,15 @@ func TestEventBusPublish_MixedNodeAgentRouteStillRequiresAgentChannel(t *testing
 func TestEventBusPublish_TargetSetInternalDeliveryUsesPerTargetRoutes(t *testing.T) {
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml":           "name: per-target-internal-delivery\n",
-		"child-a/schema.yaml":   "instance: instance_key\n",
+		"manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":           "stages: []\n",
+		"child-a/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"child-a/schema.yaml":   "stages: []\ninstance: instance_key\n",
 		"child-a/events.yaml":   "output.done:\n",
 		"child-a/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
 		"child-a/nodes.yaml":    "child-a-listener:\n  execution_type: system_node\n  event_handlers:\n    output.done: {}\n",
-		"child-b/schema.yaml":   "instance: instance_key\n",
+		"child-b/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"child-b/schema.yaml":   "stages: []\ninstance: instance_key\n",
 		"child-b/events.yaml":   "output.done:\n",
 		"child-b/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
 		"child-b/nodes.yaml":    "child-b-listener:\n  execution_type: system_node\n  event_handlers:\n    output.done: {}\n",
@@ -1768,8 +1773,10 @@ func TestEventBusPublish_TargetSetSameSemanticNodePersistsPerTargetRoutes(t *tes
 	workerTwoID := eventtest.UUID("worker/w-002")
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml":          "name: same-node-target-set\n",
-		"worker/schema.yaml":   "instance: instance_key\n",
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":          "stages: []\n",
+		"worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"worker/schema.yaml":   "stages: []\ninstance: instance_key\n",
 		"worker/events.yaml":   "work.assign:\n",
 		"worker/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
 		"worker/nodes.yaml":    "task-handler:\n  execution_type: system_node\n  event_handlers:\n    work.assign: {}\n",
@@ -1830,8 +1837,10 @@ func TestEventBusPublish_TargetedRouteTableNodePersistsSemanticNodeRoute(t *test
 	workerID := eventtest.UUID("worker/w-001")
 	store := newTargetRouteMemoryStore()
 	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
-		"schema.yaml":          "name: targeted-route-node\n",
-		"worker/schema.yaml":   "instance: instance_key\n",
+		"manifest.yaml":        "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":          "stages: []\n",
+		"worker/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"worker/schema.yaml":   "stages: []\ninstance: instance_key\n",
 		"worker/events.yaml":   "work.assign:\n",
 		"worker/entities.yaml": "work:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
 		"worker/nodes.yaml":    "task-handler:\n  execution_type: system_node\n  event_handlers:\n    work.assign: {}\n",
