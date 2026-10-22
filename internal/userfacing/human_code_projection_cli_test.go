@@ -535,6 +535,10 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"status"},
 		Reason: "typed decision-card status is a separate control taxonomy",
 	},
+	"control_mailbox.go\x00runMailboxDecideCommand": {
+		Names:  []string{"status"},
+		Reason: "typed decision-card status is a separate control taxonomy",
+	},
 	"control_nuke.go\x00writeRuntimeNukeResult": {
 		Names:  []string{"status"},
 		Reason: "runtime.nuke mutation outcome is a separate destructive-control taxonomy",
