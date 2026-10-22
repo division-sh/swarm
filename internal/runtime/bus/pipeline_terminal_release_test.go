@@ -14,6 +14,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -190,12 +191,14 @@ func TestPipelinePublicationReleaseIsTerminalAndImmediatelyReclaimable(t *testin
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			rooted, _ := sourceartifactfixture.Rooted(t, "pipeline-release", sourceartifactfixture.Artifact())
 			owner := newTerminalReleasePipelineOwner()
 			eventID := uuid.NewString()
 			owner.releaseError[eventID] = tc.failure
 			bus := &EventBus{
 				pipelineObligations: owner,
-				sourceArtifactFact:  sourceMutationFact(t, "9"),
+				sourceArtifactFact:  sourceartifactfixture.FactFor(rooted.Artifact()),
+				rootAdmission:       rooted.Admission(),
 			}
 			claim, err := bus.claimPipelinePublication(context.Background(), eventID)
 			if err != nil {
