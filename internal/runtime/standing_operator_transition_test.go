@@ -121,6 +121,7 @@ func standingOperatorProcessFixture(t *testing.T) (*RuntimeContextManager, runti
 	return manager, runtimepipeline.StandingServiceReconciliation{
 		ServiceID: target.ServiceID, RunID: target.RunID, Generation: target.Generation, BundleHash: contextDef.BundleHash(),
 		FlowPath: target.FlowPath, RestartDisposition: disposition,
+		RootReference: contextDef.RootAdmission.Reference(), PublicationSequence: target.PublicationSequence,
 	}
 }
 
@@ -224,6 +225,7 @@ func TestStandingOperatorRejectsInvalidChildComposition(t *testing.T) {
 					t.Fatal("foreign-source refusal requires genuinely unequal captured content")
 				}
 				expected.BundleHash = foreign.BundleHash()
+				expected.RootReference = foreign.RootAdmission.Reference()
 			case "stale-target":
 				entry.context.StandingTargets[0].PublicationSequence++
 			case "fenced":
