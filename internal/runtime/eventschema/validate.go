@@ -211,7 +211,7 @@ func normalizeOptionalNullConstraints(path string, schemas []map[string]any, val
 func normalizeOneOfOptionalNulls(path string, schemas []map[string]any, index int, value any, objectBoundary bool) error {
 	branches, ok := asArray(schemas[index]["oneOf"])
 	if !ok || len(branches) == 0 {
-		return fmt.Errorf("schema validation failed: %s.oneOf must be a non-empty schema array", path)
+		return violation(path, "oneOf", "non-empty schema array", "invalid oneOf", "%s.oneOf must be a non-empty schema array", path)
 	}
 	outer := make(map[string]any, len(schemas[index]))
 	for key, field := range schemas[index] {
@@ -224,7 +224,7 @@ func normalizeOneOfOptionalNulls(path string, schemas []map[string]any, index in
 	for _, raw := range branches {
 		branch, ok := raw.(map[string]any)
 		if !ok || branch == nil {
-			return fmt.Errorf("schema validation failed: %s.oneOf must contain schemas", path)
+			return violation(path, "oneOf", "schema object", "invalid branch", "%s.oneOf must contain schemas", path)
 		}
 		constraints := append([]map[string]any(nil), schemas...)
 		constraints[index] = outer
@@ -239,12 +239,12 @@ func normalizeOneOfOptionalNulls(path string, schemas []map[string]any, index in
 			continue
 		}
 		if matched {
-			return fmt.Errorf("schema validation failed: %s has ambiguous optional-null oneOf normalization", path)
+			return violation(path, "oneOf", "exactly one matching branch", "multiple", "%s has ambiguous optional-null oneOf normalization", path)
 		}
 		selected, matched = candidate, true
 	}
 	if !matched {
-		return fmt.Errorf("schema validation failed: %s has no unambiguous optional-null oneOf normalization", path)
+		return violation(path, "oneOf", "exactly one matching branch", "0", "%s has no unambiguous optional-null oneOf normalization", path)
 	}
 	switch target := value.(type) {
 	case map[string]any:
@@ -293,7 +293,7 @@ func optionalNullFieldConstraints(path, name string, schemas []map[string]any, i
 	for _, schema := range schemas {
 		for _, required := range exactRequiredList(schema["required"]) {
 			if isNull && required == name {
-				return nil, fmt.Errorf("schema validation failed: %s is required and cannot be null", path)
+				return nil, violation(path, "required", "non-null value", "null", "%s is required and cannot be null", path)
 			}
 		}
 		if field, ok := schemaProperties(schema["properties"])[name]; ok {
@@ -303,14 +303,14 @@ func optionalNullFieldConstraints(path, name string, schemas []map[string]any, i
 		}
 		allowed, additional := schemaAdditionalProperties(schema["additionalProperties"])
 		if isNull && (!allowed || additional != nil) {
-			return nil, fmt.Errorf("schema validation failed: %s null is not a declared optional field", path)
+			return nil, violation(path, "additionalProperties", "declared optional field", "null", "%s null is not a declared optional field", path)
 		}
 		if additional != nil {
 			fields = append(fields, additional)
 		}
 	}
 	if isNull && !declared {
-		return nil, fmt.Errorf("schema validation failed: %s null is not a declared optional field", path)
+		return nil, violation(path, "additionalProperties", "declared optional field", "null", "%s null is not a declared optional field", path)
 	}
 	return fields, nil
 }
@@ -325,7 +325,7 @@ func normalizeArrayNullConstraints(path string, schemas []map[string]any, value 
 	for index, item := range value {
 		itemPath := fmt.Sprintf("%s[%d]", path, index)
 		if item == nil {
-			return fmt.Errorf("schema validation failed: %s cannot be null", itemPath)
+			return violation(itemPath, "type", "non-null value", "null", "%s cannot be null", itemPath)
 		}
 		if err := normalizeOptionalNullConstraints(itemPath, items, item, false); err != nil {
 			return err
