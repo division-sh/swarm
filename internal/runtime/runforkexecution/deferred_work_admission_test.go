@@ -1,7 +1,6 @@
 package runforkexecution
 
 import (
-	"go/ast"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -259,35 +258,6 @@ func TestSelectedContractDeferredWorkAdmissionRejectsSourceDrift(t *testing.T) {
 		!strings.Contains(err.Error(), "workflow identity does not match") {
 		t.Fatalf("source drift error = %v, want exact workflow identity rejection", err)
 	}
-}
-
-func requireSelectedDeferredWorkCompositeField(t *testing.T, file string, call *ast.CallExpr, field string) {
-	t.Helper()
-	if len(call.Args) == 0 {
-		t.Fatalf("%s call in %s has no request", functionName(call.Fun), file)
-	}
-	literal, ok := call.Args[len(call.Args)-1].(*ast.CompositeLit)
-	if !ok {
-		t.Fatalf("%s call in %s does not use an auditable request literal", functionName(call.Fun), file)
-	}
-	for _, element := range literal.Elts {
-		keyValue, ok := element.(*ast.KeyValueExpr)
-		if !ok {
-			continue
-		}
-		key, ok := keyValue.Key.(*ast.Ident)
-		if ok && key.Name == field {
-			return
-		}
-	}
-	t.Fatalf("%s call in %s does not consume %s", functionName(call.Fun), file, field)
-}
-
-func functionName(expr ast.Expr) string {
-	if ident, ok := expr.(*ast.Ident); ok {
-		return ident.Name
-	}
-	return "call"
 }
 
 func selectedDeferredWorkTestSource(timers []runtimecontracts.WorkflowTimerContract, joins []runtimecontracts.WorkflowJoinPlan) semanticview.Source {
