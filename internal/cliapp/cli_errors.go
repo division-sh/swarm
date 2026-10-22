@@ -21,6 +21,7 @@ const (
 	cliExitNotFound    = 5
 	cliExitConflict    = 6
 	cliExitRunTerminal = 7
+	cliExitRunTimeout  = 8
 	cliExitInterrupted = 130
 )
 
