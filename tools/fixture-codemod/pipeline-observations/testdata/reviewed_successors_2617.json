@@ -828,7 +828,7 @@
       "File": "internal/runtime/channel_runtime_supported_surface_test.go",
       "Function": "TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedStores",
       "HistorySHA256": "3a9fff4d048d254ffebd6dbe0f5b2289e211a7d5011d6188a064b693eef356c1",
-      "CurrentSHA256": "3bb93acab01a801bd201f7c0fd90394ea82b637cd31976faddca3be62f4dc1f8",
+      "CurrentSHA256": "08702707442a6b9563f3e5b23af2c8bbb8a7af29d90ea7040a15aa03eb4a494a",
       "HasSuccessor": true
     },
     {
