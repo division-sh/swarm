@@ -1207,8 +1207,7 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 }
 
 func TestEventBusAgentDispatchDoesNotCrossSameIDNodeRouteTargets(t *testing.T) {
-	store := newTargetRouteMemoryStore()
-	eb, err := newScopedTestEventBus(store)
+	eb, err := newScopedTestEventBus(InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1229,7 +1228,7 @@ func TestEventBusAgentDispatchDoesNotCrossSameIDNodeRouteTargets(t *testing.T) {
 }
 
 func TestEventBusWorkflowRuntimeCarrierPrefersConcreteNodeRouteOverPlaceholder(t *testing.T) {
-	eb, err := newScopedTestEventBus(newTargetRouteMemoryStore())
+	eb, err := newScopedTestEventBus(InMemoryEventStore{})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

@@ -341,6 +341,7 @@ func testCommittedDispatchTerminalPreflightReleasesEveryExactClaim(t *testing.T,
 		t.Fatal(err)
 	}
 	runID := uuid.NewString()
+	installConnectionSourceConstructionForRun(t, bus, source, ".", runID)
 	intents := make([]runtimeengine.EmitIntent, 2)
 	for i := range intents {
 		intents[i].Event = eventtest.RunCreatingRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
