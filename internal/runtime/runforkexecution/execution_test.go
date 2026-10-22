@@ -787,6 +787,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 		t.Fatalf("retired process refusal = %v", err)
 	}
 	assertNoSelectedContractExecutionMutationForSource(t, db, sourceRunID, sourceEventID)
+	ctx = runForkTestContext(t)
 	request.AgentRuntime.ProcessCapability = selectedContractTestProcessCapability(t, ctx, pg)
 	// A successor process gets a new owner; a retired owner's binding is immutable.
 	request.Owner = newSelectedContractExecutionOwnerForTest(t, pg)
@@ -3163,6 +3164,11 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	`, bindingID, forkRunID, sourceRunID, revision, forkEventID, now); err != nil {
 		t.Fatalf("seed selected-contract container competition binding: %v", err)
 	}
+	seedProcess := selectedContractTestProcessCapability(t, ctx, selected)
+	if err := seedProcess.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ctx = runForkTestContext(t)
 
 	servedDB, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -3183,6 +3189,10 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	servedStore := storetest.AdmitPostgresRuntimeStore(t, servedDB)
 	standaloneStore := storetest.AdmitPostgresRuntimeStore(t, standaloneDB)
 	processCapability := selectedContractTestProcessCapability(t, ctx, servedStore)
+	ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, processCapability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	fixtureValue, _ := runForkTestWorkFixtures.Load(t)
 	process := fixtureValue.(*runForkTestWorkFixture).process
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, servedStore)
