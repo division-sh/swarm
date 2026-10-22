@@ -31,6 +31,7 @@ func TestRuntimeLogFilterParityBothStores(t *testing.T) {
 			} else {
 				selected = newBootstrappedSQLiteRuntimeStoreForTest(t)
 			}
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 			artifactA := storeTestSourceArtifact("runtime-log-filter-a")
 			artifactB := storeTestSourceArtifact("runtime-log-filter-b")

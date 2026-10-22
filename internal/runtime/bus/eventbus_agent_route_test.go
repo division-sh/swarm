@@ -20,14 +20,15 @@ import (
 )
 
 type ExactHandoffNativeFixtureForTest struct {
-	Store         runtimedelivery.Store
-	Authority     runtimedelivery.ExecutionAuthority
-	Context       context.Context
-	SelectedEvent events.Event
-	SelectedRoute events.DeliveryRoute
-	Seed          func(*testing.T, string, string, events.DeliveryRoute) events.Event
-	Session       func(*testing.T, agentidentity.Identity) string
-	Load          func(*testing.T, string) events.Event
+	Store                  runtimedelivery.Store
+	Authority              runtimedelivery.ExecutionAuthority
+	Context                context.Context
+	OriginalCommandContext context.Context
+	SelectedEvent          events.Event
+	SelectedRoute          events.DeliveryRoute
+	Seed                   func(*testing.T, string, string, events.DeliveryRoute) events.Event
+	Session                func(*testing.T, agentidentity.Identity) string
+	Load                   func(*testing.T, string) events.Event
 }
 
 type ExactHandoffNativeOpenerForTest func(*testing.T, bool) ExactHandoffNativeFixtureForTest

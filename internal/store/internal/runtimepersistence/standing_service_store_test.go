@@ -26,6 +26,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -89,6 +90,7 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 				Source: mustStoreTestSourceArtifactFact(artifact.BundleHash()),
 			}
 			seedStoreTestPersistedArtifact(t, db, artifact)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
 			if err != nil || len(created) != 1 {
 				t.Fatalf("seed standing service = %#v, %v", created, err)
@@ -163,6 +165,7 @@ func TestStandingServiceTerminalizationBeforeRegistrationIsRecoveredByStartupSca
 func TestSQLiteStandingServiceReconcileDoesNotRepairRestartAbandon(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	packageKey := "project"
 	flowID := "ingress"
@@ -233,6 +236,7 @@ func TestSQLiteStandingServiceReconcileDoesNotRepairRestartAbandon(t *testing.T)
 func TestSQLiteStandingServiceReconcileProjectsTerminalityWithCommand(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("standing-unknown-terminality")
@@ -264,6 +268,7 @@ func TestSQLiteStandingServiceReconcileProjectsTerminalityWithCommand(t *testing
 func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore, genericReconciler := newGenericScheduleAwareWorkflowTestCoordinator(t, store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("sqlite-standing-operator-lifecycle")
@@ -285,6 +290,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	agentID := "standing-agent"
 	sessionID := uuid.NewString()
 	fixtureCtx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), created.RunID)
+	fixtureCtx = startupownership.CarryMutationAuthority(fixtureCtx, ctx)
 	workEvent := eventtest.PersistedProjection(
 		eventID, events.EventType("standing.work"), "test", "", json.RawMessage(`{}`), 0,
 		created.RunID, "", events.EventEnvelope{}, time.Now().UTC(),
@@ -416,6 +422,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("sqlite-standing-orphan")
@@ -454,6 +461,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := admitTestPostgresStore(t, db)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	workflowStore, genericReconciler := newGenericScheduleAwareWorkflowTestCoordinator(t, selected)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("postgres-standing-operator-lifecycle")
@@ -464,6 +472,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	}
 	seedStoreTestPersistedArtifact(t, db, artifact)
 	fixtureCtx := testAuthorActivityContextForBundle(candidate.Source.BundleHash())
+	fixtureCtx = startupownership.CarryMutationAuthority(fixtureCtx, ctx)
 	created, err := workflowStore.ReconcileStandingServiceSet(ctx, []runtimepipeline.StandingServiceCandidate{candidate})
 	if err != nil || len(created) != 1 {
 		t.Fatalf("ReconcileStandingServiceSet = %#v, %v", created, err)
@@ -707,6 +716,7 @@ func TestStandingServicePostureCensusRejectsEachLiveWorkFamilyBeforeMutation(t *
 			t.Run(backend+"/"+family, func(t *testing.T) {
 				fixture := openStandingCensusFixture(t, backend)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				runID := uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				seedStandingCensusFamily(t, fixture, ctx, runID, family, executionmode.Live)
@@ -735,6 +745,7 @@ func TestStandingServicePostureCensusAdmitsExactMockWork(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingCensusFixture(t, backend)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			seedStandingCensusFamily(t, fixture, ctx, runID, "raw_pipeline_event", executionmode.Mock)
@@ -956,6 +967,7 @@ func countStandingCensusFamily(t *testing.T, fixture authorActivityReceiptFixtur
 func TestSQLiteRunStopRefusesCurrentStandingGenerationWithTeachingCommand(t *testing.T) {
 	ctx := testAuthorActivityRuntimeContext()
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	workflowStore := newSQLiteWorkflowTestCoordinator(t, store.backend.ConstructionHandle(), store)
 	serviceID := runtimeflowidentity.StandingServiceID("project/ingress")
 	artifact := storeTestSourceArtifact("sqlite-standing-run-stop")
@@ -1004,7 +1016,7 @@ func TestRunStopUsesDeclarationAwareStandingGuidanceParity(t *testing.T) {
 			stopper := selected.(interface {
 				StopRunControlOutcome(context.Context, runtimeruncontrol.TransitionRequest) (runtimeruncontrol.StoreTransition, error)
 			})
-			ctx := testAuthorActivityRuntimeContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), selected)
 			flowPath := "run-stop-guidance/" + backend
 			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 			artifact := storeTestSourceArtifact("standing-run-stop-guidance-" + backend)

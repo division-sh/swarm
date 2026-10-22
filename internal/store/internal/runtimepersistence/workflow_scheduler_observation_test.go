@@ -21,6 +21,7 @@ func TestWorkflowSchedulerObservationKeepsPhysicalHistoryAndExactScopeBothStores
 			f := backend.open(t)
 			run, otherRun, entity, path := uuid.NewString(), uuid.NewString(), uuid.NewString(), "mutation-flow"
 			ctx := selectedScheduleTestContext(t, run)
+			ctx = originalStoreFixtureContext(t, ctx, f.store)
 			for _, id := range []string{run, otherRun} {
 				requireRunningRunForTest(t, ctx, f.store, id, time.Now().UTC())
 			}

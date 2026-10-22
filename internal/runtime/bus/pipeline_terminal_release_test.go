@@ -221,6 +221,56 @@ func TestPipelinePublicationReleaseIsTerminalAndImmediatelyReclaimable(t *testin
 			}
 		})
 	}
+	t.Run("cancelled_original", func(t *testing.T) {
+		owner := newTerminalReleasePipelineOwner()
+		admissions := 0
+		bus := &EventBus{
+			pipelineObligations: owner,
+			sourceArtifactFact:  sourceMutationFact(t, "9"),
+			mutationContext: func(ctx context.Context) (context.Context, error) {
+				admissions++
+				return ctx, ctx.Err()
+			},
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		eventID := uuid.NewString()
+		claim, err := bus.claimPipelinePublication(ctx, eventID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		foreign := runtimecorrelation.WithSourceArtifactFact(ctx, sourceMutationFact(t, "8"))
+		if err := claim.Release(foreign); err == nil || !strings.Contains(err.Error(), "bundle source fact conflicts") {
+			t.Fatalf("foreign-source release = %v", err)
+		}
+		if claim.released.Load() || owner.releaseCalls[eventID] != 0 {
+			t.Fatal("foreign source consumed the owned claim")
+		}
+		if err := newTerminalReleasePipelineOwner().Release(ctx, claim.claim); !errors.Is(err, runtimepipelineobligation.ErrStaleClaim) {
+			t.Fatalf("foreign-store release = %v", err)
+		}
+		cancel()
+		if _, err := bus.claimPipelinePublication(ctx, eventID); !errors.Is(err, context.Canceled) {
+			t.Fatalf("new claim borrowed cancelled cleanup authority: %v", err)
+		}
+		admitted := admissions
+		if err := claim.Release(ctx); err != nil {
+			t.Fatalf("release cancelled original: %v", err)
+		}
+		if err := claim.Release(ctx); err != nil {
+			t.Fatalf("repeat cancelled release: %v", err)
+		}
+		if admissions != admitted || owner.releaseCalls[eventID] != 1 {
+			t.Fatalf("cleanup admissions=%d, want%d; store releases=%d, want1", admissions, admitted, owner.releaseCalls[eventID])
+		}
+		reclaimed, err := bus.claimPipelinePublication(context.Background(), eventID)
+		if err != nil {
+			t.Fatalf("immediate reclaim after cancelled cleanup: %v", err)
+		}
+		if err := reclaimed.Release(context.Background()); err != nil {
+			t.Fatalf("release reclaimed publication: %v", err)
+		}
+	})
 }
 
 func TestPipelineOneShotTerminalSinksPropagateOrRecordCleanupEvidence(t *testing.T) {
@@ -625,6 +675,14 @@ func TestEventBusResetAttemptsEveryTerminalPendingReleaseAndAggregatesEvidence(t
 		bus.mu.RUnlock()
 		if pending != 0 {
 			t.Fatalf("pending operations for %s = %d, want cleared terminal owner", eventID, pending)
+		}
+	}
+	if err := bus.ResetInMemoryState(); err != nil {
+		t.Fatalf("repeat reset after terminal cleanup: %v", err)
+	}
+	for _, eventID := range eventIDs {
+		if got := owner.releaseCalls[eventID]; got != 1 {
+			t.Fatalf("release calls after repeat reset for %s = %d, want one terminal attempt", eventID, got)
 		}
 		reclaimed, err := bus.claimPipelinePublication(context.Background(), eventID)
 		if err != nil {

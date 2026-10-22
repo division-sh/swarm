@@ -32,7 +32,7 @@ func withNativeObservabilityStores(t *testing.T, proof func(*testing.T, context.
 			} else {
 				selected = storetest.StartPostgresRuntimeStore(t)
 			}
-			proof(t, ctx, selected)
+			proof(t, originalAPIFixtureContext(t, ctx, selected), selected)
 		})
 	}
 }

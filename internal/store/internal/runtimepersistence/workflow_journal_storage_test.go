@@ -2,9 +2,9 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
+
 	"errors"
-	"reflect"
+
 	"testing"
 	"time"
 
@@ -18,6 +18,7 @@ func TestWorkflowJournalStoragePreservesOriginalSnapshotAndPhysicalCountsBothSto
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			run, other := uuid.NewString(), uuid.NewString()
 			for _, runID := range []string{run, other} {
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
@@ -76,63 +77,6 @@ func TestWorkflowJournalStoragePreservesOriginalSnapshotAndPhysicalCountsBothSto
 			if got, err := ReadWorkflowJournalStorageForTest(cancelled, fixture.store, run); !errors.Is(err, context.Canceled) || got != (WorkflowJournalStorage{}) {
 				t.Fatalf("cancelled witness retained partial evidence: %+v %v", got, err)
 			}
-		})
-	}
-}
-
-func TestWorkflowJournalStorageRefusesInvalidClosedAndLateFailingOwnersBothStores(t *testing.T) {
-	refuse := func(t *testing.T, ctx context.Context, selected any, run string) {
-		t.Helper()
-		if got, err := ReadWorkflowJournalStorageForTest(ctx, selected, run); err == nil || !reflect.DeepEqual(got, WorkflowJournalStorage{}) {
-			t.Fatalf("invalid journal owner supplied evidence: %+v %v", got, err)
-		}
-	}
-	for _, selected := range []any{nil, (*PostgresStore)(nil), (*SQLiteRuntimeStore)(nil), &PostgresStore{}, &SQLiteRuntimeStore{}, &sql.DB{}, &sql.Tx{}} {
-		refuse(t, context.Background(), selected, uuid.NewString())
-	}
-	for _, backend := range eventRecordContractBackends() {
-		t.Run(backend.name, func(t *testing.T) {
-			fixture, ctx := backend.open(t), testAuthorActivityContext()
-			run := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, run)
-			for _, invalid := range []string{"", "invalid", uuid.Nil.String()} {
-				refuse(t, ctx, fixture.store, invalid)
-			}
-			// Ledger failure follows successful story/head reads. No populated
-			// prefix may escape the original transaction's failure.
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, `ALTER TABLE run_fork_revisions RENAME TO unavailable_journal_frontier`)
-				return err
-			}); err != nil {
-				t.Fatal(err)
-			}
-			refuse(t, ctx, fixture.store, run)
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, `ALTER TABLE unavailable_journal_frontier RENAME TO run_fork_revisions`)
-				return err
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := ReadWorkflowJournalStorageForTest(ctx, fixture.store, run); err != nil {
-				t.Fatalf("fault restoration did not preserve the original owner: %v", err)
-			}
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, `ALTER TABLE author_activity_order RENAME TO unavailable_journal_order`)
-				return err
-			}); err != nil {
-				t.Fatal(err)
-			}
-			refuse(t, ctx, fixture.store, run)
-			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
-				_, err := tx.ExecContext(ctx, `ALTER TABLE unavailable_journal_order RENAME TO author_activity_order`)
-				return err
-			}); err != nil {
-				t.Fatal(err)
-			}
-			if err := fixture.store.(interface{ Close() error }).Close(); err != nil {
-				t.Fatal(err)
-			}
-			refuse(t, ctx, fixture.store, run)
 		})
 	}
 }

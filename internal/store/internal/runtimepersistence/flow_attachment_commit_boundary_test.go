@@ -9,12 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/google/uuid"
 )
 
 func TestFlowAttachmentNativeLostAckAfterRebindBothStores(t *testing.T) {
@@ -51,6 +53,10 @@ func TestFlowAttachmentNativeLostAckAfterRebindBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			originalAuthority, err := process.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
 			sourceSet, found, err := process.CurrentSourceSet(f.ctx)
 			if err != nil || !found {
 				t.Fatalf("source set: found=%v err=%v", found, err)
@@ -74,53 +80,138 @@ func TestFlowAttachmentNativeLostAckAfterRebindBothStores(t *testing.T) {
 			if result, err := owner.RebindFlowReadinessSourceSet(f.ctx, rebind); !errors.Is(err, fault) || result.Attempt.Validate() == nil {
 				t.Fatalf("lost rebind acknowledgment leaked a receipt: %+v %v", result, err)
 			}
+			var rebound runtimepipeline.DynamicFlowRuntimeActivationAttempt
 			if backend == "postgres" {
 				// An ambiguous retained session is force-discarded, not retried as
-				// a live writer. Exact durable readback and joined settlement remain.
+				// a live writer. Cleanup requires a new proven process owner.
 				if _, err := owner.RebindFlowReadinessSourceSet(f.ctx, rebind); err == nil {
 					t.Fatal("ambiguous PostgreSQL session remained an executable rebind owner")
 				}
 				if err := successor.ProveCurrent(f.ctx); err == nil {
 					t.Fatal("ambiguous PostgreSQL writer retained execution authority")
 				}
-				resolved, err := f.workflows.ResolveDynamicFlowRuntimeActivation(f.ctx, admissionRequest)
-				if err != nil || resolved.Disposition != runtimepipeline.FlowActivationAdmitted || admissionRequest.ValidateResolution(resolved) != nil {
-					t.Fatalf("lost admission after terminal writer: %+v %v", resolved, err)
+			} else {
+				result, err := owner.RebindFlowReadinessSourceSet(f.ctx, rebind)
+				if err != nil || result.Attempt.ID() != "1" {
+					t.Fatalf("exact rebind retry: %+v %v", result, err)
 				}
-				if err := f.workflows.AbandonDynamicFlowRuntimeActivationAttempt(f.ctx, resolved.Attempt); err != nil {
+				rebound = result.Attempt
+				if err := f.grant.Retire(f.ctx); err != nil {
 					t.Fatal(err)
 				}
-				return
-			}
-			rebound, err := owner.RebindFlowReadinessSourceSet(f.ctx, rebind)
-			if err != nil || rebound.Attempt.ID() != "1" {
-				t.Fatalf("exact rebind retry: %+v %v", rebound, err)
-			}
-			if err := f.grant.Retire(f.ctx); err != nil {
-				t.Fatal(err)
 			}
 			resolved, err := f.workflows.ResolveDynamicFlowRuntimeActivation(f.ctx, admissionRequest)
 			if err != nil || resolved.Disposition != runtimepipeline.FlowActivationAdmitted || admissionRequest.ValidateResolution(resolved) != nil {
-				t.Fatalf("lost admission after rebind: %+v %v", resolved, err)
+				t.Fatalf("lost admission after writer retirement: %+v %v", resolved, err)
 			}
-			if err := f.workflows.AbandonDynamicFlowRuntimeActivationAttempt(f.ctx, resolved.Attempt); err != nil {
+			readiness := func() runtimepipeline.DynamicFlowRuntimeReadiness {
+				t.Helper()
+				row, found, err := f.store.LoadDynamicFlowRuntimeReadiness(f.ctx, plan.Readiness.RunID, plan.Identity.Route())
+				if err != nil || !found {
+					t.Fatalf("load exact attachment: found=%t err=%v", found, err)
+				}
+				return row
+			}
+			before := readiness()
+			if err := f.workflows.AbandonDynamicFlowRuntimeActivationAttempt(f.ctx, resolved.Attempt); err == nil {
+				t.Fatal("retired original retained settlement write authority")
+			}
+			if after := readiness(); !reflect.DeepEqual(before, after) {
+				t.Fatalf("refused original changed attachment: before=%+v after=%+v", before, after)
+			}
+
+			cleanupRuntimeID := binding.RuntimeInstanceID
+			if backend == "postgres" {
+				cleanupRuntimeID = uuid.NewString()
+			}
+			cleanupCtx := correlation.WithRuntimeInstanceID(testAuthorActivityContextForBundle(binding.BundleHash), cleanupRuntimeID)
+			cleanupCtx = correlation.WithRunID(cleanupCtx, plan.Readiness.RunID)
+			cleanupCtx = authoractivity.WithScope(cleanupCtx, authoractivity.BundleScope(cleanupRuntimeID, binding.BundleHash))
+			cleanupProcess := process
+			if backend == "postgres" {
+				cleanupProcess, err = f.store.AcquireProcessCapability(cleanupCtx, startupownership.AcquireRequest{
+					OwnerID: "attachment-settlement-successor", BootID: uuid.NewString(), RuntimeInstanceID: cleanupRuntimeID,
+				})
+				if err != nil {
+					t.Fatalf("acquire cleanup possession: %v", err)
+				}
+				t.Cleanup(func() {
+					if err := cleanupProcess.Release(context.Background()); err != nil {
+						t.Errorf("release cleanup process: %v", err)
+					}
+				})
+				current, err := cleanupProcess.Evidence()
+				if err != nil || current.AuthorityGeneration <= originalAuthority.AuthorityGeneration || current.BootID == originalAuthority.BootID {
+					t.Fatalf("cleanup did not take over possession: before=%+v current=%+v err=%v", originalAuthority, current, err)
+				}
+			}
+			if err := cleanupProcess.ProveCurrent(cleanupCtx); err != nil {
+				t.Fatalf("prove cleanup possession: %v", err)
+			}
+			cleanupCtx, err = startupownership.WithProcessMutationAuthority(cleanupCtx, cleanupProcess)
+			if err != nil {
+				t.Fatal(err)
+			}
+			forgedBinding := resolved.Attempt.ProcessBinding()
+			forgedBinding.ProcessBootID = uuid.NewString()
+			forged, err := runtimepipeline.NewDynamicFlowRuntimeActivationAttempt(resolved.Attempt.ID(), resolved.Attempt.RunID(), resolved.Attempt.InstancePath(), forgedBinding)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.workflows.AbandonDynamicFlowRuntimeActivationAttempt(cleanupCtx, forged); err == nil {
+				t.Fatal("live cleanup owner accepted foreign historical target evidence")
+			}
+			if after := readiness(); !reflect.DeepEqual(before, after) {
+				t.Fatal("foreign target refusal changed the attachment")
+			}
+			if err := f.workflows.AbandonDynamicFlowRuntimeActivationAttempt(cleanupCtx, resolved.Attempt); err != nil {
+				t.Fatalf("settle exact predecessor through live process: %v", err)
+			}
+			settled := readiness()
+			if settled.AttemptOrdinal != resolved.Attempt.Ordinal() || settled.AttemptState != "aborted" || settled.PlanHash != before.PlanHash || settled.Phase != before.Phase {
+				t.Fatalf("cleanup did not abort only the exact attempt: before=%+v after=%+v", before, settled)
+			}
+			if err := f.workflows.RetireDynamicFlowRuntimeActivationAttempt(cleanupCtx, resolved.Attempt); err == nil {
+				t.Fatal("aborted attempt also admitted retired disposition")
+			}
+			if after := readiness(); !reflect.DeepEqual(settled, after) {
+				t.Fatal("refused retired disposition changed the aborted attempt")
+			}
+			if backend == "postgres" {
+				if old, err := f.workflows.ResolveDynamicFlowRuntimeActivation(f.ctx, admissionRequest); err != nil || old.Disposition != runtimepipeline.FlowActivationAdmitted || admissionRequest.ValidateResolution(old) != nil {
+					t.Fatalf("old-context readback after takeover: %+v %v", old, err)
+				}
+				return
+			}
+			currentCtx, err := startupownership.WithRuntimeMutationAuthority(cleanupCtx, successor)
+			if err != nil {
 				t.Fatal(err)
 			}
 			currentBinding, err := successor.ProcessExecutionBinding()
 			if err != nil {
 				t.Fatal(err)
 			}
-			next, err := f.workflows.BeginDynamicFlowRuntimeActivation(f.ctx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(plan.Readiness, 1, "aborted", currentBinding))
+			next, err := f.workflows.BeginDynamicFlowRuntimeActivation(currentCtx, runtimepipeline.NewDynamicFlowRuntimeActivationRequest(plan.Readiness, 1, "aborted", currentBinding))
 			if err != nil || !next.Acknowledged || next.Attempt.ID() != "2" {
 				t.Fatalf("settled successor: %+v %v", next, err)
 			}
-			if err := f.workflows.VerifyDynamicFlowRuntimeActivationAttempt(f.ctx, rebound.Attempt); err == nil {
+			if err := f.workflows.VerifyDynamicFlowRuntimeActivationAttempt(f.ctx, rebound); err == nil {
 				t.Fatal("previous attempt callback revived after successor admission")
+			}
+			if err := f.workflows.VerifyDynamicFlowRuntimeActivationAttempt(currentCtx, rebound); err == nil {
+				t.Fatal("current writer revived the previous exact attempt")
+			}
+			beforeSuccessor := readiness()
+			if err := f.workflows.AbandonDynamicFlowRuntimeActivationAttempt(cleanupCtx, resolved.Attempt); err == nil {
+				t.Fatal("old attempt settled a same-process successor")
+			}
+			if after := readiness(); !reflect.DeepEqual(beforeSuccessor, after) {
+				t.Fatal("old attempt settlement changed its successor")
 			}
 			if old, err := f.workflows.ResolveDynamicFlowRuntimeActivation(f.ctx, admissionRequest); err != nil || old.Disposition != runtimepipeline.FlowActivationForeign {
 				t.Fatalf("old request adopted successor: %+v %v", old, err)
 			}
-			if err := f.workflows.AbandonDynamicFlowRuntimeActivationAttempt(f.ctx, next.Attempt); err != nil {
+			if err := f.workflows.AbandonDynamicFlowRuntimeActivationAttempt(currentCtx, next.Attempt); err != nil {
 				t.Fatal(err)
 			}
 		})

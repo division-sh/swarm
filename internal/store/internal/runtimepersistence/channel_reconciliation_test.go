@@ -27,7 +27,7 @@ func TestChannelActivityNativeAcknowledgementCutsBothStores(t *testing.T) {
 			for _, phase := range []string{"entry_cancel", "callback_cancel", "commit_refused", "commit_ack_lost", "commit_admitted_cancel", "healthy"} {
 				t.Run(backend+"/"+operation+"/"+phase, func(t *testing.T) {
 					fixture, control := openCompletionOutcomeFixture(t, backend)
-					ctx, cancel := context.WithCancel(testAuthorActivityContext())
+					ctx, cancel := context.WithCancel(fixture.original)
 					defer cancel()
 					card, continuation := newRootProposedEffectTestCard(t, fixture.authority.Target.RunID, time.Now().UTC())
 					cards := fixture.store.(decisioncard.ProposedEffectStore)
@@ -143,6 +143,7 @@ func TestChannelPostCommitActivityHintsBothStores(t *testing.T) {
 				t.Run(backend+"/"+name+operation, func(t *testing.T) {
 					ctx := testAuthorActivityContext()
 					cards, runID := decisionCardTestStore(t, backend)
+					ctx = originalStoreFixtureContext(t, ctx, cards)
 					card, continuation := newRootProposedEffectTestCard(t, runID, time.Now().UTC())
 					if linked {
 						if err := cards.(decisioncard.ProposedEffectStore).CreateProposedEffectCard(ctx, card, continuation); err != nil {
@@ -243,6 +244,7 @@ func TestChannelPostCommitCardCreationAndTerminalHintsBothStores(t *testing.T) {
 			t.Run(backend+"/"+kind, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				cards, runID := decisionCardTestStore(t, backend)
+				ctx = originalStoreFixtureContext(t, ctx, cards)
 				proof := observeChannelHints(t, cards.(interface {
 					SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 				}))

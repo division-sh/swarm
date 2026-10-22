@@ -17,6 +17,7 @@ func TestEventChainDepthFixtureReachesNativeConstraintAndOriginalWriterBothStore
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "chain.depth.fixture", "runtime", "", []byte(`{}`), 3, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 			if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, nil); err != nil {
 				t.Fatal(err)

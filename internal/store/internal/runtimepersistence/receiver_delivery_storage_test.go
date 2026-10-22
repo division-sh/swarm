@@ -21,6 +21,7 @@ func TestReceiverDeliveryStoragePreservesIndependentPhysicalOracleBothStores(t *
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			claimed := seedDeliveryRecoveryClaim(t, fixture, ctx)
 			sibling := seedDeliveryRecoveryClaim(t, fixture, ctx)
 			if _, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
@@ -99,6 +100,7 @@ func TestReceiverDeliveryStorageRefusesInvalidCancelledAndPartialEvidenceBothSto
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			claimed := seedDeliveryRecoveryClaim(t, fixture, ctx)
 			runID := claimed.Snapshot.RunID
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "receiver.refusal", "gateway", "", nil, 0, runID, events.EventEnvelope{}, time.Now().UTC())

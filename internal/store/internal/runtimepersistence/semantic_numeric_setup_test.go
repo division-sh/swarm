@@ -32,6 +32,7 @@ func TestDirectScenarioSetupSemanticNumericParity(t *testing.T) {
 				requireDefaultSourceArtifactForTest(t, ctx, s)
 				setup = s
 			}
+			ctx = originalStoreFixtureContext(t, ctx, setup)
 			run, entity := uuid.NewString(), uuid.NewString()
 			req := pipeline.ScenarioSetupRequest{RunID: run, CreatedAt: time.Now().UTC(), Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "subject", EntityID: entity, FlowInstance: "operating", EntityType: "product"}}}
 			for _, carrier := range []any{int(5), float64(5), json.Number("5.0"), json.Number("5e0")} {

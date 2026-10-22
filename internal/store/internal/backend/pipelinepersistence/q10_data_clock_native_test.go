@@ -25,7 +25,7 @@ import (
 
 // Native writer/paired-reader proofs over the actual fresh schema. These are
 // not full engine, served, historical-ledger or replay qualification receipts.
-func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
+func VerifyQ10DataClockWriteTriggersForTest(t *testing.T, prepare StatementProcessFixtureForTest) {
 	for _, postgres := range []bool{false, true} {
 		t.Run(q10Dialect(postgres), func(t *testing.T) {
 			db := q10FreshDatabase(t, postgres)
@@ -33,9 +33,9 @@ func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
 			at := time.Date(2026, 10, 9, 1, 0, 0, 0, time.UTC)
 			runID, entityID, foreignRunID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			if postgres {
-				materializePostgresStatementRuns(t, db, false, runID, foreignRunID)
+				_, ctx = materializePostgresStatementRuns(t, db, false, prepare, runID, foreignRunID)
 			} else {
-				materializeSQLiteStatementRuns(t, db, false, runID, foreignRunID)
+				_, ctx = materializeSQLiteStatementRuns(t, db, false, prepare, runID, foreignRunID)
 			}
 			record := pipeline.WorkflowEngineStateRecord{
 				Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute("work", "work", "work")},

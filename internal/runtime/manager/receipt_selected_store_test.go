@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -47,6 +48,7 @@ func TestManagerReceiptOutcomeBothSelectedStores(t *testing.T) {
 			} else {
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			}
+			original := originalManagerFixtureContext(t, manager.TerminalPanicFixtureContext(), selected.(agentfixture.Store))
 			for _, status := range []manager.ReceiptStatus{manager.ReceiptStatusProcessed, manager.ReceiptStatusError, manager.ReceiptStatusDeadLetter, manager.ReceiptStatusTerminal} {
 				for _, fail := range []bool{false, true} {
 					phase := "healthy"
@@ -57,7 +59,7 @@ func TestManagerReceiptOutcomeBothSelectedStores(t *testing.T) {
 						}
 					}
 					t.Run(string(status)+"/"+phase, func(t *testing.T) {
-						ctx := manager.TerminalPanicFixtureContext()
+						ctx := original
 						runID := uuid.NewString()
 						storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
 						identity := agentidentitytest.RootRuntimeForRun(t, runID, "agent-a", "receipt-selected-store")

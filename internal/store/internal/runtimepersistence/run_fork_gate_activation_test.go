@@ -108,6 +108,7 @@ func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
 				selected = admitTestPostgresStore(t, db)
 			}
 			sourceRunID := "00000000-0000-0000-0000-000000023610"
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			forkRunID := "00000000-0000-0000-0000-000000023611"
 			entityID := "00000000-0000-0000-0000-000000023612"
 			now := time.Date(2026, 8, 26, 15, 0, 0, 0, time.UTC)
@@ -248,6 +249,7 @@ func TestMaterializeRunForkRootAuthoritiesExecuteWithForkIdentitySelectedStorePa
 			}
 
 			sourceRunID := "00000000-0000-0000-0000-000000023620"
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			forkRunID := "00000000-0000-0000-0000-000000023621"
 			now := time.Date(2026, 8, 28, 9, 0, 0, 0, time.UTC)
 			requireRunningRunForTest(t, ctx, selected, sourceRunID, now)
@@ -522,7 +524,8 @@ func newRootProposedEffectTestCard(t *testing.T, runID string, now time.Time) (d
 
 func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext()
+	cardStore := admitTestPostgresStore(t, db)
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), cardStore)
 	sourceRunID, forkRunID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	now := time.Date(2026, 7, 12, 15, 0, 0, 0, time.UTC)
 	requireRunningPostgresRunForTest(t, ctx, db, sourceRunID, now)
@@ -541,7 +544,6 @@ func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	cardStore := admitTestPostgresStore(t, db)
 	if err := cardStore.CreateDecisionCard(ctx, sourceCard); err != nil {
 		t.Fatalf("create source card: %v", err)
 	}
@@ -591,7 +593,8 @@ func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *test
 func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *testing.T) {
 	const safeInteger = int64(9007199254740991)
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext()
+	cardStore := admitTestPostgresStore(t, db)
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), cardStore)
 	sourceRunID, forkRunID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	now := time.Date(2026, 7, 13, 15, 0, 0, 0, time.UTC)
 	requireRunningPostgresRunForTest(t, ctx, db, sourceRunID, now)
@@ -613,7 +616,6 @@ func TestMaterializeRunForkDecisionCardsPreservesCommittedSemanticFields(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	cardStore := admitTestPostgresStore(t, db)
 	if err := cardStore.CreateDecisionCard(ctx, sourceCard); err != nil {
 		t.Fatalf("create source card: %v", err)
 	}

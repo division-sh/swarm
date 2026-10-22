@@ -2,6 +2,7 @@ package bus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -406,7 +407,7 @@ func VerifyDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMu
 		t.Fatalf("foreign session binding mutated store %d times", binds)
 	}
 
-	ownerCtx := runtimedelivery.WithClaim(context.Background(), claim)
+	ownerCtx := runtimedelivery.WithClaim(fixture.OriginalCommandContext, claim)
 	bound, err := bus.MarkDeliveryInProgress(ownerCtx, "agent-a", sessionID)
 	if err != nil {
 		t.Fatalf("owner-bound session binding: %v", err)
@@ -457,9 +458,20 @@ func TestSubscriptionAndQuiescenceRejectForeignSourceBeforeLifecycleMutation(t *
 	if !active || retained != 1 {
 		t.Fatalf("foreign quiescence changed retained lifecycle state: active=%v retained=%d", active, retained)
 	}
+	bindings := 0
+	bus.mutationContext = func(ctx context.Context) (context.Context, error) {
+		bindings++
+		return ctx, errors.New("startup deliberately refused its generation")
+	}
 	close(handle.receiverDone)
 	if err := bus.WaitForQuiescence(context.Background()); err != nil {
 		t.Fatalf("owner-bound quiescence: %v", err)
+	}
+	if err := bus.ResetInMemoryState(); err != nil {
+		t.Fatalf("local reset after refused startup: %v", err)
+	}
+	if bindings != 0 {
+		t.Fatalf("local-only cleanup requested mutation admission %d times", bindings)
 	}
 }
 
@@ -885,6 +897,31 @@ func TestPublicationClaimCleanupRejectsForeignSourceBeforeCapabilityMutation(t *
 			}
 		})
 	}
+	t.Run("reset_foreign_source", func(t *testing.T) {
+		owner := newSourceMutationProbeOwner()
+		foreignBus := newSourceMutationProbeBus(t, foreign, owner)
+		bus := newSourceMutationProbeBus(t, owned, owner)
+		foreignBus.runtimeInstanceID = bus.runtimeInstanceID
+		event := sourceMutationEvent()
+		claim, err := foreignBus.claimPipelinePublication(context.Background(), event.ID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		bus.stageCommittedOutboxOperation(runtimeengine.EmitIntent{Event: event}, EventAppendInserted, claim, nil)
+		before := owner.counts()
+		if err := bus.ResetInMemoryState(); err == nil || !strings.Contains(err.Error(), "bundle source fact conflicts") {
+			t.Fatalf("reset error = %v, want source conflict", err)
+		}
+		bus.mu.RLock()
+		pending := append([]pendingOutboxOperation(nil), bus.pendingOutboxByID[event.ID()]...)
+		bus.mu.RUnlock()
+		if len(pending) != 1 || pending[0].publicationClaim != claim || claim.released.Load() || claim.retired.Load() || !owner.owns(event.ID()) || owner.counts() != before {
+			t.Fatal("source-refused reset consumed or erased the exact pending claim")
+		}
+		if err := claim.Release(context.Background()); err != nil {
+			t.Fatalf("foreign owner's exact cleanup: %v", err)
+		}
+	})
 }
 
 func TestPipelineSweepRootsAdmitSourceBeforeWorkOccurrenceOrStoreMutation(t *testing.T) {

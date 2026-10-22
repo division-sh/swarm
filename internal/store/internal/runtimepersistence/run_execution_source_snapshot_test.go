@@ -23,6 +23,10 @@ func TestRunExecutionSourceSnapshotBothStores(t *testing.T) {
 			fixture := newSelectedCompletionFixture(t, selected, db, sqlite)
 			ctx := testAuthorActivityContext()
 			process := fixture.process
+			ctx, err := startupownership.WithProcessMutationAuthority(ctx, process)
+			if err != nil {
+				t.Fatal(err)
+			}
 			authority, err := process.Evidence()
 			if err != nil {
 				t.Fatal(err)

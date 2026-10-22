@@ -99,6 +99,7 @@ func TestFreshEventDDLRejectsMalformedStructuralFactsParity(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			for _, control := range []struct {
 				name string
 				row  func() unsafeEventRow

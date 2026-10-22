@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -21,19 +22,18 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 		t.Fatal("native timer attachment requires its admitted source")
 	}
 	workflows := selected.(pipeline.DynamicFlowRuntimeReadinessPersistence)
-	process, err := selected.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-		OwnerID: "timer-replay-proof", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	})
+	process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var request *pipeline.DynamicFlowRuntimeActivationRequest
 	var attempt pipeline.DynamicFlowRuntimeActivationAttempt
+	var grant startupownership.LiveGenerationGrant
 	var once sync.Once
 	closeOwner := func() {
 		t.Helper()
 		once.Do(func() {
-			cleanup := context.Background()
+			cleanup := context.WithoutCancel(ctx)
 			if request != nil && attempt.ID() == "" {
 				resolved, err := workflows.ResolveDynamicFlowRuntimeActivation(cleanup, *request)
 				if err != nil || request.ValidateResolution(resolved) != nil || resolved.Disposition == pipeline.FlowActivationUnresolved {
@@ -47,8 +47,10 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 					t.Errorf("retire joined native timer attachment: %v", err)
 				}
 			}
-			if err := process.Release(cleanup); err != nil {
-				t.Errorf("release native timer process owner: %v", err)
+			if grant != nil {
+				if err := grant.Retire(cleanup); err != nil {
+					t.Errorf("retire native timer attachment generation: %v", err)
+				}
 			}
 		})
 	}
@@ -68,7 +70,7 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 	} else if _, err := process.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: set}); err != nil {
 		t.Fatal(err)
 	}
-	grant, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{
+	grant, err = process.IssueGenerationGrant(ctx, startupownership.GrantRequest{
 		BundleHash: fact.BundleHash(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
 		RuntimeGeneration: 1, SourceSetRevision: set.Revision,
 	})

@@ -19,6 +19,7 @@ func TestActivityClaimReplyLossUsesExactNativeCommitAndCannotRearmBothStores(t *
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			run, sibling := uuid.NewString(), uuid.NewString()
 			for _, id := range []string{run, sibling} {
 				seedAuthorActivityReceiptRun(t, fixture, ctx, id)

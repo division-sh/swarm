@@ -32,7 +32,7 @@ type TurnIncrementResult struct {
 }
 
 type Resetter interface {
-	ResetAll(metadata ResetMetadata) (ResetSummary, error)
+	ResetAll(ctx context.Context, metadata ResetMetadata) (ResetSummary, error)
 }
 
 type ResetMetadata struct {
@@ -436,7 +436,7 @@ func (sr *InMemoryRegistry) History(identity agentmemory.Identity) []Record {
 	return out
 }
 
-func (sr *InMemoryRegistry) ResetAll(metadata ResetMetadata) (ResetSummary, error) {
+func (sr *InMemoryRegistry) ResetAll(ctx context.Context, metadata ResetMetadata) (ResetSummary, error) {
 	sr.mu.Lock()
 	defer sr.mu.Unlock()
 	summary := ResetSummary{}

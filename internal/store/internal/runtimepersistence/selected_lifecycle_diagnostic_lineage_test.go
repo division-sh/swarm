@@ -25,6 +25,7 @@ func TestSelectedGrantLifecycleDiagnosticCausalLineageBothStores(t *testing.T) {
 			t.Run(fmt.Sprintf("sqlite=%t/%s", sqlite, kind), func(t *testing.T) {
 				selected, db := newLifecycleDiagnosticTestStore(t, sqlite)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				identity, grant := selectedReceiverClaimGrant(t, ctx, selected.(agentFixtureFlowStore))
 				t.Cleanup(func() {
 					if err := grant.Retire(context.Background()); err != nil {
@@ -34,6 +35,10 @@ func TestSelectedGrantLifecycleDiagnosticCausalLineageBothStores(t *testing.T) {
 				evidence, err := grant.Evidence()
 				if err != nil || evidence.SelectedFork == nil || evidence.SelectedFork.ForkRunID != identity.RunID {
 					t.Fatalf("requires exact selected grant: %+v %v", evidence, err)
+				}
+				ctx, err = startupownership.WithRuntimeMutationAuthority(testAuthorActivityContextForBundle(evidence.BundleHash), grant)
+				if err != nil {
+					t.Fatal(err)
 				}
 				ctx = runtimecorrelation.WithRunID(ctx, identity.RunID)
 				logger := runtimepkg.NewRuntimeLogger(selected, executionposture.Live, storeTestPayloadAdmitter)

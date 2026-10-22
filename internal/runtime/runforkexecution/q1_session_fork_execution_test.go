@@ -80,6 +80,10 @@ func proveSelectedQ1SessionExecutionPreservationBothStores(t *testing.T) {
 				if !found || bundle.SourceArtifact == nil {
 					t.Fatal("missing admitted source artifact")
 				}
+				ctx, err = startupownership.WithProcessMutationAuthority(ctx, selectedContractTestProcessCapability(t, ctx, selected))
+				if err != nil {
+					t.Fatal(err)
+				}
 				storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 				root := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")
 				input := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "task.assigned", "source-runtime", "", []byte(`{"entity_id":"`+runID+`"}`), 0, runID, events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, runID), runID), eventtest.RootRoutingSource(runID), at, executionmode.Live)

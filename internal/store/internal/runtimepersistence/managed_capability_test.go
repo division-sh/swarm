@@ -25,6 +25,7 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -263,6 +264,7 @@ func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store comple
 func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context.Context, store completionSettlementTestStore, rec runtimellm.AgentTurnRecord, options managedAgentTurnFixtureOptions) error {
 	t.Helper()
 	fixtureCtx := testAuthorActivityContext()
+	fixtureCtx = originalStoreFixtureContext(t, runtimestartupownership.CarryMutationAuthority(fixtureCtx, ctx), store)
 	plan := rec.Memory
 	if rec.Identity == (agentmemory.Identity{}) {
 		rec.Identity = testAgentMemoryIdentity(t, rec.RunID, rec.AgentID, rec.FlowInstance)
@@ -586,7 +588,8 @@ func TestNormalStartupCapabilitySurfacePersistsRunlessActorPlanOnBothStores(t *t
 			if !ok {
 				t.Fatal("selected store does not expose managed capability persistence")
 			}
-			if err := store.SaveManagedCapabilitySurface(testAuthorActivityContext(), surface); err != nil {
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
+			if err := store.SaveManagedCapabilitySurface(ctx, surface); err != nil {
 				t.Fatalf("persist normal startup surface: %v", err)
 			}
 			query := `SELECT surface, run_id FROM managed_agent_capability_surfaces WHERE surface_id=?`

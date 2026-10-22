@@ -32,6 +32,7 @@ func proveSelectedContinuationReadFence(t *testing.T, backend, state string) {
 	selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
 	f := newSelectedProviderCompletionFixture(t, selected, db, sqlite)
 	ctx := testAuthorActivityContextForBundle(f.request.DeclarationPlan.BundleHash)
+	ctx = originalStoreFixtureContext(t, ctx, selected)
 	ctx = correlation.WithRunID(ctx, f.forkRun)
 	issued, err := selected.IssueRunForkSelectedContractRuntimeExecution(ctx, f.request)
 	if err != nil {

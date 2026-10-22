@@ -63,7 +63,7 @@ func TestAgentDeliveryExecutionContextRejectsPublisherValuesAndBuildsNormalRecei
 
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 	got, cleanup, err := agentDeliveryExecutionContext(
-		delivery.Context(), loopCtx, token, deliveryOwner, event, route, eventreceiver.NormalExecution(), admitManagerTestBusContext,
+		delivery.Context(), loopCtx, loopCtx, token, deliveryOwner, event, route, eventreceiver.NormalExecution(), admitManagerTestBusContext, nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("construct agent delivery receiver context: %v", err)

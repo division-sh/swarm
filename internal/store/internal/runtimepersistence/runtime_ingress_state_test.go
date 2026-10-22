@@ -15,6 +15,7 @@ func TestRuntimeIngressStatePersistsTypedTransitions(t *testing.T) {
 	t.Cleanup(cleanup)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 	runID := eventtest.UUID("persisted-projection-run")
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),

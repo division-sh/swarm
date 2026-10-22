@@ -76,6 +76,9 @@ func resolveCompletionSettlementPermit(ctx context.Context, tx *sql.Tx, attempt 
 		case runtimeeffects.AuthorityChannelNativeSetting:
 			err = requireChannelNativeSettingSettlementAuthorityTx(ctx, tx, settlement, !sqlite)
 		default:
+			if mutationprotocol.ExternalEffectResultAccepted(ctx, tx, settlement) {
+				break
+			}
 			if sqlite {
 				err = requireExternalEffectAuthoritySQLite(ctx, tx, attempt.Authority, false)
 			} else {

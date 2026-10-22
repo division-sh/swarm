@@ -19,13 +19,12 @@ import (
 
 // These replace raw-transaction fixture controls with the actual selected writer.
 // Observe before rollback so an accidental write cannot be hidden by cleanup.
-func missingMutationRunProof(t *testing.T, initial bool) {
+func VerifyMissingMutationRunForTest(t *testing.T, initial bool, prepare StatementProcessFixtureForTest) {
 	t.Helper()
-	db := fanOutReadbackTestDB(t, "sqlite")
+	db := openFanOutReadbackTestDB(t, "sqlite")
+	_, original := materializeSQLiteStatementRuns(t, db, false, prepare)
 	for _, ddl := range []string{
-		`CREATE TABLE runs (run_id TEXT PRIMARY KEY, status TEXT NOT NULL, bundle_hash TEXT)`,
 		`CREATE TABLE entity_mutations (mutation_id TEXT PRIMARY KEY)`,
-		`CREATE TABLE author_activity_order (singleton_id INTEGER PRIMARY KEY, last_sequence INTEGER NOT NULL)`,
 	} {
 		if _, err := db.Exec(ddl); err != nil {
 			t.Fatal(err)
@@ -36,7 +35,7 @@ func missingMutationRunProof(t *testing.T, initial bool) {
 		t.Fatal(err)
 	}
 	store := &PipelineSQLiteOwner{RunLifecycleSQLiteOwner: &runlifecycle.RunLifecycleSQLiteOwner{}}
-	ctx := runtimecorrelation.WithRunID(context.Background(), uuid.NewString())
+	ctx := runtimecorrelation.WithRunID(original, uuid.NewString())
 	result := mutationprotocol.RunSQLite(ctx, backend, "missing mutation run", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		before := runtimemutationlog.EntityStateProjection{}
 		after := runtimemutationlog.EntityStateProjection{Fields: map[string]any{"status": "ready"}}
@@ -72,12 +71,4 @@ func missingMutationRunProof(t *testing.T, initial bool) {
 	if result.Acknowledged() || !errors.Is(result.Err(), runtimerunlifecycle.ErrRunNotFound) {
 		t.Fatalf("missing-run mutation settled unexpectedly: ack=%v err=%v", result.Acknowledged(), result.Err())
 	}
-}
-
-func TestSQLiteEntityStateDiffRequiresExistingCanonicalRunBeforeMutation(t *testing.T) {
-	missingMutationRunProof(t, false)
-}
-
-func TestSQLiteInitialValueMutationRequiresExistingCanonicalRunBeforeMutation(t *testing.T) {
-	missingMutationRunProof(t, true)
 }

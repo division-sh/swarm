@@ -17,10 +17,11 @@ func TestRunEntityMutationHistoryStoragePreservesWholeRunOrderAndNullBothStores(
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			f, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, f.store)
 			run, foreignRun, entity, sibling := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-			seedEntityToolStorageWitness(t, f, run, entity, false, true)
-			seedEntityToolStorageWitness(t, f, run, sibling, false, true)
-			seedEntityToolStorageWitness(t, f, foreignRun, entity, false, true)
+			seedEntityToolStorageWitness(t, ctx, f, run, entity, false, true)
+			seedEntityToolStorageWitness(t, ctx, f, run, sibling, false, true)
+			seedEntityToolStorageWitness(t, ctx, f, foreignRun, entity, false, true)
 			probe, restore, err := InstallTransactionProbeForTest(f.store, transactiontest.Options{})
 			if err != nil {
 				t.Fatal(err)
@@ -87,8 +88,9 @@ func TestRunEntityMutationHistoryStorageRefusesRawInvalidCancelledClosedAndUnava
 		for _, cut := range []string{"invalid-run", "nil-run", "cancelled", "closed", "unavailable"} {
 			t.Run(backend.name+"/"+cut, func(t *testing.T) {
 				f, ctx := backend.open(t), testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, f.store)
 				run := uuid.NewString()
-				seedEntityToolStorageWitness(t, f, run, uuid.NewString(), false, true)
+				seedEntityToolStorageWitness(t, ctx, f, run, uuid.NewString(), false, true)
 				switch cut {
 				case "invalid-run":
 					run = "bad"

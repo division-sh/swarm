@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -21,7 +22,11 @@ func TestRunForkRevisionPreservesPayloadBindingBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, reopen := openPayloadBindingHistoryFixture(t, backend.name)
 			store := fixture.store.(eventRecordContractStore)
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+			process, err := agentfixture.ProcessCapability(t, ctx, store.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
 			payload := []byte("{\n  \"integer\":9007199254740993, \"double\":1.0\n}")
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "history.binding", "operator", "", payload, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC().Truncate(time.Microsecond))
 			if err := commitSemanticEventFixture(ctx, store, event); err != nil {
@@ -44,11 +49,15 @@ func TestRunForkRevisionPreservesPayloadBindingBothStores(t *testing.T) {
 			if err := fixture.db.QueryRowContext(ctx, `SELECT revision, fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='events' AND fact_key=$2 AND present ORDER BY revision LIMIT 1`, event.RunID(), event.ID()).Scan(&firstRevision, &firstRaw); err != nil {
 				t.Fatal(err)
 			}
+			if err := process.Release(ctx); err != nil {
+				t.Fatal(err)
+			}
 			if err := fixture.db.Close(); err != nil {
 				t.Fatal(err)
 			}
 			fixture = reopen()
 			store = fixture.store.(eventRecordContractStore)
+			ctx = originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			restored, found, err := loadEventProducerIdentityRecord(ctx, fixture, event.ID())
 			if err != nil || !found || !restored.Equal(record) {
 				t.Fatalf("reopened canonical record differs: found=%v err=%v", found, err)

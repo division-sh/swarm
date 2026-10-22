@@ -47,7 +47,13 @@ func TestSQLiteLifecycleCandidateCommitBusyResetsOuterHandoff(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "candidate.db")
 	store := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 	db := store.backend.ConstructionHandle()
-	f := newExactFactFixture(t, exactFactStore{db: db, selected: store})
+	owner := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+	owner.backend.ConstructionHandle().SetMaxIdleConns(0)
+	prepared := llmSQLiteBusyBlocker(t, db, path, "commit", 0)
+	if err := prepared.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	f := newExactFactFixture(t, exactFactStore{db: owner.backend.ConstructionHandle(), selected: owner})
 	var bundle string
 	if err := db.QueryRow(`SELECT bundle_hash FROM runs WHERE run_id=$1`, f.runID).Scan(&bundle); err != nil {
 		t.Fatal(err)
@@ -67,6 +73,7 @@ func TestSQLiteLifecycleCandidateCommitBusyResetsOuterHandoff(t *testing.T) {
 	}
 	defer restore()
 	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
+	ctx = originalStoreFixtureContext(t, ctx, owner)
 	defer cancel()
 	disposition, err := store.RequestCompletionCandidate(ctx, runlifecycle.ImmediateCandidate(f.runID))
 	if err != nil || disposition != runlifecycle.CandidateRequested {

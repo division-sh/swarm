@@ -246,7 +246,7 @@ func TestPostgresTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 		},
 		persistVariants: terminalEventAdmissionPersistVariants(pg),
 	}
-	assertTerminalEventAdmission(t, harness)
+	assertTerminalEventAdmission(t, originalStoreFixtureContext(t, testAuthorActivityContext(), pg), harness)
 }
 
 func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
@@ -288,13 +288,13 @@ func TestSQLiteTerminalEventAdmissionIsImmutableAndIdempotent(t *testing.T) {
 		},
 		persistVariants: terminalEventAdmissionPersistVariants(sqliteStore),
 	}
-	assertTerminalEventAdmission(t, harness)
+	assertTerminalEventAdmission(t, originalStoreFixtureContext(t, testAuthorActivityContext(), sqliteStore), harness)
 }
 
 func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := newTestPostgresStore(t, db)
-	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, runtimeLogStatusHarness{
+	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), runtimeLogStatusHarness{
 		statuses: []string{"running", "paused", "completed", "cancelled", "failed", "forked"},
 		appendOrdinary: func(ctx context.Context, evt events.Event) error {
 			return commitSemanticEventFixture(ctx, store, evt)
@@ -386,7 +386,7 @@ func TestPostgresRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 
 func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, runtimeLogStatusHarness{
+	assertRuntimeLogAdmissionPreservesEveryRunStatus(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), runtimeLogStatusHarness{
 		statuses: []string{"running", "paused", "completed", "cancelled", "failed"},
 		appendOrdinary: func(ctx context.Context, evt events.Event) error {
 			return commitSemanticEventFixture(ctx, store, evt)
@@ -476,9 +476,8 @@ func TestSQLiteRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T) {
 	})
 }
 
-func assertRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T, harness runtimeLogStatusHarness) {
+func assertRuntimeLogAdmissionPreservesEveryRunStatus(t *testing.T, ctx context.Context, harness runtimeLogStatusHarness) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
 	for _, status := range harness.statuses {
 		status := status
 		t.Run(status, func(t *testing.T) {
@@ -567,9 +566,8 @@ func TestJSONSemanticallyEqualPreservesExactNumbers(t *testing.T) {
 	}
 }
 
-func assertTerminalEventAdmission(t *testing.T, harness terminalEventAdmissionHarness) {
+func assertTerminalEventAdmission(t *testing.T, ctx context.Context, harness terminalEventAdmissionHarness) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
 	for _, status := range harness.statuses {
 		status := status
 		t.Run(status, func(t *testing.T) {
@@ -840,7 +838,7 @@ type globalRuntimeLogIdentityHarness struct {
 func TestPostgresGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
-	assertGlobalRuntimeLogIdentity(t, globalRuntimeLogIdentityHarness{
+	assertGlobalRuntimeLogIdentity(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), globalRuntimeLogIdentityHarness{
 		append: func(ctx context.Context, evt events.Event) error {
 			return commitDiagnosticRuntimeLogFixture(ctx, store, evt)
 		},
@@ -872,7 +870,7 @@ func TestPostgresGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) 
 
 func TestSQLiteGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	assertGlobalRuntimeLogIdentity(t, globalRuntimeLogIdentityHarness{
+	assertGlobalRuntimeLogIdentity(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), globalRuntimeLogIdentityHarness{
 		append: func(ctx context.Context, evt events.Event) error {
 			return commitDiagnosticRuntimeLogFixture(ctx, store, evt)
 		},
@@ -902,9 +900,8 @@ func TestSQLiteGlobalRuntimeLogIdentityIsIdempotentAndNonRouted(t *testing.T) {
 	})
 }
 
-func assertGlobalRuntimeLogIdentity(t *testing.T, harness globalRuntimeLogIdentityHarness) {
+func assertGlobalRuntimeLogIdentity(t *testing.T, ctx context.Context, harness globalRuntimeLogIdentityHarness) {
 	t.Helper()
-	ctx := context.Background()
 	eventID := uuid.NewString()
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
 	evt := eventtest.DiagnosticDirect(
@@ -940,7 +937,7 @@ func assertGlobalRuntimeLogIdentity(t *testing.T, harness globalRuntimeLogIdenti
 func TestPostgresRunScopedRuntimeLogRequiresExistingRun(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
-	assertRunScopedRuntimeLogRequiresExistingRun(t, func(ctx context.Context, evt events.Event) error {
+	assertRunScopedRuntimeLogRequiresExistingRun(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), func(ctx context.Context, evt events.Event) error {
 		return commitDiagnosticRuntimeLogFixture(ctx, store, evt)
 	}, func(ctx context.Context, runID, eventID string) (int, int, error) {
 		var runCount, eventCount int
@@ -956,7 +953,7 @@ func TestPostgresRunScopedRuntimeLogRequiresExistingRun(t *testing.T) {
 
 func TestSQLiteRunScopedRuntimeLogRequiresExistingRun(t *testing.T) {
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	assertRunScopedRuntimeLogRequiresExistingRun(t, func(ctx context.Context, evt events.Event) error {
+	assertRunScopedRuntimeLogRequiresExistingRun(t, originalStoreFixtureContext(t, testAuthorActivityContext(), store), func(ctx context.Context, evt events.Event) error {
 		return commitDiagnosticRuntimeLogFixture(ctx, store, evt)
 	}, func(ctx context.Context, runID, eventID string) (int, int, error) {
 		var runCount, eventCount int
@@ -972,11 +969,11 @@ func TestSQLiteRunScopedRuntimeLogRequiresExistingRun(t *testing.T) {
 
 func assertRunScopedRuntimeLogRequiresExistingRun(
 	t *testing.T,
+	ctx context.Context,
 	appendEvent func(context.Context, events.Event) error,
 	loadCounts func(context.Context, string, string) (int, int, error),
 ) {
 	t.Helper()
-	ctx := context.Background()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	evt := eventtest.DiagnosticDirect(
@@ -999,6 +996,7 @@ func TestPostgresRuntimeLogWriterUsesAdmissionFactsAndRemainsNonRouted(t *testin
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	logger := runtimepkg.NewRuntimeLogger(pg, executionposture.Live, currentPlatformPayloadAdmitterForStoreTest(t))
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{
@@ -1026,6 +1024,7 @@ func TestPostgresRuntimeLogWriterUsesAdmissionFactsAndRemainsNonRouted(t *testin
 func TestSQLiteRuntimeLogDiagnosticDirectUsesAdmissionFacts(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 
 	logger := runtimepkg.NewRuntimeLogger(sqliteStore, executionposture.Live, currentPlatformPayloadAdmitterForStoreTest(t))
 	if err := logger.Log(ctx, runtimepkg.RuntimeLogEntry{

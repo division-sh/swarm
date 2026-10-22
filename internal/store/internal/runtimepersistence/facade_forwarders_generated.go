@@ -1100,8 +1100,8 @@ func (s *PostgresStore) ReserveDirectiveOperation(ctx context.Context, req agent
 	return s.agentPostgresOwner.ReserveDirectiveOperation(ctx, req)
 }
 
-func (s *PostgresStore) ResetAll(metadata sessions.ResetMetadata) (sessions.ResetSummary, error) {
-	return s.lLMPostgresOwner.ResetAll(metadata)
+func (s *PostgresStore) ResetAll(ctx context.Context, metadata sessions.ResetMetadata) (sessions.ResetSummary, error) {
+	return s.lLMPostgresOwner.ResetAll(ctx, metadata)
 }
 
 func (s *PostgresStore) ResetChannelOnboardingPendingIdentity(ctx context.Context, req channelonboarding.PendingResetRequest) (channelonboarding.Operation, error) {
@@ -2324,8 +2324,8 @@ func (s *SQLiteRuntimeStore) ReserveDirectiveOperation(ctx context.Context, req 
 	return s.agentSQLiteOwner.ReserveDirectiveOperation(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) ResetAll(metadata sessions.ResetMetadata) (sessions.ResetSummary, error) {
-	return s.lLMSQLiteOwner.ResetAll(metadata)
+func (s *SQLiteRuntimeStore) ResetAll(ctx context.Context, metadata sessions.ResetMetadata) (sessions.ResetSummary, error) {
+	return s.lLMSQLiteOwner.ResetAll(ctx, metadata)
 }
 
 func (s *SQLiteRuntimeStore) ResetChannelOnboardingPendingIdentity(ctx context.Context, req channelonboarding.PendingResetRequest) (channelonboarding.Operation, error) {

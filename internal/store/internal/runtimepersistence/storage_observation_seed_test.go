@@ -12,9 +12,9 @@ import (
 	"time"
 )
 
-func seedEntityToolStorageWitness(t *testing.T, fixture authorActivityReceiptFixture, runID, entityID string, constructed, fielded bool) {
+func seedEntityToolStorageWitness(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, runID, entityID string, constructed, fielded bool) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	path := "storage-witness/" + entityID
 	if constructed {

@@ -253,6 +253,17 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	if opts.SessionResetter == nil {
 		opts.SessionResetter = sessions.NewInMemoryRegistry(0)
 	}
+	if native, ok := opts.DeliveryStore.(*ManagerDeliveryNativeFixture); ok {
+		if opts.BaseContext == nil {
+			opts.BaseContext = native.Context
+		}
+		if opts.MutationContext == nil {
+			opts.MutationContext = native.MutationContext
+		}
+		if opts.CarryMutationContext == nil {
+			opts.CarryMutationContext = native.CarryMutationContext
+		}
+	}
 	if opts.LifecycleStore == nil && len(stores) > 0 {
 		opts.LifecycleStore, _ = any(stores[0]).(AgentLifecyclePersistence)
 	}

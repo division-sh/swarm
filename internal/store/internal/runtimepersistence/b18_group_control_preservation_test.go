@@ -189,7 +189,7 @@ func TestB18RetiredGenerationPreservesAcknowledgedGroupPrefixBothStores(t *testi
 				t.Fatalf("retirement lost immutable committed membership: %v", err)
 			}
 			out, err = f.group.Settle(f.ctx, members[1:])
-			if err == nil || !strings.Contains(err.Error(), "run execution generation grant is no longer current") || len(out.Results) != 0 {
+			if err == nil || !strings.Contains(err.Error(), "runtime generation grant is retired") || len(out.Results) != 0 {
 				t.Fatalf("retired generation settlement=%+v err=%v", out, err)
 			}
 			read, err := f.group.ReadPublicationSettlement(f.ctx, members)

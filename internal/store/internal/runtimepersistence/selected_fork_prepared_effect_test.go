@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
@@ -22,6 +23,10 @@ func TestPreparedSelectedForkProbeEffectBothStores(t *testing.T) {
 			ctx := testAuthorActivityContextForBundle(testCanonicalBundleHash)
 			acquire := testStartupAcquireRequest("prepared-probe-process")
 			capability, err := store.AcquireProcessCapability(ctx, acquire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -171,6 +176,18 @@ func TestPreparedSelectedForkProbeEffectBothStores(t *testing.T) {
 			if _, err := store.MarkExternalAttemptLaunched(ctx, accepted, time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
+			resultCtx, err := startupownership.ExternalEffectResultContext(ctx, effects.Settlement{OperationID: accepted.OperationID, AttemptID: accepted.AttemptID, Authority: accepted.Authority})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fresh := request
+			fresh.OperationID, fresh.AttemptID = uuid.NewString(), uuid.NewString()
+			if _, err := controller.Authorize(effects.WithAuthority(resultCtx, authority), fresh); err == nil {
+				t.Error("accepted-result context admitted another probe while the process was live")
+			}
+			if _, err := store.MarkExternalAttemptLaunched(resultCtx, attempt, time.Now().UTC()); err == nil {
+				t.Error("accepted-result context launched another probe while the process was live")
+			}
 			if err := capability.Release(ctx); err != nil {
 				t.Fatal(err)
 			}
@@ -196,6 +213,21 @@ func TestPreparedSelectedForkProbeEffectBothStores(t *testing.T) {
 			if outcome, found, err := outcomes.GetExternalEffectOutcome(ctx, request.OperationID); err != nil || found {
 				t.Errorf("refused authorization persisted an operation: %+v found=%v err=%v", outcome, found, err)
 			}
+			foreignOperation, foreignAttempt, foreignAuthority := accepted, accepted, accepted
+			foreignOperation.OperationID = uuid.NewString()
+			foreignAttempt.AttemptID = uuid.NewString()
+			foreignAuthority.Authority.ExecutionOwner += "-foreign"
+			for _, refused := range []effects.Attempt{foreignOperation, foreignAttempt, foreignAuthority, attempt} {
+				if err := store.MarkExternalAttemptResponseObserved(ctx, refused, map[string]any{"refused": true}, time.Now().UTC()); err == nil {
+					t.Error("released process observed a foreign or unlaunched attempt")
+				}
+				if err := store.SettleExternalAttempt(ctx, effects.Settlement{OperationID: refused.OperationID, AttemptID: refused.AttemptID, Authority: refused.Authority, State: effects.StateSettled, Now: time.Now().UTC()}); err == nil {
+					t.Error("released process settled a foreign or unlaunched attempt")
+				}
+			}
+			if outcome, found, err := outcomes.GetExternalEffectOutcome(ctx, accepted.OperationID); err != nil || !found || outcome.State != effects.StateLaunched || outcome.AttemptState != effects.StateLaunched {
+				t.Fatalf("refused results changed the accepted attempt: %+v found=%v err=%v", outcome, found, err)
+			}
 			if err := store.MarkExternalAttemptResponseObserved(ctx, accepted, map[string]any{"accepted_before_release": true}, time.Now().UTC()); err != nil {
 				t.Fatalf("Release refused already accepted response evidence: %v", err)
 			}
@@ -207,7 +239,7 @@ func TestPreparedSelectedForkProbeEffectBothStores(t *testing.T) {
 			}
 			// The same owner/boot/runtime inputs still mint a new native lease.
 			// A retained prepared value must never redirect onto that successor.
-			successor, err := store.AcquireProcessCapability(ctx, acquire)
+			successor, err := store.AcquireProcessCapability(testAuthorActivityContextForBundle(testCanonicalBundleHash), acquire)
 			if err != nil {
 				t.Fatal(err)
 			}

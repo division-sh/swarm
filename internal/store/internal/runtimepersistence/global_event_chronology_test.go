@@ -16,6 +16,7 @@ func TestGlobalEventChronologyPreservesUnfilteredOrderFieldsAndOriginalReadBothS
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			at := time.Date(2026, 10, 8, 15, 0, 0, 0, time.UTC)
 			for _, item := range []struct {
 				id, run, name string

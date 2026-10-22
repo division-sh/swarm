@@ -301,6 +301,7 @@ func testSetupHandler(t *testing.T, pg *store.PostgresStore, source semanticview
 		t.Fatal("test setup source has no admitted source artifact")
 	}
 	fact := sourceartifactfixture.RequireArtifact(t, context.Background(), pg, bundle.SourceArtifact)
+	ctx := originalAPIFixtureContext(t, testAuthorActivityContextForSource(context.Background(), fact), pg)
 	handlers := testOperatorHandlers(testOperatorCapabilities{
 		Now:         func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 		Ready:       func() bool { return true },
@@ -326,10 +327,10 @@ func testSetupHandler(t *testing.T, pg *store.PostgresStore, source semanticview
 	if handlers[testSetupEntitiesMethod] == nil {
 		t.Fatal("test.setup_entities handler is not configured")
 	}
-	return testHandler(t, Options{
+	return testHandlerWithOriginalContext(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers:   handlers,
-	})
+	}, ctx)
 }
 
 func testSetupBody(bundleHash, runID, entityID, note, idempotencyKey string) string {

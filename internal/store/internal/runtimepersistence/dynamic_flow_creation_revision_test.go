@@ -355,6 +355,11 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 					rehydrated, err := newStoreTestEventBus(t, f.selected, runtimebus.EventBusOptions{
 						RuntimeInstanceID: "11111111-1111-1111-1111-111111111111",
 						ContractBundle:    bundle, SourceArtifactFact: source,
+						MutationContext: func(incoming context.Context) (context.Context, error) {
+							bound := runtimestartupownership.CarryMutationAuthority(incoming, f.ctx)
+							_, err := runtimestartupownership.CaptureMutationAuthority(bound)
+							return bound, err
+						},
 					})
 					if err != nil {
 						t.Fatal(err)

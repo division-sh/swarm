@@ -45,6 +45,7 @@ func TestReplyContinuationRows_BackendParityNoticesAndSchedulesRestoreContext(t 
 				t.Fatalf("%s store lacks reply continuation surface", tc.name)
 			}
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			runID := uuid.NewString()
 			requestEventID := uuid.NewString()
 			if err := seed(ctx, runID, requestEventID); err != nil {
@@ -143,6 +144,7 @@ func TestReplyContextStore_BackendParityAtomicClaimAndDeliveryReadback(t *testin
 		t.Run(tc.name, func(t *testing.T) {
 			store, seed := tc.setup(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			runID := uuid.NewString()
 			requestEventID := uuid.NewString()
 			collisionEventID := uuid.NewString()
@@ -303,6 +305,7 @@ func TestReplyContextStore_ForkedSourceRejectsCreateAndClaimWithoutDestroyingLin
 		t.Run(tc.name, func(t *testing.T) {
 			store, seed := tc.setup(t)
 			ctx := testAuthorActivitySourceArtifactContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			runID := uuid.NewString()
 			requestEventID := uuid.NewString()
 			replyEventID := uuid.NewString()
@@ -347,6 +350,7 @@ func TestReplyContextStore_ForkFreezeSerializesBothCreateAndClaimCommitOrders(t 
 				t.Run(tc.name+"/"+operation+"_commits_first_"+winner, func(t *testing.T) {
 					store, seed := tc.setup(t)
 					ctx := testAuthorActivitySourceArtifactContext()
+					ctx = originalStoreFixtureContext(t, ctx, store)
 					runID := uuid.NewString()
 					requestEventID := uuid.NewString()
 					replyEventID := uuid.NewString()

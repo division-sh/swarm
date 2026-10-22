@@ -38,7 +38,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	}
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.backend.Close() })
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 
 	now := time.Date(2026, 5, 16, 18, 30, 0, 0, time.UTC)
@@ -149,7 +149,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	}
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.backend.Close() })
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 
 	now := time.Date(2026, 5, 16, 18, 35, 0, 0, time.UTC)
@@ -220,6 +220,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_ProviderAuthorityMatrix(t *t
 			store := admitTestPostgresStore(t, db)
 			fixture := newCompletionSettlementFixture(t, store, db, false)
 			ctx := providerDrainContext(t, fixture, "destructive-reset-"+candidate.name)
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", candidate.name)
 			if candidate.drained {
 				transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
@@ -240,7 +241,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_ProviderAuthorityMatrix(t *t
 					if !ok {
 						t.Fatalf("completion store %T does not expose delivery settlement", fixture.store)
 					}
-					if _, err := deliveryStore.SettleSuccess(testAuthorActivityContext(), fixture.origin, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
+					if _, err := deliveryStore.SettleSuccess(ctx, fixture.origin, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 						t.Fatalf("settle current provider origin before reset: %v", err)
 					}
 				}
@@ -307,7 +308,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RejectsExecutingDirectiveAut
 	}
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.backend.Close() })
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 	now := time.Date(2026, 7, 10, 18, 0, 0, 0, time.UTC)
 	request := destructiveResetDirectiveReservation(t, seed.RunA, "reset-active", "reset-active-hash", now.Add(-2*time.Minute))
@@ -351,7 +352,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RetainsTerminalDirectiveAuth
 			}
 			bootstrapTestPostgresStore(t, pg)
 			t.Cleanup(func() { _ = pg.backend.Close() })
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 			seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 			now := time.Date(2026, 7, 10, 19, 0, 0, 0, time.UTC)
 			request := destructiveResetDirectiveReservation(t, seed.RunA, "reset-terminal", "reset-terminal-hash", now)
@@ -418,7 +419,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeSourceArtifactsDelete
 	}
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.backend.Close() })
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 	seedDestructiveResetSourceArtifactRows(t, ctx, pg)
 
@@ -461,7 +462,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_ExcludeSourceArtifactsPreser
 	}
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.backend.Close() })
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 	seedDestructiveResetSourceArtifactRows(t, ctx, pg)
 
@@ -504,7 +505,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunIncludeSourceArtifacts
 	}
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.backend.Close() })
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	seed := seedDestructiveResetCleanupRows(t, ctx, pg)
 	seedDestructiveResetSourceArtifactRows(t, ctx, pg)
 
@@ -541,7 +542,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_IncludeSourceArtifactsReject
 	}
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.backend.Close() })
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	seedDestructiveResetSourceArtifactRows(t, ctx, pg)
 	outOfPlanRun := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
@@ -584,7 +585,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DoesNotDeleteRunsCreatedAfte
 	}
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.backend.Close() })
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	seedDestructiveResetCleanupRows(t, ctx, pg)
 	plan, err := (destructivereset.InventoryPlanner{Reader: pg}).BuildPlan(ctx, destructivereset.Request{ActorTokenID: "operator-token", IncludeSourceArtifacts: false, IncludeSourceArtifactsSet: true})
 	if err != nil {
@@ -641,7 +642,7 @@ func TestPostgresStore_DestructiveResetPlanCapturesManagedContainersBeforeCleanu
 	}
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.backend.Close() })
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	seedDestructiveResetCleanupRows(t, ctx, pg)
 	containerRefs := []destructivereset.ContainerRef{{
 		Name:          "swarm-agent-agent-a",
@@ -694,7 +695,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	}
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.backend.Close() })
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	lateRunID := deterministicRunForkMaterializationID(runID, eventID)
@@ -892,7 +893,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesForkLineageRowsByLink
 	}
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.backend.Close() })
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	cleanupRunID := uuid.NewString()
 	preservedSourceRunID := uuid.NewString()
 	preservedForkRunID := uuid.NewString()
@@ -1017,7 +1018,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_RollsBackOnUnknownForeignKey
 	}
 	bootstrapTestPostgresStore(t, pg)
 	t.Cleanup(func() { _ = pg.backend.Close() })
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), pg)
 	runID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle())), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	if _, err := pg.backend.ExecContext(ctx, `

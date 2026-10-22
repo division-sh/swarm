@@ -133,6 +133,11 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				}
 				ctx, cancel := context.WithCancel(runForkTestContext(t))
 				defer cancel()
+				capability := selectedContractTestProcessCapability(t, ctx, capabilityStore)
+				ctx, bindErr := startupownership.WithProcessMutationAuthority(ctx, capability)
+				if bindErr != nil {
+					t.Fatal(bindErr)
+				}
 				root := runForkExecutionRepoRoot(t)
 				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: filepath.Join(root, "tests/tier1-primitives/test-emits-multiple")}
 				loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
@@ -224,7 +229,7 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				request := SelectedContractExecutionRequest{
 					SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: selectedContractTestProcessCapability(t, ctx, capabilityStore)},
+					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 				}
 				var result SelectedContractExecutionResult
 				if point == "delayed_submission" {

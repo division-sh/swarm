@@ -1,4 +1,4 @@
-package llmpersistence
+package llmpersistence_test
 
 import (
 	"context"
@@ -13,12 +13,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/construction"
+	"github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	runstore "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
-	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
-	artifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -26,13 +26,18 @@ import (
 )
 
 func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	backend, err := postgresbackend.New(db)
+	dsn, _, _ := testutil.StartPostgres(t)
+	ctx := context.Background()
+	selected, db, err := construction.OpenPostgresRuntime(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
-	schema, err := schemastore.NewPostgres(backend)
+	t.Cleanup(func() {
+		if err := selected.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	backend, err := postgresbackend.New(db)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,22 +49,30 @@ func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := schema.BootstrapSchema(ctx, schemastore.SchemaBootstrapRequest{
+	if err := selected.BootstrapSchema(ctx, schemastore.SchemaBootstrapRequest{
 		PlatformPlans: plans,
 		Origin:        schemastore.RuntimeStoreOrigin{SwarmVersion: "llm-coordinate-proof", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	lifecycle, err := runstore.NewPostgres(backend, schema.RequireCurrent, runhandoff.NewCandidateCoordinator())
+	runtimeID := uuid.NewString()
+	setupCtx := authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, sourceartifactfixture.BundleHash))
+	if _, err := selected.EnsureSourceArtifact(setupCtx, sourceartifactfixture.Artifact()); err != nil {
+		t.Fatal(err)
+	}
+	process, err := selected.AcquireProcessCapability(setupCtx, startupownership.AcquireRequest{
+		OwnerID: "llm-coordinate-fixture", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	artifacts, err := artifactstore.NewPostgres(backend, schema.RequireCurrent)
+	t.Cleanup(func() {
+		if err := process.Release(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	ctx, err = startupownership.WithProcessMutationAuthority(setupCtx, process)
 	if err != nil {
-		t.Fatal(err)
-	}
-	setupCtx := authoractivity.WithScope(ctx, authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
-	if _, err := artifacts.EnsureSourceArtifact(setupCtx, sourceartifactfixture.Artifact()); err != nil {
 		t.Fatal(err)
 	}
 	name, err := agentidentity.DeclaredName("uuid-agent", "uuid-owner")
@@ -80,7 +93,7 @@ func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
 			}
 			sessionID, firstRunID, nextRunID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			for _, runID := range []string{firstRunID, nextRunID} {
-				if _, err := lifecycle.CreateRun(setupCtx, runlifecycle.CreateRequest{
+				if _, err := selected.CreateRun(ctx, runlifecycle.CreateRequest{
 					RunID: runID, Origin: runlifecycle.ScenarioSetupRunOrigin(), Source: sourceartifactfixture.Fact(), StartedAt: time.Now().UTC(),
 				}); err != nil {
 					t.Fatal(err)
@@ -94,7 +107,7 @@ func TestPostgresLLMExactRevisionFactsUseStoredUUIDCoordinates(t *testing.T) {
 				SessionID: spell(sessionID), RunID: identity.RunID, Identity: identity,
 				AgentID: identity.AgentID(), FlowInstance: identity.FlowInstance(), Memory: agentmemory.Plan{},
 			}
-			owner := &LLMPostgresOwner{}
+			owner := &llmpersistence.LLMPostgresOwner{}
 			write := func() error {
 				result := mutationprotocol.RunPostgres(ctx, backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 					return struct{}{}, owner.EnsureCompletionTurnMemoryTx(ctx, attempt, record)

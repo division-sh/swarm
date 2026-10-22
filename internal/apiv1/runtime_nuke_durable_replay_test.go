@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -29,7 +30,10 @@ func TestRuntimeNukeDurableReplaySurvivesAPICompletionLossAndExpiration(t *testi
 		Locks: selected, Quiescer: destructivereset.Quiescer{Store: selected},
 		Cleaner: destructivereset.Cleaner{Store: administrativeResetCleanup{cap}}, Containers: external,
 	}
-	ctx := context.Background()
+	ctx, err := startupownership.WithProcessMutationAuthority(context.Background(), cap)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`CREATE FUNCTION lose_reset_api_completion() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'API completion lost'; END $$;
 	CREATE TRIGGER lose_reset_api_completion BEFORE INSERT ON api_idempotency FOR EACH ROW EXECUTE FUNCTION lose_reset_api_completion()`); err != nil {
 		t.Fatal(err)

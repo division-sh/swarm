@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
 func TestSelectedRetriedTurnCancellationBothStores(t *testing.T) {
@@ -28,6 +29,7 @@ func TestSelectedRetriedTurnCancellationBothStores(t *testing.T) {
 				selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
 				fixture := newSelectedProviderCompletionFixture(t, selected, db, sqlite)
 				ctx := testAuthorActivityContextForBundle(fixture.request.DeclarationPlan.BundleHash)
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				issued, err := selected.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 				if err != nil {
 					t.Fatal(err)
@@ -120,7 +122,12 @@ func TestSelectedRetriedTurnCancellationBothStores(t *testing.T) {
 				if err := fixture.process.Release(ctx); err != nil {
 					t.Fatal(err)
 				}
-				process, err := selectedPreparationProcessForTest(t, selected).Evidence()
+				recoveryProcess := selectedPreparationProcessForTest(t, selected)
+				process, err := recoveryProcess.Evidence()
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, err = startupownership.WithProcessMutationAuthority(testAuthorActivityContextForBundle(fixture.request.DeclarationPlan.BundleHash), recoveryProcess)
 				if err != nil {
 					t.Fatal(err)
 				}

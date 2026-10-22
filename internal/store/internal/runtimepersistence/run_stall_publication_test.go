@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -214,7 +215,14 @@ func proveRunStallPublicationEvidence(t *testing.T, adapter, scope, phase string
 				}
 				publisherStore = wrapper
 			}
-			publisher, err := newStoreTestEventBus(t, publisherStore, bus.EventBusOptions{RuntimeInstanceID: catalogScope.RuntimeInstanceID})
+			publisher, err := newStoreTestEventBus(t, publisherStore, bus.EventBusOptions{
+				RuntimeInstanceID: catalogScope.RuntimeInstanceID,
+				MutationContext: func(incoming context.Context) (context.Context, error) {
+					bound := startupownership.CarryMutationAuthority(incoming, fixture.original)
+					_, err := startupownership.CaptureMutationAuthority(bound)
+					return bound, err
+				},
+			})
 			if err != nil {
 				t.Fatal(err)
 			}

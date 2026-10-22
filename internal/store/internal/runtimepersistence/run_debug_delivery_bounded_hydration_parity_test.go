@@ -27,6 +27,7 @@ func TestRunDebugReportBoundsDeliveryHydrationParity(t *testing.T) {
 			fixture := backend.open(t)
 			selected := fixture.store.(boundedRunDebugDeliveryStore)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			runID := uuid.NewString()
 			base := time.Date(2026, 7, 23, 5, 0, 0, 0, time.UTC)
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
