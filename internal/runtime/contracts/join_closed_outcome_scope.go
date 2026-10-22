@@ -147,6 +147,7 @@ func validateJoinOutcomeComprehension(expr celast.NavigableExpr, bound map[strin
 func joinScopeLoopSource(source string) string {
 	runes := []rune(source)
 	lexer := gen.NewCELLexer(antlr.NewInputStream(source))
+	lexer.RemoveErrorListeners()
 	var out strings.Builder
 	offset, previous := 0, 0
 	for token := lexer.NextToken(); token.GetTokenType() != antlr.TokenEOF; token = lexer.NextToken() {

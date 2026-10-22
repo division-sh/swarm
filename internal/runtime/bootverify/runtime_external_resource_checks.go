@@ -60,6 +60,7 @@ func (c *checkerContext) credentials() []Finding {
 			CheckID:      "credential_key_exists",
 			Severity:     "warning",
 			Message:      message,
+			Remediation:  fmt.Sprintf("Provision this credential with swarm secrets set %s, then restart swarm serve.", item.Key),
 			Location:     item.Key,
 			FailureClass: failures.ClassAuthenticationNeeded,
 		})

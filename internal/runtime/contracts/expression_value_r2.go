@@ -45,9 +45,12 @@ func splitExpressionInterpolation(value string) ([]string, []string, error) {
 		}
 		start += offset
 		parts = append(parts, value[offset:start])
-		end := interpolationEnd(value[start+2:])
+		end, character := interpolationEnd(value[start+2:])
 		if end < 0 {
-			return nil, nil, fmt.Errorf("unterminated ${...} expression")
+			if character != "" {
+				return nil, nil, fmt.Errorf("unterminated ${...} expression at %s; preserve CEL escapes with single-quoted YAML and close the expression with }", character)
+			}
+			return nil, nil, fmt.Errorf("unterminated ${...} expression; close the expression with }")
 		}
 		end += start + 2
 		expr := value[start+2 : end]
@@ -60,8 +63,29 @@ func splitExpressionInterpolation(value string) ([]string, []string, error) {
 	return parts, expressions, nil
 }
 
-func interpolationEnd(source string) int {
+type interpolationErrorListener struct {
+	antlr.DefaultErrorListener
+	input     antlr.CharStream
+	character string
+}
+
+func (l *interpolationErrorListener) SyntaxError(_ antlr.Recognizer, _ any, _, _ int, _ string, _ antlr.RecognitionException) {
+	if l.character != "" {
+		return
+	}
+	character := l.input.LA(1)
+	if character == antlr.TokenEOF {
+		l.character = "end of input"
+		return
+	}
+	l.character = fmt.Sprintf("%q", rune(character))
+}
+
+func interpolationEnd(source string) (int, string) {
 	lexer := gen.NewCELLexer(antlr.NewInputStream(source))
+	lexer.RemoveErrorListeners()
+	errors := interpolationErrorListener{input: lexer.GetInputStream()}
+	lexer.AddErrorListener(&errors)
 	depth := 0
 	for token := lexer.NextToken(); token.GetTokenType() != antlr.TokenEOF; token = lexer.NextToken() {
 		switch token.GetTokenType() {
@@ -69,12 +93,12 @@ func interpolationEnd(source string) int {
 			depth++
 		case gen.CELLexerRBRACE:
 			if depth == 0 {
-				return len(string([]rune(source)[:token.GetStart()]))
+				return len(string([]rune(source)[:token.GetStart()])), ""
 			}
 			depth--
 		}
 	}
-	return -1
+	return -1, errors.character
 }
 
 func expressionValueCELSource(value ExpressionValue) (string, error) {
