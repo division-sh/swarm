@@ -193,4 +193,3 @@ func selectedContractActivityLineage(ctx context.Context, tx *sql.Tx, postgres b
 	}
 	return freshIDs, nil
 }
-

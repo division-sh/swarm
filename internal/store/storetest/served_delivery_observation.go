@@ -2,9 +2,10 @@ package storetest
 
 import (
 	"context"
+	"time"
+
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
-	"time"
 )
 
 type CausalDeliveryStatusCount = private.CausalDeliveryStatusCount
