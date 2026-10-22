@@ -7,8 +7,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	generationauthority "github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	managedcapabilitystore "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
-	storestartup "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
 
 func proveSelectedExecutionPreparationTx(ctx context.Context, tx *sql.Tx, issued runfork.SelectedContractRuntimeExecution, sqlite bool) error {
@@ -51,7 +51,7 @@ func proveSelectedPreparationForMutationTx(ctx context.Context, tx *sql.Tx, prep
 	if err := preparation.Validate(); err != nil {
 		return err
 	}
-	current, err := storestartup.PreparedProcessCurrent(ctx, tx, preparation.Coordinates, preparation.ProcessGeneration, sqlite, true)
+	current, err := generationauthority.PreparedProcessCurrent(ctx, tx, preparation.Coordinates, preparation.ProcessGeneration, sqlite, true)
 	if err != nil {
 		return err
 	}

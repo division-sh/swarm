@@ -14,8 +14,8 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
+	generationauthority "github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
-	storestartupownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
 )
 
 func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
@@ -611,7 +611,7 @@ func externalEffectAttemptLeaseSQLite(ctx context.Context, q schemaQueryer, auth
 }
 
 func requirePreparedProbeProcess(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, sqlite bool) error {
-	current, err := storestartupownership.PreparedProbeProcessCurrent(ctx, tx, *authority.StartupProbe.Preparation, authority.FenceGeneration, sqlite, true)
+	current, err := generationauthority.PreparedProbeProcessCurrent(ctx, tx, *authority.StartupProbe.Preparation, authority.FenceGeneration, sqlite, true)
 	if err != nil {
 		return err
 	}
@@ -622,7 +622,7 @@ func requirePreparedProbeProcess(ctx context.Context, tx *sql.Tx, authority runt
 }
 
 func requireGenerationGrantProcess(ctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, grantID string, sqlite bool) error {
-	current, err := storestartupownership.GenerationGrantProcessCurrent(ctx, tx, grantID, sqlite, true)
+	current, err := generationauthority.GenerationGrantProcessCurrent(ctx, tx, grantID, sqlite, true)
 	if err != nil {
 		return err
 	}
@@ -635,9 +635,9 @@ func requireGenerationGrantProcess(ctx context.Context, tx *sql.Tx, authority ru
 func startupProbeAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	startup := authority.StartupProbe
 	if startup.Preparation != nil {
-		return storestartupownership.PreparedProbeProcessCurrent(ctx, q, *startup.Preparation, authority.FenceGeneration, false, false)
+		return generationauthority.PreparedProbeProcessCurrent(ctx, q, *startup.Preparation, authority.FenceGeneration, false, false)
 	}
-	if current, err := storestartupownership.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, false, false); err != nil || !current {
+	if current, err := generationauthority.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, false, false); err != nil || !current {
 		return false, err
 	}
 	var count int
@@ -652,9 +652,9 @@ func startupProbeAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, 
 func startupProbeAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	startup := authority.StartupProbe
 	if startup.Preparation != nil {
-		return storestartupownership.PreparedProbeProcessCurrent(ctx, q, *startup.Preparation, authority.FenceGeneration, true, false)
+		return generationauthority.PreparedProbeProcessCurrent(ctx, q, *startup.Preparation, authority.FenceGeneration, true, false)
 	}
-	if current, err := storestartupownership.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, true, false); err != nil || !current {
+	if current, err := generationauthority.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, true, false); err != nil || !current {
 		return false, err
 	}
 	var count int
@@ -668,7 +668,7 @@ func startupProbeAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, au
 
 func serveRegistrationAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	startup := authority.ServeRegistration
-	if current, err := storestartupownership.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, false, false); err != nil || !current {
+	if current, err := generationauthority.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, false, false); err != nil || !current {
 		return false, err
 	}
 	var count int
@@ -683,7 +683,7 @@ func serveRegistrationAuthorityCurrentPostgres(ctx context.Context, q schemaQuer
 
 func serveRegistrationAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
 	startup := authority.ServeRegistration
-	if current, err := storestartupownership.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, true, false); err != nil || !current {
+	if current, err := generationauthority.GenerationGrantProcessCurrent(ctx, q, startup.StartupAuthorityID, true, false); err != nil || !current {
 		return false, err
 	}
 	var count int

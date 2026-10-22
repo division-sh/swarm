@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/google/uuid"
 )
 
@@ -48,7 +49,7 @@ func TestRuntimeLogoutWithdrawalRefusesInvalidTemporalEvidenceBothStores(t *test
 					claimed := original
 					cell.edit(&claimed)
 					if err := run(context.Background(), func(ctx context.Context, tx *sql.Tx) error {
-						withdrawn, err := RuntimeAuthorityWithdrawnTx(ctx, tx, claimed, sqlite)
+						withdrawn, err := generationauthority.RuntimeAuthorityWithdrawnTx(ctx, tx, claimed, sqlite)
 						if withdrawn {
 							t.Error("invalid original gained successor proof")
 						}
@@ -73,7 +74,7 @@ func TestRuntimeLogoutWithdrawalRefusesInvalidTemporalEvidenceBothStores(t *test
 						if err := corruptLogoutGenerationForTest(ctx, tx, original, cell); err != nil {
 							return err
 						}
-						withdrawn, err := RuntimeAuthorityWithdrawnTx(ctx, tx, original, sqlite)
+						withdrawn, err := generationauthority.RuntimeAuthorityWithdrawnTx(ctx, tx, original, sqlite)
 						if withdrawn {
 							t.Error("invalid current observation gained withdrawal authority")
 						}
@@ -93,7 +94,7 @@ func TestRuntimeLogoutWithdrawalRefusesInvalidTemporalEvidenceBothStores(t *test
 			canceled, cancel := context.WithCancel(context.Background())
 			cancel()
 			if err := run(canceled, func(ctx context.Context, tx *sql.Tx) error {
-				withdrawn, err := RuntimeAuthorityWithdrawnTx(ctx, tx, original, sqlite)
+				withdrawn, err := generationauthority.RuntimeAuthorityWithdrawnTx(ctx, tx, original, sqlite)
 				if withdrawn {
 					t.Error("cancellation supplied successor evidence")
 				}

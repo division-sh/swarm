@@ -34,7 +34,6 @@ const runtimeSharedStoreOwnershipLock = "swarm:runtime:shared-store-owner"
 
 type StartupPostgresOwner struct {
 	processOperations
-	selectedResetHistory
 	constructionMu       sync.Mutex
 	constructionLease    *postgresbackend.AdvisoryLockLease
 	constructionCapacity func()
@@ -51,7 +50,6 @@ type StartupPostgresOwner struct {
 
 type StartupSQLiteOwner struct {
 	processOperations
-	selectedResetHistory
 	backend             *sqlitebackend.Backend
 	path                string
 	backendIdentity     *SQLiteBackendIdentity
@@ -377,7 +375,7 @@ func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req 
 			}
 		}
 		var err error
-		history, err := s.owner.applySelectedResetHistoryTx(txctx, tx, req, false)
+		history, err := applySelectedResetHistoryTx(txctx, tx, req, false)
 		if err != nil {
 			return err
 		}
@@ -583,7 +581,7 @@ func (s *sqliteSession) ApplyDestructiveResetCleanup(ctx context.Context, req ru
 			}
 		}
 		var err error
-		history, err := s.owner.applySelectedResetHistoryTx(txctx, tx, req, true)
+		history, err := applySelectedResetHistoryTx(txctx, tx, req, true)
 		if err != nil {
 			return err
 		}
@@ -984,38 +982,15 @@ func inspectRunExecutionOwnershipTx(ctx context.Context, tx *sql.Tx, evidence ru
 }
 
 func loadSourceSetTx(ctx context.Context, tx *sql.Tx, sqlite bool) (runtimeagenttopology.SourceSetPlan, bool, error) {
-	return loadSourceSetModeTx(ctx, tx, sqlite, true)
+	return generationauthority.ReadSourceSetTx(ctx, tx, sqlite, true)
 }
 
 func loadSourceSetModeTx(ctx context.Context, tx *sql.Tx, sqlite, lock bool) (runtimeagenttopology.SourceSetPlan, bool, error) {
-	query := `SELECT revision,plan FROM agent_topology_source_set_head WHERE singleton_id = 1`
-	if !sqlite && lock {
-		query += ` FOR SHARE`
-	}
-	var plan runtimeagenttopology.SourceSetPlan
-	var raw []byte
-	if err := tx.QueryRowContext(ctx, query).Scan(&plan.Revision, &raw); err != nil {
-		if err == sql.ErrNoRows {
-			return runtimeagenttopology.SourceSetPlan{}, false, nil
-		}
-		return runtimeagenttopology.SourceSetPlan{}, false, err
-	}
-	if err := json.Unmarshal(raw, &plan); err != nil {
-		return runtimeagenttopology.SourceSetPlan{}, false, err
-	}
-	if err := plan.Validate(); err != nil {
-		return runtimeagenttopology.SourceSetPlan{}, false, err
-	}
-	return plan, true, nil
+	return generationauthority.ReadSourceSetTx(ctx, tx, sqlite, lock)
 }
 
 func sourceSetContains(plan runtimeagenttopology.SourceSetPlan, source runtimeagenttopology.SourceCoordinate) bool {
-	for _, candidate := range plan.Sources {
-		if candidate.Normalize() == source {
-			return true
-		}
-	}
-	return false
+	return generationauthority.SourceSetContains(plan, source)
 }
 
 func nullText(value string) any {

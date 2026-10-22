@@ -1,4 +1,4 @@
-package startupownership
+package generationauthority
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
-	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 )
 
 // RuntimeAuthorityWithdrawnTx proves an exact frozen process stamp has a newer
@@ -19,7 +18,7 @@ func RuntimeAuthorityWithdrawnTx(ctx context.Context, tx *sql.Tx, original proce
 	if original.Validate() != nil || original.Backend != backend {
 		return false, fmt.Errorf("runtime withdrawal requires its exact original native stamp")
 	}
-	current, err := generationauthority.ReadProcessGenerationTx(ctx, tx, sqlite)
+	current, err := ReadProcessGenerationTx(ctx, tx, sqlite)
 	if err != nil {
 		return false, err
 	}
