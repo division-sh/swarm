@@ -16,7 +16,7 @@ import (
 
 func TestPostgresDeliveryRenewalRetainsIndependentMutationFences(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), admitTestPostgresStore(t, db))
 	for _, statement := range []string{
 		`CREATE FUNCTION test_renewal_suppress() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$`,
 		`CREATE FUNCTION test_renewal_refuse() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'renewal storage failure'; END $$`,

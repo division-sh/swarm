@@ -57,7 +57,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			reader := fixture.store.(runOriginReadStore)
-			ctx := testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash)
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash), fixture.store)
 			at := time.Date(2026, 7, 29, 16, 0, 0, 0, time.UTC)
 
 			t.Run("event_origin_survives_later_event", func(t *testing.T) {

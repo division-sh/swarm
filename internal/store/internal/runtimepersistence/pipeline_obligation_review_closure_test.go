@@ -923,7 +923,7 @@ func TestClaimEventReturnsTypedCorruptDecisionWorkForAcknowledgedAndUnacknowledg
 				fixture := backend.open(t)
 				selected := fixture.store.(pipelineObligationParityStore)
 				owner := selected.PipelineObligations()
-				ctx := testAuthorActivityContext()
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 				runID := uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				at := time.Now().UTC().Add(-time.Minute)

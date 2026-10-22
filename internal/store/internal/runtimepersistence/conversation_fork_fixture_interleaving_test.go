@@ -59,6 +59,7 @@ func TestConversationForkRawSeedOverlapsRuntimeDiagnostic(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	seedStoreTestPersistedArtifact(t, db, bundle.SourceArtifact)
 	item := createConversationForkLifecycleDiagnostic(t, ctx, store, bundle)
 	identity, err := item.Identity.StorageFields()
