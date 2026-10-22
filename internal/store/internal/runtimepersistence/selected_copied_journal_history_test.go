@@ -170,8 +170,6 @@ func proveClosedCopiedSelectedJournalCohort(t *testing.T, backend string) {
 				t.Fatal(err)
 			}
 			payload, err := json.Marshal(map[string]any{"activity_id": identity.ActivityID, "tool": identity.Tool, "input": map[string]any{"value": value},
-				"effect_class": string(runtimecontracts.ActivityEffectClassNonIdempotentWrite), "fork_policy": string(runtimecontracts.ActivityForkRequireConfirmation), "attempt": identity.Attempt,
-				"retry_max_attempts": 1, "retry_backoff": "",
 				"success_event": results.SuccessEvent, "failure_event": results.FailureEvent, "entity_id": instance.EntityID, "node_id": identity.Owner.Key(),
 				"flow_id": "flow-a", "flow_instance": instance.InstancePath, "handler_event_key": identity.HandlerEventKey, "source_run_id": runID, "source_event_id": rootID,
 				"source_task_id": "", "parent_event_id": identity.ParentEventID, "chain_depth": 0})
@@ -198,7 +196,7 @@ func proveClosedCopiedSelectedJournalCohort(t *testing.T, backend string) {
 			original, inserted, err := journal.StartActivityAttempt(ctx, pipeline.ActivityAttemptRecord{RequestEventID: parent.ID(), RunID: runID, SourceEventID: rootID,
 				EntityID: instance.EntityID, FlowInstance: instance.InstancePath, NodeID: identity.Owner.Key(), HandlerEventKey: identity.HandlerEventKey,
 				ActivityID: identity.ActivityID, Tool: identity.Tool, Attempt: 1, SuccessEvent: results.SuccessEvent, FailureEvent: results.FailureEvent,
-				InputHash: "copied-history-input", ExecutionMode: executionmode.Live, StartedAt: at, EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite)})
+				InputHash: "copied-history-input", ExecutionMode: executionmode.Live, StartedAt: at})
 			if err != nil || !inserted {
 				t.Fatalf("start original captured journal: inserted=%t err=%v", inserted, err)
 			}

@@ -132,7 +132,8 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 				return req.Owner.continueElectedSelectedForkOperation(callerContext, request, replay)
 			}
 		}
-		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, materializationDiagnostic
+		disposed = true
+		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, errors.Join(materializationDiagnostic, req.Owner.disposePreparation(prepared))
 	}
 	defer func() {
 		if !out.Activation.Activated {

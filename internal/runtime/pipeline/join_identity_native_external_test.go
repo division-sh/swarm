@@ -1,8 +1,9 @@
 package pipeline_test
 
 import (
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func TestSiblingFlowJoinDeclarationsStayIndependentAcrossRestartOnBothStores(t *testing.T) {

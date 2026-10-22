@@ -886,7 +886,3 @@ func commitUnrevisionedEventFixtureFactsForTest(ctx context.Context, selected an
 		return fmt.Errorf("event fixture store %T is unsupported", selected)
 	}
 }
-
-
-
-

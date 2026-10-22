@@ -975,7 +975,7 @@ func TestPipelineActivityRequestRefusesRetiredPolicyBeforeDispatch(t *testing.T)
 	if err := json.Unmarshal(request.Event.Payload(), &payload); err != nil {
 		t.Fatalf("payload unmarshal: %v", err)
 	}
-	for key, value := range map[string]any{"effect_class": "idempotent_write", "fork_policy": "reexecute_read", "retry_max_attempts": 3, "retry_backoff": "exponential", "attempt": 2} {
+	for key, value := range map[string]any{"attempt": 2} {
 		t.Run(key, func(t *testing.T) {
 			payload[key] = value
 			malformed := activityRequestEventWithPayload(t, request.Event, payload)

@@ -77,5 +77,3 @@ func CountRunNamedEventStorage(ctx context.Context, selected any, runID, eventNa
 func ReadSelectedForkExecutableCardinality(ctx context.Context, selected any, runID string) (map[string]string, error) {
 	return private.ReadSelectedForkExecutableCardinalityForTest(ctx, selected, runID)
 }
-
-

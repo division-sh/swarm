@@ -127,13 +127,17 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 			commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
 			storetest.CaptureRunForkSnapshot(t, ctx, selected, sourceID)
 			selection := runforkadmission.SelectedContractSelection(loaded.Source)
+			selector := eventID
+			if !cell.cancelDuplicate {
+				selector = ""
+			}
 			operation := runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "bound-live-winner", TransportHash: "sha256:same-request",
-				SourceRunID: sourceID, ForkEventID: eventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
+				SourceRunID: sourceID, ForkEventID: selector, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
 				AllowSourceFreeze: true, ContractSelection: selection,
 			}
 			request := SelectedContractExecutionRequest{
-				Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true,
+				Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: selector, AllowSourceFreeze: true,
 				ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection,
 				SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,
 					Store: selected.(SourceArtifactSelectedContractSourceStore)},

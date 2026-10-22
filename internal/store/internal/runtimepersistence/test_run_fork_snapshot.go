@@ -54,4 +54,3 @@ func CaptureRunForkSnapshotForTest(ctx context.Context, selected any, runID stri
 
 // The receipt is the exact finalizer result from the acknowledged transaction,
 // not a subsequent head query that could observe another writer's revision.
-
