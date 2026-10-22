@@ -19,6 +19,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
@@ -41,7 +42,7 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 			t.Run(backend.name+"/"+mode, func(t *testing.T) {
 				fixture := backend.open(t)
 				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
-				eventBus, err := newRunConvergenceEventBus(t, fixture.store)
+				eventBus, err := newRunConvergenceEventBus(t, ctx, fixture.store)
 				if err != nil {
 					t.Fatalf("NewEventBus: %v", err)
 				}
@@ -218,7 +219,7 @@ func TestSameLabelCausalAndRunScopedEventsCannotConvergeExistingRunParity(t *tes
 					parentID = root.ID()
 				}
 				event := eventtest.RuntimeControl(uuid.NewString(), "platform.paused", "runtime", "", json.RawMessage(`{}`), 0, runID, parentID, events.EventEnvelope{}, at.Add(time.Second))
-				eventBus, err := newRunConvergenceEventBus(t, fixture.store)
+				eventBus, err := newRunConvergenceEventBus(t, ctx, fixture.store)
 				if err != nil {
 					t.Fatalf("NewEventBus: %v", err)
 				}
@@ -363,15 +364,19 @@ func executeStandaloneCompletionCandidateWithCatalog(t *testing.T, ctx context.C
 	t.Fatalf("completion candidate for run %s was not persisted", runID)
 }
 
-func newRunConvergenceEventBus(t *testing.T, selected any) (*runtimebus.EventBus, error) {
+func newRunConvergenceEventBus(t *testing.T, ctx context.Context, selected any) (*runtimebus.EventBus, error) {
 	t.Helper()
+	ctx = originalStoreFixtureContext(t, ctx, selected)
+	options := runtimebus.EventBusOptions{MutationContext: func(work context.Context) (context.Context, error) {
+		return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, ctx))
+	}}
 	var bus *runtimebus.EventBus
 	var err error
 	switch store := selected.(type) {
 	case *PostgresStore:
-		bus, err = newStoreTestEventBus(t, store)
+		bus, err = newStoreTestEventBus(t, store, options)
 	case *SQLiteRuntimeStore:
-		bus, err = newStoreTestEventBus(t, store)
+		bus, err = newStoreTestEventBus(t, store, options)
 	default:
 		return nil, fmt.Errorf("unsupported run convergence store %T", selected)
 	}

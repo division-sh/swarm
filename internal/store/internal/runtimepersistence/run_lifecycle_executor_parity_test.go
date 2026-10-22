@@ -478,7 +478,7 @@ func TestRunLifecycleServedDeliverySameRevisionHandoffParity(t *testing.T) {
 				t.Fatalf("start candidate executor: %v", err)
 			}
 
-			eventBus, err := newRunConvergenceEventBus(t, fixture.store)
+			eventBus, err := newRunConvergenceEventBus(t, ctx, fixture.store)
 			if err != nil {
 				t.Fatalf("create EventBus: %v", err)
 			}

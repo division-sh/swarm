@@ -447,7 +447,7 @@ func runPipelineCrashChild(t *testing.T, mode string) {
 	if (before.RunID != "") != (wantBefore == 1) {
 		t.Fatalf("candidate at restart=%#v, committed settlement=%v", before, wantBefore == 1)
 	}
-	bus, err := newRunConvergenceEventBus(t, fixture.store)
+	bus, err := newRunConvergenceEventBus(t, ctx, fixture.store)
 	if err != nil {
 		t.Fatal(err)
 	}
