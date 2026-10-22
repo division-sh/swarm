@@ -103,8 +103,7 @@ deploy.done:
 		instance = "instance: vertical_id\n"
 		entities = "deployment:\n  vertical_id:\n    type: string\n    _unused_reason: composition connect route-key proof field\n"
 	}
-	writeLegacyInstanceFlow(t, root, "consumer", `stages: []
-# fixture: consumer
+	writeLegacyInstanceFlow(t, root, "consumer", `# fixture: consumer
 `+instance+`stages:
   idle: {}
   done: {final: true}

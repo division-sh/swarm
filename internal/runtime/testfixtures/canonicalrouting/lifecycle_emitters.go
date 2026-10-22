@@ -429,8 +429,6 @@ func CopyLifecycleEmitter(t testing.TB, variant LifecycleEmitterVariant) string 
 	t.Helper()
 	root := t.TempDir()
 	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeClosedVariantFile(t, root, "ordinary/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
-	writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	schema := `# fixture: lifecycle-emitter
 stages:
   waiting: {}
@@ -482,6 +480,8 @@ pins:
 		schema = strings.Replace(schema, "          emit:\n            event: work.completed\n            fields: {result: \"approved\"}\n", "", 1)
 	case LifecycleGateNested:
 		prefix = "outer/inner/"
+		writeClosedVariantFile(t, root, "outer/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, "outer/inner/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, "schema.yaml", "# fixture: lifecycle-parent\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - work.requested\nconnect:\n  - {event: work.requested, from: ., to: outer/inner}\n")
 		writeClosedVariantFile(t, root, "events.yaml", "work.requested:\n  seed: boolean\n")
 		writeClosedVariantFile(t, root, "outer/schema.yaml", "stages: []\n# fixture: lifecycle-middle\n")
@@ -507,6 +507,7 @@ pins:
 			}
 			writeClosedVariantFile(t, root, edit.path, strings.Replace(string(raw), edit.old, edit.replacement, 1))
 		}
+		writeClosedVariantFile(t, root, "ordinary/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, "ordinary/schema.yaml", "# fixture: ordinary\nstages:\n  waiting: {}\n  observed: {final: true}\npins:\n  inputs:\n    - ordinary.repeated\n")
 		writeClosedVariantFile(t, root, "ordinary/entities.yaml", "receipt:\n  token: text\n  revision_id: text\n")
 		writeClosedVariantFile(t, root, "ordinary/nodes.yaml", `collector:
@@ -603,6 +604,7 @@ connect:
       loop: {close: revision, from: review}
       advances_to: done
 `)
+	writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "sink/schema.yaml", `# fixture: sink
 stages:
   waiting: {}
