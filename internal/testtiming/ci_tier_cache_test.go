@@ -156,7 +156,7 @@ func TestDebtAnalysisCIPublisherPreservesArchiveContract(t *testing.T) {
 	if restore.Uses != "actions/cache/restore@v4" || restore.With["key"] != "${{ steps.identity.outputs.key }}" || restore.With["restore-keys"] != nil || save.If != "steps.analysis.outputs.cache-hit != 'true' && success()" {
 		t.Fatal("producer must restore and save only its exact successful immutable archive")
 	}
-	if len(job.Steps) != 6 || job.Steps[0].Uses != "actions/checkout@v4" || job.Steps[0].With["ref"] != "${{ needs.ci-plan.outputs.execution_sha }}" || job.Steps[0].With["fetch-depth"] != 0 {
+	if len(job.Steps) != 7 || job.Steps[0].Uses != "actions/checkout@v4" || job.Steps[0].With["ref"] != "${{ needs.ci-plan.outputs.execution_sha }}" || job.Steps[0].With["fetch-depth"] != 0 {
 		t.Fatal("producer checkout must retain the qualified execution source and full archive history")
 	}
 }
