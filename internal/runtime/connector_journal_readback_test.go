@@ -6,9 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -31,6 +35,7 @@ func TestRuntimeConnectorJournalWitnessesPreserveToolSourceAndEarliestAttemptBot
 		t.Run(backend, func(t *testing.T) {
 			var selected interface {
 				storetest.RunFixtureStore
+				agentfixture.Store
 				pipeline.ActivityAttemptJournal
 			}
 			if backend == "sqlite" {
@@ -39,6 +44,27 @@ func TestRuntimeConnectorJournalWitnessesPreserveToolSourceAndEarliestAttemptBot
 				selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t)
 			}
 			ctx := testAuthorActivityContext(context.Background())
+			fact, _ := correlation.SourceArtifactFactFromContext(ctx)
+			coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+			plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+				t.Fatal(err)
+			}
+			evidence, err := grant.AdmitExecution(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			journal, err := startupownership.CaptureActivityJournal(ctx, grant, evidence)
+			if err != nil {
+				t.Fatal(err)
+			}
 			runID, otherRun, source, otherSource := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 			for _, run := range []string{runID, otherRun} {
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: run, Origin: storetest.ScenarioSetupOrigin()})
@@ -55,7 +81,7 @@ func TestRuntimeConnectorJournalWitnessesPreserveToolSourceAndEarliestAttemptBot
 					Tool: identity.tool, Attempt: 1,
 					SuccessEvent: "fixture.succeeded", FailureEvent: "fixture.failed", InputHash: "exact-storage-input",
 					StartedAt: at.Add(time.Duration(index) * time.Minute)}
-				stored, inserted, err := selected.StartActivityAttempt(ctx, record)
+				stored, inserted, err := journal.StartActivityAttempt(ctx, record)
 				if err != nil || !inserted {
 					t.Fatalf("start original journal: inserted=%t err=%v", inserted, err)
 				}
