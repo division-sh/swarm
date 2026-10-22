@@ -26,7 +26,6 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -1275,30 +1274,9 @@ func deliveryRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRo
 	return false
 }
 
-func nodeOnlyDeliveryPlanner(t testing.TB, nodeID string, eventType events.EventType) deliveryPlanner {
+func nodeOnlyDeliveryPlanner(t testing.TB, source semanticview.Source, nodeID string, eventType events.EventType) deliveryPlanner {
 	t.Helper()
 	event := strings.TrimSpace(string(eventType))
-	node := runtimecontracts.SystemNodeContract{
-		ExecutionType: "system_node", SubscribesTo: []string{event},
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{event: {}},
-	}
-	rootSchema := runtimecontracts.FlowSchemaDocument{Name: "root"}
-	root := runtimecontracts.FlowContractView{
-		Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Schema: rootSchema,
-		Nodes: map[string]runtimecontracts.SystemNodeContract{nodeID: node}, Events: map[string]runtimecontracts.EventCatalogEntry{event: {}},
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &rootSchema,
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{".": &root}, ByPath: map[string]*runtimecontracts.FlowContractView{".": &root},
-		},
-		Nodes:  map[string]runtimecontracts.SystemNodeContract{nodeID: node},
-		Events: map[string]runtimecontracts.EventCatalogEntry{event: {}},
-	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatalf("compile node-only target fixture: %v", err)
-	}
-	source := semanticview.Wrap(bundle)
 	handlerNode := testRootNode(t, nodeID)
 	handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, handlerNode)
 	if err != nil {
@@ -1419,7 +1397,13 @@ func TestEventBusPublish_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 
 func TestEventBusCommittedPublishDispatch_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := newScopedTestEventBus(store)
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "custom.node_only_tx:\n",
+		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.node_only_tx]\n  event_handlers:\n    custom.node_only_tx: {}\n",
+	}))
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1446,7 +1430,13 @@ func TestEventBusCommittedPublishDispatch_NodeOnlyRouteDoesNotRequireAgentChanne
 
 func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	eb, err := newScopedTestEventBus(store)
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "custom.node_only_outbox:\n",
+		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.node_only_outbox]\n  event_handlers:\n    custom.node_only_outbox: {}\n",
+	}))
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -1475,6 +1465,12 @@ func TestEngineDispatcher_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) 
 
 func TestSweepPipelineObligations_NodeOnlyRouteDoesNotRequireAgentChannel(t *testing.T) {
 	store := newTargetRouteMemoryStore()
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "custom.node_only_sweep:\n",
+		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.node_only_sweep]\n  event_handlers:\n    custom.node_only_sweep: {}\n",
+	}))
 	eventID := uuid.NewString()
 	target := events.RouteIdentity{FlowID: ".", FlowInstance: "root"}
 	evt := eventtest.ExistingRunRootIngress(eventID,
@@ -1488,11 +1484,11 @@ func TestSweepPipelineObligations_NodeOnlyRouteDoesNotRequireAgentChannel(t *tes
 	}}
 	store.scopes[evt.ID()] = runtimepipelineobligation.ScopeSubscribed
 	store.missing = []events.PersistedReplayEvent{{Event: evt}}
-	eb, err := newScopedTestEventBus(store)
+	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	eb.deliveryPlanner = nodeOnlyDeliveryPlanner(t, "workflow-node", evt.Type())
+	eb.deliveryPlanner = nodeOnlyDeliveryPlanner(t, source, "workflow-node", evt.Type())
 	deliveries := subscribeInternalDeliveriesForTest(t, eb, testRootNode(t, "workflow-node").Key(), evt.Type())
 
 	result, err := eb.SweepPipelineObligations(context.Background(), 10)
