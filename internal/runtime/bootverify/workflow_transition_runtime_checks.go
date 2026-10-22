@@ -11,7 +11,6 @@ import (
 )
 
 func checkTransitionReferenceValidation(c *checkerContext) []Finding { return c.transitionReferences() }
-func checkTransitionOwnershipValidation(c *checkerContext) []Finding { return c.transitionOwnership() }
 func checkEventRuntimeWiringValidation(c *checkerContext) []Finding  { return c.eventRuntimeWiring() }
 
 func (c *checkerContext) transitionReferences() []Finding {
@@ -131,78 +130,6 @@ func (c *checkerContext) checkTransitionEventReference(flowID, location, event s
 	} else if !flowEventExists(c.source, flowID, event) {
 		c.transitionReferenceFinding(location, "trigger %s missing from event catalog", event)
 	}
-}
-
-func (c *checkerContext) transitionOwnership() []Finding {
-	if c.transitionOwnerLoaded {
-		return c.transitionOwnerFindings
-	}
-	c.transitionOwnerLoaded = true
-	for _, flow := range lifecycleFlowSchemas(c.source) {
-		topology, ok := semanticview.WorkflowStageTopology(c.source, flow.flowID)
-		if !ok {
-			continue
-		}
-		for _, edge := range topology.Edges {
-			location := fmt.Sprintf("%s:%s:%s->%s", flow.flowID, edge.Source, edge.From, edge.To)
-			var problem string
-			// Admission owns carrier shape/protocol validation, not declaration existence.
-			compiled, admissionErr := topology.AdmitTransition(edge.Site(), edge.From, edge.To)
-			switch {
-			case topology.FlowID != flow.flowID:
-				problem = "compiled topology belongs to another flow"
-			case admissionErr != nil:
-				problem = fmt.Sprintf("invalid compiled carrier: %v", admissionErr)
-			case compiled.Edge() != edge:
-				problem = "compiled carrier differs from admitted evidence"
-			case edge.Source == "timer" || edge.Source == "gate":
-				// Runtime carriers have no executable handler declaration.
-			default:
-				if _, ok := c.source.ExecutableNode(edge.Node); !ok {
-					problem = "compiled carrier executable owner is missing"
-				} else if handler, ok := c.source.ExecutableNodeEventHandler(edge.Node, edge.HandlerEvent); !ok {
-					problem = fmt.Sprintf("workflow owner is %s but originating handler %s is missing", executableNodeDiagnostic(edge.Node), edge.HandlerEvent)
-				} else if edge.Source == "loop.escape" {
-					if !compiledLoopEscapeOwnsEdge(c.source, flow.flowID, edge) {
-						problem = "compiled loop escape does not belong to its originating repeat operation"
-					}
-				} else {
-					matched := false
-					for _, carrier := range runtimecontracts.HandlerAdvanceCarriers(handler) {
-						if carrier.Kind == edge.AdvanceCarrier && carrier.RuleRef == edge.RuleRef && carrier.AdvancesTo == edge.To {
-							matched = true
-							break
-						}
-					}
-					if !matched {
-						problem = "compiled advance carrier does not belong to its originating handler"
-					}
-				}
-			}
-			if problem != "" {
-				c.transitionOwnerFindings = append(c.transitionOwnerFindings, Finding{
-					CheckID: "transition_ownership_validation", Severity: "error",
-					Message: "transition " + location + " " + problem, Location: location,
-				})
-			}
-		}
-	}
-	return c.transitionOwnerFindings
-}
-
-func compiledLoopEscapeOwnsEdge(source semanticview.Source, flowID string, edge runtimecontracts.WorkflowStageTopologyEdge) bool {
-	for _, plan := range semanticview.WorkflowLoops(source) {
-		if plan.FlowID != flowID || plan.ID != edge.LoopID || plan.Escape.AdvancesTo != edge.To {
-			continue
-		}
-		for _, operation := range plan.Operations {
-			if operation.Kind == runtimecontracts.LoopOperationRepeat && edge.LoopOperation == operation.Kind &&
-				operation.Node.Equal(edge.Node) && operation.HandlerEvent == edge.HandlerEvent && operation.From == edge.From {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (c *checkerContext) eventRuntimeWiring() []Finding {

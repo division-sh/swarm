@@ -1464,13 +1464,6 @@ func (m *RuntimeContextManager) AcquireChannelActivationPublication(bundleHash s
 	return lease, true, nil
 }
 
-// ReplaceChannelActivations publishes an exact executable activation snapshot
-// only to the still-current runtime-context publication that owns it.
-func (m *RuntimeContextManager) ReplaceChannelActivations(bundleHash string, publicationGeneration uint64, publication channelonboarding.ChannelActivationPublication) error {
-	_, err := m.ReplaceChannelActivationsContext(context.Background(), bundleHash, publicationGeneration, publication)
-	return err
-}
-
 func (m *RuntimeContextManager) ReplaceChannelActivationsContext(ctx context.Context, bundleHash string, publicationGeneration uint64, publication channelonboarding.ChannelActivationPublication) (bool, error) {
 	if m == nil || strings.TrimSpace(bundleHash) == "" || publicationGeneration == 0 {
 		return false, fmt.Errorf("runtime context channel activation coordinate is required")
@@ -2075,30 +2068,6 @@ func (m *RuntimeContextManager) RestoreStandingServiceTargets(serviceID string) 
 				_ = m.refreshCapabilitySubjectsLocked()
 				return fmt.Errorf("reopen standing service %s occurrence: %w", serviceID, err)
 			}
-		}
-	}
-	return nil
-}
-
-func (m *RuntimeContextManager) WaitStandingServiceOccurrence(ctx context.Context, serviceID string) error {
-	if m == nil {
-		return nil
-	}
-	serviceID = strings.TrimSpace(serviceID)
-	m.mu.RLock()
-	var occurrences []*worklifetime.StandingOccurrence
-	for _, entry := range m.contexts {
-		if entry != nil && entry.standing != nil && entry.standing[serviceID] != nil {
-			occurrences = append(occurrences, entry.standing[serviceID])
-		}
-	}
-	m.mu.RUnlock()
-	if len(occurrences) == 0 {
-		return fmt.Errorf("standing service %s has no process occurrence", serviceID)
-	}
-	for _, occurrence := range occurrences {
-		if err := occurrence.Wait(ctx); err != nil {
-			return err
 		}
 	}
 	return nil

@@ -263,18 +263,3 @@ func StartupVisibleToolSurfaceProberForRuntime(runtime Runtime) (StartupVisibleT
 	prober, ok := runtime.(StartupVisibleToolSurfaceProber)
 	return prober, ok && prober != nil
 }
-
-func PersistConversationSnapshotForRuntime(ctx context.Context, runtime Runtime, lease *sessions.Lease, session *Session) error {
-	if session == nil {
-		return nil
-	}
-	contract, ok := ProviderContractForRuntime(runtime)
-	if !ok || !contract.Persistence.PersistsConversationSnapshots {
-		return nil
-	}
-	persister, ok := runtime.(ConversationSnapshotPersister)
-	if !ok || persister == nil {
-		return fmt.Errorf("llm runtime %T declares conversation snapshot persistence but does not implement it", runtime)
-	}
-	return persister.PersistConversationSnapshot(ctx, lease, session)
-}

@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/durabledata"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -195,8 +194,4 @@ func resolveAgentFlowDataDeclaration(source semanticview.Source, actor models.Ag
 		return agentFlowDataDeclaration{}, false
 	}
 	return agentFlowDataDeclaration{LogicalID: strings.TrimSpace(declaration.LocalID), FlowPath: flowID}, true
-}
-
-func FlowDataAccessFromEntry(entry runtimecontracts.AgentRegistryEntry) []string {
-	return NormalizeAccessList(entry.FlowDataAccess)
 }

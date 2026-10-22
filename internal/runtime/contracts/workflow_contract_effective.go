@@ -138,13 +138,6 @@ func RequiredAgentsDeclared(schema FlowSchemaDocument) bool {
 	return schema.RequiredAgentsDeclared || len(schema.RequiredAgents) > 0
 }
 
-func EffectiveRequiredAgentFacts(schema FlowSchemaDocument, agents map[string]AgentRegistryEntry, schemaFile, agentsFile string) []RequiredAgentFact {
-	if RequiredAgentsDeclared(schema) {
-		return explicitRequiredAgentFacts(schema.RequiredAgents, schemaFile)
-	}
-	return inferredRequiredAgentFacts(agents, agentsFile)
-}
-
 func FlowRequiredAgentsFromFacts(facts []RequiredAgentFact) []FlowRequiredAgent {
 	if len(facts) == 0 {
 		return nil

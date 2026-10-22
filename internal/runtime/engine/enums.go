@@ -110,14 +110,6 @@ type GuardFailure struct {
 	EventType string
 }
 
-func ParseGuardFailure(action string) (GuardFailure, error) {
-	spec, err := runtimecontracts.ParseGuardFailureSpec(action)
-	if err != nil {
-		return GuardFailure{}, err
-	}
-	return GuardFailureFromSpec(spec)
-}
-
 func GuardFailureFromSpec(spec runtimecontracts.GuardFailureSpec) (GuardFailure, error) {
 	switch spec.Action {
 	case runtimecontracts.GuardFailureActionReject:

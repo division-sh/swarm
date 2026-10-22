@@ -230,14 +230,6 @@ func (v ExecutionVariant) authorityForMode(mode executionmode.Mode) runtimeeffec
 	return authority
 }
 
-func IsBound(ctx context.Context) bool {
-	if ctx == nil {
-		return false
-	}
-	kind, ok := ctx.Value(executionContextKey{}).(ExecutionKind)
-	return ok && (kind == ExecutionNormal || kind == ExecutionSelectedContractFork)
-}
-
 // NewContext mirrors only lifetime cancellation/deadline onto an empty value
 // tree. The returned cleanup releases the cancellation bridge.
 func NewContext(lifetime context.Context) (context.Context, func()) {

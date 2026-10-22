@@ -47,11 +47,6 @@ func (g Generation) Diagnostic() string {
 	return hex.EncodeToString(g.digest[:])
 }
 
-func (g Generation) MatchesDiagnostic(encoded string) bool {
-	other, err := Parse(encoded)
-	return err == nil && g.Equal(other)
-}
-
 func (g Generation) MarshalJSON() ([]byte, error) {
 	if !g.valid {
 		return nil, fmt.Errorf("trigger catalog generation is missing")

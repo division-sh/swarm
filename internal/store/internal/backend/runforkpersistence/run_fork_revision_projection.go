@@ -233,5 +233,3 @@ func stringSliceSet(values []string) map[string]struct{} {
 	}
 	return out
 }
-
-func StringSliceSet(values []string) map[string]struct{} { return stringSliceSet(values) }

@@ -147,12 +147,6 @@ func DefaultGeneratedCleanupCatalog() []CleanupCatalogEntry {
 	}
 }
 
-func DefaultCleanupCatalog() []CleanupCatalogEntry {
-	out := DefaultPlatformCleanupCatalog()
-	out = append(out, DefaultGeneratedCleanupCatalog()...)
-	return out
-}
-
 func CleanupCatalogForPolicy(policy CleanupPolicy) []CleanupCatalogEntry {
 	out := PlatformCleanupCatalogForPolicy(policy)
 	out = append(out, DefaultGeneratedCleanupCatalog()...)

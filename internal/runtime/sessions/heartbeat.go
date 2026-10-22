@@ -15,10 +15,6 @@ const (
 	maxLeaseHeartbeatInterval = 45 * time.Second
 )
 
-func StartLeaseHeartbeat(ctx context.Context, sessions Registry, lease *Lease) func() {
-	return StartLeaseHeartbeatWithErrorHandler(ctx, sessions, lease, nil)
-}
-
 func StartLeaseHeartbeatWithErrorHandler(ctx context.Context, sessions Registry, lease *Lease, onError func(error)) func() {
 	if sessions == nil || lease == nil {
 		return func() {}
