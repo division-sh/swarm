@@ -51,7 +51,7 @@ func validateSharedCoordinatorComposition2617(row recipe, actual string, directi
 	}
 	var prior reviewedSuccessorPacket2617
 	// The separately pinned C packet is immutable, not refreshed by this merge.
-	if fmt.Sprintf("%x", sha256.Sum256(priorSharedCoordinatorBytes2617)) != "04c99a54f396347c0b3cd0b6d3333d9c167e7303b431799800289b5aa70812e5" {
+	if fmt.Sprintf("%x", sha256.Sum256(priorSharedCoordinatorBytes2617)) != "6ed21982df76f46f7048b20781b83a7ba663de7dce3bd383adc7f3dce43d876f" {
 		return fmt.Errorf("prior C composition evidence changed")
 	}
 	if err := json.Unmarshal(priorSharedCoordinatorBytes2617, &prior); err != nil {

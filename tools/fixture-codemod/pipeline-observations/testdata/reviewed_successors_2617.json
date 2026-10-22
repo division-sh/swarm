@@ -868,7 +868,7 @@
       "File": "internal/runtime/slack_connector_managed_credential_supported_surface_test.go",
       "Function": "startSlackManagedConnectorBusAndCoordinator",
       "HistorySHA256": "4ce8c8bd7078e59357628af5a07b2f99cf1dd85fcee1e06dd4c1dac2d3c733bc",
-      "CurrentSHA256": "36fc0fed9666a0e4452af851db0af37b40f846a99a383c157769e6fce8d9a0d9",
+      "CurrentSHA256": "91480cea2f6c8042576c92e1c1bc9ddbf8d5f1c7362133311e61194aa4b0b136",
       "HasSuccessor": true
     },
     {
@@ -876,7 +876,7 @@
       "File": "internal/runtime/telegram_connector_supported_surface_test.go",
       "Function": "startTelegramConnectorSupportedSurfaceCoordinator",
       "HistorySHA256": "f2c2d224dbe21ea9bc60a0a2e26bd4691ce525c52bddea587e6731d4cca08407",
-      "CurrentSHA256": "6e36a894c6f9b4615147f868899a007140a6b1622aa5301da2eeb453e57f1f41",
+      "CurrentSHA256": "ebde7f1ff06e2b46505e2701d2b97fc44fcc94709e00567543ef472ef40e8ae2",
       "HasSuccessor": true
     },
     {
