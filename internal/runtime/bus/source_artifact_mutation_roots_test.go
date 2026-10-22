@@ -388,7 +388,7 @@ func VerifyDeliverySessionBindingRejectsForeignSourceWithExactClaimBeforeStoreMu
 	owned := fixture.Authority.SourceArtifact()
 	foreign := sourceMutationFact(t, "8")
 	store := newExactHandoffProofStore(fixture, false)
-	bus := newSourceMutationProbeBusWithStore(t, store, owned, newSourceMutationProbeOwner())
+	bus := newSourceMutationProbeBusWithStore(t, store, owned, newSourceMutationProbeOwner(), fixture.Source)
 	bus.durable.DeliveryLifecycle = store
 	eventID, runID := uuid.NewString(), uuid.NewString()
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: testAgentRouteIdentityForRun(t, runID, "agent-a", "")}

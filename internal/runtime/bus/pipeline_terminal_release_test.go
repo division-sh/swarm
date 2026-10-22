@@ -481,7 +481,7 @@ func TestInvalidPreparedDispatchTerminallyConsumesAttachedPublicationClaim(t *te
 func VerifyEventBusResetPreservesPendingOperationUntilPriorRetirementSucceedsForTest(t *testing.T, open ExactHandoffNativeOpenerForTest) {
 	store := newExactHandoffProofStore(open(t, false), false)
 	owner := newTerminalReleasePipelineOwner()
-	bus, err := newScopedTestEventBus(store, EventBusOptions{PipelineObligations: owner})
+	bus, err := newScopedTestEventBus(store, EventBusOptions{PipelineObligations: owner, ContractBundle: store.fixture.Source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
