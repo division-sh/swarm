@@ -27,45 +27,6 @@ func Materialize[T any](node *BuildNode[T], reset func(*T, int), addChild func(*
 	return out
 }
 
-func IndexAndPopulateScopedURIs[T any, N any, A any, E any](
-	root *T,
-	tree *Tree[T],
-	registry *URIRegistry,
-	id func(*T) string,
-	children func(*T) []*T,
-	normalizeParent func(*T) *T,
-	setParent func(*T, *T),
-	setPath func(*T, string),
-	setURI func(*T, string),
-	flowID func(*T) string,
-	flowPath func(*T) string,
-	nodeEntries func(*T) map[string]N,
-	agentEntries func(*T) map[string]A,
-	eventEntries func(*T) map[string]E,
-	nodeURIs func(*T) *map[string]string,
-	agentURIs func(*T) *map[string]string,
-	eventURIs func(*T) *map[string]string,
-) {
-	if root == nil || tree == nil {
-		return
-	}
-	IndexTree(root, nil, "", tree, registry, id, children, normalizeParent, setParent, setPath, setURI)
-	Walk(root, children, func(node *T) {
-		PopulateScopedURIs(
-			node,
-			registry,
-			flowID,
-			flowPath,
-			nodeEntries,
-			agentEntries,
-			eventEntries,
-			nodeURIs,
-			agentURIs,
-			eventURIs,
-		)
-	})
-}
-
 func PopulateScopedURIs[T any, N any, A any, E any](
 	node *T,
 	registry *URIRegistry,

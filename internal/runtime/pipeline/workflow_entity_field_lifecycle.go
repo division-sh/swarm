@@ -1,9 +1,6 @@
 package pipeline
 
 import (
-	"strings"
-
-	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
@@ -44,21 +41,4 @@ func stripWorkflowExpressionStringLiterals(expression string) string {
 
 func WorkflowEntityReferenceField(ref string) string {
 	return workflowexpr.EntityReferenceField(ref)
-}
-
-func WorkflowEntityFieldNameFromTarget(target string) (string, bool) {
-	return workflowEntityFieldNameFromTarget(target)
-}
-
-func workflowEntityFieldNameFromTarget(target string) (string, bool) {
-	path, entityTarget, err := entityruntime.EntityWritePath(target)
-	if err != nil || !entityTarget {
-		return "", false
-	}
-	field, _, _ := strings.Cut(path, ".")
-	field = strings.TrimSpace(field)
-	if field == "" {
-		return "", false
-	}
-	return field, true
 }

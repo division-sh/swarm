@@ -535,20 +535,6 @@ typed-process-local	callback-type	typed	internal/runtime/eventbus_logger.go	NewR
 typed-process-local	callback-type	typed	internal/runtime/eventbus_logger.go	newRuntimeEventBus	param:interceptorProvider	func() []github.com/division-sh/swarm/internal/runtime/bus.EventInterceptor
 typed-process-local	callback-type	typed	internal/runtime/eventbus_logger.go	newRuntimeEventBus	param:payloadAdmitter	github.com/division-sh/swarm/internal/runtime/bus.PayloadAdmitter
 typed-process-local	callback-type	typed	internal/runtime/failures/failures.go	OnlyBranches	param:allowed	func(error) bool
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:agentEntries	func(*T) map[string]A
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:agentURIs	func(*T) *map[string]string
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:children	func(*T) []*T
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:eventEntries	func(*T) map[string]E
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:eventURIs	func(*T) *map[string]string
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:flowID	func(*T) string
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:flowPath	func(*T) string
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:id	func(*T) string
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:nodeEntries	func(*T) map[string]N
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:nodeURIs	func(*T) *map[string]string
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:normalizeParent	func(*T) *T
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:setParent	func(*T, *T)
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:setPath	func(*T, string)
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	IndexAndPopulateScopedURIs	param:setURI	func(*T, string)
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	Materialize	param:addChild	func(*T, T)
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	Materialize	param:reset	func(*T, int)
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/build.go	PopulateScopedURIs	param:agentEntries	func(*T) map[string]A
@@ -563,16 +549,8 @@ typed-process-local	callback-type	typed	internal/runtime/flowmodel/clone.go	Clon
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/clone.go	CloneViewTree	param:mutate	func(*github.com/division-sh/swarm/internal/runtime/flowmodel.View[P, S, N, E, A, T])
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/clone.go	cloneViewTree	param:id	func(*github.com/division-sh/swarm/internal/runtime/flowmodel.View[P, S, N, E, A, T]) string
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/clone.go	cloneViewTree	param:mutate	func(*github.com/division-sh/swarm/internal/runtime/flowmodel.View[P, S, N, E, A, T])
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/index.go	IndexTree	param:children	func(*T) []*T
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/index.go	IndexTree	param:id	func(*T) string
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/index.go	IndexTree	param:normalizeParent	func(*T) *T
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/index.go	IndexTree	param:setParent	func(*T, *T)
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/index.go	IndexTree	param:setPath	func(*T, string)
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/index.go	IndexTree	param:setURI	func(*T, string)
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/query.go	CollectPathByID	param:children	func(*T) []*T
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/query.go	CollectPathByID	param:id	func(*T) string
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/query.go	NearestAncestor	param:include	func(*T) bool
-typed-process-local	callback-type	typed	internal/runtime/flowmodel/query.go	NearestAncestor	param:parent	func(*T) *T
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/query.go	Walk	param:children	func(*T) []*T
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/query.go	Walk	param:fn	func(*T)
 typed-process-local	callback-type	typed	internal/runtime/flowmodel/query.go	collectPathByID	param:children	func(*T) []*T

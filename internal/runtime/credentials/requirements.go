@@ -161,21 +161,6 @@ func ListDescriptors(ctx context.Context, store Store, source semanticview.Sourc
 	return out, nil
 }
 
-func MissingRequired(ctx context.Context, store Store, source semanticview.Source) ([]Descriptor, error) {
-	descriptors, err := ListDescriptors(ctx, store, source)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Descriptor, 0)
-	for _, desc := range descriptors {
-		if desc.Present || len(desc.RequiredBy) == 0 {
-			continue
-		}
-		out = append(out, desc)
-	}
-	return out, nil
-}
-
 func inspectStore(ctx context.Context, store Store, key string) (Metadata, error) {
 	if inspector, ok := store.(Inspector); ok && inspector != nil {
 		meta, err := inspector.Inspect(ctx, key)
