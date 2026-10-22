@@ -14,7 +14,7 @@ import (
 
 func seedConnectorCredentialStorageWitness(t *testing.T, fixture authorActivityReceiptFixture, runID string) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 	for index := 0; index < 2; index++ {
 		event := eventtest.ExistingRunRootIngress(uuid.NewString(), "activity.evidence", "fixture", "",

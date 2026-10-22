@@ -28,14 +28,23 @@ import (
 	"github.com/google/uuid"
 )
 
-func constructWorkflowMutationFixture(t *testing.T, backend, flowID string, at time.Time) (receiverConfigActivationFixture, runtimepipeline.WorkflowEngineStateRecord) {
+func constructWorkflowMutationFixture(t *testing.T, backend, flowID string, at time.Time, prepared ...agentFixtureFlowStore) (receiverConfigActivationFixture, runtimepipeline.WorkflowEngineStateRecord) {
 	t.Helper()
-	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
+	if len(prepared) > 1 {
+		t.Fatal("workflow mutation fixture accepts one original selected store")
+	}
+	var selected agentFixtureFlowStore
+	if len(prepared) == 1 {
+		selected = prepared[0]
+	} else {
+		_, selected = newAgentFixtureAuthorityStore(t, backend)
+	}
+	f := newReceiverConfigActivationFixtureForStore(t, selected, false, map[string]string{
 		"schema.yaml":             "name: workflow-mutation\n",
 		flowID + "/schema.yaml":   "name: " + flowID + "\ninstance: receiver_key\nstages:\n  active: {}\n  done: {}\npins:\n  inputs: [construct.requested]\n",
 		flowID + "/entities.yaml": "review_item:\n  receiver_key: text\n  account_id: {type: text, initial: preserved}\n  handled: boolean?\n",
 		flowID + "/events.yaml":   "construct.requested:\n",
-	}, nil)
+	}, nil, ownStoreTestAgentManager, nil)
 	runID := correlation.RunIDFromContext(f.ctx)
 	activateFixtureStructuralRoot(t, f.ctx, f.manager, f.bundle, at)
 	req := sqliteFlowActivationRequest(f.bundle, flowID, "receiver", "", flowID+"/receiver")

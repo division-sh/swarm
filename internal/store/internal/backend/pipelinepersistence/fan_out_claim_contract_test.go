@@ -14,14 +14,22 @@ import (
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 )
 
-func TestFanOutUnacknowledgedCommitCannotBorrowSuccessorOnBothStores(t *testing.T) {
+func VerifyFanOutUnacknowledgedCommitCannotBorrowSuccessorForTest(t *testing.T, prepare StatementProcessFixtureForTest) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, disposition := range []string{"none", "claimed", "advanced", "canceled"} {
 			t.Run(backend+"/"+disposition, func(t *testing.T) {
-				ctx := context.Background()
-				db := fanOutReadbackTestDB(t, backend)
+				db := openFanOutReadbackTestDB(t, backend)
 				if backend == "sqlite" {
 					db.SetMaxOpenConns(1)
+				}
+				var ctx context.Context
+				if backend == "postgres" {
+					_, ctx = materializePostgresStatementRuns(t, db, false, prepare)
+				} else {
+					_, ctx = materializeSQLiteStatementRuns(t, db, false, prepare)
+				}
+				initializeFanOutReadbackTestDB(t, db, backend)
+				if backend == "sqlite" {
 					if _, err := db.Exec(`PRAGMA foreign_keys=ON`); err != nil {
 						t.Fatal(err)
 					}

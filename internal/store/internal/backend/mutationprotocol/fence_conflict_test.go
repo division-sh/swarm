@@ -32,6 +32,7 @@ type fenceConflictConnector struct {
 	rollbackFailure, commitFailure error
 	afterRollback                  func() error
 	conflictQueryPrefix            string
+	baseSequence                   int64
 }
 
 func (p *fenceConflictConnector) Driver() driver.Driver { return p.driver }
@@ -120,15 +121,19 @@ func (tx *fenceConflictTx) Rollback() error {
 	return err
 }
 
-func nativeFenceBackend(t *testing.T) (*postgresbackend.Backend, *fenceConflictConnector, *postgresbackend.AdvisoryLockLease) {
+type NativeFenceAuthorityFixtureForTest func(*testing.T, string) context.Context
+
+func nativeFenceBackend(t *testing.T, prepare NativeFenceAuthorityFixtureForTest) (*postgresbackend.Backend, *fenceConflictConnector, *postgresbackend.AdvisoryLockLease, context.Context) {
 	t.Helper()
 	dsn, original, _ := testutil.StartEmptyPostgres(t)
-	faultMatrixSchema(t, original)
-	faultMatrixActivitySchema(t, original)
-	if _, err := original.Exec(`INSERT INTO author_activity_order VALUES (1, 0)`); err != nil {
+	ctx := prepare(t, dsn)
+	if _, err := original.Exec(`CREATE TABLE mutation_fault_probe (value TEXT PRIMARY KEY)`); err != nil {
 		t.Fatal(err)
 	}
 	p := &fenceConflictConnector{driver: original.Driver(), dsn: dsn, competitor: original, conflicts: 1}
+	if err := original.QueryRow(`SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&p.baseSequence); err != nil {
+		t.Fatal(err)
+	}
 	db := sql.OpenDB(p)
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
@@ -145,11 +150,11 @@ func nativeFenceBackend(t *testing.T) (*postgresbackend.Backend, *fenceConflictC
 			t.Error(err)
 		}
 	})
-	return b, p, lease
+	return b, p, lease, ctx
 }
 
-func TestNativeRetainedPostgresFenceConflictRetriesBeforeDomain(t *testing.T) {
-	_, p, lease := nativeFenceBackend(t)
+func VerifyNativeRetainedPostgresFenceConflictRetriesBeforeDomainForTest(t *testing.T, prepare NativeFenceAuthorityFixtureForTest) {
+	_, p, lease, ctx := nativeFenceBackend(t, prepare)
 	baseline := NewBaseline()
 	// Dirty attempt-local revision evidence must not survive the aborted fence.
 	p.onConflict = func() error {
@@ -157,7 +162,7 @@ func TestNativeRetainedPostgresFenceConflictRetriesBeforeDomain(t *testing.T) {
 	}
 	calls := 0
 	var domainAttempt *Attempt
-	result := RunRetainedPostgresWithOptions(context.Background(), lease.Session(), &sql.TxOptions{Isolation: sql.LevelSerializable}, Story, Ordinary, baseline, nil,
+	result := RunRetainedPostgresWithOptions(ctx, lease.Session(), &sql.TxOptions{Isolation: sql.LevelSerializable}, Story, Ordinary, baseline, nil,
 		func(ctx context.Context, attempt *Attempt) (string, error) {
 			calls++
 			domainAttempt = attempt
@@ -167,7 +172,7 @@ func TestNativeRetainedPostgresFenceConflictRetriesBeforeDomain(t *testing.T) {
 			}); err != nil {
 				return "", err
 			}
-			if sequence != 1 {
+			if sequence != p.baseSequence+1 {
 				return "", fmt.Errorf("stale authority sequence %d", sequence)
 			}
 			if err := faultMatrixInsert(ctx, attempt, "selected-fork-output"); err != nil {
@@ -195,7 +200,7 @@ func TestNativeRetainedPostgresFenceConflictRetriesBeforeDomain(t *testing.T) {
 		t.Fatal("output was not exactly once")
 	}
 	var occurrences, sequence int64
-	if err := p.competitor.QueryRow(`SELECT COUNT(*), MAX(sequence) FROM author_activity_occurrences WHERE dedup_key='selected-fork-history'`).Scan(&occurrences, &sequence); err != nil || occurrences != 1 || sequence != 2 {
+	if err := p.competitor.QueryRow(`SELECT COUNT(*), MAX(sequence) FROM author_activity_occurrences WHERE dedup_key='selected-fork-history'`).Scan(&occurrences, &sequence); err != nil || occurrences != 1 || sequence != p.baseSequence+2 {
 		t.Fatalf("history did not use fresh ordering exactly once: occurrences=%d sequence=%d err=%v", occurrences, sequence, err)
 	}
 	if err := lease.ProveCurrent(context.Background()); err != nil {
@@ -203,7 +208,7 @@ func TestNativeRetainedPostgresFenceConflictRetriesBeforeDomain(t *testing.T) {
 	}
 }
 
-func TestNativePostgresFenceConsumers(t *testing.T) {
+func VerifyNativePostgresFenceConsumersForTest(t *testing.T, prepare NativeFenceAuthorityFixtureForTest) {
 	for _, tc := range []struct {
 		name      string
 		evidence  Evidence
@@ -216,12 +221,12 @@ func TestNativePostgresFenceConsumers(t *testing.T) {
 		{"read_committed", Story, Ordinary, sql.LevelReadCommitted},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			b, p, lease := nativeFenceBackend(t)
+			b, p, lease, ctx := nativeFenceBackend(t, prepare)
 			if err := lease.Release(context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			calls := 0
-			result := RunPostgresWithOptions(context.Background(), b, &sql.TxOptions{Isolation: tc.isolation}, tc.evidence, tc.kind, nil, runhandoff.NewCandidateCoordinator(),
+			result := RunPostgresWithOptions(ctx, b, &sql.TxOptions{Isolation: tc.isolation}, tc.evidence, tc.kind, nil, runhandoff.NewCandidateCoordinator(),
 				func(ctx context.Context, attempt *Attempt) (string, error) {
 					calls++
 					if tc.kind == RetainedForkCleanup {
@@ -246,10 +251,10 @@ func TestNativePostgresFenceConsumers(t *testing.T) {
 	}
 }
 
-func TestNativeRetainedPostgresPersistentFenceConflictCancellation(t *testing.T) {
-	_, p, lease := nativeFenceBackend(t)
+func VerifyNativeRetainedPostgresPersistentFenceConflictCancellationForTest(t *testing.T, prepare NativeFenceAuthorityFixtureForTest) {
+	_, p, lease, baseCtx := nativeFenceBackend(t, prepare)
 	p.conflicts = -1
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(baseCtx)
 	defer cancel()
 	p.onConflict = func() error {
 		if p.fences == 8 {
@@ -275,10 +280,10 @@ func TestNativeRetainedPostgresPersistentFenceConflictCancellation(t *testing.T)
 	}
 }
 
-func TestNativeRetainedPostgresFenceSettlementRefusesRetry(t *testing.T) {
+func VerifyNativeRetainedPostgresFenceSettlementRefusesRetryForTest(t *testing.T, prepare NativeFenceAuthorityFixtureForTest) {
 	for _, scenario := range []string{"rollback_failure", "session_cleanup", "revoked_session", "already_settled"} {
 		t.Run(scenario, func(t *testing.T) {
-			_, p, lease := nativeFenceBackend(t)
+			_, p, lease, ctx := nativeFenceBackend(t, prepare)
 			session := lease.Session()
 			cleanup := errors.New("independent native cleanup")
 			switch scenario {
@@ -292,7 +297,7 @@ func TestNativeRetainedPostgresFenceSettlementRefusesRetry(t *testing.T) {
 				p.afterRollback = func() error { return sql.ErrTxDone }
 			}
 			calls := 0
-			result := RunRetainedPostgresWithOptions(context.Background(), session, &sql.TxOptions{Isolation: sql.LevelSerializable}, Story, Ordinary, nil, nil,
+			result := RunRetainedPostgresWithOptions(ctx, session, &sql.TxOptions{Isolation: sql.LevelSerializable}, Story, Ordinary, nil, nil,
 				func(context.Context, *Attempt) (string, error) { calls++; return "must-not-run", nil })
 			faultMatrixNoValue(t, result, AcquireFence)
 			if calls != 0 || p.fences != 1 || p.rollbacks != 1 || p.commits != 0 || postgresbackend.IsRolledBackSerializationConflict(result.Err()) {
@@ -305,10 +310,10 @@ func TestNativeRetainedPostgresFenceSettlementRefusesRetry(t *testing.T) {
 	}
 }
 
-func TestNativeRetainedPostgresPostFenceConflictsNeverReplay(t *testing.T) {
+func VerifyNativeRetainedPostgresPostFenceConflictsNeverReplayForTest(t *testing.T, prepare NativeFenceAuthorityFixtureForTest) {
 	for _, scenario := range []string{"domain", "revision_finalize", "activity_finalize", "unconfirmed_commit", "acknowledged_cleanup"} {
 		t.Run(scenario, func(t *testing.T) {
-			_, p, lease := nativeFenceBackend(t)
+			_, p, lease, ctx := nativeFenceBackend(t, prepare)
 			p.conflicts = 0
 			session := lease.Session()
 			wantPhase := DomainWrite
@@ -329,7 +334,7 @@ func TestNativeRetainedPostgresPostFenceConflictsNeverReplay(t *testing.T) {
 				session.SetEndTxErrorForTest(func() error { return &pq.Error{Code: "40001", Message: "independent postcommit cleanup"} })
 			}
 			calls := 0
-			result := RunRetainedPostgresWithOptions(context.Background(), session, &sql.TxOptions{Isolation: sql.LevelSerializable}, Story, Ordinary, nil, nil,
+			result := RunRetainedPostgresWithOptions(ctx, session, &sql.TxOptions{Isolation: sql.LevelSerializable}, Story, Ordinary, nil, nil,
 				func(ctx context.Context, attempt *Attempt) (string, error) {
 					calls++
 					if err := faultMatrixInsert(ctx, attempt, scenario); err != nil {
@@ -382,12 +387,12 @@ func (c fenceBackoffCancellation) Done() <-chan struct{} {
 	return c.Context.Done()
 }
 
-func TestNativeRetainedPostgresFenceRetryRechecksAdmission(t *testing.T) {
+func VerifyNativeRetainedPostgresFenceRetryRechecksAdmissionForTest(t *testing.T, prepare NativeFenceAuthorityFixtureForTest) {
 	for _, scenario := range []string{"joined_evidence", "wrapped_evidence", "revoked_after_settlement", "backoff_cancel"} {
 		t.Run(scenario, func(t *testing.T) {
-			_, p, lease := nativeFenceBackend(t)
+			_, p, lease, baseCtx := nativeFenceBackend(t, prepare)
 			session := lease.Session()
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(baseCtx)
 			defer cancel()
 			if scenario == "backoff_cancel" {
 				ctx = fenceBackoffCancellation{Context: ctx, cancel: cancel}
