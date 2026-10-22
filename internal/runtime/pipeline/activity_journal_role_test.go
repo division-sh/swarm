@@ -65,16 +65,6 @@ type unusedActivityInstanceReader struct {
 }
 
 // These HTTP/payload unit controls do not supply native execution permission.
-func newJournaledActivityHTTPComponentForTest(t *testing.T, bus Bus, options PipelineCoordinatorOptions) *PipelineCoordinator {
-	t.Helper()
-	pc := newPreviewPipelineCoordinatorForTest(bus, options)
-	pc.workflowStore = &workflowInstanceStore{instanceReader: &unusedActivityInstanceReader{}}
-	if err := pc.InstallActivityJournal(&capturedActivityJournalProbe{}); err != nil {
-		t.Fatal(err)
-	}
-	return pc
-}
-
 func TestActivityDispatchRetainsInstalledJournalAcrossReplacement(t *testing.T) {
 	for _, interrupted := range []bool{false, true} {
 		t.Run(map[bool]string{false: "completed", true: "uncertain"}[interrupted], func(t *testing.T) {
@@ -83,6 +73,7 @@ func TestActivityDispatchRetainsInstalledJournalAcrossReplacement(t *testing.T) 
 			original, successor := &capturedActivityJournalProbe{}, &capturedActivityJournalProbe{}
 			tool := runtimecontracts.MustToolSchemaEntry(
 				runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+				runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 				runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: http.MethodGet, URL: "https://proof.invalid"}),
 				runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.ToolInputSchema{}),
 			)

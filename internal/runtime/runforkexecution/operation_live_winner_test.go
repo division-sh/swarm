@@ -12,7 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
+
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -109,7 +109,6 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 			repo := runForkExecutionRepoRoot(t)
 			fixtureLoader := admittedFixtureSelectedContractSourceLoader{
 				RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"),
-				PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo),
 			}
 			loaded, err := fixtureLoader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 			if err != nil {
@@ -136,7 +135,7 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 			request := SelectedContractExecutionRequest{
 				Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true,
 				ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection,
-				SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo),
+				SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,
 					Store: selected.(SourceArtifactSelectedContractSourceStore)},
 				AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 			}
@@ -324,7 +323,6 @@ func ownerlessSelectedOperationFixtureFromSource(t *testing.T, backend, sourceRo
 	repo := runForkExecutionRepoRoot(t)
 	loader := admittedFixtureSelectedContractSourceLoader{
 		RepoRoot: repo, SourceRoot: sourceRoot,
-		PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo),
 	}
 	if !filepath.IsAbs(loader.SourceRoot) {
 		loader.SourceRoot = filepath.Join(repo, loader.SourceRoot)
@@ -354,7 +352,7 @@ func ownerlessSelectedOperationFixtureFromSource(t *testing.T, backend, sourceRo
 	return ctx, SelectedContractExecutionRequest{
 		Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true,
 		ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection,
-		SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo),
+		SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,
 			Store: selected.(SourceArtifactSelectedContractSourceStore)},
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 	}

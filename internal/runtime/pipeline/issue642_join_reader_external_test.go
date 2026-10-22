@@ -380,7 +380,7 @@ func issue642RequireCapturedJoinReaderState(t *testing.T, f *issue642JoinReaderF
 	} else if scenario.count > 0 {
 		want = 2
 	}
-	if len(plan.JoinSchedules) != want || len(plan.Entities) != 1 || plan.Entities[0].EntityID != f.owner.RunID || plan.Entities[0].CurrentState != before.CurrentState {
+	if len(plan.JoinSchedules) != want || len(plan.Entities) != 1 || plan.Entities[0].EntityID != f.owner.RunID || plan.Entities[0].CurrentState == nil || *plan.Entities[0].CurrentState != before.CurrentState {
 		t.Fatalf("native planner lost its exact join/receiver census: schedules=%d entities=%d want_schedules=%d", len(plan.JoinSchedules), len(plan.Entities), want)
 	}
 	if scenario.noJoin {

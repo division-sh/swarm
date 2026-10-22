@@ -192,7 +192,7 @@ func projectRunForkConstructionReceipt(plan runfork.RunForkPlan, forkRunID strin
 		return pipeline.FlowConstructionReceipt{}, err
 	}
 	initial := entity
-	initial.CurrentState = source.InitialState
+	initial.CurrentState = &source.InitialState
 	initial.Bookkeeping, initial.Accumulator = source.Persisted.Bookkeeping, source.Persisted.Accumulator
 	projection, err := runfork.ProjectEntityOwnership(plan.SourceRunID, forkRunID, entity.EntityID, meta.FlowInstance)
 	if err != nil {

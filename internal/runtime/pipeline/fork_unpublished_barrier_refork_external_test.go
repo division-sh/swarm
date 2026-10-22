@@ -106,7 +106,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 			}
 			request := runforkexecution.SelectedContractExecutionRequest{SourceRunID: ancestor, At: original.id,
 				AllowSourceFreeze: true, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(),
-				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
+				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 				ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 				AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture}}
 			parentRequest := request
@@ -237,7 +237,7 @@ func verifyUnpublishedTransferredBarrierRefork(t *testing.T, latePublication boo
 				if err != nil {
 					t.Fatal(err)
 				}
-				publishBarrierCrashCheckpoint(t, phase, selected, child, occurrence.Publication.EventID, observed, source.Entity.Revision)
+				publishBarrierCrashCheckpoint(t, phase, selected, child, occurrence.Publication.EventID, observed, forkFixtureEntityRevision(t, source.Entity.Revision))
 			}
 			if _, err := childProbe.Wait(phase, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: id, SubscriberID: producer.Key(), SubscriberType: "node", Status: "delivered"}); err != nil {
 				t.Fatal(err)

@@ -2,7 +2,7 @@ package runforkexecution
 
 import (
 	"context"
-	"path/filepath"
+
 	"reflect"
 	"sync"
 	"testing"
@@ -225,7 +225,7 @@ func proveSelectedNestedDeadlines(t *testing.T, refusals bool, restartVariant st
 				root = canonicalrouting.CopyTwoOpenFanOutReplyDeadlines(t)
 			}
 			repo := runForkExecutionRepoRoot(t)
-			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml")}
+			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root}
 			loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 			if err != nil {
 				t.Fatal(err)

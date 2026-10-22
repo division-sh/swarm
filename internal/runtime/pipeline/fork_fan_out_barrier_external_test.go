@@ -149,7 +149,7 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 				probe := &forkBarrierCompletionProbe{Probe: lifecycleprobe.New(), completed: make(chan string, 1), claimed: make(chan forkEngineObservation, 1)}
 				result, err := family.Execute(phase, runforkexecution.SelectedContractExecutionRequest{
 					SourceRunID: runID, At: cutID, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
-					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
+					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 					ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 					AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture,
 						AgentManagerOptions: manager.AgentManagerOptions{TestLifecycleProbe: probe}},
@@ -197,7 +197,7 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 					t.Fatalf("selected barrier did not reach its real final consumer: %v", err)
 				}
 				child, err := selected.Entities().LoadOperatorEntity(phase, proof.ForkRunID, proof.ForkRunID)
-				if err != nil || child.Fields["completed_total"] != float64(1) || child.Entity.Revision != 2 {
+				if err != nil || child.Fields["completed_total"] != float64(1) || forkFixtureEntityRevision(t, child.Entity.Revision) != 2 {
 					t.Fatalf("final consumer did not retain exactly one ordinal: %+v err=%v", child, err)
 				}
 				childPlan, err := family.Plan(phase, runfork.RunForkPlanRequest{SourceRunID: proof.ForkRunID, At: final.EventID})
@@ -219,7 +219,7 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 					t.Fatalf("barrier progressed without exact settled receiver evidence: %+v", native)
 				}
 				childConsumer, err := selected.Entities().LoadOperatorEntity(phase, sourceConsumer.EntityID, proof.ForkRunID)
-				if err != nil || childConsumer.Fields["processed_token"] != token || childConsumer.Entity.Revision != 2 {
+				if err != nil || childConsumer.Fields["processed_token"] != token || forkFixtureEntityRevision(t, childConsumer.Entity.Revision) != 2 {
 					t.Fatalf("continued receiver did not mutate exactly once: %+v err=%v", childConsumer, err)
 				}
 				report, err := selected.Runs().LoadRunDebugReport(phase, proof.ForkRunID, operatorread.RunDebugQueryOptions{})
@@ -238,11 +238,11 @@ func TestIssue642FanOutBarrierFrontierBothStores(t *testing.T) {
 					t.Fatalf("barrier omitted consumers: %+v", wantRecipients)
 				}
 				afterSource, err := selected.Entities().LoadOperatorEntity(phase, sourceRoot.EntityID, runID)
-				if err != nil || !reflect.DeepEqual(beforeSource.Fields, afterSource.Fields) || beforeSource.Entity.Revision != afterSource.Entity.Revision {
+				if err != nil || !reflect.DeepEqual(beforeSource.Fields, afterSource.Fields) || forkFixtureEntityRevision(t, beforeSource.Entity.Revision) != forkFixtureEntityRevision(t, afterSource.Entity.Revision) {
 					t.Fatalf("child barrier modified source: before=%+v after=%+v err=%v", beforeSource, afterSource, err)
 				}
 				afterConsumer, err := selected.Entities().LoadOperatorEntity(phase, sourceConsumer.EntityID, runID)
-				if err != nil || !reflect.DeepEqual(beforeConsumer.Fields, afterConsumer.Fields) || beforeConsumer.Entity.Revision != afterConsumer.Entity.Revision {
+				if err != nil || !reflect.DeepEqual(beforeConsumer.Fields, afterConsumer.Fields) || forkFixtureEntityRevision(t, beforeConsumer.Entity.Revision) != forkFixtureEntityRevision(t, afterConsumer.Entity.Revision) {
 					t.Fatalf("child receiver modified source: before=%+v after=%+v err=%v", beforeConsumer, afterConsumer, err)
 				}
 				cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)

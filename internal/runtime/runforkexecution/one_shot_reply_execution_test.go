@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"path/filepath"
+
 	"reflect"
 	"testing"
 	"time"
@@ -60,7 +60,7 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores(t *testing.T) {
 				construct = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
 			}
 			repo, ctx := runForkExecutionRepoRoot(t), runForkTestContext(t)
-			loader := nativeSelectedCrashLoader{admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: canonicalrouting.CopyOneShotReplySchedule(t), PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml")}}
+			loader := nativeSelectedCrashLoader{admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: canonicalrouting.CopyOneShotReplySchedule(t)}}
 			loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: runfork.RunForkContractSelection{Mode: "selected_contracts"}})
 			if err != nil {
 				t.Fatal(err)

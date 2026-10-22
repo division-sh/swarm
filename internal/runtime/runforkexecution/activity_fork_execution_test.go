@@ -69,7 +69,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 			effectClass:     runtimecontracts.ActivityEffectClassNonIdempotentWrite,
 			forkPolicy:      "require_manual_confirmation",
 			resultEventType: "flow_a/connector.succeeded",
-			wantError:       "fork policy \"require_manual_confirmation\" is not executable",
+			wantError:       "has no recorded attempt evidence for fork reuse",
 		},
 		{
 			name:               "read-only reexecutes exactly once",
@@ -81,7 +81,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 		{
 			name:                  "succeeded write publishes recorded result",
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:            "reuse_recorded_result",
+			forkPolicy:            "require_manual_confirmation",
 			sourceAttemptStatus:   "succeeded",
 			resultEventType:       "flow_a/connector.succeeded",
 			wantForkAttemptStatus: "succeeded",
@@ -89,7 +89,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 		{
 			name:                  "failed write publishes recorded typed failure",
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:            "reuse_recorded_result",
+			forkPolicy:            "require_manual_confirmation",
 			sourceAttemptStatus:   "failed",
 			resultEventType:       "flow_a/connector.failed",
 			failureClass:          string(runtimefailures.ClassDependencyUnavailable),
@@ -99,7 +99,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 		{
 			name:                  "uncertain write stays uncertain and publishes outcome-uncertain failure",
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:            "reuse_recorded_result",
+			forkPolicy:            "require_manual_confirmation",
 			sourceAttemptStatus:   "uncertain",
 			resultEventType:       "flow_a/connector.failed",
 			failureClass:          string(runtimefailures.ClassOutcomeUncertain),
@@ -135,10 +135,11 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				Recipient: events.MustNodeDeliveryRecipient(activityNode),
 				Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow_a", FlowInstance: "flow_a", EntityID: entityID}),
 			}
+			defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(tt.effectClass)
 			request := selectedContractActivityRequestPayload{
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
 				EffectClass: string(tt.effectClass), SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
-				RetryMaxAttempts: 1, ForkPolicy: string(tt.forkPolicy), EntityID: entityID, FlowInstance: "flow_a",
+				RetryMaxAttempts: defaults.MaxAttempts, RetryBackoff: defaults.Backoff, ForkPolicy: string(tt.forkPolicy), EntityID: entityID, FlowInstance: "flow_a",
 				NodeID: activityidentity.MustNodeOwner(activityNode).Key(), FlowID: "flow_a", HandlerEventKey: "review.requested",
 				SourceEventID: initiatingEventID, SourceRunID: sourceRunID, Attempt: 1,
 				Generation: sourceGeneration, LoopStage: "review",
@@ -228,6 +229,14 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				}
 			}
 			original, err := semanticview.CompileOriginalLoopCarriage(loaded.Source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourcePlan, err := fixture.owner.ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: sourceRequestEventID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			original, err = retainOriginalActivityHistory(ctx, loader, original, sourcePlan)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -390,6 +399,14 @@ func seedSelectedContractActivitySource(t *testing.T, selected any, loaded Loade
 		t.Fatal(err)
 	}
 	event := eventtest.ExistingRunRootIngressWithRoutingSource(eventID, "platform.activity_requested", "source-runtime", "", payload, 0, runID, envelope, source, at)
+	admission, err := runtimepkg.NewRuntimePayloadAdmitter(nil, loaded.Source, loaded.SourceArtifactFact)(ctx, event, "flow_a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err = events.ApplyPayloadAdmission(event, admission)
+	if err != nil {
+		t.Fatal(err)
+	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, pipelineobligation.ScopeSubscribed)
 	root := flowidentity.Stored(loaded.Source, semanticview.RootExecutionFlowID(loaded.Source), runID, runID, runID, "")
 	child, err := flowidentity.KeylessChild(loaded.Source, root, "flow_a")
@@ -648,7 +665,7 @@ func seedSelectedContractActivityAttempt(t *testing.T, selected any, fact activi
 	if err := storetest.SeedHistoricalActivityForkAttempt(context.Background(), selected, pipeline.ActivityAttemptRecord{
 		RequestEventID: requestEventID, RunID: fact.RunID, ExecutionMode: executionmode.Live,
 		SourceEventID: fact.SourceEventID, EntityID: fact.EntityID, FlowInstance: "flow_a", NodeID: fact.Owner.Key(), HandlerEventKey: "review.requested",
-		ActivityID: "connector", Tool: "provider.connector", Attempt: 1, Status: status,
+		ActivityID: "connector", Tool: "provider.connector", EffectClass: string(runtimecontracts.ActivityEffectClassNonIdempotentWrite), Attempt: 1, Status: status,
 		SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
 		ResultEventID: resultEventID, ResultEventType: resultEventType, ResultPayload: resultPayload, Failure: failure,
 		InputHash: fmt.Sprintf("sha256:%x", inputHash[:]), Generation: generation, LoopStage: "review",

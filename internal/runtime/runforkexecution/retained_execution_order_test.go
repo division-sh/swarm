@@ -185,7 +185,7 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			process, _ := worklifetime.ProcessFromContext(ctx)
 			baselineLeases := process.ActiveCount()
 			repo := runForkExecutionRepoRoot(t)
-			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"), PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml")}
+			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")}
 			loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts})
 			if err != nil {
 				t.Fatal(err)

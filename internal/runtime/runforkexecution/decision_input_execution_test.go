@@ -6,7 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
+
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -53,7 +53,7 @@ func TestIssue642ForkDecisionInputControlsRequireCurrentGenerationBothStores(t *
 			t.Cleanup(provider.Close)
 			repo := runForkExecutionRepoRoot(t)
 			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo,
-				SourceRoot: canonicalrouting.CopyNestedPendingActivityReply(t, provider.URL), PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml")}
+				SourceRoot: canonicalrouting.CopyNestedPendingActivityReply(t, provider.URL)}
 			ctx := runForkTestContext(t)
 			loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 			if err != nil {

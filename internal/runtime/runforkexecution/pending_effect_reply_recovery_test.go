@@ -442,7 +442,7 @@ func runPendingEffectReplyCrashHelper(t *testing.T, ctx context.Context, selecte
 	defer cancel()
 	repo := runForkExecutionRepoRoot(t)
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo,
-		SourceRoot: canonicalrouting.CopyNestedPendingActivityReply(t, os.Getenv("SWARM_SELECTED_PENDING_REPLY_PROVIDER")), PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml")}
+		SourceRoot: canonicalrouting.CopyNestedPendingActivityReply(t, os.Getenv("SWARM_SELECTED_PENDING_REPLY_PROVIDER"))}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err != nil {
 		t.Fatal(err)

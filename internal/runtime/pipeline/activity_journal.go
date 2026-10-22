@@ -3,6 +3,9 @@ package pipeline
 import (
 	"context"
 	"fmt"
+
+	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
 type ActivityAttemptJournal interface {
@@ -18,6 +21,26 @@ type ActivityAttemptJournal interface {
 // journal/readback obligation only after native transaction acknowledgement.
 type ActivityRecoverySummary struct {
 	Results []RecoveredHTTPActivity
+}
+
+func (s *workflowInstanceStore) recordedActivityResult(ctx context.Context, intent runtimeengine.ActivityIntent) (activityRecordedResult, bool, error) {
+	if s == nil || s.activityResults == nil {
+		return activityRecordedResult{}, false, fmt.Errorf("activity result reader is required")
+	}
+	success, err := admitActivityPublication(intent, intent.SuccessEvent)
+	if err != nil {
+		return activityRecordedResult{}, false, err
+	}
+	failure, err := admitActivityPublication(intent, intent.FailureEvent)
+	if err != nil {
+		return activityRecordedResult{}, false, err
+	}
+	return s.activityResults.LoadRecordedActivityResult(ctx, runtimeactivityresult.Query{
+		ActivityID:     intent.ActivityID,
+		RequestEventID: activityRequestEventID(intent),
+		SuccessEventID: success.eventID,
+		FailureEventID: failure.eventID,
+	})
 }
 
 func (s *workflowInstanceStore) StartActivityAttempt(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {

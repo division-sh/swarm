@@ -62,7 +62,7 @@ func TestIssue642FreshSelectedNoticeReadbackAcknowledgmentBothStores(t *testing.
 				t.Fatal(err)
 			}
 			loader := nativeSelectedCrashLoader{admittedFixtureSelectedContractSourceLoader{
-				RepoRoot: repo, SourceRoot: root, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"),
+				RepoRoot: repo, SourceRoot: root,
 			}}
 			loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 				Selection: runfork.RunForkContractSelection{Mode: "selected_contracts"},

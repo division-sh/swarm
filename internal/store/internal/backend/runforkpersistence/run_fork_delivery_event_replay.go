@@ -258,7 +258,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 
 // Replay consumes fixed-cut construction independently of the actor's entity.
 // It never runs a constructor or borrows source-run attachment authority.
-func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, event events.Event, delivery runtimedelivery.Snapshot, forkRunID string) (events.DeliveryRoute, error) {
+func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, event events.Event, delivery runtimedelivery.HistoricalFact, forkRunID string) (events.DeliveryRoute, error) {
 	source := delivery.Route.Normalized()
 	if !source.Recipient.IsAgent() {
 		return events.DeliveryRoute{}, fmt.Errorf("ordinary replay receiver requires an admitted agent delivery")

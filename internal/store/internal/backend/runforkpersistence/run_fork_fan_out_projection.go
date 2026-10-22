@@ -401,10 +401,7 @@ func fixedRunForkFanOutEventDisposition(
 	if err != nil {
 		return false, "", nil, "", err
 	}
-	disposition, terminal, err := fanoutbarrier.RecipientDisposition(recipients)
-	if retained != "" {
-		disposition, terminal, err = fanoutbarrier.RecipientDispositionWithRetained(recipients, retained)
-	}
+	disposition, terminal, err := fanoutbarrier.HistoricalRecipientDisposition(recipients, retained)
 	if err != nil {
 		return false, "", nil, "", fmt.Errorf("event %s recipient disposition: %w", eventID, err)
 	}
@@ -419,7 +416,7 @@ func fixedRunForkFanOutEventDisposition(
 		}
 	}
 	deliveryIDs := make([]string, 0, len(deliveries))
-	settled := make([]runtimedelivery.Snapshot, 0, len(deliveries))
+	settled := make([]runtimedelivery.HistoricalFact, 0, len(deliveries))
 	for _, delivery := range deliveries {
 		if delivery.Snapshot.Terminal() {
 			settled = append(settled, delivery.Snapshot)
@@ -431,10 +428,7 @@ func fixedRunForkFanOutEventDisposition(
 		deliveryIDs = append(deliveryIDs, delivery.Snapshot.DeliveryID)
 	}
 	if len(settled) != 0 {
-		disposition, _, err = fanoutbarrier.RecipientDisposition(settled)
-		if retained != "" {
-			disposition, _, err = fanoutbarrier.RecipientDispositionWithRetained(settled, retained)
-		}
+		disposition, _, err = fanoutbarrier.HistoricalRecipientDisposition(settled, retained)
 		if err != nil {
 			return false, "", nil, "", err
 		}
@@ -480,8 +474,8 @@ func decodeFixedRunForkFanOutRouteSettlement(eventID string, event runForkRevisi
 	return settlement, nil
 }
 
-func fixedRunForkFanOutRecipients(eventID, runID string, deliveries []runForkRevisionDelivery) ([]runtimedelivery.Snapshot, error) {
-	recipients := make([]runtimedelivery.Snapshot, len(deliveries))
+func fixedRunForkFanOutRecipients(eventID, runID string, deliveries []runForkRevisionDelivery) ([]runtimedelivery.HistoricalFact, error) {
+	recipients := make([]runtimedelivery.HistoricalFact, len(deliveries))
 	seen := make(map[string]bool, len(deliveries))
 	for i, delivery := range deliveries {
 		if delivery.Snapshot.RunID != runID || delivery.Snapshot.EventID != eventID || seen[delivery.Snapshot.DeliveryID] {
@@ -509,7 +503,7 @@ func fixedRunForkDeploymentPendingPhase(eventID string, receipts []runForkRevisi
 	return runfork.RunForkDeploymentPendingReceiver, nil
 }
 
-func admitFixedRunForkFanOutPendingDelivery(eventID string, delivery runtimedelivery.Snapshot, deployment *fanoutobligation.DeploymentOrigin, phase runfork.RunForkDeploymentPendingPhase, pendingByDelivery map[string]runfork.RunForkPendingWork) error {
+func admitFixedRunForkFanOutPendingDelivery(eventID string, delivery runtimedelivery.HistoricalFact, deployment *fanoutobligation.DeploymentOrigin, phase runfork.RunForkDeploymentPendingPhase, pendingByDelivery map[string]runfork.RunForkPendingWork) error {
 	pending, ok := pendingByDelivery[strings.TrimSpace(delivery.DeliveryID)]
 	if !ok || pending.EventID != eventID || pending.DeliveryID != delivery.DeliveryID ||
 		!events.SameDeliveryRouteIdentity(pending.DeliveryRoute, delivery.Route) || pending.SubscriberType != string(delivery.SubscriberClass) ||
@@ -521,7 +515,7 @@ func admitFixedRunForkFanOutPendingDelivery(eventID string, delivery runtimedeli
 		return fmt.Errorf("nonterminal fan-out event %s has an unsupported recipient class", eventID)
 	}
 	if deployment != nil && (pending.Classification != runfork.RunForkPendingClassificationPending || pending.Status != "pending" ||
-		pending.RetryCount != 0 || pending.ActiveSessionID != "" || pending.StartedAt != nil || pending.DeliveredAt != nil || pending.ReceiptAt != nil) {
+		pending.RetryCount != 0 || pending.SourceExecution.SessionBound || pending.SourceExecution.Started || pending.SourceExecution.InProgress || pending.DeliveredAt != nil || pending.ReceiptAt != nil) {
 		return fmt.Errorf("deployment event %s delivery %s contradicts its pending handoff phase", eventID, delivery.DeliveryID)
 	}
 	return nil

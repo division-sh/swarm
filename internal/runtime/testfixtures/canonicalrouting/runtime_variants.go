@@ -21,6 +21,7 @@ func CopyGeneratedActivity(t testing.TB, nested, subscribeResults bool) string {
 	writeClosedVariantFile(t, root, flowRoot+"tools.yaml", `send:
   description: send one message
   handler_type: http
+  effect_class: read_only
   input_schema:
     type: object
     properties:

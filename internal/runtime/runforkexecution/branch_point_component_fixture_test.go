@@ -211,7 +211,7 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact,
 		BundleHash: fact.BundleHash(), StartedAt: at,
 	})
-	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)}
+	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: runID, SourceArtifactFact: fact, Selection: testContractSelection()})
 	if err != nil {
 		t.Fatal(err)
@@ -329,7 +329,7 @@ func q1DeploymentComponentSource(t *testing.T, owner SelectedContractExecutionOw
 	}
 	bootstrap := uuid.NewString()
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: bootstrap, Origin: storetest.ScenarioSetupOrigin(), Artifact: bundle.SourceArtifact, BundleHash: catalog.BundleHash})
-	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)}
+	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: bootstrap, Selection: testContractSelection()})
 	if err != nil {
 		t.Fatal(err)

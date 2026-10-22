@@ -354,10 +354,14 @@ type ActivityIntent struct {
 	WorkflowVersion             string
 	Input                       semanticvalue.Value
 	ApprovalDecision            string
+	EffectClass                 runtimecontracts.ActivityEffectClass
 	SuccessEvent                string
 	FailureEvent                string
 	RevisionEvent               string
 	RejectedEvent               string
+	RetryMaxAttempts            int
+	RetryBackoff                string
+	ForkPolicy                  runtimecontracts.ActivityForkPolicy
 	EntityID                    identity.EntityID
 	Owner                       activityidentity.Owner
 	ExecutionFlowID             identity.FlowID
@@ -368,6 +372,7 @@ type ActivityIntent struct {
 	SourceTaskID                string
 	ParentEventID               string
 	ChainDepth                  int
+	Attempt                     int
 	Generation                  attemptgeneration.Generation
 	LoopStage                   string
 	ExecutionMode               executionmode.Mode
@@ -384,6 +389,7 @@ func (i ActivityIntent) Normalized() ActivityIntent {
 	i.FailureEvent = strings.TrimSpace(i.FailureEvent)
 	i.RevisionEvent = strings.TrimSpace(i.RevisionEvent)
 	i.RejectedEvent = strings.TrimSpace(i.RejectedEvent)
+	i.RetryBackoff = strings.TrimSpace(i.RetryBackoff)
 	i.HandlerEventKey = strings.TrimSpace(i.HandlerEventKey)
 	i.ApprovalDecision = strings.TrimSpace(i.ApprovalDecision)
 	i.SourceEventID = strings.TrimSpace(i.SourceEventID)
@@ -393,6 +399,9 @@ func (i ActivityIntent) Normalized() ActivityIntent {
 	i.Generation = i.Generation.Normalize()
 	i.LoopStage = strings.TrimSpace(i.LoopStage)
 	i.ExecutionMode = executionmode.Mode(strings.TrimSpace(string(i.ExecutionMode)))
+	if i.Attempt <= 0 {
+		i.Attempt = 1
+	}
 	if i.Input.Kind() == semanticvalue.KindNull {
 		i.Input = semanticvalue.EmptyObject()
 	}

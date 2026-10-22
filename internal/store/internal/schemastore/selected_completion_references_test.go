@@ -162,8 +162,8 @@ func verifySelectedCompletionMembers(t *testing.T, tx *sql.Tx, execution, run, o
 	for _, binding := range []any{nil, `{"version":"activity-execution.v1","grant_id":"00000000-0000-4000-8000-000000000001","state_version":1}`} {
 		request := uuid.NewString()
 		if _, err := tx.Exec(`INSERT INTO activity_attempts
-			(request_event_id,run_id,execution_mode,execution_binding,node_id,handler_event_key,activity_id,tool,status,success_event,failure_event,input_hash,result_event_id,result_event_type,result_payload,completed_at)
-			VALUES ($1,$2,'live',$3,'schema','start','schema:1','schema.tool','succeeded','schema.done','schema.failed','schema-input',$4,'schema.done','{}',CURRENT_TIMESTAMP)`, request, run, binding, uuid.NewString()); err != nil {
+			(request_event_id,run_id,execution_mode,execution_binding,node_id,handler_event_key,activity_id,tool,status,success_event,failure_event,input_hash,result_event_id,result_event_type,result_payload,completed_at,effect_class)
+			VALUES ($1,$2,'live',$3,'schema','start','schema:1','schema.tool','succeeded','schema.done','schema.failed','schema-input',$4,'schema.done','{}',CURRENT_TIMESTAMP,'non_idempotent_write')`, request, run, binding, uuid.NewString()); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := tx.Exec(`INSERT INTO activity_attempt_live_parents (request_event_id,run_id,reply_context_present) VALUES ($1,$2,FALSE)`, request, run); err != nil {

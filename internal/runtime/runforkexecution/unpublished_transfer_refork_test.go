@@ -2,7 +2,7 @@ package runforkexecution
 
 import (
 	"context"
-	"path/filepath"
+
 	"reflect"
 	"sync"
 	"testing"
@@ -53,7 +53,7 @@ func verifyUnpublishedTransferredArrivalRefork(t *testing.T, latePublication boo
 			baseline := process.ActiveCount()
 			capability := selectedContractTestProcessCapability(t, ctx, selected)
 			repo := runForkExecutionRepoRoot(t)
-			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: publishedJoinFixture(t), PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml")}
+			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: publishedJoinFixture(t)}
 			loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: runfork.RunForkContractSelection{Mode: "selected_contracts"}})
 			if err != nil {
 				t.Fatal(err)

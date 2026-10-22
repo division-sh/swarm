@@ -16,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
+
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
@@ -68,7 +68,7 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 				}))
 				defer provider.Close()
 				repo := runForkExecutionRepoRoot(t)
-				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: selectedForkFrameContracts(t, repo, lookup.URL), PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}
+				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: selectedForkFrameContracts(t, repo, lookup.URL)}
 				loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 				if err != nil {
 					t.Fatal(err)

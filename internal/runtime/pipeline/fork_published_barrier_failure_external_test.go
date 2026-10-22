@@ -40,13 +40,13 @@ func verifyPublishedBarrierCompletionFailure(t *testing.T, ctx context.Context, 
 	}
 	var transactions *storetest.TransactionCollector
 	if proof == publishedBarrierCompletionSQLFailure {
-		if err := storetest.SetBarrierCompletionPublicationFault(ctx, selected.RuntimeDeps().DeliveryStore, claim.RunID(), entityID, before.Entity.Revision, len(projection.Mutations), true); err != nil {
+		if err := storetest.SetBarrierCompletionPublicationFault(ctx, selected.RuntimeDeps().DeliveryStore, claim.RunID(), entityID, forkFixtureEntityRevision(t, before.Entity.Revision), len(projection.Mutations), true); err != nil {
 			t.Fatal(err)
 		}
 		defer func() {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
-			if err := storetest.SetBarrierCompletionPublicationFault(cleanup, selected.RuntimeDeps().DeliveryStore, claim.RunID(), entityID, before.Entity.Revision, len(projection.Mutations), false); err != nil {
+			if err := storetest.SetBarrierCompletionPublicationFault(cleanup, selected.RuntimeDeps().DeliveryStore, claim.RunID(), entityID, forkFixtureEntityRevision(t, before.Entity.Revision), len(projection.Mutations), false); err != nil {
 				t.Error(err)
 			}
 		}()
@@ -125,7 +125,7 @@ func verifyPublishedBarrierCompletionFailure(t *testing.T, ctx context.Context, 
 		t.Fatalf("failed completion leaked authored mutations or projection: before=%+v after=%+v err=%v", projection, afterProjection, err)
 	}
 	root, err := selected.Entities().LoadOperatorEntity(ctx, claim.RunID(), claim.RunID())
-	if err != nil || root.Fields["completed_total"] != float64(0) || root.Entity.Revision != 1 {
+	if err != nil || root.Fields["completed_total"] != float64(0) || forkFixtureEntityRevision(t, root.Entity.Revision) != 1 {
 		t.Fatalf("failed completion reached the success consumer: %+v err=%v", root, err)
 	}
 	if count, err := storetest.ReadLifecycleEventCardinality(ctx, selected.RuntimeDeps().DeliveryStore, claim.RunID(), "producer/batch.completed"); err != nil || count != 0 {

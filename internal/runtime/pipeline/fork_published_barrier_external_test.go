@@ -184,7 +184,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 			}
 			request := runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: runID, At: original.id, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
-				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
+				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 				ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 				AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture,
 					AgentManagerOptions: manager.AgentManagerOptions{TestLifecycleProbe: childProbe}},
@@ -233,7 +233,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 				t.Fatal("child reused original outcome claim")
 			}
 			if crashing {
-				publishBarrierCrashCheckpoint(t, phase, selected, result, original.id, childClaim, before.Entity.Revision)
+				publishBarrierCrashCheckpoint(t, phase, selected, result, original.id, childClaim, forkFixtureEntityRevision(t, before.Entity.Revision))
 			}
 			if failingCompletion {
 				verifyPublishedBarrierCompletionFailure(t, phase, selected, family, result, plan, original, childClaim, childProbe, runID, before, proof)
@@ -275,7 +275,7 @@ func verifyPublishedFanOutBarrierContinuation(t *testing.T, proof publishedBarri
 					t.Fatal(err)
 				}
 				if child.Fields["completed_total"] == float64(1) {
-					if child.Entity.Revision != 2 {
+					if forkFixtureEntityRevision(t, child.Entity.Revision) != 2 {
 						t.Fatalf("final consumer did not commit once: %+v", child)
 					}
 					break

@@ -313,7 +313,7 @@ func projectContinuedFanOutSourceRoutes(snapshot *runForkRevisionSnapshot, event
 	return routes, nil
 }
 
-func projectSelectedFanOutRecipient(snapshot *runForkRevisionSnapshot, event events.Event, delivery deliverylifecycle.Snapshot, childRun string) (events.DeliveryRoute, error) {
+func projectSelectedFanOutRecipient(snapshot *runForkRevisionSnapshot, event events.Event, delivery deliverylifecycle.HistoricalFact, childRun string) (events.DeliveryRoute, error) {
 	if snapshot == nil || event.RunID() != snapshot.RunID || delivery.RunID != snapshot.RunID || delivery.EventID != event.ID() || delivery.Terminal() {
 		return events.DeliveryRoute{}, fmt.Errorf("continued fan-out requires exact unfinished cut evidence")
 	}

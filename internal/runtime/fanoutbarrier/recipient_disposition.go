@@ -25,24 +25,43 @@ func RecipientDispositionWithRetained(deliveries []deliverylifecycle.Snapshot, r
 }
 
 func recipientDisposition(deliveries []deliverylifecycle.Snapshot, retained fanoutobligation.InheritedTerminalDisposition) (fanoutobligation.InheritedTerminalDisposition, bool, error) {
-	if len(deliveries) == 0 {
+	return reduceRecipientDisposition(len(deliveries), retained, func(i int) (deliverylifecycle.Status, error) {
+		delivery := deliveries[i]
+		return delivery.Status, deliverylifecycle.ValidateCanceledSnapshot(delivery)
+	})
+}
+
+// Fixed-cut evidence is reduced without manufacturing a live delivery snapshot.
+func HistoricalRecipientDisposition(deliveries []deliverylifecycle.HistoricalFact, retained fanoutobligation.InheritedTerminalDisposition) (fanoutobligation.InheritedTerminalDisposition, bool, error) {
+	if retained != "" && (!retained.Valid() || retained == fanoutobligation.InheritedNoRoute) {
+		return "", false, fmt.Errorf("continuing fan-out recipients require a terminal delivery contribution")
+	}
+	return reduceRecipientDisposition(len(deliveries), retained, func(i int) (deliverylifecycle.Status, error) {
+		delivery := deliveries[i]
+		return delivery.Status, delivery.Validate()
+	})
+}
+
+func reduceRecipientDisposition(count int, retained fanoutobligation.InheritedTerminalDisposition, at func(int) (deliverylifecycle.Status, error)) (fanoutobligation.InheritedTerminalDisposition, bool, error) {
+	if count == 0 {
 		return "", false, fmt.Errorf("fan-out recipient disposition requires delivery evidence")
 	}
 	terminal, deadLettered, canceled := true, retained == fanoutobligation.InheritedDeadLettered, retained == fanoutobligation.InheritedCanceled
-	for _, delivery := range deliveries {
-		status, err := deliverylifecycle.ParseStatus(string(delivery.Status))
+	for i := 0; i < count; i++ {
+		captured, err := at(i)
 		if err != nil {
 			return "", false, err
 		}
-		if status != delivery.Status {
-			return "", false, fmt.Errorf("fan-out recipient requires canonical delivery status")
-		}
-		if err := deliverylifecycle.ValidateCanceledSnapshot(delivery); err != nil {
+		status, err := deliverylifecycle.ParseStatus(string(captured))
+		if err != nil {
 			return "", false, err
 		}
-		terminal = terminal && delivery.Terminal()
-		deadLettered = deadLettered || delivery.Status == deliverylifecycle.StatusDeadLetter
-		canceled = canceled || delivery.Status == deliverylifecycle.StatusCanceled
+		if status != captured {
+			return "", false, fmt.Errorf("fan-out recipient requires canonical delivery status")
+		}
+		terminal = terminal && status.Terminal()
+		deadLettered = deadLettered || status == deliverylifecycle.StatusDeadLetter
+		canceled = canceled || status == deliverylifecycle.StatusCanceled
 	}
 	if !terminal {
 		return "", false, nil

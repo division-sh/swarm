@@ -7,7 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
+
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -18,8 +18,8 @@ import (
 func TestSelectedFutureAgentDeclarationRetainsConfiguredRuntimeWithEmptyCensus(t *testing.T) {
 	repo := runForkExecutionRepoRoot(t)
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo,
-		SourceRoot:       canonicalrouting.CopySelectedNestedConstructedAgentInput(t, false),
-		PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}
+		SourceRoot: canonicalrouting.CopySelectedNestedConstructedAgentInput(t, false),
+	}
 	loaded, err := loader.LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err != nil {
 		t.Fatal(err)

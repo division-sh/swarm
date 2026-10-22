@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
+
 	"reflect"
 	"testing"
 	"time"
@@ -24,7 +24,7 @@ import (
 func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selected startupownership.Store, owner SelectedContractExecutionOwner, capability startupownership.ProcessCapability) {
 	t.Helper()
 	repo := runForkExecutionRepoRoot(t)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: publishedJoinFixture(t), PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml")}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: publishedJoinFixture(t)}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: runfork.RunForkContractSelection{Mode: "selected_contracts"}})
 	if err != nil {
 		t.Fatal(err)

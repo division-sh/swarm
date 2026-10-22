@@ -4,6 +4,7 @@ tools:
     category: provider_connector
     description: send Telegram messages
     handler_type: http
+    effect_class: non_idempotent_write
     credentials:
       - telegram_bot_token
     input_schema:
@@ -28,6 +29,7 @@ tools:
     category: provider_connector
     description: send a Telegram direct-message presentation with optional actions
     handler_type: http
+    effect_class: non_idempotent_write
     credentials: [telegram_bot_token]
     input_schema:
       type: object
@@ -79,6 +81,7 @@ tools:
     category: provider_connector
     description: replace a Telegram direct-message presentation and controls
     handler_type: http
+    effect_class: non_idempotent_write
     credentials: [telegram_bot_token]
     input_schema:
       type: object
@@ -132,6 +135,7 @@ tools:
     category: provider_connector
     description: acknowledge one Telegram callback interaction
     handler_type: http
+    effect_class: non_idempotent_write
     credentials: [telegram_bot_token]
     input_schema:
       type: object
@@ -162,6 +166,7 @@ tools:
     category: provider_connector
     description: install the Open inbox command for one Telegram chat
     handler_type: http
+    effect_class: non_idempotent_write
     credentials: [telegram_bot_token]
     input_schema:
       type: object
@@ -204,6 +209,7 @@ tools:
     category: provider_registration
     description: read commands for one Telegram chat
     handler_type: http
+    effect_class: read_only
     credentials: [telegram_bot_token]
     input_schema:
       type: object
@@ -246,6 +252,7 @@ tools:
     category: provider_connector
     description: install Open inbox for one Telegram group member
     handler_type: http
+    effect_class: non_idempotent_write
     credentials: [telegram_bot_token]
     input_schema:
       type: object
@@ -290,6 +297,7 @@ tools:
     category: provider_registration
     description: read Open inbox commands for one Telegram group member
     handler_type: http
+    effect_class: read_only
     credentials: [telegram_bot_token]
     input_schema:
       type: object
@@ -334,6 +342,7 @@ tools:
     category: provider_registration
     description: read the private chat launcher without changing it
     handler_type: http
+    effect_class: read_only
     credentials: [telegram_bot_token]
     input_schema:
       type: object
@@ -359,6 +368,7 @@ tools:
     category: provider_registration
     description: read the default private chat launcher without changing it
     handler_type: http
+    effect_class: read_only
     credentials: [telegram_bot_token]
     input_schema: {type: object, additionalProperties: false}
     output_schema:
@@ -378,6 +388,7 @@ tools:
     category: provider_registration
     description: identify the Telegram bot webhook slot
     handler_type: http
+    effect_class: read_only
     credentials: [telegram_bot_token]
     input_schema:
       type: object
@@ -401,6 +412,7 @@ tools:
     category: provider_registration
     description: read the current Telegram bot command address
     handler_type: http
+    effect_class: read_only
     credentials: [telegram_bot_token]
     input_schema: {type: object, additionalProperties: false}
     output_schema:
@@ -422,6 +434,7 @@ tools:
     category: provider_registration
     description: register the current Swarm callback generation
     handler_type: http
+    effect_class: non_idempotent_write
     credentials: [telegram_bot_token, webhook_signing_secret]
     input_schema:
       type: object
@@ -451,6 +464,7 @@ tools:
     category: provider_registration
     description: read the current Telegram webhook callback
     handler_type: http
+    effect_class: read_only
     credentials: [telegram_bot_token]
     input_schema:
       type: object

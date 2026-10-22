@@ -11,7 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
+
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -59,7 +59,7 @@ func (p selectedHandlerFanOutIntentCrash) CommitWorkflowEngineMutation(ctx conte
 func runSelectedHandlerFanOutCrashHelper(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, capability startupownership.ProcessCapability) {
 	t.Helper()
 	repo := runForkExecutionRepoRoot(t)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: canonicalrouting.CopyForkFanOutConsumer(t, false, false), PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: canonicalrouting.CopyForkFanOutConsumer(t, false, false)}
 	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: runfork.RunForkContractSelection{Mode: "selected_contracts"}})
 	if err != nil {
 		t.Fatal(err)

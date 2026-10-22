@@ -82,11 +82,11 @@ func proveMixedFanOutChildRefork(t *testing.T, ctx context.Context, selected *st
 	releaseSettlement.Do(func() { close(probe.resumeSettled) })
 	waitForkEnginePipelineSettlement(t, forkCtx, selected, observationRequest, settlement)
 	after, err := selected.Entities().LoadOperatorEntity(forkCtx, parent.Entity.EntityID, claim.RunID())
-	if err != nil || after.Fields["processed_token"] != parent.Fields["processed_token"] || after.Entity.Revision != before.Entity.Revision+1 {
+	if err != nil || after.Fields["processed_token"] != parent.Fields["processed_token"] || forkFixtureEntityRevision(t, after.Entity.Revision) != forkFixtureEntityRevision(t, before.Entity.Revision)+1 {
 		t.Fatalf("second-generation child did not execute exactly once: before=%+v after=%+v err=%v", before, after, err)
 	}
 	unchanged, err := selected.Entities().LoadOperatorEntity(forkCtx, parent.Entity.EntityID, request.SourceRunID)
-	if err != nil || unchanged.Entity.Revision != parent.Entity.Revision || !reflect.DeepEqual(unchanged.Fields, parent.Fields) {
+	if err != nil || forkFixtureEntityRevision(t, unchanged.Entity.Revision) != forkFixtureEntityRevision(t, parent.Entity.Revision) || !reflect.DeepEqual(unchanged.Fields, parent.Fields) {
 		t.Fatalf("second-generation execution changed its parent: before=%+v after=%+v err=%v", parent, unchanged, err)
 	}
 	outcomes, err := storetest.ReadFanOutPublishedOutcomeStorage(forkCtx, selected.RuntimeDeps().DeliveryStore, claim.RunID())

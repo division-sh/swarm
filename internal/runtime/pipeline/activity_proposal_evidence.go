@@ -29,6 +29,8 @@ func ValidateRecordedActivityProposal(request events.Event, card decisioncard.Ca
 		return err
 	}
 	if actual.ActivityID != expected.ActivityID || actual.Tool != expected.Tool || actual.BundleHash != expected.BundleHash ||
+		actual.EffectClass != expected.EffectClass || actual.ForkPolicy != expected.ForkPolicy || actual.Attempt != expected.Attempt ||
+		actual.RetryMaxAttempts != expected.RetryMaxAttempts || actual.RetryBackoff != expected.RetryBackoff ||
 		actual.WorkflowVersion != expected.WorkflowVersion || !actual.Input.Equal(expected.Input) ||
 		actual.SuccessEvent != expected.SuccessEvent || actual.FailureEvent != expected.FailureEvent ||
 		actual.RevisionEvent != expected.RevisionEvent || actual.RejectedEvent != expected.RejectedEvent ||

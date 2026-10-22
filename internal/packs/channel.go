@@ -1124,7 +1124,7 @@ func NewOutboundBindingPlanWithRegistration(id string, structural SatisfactionPl
 			runtimecontracts.WithToolCategory("channel_operation"),
 			runtimecontracts.WithToolDescription("Execute the configured "+operation.name.String()+" operation through channel binding "+bindingID.String()+"."),
 			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerChannel),
-
+			runtimecontracts.WithToolEffect(operation.effect),
 			runtimecontracts.WithToolSchemas(operation.inputSchema, operation.outputSchema),
 		)
 		if err != nil {
@@ -1563,6 +1563,9 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 		tool, ok := connector.Tools[strings.TrimSpace(binding.Tool)]
 		if !ok {
 			return SatisfactionPlan{}, fmt.Errorf("channel operation %q references unknown connector tool %q", name, binding.Tool)
+		}
+		if tool.Effect() != effect {
+			return SatisfactionPlan{}, fmt.Errorf("channel operation %q effect class does not match connector tool %q", name, binding.Tool)
 		}
 		operationID, err := admitChannelPlanIdentity("channel operation identity", name)
 		if err != nil {

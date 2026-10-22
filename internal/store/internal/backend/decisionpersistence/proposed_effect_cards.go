@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
@@ -263,10 +264,14 @@ type proposedEffectProjection struct {
 	ChannelActivationGeneration channelonboarding.ChannelActivationGeneration `json:"channel_activation_generation,omitempty"`
 	BundleHash                  string                                        `json:"bundle_hash"`
 	WorkflowVersion             string                                        `json:"workflow_version"`
+	EffectClass                 string                                        `json:"effect_class"`
 	SuccessEvent                string                                        `json:"success_event"`
 	FailureEvent                string                                        `json:"failure_event"`
 	RevisionEvent               string                                        `json:"revision_event"`
 	RejectedEvent               string                                        `json:"rejected_event"`
+	RetryMaxAttempts            int                                           `json:"retry_max_attempts"`
+	RetryBackoff                string                                        `json:"retry_backoff"`
+	ForkPolicy                  string                                        `json:"fork_policy"`
 	EntityID                    string                                        `json:"entity_id"`
 	NodeID                      string                                        `json:"node_id"`
 	FlowID                      string                                        `json:"flow_id"`
@@ -277,6 +282,7 @@ type proposedEffectProjection struct {
 	SourceTaskID                string                                        `json:"source_task_id"`
 	ParentEventID               string                                        `json:"parent_event_id"`
 	ChainDepth                  int                                           `json:"chain_depth"`
+	Attempt                     int                                           `json:"attempt"`
 	Generation                  attemptgeneration.Generation                  `json:"loop_generation"`
 	LoopStage                   string                                        `json:"loop_stage"`
 	ExecutionMode               executionmode.Mode                            `json:"execution_mode"`
@@ -304,10 +310,14 @@ func projectProposedEffect(value semanticvalue.Value, out *decisioncard.Proposed
 	out.BundleHash = dto.BundleHash
 	out.WorkflowVersion = dto.WorkflowVersion
 	out.Input = input
+	out.EffectClass = runtimecontracts.NormalizeActivityEffectClass(dto.EffectClass)
 	out.SuccessEvent = dto.SuccessEvent
 	out.FailureEvent = dto.FailureEvent
 	out.RevisionEvent = dto.RevisionEvent
 	out.RejectedEvent = dto.RejectedEvent
+	out.RetryMaxAttempts = dto.RetryMaxAttempts
+	out.RetryBackoff = dto.RetryBackoff
+	out.ForkPolicy = runtimecontracts.ActivityForkPolicy(dto.ForkPolicy)
 	out.EntityID = dto.EntityID
 	out.NodeID = dto.NodeID
 	out.FlowID = dto.FlowID
@@ -318,6 +328,7 @@ func projectProposedEffect(value semanticvalue.Value, out *decisioncard.Proposed
 	out.SourceTaskID = dto.SourceTaskID
 	out.ParentEventID = dto.ParentEventID
 	out.ChainDepth = dto.ChainDepth
+	out.Attempt = dto.Attempt
 	out.Generation = dto.Generation
 	out.LoopStage = dto.LoopStage
 	out.ExecutionMode = dto.ExecutionMode

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
+
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -58,7 +58,7 @@ func TestIssue642SourceAndForkDecideOwnPendingEffectsBothStores(t *testing.T) {
 			t.Cleanup(provider.Close)
 			repo := runForkExecutionRepoRoot(t)
 			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo,
-				SourceRoot: canonicalrouting.CopyNestedPendingActivityReply(t, provider.URL), PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml")}
+				SourceRoot: canonicalrouting.CopyNestedPendingActivityReply(t, provider.URL)}
 			ctx := runForkTestContext(t)
 			loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 			if err != nil {

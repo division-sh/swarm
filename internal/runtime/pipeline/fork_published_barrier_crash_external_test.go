@@ -81,14 +81,14 @@ func publishBarrierCrashCheckpoint(t *testing.T, ctx context.Context, selected *
 		t.Fatal("crash proof must preserve the exact active authority without another union branch")
 	}
 	child, err := selected.Entities().LoadOperatorEntity(ctx, claim.RunID(), claim.RunID())
-	if err != nil || child.Fields["completed_total"] != float64(0) || child.Entity.Revision != 1 {
+	if err != nil || child.Fields["completed_total"] != float64(0) || forkFixtureEntityRevision(t, child.Entity.Revision) != 1 {
 		t.Fatalf("crash crossed the unpublished final-consumer write: %+v err=%v", child, err)
 	}
 	fixture := &mixedFanOutCrashFixture{}
 	fixture.publishCheckpoint(t, mixedFanOutCrashCheckpoint{
 		Proof:      forkEngineExecutionProofRequest(t, result, original, observed.id, claim),
 		BundleHash: fact.BundleHash(), SourceEntityID: result.Materialization.SourceRunID,
-		ChildEntityID: claim.RunID(), SourceRevision: sourceRevision, ChildRevision: child.Entity.Revision, Authority: &preserved,
+		ChildEntityID: claim.RunID(), SourceRevision: sourceRevision, ChildRevision: forkFixtureEntityRevision(t, child.Entity.Revision), Authority: &preserved,
 	})
 }
 
@@ -128,7 +128,7 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, canonicalrouting.CopyForkFanOutBarrierReceiver(t), filepath.Join(repo, "platform-spec.yaml"))
+			_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, canonicalrouting.CopyForkFanOutBarrierReceiver(t))
 			if err != nil || bundle.SourceArtifact.BundleHash() != checkpoint.BundleHash {
 				t.Fatalf("barrier successor requires the exact original source artifact: %v", err)
 			}
@@ -279,7 +279,7 @@ func verifyBarrierCrashRestartBothStores(t *testing.T, pendingSource bool) {
 			}
 			waitPublishedBarrierPipelineReceipts(t, wait, selected.RuntimeDeps().DeliveryStore, observed.id, output)
 			child, err := selected.Entities().LoadOperatorEntity(wait, checkpoint.Proof.ChildRunID, checkpoint.Proof.ChildRunID)
-			if err != nil || child.Fields["completed_total"] != float64(1) || child.Entity.Revision != checkpoint.ChildRevision+1 {
+			if err != nil || child.Fields["completed_total"] != float64(1) || forkFixtureEntityRevision(t, child.Entity.Revision) != checkpoint.ChildRevision+1 {
 				t.Fatalf("barrier successor lost the once-only final consumer: %+v err=%v", child, err)
 			}
 			final, err := family.Plan(wait, runfork.RunForkPlanRequest{SourceRunID: checkpoint.Proof.ChildRunID, At: output})

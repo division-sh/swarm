@@ -26,8 +26,8 @@ func verifyActivityExecutionBindingColumn(t *testing.T, db *sql.DB, runID string
 	for _, column := range columns {
 		present[column] = true
 	}
-	if present["effect_class"] || !present["attempt"] || !present["execution_binding"] || !present["reply_context_present"] {
-		t.Fatalf("generated schema retained authored class or lost native identity: %v", columns)
+	if !present["effect_class"] || !present["attempt"] || !present["execution_binding"] || !present["reply_context_present"] {
+		t.Fatalf("generated schema lost landed policy or native identity: %v", columns)
 	}
 	binding := processbinding.ActivityExecutionBinding{Version: processbinding.ActivityExecutionBindingVersion, GrantID: uuid.NewString(), StateVersion: 3}
 	raw, err := canonicaljson.Bytes(binding)
@@ -38,8 +38,8 @@ func verifyActivityExecutionBindingColumn(t *testing.T, db *sql.DB, runID string
 		requestID := uuid.NewString()
 		// Schema evidence only: this direct insert grants no runtime dispatch or recovery authority.
 		if _, err := db.ExecContext(ctx, `INSERT INTO activity_attempts
-					(request_event_id,run_id,execution_mode,node_id,handler_event_key,activity_id,tool,status,success_event,failure_event,input_hash,execution_binding)
-					VALUES ($1,$2,'live','check','start','check:1','provider.check','started','check.done','check.failed','exact-input',$3)`, requestID, runID, value); err != nil {
+					(request_event_id,run_id,execution_mode,node_id,handler_event_key,activity_id,tool,status,success_event,failure_event,input_hash,execution_binding,effect_class)
+					VALUES ($1,$2,'live','check','start','check:1','provider.check','started','check.done','check.failed','exact-input',$3,'non_idempotent_write')`, requestID, runID, value); err != nil {
 			t.Fatal(err)
 		}
 		var stored []byte
@@ -76,8 +76,8 @@ func verifyActivityReplyLiveParents(t *testing.T, db *sql.DB, runID, otherRunID,
 		t.Fatal(err)
 	}
 	insert := `INSERT INTO activity_attempts
-		(request_event_id,run_id,execution_mode,node_id,handler_event_key,activity_id,tool,status,success_event,failure_event,input_hash,execution_binding,reply_context_id,reply_context_present)
-		VALUES ($1,$2,'live','check','start','check:1','provider.check','started','check.done','check.failed','exact-input',$3,$4,$5)`
+		(request_event_id,run_id,execution_mode,node_id,handler_event_key,activity_id,tool,status,success_event,failure_event,input_hash,execution_binding,reply_context_id,reply_context_present,effect_class)
+		VALUES ($1,$2,'live','check','start','check:1','provider.check','started','check.done','check.failed','exact-input',$3,$4,$5,'non_idempotent_write')`
 	pair := `INSERT INTO activity_attempt_live_parents (request_event_id,run_id,reply_context_id,reply_context_present) VALUES ($1,$2,$3,$4)`
 	for _, attributed := range []bool{false, true} {
 		for _, present := range []bool{false, true} {

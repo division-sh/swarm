@@ -68,13 +68,13 @@ func (c runForkReplayCut) event(eventID string) (events.Event, error) {
 	return admitted.Event().Clone(), nil
 }
 
-func (c runForkReplayCut) delivery(eventID, deliveryID string) (deliverylifecycle.Snapshot, error) {
+func (c runForkReplayCut) delivery(eventID, deliveryID string) (deliverylifecycle.HistoricalFact, error) {
 	row, found := c.deliveries[deliveryID]
 	if c.runID == "" || !found {
-		return deliverylifecycle.Snapshot{}, fmt.Errorf("fork replay delivery %s is absent at the cut", deliveryID)
+		return deliverylifecycle.HistoricalFact{}, fmt.Errorf("fork replay delivery %s is absent at the cut", deliveryID)
 	}
 	if _, found := c.events[eventID]; !found || row.Snapshot.EventID != eventID {
-		return deliverylifecycle.Snapshot{}, fmt.Errorf("fork replay delivery %s contradicts its source publication", deliveryID)
+		return deliverylifecycle.HistoricalFact{}, fmt.Errorf("fork replay delivery %s contradicts its source publication", deliveryID)
 	}
 	return row.Snapshot, nil
 }

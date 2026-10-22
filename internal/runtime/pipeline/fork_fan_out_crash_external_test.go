@@ -99,7 +99,7 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, canonicalrouting.CopyForkFanOutReceiverOwnership(t), filepath.Join(repo, "platform-spec.yaml"))
+				_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, canonicalrouting.CopyForkFanOutReceiverOwnership(t))
 				if err != nil || bundle.SourceArtifact.BundleHash() != checkpoint.BundleHash {
 					t.Fatalf("restart schema must use the exact original artifact: %v", err)
 				}
@@ -151,7 +151,7 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				}
 				baseline := process.ActiveCount()
 				beforeSource, err := selected.Entities().LoadOperatorEntity(ctx, checkpoint.SourceEntityID, checkpoint.Proof.SourceRunID)
-				if err != nil || beforeSource.Entity.Revision != checkpoint.SourceRevision || beforeSource.Fields["processed_token"] != "seeded" {
+				if err != nil || forkFixtureEntityRevision(t, beforeSource.Entity.Revision) != checkpoint.SourceRevision || beforeSource.Fields["processed_token"] != "seeded" {
 					t.Fatalf("crash changed the frozen source receiver: %+v err=%v", beforeSource, err)
 				}
 				original, found, err := family.Operations().LoadForkOperation(ctx, "mixed-fanout-crash", "pending-cut", "mixed-fanout-crash-transport")
@@ -212,7 +212,7 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				releaseSettlement.Do(func() { close(probe.resumeSettled) })
 				waitForkEnginePipelineSettlement(t, wait, selected, request, settlement)
 				child, err := selected.Entities().LoadOperatorEntity(wait, checkpoint.ChildEntityID, checkpoint.Proof.ChildRunID)
-				if err != nil || child.Fields["processed_token"] != checkpoint.Token || child.Entity.Revision != checkpoint.ChildRevision+1 {
+				if err != nil || child.Fields["processed_token"] != checkpoint.Token || forkFixtureEntityRevision(t, child.Entity.Revision) != checkpoint.ChildRevision+1 {
 					t.Fatalf("crash/restart lost once-only child business mutation: %+v err=%v", child, err)
 				}
 				report, err := selected.Runs().LoadRunDebugReport(wait, checkpoint.Proof.ChildRunID, operatorread.RunDebugQueryOptions{})
@@ -231,7 +231,7 @@ func TestIssue642MixedFanOutCrashRestartBothStores(t *testing.T) {
 				}
 				assertMixedFanOutPendingPlan(t, cut, checkpoint.Proof.ChildEventID, retained)
 				afterSource, err := selected.Entities().LoadOperatorEntity(wait, checkpoint.SourceEntityID, checkpoint.Proof.SourceRunID)
-				if err != nil || afterSource.Entity.Revision != beforeSource.Entity.Revision || !reflect.DeepEqual(afterSource.Fields, beforeSource.Fields) {
+				if err != nil || forkFixtureEntityRevision(t, afterSource.Entity.Revision) != forkFixtureEntityRevision(t, beforeSource.Entity.Revision) || !reflect.DeepEqual(afterSource.Fields, beforeSource.Fields) {
 					t.Fatalf("restart changed source business state: %+v err=%v", afterSource, err)
 				}
 				again, found, err := family.Operations().LoadForkOperation(wait, original.Request.Actor, original.Request.IdempotencyKey, original.Request.TransportHash)

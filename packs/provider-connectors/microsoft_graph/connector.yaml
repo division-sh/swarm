@@ -4,6 +4,7 @@ tools:
     category: provider_connector
     description: send Microsoft Graph mail
     handler_type: http
+    effect_class: non_idempotent_write
     managed_credential:
       key: microsoft_graph_app
       scopes:

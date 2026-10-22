@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
-	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -39,14 +38,22 @@ func ValidateConfiguredToolFulfillability(source semanticview.Source, discovered
 		return findings
 	}
 	for _, declaration := range semanticview.AgentDeclarations(source) {
-		actor, err := configuredToolActor(source, declaration)
+		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
 		if err != nil {
-			findings = append(findings, ConfiguredToolFinding{AgentID: actor.ID, Reason: err.Error()})
+			findings = append(findings, ConfiguredToolFinding{AgentID: declaration.LocalID, Reason: err.Error()})
 			continue
 		}
+		permissions, err := ResolveAgentPermissions(source, plan.OwnerFlowID, declaration.Entry)
+		if err != nil {
+			findings = append(findings, ConfiguredToolFinding{AgentID: plan.AgentID, Reason: err.Error()})
+			continue
+		}
+		actor := nativeToolAgentConfig(plan.AgentID, plan.EffectiveRole(declaration.Entry), declaration.Entry)
+		actor.FlowID = plan.OwnerFlowID
+		actor.Permissions = permissions
 		candidates, err := executionToolsForActor(source, actor, discovered)
 		if err != nil {
-			findings = append(findings, ConfiguredToolFinding{AgentID: actor.ID, Reason: err.Error()})
+			findings = append(findings, ConfiguredToolFinding{AgentID: plan.AgentID, Reason: err.Error()})
 			continue
 		}
 		provider := runtimeauthority.NewSourceProvider(source)
@@ -57,14 +64,14 @@ func ValidateConfiguredToolFulfillability(source semanticview.Source, discovered
 				continue
 			}
 			if err := hitlIdentityReferenceError(name, "configured tool"); err != nil {
-				findings = append(findings, ConfiguredToolFinding{AgentID: actor.ID, ToolName: name, Reason: err.Error()})
+				findings = append(findings, ConfiguredToolFinding{AgentID: plan.AgentID, ToolName: name, Reason: err.Error()})
 				continue
 			}
 			if _, ok := candidates[name]; !ok {
 				findings = append(findings, ConfiguredToolFinding{
-					AgentID:  actor.ID,
+					AgentID:  plan.AgentID,
 					ToolName: name,
-					Reason:   fmt.Sprintf("not available in the effective candidate surface for agent %s", actor.ID),
+					Reason:   fmt.Sprintf("not available in the effective candidate surface for agent %s", plan.AgentID),
 				})
 				continue
 			}
@@ -76,23 +83,8 @@ func ValidateConfiguredToolFulfillability(source semanticview.Source, discovered
 			if permission, ok := requiredPermissionForTool(name); ok {
 				reason = fmt.Sprintf("requires permission %q", permission)
 			}
-			findings = append(findings, ConfiguredToolFinding{AgentID: actor.ID, ToolName: name, Reason: reason})
+			findings = append(findings, ConfiguredToolFinding{AgentID: plan.AgentID, ToolName: name, Reason: reason})
 		}
 	}
 	return findings
-}
-
-func configuredToolActor(source semanticview.Source, declaration semanticview.AgentDeclaration) (models.AgentConfig, error) {
-	plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
-	if err != nil {
-		return models.AgentConfig{ID: declaration.LocalID}, err
-	}
-	permissions, err := ResolveAgentPermissions(source, plan.OwnerFlowID, declaration.Entry)
-	if err != nil {
-		return models.AgentConfig{ID: plan.AgentID}, err
-	}
-	actor := nativeToolAgentConfig(plan.AgentID, plan.EffectiveRole(declaration.Entry), declaration.Entry)
-	actor.FlowID = plan.OwnerFlowID
-	actor.Permissions = permissions
-	return actor, nil
 }

@@ -10,7 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
+
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -125,8 +125,8 @@ func TestSelectedActivationGatewayInitializesLaterProbingWorkspace(t *testing.T)
 				trace := &workspacePreparationTrace{mode: mode, cancel: cancel}
 				source := &activationObservationWorkspace{&preparationWorkspace{Lifecycle: workspace.NewHostManager(), trace: trace}}
 				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo,
-					SourceRoot:       filepath.Join(repo, "internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp"),
-					PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}
+					SourceRoot: filepath.Join(repo, "internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp"),
+				}
 				loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 				if err != nil {
 					t.Fatal(err)

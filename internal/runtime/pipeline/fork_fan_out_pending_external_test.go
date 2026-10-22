@@ -175,7 +175,7 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 				defer forkCancel()
 				executionRequest := runforkexecution.SelectedContractExecutionRequest{
 					SourceRunID: runID, At: cutID, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
-					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
+					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 					ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 					AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture,
 						AgentManagerOptions: manager.AgentManagerOptions{TestLifecycleProbe: probe}},
@@ -226,7 +226,7 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 					crash.publishCheckpoint(t, mixedFanOutCrashCheckpoint{
 						Proof: request, BundleHash: rt.Options.SourceArtifactFact.BundleHash(),
 						SourceEntityID: sourceConsumer.EntityID, ChildEntityID: childEntity,
-						SourceRevision: beforeSource.Entity.Revision, ChildRevision: beforeChild.Entity.Revision, Token: token,
+						SourceRevision: forkFixtureEntityRevision(t, beforeSource.Entity.Revision), ChildRevision: forkFixtureEntityRevision(t, beforeChild.Entity.Revision), Token: token,
 					})
 				}
 				release.Do(func() { close(probe.resume) })
@@ -245,11 +245,11 @@ func runMixedFanOutPendingMatrixWithCrash(t *testing.T, refork bool, crash *mixe
 				releaseSettlement.Do(func() { close(probe.resumeSettled) })
 				waitForkEnginePipelineSettlement(t, forkCtx, selected, request, settlement)
 				afterChild, err := selected.Entities().LoadOperatorEntity(forkCtx, childEntity, claim.RunID())
-				if err != nil || afterChild.Fields["processed_token"] != token || afterChild.Entity.Revision != beforeChild.Entity.Revision+1 {
+				if err != nil || afterChild.Fields["processed_token"] != token || forkFixtureEntityRevision(t, afterChild.Entity.Revision) != forkFixtureEntityRevision(t, beforeChild.Entity.Revision)+1 {
 					t.Fatalf("child did not write exactly once: before=%+v after=%+v err=%v", beforeChild, afterChild, err)
 				}
 				afterSource, err := selected.Entities().LoadOperatorEntity(forkCtx, sourceConsumer.EntityID, runID)
-				if err != nil || !reflect.DeepEqual(beforeSource.Fields, afterSource.Fields) || beforeSource.Entity.Revision != afterSource.Entity.Revision {
+				if err != nil || !reflect.DeepEqual(beforeSource.Fields, afterSource.Fields) || forkFixtureEntityRevision(t, beforeSource.Entity.Revision) != forkFixtureEntityRevision(t, afterSource.Entity.Revision) {
 					t.Fatalf("child changed source business state: before=%+v after=%+v err=%v", beforeSource, afterSource, err)
 				}
 				report, err := selected.Runs().LoadRunDebugReport(forkCtx, claim.RunID(), operatorread.RunDebugQueryOptions{})
@@ -297,7 +297,7 @@ func waitMixedFanOutSeed(t *testing.T, ctx context.Context, entities operatorrea
 		}
 		ready := 0
 		for _, entity := range page.Entities {
-			if (entity.FlowInstance == "consumer" || entity.FlowInstance == "settled") && entity.CurrentState == "active" {
+			if (entity.FlowInstance == "consumer" || entity.FlowInstance == "settled") && entity.CurrentState != nil && *entity.CurrentState == "active" {
 				ready++
 			}
 		}

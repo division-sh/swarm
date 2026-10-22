@@ -481,6 +481,14 @@ func forkEngineMarker(t *testing.T, raw string) any {
 	return fields["marker"]
 }
 
+func forkFixtureEntityRevision(t testing.TB, revision *int64) int {
+	t.Helper()
+	if revision == nil {
+		t.Fatal("fork fixture requires a present entity revision")
+	}
+	return int(*revision)
+}
+
 func assertForkEngineRows(t *testing.T, ctx context.Context, selected *storeselected.Owner, sourceRun, childRun, receiver, sourceBefore string, wantRevision int64, missing bool) {
 	t.Helper()
 	child, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, childRun)

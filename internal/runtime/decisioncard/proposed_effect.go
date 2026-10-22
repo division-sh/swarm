@@ -37,10 +37,14 @@ type ProposedEffectContinuation struct {
 	WorkflowVersion             string
 	Input                       semanticvalue.Value
 	EffectContentHash           string
+	EffectClass                 runtimecontracts.ActivityEffectClass
 	SuccessEvent                string
 	FailureEvent                string
 	RevisionEvent               string
 	RejectedEvent               string
+	RetryMaxAttempts            int
+	RetryBackoff                string
+	ForkPolicy                  runtimecontracts.ActivityForkPolicy
 	EntityID                    string
 	NodeID                      string
 	FlowID                      string
@@ -51,6 +55,7 @@ type ProposedEffectContinuation struct {
 	SourceTaskID                string
 	ParentEventID               string
 	ChainDepth                  int
+	Attempt                     int
 	Generation                  attemptgeneration.Generation
 	LoopStage                   string
 	ExecutionMode               executionmode.Mode
@@ -88,6 +93,7 @@ func (c ProposedEffectContinuation) Canonical() ProposedEffectContinuation {
 	c.FailureEvent = strings.TrimSpace(c.FailureEvent)
 	c.RevisionEvent = strings.TrimSpace(c.RevisionEvent)
 	c.RejectedEvent = strings.TrimSpace(c.RejectedEvent)
+	c.RetryBackoff = strings.TrimSpace(c.RetryBackoff)
 	c.EntityID = strings.TrimSpace(c.EntityID)
 	c.NodeID = strings.TrimSpace(c.NodeID)
 	c.FlowID = strings.TrimSpace(c.FlowID)
@@ -108,6 +114,9 @@ func (c ProposedEffectContinuation) Canonical() ProposedEffectContinuation {
 	c.SupersededReason = strings.TrimSpace(c.SupersededReason)
 	c.CreatedAt = CanonicalTimestamp(c.CreatedAt)
 	c.UpdatedAt = CanonicalTimestamp(c.UpdatedAt)
+	if c.Attempt <= 0 {
+		c.Attempt = 1
+	}
 	if c.Input.Kind() == semanticvalue.KindNull {
 		c.Input = semanticvalue.EmptyObject()
 	}
@@ -117,29 +126,34 @@ func (c ProposedEffectContinuation) Canonical() ProposedEffectContinuation {
 func (c ProposedEffectContinuation) EffectValue() (semanticvalue.Value, error) {
 	c = c.Canonical()
 	fields := map[string]any{
-		"request_event_id":  c.RequestEventID,
-		"activity_id":       c.ActivityID,
-		"tool":              c.Tool,
-		"bundle_hash":       c.BundleHash,
-		"workflow_version":  c.WorkflowVersion,
-		"success_event":     c.SuccessEvent,
-		"failure_event":     c.FailureEvent,
-		"revision_event":    c.RevisionEvent,
-		"rejected_event":    c.RejectedEvent,
-		"entity_id":         c.EntityID,
-		"node_id":           c.NodeID,
-		"flow_id":           c.FlowID,
-		"flow_instance":     c.FlowInstance,
-		"handler_event_key": c.HandlerEventKey,
-		"source_event_id":   c.SourceEventID,
-		"source_run_id":     c.SourceRunID,
-		"source_task_id":    c.SourceTaskID,
-		"parent_event_id":   c.ParentEventID,
-		"chain_depth":       c.ChainDepth,
-		"loop_generation":   c.Generation,
-		"loop_stage":        c.LoopStage,
-		"execution_mode":    c.ExecutionMode,
-		"reply_context_id":  c.ReplyContextID,
+		"request_event_id":   c.RequestEventID,
+		"activity_id":        c.ActivityID,
+		"tool":               c.Tool,
+		"bundle_hash":        c.BundleHash,
+		"workflow_version":   c.WorkflowVersion,
+		"effect_class":       string(c.EffectClass),
+		"success_event":      c.SuccessEvent,
+		"failure_event":      c.FailureEvent,
+		"revision_event":     c.RevisionEvent,
+		"rejected_event":     c.RejectedEvent,
+		"retry_max_attempts": c.RetryMaxAttempts,
+		"retry_backoff":      c.RetryBackoff,
+		"fork_policy":        string(c.ForkPolicy),
+		"entity_id":          c.EntityID,
+		"node_id":            c.NodeID,
+		"flow_id":            c.FlowID,
+		"flow_instance":      c.FlowInstance,
+		"handler_event_key":  c.HandlerEventKey,
+		"source_event_id":    c.SourceEventID,
+		"source_run_id":      c.SourceRunID,
+		"source_task_id":     c.SourceTaskID,
+		"parent_event_id":    c.ParentEventID,
+		"chain_depth":        c.ChainDepth,
+		"attempt":            c.Attempt,
+		"loop_generation":    c.Generation,
+		"loop_stage":         c.LoopStage,
+		"execution_mode":     c.ExecutionMode,
+		"reply_context_id":   c.ReplyContextID,
 	}
 	if c.NativeSessionTarget != "" {
 		if !strings.HasPrefix(c.NativeSessionTarget, runtimecontracts.PrivateChannelActivityPrefix) || !c.PlanGeneration.Valid() || !c.ChannelActivationGeneration.Valid() {
@@ -173,6 +187,9 @@ func (c ProposedEffectContinuation) Validate(card Card) error {
 	}
 	if err := validateProposedEffectSourceOwner(anchor, c); err != nil {
 		return err
+	}
+	if c.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		return fmt.Errorf("proposed-effect continuation requires effect_class non_idempotent_write")
 	}
 	if c.Input.Kind() != semanticvalue.KindObject {
 		return fmt.Errorf("proposed-effect input must be a semantic object")
