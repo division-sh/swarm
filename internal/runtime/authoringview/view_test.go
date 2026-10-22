@@ -1344,7 +1344,8 @@ func loadAuthoringAgentProvenanceSource(t testing.TB, explicitFlowRequiredAgents
 	t.Helper()
 	root := t.TempDir()
 
-	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: authoring-agent-provenance\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeAuthoringViewTestFile(t, filepath.Join(root, "agents.yaml"), `
 root-agent:
   role: root-agent
@@ -1353,11 +1354,12 @@ root-agent:
   subscriptions: [root.requested]
   emit_events: [root.done]
 `)
-	flowSchema := "name: analysis\n"
+	flowSchema := "stages: []\n"
 	if explicitFlowRequiredAgents {
 		flowSchema += "required_agents: []\n"
 	}
 	flowRoot := filepath.Join(root, "analysis")
+	writeAuthoringViewTestFile(t, filepath.Join(flowRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeAuthoringViewTestFile(t, filepath.Join(flowRoot, "schema.yaml"), flowSchema)
 	writeAuthoringViewTestFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 analyzer:
@@ -1379,9 +1381,11 @@ func loadDefaultedTemplatePolicySource(t testing.TB) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
 
-	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: defaulted-template-policy\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "scoring", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeAuthoringViewTestFile(t, filepath.Join(root, "scoring", "schema.yaml"), `
-name: scoring
+stages: []
 instance: account_id
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
@@ -1400,7 +1404,8 @@ func writeRootPrimaryEntityContracts(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeAuthoringViewTestFile(t, filepath.Join(root, "entities.yaml"), `
 workspace:
   org_id: text
@@ -1413,7 +1418,8 @@ func loadDuplicateNodeIDContainedOpsSource(t testing.TB) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
 
-	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: duplicate-node-contained-ops\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeDuplicateNodeIDFlow(t, root, "alpha")
 	writeDuplicateNodeIDFlow(t, root, "beta")
 
@@ -1428,8 +1434,9 @@ func loadDuplicateNodeIDContainedOpsSource(t testing.TB) semanticview.Source {
 func writeDuplicateNodeIDFlow(t testing.TB, root, flowID string) {
 	t.Helper()
 	dir := filepath.Join(root, flowID)
+	writeAuthoringViewTestFile(t, filepath.Join(dir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "schema.yaml"), `
-name: `+flowID+`
+stages: []
 pins:
   inputs:
     - observed
