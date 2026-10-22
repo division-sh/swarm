@@ -597,30 +597,20 @@ func TestMixedPubsubConnectCompositionConnectFailureIsAtomic(t *testing.T) {
 	}
 }
 
-func mixedPubsubConnectStaticSource(t testing.TB) semanticview.Source {
-	return semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
-		{
-			id: "producer", mode: "static",
-			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}},
-			nodes: map[string]runtimecontracts.SystemNodeContract{
-				"local-observer": {
-					SubscribesTo:  []string{"deploy.done"},
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.done": existingOwnerHandlerFixture()},
-				},
-			},
-		},
-		{
-			id: "consumer", mode: "static",
-			inputs: []runtimecontracts.FlowInputEventPin{{Event: "deploy.completed"}},
-			nodes: map[string]runtimecontracts.SystemNodeContract{
-				"consumer-node": {
-					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"deploy.completed": existingOwnerHandlerFixture()},
-				},
-			},
-		},
-	}, []runtimecontracts.FlowConnect{{
-		Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed",
-	}}))
+func mixedPubsubConnectStaticSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	return semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":            "stages: []\nconnect:\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.completed\n",
+		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"producer/schema.yaml":   "stages: []\npins:\n  outputs: [deploy.done]\n",
+		"producer/events.yaml":   "deploy.done:\n",
+		"producer/nodes.yaml":    "local-observer:\n  execution_type: system_node\n  subscribes_to: [deploy.done]\n  event_handlers:\n    deploy.done:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+		"consumer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"consumer/schema.yaml":   "stages: []\npins:\n  inputs: [deploy.completed]\n",
+		"consumer/events.yaml":   "deploy.completed:\n",
+		"consumer/nodes.yaml":    "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.completed:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+	}))
 }
 
 func mixedPubsubConnectNoMatchSource(t testing.TB) semanticview.Source {
