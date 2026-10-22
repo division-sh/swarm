@@ -697,15 +697,9 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	if err := continuations.Synchronize(runCtx); err != nil {
 		return fmt.Errorf("synchronize selected delivery continuations: %w", err)
 	}
-	// Controls may start business work, so publish readiness after startup has
-	// joined, but before dispatch can wait for that same business work.
-	agentRuntime.mu.Lock()
-	if agentRuntime.cancelExecution == nil || runCtx.Err() != nil {
-		agentRuntime.mu.Unlock()
-		return worklifetime.ErrRetired
+	if err := agentRuntime.publishDecisionControlReadiness(runCtx); err != nil {
+		return err
 	}
-	agentRuntime.controlContext = runCtx
-	agentRuntime.mu.Unlock()
 	for len(inputs) > 0 {
 		input := inputs[0]
 		inputs = inputs[1:]

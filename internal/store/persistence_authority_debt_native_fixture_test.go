@@ -12,20 +12,21 @@ import (
 
 // #642/6190983544: these imports consume the reviewed selected construction
 // and execution ports. Every selected-qualified use must retain its exact body.
+// Current bodies compose the landed embedded-spec/nullable-model setup only.
 func debtReviewedNativeSelectedImport(path, alias string, file *ast.File) bool {
 	var pins map[string]string
 	switch path {
 	case "internal/runtime/pipeline/fork_fan_out_crash_external_test.go":
-		pins = map[string]string{"TestIssue642MixedFanOutCrashRestartBothStores": "3b09d43a4504650fddd1759cbc936094b8ec5267dd0484f4f91848630496e821"}
+		pins = map[string]string{"TestIssue642MixedFanOutCrashRestartBothStores": "48de2ed84a9b34a5844c95cdcb86632eb993301293e411f0c9e0692b9bfc1114"}
 	case "internal/runtime/pipeline/fork_fan_out_refork_external_test.go":
-		pins = map[string]string{"proveMixedFanOutChildRefork": "69b01db6be47fbd7a0e940eee058a80e50bfddf61117dea284eeb992f87c2776"}
+		pins = map[string]string{"proveMixedFanOutChildRefork": "4d722cc930b51a0278ad79589717099e66f9206c4667259573e1d9fc9d1e3b79"}
 	case "internal/runtime/pipeline/fork_published_barrier_crash_external_test.go":
 		pins = map[string]string{
-			"publishBarrierCrashCheckpoint":       "4154a9d434713083c9082d47d11d3b996586046f7fdbf3f6f1103bda0882345c",
-			"verifyBarrierCrashRestartBothStores": "6a6c8593e82984d18640dd41af36ee4bf8b86c87941a5fab094feb424542ad47",
+			"publishBarrierCrashCheckpoint":       "0415ec5927c671c743b35606c8e110ad3c246728bf1b64fce7b4c4ea6d235c89",
+			"verifyBarrierCrashRestartBothStores": "218f10b3b0a7877d4a8533bef6ad4004c1ebdb28767c8666f25c7b8683094f3a",
 		}
 	case "internal/runtime/pipeline/fork_published_barrier_failure_external_test.go":
-		pins = map[string]string{"verifyPublishedBarrierCompletionFailure": "9671e34719bb8d35ea395c00b69ae49bd6510698187aa2dfdc64ac48247e35fe"}
+		pins = map[string]string{"verifyPublishedBarrierCompletionFailure": "3b3bc23e90fe29faf67ed8d65881ac88dd12708a36504c8e385ff96689a800ab"}
 	default:
 		return false
 	}
