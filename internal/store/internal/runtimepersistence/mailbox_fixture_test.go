@@ -19,6 +19,7 @@ func TestMailboxRequesterFixtureTransactionBothStores(t *testing.T) {
 			owner, runID := decisionCardTestStore(t, backend)
 			db, postgres := decisionCardStoreDB(t, owner)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			now := time.Now().UTC()
 			card, continuation := newHumanTaskDecisionCardTestFixture(t, runID, uuid.NewString(), now, 0, now.Add(time.Hour))
 			if err := owner.(decisioncard.HumanTaskStore).CreateHumanTaskCard(ctx, card, continuation); err != nil {

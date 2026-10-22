@@ -15,11 +15,13 @@ import (
 	swaruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -206,6 +208,7 @@ func agentPlanDescriptions(plans []agentidentity.Plan) []string {
 
 type selectedContractAgentRuntime struct {
 	mu                  sync.Mutex
+	operationContext    context.Context
 	manager             *runtimemanager.AgentManager
 	generationGrant     runtimestartupownership.GenerationGrant
 	cleanup             func()
@@ -512,11 +515,28 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 			resultErr = errors.Join(resultErr, runtimeOwner.Shutdown())
 		}
 	}()
+	contextOwner, ok := generationGrant.(runtimestartupownership.SelectedForkMutationContextOwner)
+	if !ok {
+		return nil, managedexecution.Admission{}, errors.New("selected runtime grant cannot construct its child operation context")
+	}
+	if !runtimestartupownership.HasMutationAuthority(ctx) {
+		// Supply the preparation's actual retained original only for the new
+		// child handoff, never as ambient authority for publication work.
+		ctx, err = runtimestartupownership.WithProcessMutationAuthority(ctx, req.Prepared.processOwner)
+		if err != nil {
+			return nil, managedexecution.Admission{}, err
+		}
+	}
+	ctx, err = contextOwner.BindSelectedForkMutationContext(ctx)
+	if err != nil {
+		return nil, managedexecution.Admission{}, err
+	}
 	binding, err := generationGrant.ProcessExecutionBinding()
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, binding.RuntimeInstanceID)
+	runtimeOwner.operationContext = ctx
 	admitActivations := func() error {
 		for _, flow := range req.AgentRuntime.Flows {
 			owner, err := runtimeflowidentity.NewRunScopedFlowInstance(authority.SelectedFork.ForkRunID, flow.Instance.Route())
@@ -578,6 +598,11 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		}
 		return runtimeOwner, admission, nil
 	}
+	receiverExecution, err := req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution.WithSelectedAdmission(admission)
+	if err != nil {
+		return nil, managedexecution.Admission{}, fmt.Errorf("bind selected-contract gateway receiver execution: %w", err)
+	}
+	req.AgentRuntime.Options.AgentManagerOptions.ReceiverExecution = receiverExecution
 	builder, err := buildSelectedContractAgentRuntimeFactory(req, generationGrant, bus, pipeline)
 	if err != nil {
 		return nil, managedexecution.Admission{}, err
@@ -654,7 +679,7 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	if err := transferActivations(manager); err != nil {
 		return nil, managedexecution.Admission{}, err
 	}
-	receiverExecution, err := builder.options.ReceiverExecution.WithSelectedAdmission(admission)
+	receiverExecution, err = builder.options.ReceiverExecution.WithSelectedAdmission(admission)
 	if err != nil {
 		return nil, managedexecution.Admission{}, fmt.Errorf("finalize selected-contract manager receiver execution: %w", err)
 	}
@@ -777,6 +802,11 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if err != nil {
 		return selectedContractAgentRuntimeFactory{}, err
 	}
+	custody, err := selectedContractGatewayCustody(req, lifecycle, managerOptions)
+	if err != nil {
+		_ = gatewayWork.Done()
+		return selectedContractAgentRuntimeFactory{}, err
+	}
 	binding, cleanup, err := startSelectedContractAgentRuntimeGateway(exec, mcpTurns, gatewayWork, func(identity agentidentity.Identity) (runtimeactors.AgentConfig, bool) {
 		if managerRef == nil {
 			return runtimeactors.AgentConfig{}, false
@@ -788,7 +818,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 			return errors.New("selected activation has no lifecycle owner")
 		}
 		return managerRef.ProveUnpublishedActivation(token)
-	})
+	}, custody)
 	if err != nil {
 		return selectedContractAgentRuntimeFactory{}, fmt.Errorf("start selected-fork tool gateway: %w", err)
 	}
@@ -859,7 +889,7 @@ func newSelectedContractToolExecutor(options SelectedContractAgentRuntimeOptions
 	})
 }
 
-func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, mcpTurns *runtimemcp.TurnContextRegistry, lease *worklifetime.Lease, resolveActorConfig func(agentidentity.Identity) (runtimeactors.AgentConfig, bool), validateActivation func(runtimeeffects.LifecycleToken) error) (_ toolgateway.Binding, _ func(), finalErr error) {
+func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, mcpTurns *runtimemcp.TurnContextRegistry, lease *worklifetime.Lease, resolveActorConfig func(agentidentity.Identity) (runtimeactors.AgentConfig, bool), validateActivation func(runtimeeffects.LifecycleToken) error, custody *selectedGatewayCustody) (_ toolgateway.Binding, _ func(), finalErr error) {
 	if lease == nil {
 		return toolgateway.Binding{}, nil, errors.New("selected-fork gateway requires admitted work")
 	}
@@ -903,10 +933,146 @@ func startSelectedContractAgentRuntimeGateway(exec *runtimetools.Executor, mcpTu
 
 	hooks := swaruntime.RuntimeMCPGatewayHooks(nil, nil, resolveActorConfig, nil, mcpTurns)
 	hooks.ValidateActivationProbe = validateActivation
+	if custody != nil {
+		hooks = custody.hooks(hooks)
+	}
 	gateway := runtimemcp.NewGateway(exec, binding.AuthToken(), hooks)
 	server := serveSelectedContractGateway(ln, gateway.Handler(), lease)
 	transferred = true
 	return binding, server.Close, nil
+}
+
+type selectedGatewayCustody struct {
+	grant       runtimestartupownership.GenerationGrant
+	admission   managedexecution.Admission
+	preparation runfork.SelectedForkPreparation
+}
+
+func selectedContractGatewayCustody(req publishSelectedContractForkEventsRequest, lifecycle runtimemanager.AgentLifecyclePersistence, options runtimemanager.AgentManagerOptions) (*selectedGatewayCustody, error) {
+	if req.Prepared == nil {
+		return nil, nil
+	}
+	grant, ok := lifecycle.(runtimestartupownership.GenerationGrant)
+	if !ok {
+		return nil, errors.New("selected gateway requires its retained native child grant")
+	}
+	bound, err := options.ReceiverExecution.Bind(context.Background(), req.AgentRuntime.Options.ExecutionPosture.RootMode())
+	if err != nil {
+		return nil, err
+	}
+	admission, ok := managedexecution.FromContext(bound)
+	if !ok {
+		return nil, errors.New("selected gateway requires its retained child admission")
+	}
+	return &selectedGatewayCustody{grant: grant, admission: admission, preparation: req.Prepared.evidence()}, nil
+}
+
+func (c *selectedGatewayCustody) hooks(hooks runtimemcp.GatewayHooks) runtimemcp.GatewayHooks {
+	resolve := hooks.ResolveTurnContext
+	hooks.ResolveTurnContext = func(token string) (runtimemcp.TurnContext, bool) {
+		turn, ok := resolve(token)
+		if !ok || !c.matchesTurn(turn) {
+			return runtimemcp.TurnContext{}, false
+		}
+		return turn, true
+	}
+	epoch := hooks.WithCurrentRuntimeEpoch
+	hooks.WithCurrentRuntimeEpoch = func(ctx context.Context) context.Context {
+		ctx = epoch(ctx)
+		if err := c.grant.ProveCurrent(ctx); err != nil {
+			return refusedSelectedGatewayContext(ctx, err)
+		}
+		binder, ok := c.grant.(interface {
+			BindRuntimeMutationContext(context.Context) (context.Context, error)
+		})
+		if !ok {
+			return refusedSelectedGatewayContext(ctx, errors.New("selected gateway grant cannot forward its original custody"))
+		}
+		bound, err := binder.BindRuntimeMutationContext(ctx)
+		if err != nil {
+			return refusedSelectedGatewayContext(ctx, err)
+		}
+		owner, ok := c.grant.(runtimestartupownership.SelectedForkMutationContextOwner)
+		if !ok {
+			return refusedSelectedGatewayContext(ctx, errors.New("selected gateway grant cannot bind its retained child"))
+		}
+		bound, err = owner.BindSelectedForkMutationContext(bound)
+		if err != nil {
+			return refusedSelectedGatewayContext(ctx, err)
+		}
+		return bound
+	}
+	return hooks
+}
+
+func refusedSelectedGatewayContext(ctx context.Context, err error) context.Context {
+	refused, _ := runtimestartupownership.WithRuntimeMutationAuthority(ctx, nil)
+	failed, cancel := context.WithCancelCause(refused)
+	cancel(err)
+	return failed
+}
+
+func (c *selectedGatewayCustody) matchesTurn(turn runtimemcp.TurnContext) bool {
+	evidence, err := c.grant.Evidence()
+	if err != nil || evidence.SelectedFork == nil || turn.CapabilitySurface == nil ||
+		!turn.HasSourceArtifactFact || turn.SourceArtifactFact.BundleHash() != evidence.BundleHash ||
+		!turn.HasAuthorActivityScope || turn.AuthorActivityScope != runtimeauthoractivity.BundleScope(evidence.RuntimeInstanceID, evidence.BundleHash) ||
+		turn.RunID != evidence.SelectedFork.ForkRunID || !turn.HasEffectAuthority || !turn.HasExecutionAdmission {
+		return false
+	}
+	admission := turn.ExecutionAdmission
+	if admission.Validate() != nil || admission.ID != c.admission.ID ||
+		!admission.AuthorizesSelected(evidence.SelectedFork.ExecutionID, turn.RunID, evidence.SelectedFork.ExecutionGeneration) ||
+		admission.ActorCensusFingerprint != evidence.SelectedFork.ActorCensusFingerprint || admission.BundleHash != evidence.BundleHash {
+		return false
+	}
+	if !selectedGatewayEffectMatches(turn.EffectAuthority, *evidence.SelectedFork) {
+		return false
+	}
+	return c.matchesTurnActor(turn, evidence)
+}
+
+func selectedGatewayEffectMatches(authority runtimeeffects.Authority, binding runtimestartupownership.SelectedForkGrantBinding) bool {
+	selected := authority.SelectedFork
+	return authority.Valid() && authority.Kind == runtimeeffects.AuthoritySelectedContractFork &&
+		authority.ID == binding.ExecutionID && authority.ExecutionOwner == binding.ExecutionOwner && authority.FenceGeneration == binding.FenceGeneration &&
+		selected.ForkRunID == binding.ForkRunID && selected.Generation == binding.ExecutionGeneration &&
+		selected.AdmissionFingerprint == binding.AdmissionFingerprint && selected.ContainerPlanFingerprint == binding.ContainerPlanFingerprint &&
+		selected.ActorCensusFingerprint == binding.ActorCensusFingerprint && selected.EffectiveConfigFingerprint == binding.EffectiveConfigFingerprint
+}
+
+func (c *selectedGatewayCustody) matchesTurnActor(turn runtimemcp.TurnContext, evidence runtimestartupownership.GrantEvidence) bool {
+	surface := turn.CapabilitySurface
+	if surface.Validate() != nil {
+		return false
+	}
+	identity := turn.Actor.Identity
+	if surface.Authority.Kind == managedcapabilities.AuthorityStartupProbe {
+		if !turn.HasLifecycleToken || !turn.LifecycleToken.Valid() || surface.Authority.ExecutionKind != managedcapabilities.ExecutionSelectedForkPreparation ||
+			surface.Authority.ExecutionAuthorityID != c.preparation.PreparationID || surface.Authority.Preparation == nil ||
+			surface.Authority.Preparation.SelectedForkPreparationCoordinates != c.preparation.Coordinates {
+			return false
+		}
+		identity = turn.LifecycleToken.Identity
+	} else if surface.Authority.Kind != managedcapabilities.AuthorityProviderTurn || evidence.State != runtimestartupownership.GrantAdmitted ||
+		surface.Authority.ExecutionKind != managedcapabilities.ExecutionSelectedContractFork ||
+		surface.Authority.ExecutionAuthorityID != evidence.SelectedFork.ExecutionID || surface.Authority.RunID != turn.RunID ||
+		!runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(turn.EffectAuthority.Target, *surface) {
+		return false
+	}
+	if identity.Validate() != nil || identity.RunID != turn.RunID || identity.AgentID() != turn.Actor.ID {
+		return false
+	}
+	plan, err := identity.Plan()
+	if err != nil {
+		return false
+	}
+	for _, actor := range c.preparation.Actors {
+		if actor.Plan == plan {
+			return (surface.ActorPlan == plan || surface.ActorIdentity == identity) && actor.Mode == turn.Actor.ExecutionMode
+		}
+	}
+	return false
 }
 
 type selectedContractGatewayServer struct {

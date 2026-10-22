@@ -48,6 +48,7 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext(context.Background())
 			selected := backend.open(t, ctx)
+			ctx = originalAPIFixtureContext(t, ctx, selected)
 			registrar, ok := selected.(authorActivityTestCatalogRegistrar)
 			if !ok {
 				t.Fatalf("%T does not register author activity catalogs", selected)

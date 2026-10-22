@@ -23,10 +23,38 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
+
+func originalPipelineFixtureContext(t testing.TB, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if startupownership.HasMutationAuthority(ctx) {
+		if _, err := startupownership.CaptureMutationAuthority(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return ctx
+	}
+	if _, present := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !present {
+		scope, found := runtimeauthoractivity.ScopeFromContext(ctx)
+		if !found || scope.RuntimeInstanceID == "" {
+			t.Fatal("pipeline fixture requires its declared runtime before process acquisition")
+		}
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, scope.RuntimeInstanceID)
+	}
+	process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
 
 var authorActivityTestSourceArtifactFact = mustAuthorActivityTestSourceArtifactFact()
 
@@ -179,6 +207,20 @@ func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts
 	}
 	if opts.SourceArtifactFact.Validate() != nil {
 		opts.SourceArtifactFact = authorActivityTestSourceArtifactFact
+	}
+	opts.CarryMutationContext = startupownership.CarryMutationAuthority
+	if _, native := eventStore.(agentfixture.Store); native && opts.MutationContext == nil {
+		fixtureContext := testAuthorActivityContextForSource(t, context.Background(), opts.SourceArtifactFact)
+		fixtureContext = runtimecorrelation.WithRuntimeInstanceID(fixtureContext, opts.RuntimeInstanceID)
+		fixtureContext = runtimeauthoractivity.WithScope(fixtureContext, runtimeauthoractivity.BundleScope(opts.RuntimeInstanceID, opts.SourceArtifactFact.BundleHash()))
+		original := originalPipelineFixtureContext(t, fixtureContext, eventStore)
+		opts.MutationContext = func(ctx context.Context) (context.Context, error) {
+			if !startupownership.HasMutationAuthority(ctx) {
+				ctx = startupownership.CarryMutationAuthority(ctx, original)
+			}
+			_, err := startupownership.CaptureMutationAuthority(ctx)
+			return ctx, err
+		}
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = pipelineExternalTestWorkOwnerForSource(t, opts.SourceArtifactFact)

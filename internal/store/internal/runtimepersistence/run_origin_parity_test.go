@@ -16,6 +16,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -57,7 +58,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			reader := fixture.store.(runOriginReadStore)
-			ctx := testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash)
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash), fixture.store)
 			at := time.Date(2026, 7, 29, 16, 0, 0, 0, time.UTC)
 
 			t.Run("event_origin_survives_later_event", func(t *testing.T) {
@@ -118,7 +119,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 					disposition != runtimerunlifecycle.MutationApplied {
 					t.Fatalf("revise scenario source = %s/%v", disposition, err)
 				}
-				ctx = testAuthorActivityContextForBundle(runLifecycleCandidateParityReplacementHash)
+				ctx = startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(runLifecycleCandidateParityReplacementHash), ctx)
 				requireRunOriginHeader(t, ctx, reader, runID, want, 1)
 				for _, state := range []runtimerunlifecycle.State{
 					runtimerunlifecycle.StatePaused,
@@ -165,6 +166,7 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			}
 			reader := selected.(runOriginReadStore)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			flowPath := "origin-parity/" + backend
 			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 			firstArtifact := storeTestSourceArtifact("standing-origin-first-" + backend)
@@ -189,7 +191,7 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 				t.Fatalf("replayed standing generation = %#v, want run %s generation %d", replayedFresh, fresh.RunID, fresh.Generation)
 			}
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, fresh.RunID, serviceID, 1)
-			commitStandingOriginIngress(t, selected, firstHash, fresh.RunID, "fresh")
+			commitStandingOriginIngress(t, ctx, selected, firstHash, fresh.RunID, "fresh")
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, fresh.RunID, serviceID, 1)
 
 			reset, err := workflow.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{
@@ -199,7 +201,7 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 				t.Fatalf("reset standing generation: %v", err)
 			}
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, reset.RunID, serviceID, 2)
-			commitStandingOriginIngress(t, selected, firstHash, reset.RunID, "reset")
+			commitStandingOriginIngress(t, ctx, selected, firstHash, reset.RunID, "reset")
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, reset.RunID, serviceID, 2)
 
 			wrongServiceID := uuid.NewString()
@@ -245,6 +247,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			candidateStore := selected.(runLifecycleCandidateParityStore)
 			registrar := selected.(runtimerunlifecycle.CandidateRegistrar)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			flowPath := "repair-candidate/standing"
 			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 			firstArtifact := storeTestSourceArtifact("standing-repair-first-" + backend)
@@ -578,9 +581,9 @@ func requireStandingGenerationOrigin(
 	}
 }
 
-func commitStandingOriginIngress(t *testing.T, selected any, bundleHash, runID, suffix string) {
+func commitStandingOriginIngress(t *testing.T, original context.Context, selected any, bundleHash, runID, suffix string) {
 	t.Helper()
-	ctx := testAuthorActivityContextForBundle(bundleHash)
+	ctx := startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(bundleHash), original)
 	event := eventtest.ExistingRunRootIngress(
 		uuid.NewString(), events.EventType("standing.origin."+suffix), "ingress", "", json.RawMessage(`{}`), 0,
 		runID, events.EventEnvelope{}, time.Now().UTC(),

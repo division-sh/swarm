@@ -34,8 +34,6 @@ func TestFlowActivationSourceSetRebindBothStores(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			runID, path := uuid.NewString(), "account/restamp"
 			hash := mustExternalStoreTestSourceArtifactFact().BundleHash()
-			requireReadinessRun(t, ctx, selected, runID, hash)
-			seedExactFlowInstanceDescriptorOwner(t, selected, runID, uuid.NewString(), path, hash)
 			runtimeID := uuid.NewString()
 			process, err := selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "readiness-restamp", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
 			if err != nil {
@@ -46,6 +44,12 @@ func TestFlowActivationSourceSetRebindBothStores(t *testing.T) {
 					t.Error(err)
 				}
 			})
+			ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireReadinessRun(t, ctx, selected, runID, hash)
+			seedExactFlowInstanceDescriptorOwner(t, ctx, selected, runID, uuid.NewString(), path, hash)
 			sourceSet, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
 			if err != nil {
 				t.Fatal(err)

@@ -61,6 +61,7 @@ func TestRunForkSelectedContractRouteRecoverySelectedStoreParity(t *testing.T) {
 				store := admitTestPostgresStore(t, db)
 				selected, eventStore = store, store
 			}
+			ctx = originalStoreFixtureContext(t, ctx, eventStore)
 			sourceRunID := "00000000-0000-0000-0000-000000023620"
 			forkRunID := "00000000-0000-0000-0000-000000023621"
 			eventID := "00000000-0000-0000-0000-000000023622"

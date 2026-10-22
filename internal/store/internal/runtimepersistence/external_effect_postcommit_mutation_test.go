@@ -63,7 +63,7 @@ func TestExternalEffectSettlementPostCommitErrorIsTypedOnBothStores(t *testing.T
 			OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, Authority: attempt.Authority,
 			State: runtimeeffects.StateTerminalFailure, Failure: &failure, Now: time.Now().UTC(),
 		}
-		err = fixture.store.SettleExternalAttempt(testAuthorActivityContext(), settlement)
+		err = fixture.store.SettleExternalAttempt(fixture.ctx, settlement)
 		var committed *runtimeeffects.PostCommitMutationError
 		if !errors.As(err, &committed) || !errors.Is(err, injected) {
 			t.Fatalf("acknowledged settlement error = %T %v, want typed injected fault", err, err)

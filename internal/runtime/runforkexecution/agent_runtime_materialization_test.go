@@ -2,6 +2,7 @@ package runforkexecution
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -33,7 +34,7 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/google/uuid"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 )
 
 const (
@@ -114,7 +115,8 @@ func selectedContractTestProcessCapability(
 	fixture := value.(*runForkTestWorkFixture)
 	fixture.mu.Lock()
 	defer fixture.mu.Unlock()
-	if capability := fixture.capabilities[selected]; capability != nil {
+	db := storetest.Database(selected)
+	if capability := fixture.capabilities[db]; capability != nil {
 		select {
 		case <-capability.Done():
 		default:
@@ -124,22 +126,39 @@ func selectedContractTestProcessCapability(
 			return capability
 		}
 	}
-	capability, err := selected.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-		OwnerID: "selected-contract-test", BootID: uuid.NewString(), RuntimeInstanceID: runForkTestRuntimeInstanceID,
-	})
+	native, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("selected-contract fixture requires its native lifecycle owner: %T", selected)
+	}
+	capability, err := agentfixture.ProcessCapability(t, runtimecorrelation.WithRuntimeInstanceID(ctx, runForkTestRuntimeInstanceID), native)
 	if err != nil {
 		t.Fatalf("acquire selected-contract process capability: %v", err)
 	}
 	if fixture.capabilities == nil {
-		fixture.capabilities = make(map[runtimestartupownership.Store]runtimestartupownership.ProcessCapability)
+		fixture.capabilities = make(map[*sql.DB]runtimestartupownership.ProcessCapability)
 	}
-	fixture.capabilities[selected] = capability
+	fixture.capabilities[db] = capability
 	t.Cleanup(func() {
 		if err := capability.Release(context.Background()); err != nil {
 			t.Errorf("release selected-contract process capability: %v", err)
 		}
 	})
 	return capability
+}
+
+func originalSelectedFixtureContext(t testing.TB, ctx context.Context, selected runtimestartupownership.Store) context.Context {
+	t.Helper()
+	if runtimestartupownership.HasMutationAuthority(ctx) {
+		if _, err := runtimestartupownership.CaptureMutationAuthority(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return ctx
+	}
+	ctx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, selectedContractTestProcessCapability(t, ctx, selected))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
 }
 
 func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredecessorRetirement(t *testing.T) {

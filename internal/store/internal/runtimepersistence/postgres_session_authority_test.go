@@ -317,6 +317,7 @@ func TestPostgresPipelineScanCloseFailureIsTerminalAndReclaimable(t *testing.T) 
 				dialect: authoractivityfixture.DialectPostgres,
 			}
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			eventID := commitPipelineParityEvent(t, ctx, selected, runID, time.Now().UTC().Add(-time.Minute))

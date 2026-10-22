@@ -21,6 +21,7 @@ func TestFanOutExpiredUnreclaimedClaimCannotReadOrCommitOnBothStores(t *testing.
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, time.Now().UTC())
 			turnTime := time.Now().UTC()
 			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
@@ -76,6 +77,7 @@ func TestFanOutClaimLeaseUsesAdmissionRatherThanCallerClockOnBothStores(t *testi
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, time.Now().UTC())
 			for _, offset := range []time.Duration{-time.Hour, time.Hour} {
 				before := time.Now().UTC()
@@ -103,6 +105,7 @@ func TestFanOutClaimExpiresWhileMutationWaitsForWriterOnBothStores(t *testing.T)
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
 			defer cancel()
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, time.Now().UTC())
 			at := time.Now().UTC()
 			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{

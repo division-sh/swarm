@@ -254,7 +254,7 @@ func TestOperatorRunStartHandlersFailClosedBeforePersistence(t *testing.T) {
 		}
 		handler := runStartTestHandler(t, pg, bus, source)
 		runID := uuid.NewString()
-		storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+		storetest.RequireRun(t, originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 			RunID:      runID,
 			BundleHash: runStartTestBundleHash,
 		})

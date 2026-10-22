@@ -54,6 +54,7 @@ func verifyNativeObserverCreationOrder(t *testing.T, backend string, observerFir
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
 	selected := newScalarTemplateInstanceParityStore(t, backend, ctx)
+	ctx = originalEventBusFixtureContext(t, ctx, selected)
 	at := time.Now().UTC()
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 	constructed := map[string]runtimeflowidentity.Instance{}

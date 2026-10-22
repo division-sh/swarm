@@ -42,6 +42,10 @@ func TestResetCoordinatorContinuesDurableReceiptsBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				ctx, err = startupownership.WithProcessMutationAuthority(ctx, cap)
+				if err != nil {
+					t.Fatal(err)
+				}
 				t.Cleanup(func() {
 					if err := cap.Release(context.Background()); err != nil {
 						t.Error(err)

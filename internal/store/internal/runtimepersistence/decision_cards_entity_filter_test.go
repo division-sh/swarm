@@ -2,11 +2,12 @@ package runtimepersistence
 
 import (
 	"errors"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 	"reflect"
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/decisioncardtest"
 
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -21,6 +22,7 @@ func TestDecisionCardEntityFilterParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			store, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			otherRun, entityID, otherEntity := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 			if err := ensureEphemeralRunForTest(ctx, store, otherRun, now.Add(-time.Hour)); err != nil {

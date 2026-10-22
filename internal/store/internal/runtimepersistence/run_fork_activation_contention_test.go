@@ -462,6 +462,7 @@ func newConstructedGateFixtureWithOrigin(t *testing.T, backend eventRecordContra
 	runID := uuid.NewString()
 	f := forkContentionFixture{snapshotOwnershipFixture: snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, runID: runID, entityID: runID, eventID: uuid.NewString()}, gateOwned: true, source: semanticview.Wrap(bundle)}
 	f.ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), f.runID)
+	f.ctx = originalStoreFixtureContext(t, f.ctx, opened.store)
 	f.ctx, err = eventreceiver.NormalExecution().Bind(f.ctx, executionmode.Live)
 	if err != nil {
 		t.Fatal(err)

@@ -24,7 +24,7 @@ func TestDecisionMarkRetainsAcknowledgementAfterHandoffFailure(t *testing.T) {
 			if !ok {
 				t.Fatalf("%T does not expose pipeline obligations", fixture.store)
 			}
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			at := time.Now().UTC().Add(-time.Minute)

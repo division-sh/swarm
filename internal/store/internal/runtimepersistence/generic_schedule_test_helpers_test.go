@@ -32,7 +32,7 @@ func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 		{name: "sqlite", open: func(t *testing.T) (selectedScheduleStore, *sql.DB, context.Context) {
 			store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 			runID := uuid.NewString()
-			ctx := selectedScheduleTestContext(t, runID)
+			ctx := originalStoreFixtureContext(t, selectedScheduleTestContext(t, runID), store)
 			seedSQLiteScheduleRun(t, store, ctx, runID)
 			return store, store.backend.ConstructionHandle(), ctx
 		}},
@@ -40,10 +40,10 @@ func selectedScheduleStoreCases() []selectedScheduleStoreCase {
 			_, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			runID := uuid.NewString()
-			ctx := selectedScheduleTestContext(t, runID)
 			store := admitTestPostgresStore(t, db)
+			ctx := originalStoreFixtureContext(t, selectedScheduleTestContext(t, runID), store)
 			requireRunningRunForTest(t, ctx, store, runID, time.Now().UTC())
-			t.Cleanup(func() { _ = store.ReleaseGenericScheduleClaims(context.Background()) })
+			t.Cleanup(func() { _ = store.ReleaseGenericScheduleClaims(ctx) })
 			return store, db, ctx
 		}},
 	}

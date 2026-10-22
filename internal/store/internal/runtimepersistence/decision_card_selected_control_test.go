@@ -24,6 +24,7 @@ func TestDecisionCardSelectedControlMutationBoundariesBothStores(t *testing.T) {
 			t.Run(backend+"/"+control, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				store, runID := decisionCardTestStore(t, backend)
+				ctx = originalStoreFixtureContext(t, ctx, store)
 				now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 				card := newDecisionCardTestCard(t, runID, now)
 				outcome := card.Snapshot.Outcomes["revise"]

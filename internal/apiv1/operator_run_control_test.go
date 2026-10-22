@@ -69,6 +69,7 @@ func TestOperatorRunStopDoesNotReplayCommittedTransitionAfterReconciliationFailu
 
 func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
+	ctx := originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg)
 	bus, err := newScopedAPITestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
@@ -77,7 +78,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 		Now: func() time.Time { return time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC) },
 	})
 	bus.SetRunDispatchGate(controller)
-	handler := testHandler(t, Options{
+	handler := testHandlerWithOriginalContext(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
 			Now:         func() time.Time { return time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC) },
@@ -86,8 +87,7 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 			Idempotency: pg,
 			RunControl:  controller,
 		}),
-	})
-	ctx := context.Background()
+	}, ctx)
 	runID := uuid.NewString()
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: runID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
@@ -167,13 +167,14 @@ func TestOperatorRunControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T)
 
 func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 	pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+	ctx := originalAPIFixtureContext(t, testAuthorActivityContext(context.Background()), pg)
 	bus, err := newScopedAPITestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
 	controller := runtimeruncontrol.NewController(pg, bus, runtimeruncontrol.Options{})
 	bus.SetRunDispatchGate(controller)
-	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Idempotency: pg, RunControl: controller})})
+	handler := testHandlerWithOriginalContext(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Idempotency: pg, RunControl: controller})}, ctx)
 	missingRunID := uuid.NewString()
 	for _, method := range []string{"run.stop", "run.pause", "run.continue"} {
 		resp := rpcCall(t, handler, runControlBody(method, missingRunID, ""))
@@ -185,7 +186,7 @@ func TestOperatorRunControlHandlersTypedResourceErrors(t *testing.T) {
 		}
 	}
 	materializedLikePausedRunID := uuid.NewString()
-	storetest.RequireRun(t, context.Background(), pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: materializedLikePausedRunID, State: storerunlifecycle.StatePaused, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: materializedLikePausedRunID, State: storerunlifecycle.StatePaused, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
 	resp := rpcCall(t, handler, runControlBody("run.continue", materializedLikePausedRunID, ""))
 	if resp.Error == nil {
 		t.Fatal("run.continue without operator pause owner error = nil")

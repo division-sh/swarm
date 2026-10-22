@@ -234,12 +234,12 @@ func TestOrdinaryReplayInitializedReceiversBothStores(t *testing.T) {
 					}
 				})
 			}
+			foreignRun := uuid.NewString()
+			foreignSource := stateOnlyRootAcquisitionSource(t, "foreign-replay-parent")
+			foreignBundle, _ := semanticview.Bundle(foreignSource)
+			foreignCtx := correlation.WithRunID(seedSelectedActivitySourceRun(t, fixture, foreignRun, foreignSource), foreignRun)
+			constructHistoricalSourceFixture(t, foreignCtx, fixture.store.(agentFixtureFlowStore), sqliteFlowActivationRequest(foreignBundle, ".", foreignRun, "", foreignRun))
 			t.Run("wrong_run", func(t *testing.T) {
-				foreignRun := uuid.NewString()
-				foreignSource := stateOnlyRootAcquisitionSource(t, "foreign-replay-parent")
-				foreignBundle, _ := semanticview.Bundle(foreignSource)
-				foreignCtx := correlation.WithRunID(seedSelectedActivitySourceRun(t, fixture, foreignRun, foreignSource), foreignRun)
-				constructHistoricalSourceFixture(t, foreignCtx, fixture.store.(agentFixtureFlowStore), sqliteFlowActivationRequest(foreignBundle, ".", foreignRun, "", foreignRun))
 				if _, err := fixture.db.ExecContext(ctx, `UPDATE flow_instances SET run_id=$1, parent_instance=$4 WHERE run_id=$2 AND entity_id=$3`, foreignRun, child.ForkRunID, receiver.EntityID, foreignRun); err != nil {
 					t.Fatal(err)
 				}

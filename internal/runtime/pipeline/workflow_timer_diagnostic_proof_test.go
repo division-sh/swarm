@@ -323,7 +323,7 @@ func VerifyWorkflowTimerFailureDiagnosticsPersistOnBothStoresForTest(t *testing.
 					lifecycle.recoveryMu.Lock()
 					ownedRecovery := len(lifecycle.recovering)
 					lifecycle.recoveryMu.Unlock()
-					if ownedRecovery != 1 || !lifecycle.startWakeupRecovery(activation.Ref) {
+					if ownedRecovery != 1 || !lifecycle.startWakeupRecovery(ctx, activation.Ref) {
 						t.Fatalf("existing recovery did not coalesce one exact activation: %d", ownedRecovery)
 					}
 					lifecycle.recoveryMu.Lock()
@@ -353,11 +353,6 @@ func VerifyWorkflowTimerFailureDiagnosticsPersistOnBothStoresForTest(t *testing.
 						t.Fatalf("diagnostic lost failure normalization/causal chain: %+v, want %+v", observed.entry.Failure, want.Failure)
 					}
 					wantRunID := runtimecorrelation.RunIDFromContext(ctx)
-					if action == "workflow_timer_reconcile_retry_failed" {
-						// Existing owned recovery uses a process-scoped context. Do not
-						// invent run correlation or replace its cancellation policy.
-						wantRunID = ""
-					}
 					if observed.runID != wantRunID {
 						t.Fatalf("diagnostic context run = %q, want existing caller scope %q", observed.runID, wantRunID)
 					}

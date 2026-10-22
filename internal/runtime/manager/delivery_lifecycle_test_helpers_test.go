@@ -51,6 +51,11 @@ func managerClaimedDeliveryContext(
 	agentID string,
 ) context.Context {
 	t.Helper()
+	var err error
+	ctx, err = am.bindRuntimeOperationContext(ctx)
+	if err != nil {
+		t.Fatalf("bind manager test delivery owner: %v", err)
+	}
 	ctx = managerAgentDeliveryContext(ctx, evt.RunID(), agentID)
 	store, ok := am.deliveryStore.(interface {
 		ClaimDelivery(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error)

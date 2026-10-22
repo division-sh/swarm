@@ -16,6 +16,7 @@ func TestOperatorConversationKeysetInsertionParity(t *testing.T) {
 			backend := newOperatorConversationProjectionTestBackend(t, name)
 			fixture := seedOperatorConversationProjectionFixture(t, backend)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, backend.settlement)
 			first, err := backend.store.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: fixture.sessionID, Limit: 2})
 			if err != nil || len(first.Turns) != 2 || first.NextCursor == "" {
 				t.Fatalf("first page=%#v err=%v", first, err)

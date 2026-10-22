@@ -47,6 +47,11 @@ type cardIntentRecheckConn struct {
 	probe *cardIntentRecheckProbe
 }
 
+func (c *cardIntentRecheckConn) IsValid() bool {
+	validator, ok := c.Conn.(driver.Validator)
+	return ok && validator.IsValid()
+}
+
 func (c *cardIntentRecheckConn) before(ctx context.Context, query string) error {
 	cut, ok := ctx.Value(cardIntentRecheckKey{}).(*cardIntentRecheckCut)
 	if !ok {

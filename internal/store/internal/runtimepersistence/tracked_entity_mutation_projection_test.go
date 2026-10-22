@@ -18,9 +18,9 @@ func TestTrackedMutationProjectionPreservesScopeOrderAndNullBothStores(t *testin
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
 			run, entity, foreignRun, foreignEntity := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-			seedEntityToolStorageWitness(t, fixture, run, entity, true, true)
-			seedEntityToolStorageWitness(t, fixture, foreignRun, entity, true, true)
-			seedEntityToolStorageWitness(t, fixture, run, foreignEntity, true, true)
+			seedEntityToolStorageWitness(t, ctx, fixture, run, entity, true, true)
+			seedEntityToolStorageWitness(t, ctx, fixture, foreignRun, entity, true, true)
+			seedEntityToolStorageWitness(t, ctx, fixture, run, foreignEntity, true, true)
 			probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
 			if err != nil {
 				t.Fatal(err)
@@ -84,7 +84,7 @@ func TestTrackedMutationProjectionRefusesRawInvalidCancelledClosedAndLateFailure
 			t.Run(backend.name+"/"+cut, func(t *testing.T) {
 				fixture, ctx := backend.open(t), testAuthorActivityContext()
 				run, entity := uuid.NewString(), uuid.NewString()
-				seedEntityToolStorageWitness(t, fixture, run, entity, true, true)
+				seedEntityToolStorageWitness(t, ctx, fixture, run, entity, true, true)
 				switch cut {
 				case "invalid-run":
 					run = "bad"
@@ -135,7 +135,7 @@ func TestTrackedMutationProjectionPreservesAbsenceAndPrivateCurrentOperandsBothS
 			}{{"fielded", true, true}, {"fieldless", true, false}, {"data-only", false, true}} {
 				t.Run(shape.name, func(t *testing.T) {
 					entity := uuid.NewString()
-					seedEntityToolStorageWitness(t, fixture, run, entity, shape.constructed, shape.fielded)
+					seedEntityToolStorageWitness(t, ctx, fixture, run, entity, shape.constructed, shape.fielded)
 					got, err := ReadTrackedEntityMutationProjectionStorageForTest(ctx, fixture.store, run, entity)
 					if err != nil {
 						t.Fatal(err)

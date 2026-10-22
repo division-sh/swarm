@@ -17,6 +17,7 @@ import (
 func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	ctx := context.Background()
 	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
+	ctx = originalAPIFixtureContext(t, ctx, sqliteStore)
 	agentID := "agent-operator-read"
 	sessionID := uuid.NewString()
 	turnID := uuid.NewString()

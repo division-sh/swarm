@@ -1,6 +1,11 @@
 package postgres
 
-import "context"
+import (
+	"context"
+	"errors"
+
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+)
 
 // Distinct from serialization-conflict retry evidence. This outcome conveys
 // joined cancellation only and grants no replay entitlement.
@@ -18,6 +23,18 @@ func CleanCancellationBeforeCommit(err error) (beforeAttempt, ok bool) {
 		return false, false
 	}
 	return cancelled.beforeAttempt, true
+}
+
+// No session operation or pool acquisition has begun at this admission cut.
+// Reading the original with cancellation detached does not execute SQL work.
+func cancellationBeforeMutationAdmission(ctx context.Context, err error) error {
+	if err != context.Canceled || ctx == nil || ctx.Err() != context.Canceled {
+		return err
+	}
+	if _, authorityErr := runtimeownership.CaptureMutationAuthority(context.WithoutCancel(ctx)); authorityErr != nil {
+		return errors.Join(err, authorityErr)
+	}
+	return &cleanTransactionCancellation{cause: err, beforeAttempt: true}
 }
 
 func onlyCallerCancellation(err error) bool {

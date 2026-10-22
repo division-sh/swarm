@@ -181,6 +181,7 @@ func TestLifecycleDiagnosticCleanupTransactionInterleavingsBothStores(t *testing
 				if diagnosticFirst {
 					cleanupStore, logStore = secondStore, firstStore
 				}
+				ctx = originalStoreFixtureContext(t, ctx, cleanupStore)
 				item := createLifecycleDiagnostic(t, ctx, cleanupStore)
 				capability, err := agentfixture.ProcessCapability(t, ctx, cleanupStore)
 				if err != nil {

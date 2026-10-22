@@ -3,6 +3,7 @@ package runforkexecution
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/binary"
 	"sync"
 	"testing"
@@ -51,7 +52,7 @@ type runForkTestWorkFixture struct {
 	process      *worklifetime.Process
 	runtime      *worklifetime.RuntimeOccurrence
 	mu           sync.Mutex
-	capabilities map[startupownership.Store]startupownership.ProcessCapability
+	capabilities map[*sql.DB]startupownership.ProcessCapability
 	owners       map[startupownership.Store]SelectedContractExecutionOwner
 }
 

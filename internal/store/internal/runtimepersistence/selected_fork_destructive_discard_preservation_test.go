@@ -24,6 +24,7 @@ func TestSelectedForkDestructiveDiscardPendingDeliveryBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			store, db, _ := selectedForkDiscardTestStore(t, backend)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			runID := uuid.NewString()
 			requirePausedRunForTest(t, ctx, store, runID, time.Now().UTC())
 			seedSelectedForkDiscardConstructionRows(t, ctx, db, runID)
@@ -92,6 +93,8 @@ func TestSelectedForkRetainedDiscardPendingDeliveryTombstonesBothStores(t *testi
 			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			fixture := newSelectedProviderCompletionFixture(t, store, db, sqlite)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			seedSelectedForkDiscardConstructionRows(t, ctx, db, fixture.forkRun)
 			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 			if err != nil {
@@ -194,6 +197,7 @@ func TestSelectedForkDestructiveDiscardRollbackPendingDeliveryBothStores(t *test
 		t.Run(backend, func(t *testing.T) {
 			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			runID := uuid.NewString()
 			requirePausedRunForTest(t, ctx, store, runID, time.Now().UTC())
 			seedSelectedForkDiscardConstructionRows(t, ctx, db, runID)
@@ -236,6 +240,7 @@ func TestSelectedForkDestructiveDiscardRefusesDependentForkBothStores(t *testing
 				t.Fatal("selected store does not expose fork materialization")
 			}
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, store)
 			runID := uuid.NewString()
 			requirePausedRunForTest(t, ctx, store, runID, time.Now().UTC())
 			eventStore, ok := store.(semanticEventFixtureStore)

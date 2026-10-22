@@ -18,6 +18,7 @@ func TestEventKeyCardinalityObservationPreservesExactPhysicalPredicateBothStores
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx, at := testAuthorActivityContext(), time.Now().UTC()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			ids := [3]string{uuid.NewString(), uuid.NewString(), uuid.NewString()}
 			for index, id := range ids {
 				event := eventtest.RunCreatingRootIngress(id, events.EventType("key.first"), "fixture", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, at)

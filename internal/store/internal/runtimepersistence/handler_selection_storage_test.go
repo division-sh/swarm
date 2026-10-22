@@ -22,6 +22,7 @@ func TestHandlerSelectionStoragePreservesExactColumnsAndScopesBothStores(t *test
 			fixture := backend.open(t)
 			selected := fixture.store.(deliveryReadProjectionStore)
 			ctx, runID, otherRun := testAuthorActivityContext(), uuid.NewString(), uuid.NewString()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			var exact events.Event
 			want := make(map[string]HandlerSelectionStorageEvidence)
 			for _, run := range []string{runID, otherRun} {

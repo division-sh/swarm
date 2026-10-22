@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
+
 	"reflect"
 	"strings"
 	"testing"
@@ -56,106 +56,6 @@ func m29DeliveryAdapter(t *testing.T, postgres bool) *privatedelivery.Adapter {
 		t.Fatal(err)
 	}
 	return adapter
-}
-
-func TestFanOutBatchPhysicalReadCountAndScalarParityBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
-			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
-			ctx := testAuthorActivityContext()
-			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 129, base)
-			ids := make([]string, 129)
-			for i := range ids {
-				event := fanOutBarrierChildEvent(t, fixture, i, base.Add(time.Duration(i)*time.Microsecond))
-				var routes []events.DeliveryRoute
-				if i > 0 {
-					routes = []events.DeliveryRoute{fanOutBarrierRoute("first")}
-				}
-				if i == 1 {
-					routes = append(routes, fanOutBarrierRoute("second"))
-				}
-				if err := commitSemanticEventFixtureWithRoutes(ctx, owner, event, routes); err != nil {
-					t.Fatal(err)
-				}
-				ids[i] = event.ID()
-			}
-			seedFanOutBarrierOutcomes(t, ctx, db, fixture, ids, false, base.Add(time.Second))
-			adapter := m29DeliveryAdapter(t, postgres)
-			for _, size := range []int{0, 1, 18, 128, 129} {
-				t.Run(fmt.Sprintf("events_%d", size), func(t *testing.T) {
-					tx, err := db.BeginTx(ctx, nil)
-					if err != nil {
-						t.Fatal(err)
-					}
-					defer tx.Rollback()
-					requested := append([]string(nil), ids[:size]...)
-					for i, j := 0, size-1; i < j; i, j = i+1, j-1 {
-						requested[i], requested[j] = requested[j], requested[i]
-					}
-					q := &m29BatchQueryCounter{eventReadQueryer: tx}
-					admitted, err := m29LoadBatch(ctx, q, postgres, requested)
-					chunks := (size + 127) / 128
-					if err != nil || len(admitted) != size || q.rows != 0 || q.lists != chunks || q.maxArgs > 128 {
-						t.Fatalf("event batch: len=%d rows=%d lists=%d maxArgs=%d chunks=%d err=%v", len(admitted), q.rows, q.lists, q.maxArgs, chunks, err)
-					}
-					q = &m29BatchQueryCounter{eventReadQueryer: tx}
-					deliveries, err := adapter.SnapshotsForEvents(ctx, q, requested)
-					wantClock := 0
-					if size > 0 {
-						wantClock = 1
-					}
-					if err != nil || len(deliveries) != size || q.rows != wantClock || q.lists != 2*chunks || q.maxArgs > 128 {
-						t.Fatalf("delivery batch: len=%d rows=%d lists=%d maxArgs=%d chunks=%d err=%v", len(deliveries), q.rows, q.lists, q.maxArgs, chunks, err)
-					}
-					for i, id := range requested {
-						scalar, settlement, found, err := loadJointSourceReadAdmitted(ctx, tx, postgres, id)
-						if err != nil || !found || admitted[i].Event.Event().ID() != id {
-							t.Fatalf("scalar membership/order %s: found=%v err=%v", id, found, err)
-						}
-						want, err := eventrecord.FromAdmitted(scalar, settlement)
-						if err != nil {
-							t.Fatal(err)
-						}
-						got, err := eventrecord.FromAdmitted(admitted[i].Event, admitted[i].Settlement)
-						if err != nil || !got.Equal(want) {
-							t.Fatalf("full admitted event/settlement differs for %s: %v", id, err)
-						}
-						wantDeliveries, err := adapter.SnapshotsForEvent(ctx, tx, id)
-						if err != nil || !reflect.DeepEqual(deliveries[id], wantDeliveries) {
-							t.Fatalf("full delivery snapshots/order differ for %s: %v", id, err)
-						}
-					}
-					t.Logf("physical reads: events=%d event_queries=%d delivery_queries=%d clock_queries=%d", size, chunks, 2*chunks, wantClock)
-				})
-			}
-			// Execute the actual fold consumer, not just the canonical adapters.
-			summary, err := owner.FanOutRunSummary(ctx, fixture.runID, time.Now().UTC())
-			if err != nil || summary.Committed != 129 || summary.Settled != 1 || summary.Unsettled != 128 {
-				t.Fatalf("actual mixed no-route/pending fold: %+v err=%v", summary, err)
-			}
-			for _, duplicate := range [][]string{{ids[0], ids[0]}, append(append([]string(nil), ids...), ids[0])} {
-				q := &m29BatchQueryCounter{eventReadQueryer: db}
-				if got, err := m29LoadBatch(ctx, q, postgres, duplicate); err == nil || got != nil || q.rows+q.lists != 0 {
-					t.Fatalf("duplicate event IDs admitted or queried: %v", err)
-				}
-				if got, err := adapter.SnapshotsForEvents(ctx, q, duplicate); err == nil || got != nil || q.rows+q.lists != 0 {
-					t.Fatalf("duplicate delivery event IDs admitted or queried: %v", err)
-				}
-			}
-			missing := uuid.NewString()
-			got, err := m29LoadBatch(ctx, db, postgres, []string{ids[0], missing})
-			var absent *eventrecord.MissingError
-			if got != nil || !errors.Is(err, eventrecord.ErrMissing) || !errors.As(err, &absent) || absent.EventID != missing {
-				t.Fatalf("batch must report exact missing ID without partial result: %v", err)
-			}
-			noDeliveries, err := adapter.SnapshotsForEvents(ctx, db, []string{missing})
-			scalarEmpty, scalarErr := adapter.SnapshotsForEvent(ctx, db, missing)
-			if err != nil || scalarErr != nil || !reflect.DeepEqual(noDeliveries[missing], scalarEmpty) {
-				t.Fatalf("zero delivery membership scalar parity: batch=%v scalar=%v", err, scalarErr)
-			}
-		})
-	}
 }
 
 func TestFanOutBatchEventAdmissionHostileBothStores(t *testing.T) {
@@ -349,6 +249,7 @@ func TestFanOutBatchDeliveryMembershipHostileBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			owner, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)
 			other := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 1, base)

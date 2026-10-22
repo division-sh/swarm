@@ -20,6 +20,7 @@ func TestFanOutGrantedGlobalReadinessIsNotOwedSuffixBothStores(t *testing.T) {
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 20*time.Second)
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			fixture := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 64, time.Now().UTC())
 			if err := acknowledgePipelineEventFixture(ctx, selected, fixture.eventID); err != nil {
 				t.Fatal(err)
@@ -68,7 +69,7 @@ func TestFanOutGrantedGlobalReadinessIsNotOwedSuffixBothStores(t *testing.T) {
 				PauseRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
 				ContinueRunControlOutcome(context.Context, runcontrol.TransitionRequest) (runcontrol.StoreTransition, error)
 			})
-			controlCtx := testAuthorActivityContextForBundle(fixture.bundleHash)
+			controlCtx := startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(fixture.bundleHash), ctx)
 			transition := runcontrol.TransitionRequest{RunID: fixture.runID, Now: time.Now().UTC(), Reason: "readiness-proof", ControlledBy: "test"}
 			if outcome, err := control.PauseRunControlOutcome(controlCtx, transition); err != nil || !outcome.Acknowledged {
 				t.Fatalf("pause outcome=%+v err=%v", outcome, err)
@@ -109,6 +110,7 @@ func TestFanOutGrantedClockTiesUseStructuredIdentityBothStores(t *testing.T) {
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 20*time.Second)
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			first := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 1, at)
 			second := seedFanOutOwnerIntent(t, ctx, db, first, 1, at)

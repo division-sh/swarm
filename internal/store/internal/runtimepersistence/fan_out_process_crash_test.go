@@ -31,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -166,6 +167,13 @@ func TestFanOutProcessSIGKILLRecoveryBothStores(t *testing.T) {
 				fixture := openFanOutCrashStore(t, backend, location)
 				root := canonicalrouting.CopyForkFanOutCarrier(t, false, false)
 				ctx, seeded, _, _ := seedDeclaredForkFanOutGenerationFromSource(t, backend, fixture, fanOutCrashCardinality, time.Now().UTC(), false, false, root, nil, nil)
+				setup, err := agentfixture.ProcessCapability(t, ctx, fixture.store.(agentfixture.Store))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := setup.Release(ctx); err != nil {
+					t.Fatal(err)
+				}
 				env := []string{"SWARM_FAN_OUT_CRASH_BACKEND=" + backend, "SWARM_FAN_OUT_CRASH_LOCATION=" + location,
 					"SWARM_FAN_OUT_CRASH_ROOT=" + root, "SWARM_FAN_OUT_CRASH_RUN=" + seeded.runID, "SWARM_FAN_OUT_CRASH_CUT=" + cut}
 				cmd, evidence, exited := startFanOutCrashChild(t, "predecessor", env)
@@ -390,6 +398,10 @@ func runFanOutCrashChild(t *testing.T, mode string) {
 		t.Fatal(err)
 	}
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(grant.RuntimeInstanceID, fact.BundleHash()))
+	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, liveGrant)
+	if err != nil {
+		t.Fatal(err)
+	}
 	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(source)
 	if err != nil {
 		t.Fatal(err)
@@ -416,7 +428,12 @@ func runFanOutCrashChild(t *testing.T, mode string) {
 			t.Error(err)
 		}
 	})
-	eventBus, err := newStoreTestEventBus(t, fixture.store.(storeTestDurableEventBusStore), bus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, WorkOwner: work, RuntimeInstanceID: grant.RuntimeInstanceID})
+	eventBus, err := newStoreTestEventBus(t, fixture.store.(storeTestDurableEventBusStore), bus.EventBusOptions{
+		ContractBundle: source, SourceArtifactFact: fact, WorkOwner: work, RuntimeInstanceID: grant.RuntimeInstanceID,
+		MutationContext: func(work context.Context) (context.Context, error) {
+			return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, ctx))
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

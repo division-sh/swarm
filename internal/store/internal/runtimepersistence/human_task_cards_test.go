@@ -24,6 +24,7 @@ func TestHumanTaskDecisionAndBudgetLifecycleParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			humanStore := cardStore.(decisioncard.HumanTaskStore)
 			now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 
@@ -90,6 +91,7 @@ func TestHumanTaskMutationsRejectForeignRequesterOwnerBeforeStateChange(t *testi
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			humanStore := cardStore.(decisioncard.HumanTaskStore)
 			db, postgres := decisionCardStoreDB(t, cardStore)
 			now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
@@ -160,6 +162,7 @@ func TestNormalRunCompletionRequiresSettledHumanTasksParity(t *testing.T) {
 			t.Run(backend+"/"+testCase.name, func(t *testing.T) {
 				ctx := testAuthorActivityContext()
 				cardStore, runID := decisionCardTestStore(t, backend)
+				ctx = originalStoreFixtureContext(t, ctx, cardStore)
 				humanStore := cardStore.(decisioncard.HumanTaskStore)
 				db, postgres := decisionCardStoreDB(t, cardStore)
 				now := time.Date(2026, 7, 14, 17, 0, 0, 0, time.UTC)
@@ -239,6 +242,7 @@ func TestNormalRunCompletionRequiresSettledHumanTasksParity(t *testing.T) {
 func TestPostgresHumanTaskWeeklyBudgetSerializesConcurrentApprovals(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	cardStore, runID := decisionCardTestStore(t, "postgres")
+	ctx = originalStoreFixtureContext(t, ctx, cardStore)
 	humanStore := cardStore.(decisioncard.HumanTaskStore)
 	postgres := cardStore.(*PostgresStore)
 	now := time.Date(2026, 7, 14, 9, 30, 0, 0, time.UTC)
@@ -333,6 +337,7 @@ func TestHumanTaskExpiryAndRunSupersessionParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			cardStore, runID := decisionCardTestStore(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, cardStore)
 			humanStore := cardStore.(decisioncard.HumanTaskStore)
 			now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
 

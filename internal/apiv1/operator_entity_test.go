@@ -138,6 +138,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 	bundle := operatorReadbackBundle(t)
 	source := semanticview.Wrap(bundle)
 	ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForSource(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact)), runID)
+	ctx = originalAPIFixtureContext(t, ctx, pg)
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
@@ -200,6 +201,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 	bundle := operatorReadbackBundle(t)
 	source := semanticview.Wrap(bundle)
 	ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForSource(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact)), runID)
+	ctx = originalAPIFixtureContext(t, ctx, sqliteStore)
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"
 	now := time.Unix(1700000000, 0).UTC()

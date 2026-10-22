@@ -20,6 +20,7 @@ func TestFanOutClosingSourceHeadRefreshPreservesHealthyProgressBothStores(t *tes
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 20*time.Second)
 			defer cancel()
 			selected, _, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			closing := seedFanOutOwnerFixture(t, ctx, db, selected, postgres, 1, time.Now().UTC())
 			healthy := seedFanOutOwnerFixtureWithArtifact(t, ctx, db, selected, postgres, 1, time.Now().UTC(), storeTestSourceArtifact("closing-head-refresh-healthy-source"))
 			process, grants, occurrences, originalPlan := newGrantedFanOutProcessForTest(t, ctx, selected, []fanOutOwnerFixture{closing, healthy})

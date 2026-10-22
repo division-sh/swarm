@@ -24,6 +24,7 @@ func TestSelectedPreparationExecutionBindingBothStores(t *testing.T) {
 			selected, db, sqlite := selectedForkDiscardTestStore(t, backend)
 			fixture := newSelectedCompletionFixture(t, selected, db, sqlite)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			name, err := agentidentity.DeclaredName("probe-agent", "selected-target")
 			if err != nil {
 				t.Fatal(err)

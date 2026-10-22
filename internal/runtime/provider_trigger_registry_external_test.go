@@ -144,6 +144,7 @@ func TestBoundedProviderDeliveryRequiresPreResolvedStandingTarget(t *testing.T) 
 
 func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence runtimepkg.InboundPersistence, alias string, selectedSource semanticview.Source) runtimepkg.InboundTarget {
 	t.Helper()
+	ctx = originalRuntimeFixtureContext(t, ctx, persistence)
 	flowPath := boundedProviderFlowID
 	serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 	source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)

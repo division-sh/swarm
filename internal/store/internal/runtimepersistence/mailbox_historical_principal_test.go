@@ -21,6 +21,7 @@ func TestForkMaterializedDecisionPrincipalBothStores(t *testing.T) {
 			selected, sourceRunID := decisionCardTestStore(t, backend)
 			db := DatabaseForTest(selected)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			principal, err := selected.(interface {
 				EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error)
