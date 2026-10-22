@@ -2663,8 +2663,10 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	if !ok {
 		return fmt.Errorf("%w: activity tool %q is not declared", ErrInvalidConfig, toolID)
 	}
-	if _, hasHTTP := tool.HTTPExecution(); tool.Handler() != runtimecontracts.ToolHandlerHTTP || !hasHTTP {
-		return fmt.Errorf("%w: activity tool %q requires an authored HTTP contract", ErrInvalidConfig, toolID)
+	if _, native := tool.InProcess(); !native {
+		if _, hasHTTP := tool.HTTPExecution(); tool.Handler() != runtimecontracts.ToolHandlerHTTP || !hasHTTP {
+			return fmt.Errorf("%w: activity tool %q requires an authored HTTP contract", ErrInvalidConfig, toolID)
+		}
 	}
 	input := make(map[string]any, len(activitySpec.Input))
 	base := e.currentContext(frame)
