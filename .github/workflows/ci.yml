@@ -223,8 +223,10 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: true
+      - name: Prepare verified Go modules
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Check independently measured base and head
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -266,7 +268,7 @@ jobs:
         id: go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: false
 
       - name: Restore shared Go modules
@@ -277,7 +279,7 @@ jobs:
           key: go-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
       - name: Populate shared Go modules
         if: steps.modules.outputs.cache-hit != 'true'
-        run: go mod download
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Save shared Go modules
         if: github.event_name != 'pull_request' && steps.modules.outputs.cache-hit != 'true' && success()
         uses: actions/cache/save@v4
@@ -445,8 +447,10 @@ jobs:
           ref: ${{ github.sha }}
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: true
+      - name: Prepare verified Go modules
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Check formatting
         run: |
           unformatted=$(gofmt -l .)
@@ -478,8 +482,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: true
+      - name: Prepare verified Go modules
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Build swarm binary
         run: go build ./cmd/swarm
       - name: Select workspace base
@@ -629,8 +635,10 @@ jobs:
           ref: ${{ github.sha }}
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: true
+      - name: Prepare verified Go modules
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Prove store ownership and engine-disjoint crash reclaim
         run: go test ./internal/store/internal/startupownership -skip '^(TestPostgresPossessionObservationUsesIndependentExactSessionAndKey|TestPostgresGenerationMonitorFencesStalledNativePhase|TestPostgresGenerationMonitorHealthyQueueAndCancellation|TestPostgresGenerationMonitorWithdrawsCapabilityBeforeNativeJoin)$|^(TestPossessionObservationExternalProcessReleaseAndCrashBothStores|TestRuntimeLogoutWithdrawalRefusesInvalidTemporalEvidenceBothStores)$/^postgres$' -count=1
       - name: Prove selected SQLite construction consumes the owner
@@ -660,8 +668,10 @@ jobs:
           ref: ${{ github.sha }}
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: true
+      - name: Prepare verified Go modules
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Collect native Linux unused analysis
         run: go run ./cmd/swarm-unused -collect -out test-results/unused/linux
       - name: Upload native Linux unused analysis
@@ -687,8 +697,10 @@ jobs:
           ref: ${{ github.sha }}
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: true
+      - name: Prepare verified Go modules
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Collect native Darwin unused analysis
         run: go run ./cmd/swarm-unused -collect -out test-results/unused/darwin
       - name: Upload native Darwin unused analysis
@@ -713,8 +725,10 @@ jobs:
           ref: ${{ github.sha }}
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: true
+      - name: Prepare verified Go modules
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Download native Linux unused analysis from this run
         uses: actions/download-artifact@v4
         with:
@@ -746,7 +760,7 @@ jobs:
       - uses: actions/setup-go@v5
         id: go
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: false
       - name: Download exact proof plan
         uses: actions/download-artifact@v4
@@ -758,6 +772,8 @@ jobs:
         with:
           path: ~/go/pkg/mod
           key: go-mod-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.go.outputs.go-version }}-${{ hashFiles('go.sum') }}
+      - name: Prepare verified Go modules
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Download compilation-only release products
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -825,8 +841,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: true
+      - name: Prepare verified Go modules
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Prove explicit Postgres opt-in selector
         run: go run ./cmd/swarm-test -- ./internal/serveapp -run '^TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction$' -count=1 -v
       - name: Prove runner-owned Docker service
@@ -876,7 +894,7 @@ jobs:
     if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.workspace_base_setup != true) && needs.ci-preflight.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.master_replay != 'true' }}
     needs: [ci-preflight, ci-plan, proof-unit]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       actions: read
@@ -887,8 +905,10 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: true
+      - name: Prepare verified Go modules
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Download exact proof plan
         uses: actions/download-artifact@v4
         with:
@@ -913,23 +933,51 @@ jobs:
           # An attempt-scoped jobs list can lag the completed needs result.
           # Refresh evidence only; never rerun a proof or replace the evaluator's
           # exact run/attempt/head, success, timestamp, and missing-job checks.
-          for check in $(seq 1 60); do
-            gh api --paginate --slurp -H 'Cache-Control: no-cache' "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100&metadata_poll=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$check" > test-results/jobs.json
-            if jq -e --slurpfile plan test-results/plan/proof-plan.json '
-              ([$plan[0].batches[].id | "Go proof " + .]) as $expected
-              | ([.[].jobs[] | select(.name | startswith("Go proof "))]) as $actual
-              | ($expected | length > 0) and all($expected[]; . as $name
-                  | [$actual[] | select(.name == $name)]
-                  | length == 1 and .[0].status == "completed")
-            ' test-results/jobs.json >/dev/null; then
-              break
+          deadline=$((SECONDS + 600))
+          check=0
+          ready=false
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            check=$((check + 1))
+            remaining=$((deadline - SECONDS))
+            request_seconds=$((remaining < 30 ? remaining : 30))
+            if timeout --signal=KILL "$request_seconds" gh api --paginate --slurp -H 'Cache-Control: no-cache' "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100&metadata_poll=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$check" > test-results/jobs.tmp.json 2> test-results/jobs-fetch.log; then
+              jq -e 'type == "array" and all(.[]; (.jobs | type) == "array")' test-results/jobs.tmp.json >/dev/null
+              mv test-results/jobs.tmp.json test-results/jobs.json
+              if jq -e --slurpfile plan test-results/plan/proof-plan.json '
+                ([$plan[0].batches[].id | "Go proof " + .]) as $expected
+                | ([.[].jobs[] | select(.name | startswith("Go proof "))]) as $actual
+                | ($expected | length > 0) and all($expected[]; . as $name
+                    | [$actual[] | select(.name == $name)]
+                    | length == 1 and .[0].status == "completed")
+              ' test-results/jobs.json >/dev/null; then
+                ready=true
+                break
+              fi
+            else
+              status=$?
+              cat test-results/jobs-fetch.log >&2
+              if [ "$status" -ne 137 ]; then
+                if grep -Eiq 'HTTP (401|403)|authentication|unauthorized|forbidden' test-results/jobs-fetch.log || ! grep -Eiq 'HTTP (408|429|5[0-9][0-9])|connection reset by peer|TLS handshake timeout|unexpected EOF' test-results/jobs-fetch.log; then
+                  exit "$status"
+                fi
+              fi
             fi
-            if [ "$check" -eq 60 ]; then
-              echo "::error::Timed out waiting for complete attempt-scoped proof-job metadata" >&2
-              exit 1
-            fi
-            sleep 5
+            remaining=$((deadline - SECONDS))
+            if [ "$remaining" -gt 0 ]; then sleep "$((remaining < 5 ? remaining : 5))"; fi
           done
+          if [ "$ready" != true ]; then
+            echo "::error::Timed out waiting for complete attempt-scoped proof-job metadata" >&2
+            if [ -s test-results/jobs.json ]; then
+              jq -r --slurpfile plan test-results/plan/proof-plan.json '
+                [.[].jobs[]] as $actual | $plan[0].batches[].id | "Go proof " + . as $name
+                | [$actual[] | select(.name == $name)]
+                | select(length != 1 or .[0].status != "completed") | $name
+              ' test-results/jobs.json >&2
+            else
+              jq -r '.batches[].id | "Go proof " + .' test-results/plan/proof-plan.json >&2
+            fi
+            exit 1
+          fi
           go run ./cmd/swarm-test-timing -evaluate-budget \
             -event "$GITHUB_EVENT_NAME" \
             -test-time-reference .github/test-time-reference.json \
@@ -989,8 +1037,11 @@ jobs:
       - uses: actions/setup-go@v5
         if: needs.ci-preflight.result == 'success' && needs.ci-plan.result == 'success'
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: true
+      - name: Prepare verified Go modules
+        if: needs.ci-preflight.result == 'success' && needs.ci-plan.result == 'success'
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Download exact proof plan
         if: needs.ci-preflight.result == 'success' && needs.ci-plan.result == 'success'
         uses: actions/download-artifact@v4
@@ -1141,8 +1192,10 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: true
+      - name: Prepare verified Go modules
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Resolve exact protected-master cache key
         id: identity
         env:
@@ -1195,8 +1248,10 @@ jobs:
           ref: ${{ needs.ci-plan.outputs.execution_sha }}
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: '1.26.8'
           cache: true
+      - name: Prepare verified Go modules
+        run: python3 .github/scripts/prepare-go-modules.py
       - name: Download exact proof plan
         uses: actions/download-artifact@v4
         with:

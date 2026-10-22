@@ -53,10 +53,10 @@ func TestCIJobCollectionWaitsOnlyForTerminalEvidence(t *testing.T) {
 	if assertAt < 0 || fetchAt <= assertAt || evaluateAt <= fetchAt ||
 		!strings.Contains(step.Run, `-event "$GITHUB_EVENT_NAME"`) ||
 		!strings.Contains(step.Run, "attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100") ||
-		!strings.Contains(step.Run, "for check in $(seq 1 60)") ||
-		!strings.Contains(step.Run, "if [ \"$check\" -eq 60 ]; then") ||
+		!strings.Contains(step.Run, "deadline=$((SECONDS + 600))") ||
+		!strings.Contains(step.Run, "if [ \"$ready\" != true ]; then") ||
 		!strings.Contains(step.Run, "exit 1") ||
-		!strings.Contains(step.Run, "sleep 5") ||
+		!strings.Contains(step.Run, "remaining < 5 ? remaining : 5") ||
 		strings.Count(step.Run, "-evaluate-budget") != 1 {
 		t.Fatal("job collection must be bounded, attempt-scoped, and precede one fail-closed evaluation")
 	}
@@ -166,7 +166,7 @@ func TestCICachesSeparateModulesAndNeverRestoreAnotherProofUnit(t *testing.T) {
 	}
 	populate := findWorkflowStep(plan.Steps, "Populate shared Go modules")
 	saveModules := findWorkflowStep(plan.Steps, "Save shared Go modules")
-	if populate == nil || populate.Run != "go mod download" || saveModules == nil || saveModules.With["path"] != modules.With["path"] || saveModules.With["key"] != "${{ steps.modules.outputs.cache-primary-key }}" {
+	if populate == nil || populate.Run != "python3 .github/scripts/prepare-go-modules.py" || saveModules == nil || saveModules.With["path"] != modules.With["path"] || saveModules.With["key"] != "${{ steps.modules.outputs.cache-primary-key }}" {
 		t.Fatal("the planner must populate the complete module graph before saving it")
 	}
 	build := findWorkflowStep(proof.Steps, "Restore measured Go cache")

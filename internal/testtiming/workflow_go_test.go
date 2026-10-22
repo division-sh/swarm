@@ -13,6 +13,19 @@ import (
 
 func TestCIVersionBoundToolsUsePlannedGoToolchain(t *testing.T) {
 	root := testTimingRepoRoot(t)
+	module, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := ""
+	for _, line := range strings.Split(string(module), "\n") {
+		if fields := strings.Fields(line); len(fields) == 2 && fields[0] == "toolchain" {
+			version = strings.TrimPrefix(fields[1], "go")
+		}
+	}
+	if version == "" {
+		t.Fatal("missing module toolchain pin")
+	}
 	raw, err := os.ReadFile(filepath.Join(root, ".github/workflows/ci.yml"))
 	if err != nil {
 		t.Fatal(err)
@@ -40,7 +53,7 @@ func TestCIVersionBoundToolsUsePlannedGoToolchain(t *testing.T) {
 		}
 		checked[name] = true
 		t.Run(name, func(t *testing.T) {
-			if problems := workflowGoSetupProblems(steps); len(problems) != 0 {
+			if problems := workflowGoSetupProblems(steps, version); len(problems) != 0 {
 				t.Fatalf("GOVERSION-bound workflow consumer: %v", problems)
 			}
 			for _, cut := range []string{"missing", "wrong-file", "late"} {
@@ -52,14 +65,14 @@ func TestCIVersionBoundToolsUsePlannedGoToolchain(t *testing.T) {
 						}
 						changed = append(changed, step)
 					}
-					setup := ciWorkflowStep{Uses: "actions/setup-go@v5", With: map[string]any{"go-version-file": "go.mod"}}
+					setup := ciWorkflowStep{Uses: "actions/setup-go@v5", With: map[string]any{"go-version": version}}
 					if cut == "wrong-file" {
 						setup.With["go-version-file"] = "other.mod"
 						changed = append([]ciWorkflowStep{setup}, changed...)
 					} else if cut == "late" {
 						changed = append(changed, setup)
 					}
-					if problems := workflowGoSetupProblems(changed); len(problems) == 0 {
+					if problems := workflowGoSetupProblems(changed, version); len(problems) == 0 {
 						t.Fatal("unplanned runner toolchain reached a version-bound consumer")
 					}
 				})
@@ -77,15 +90,15 @@ func invokesVersionBoundTool(step ciWorkflowStep) bool {
 	return strings.Contains(step.Run, "./cmd/swarm-test-timing") || strings.Contains(step.Run, "./cmd/swarm-test ")
 }
 
-func workflowGoSetupProblems(steps []ciWorkflowStep) []string {
+func workflowGoSetupProblems(steps []ciWorkflowStep, version string) []string {
 	var problems []string
 	planned := false
 	for i, step := range steps {
 		if strings.HasPrefix(step.Uses, "actions/setup-go@") {
-			planned = step.Uses == "actions/setup-go@v5" && step.With["go-version-file"] == "go.mod" && step.With["go-version"] == nil && !step.ContinueOnError
+			planned = step.Uses == "actions/setup-go@v5" && step.With["go-version"] == version && step.With["go-version-file"] == nil && !step.ContinueOnError
 		}
 		if invokesVersionBoundTool(step) && !planned {
-			problems = append(problems, fmt.Sprintf("step %d must follow actions/setup-go from go.mod", i))
+			problems = append(problems, fmt.Sprintf("step %d must follow actions/setup-go at module toolchain %s", i, version))
 		}
 	}
 	return problems
