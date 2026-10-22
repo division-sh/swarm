@@ -3718,14 +3718,8 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 		t.Fatal(err)
 	}
 	forkRunID := uuid.NewString()
-	eventBus, err := bus.NewEphemeralEventBusWithOptions(nil, bus.EventBusOptions{
-		ExecutionPosture: executionposture.Live, SourceArtifactFact: sourceFact,
-		WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(),
-	})
-	if err != nil {
-		t.Fatalf("NewEventBus: %v", err)
-	}
 	ctx := runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), sourceFact)
+	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()))
 	ctx = originalSelectedFixtureContext(t, ctx, selected)
 	declarations, err := runtimeagenttopology.NewSelectedDeclarationPlan(sourceFact.BundleHash(), []runtimeagenttopology.DesiredAgent{})
 	if err != nil {
@@ -3737,6 +3731,22 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 	preparedAgents := selectedContractAgentRuntimePlan{Declarations: declarations, Options: SelectedContractAgentRuntimeOptions{ProcessCapability: processCapability}}
 	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, bundle.SourceArtifact, forkRunID, preparedAgents)
 	ctx = selectedForkExecutionTestContext(t, ctx, authority, sourceFact)
+	admission, ok := managedexecution.FromContext(ctx)
+	if !ok {
+		t.Fatal("selected-contract cleanup admission is missing")
+	}
+	receiverExecution, err := eventreceiver.SelectedContractForkExecution(authority, admission,
+		liveTestCompletionController(selected, selected, selected, selectedForkDiscardSpendProjection{}), runtimecorrelation.RuntimeLineage{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventBus, err := bus.NewEphemeralEventBusWithOptions(nil, bus.EventBusOptions{
+		ExecutionPosture: executionposture.Live, SourceArtifactFact: sourceFact,
+		WorkOwner: owner, ReceiverExecution: receiverExecution,
+	})
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
 	badIdentity := selectedContractTestAgentIdentityForRun(t, authority.SelectedFork.ForkRunID, "bad-agent", "")
 
 	_, _, err = startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
@@ -3768,7 +3778,7 @@ func TestStartSelectedContractAgentRuntimeCleansGatewayOnRegistrationFailure(t *
 				Config:            &config.Config{},
 				LLMRuntime:        selectedContractCleanupRuntime{},
 				AgentManagerOptions: runtimemanager.AgentManagerOptions{
-					WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(),
+					WorkOwner: owner, ReceiverExecution: receiverExecution,
 				},
 			},
 		},
@@ -4180,6 +4190,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	ctx = originalSelectedFixtureContext(t, ctx, pg)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}
@@ -4674,6 +4685,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := runForkTestContext(t)
+	ctx = originalSelectedFixtureContext(t, ctx, pg)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}

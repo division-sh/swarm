@@ -565,7 +565,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 				t.Fatal("card delivery authority is invalid")
 			}
 			effectCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(
-				testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), authority),
+				originalStoreFixtureContext(t, testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), selected), authority),
 				runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
 			handle, err := runtimeeffects.BeginChannelDelivery(effectCtx, []byte("card"), nil)
 			if err != nil {
@@ -678,7 +678,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 			editAuthority.ChannelDelivery.RenderHash = prompted.Frozen.Hash
 			editAuthority.ChannelDelivery.PreviousReceiptOperationID = operationID
 			editCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(
-				testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), editAuthority),
+				originalStoreFixtureContext(t, testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), selected), editAuthority),
 				runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
 			edit, err := runtimeeffects.BeginChannelDelivery(editCtx, []byte("prompt edit"), nil)
 			if err != nil {
@@ -743,7 +743,7 @@ func TestChannelDeliveryCardActionAdmissionSelectedStoreParity(t *testing.T) {
 				t.Fatalf("predecessor render admission = %v", err)
 			}
 			t.Run("unsupported_chooser_retirement", func(t *testing.T) {
-				proveUnsupportedChooserRetirement(t, cards, selected, runTx, authority, card, text, now, postgres)
+				proveUnsupportedChooserRetirement(t, ctx, cards, selected, runTx, authority, card, text, now, postgres)
 			})
 		})
 	}
