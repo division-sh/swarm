@@ -43,6 +43,9 @@ func runUnpublishedArrivalCrashHelper(t *testing.T, ctx context.Context, selecte
 	go func() {
 		_, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: ancestor, At: marker,
 			AllowSourceFreeze: true, Owner: parent, SourceLoader: loader, ContractSelection: selection,
+			ForkOperation: &runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "pending-join-parent", IdempotencyKey: "original-cut",
+				TransportHash: "pending-join-parent-transport", SourceRunID: ancestor, ForkEventID: marker,
+				TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true, ContractSelection: selection},
 			AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}})
 		parentDone <- err
 	}()
@@ -152,6 +155,13 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 				}
 				ctx := runForkTestContext(t)
 				loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
+				operations := selected.(interface {
+					LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
+				})
+				parentACK, found, err := operations.LoadForkOperation(ctx, "pending-join-parent", "original-cut", "pending-join-parent-transport")
+				if err != nil || !found || parentACK.ForkRunID != crashed.SourceRun || parentACK.Status != runfork.ForkOperationActivated {
+					t.Fatalf("frozen parent lost its durable operation: %+v error=%v", parentACK, err)
+				}
 				inspected, err := InspectSelectedForkRecoveries(ctx, selected.(SelectedForkRecoveryInspectionReader), loader)
 				if err != nil || len(inspected) != 2 {
 					t.Fatalf("read-only two-boundary recovery inventory: %+v error=%v", inspected, err)
@@ -160,7 +170,8 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 					switch entry.Entry.Binding.ForkRunID {
 					case crashed.SourceRun:
 						if entry.Evidence.RunState != "forked" || entry.Evidence.ExecutionState != "running" ||
-							entry.Evidence.Plan.Disposition != runfork.SelectedForkRecoveryFailed || entry.Evidence.Plan.Continuation != nil || entry.Evidence.Plan.Operation != nil {
+							entry.Evidence.Plan.Disposition != runfork.SelectedForkRecoveryFailed || entry.Evidence.Plan.Continuation != nil || entry.Evidence.Plan.Operation == nil ||
+							!reflect.DeepEqual(parentACK, *entry.Evidence.Plan.Operation) {
 							t.Fatalf("frozen interrupted parent gained continuation authority: %+v", entry)
 						}
 					case crashed.ForkRun:
@@ -183,9 +194,6 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				baseline := process.ActiveCount()
-				operations := selected.(interface {
-					LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
-				})
 				ack, found, err := operations.LoadForkOperation(ctx, "pending-join-crash", "parent-start", "pending-join-crash-transport")
 				if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.ForkRunID != crashed.ForkRun || ack.Result == nil ||
 					ack.Request.ResolvedPoint == nil || *ack.Request.ResolvedPoint != binding.ForkPoint {
@@ -271,7 +279,7 @@ func TestIssue642UnpublishedArrivalCrashSuccessorBothStores(t *testing.T) {
 				if err != nil || !found || !reflect.DeepEqual(ack, stable) {
 					t.Fatalf("successor changed the permanent acknowledgment: %+v error=%v", stable, err)
 				}
-				requireUnpublishedJoinAncestorPurgeRefused(t, ctx, selected, capability, pending.Publication.CommittedCause.RunID, crashed.SourceRun)
+				requireUnpublishedJoinAncestorPurgeRefused(t, ctx, selected, owner, capability, pending.Publication.CommittedCause.RunID, crashed.SourceRun)
 				if err := owner.RetireSelectedContexts(ctx); err != nil || process.ActiveCount() != baseline {
 					t.Fatalf("pending successor retained process work: count=%d baseline=%d error=%v", process.ActiveCount(), baseline, err)
 				}

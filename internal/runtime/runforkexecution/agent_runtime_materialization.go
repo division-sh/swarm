@@ -981,6 +981,7 @@ func (r *selectedContractAgentRuntime) Shutdown() (result error) {
 	r.mu.Lock()
 	cancel, done := r.cancelExecution, r.executionDone
 	r.cancelExecution = nil
+	r.controlContext = nil
 	r.mu.Unlock()
 	if cancel != nil {
 		cancel(worklifetime.ErrRetired)

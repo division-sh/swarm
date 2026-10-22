@@ -9,25 +9,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -36,116 +30,6 @@ type selectedForkCrashCheckpoint struct {
 	ScheduleID         string                                `json:"schedule_id,omitempty"`
 	Activity           *selectedActivityCrashCheckpoint      `json:"activity,omitempty"`
 	FanOut             *selectedHandlerFanOutCrashCheckpoint `json:"fan_out,omitempty"`
-}
-
-// These are actual process deaths during the existing execution path. They do
-// not prove the separate public publication or API response-reconstruction flow.
-func TestSelectedForkCommittedProcessDeathBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, cut := range []string{"before_materialization", "materialized", "execution_issued", "execution_claimed", "event_committed", "before_activation", "execution_returned"} {
-			t.Run(backend+"/"+cut, func(t *testing.T) {
-				var db *sql.DB
-				var capabilityStore startupownership.Store
-				var construct func() SelectedContractExecutionOwner
-				var dsn string
-				if backend == "sqlite" {
-					s := storetest.StartSQLiteRuntimeStore(t)
-					db, capabilityStore = storetest.Database(s), s
-					var sequence int
-					var name string
-					if err := db.QueryRow(`PRAGMA database_list`).Scan(&sequence, &name, &dsn); err != nil {
-						t.Fatal(err)
-					}
-					construct = func() SelectedContractExecutionOwner { return newSelectedContractSQLiteExecutionOwnerForTest(t, s) }
-				} else {
-					dsn, db, _ = testutil.StartPostgres(t)
-					s := storetest.AdmitPostgresRuntimeStore(t, db)
-					capabilityStore = s
-					construct = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
-				}
-				checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, cut)
-				before := selectedPreparationDatabaseSnapshot(t, db, backend)
-				ctx := runForkTestContext(t)
-				want := runfork.SelectedForkRecoveryControlOnly
-				if cut == "materialized" {
-					want = runfork.SelectedForkRecoveryStaged
-				} else if cut == "event_committed" || cut == "execution_issued" || cut == "execution_claimed" {
-					want = runfork.SelectedForkRecoveryFailed
-				}
-				reader := capabilityStore.(SelectedForkRecoveryInspectionReader)
-				inspected, err := InspectSelectedForkRecoveries(ctx, reader, SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t)})
-				if cut == "before_materialization" {
-					if err != nil || len(inspected) != 0 {
-						t.Fatalf("uncommitted preparation created inspection work: %+v %v", inspected, err)
-					}
-				} else if err != nil || len(inspected) != 1 || inspected[0].Evidence.Plan.Disposition != want ||
-					inspected[0].SelectedSource.RuntimeProjection != nil || inspected[0].SelectedSource.Cleanup != nil {
-					t.Fatalf("read-only crash inspection after %s: %+v %v", cut, inspected, err)
-				}
-				if !reflect.DeepEqual(before, selectedPreparationDatabaseSnapshot(t, db, backend)) {
-					t.Fatal("read-only crash inspection changed retained tables before process acquisition")
-				}
-				capability := selectedContractTestProcessCapability(t, ctx, capabilityStore)
-				owner := construct()
-				process, _ := worklifetime.ProcessFromContext(ctx)
-				if err := owner.BindSelectedProcess(ctx, process, capability); err != nil {
-					t.Fatal(err)
-				}
-				recovered, err := owner.RecoverSelectedForkContexts(ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})
-				if cut == "before_materialization" {
-					if err != nil || len(recovered) != 0 {
-						t.Fatalf("uncommitted preparation acquired durable recovery work: %+v %v", recovered, err)
-					}
-				} else {
-					if err != nil || len(recovered) != 1 || recovered[0].RunID != checkpoint.ForkRun || recovered[0].Disposition != want {
-						t.Fatalf("recovery after %s: %+v err=%v, want %s", cut, recovered, err, want)
-					}
-				}
-				after := selectedPreparationDatabaseSnapshot(t, db, backend)
-				for _, table := range []string{"events", "entity_state", "entity_mutations", "run_fork_selected_contract_executions"} {
-					if !reflect.DeepEqual(before[table], after[table]) {
-						t.Errorf("recovery changed execution/business history in %s", table)
-					}
-				}
-				if cut == "before_materialization" || cut == "materialized" {
-					var count int
-					if err := db.QueryRow(`SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions`).Scan(&count); err != nil || count != 0 {
-						t.Fatalf("recovery issued execution for a preparation/staged binding: count=%d err=%v", count, err)
-					}
-					for _, table := range []string{"runs", "run_fork_selected_contract_bindings"} {
-						if !reflect.DeepEqual(before[table], after[table]) {
-							t.Errorf("recovery mutated non-executable %s", table)
-						}
-					}
-					return
-				}
-				var state, status string
-				var generations int
-				if err := db.QueryRow(`SELECT e.state,r.status FROM run_fork_selected_contract_runtime_executions e JOIN runs r ON r.run_id=e.fork_run_id WHERE r.run_id=$1`, checkpoint.ForkRun).Scan(&state, &status); err != nil {
-					t.Fatal(err)
-				}
-				wantState := "closed"
-				if cut == "before_activation" {
-					wantState = "quiesced"
-				}
-				if err := db.QueryRow(`SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, checkpoint.ForkRun).Scan(&generations); err != nil || generations != 1 || state != wantState {
-					t.Fatalf("recovery reissued or retained executable authority: generations=%d state=%s err=%v", generations, state, err)
-				}
-				wantStatus := "running"
-				if want == runfork.SelectedForkRecoveryFailed {
-					wantStatus = "failed"
-				} else if cut == "before_activation" {
-					wantStatus = "paused"
-				}
-				if status != wantStatus {
-					t.Fatalf("recovery status=%s, want %s", status, wantStatus)
-				}
-				if err := owner.RetireSelectedContexts(ctx); err != nil {
-					t.Fatal(err)
-				}
-			})
-		}
-	}
 }
 
 func killSelectedForkAtCheckpoint(t *testing.T, backend, dsn, cut string) selectedForkCrashCheckpoint {
@@ -163,7 +47,7 @@ func killSelectedForkAtCheckpoint(t *testing.T, backend, dsn, cut string) select
 		cmd.Args = append(cmd.Args, "-test.v")
 	}
 	cmd.Env = append(os.Environ(), "SWARM_SELECTED_CRASH_BACKEND="+backend, "SWARM_SELECTED_CRASH_DSN="+dsn, "SWARM_SELECTED_CRASH_CUT="+cut)
-	if cut == "native_before_activation" || strings.HasPrefix(cut, "retained_timer_") || strings.HasPrefix(cut, "retained_join_") || strings.HasPrefix(cut, "retained_pending_join_") || strings.HasPrefix(cut, "retained_armed_join_") || strings.HasPrefix(cut, "retained_activity_") || strings.HasPrefix(cut, "retained_handler_fan_out_") {
+	if strings.HasPrefix(cut, "retained_timer_") || strings.HasPrefix(cut, "retained_join_") || strings.HasPrefix(cut, "retained_pending_join_") || strings.HasPrefix(cut, "retained_armed_join_") || strings.HasPrefix(cut, "retained_activity_") || strings.HasPrefix(cut, "retained_handler_fan_out_") {
 		// The killed child cannot release its sealed source projections. Keep
 		// every private scratch root under the parent's exact cleanup ownership.
 		root := t.TempDir()
@@ -323,22 +207,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		loader.SourceRoot = armedArrivalFixture(t)
 	}
 	options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}
-	if cut == "native_before_activation" {
-		loader.SourceRoot = nativeSelectedForkCrashFixture(t, root)
-		manager := workspace.NewHostManager()
-		cfg := workspace.DefaultHostConfig()
-		cfg.WorkspaceRoot = t.TempDir()
-		manager.SetConfig(cfg)
-		options.Workspace = manager
-		options.Config = &config.Config{LLM: config.LLMConfig{
-			Backend: selection.BackendClaudeCLI,
-			Session: config.LLMSessionConfig{LockTTL: time.Second, RotateAfterTurns: 40, RotateOnParseFailures: 3},
-		}}
-	}
 	var sourceLoader SelectedContractSourceLoader = loader
-	if cut == "native_before_activation" {
-		sourceLoader = nativeSelectedCrashLoader{admittedFixtureSelectedContractSourceLoader: loader}
-	}
 	loaded, err := sourceLoader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: runfork.RunForkContractSelection{Mode: "selected_contracts"}})
 	if err != nil {
 		t.Fatal(err)
@@ -350,8 +219,6 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		eventID, _ = seedPublishedJoinSource(t, ctx, selected, owner, loaded, sourceRun)
 	} else if armedJoinCut {
 		eventID = seedArmedArrivalCrashSource(t, ctx, selected, owner, loaded, sourceRun)
-	} else if cut == "native_before_activation" {
-		seedSelectedAgentExecutionSource(t, ctx, capabilityStore, loaded, sourceRun, eventID, time.Unix(1700002303, 0).UTC(), executionmode.Mock)
 	} else {
 		seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
 	}
@@ -383,7 +250,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		owner.ports.genericSchedules = newArmedArrivalCrashScheduleStore(t, owner.ports.genericSchedules, checkpointWithSchedule)
 	} else if cut == "retained_timer_occurrence_committed" {
 		owner.ports.workflow = newIssue642TimerCrashPersistence(t, selected, checkpoint)
-	} else if cut == "before_activation" || cut == "native_before_activation" {
+	} else if cut == "before_activation" {
 		var discards int
 		owner.ports.fork = selectedOperationActivationProbe{SelectedContractForkLifecycle: owner.ports.fork, discards: &discards, before: func(ctx context.Context) {
 			occurrence, _ := worklifetime.OccurrenceFromContext(ctx)

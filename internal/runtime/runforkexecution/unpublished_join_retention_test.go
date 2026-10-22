@@ -8,15 +8,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
 // Exercise the actual cleanup owner, with both ancestors selected and C kept.
 // Quiescence is a separate admitted phase; the cleanup itself must write nothing.
-func requireUnpublishedJoinAncestorPurgeRefused(t *testing.T, ctx context.Context, selected startupownership.Store, capability startupownership.ProcessCapability, ancestor, parent string) {
+func requireUnpublishedJoinAncestorPurgeRefused(t *testing.T, ctx context.Context, selected startupownership.Store, owner SelectedContractExecutionOwner, capability startupownership.ProcessCapability, ancestor, parent string) {
 	t.Helper()
 	now := time.Now().UTC()
 	operation, err := capability.AdmitResetOperation(ctx, destructivereset.Request{
@@ -41,13 +43,23 @@ func requireUnpublishedJoinAncestorPurgeRefused(t *testing.T, ctx context.Contex
 	if err != nil {
 		t.Fatal(err)
 	}
+	bases, err := packartifact.NewPlatformPackBaseGenerationOwner(packfixture.EmbeddedBase(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err := owner.PrepareResetHistory(ctx, []string{ancestor, parent}, SourceArtifactSelectedContractSourceLoader{
+		RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore), PlatformPackBases: bases,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = capability.ApplyDestructiveResetCleanup(ctx, destructivereset.CleanupRequest{
 		OperationID: operation.Request.OperationID, ActorTokenID: operation.Request.ActorTokenID, RequestedAt: now,
-		Result: *planned.Plan, Quiescence: quiesced,
+		Result: *planned.Plan, Quiescence: quiesced, SelectedHistory: history,
 	}, nil)
 	if !errors.Is(err, destructivereset.ErrInvalidRequest) || !strings.Contains(err.Error(), "while dependent fork") {
 		t.Fatalf("cleanup admitted deleting the committed cause beneath its preserved descendant: %v", err)

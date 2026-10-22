@@ -258,6 +258,7 @@ func approvePendingReplyCard(t *testing.T, ctx context.Context, store pendingRep
 	t.Helper()
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
+	waitPendingReplyControlReady(t, ctx, owner, card.RunID)
 	at, decisionID := time.Now().UTC(), uuid.NewString()
 	principal, err := store.EnsureOperatorPrincipal(ctx, at)
 	if err != nil {
@@ -270,6 +271,31 @@ func approvePendingReplyCard(t *testing.T, ctx context.Context, store pendingRep
 	if _, replayed, selected, err := owner.CommitSelectedDecisionCardMutation(ctx, card.RunID, request, mutation); err != nil || replayed || !selected {
 		t.Fatalf("approve only the fresh child effect: selected=%t replay=%t error=%v causes=%v execution_causes=%v", selected, replayed, err,
 			pendingReplyDecisionCauses(err), pendingReplyExecutionCauses(owner, card.RunID))
+	}
+}
+
+func waitPendingReplyControlReady(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, runID string) {
+	t.Helper()
+	for {
+		ready := false
+		owner.ports.contexts.mu.Lock()
+		for _, entry := range owner.ports.contexts.entries {
+			if entry.binding.ForkRunID == runID && entry.retained != nil && entry.retained.retainedRuntime != nil {
+				runtime := entry.retained.retainedRuntime
+				runtime.mu.Lock()
+				ready = runtime.controlContext != nil && runtime.controlContext.Err() == nil
+				runtime.mu.Unlock()
+			}
+		}
+		owner.ports.contexts.mu.Unlock()
+		if ready {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("selected control did not finish startup: %v causes=%v", context.Cause(ctx), pendingReplyExecutionCauses(owner, runID))
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 

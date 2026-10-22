@@ -13,7 +13,21 @@ type selectedResetHistory struct {
 	apply func(context.Context, *sql.Tx, destructivereset.CleanupRequest, bool) (destructivereset.SelectedHistoryDisposition, error)
 }
 
-func (s *selectedResetHistory) BindSelectedResetHistory(apply func(context.Context, *sql.Tx, destructivereset.CleanupRequest, bool) (destructivereset.SelectedHistoryDisposition, error)) error {
+func BindPostgresSelectedResetHistory(s *StartupPostgresOwner, apply func(context.Context, *sql.Tx, destructivereset.CleanupRequest, bool) (destructivereset.SelectedHistoryDisposition, error)) error {
+	if s == nil {
+		return errors.New("selected reset history requires its startup owner")
+	}
+	return s.selectedResetHistory.bindSelectedResetHistory(apply)
+}
+
+func BindSQLiteSelectedResetHistory(s *StartupSQLiteOwner, apply func(context.Context, *sql.Tx, destructivereset.CleanupRequest, bool) (destructivereset.SelectedHistoryDisposition, error)) error {
+	if s == nil {
+		return errors.New("selected reset history requires its startup owner")
+	}
+	return s.selectedResetHistory.bindSelectedResetHistory(apply)
+}
+
+func (s *selectedResetHistory) bindSelectedResetHistory(apply func(context.Context, *sql.Tx, destructivereset.CleanupRequest, bool) (destructivereset.SelectedHistoryDisposition, error)) error {
 	if apply == nil || s.apply != nil {
 		return errors.New("selected reset history must be bound exactly once")
 	}

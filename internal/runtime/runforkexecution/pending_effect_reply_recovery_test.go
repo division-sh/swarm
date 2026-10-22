@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -37,6 +39,22 @@ import (
 )
 
 const pendingReplyBeforeJournalCrashCut = "retained_pending_effect_before_journal"
+
+type pendingReplyStartupReconciliation struct {
+	SelectedContractForkLifecycle
+	entered chan struct{}
+	release <-chan struct{}
+}
+
+func (p pendingReplyStartupReconciliation) ReconcileSelectedSuccessorDeliveryAuthority(ctx context.Context, predecessor string, successor deliverylifecycle.ExecutionAuthority) error {
+	close(p.entered)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.release:
+	}
+	return p.SelectedContractForkLifecycle.ReconcileSelectedSuccessorDeliveryAuthority(ctx, predecessor, successor)
+}
 
 type pendingReplyCrashEvidence struct {
 	OriginalSourceRun string
@@ -333,6 +351,10 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 			})
 			claims := make(chan effects.Authority, 4)
 			owner.ports.runtimeExecution = selectedActivitySuccessorClaim{owner.ports.runtimeExecution, claims}
+			startupEntered, releaseStartup := make(chan struct{}), make(chan struct{})
+			releaseReconciliation := sync.OnceFunc(func() { close(releaseStartup) })
+			defer releaseReconciliation()
+			owner.ports.fork = pendingReplyStartupReconciliation{owner.ports.fork, startupEntered, releaseStartup}
 			loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: selected.(SourceArtifactSelectedContractSourceStore)}
 			wait, cancel := context.WithTimeout(ctx, 20*time.Second)
 			defer cancel()
@@ -341,6 +363,18 @@ func TestIssue642FreshPendingEffectBeforeJournalSIGKILLRecoveryBothStores(t *tes
 			if err != nil || len(recovered) != 2 {
 				t.Fatalf("pending-card native recovery: %+v error=%v", recovered, err)
 			}
+			select {
+			case <-startupEntered:
+			case <-wait.Done():
+				t.Fatal("successor did not reach its native startup reconciliation")
+			}
+			if use, selected, err := owner.AcquireSelectedDecisionCardControl(wait, card.RunID, runfork.ControlMailboxDecide); err == nil || !selected || use != nil {
+				if use != nil {
+					_ = use.Close()
+				}
+				t.Fatalf("decision acquired before startup reconciliation: selected=%t error=%v", selected, err)
+			}
+			releaseReconciliation()
 			matched := 0
 			for _, entry := range recovered {
 				if entry.RunID == checkpoint.ForkRun {
@@ -527,6 +561,7 @@ func runPendingEffectReplyCrashHelper(t *testing.T, ctx context.Context, selecte
 		!reflect.DeepEqual(original, actualCard) || !reflect.DeepEqual(originalEffect, actualEffect) || !reflect.DeepEqual(originalRows, actualRows) {
 		t.Fatalf("pending crash preparation changed source work: errors=%v/%v/%v/%v/%v", err, stagedErr, cardErr, effectErr, rowsErr)
 	}
+	waitPendingReplyControlReady(t, ctx, owner, card.RunID)
 	use, isSelected, err := owner.AcquireSelectedDecisionCardControl(ctx, card.RunID, runfork.ControlMailboxDecide)
 	if err != nil || !isSelected || use == nil {
 		t.Fatalf("activated pending crash child lacks actual control: selected=%t error=%v", isSelected, err)
@@ -613,6 +648,7 @@ func loadPendingReplyRecoveryOperation(t *testing.T, ctx context.Context, select
 func requirePendingReplyRecoveryRefusals(t *testing.T, ctx context.Context, selected any, store pendingReplyExecutionStore, owner SelectedContractExecutionOwner,
 	card decisioncard.Card, principal string, previous pendingReplyCrashEvidence, current effects.Authority) {
 	t.Helper()
+	waitPendingReplyControlReady(t, ctx, owner, card.RunID)
 	before, err := store.ListDecisionCardChanges(ctx, decisioncard.SubscriptionOptions{Limit: 100})
 	if err != nil {
 		t.Fatal(err)
