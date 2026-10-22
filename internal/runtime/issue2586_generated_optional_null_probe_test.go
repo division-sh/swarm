@@ -95,7 +95,7 @@ func TestIssue2586GeneratedActivityOptionalNullProbe(t *testing.T) {
 		{"unknown_null_refuses", `{"unknown":null}`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			payload := []byte(`{"activity_id":"send","tool":"send","effect_class":"read_only","attempt":1,"result":` + tc.result + `}`)
+			payload := []byte(`{"activity_id":"send","tool":"send","result":` + tc.result + `}`)
 			before := bytes.Clone(payload)
 			event, err := admitRuntimePayload(admitter, eventName, payload)
 			if !bytes.Equal(before, payload) {
@@ -133,7 +133,7 @@ func TestIssue2586GeneratedActivityOptionalNullProbe(t *testing.T) {
 		valid        bool
 	}{{"historical_bytes_unchanged", `{}`, true}, {"historical_null_not_rewritten", `{"label":null}`, false}} {
 		t.Run(tc.name, func(t *testing.T) {
-			payload := []byte("{\n  \"activity_id\":\"send\", \"tool\":\"send\", \"effect_class\":\"read_only\", \"attempt\":1, \"result\":" + tc.result + "\n}")
+			payload := []byte("{\n  \"activity_id\":\"send\", \"tool\":\"send\", \"result\":" + tc.result + "\n}")
 			lineage, err := events.NewSelectedForkLineage(uuid.NewString(), uuid.NewString(), uuid.NewString(), "selected-contract", "", executionmode.Live)
 			if err != nil {
 				t.Fatal(err)
