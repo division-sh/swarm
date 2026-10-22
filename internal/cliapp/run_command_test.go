@@ -16,110 +16,36 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/apiv1"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/gorilla/websocket"
 )
 
-func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
+func TestRunCommandRequiresRunningServe(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
-	tracePrinted := make(chan struct{})
-	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
-		expectedToken: apiv1.DefaultLoopbackAPIToken,
-		rpcResponder: func(req jsonRPCRequest, callIndex int) map[string]any {
-			switch req.Method {
-			case "health.check":
-				return runCommandHealthResult()
-			case "run.start":
-				if got := req.Params["event_name"]; got != "scan.requested" {
-					t.Fatalf("event_name = %#v, want scan.requested", got)
-				}
-				if got := req.Params["bundle_hash"]; got != "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
-					t.Fatalf("bundle_hash = %#v, want health.check bundle hash", got)
-				}
-				return runStartCommandResult("run-local", "running")
-			case "run.get":
-				run := validDiagnosticRunHeader("run-local")
-				select {
-				case <-tracePrinted:
-					run["status"] = "completed"
-					run["ended_at"] = "2026-05-13T10:01:00Z"
-				default:
-				}
-				return map[string]any{"run": run}
-			default:
-				t.Fatalf("unexpected method[%d] = %q", callIndex, req.Method)
+	server := httptest.NewServer(http.NotFoundHandler())
+	server.Close()
+	for _, extra := range [][]string{nil, {"--no-follow"}, {"--connect", server.URL}} {
+		t.Run(strings.Join(extra, " "), func(t *testing.T) {
+			opts := testRunCommandOptions(server)
+			opts.runServe = func(context.Context, InvocationRoot, ServeOptions) int {
+				t.Error("run start must not launch a serve")
+				return 1
 			}
-			return nil
-		},
-		wsRows: []map[string]any{validRunCommandTraceRow("evt-local")},
-	})
-	defer server.Close()
-
-	var serveCalled atomic.Int32
-	serveCanceled := make(chan struct{})
-	opts := testRunCommandOptions(server)
-	repo := t.TempDir()
-	configPath := filepath.Join(repo, "runtime.yaml")
-	if err := os.Mkdir(filepath.Join(repo, "contracts"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	wantSource := mustInvocationRootForTest(filepath.Join(repo, "contracts")).Path()
-	if err := os.WriteFile(configPath, []byte("runtime:\n  recovery_on_startup: true\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	opts.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
-		serveCalled.Add(1)
-		if serveOpts.ConfigPath != configPath || serveOpts.Backend != "claude_cli" || serveOpts.SourceRoot != wantSource || serveOpts.DataSource != "" {
-			t.Errorf("serve opts = %#v", serveOpts)
-		}
-		if serveOpts.Verbose {
-			t.Errorf("local run serve opts Verbose = true, want default non-verbose schema summary owner")
-		}
-		if !serveOpts.LocalRun {
-			t.Errorf("local run serve opts LocalRun = false, want shared local preflight consumer marker")
-		}
-		<-ctx.Done()
-		close(serveCanceled)
-		return 0
-	}
-
-	stdout := &notifyingBuffer{needle: "id=evt-local", notify: tracePrinted}
-	var stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "start", "contracts", "--event", "scan.requested", "--payload", payloadPath, "--config", configPath, "--backend", "claude_cli"}, stdout, &stderr, opts)
-	if code != 0 {
-		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-	if serveCalled.Load() != 1 {
-		t.Fatalf("serve called = %d, want 1", serveCalled.Load())
-	}
-	select {
-	case <-serveCanceled:
-	case <-time.After(time.Second):
-		t.Fatal("local serve hook was not canceled after terminal run")
-	}
-	methods := runCommandMethodNames(*calls)
-	if len(methods) < 4 || methods[0] != "health.check" || methods[1] != "health.check" || methods[2] != "run.start" {
-		t.Fatalf("methods = %v, want two health.check calls, run.start, then one or more run.get calls", methods)
-	}
-	for i, method := range methods[3:] {
-		if method != "run.get" {
-			t.Fatalf("method[%d] = %q, want run.get; all=%v", i+3, method, methods)
-		}
-	}
-	assertRunCommandTraceSubscription(t, wsRequests, "run-local", true)
-	for _, want := range []string{"run started: run_id=run-local", "id=evt-local", "run terminal: run_id=run-local status=completed"} {
-		if !strings.Contains(stdout.String(), want) {
-			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
-		}
-	}
-	if strings.TrimSpace(stderr.String()) != "" {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
+			args := append([]string{"run", "start", "--event", "scan.requested", "--payload", payloadPath}, extra...)
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, opts)
+			if code != 6 || !strings.Contains(stderr.String(), "No serve running for this deployment: start `swarm serve` first") {
+				t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("absent serve produced a start receipt: %s", stdout.String())
+			}
+		})
 	}
 }
 
-func TestRunCommandLocalForegroundUsesServeAPITokenFileForEmbeddedClient(t *testing.T) {
+func TestRunCommandUsesRunningServeAPITokenFile(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	tokenFile := writeCLIAPITokenFile(t, "serve-token")
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
@@ -156,11 +82,8 @@ func TestRunCommandLocalForegroundUsesServeAPITokenFileForEmbeddedClient(t *test
 	var serveCalled atomic.Int32
 	opts.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
 		serveCalled.Add(1)
-		if !serveOpts.LocalRun {
-			t.Errorf("local run serve opts LocalRun = false, want true")
-		}
-		<-ctx.Done()
-		return 0
+		t.Error("run start must use the existing serve")
+		return 1
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -168,10 +91,10 @@ func TestRunCommandLocalForegroundUsesServeAPITokenFileForEmbeddedClient(t *test
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if serveCalled.Load() != 1 {
-		t.Fatalf("serve called = %d, want 1", serveCalled.Load())
+	if serveCalled.Load() != 0 {
+		t.Fatalf("serve called = %d, want 0", serveCalled.Load())
 	}
-	assertRunCommandMethods(t, calls, []string{"health.check", "health.check", "run.start", "run.get"})
+	assertRunCommandMethods(t, calls, []string{"health.check", "run.start", "run.get"})
 	assertRunCommandTraceSubscription(t, wsRequests, "run-token-file", true)
 }
 
@@ -286,7 +209,7 @@ func TestRunCommandHelpShowsDataFlag(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("run --help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"--data", "Fused immutable data import", "--pin", "Exact data version pin", "--backend", "openai_responses"} {
+	for _, want := range []string{"--data", "Fused immutable data import", "--pin", "Exact data version pin", "--backend", "openai_responses", "--timeout", "10m0s", "0 waits indefinitely"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("run help missing %q:\n%s", want, stdout.String())
 		}
@@ -306,6 +229,7 @@ func TestRunStartInitiationRequiresEventPairOrData(t *testing.T) {
 		{"missing", runCommandOptions{}, true},
 		{"event_without_payload", runCommandOptions{eventName: "started"}, true},
 		{"payload_without_event", runCommandOptions{payloadPath: "payload.json"}, true},
+		{"negative_timeout", runCommandOptions{eventName: "started", payloadPath: "payload.json", timeout: -time.Second}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.opts.validate()
@@ -391,7 +315,7 @@ func TestConnectedFeedOnlyRunStartSendsNoInitialEvent(t *testing.T) {
 	}
 }
 
-func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
+func TestRunCommandNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	root := t.TempDir()
 	payloadPath := filepath.Join(root, "payload.json")
@@ -422,7 +346,7 @@ func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 
 	chdirForTest(t, t.TempDir())
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), root, []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", filepath.Base(payloadPath), "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), root, []string{"run", "start", "--event", "scan.requested", "--payload", filepath.Base(payloadPath), "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -430,7 +354,7 @@ func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	if len(*wsRequests) != 0 {
 		t.Fatalf("websocket requests = %d, want 0", len(*wsRequests))
 	}
-	for _, want := range []string{"run started: run_id=run-no-follow", "reattach: swarm run start --connect " + server.URL + " --reattach run-no-follow"} {
+	for _, want := range []string{"run started: run_id=run-no-follow", "reattach: swarm run start --reattach run-no-follow"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
@@ -738,6 +662,32 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}
 	}
+	t.Run("timeout_detaches_without_cancelling_work", func(t *testing.T) {
+		server, calls, _ := newRunCommandServer(t, runCommandServerOptions{
+			rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
+				switch req.Method {
+				case "health.check":
+					return runCommandHealthResult()
+				case "run.start":
+					return runStartCommandResult("run-timeout", "running")
+				default:
+					t.Errorf("timeout must not mutate work; unexpected method %s", req.Method)
+					return nil
+				}
+			},
+		})
+		defer server.Close()
+		opts := testRunCommandOptions(server)
+		opts.runStatusPoll = time.Hour
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{
+			"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--timeout", "10ms",
+		}, &stdout, &stderr, opts)
+		if code != 8 || !strings.Contains(stderr.String(), "swarm run status run-timeout") || !strings.Contains(stderr.String(), "work continues") {
+			t.Fatalf("code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+		}
+		assertRunCommandMethods(t, calls, []string{"health.check", "run.start"})
+	})
 }
 
 type notifyingBuffer struct {
@@ -884,13 +834,12 @@ func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
 	}))
 	defer server.Close()
 
-	var serveCanceled atomic.Bool
+	var serveCalled atomic.Bool
 	opts := testRunCommandOptions(server)
 	opts.runReadyTimeout = time.Minute
 	opts.runReadyPoll = time.Millisecond
 	opts.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
-		<-ctx.Done()
-		serveCanceled.Store(true)
+		serveCalled.Store(true)
 		return 0
 	}
 
@@ -899,8 +848,8 @@ func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
 	if code != 4 {
 		t.Fatalf("code = %d, want 4 stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if !serveCanceled.Load() {
-		t.Fatal("local serve hook was not canceled after readiness auth failure")
+	if serveCalled.Load() {
+		t.Fatal("an authentication refusal must not launch a local serve")
 	}
 	if !strings.Contains(stderr.String(), "rejected the request with status 401") {
 		t.Fatalf("stderr = %q, want auth failure", stderr.String())
@@ -1025,7 +974,6 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		wantStderr string
 	}{
 		{name: "unknown detach", token: "test-token", args: []string{"run", "start", "--detach", "--event", "scan.requested", "--payload", payloadPath}, wantCode: 2, wantStderr: "unknown flag: --detach"},
-		{name: "no follow requires connect", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, wantCode: 2, wantStderr: "--no-follow requires --connect"},
 		{name: "no follow reattach rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--no-follow"}, wantCode: 2, wantStderr: "--no-follow and --reattach are mutually exclusive"},
 		{name: "invalid retired bundle hash rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, wantCode: 2, wantStderr: "unknown flag"},
 		{name: "blank retired bundle hash rejected", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--bundle-hash", "  "}, wantCode: 2, wantStderr: "unknown flag"},
