@@ -41,6 +41,9 @@ func TestIssue2655StagedRevisionRefusalAndRetryBothStores(t *testing.T) {
 			sourceRows := []byte("{\"account_id\":\"source\",\"document\":{}}\n")
 			sourceVersion := selectedDeploymentVersion(t, f, sourceRows)
 			sourceRun := start("source", sourceRows)
+			// --no-follow acknowledges before the root and singleton finish attaching.
+			waitNotifyAllChildrenRuntimeReadiness(t, f.ctx, f.runtime.pipeline, sourceRun, sourceRun)
+			waitNotifyAllChildrenRuntimeReadiness(t, f.ctx, f.runtime.pipeline, sourceRun, "consumer")
 			laterRows := []byte("{\"account_id\":\"later\",\"document\":{\"value\":2}}\n")
 			laterVersion := selectedDeploymentVersion(t, f, laterRows)
 			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
