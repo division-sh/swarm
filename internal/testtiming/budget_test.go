@@ -268,7 +268,7 @@ func TestPersistenceAuthorityCensusBudgetIsIsolated(t *testing.T) {
 func committedBroadBudgetPlan(t *testing.T, proof testplanning.Policy) testplanning.RunPlan {
 	t.Helper()
 	packages := []string{
-		"github.com/division-sh/swarm/internal/apispec",
+		"github.com/division-sh/swarm/internal/testchanged",
 		"github.com/division-sh/swarm/internal/dashboard/server",
 		"github.com/division-sh/swarm/internal/runtime/manager",
 	}

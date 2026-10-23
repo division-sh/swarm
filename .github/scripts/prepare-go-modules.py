@@ -57,9 +57,12 @@ def main():
                     raise
         except subprocess.TimeoutExpired as error:
             output = error.output or ""
-            print(output.decode(errors="replace") if isinstance(output, bytes) else output,
-                  end="", flush=True)
+            output = output.decode(errors="replace") if isinstance(output, bytes) else output
+            print(output, end="", flush=True)
             print("Go module bootstrap command deadline exceeded", file=sys.stderr)
+            if (attempt < len(BACKOFF_SECONDS) and time.monotonic() < deadline
+                    and not PERMANENT.search(output)):
+                continue
             return 124
         except OSError as error:
             print(f"Go module bootstrap failed: {error}", file=sys.stderr)

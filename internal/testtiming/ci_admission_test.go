@@ -260,7 +260,7 @@ func TestCIDraftSkipsPlanAndProofExpansion(t *testing.T) {
 		t.Fatal("empty unified proof selection admitted")
 	}
 	for _, job := range []string{"proof-unit"} {
-		if workflow.Jobs[job].Strategy.FailFast == nil || *workflow.Jobs[job].Strategy.FailFast != "${{ !inputs.keep_going }}" || workflow.Jobs[job].Strategy.MaxParallel != nil {
+		if workflow.Jobs[job].Strategy.FailFast == nil || *workflow.Jobs[job].Strategy.FailFast != false || workflow.Jobs[job].Strategy.MaxParallel != nil {
 			t.Fatalf("%s lost full matrix evidence", job)
 		}
 	}

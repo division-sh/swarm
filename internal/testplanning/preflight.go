@@ -97,7 +97,7 @@ func preflightRoot(pkg, name string) TestRoot {
 	return TestRoot{Package: "github.com/division-sh/swarm/" + pkg, Name: name}
 }
 
-func BuildPreflightPlan(repo, base string, inventory RootInventory, native RunPlan, comparison PreflightComparison) (PreflightPlan, error) {
+func BuildPreflightPlan(repo, base string, inventory RootInventory, native RunPlan, comparison PreflightComparison, affected ...TestRoot) (PreflightPlan, error) {
 	if err := native.Validate(); err != nil {
 		return PreflightPlan{}, err
 	}
@@ -112,6 +112,11 @@ func BuildPreflightPlan(repo, base string, inventory RootInventory, native RunPl
 	roots = append(roots, preflightSafetyRoots...)
 	if comparison.DebtRequired {
 		roots = append(roots, preflightDebtRoots...)
+	}
+	for _, root := range affected {
+		if !slices.Contains(roots, root) {
+			roots = append(roots, root)
+		}
 	}
 	owners := make(map[TestRoot][]RequiredTest)
 	for _, unit := range native.Units {

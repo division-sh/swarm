@@ -249,7 +249,7 @@ func TestCIConsumesOnePlanAndCompletePlanBoundEvidence(t *testing.T) {
 		}
 	}
 	producer := findWorkflowStep(workflow.Jobs["proof-unit"].Steps, "Run exact planned proof unit")
-	if producer == nil || producer.Run != "bash .github/scripts/run-proof-batch.sh" {
+	if producer == nil || producer.Run != "bash .github/scripts/run-proof-batch.sh" || producer.Env["KEEP_GOING"] != "true" {
 		t.Fatal("missing isolated batch consumer")
 	}
 	batchScript, err := os.ReadFile(filepath.Join(root, ".github/scripts/run-proof-batch.sh"))
