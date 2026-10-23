@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -183,10 +184,10 @@ func q1BranchPointSourceConstructor(t *testing.T, ctx context.Context, owner Sel
 }
 
 func q1StateOnlyGateComponentSource(t *testing.T, owner SelectedContractExecutionOwner) (context.Context, SelectedContractExecutionRequest, func()) {
-	return q1GateComponentSource(t, owner, true)
+	return q1GateComponentSource(t, owner, true, false)
 }
 
-func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, decided bool) (context.Context, SelectedContractExecutionRequest, func()) {
+func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, decided, pending bool) (context.Context, SelectedContractExecutionRequest, func()) {
 	t.Helper()
 	selected := owner.ports.fork
 	ctx := runForkTestContext(t)
@@ -243,8 +244,16 @@ func q1GateComponentSource(t *testing.T, owner SelectedContractExecutionOwner, d
 		t.Fatal(err)
 	}
 	if !decided {
-		event := eventtest.ExistingRunRootIngress(eventID, "item.received", "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
-		storetest.CommitSemanticEvent(t, ctx, selected, event)
+		envelope := events.EventEnvelope{}
+		if pending {
+			envelope = events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(envelope, runID), runID)
+		}
+		event := eventtest.ExistingRunRootIngress(eventID, "item.received", "operator", "", []byte(`{}`), 0, runID, envelope, time.Now().UTC())
+		if pending {
+			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, runID, "frontier")}, pipelineobligation.ScopeSubscribed)
+		} else {
+			storetest.CommitSemanticEvent(t, ctx, selected, event)
+		}
 		storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
 		state.ExpectedRevision = 2
 		state.Accumulator = json.RawMessage(`{"source_advanced":{"count":1}}`)
