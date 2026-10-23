@@ -215,12 +215,8 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 		}
 		credential := func(admission channelonboarding.CredentialAdmission) bool {
 			value, usable, err := c.opts.CredentialOwner.ObserveValueMatchingSeal(request.Context(), runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
-			for _, receiving := range provider {
-				if err == nil && usable && subtle.ConstantTimeCompare([]byte(value.CredentialValue()), []byte(receiving.CredentialValue())) == 1 {
-					return true
-				}
-			}
-			return false
+			receiving, exists := provider[admission.Role]
+			return err == nil && usable && exists && subtle.ConstantTimeCompare([]byte(value.CredentialValue()), []byte(receiving.CredentialValue())) == 1
 		}
 		current := func() bool {
 			credentialsCurrent, err := c.credentialObservationTokensCurrent(request.Context(), state.LastVerified.CredentialObservationTokens)
@@ -240,13 +236,9 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 			if err := canonicaljson.DecodePreservingNumberLexemes(body, &payload); err != nil {
 				return providertriggers.Delivery{}, err
 			}
-			admitted, err := plan.AdmitRequest(providertriggers.Request{Provider: target.Provider, Method: request.Method,
+			return plan.Accept(providertriggers.Request{Provider: target.Provider, Method: request.Method,
 				URL: request.URL.String(), Body: body, Headers: request.Header, Payload: payload, ContentType: request.Header.Get("Content-Type"),
 				Target: providertriggers.Target{WebhookSecret: signing.CredentialValue()}, Received: c.opts.Now()})
-			if err != nil {
-				return providertriggers.Delivery{}, err
-			}
-			return plan.ProjectDelivery(admitted)
 		}
 		return consume(request.Context(), account, credential, admit, current)
 	}

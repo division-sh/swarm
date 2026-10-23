@@ -5,6 +5,7 @@ package sessionprovider
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -43,24 +44,25 @@ func (input nativeSessionInput) matchesOriginalOperation(op channelonboarding.Op
 	if input.DeploymentRegistration != op.DeploymentRegistration {
 		return false
 	}
+	awaitingIdentity := slices.Contains([]channelonboarding.Phase{channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation}, op.Phase)
 	if op.DeploymentRegistration {
 		return input.Scope == channelonboarding.SessionInputOnboarding && input.OperationID == op.OperationID &&
 			op.AccountConfirmed && op.SessionAccount == input.Account && op.PrincipalID == input.PrincipalID &&
-			op.Revision == input.OperationRevision && (op.Phase == channelonboarding.PhaseAwaitingExternalIdentity || op.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation) &&
+			op.Revision == input.OperationRevision && awaitingIdentity &&
 			coordinate == (channelonboarding.ChannelRuntimeContextCoordinate{}) && input.ActivationRevision == 0 && input.TargetSelector == ""
 	}
 	activationCurrent := op.ActivationRevision == input.ActivationRevision
 	if input.Scope == channelonboarding.SessionInputOnboarding && input.ActivationRevision == 0 && op.AccountConnection() &&
-		op.IdentityOperationID != "" && (op.Phase == channelonboarding.PhaseAwaitingExternalIdentity || op.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation) {
+		op.IdentityOperationID != "" && awaitingIdentity {
 		activationCurrent = true
 	}
 	return op.OperationID == input.OperationID && op.Posture == channelonboarding.ActivationSessionConnection &&
 		(input.Scope != channelonboarding.SessionInputBusiness || input.AccountOnly == op.AccountConnection()) &&
-		op.Phase != channelonboarding.PhaseFailed && op.Phase != channelonboarding.PhaseRetired && op.Coordinate.MatchesDeclaration(coordinate) &&
+		!slices.Contains([]channelonboarding.Phase{channelonboarding.PhaseFailed, channelonboarding.PhaseRetired}, op.Phase) && op.Coordinate.MatchesDeclaration(coordinate) &&
 		op.SessionAccount == input.Account && activationCurrent &&
 		op.TargetSelector == input.TargetSelector && op.PrincipalID == input.PrincipalID &&
 		op.Coordinate.DurableIdentity().Matches(input.Source) && op.BindingRevision == input.BindingRevision &&
-		op.ValidateSessionAccount() == nil && (input.Scope == channelonboarding.SessionInputOnboarding || input.Scope == channelonboarding.SessionInputBusiness)
+		op.ValidateSessionAccount() == nil && slices.Contains([]channelonboarding.SessionInputScope{channelonboarding.SessionInputOnboarding, channelonboarding.SessionInputBusiness}, input.Scope)
 }
 
 // The reader owns actual provider state and the private capture handoff. It

@@ -10,7 +10,7 @@ import (
 
 type DeploymentSessionOwner interface {
 	VerifyRegistration(context.Context, Operation) (bool, error)
-	LogoutRegistration(context.Context, Operation, Operation) error
+	LogoutRegistration(context.Context, Operation) error
 	CloseRegistration(context.Context, Operation) error
 }
 
@@ -58,7 +58,7 @@ func (s *Service) LogoutDeployment(ctx context.Context, id string, revision int6
 		}
 	}
 	if op.FailureCode != "account_logout_unlinked" {
-		if err := session.LogoutRegistration(ctx, op, op); err != nil {
+		if err := session.LogoutRegistration(ctx, op); err != nil {
 			return Result{}, err
 		}
 		op, err = s.store.GetChannelOnboarding(ctx, id)
@@ -166,7 +166,6 @@ func (s *Service) ReverifyDeployment(ctx context.Context, id string) (Result, er
 		if err != nil {
 			return Result{}, err
 		}
-		return s.driveLocked(ctx, op, candidate, "", false)
 	}
 	return s.driveLocked(ctx, op, candidate, "", false)
 }

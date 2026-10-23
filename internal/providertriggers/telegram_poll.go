@@ -46,42 +46,17 @@ func (p InboundAdmissionPlan) PollTelegramClaim(ctx context.Context, client *htt
 		channel.Provider() != p.provider || !operatorchannel.ValidChallenge(challenge) || token == "" || strings.ContainsAny(token, "/?#\r\n") {
 		return absent, offset, fmt.Errorf("Telegram claim requires its admitted provider and exact challenge")
 	}
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
-	}
-	read := func(method string, query url.Values, result any) error {
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.telegram.org/bot"+token+"/"+method+"?"+query.Encode(), nil)
-		if err != nil {
-			return fmt.Errorf("Telegram registration request is invalid")
-		}
-		copy := *client
-		copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-		response, err := copy.Do(request)
-		if err != nil {
-			return fmt.Errorf("Telegram registration read unavailable")
-		}
-		defer response.Body.Close()
-		var envelope struct {
-			OK     bool            `json:"ok"`
-			Result json.RawMessage `json:"result"`
-		}
-		raw, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
-		if err != nil || len(raw) > 1<<20 || response.StatusCode != http.StatusOK || json.Unmarshal(raw, &envelope) != nil || !envelope.OK {
-			return fmt.Errorf("Telegram refused registration read (HTTP %d)", response.StatusCode)
-		}
-		return json.Unmarshal(envelope.Result, result)
-	}
 	var webhook struct {
 		URL string `json:"url"`
 	}
-	if err := read("getWebhookInfo", nil, &webhook); err != nil {
+	if err := readTelegramRegistration(ctx, client, token, "getWebhookInfo", nil, &webhook); err != nil {
 		return absent, offset, err
 	}
 	if webhook.URL != "" {
 		return absent, offset, PollingWebhookActive{URL: webhook.URL}
 	}
 	var updates []json.RawMessage
-	if err := read("getUpdates", url.Values{"offset": {strconv.FormatInt(offset, 10)}, "timeout": {"0"}, "limit": {"100"}}, &updates); err != nil {
+	if err := readTelegramRegistration(ctx, client, token, "getUpdates", url.Values{"offset": {strconv.FormatInt(offset, 10)}, "timeout": {"0"}, "limit": {"100"}}, &updates); err != nil {
 		return absent, offset, err
 	}
 	for _, raw := range updates {
@@ -114,4 +89,32 @@ func (p InboundAdmissionPlan) PollTelegramClaim(ctx context.Context, client *htt
 		}
 	}
 	return absent, offset, nil
+}
+
+// Both provider reads share the same response bound, redirect refusal and
+// redacted errors; neither can expose the token-bearing request URL.
+func readTelegramRegistration(ctx context.Context, client *http.Client, token, method string, query url.Values, result any) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.telegram.org/bot"+token+"/"+method+"?"+query.Encode(), nil)
+	if err != nil {
+		return fmt.Errorf("Telegram registration request is invalid")
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 15 * time.Second}
+	}
+	copy := *client
+	copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	response, err := copy.Do(request)
+	if err != nil {
+		return fmt.Errorf("Telegram registration read unavailable")
+	}
+	defer response.Body.Close()
+	var envelope struct {
+		OK     bool            `json:"ok"`
+		Result json.RawMessage `json:"result"`
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
+	if err != nil || len(raw) > 1<<20 || response.StatusCode != http.StatusOK || json.Unmarshal(raw, &envelope) != nil || !envelope.OK {
+		return fmt.Errorf("Telegram refused registration read (HTTP %d)", response.StatusCode)
+	}
+	return json.Unmarshal(envelope.Result, result)
 }
