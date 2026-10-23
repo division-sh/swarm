@@ -105,18 +105,18 @@ func (c *RuntimeConnection) VerifyDeploymentRegistration(ctx context.Context, ex
 	return err == nil, err
 }
 
-func (c *RuntimeConnection) LogoutDeploymentRegistration(ctx context.Context, original, expected channelonboarding.Operation) (err error) {
+func (c *RuntimeConnection) LogoutDeploymentRegistration(ctx context.Context, expected channelonboarding.Operation) (err error) {
 	work, err := c.begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, work.Done()) }()
-	op, err := c.operations.GetChannelOnboarding(work.Context(), original.OperationID)
-	if err != nil || !c.operation.DeploymentRegistration || !original.DeploymentRegistration || !op.DeploymentRegistration ||
+	op, err := c.operations.GetChannelOnboarding(work.Context(), expected.OperationID)
+	if err != nil || !c.operation.DeploymentRegistration || !expected.DeploymentRegistration || !op.DeploymentRegistration ||
 		op.OperationID != c.operation.OperationID || op.OperationID != expected.OperationID || op.Revision != expected.Revision ||
-		op.PrincipalID != c.operation.PrincipalID || op.PrincipalID != original.PrincipalID ||
+		op.PrincipalID != c.operation.PrincipalID || op.PrincipalID != expected.PrincipalID ||
 		op.Phase.Terminal() && op.Phase != channelonboarding.PhaseSucceeded || op.LogoutCompleted ||
-		op.SessionAccount != original.SessionAccount || op.SessionAccount != c.sessionAccount() || op.AccountReference != original.AccountReference {
+		op.SessionAccount != expected.SessionAccount || op.SessionAccount != c.sessionAccount() || op.AccountReference != expected.AccountReference {
 		return errors.Join(channelonboarding.ErrRevisionConflict, err)
 	}
 	occurrence := c.state.currentOccurrence()

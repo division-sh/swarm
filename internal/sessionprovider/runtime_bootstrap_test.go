@@ -215,8 +215,8 @@ func (f *runtimeBootstrapFixture) VerifyRegistration(ctx context.Context, op cha
 	return f.connection.VerifyDeploymentRegistration(ctx, op)
 }
 
-func (f *runtimeBootstrapFixture) LogoutRegistration(ctx context.Context, original, retired channelonboarding.Operation) error {
-	if err := f.connection.LogoutDeploymentRegistration(ctx, original, retired); err != nil {
+func (f *runtimeBootstrapFixture) LogoutRegistration(ctx context.Context, op channelonboarding.Operation) error {
+	if err := f.connection.LogoutDeploymentRegistration(ctx, op); err != nil {
 		return err
 	}
 	return f.connection.Close(ctx)

@@ -378,16 +378,16 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 			return returnCLIValidationError(errOut, err)
 		}
 		defer func() { resultErr = errors.Join(resultErr, local.close(context.WithoutCancel(ctx))) }()
+		accounts, err := local.accounts(ctx)
+		if err != nil {
+			return returnCLIValidationError(errOut, err)
+		}
 		if opts.account != "" {
 			ref, err := channelonboarding.CanonicalAccount(provider, opts.account)
 			if err != nil {
 				return returnCLIValidationError(errOut, err)
 			}
 			local.expectedAccount = ref.Account
-			accounts, err := local.accounts(ctx)
-			if err != nil {
-				return returnCLIValidationError(errOut, err)
-			}
 			operation, err := selectDeploymentAccount(accounts, ref.Account, opts.apiOptions.input, errOut, false)
 			if err != nil {
 				return returnCLIValidationError(errOut, err)
@@ -400,19 +400,13 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 				fmt.Fprintln(out, "Account was logged out from the phone. Link it again:")
 				begun = channelOnboardingResult{}
 			}
-		} else {
-			accounts, err := local.accounts(ctx)
-			if err != nil {
-				return returnCLIValidationError(errOut, err)
+		} else if len(accounts) > 0 && !opts.yes {
+			for _, account := range accounts {
+				fmt.Fprintf(out, "Account: %s.\n", account.Operation.DeploymentAccount())
 			}
-			if len(accounts) > 0 && !opts.yes {
-				for _, account := range accounts {
-					fmt.Fprintf(out, "Already linked: %s.\n", account.Operation.AccountReference)
-				}
-				approved, err := confirmChannelAccount(opts.apiOptions.input, errOut, "Link another? [y/N] ")
-				if err != nil || !approved {
-					return err
-				}
+			approved, err := confirmChannelAccount(opts.apiOptions.input, errOut, "Link another? [y/N] ")
+			if err != nil || !approved {
+				return err
 			}
 		}
 		client = local
@@ -683,7 +677,7 @@ func confirmCLIChannelAccount(ctx context.Context, client channelControlClient, 
 	}
 	if !pending {
 		switch {
-		case current.Operation.Posture != channelonboarding.ActivationSessionConnection && !current.Operation.DeploymentRegistration,
+		case !current.Operation.UsesPairingCheckpoint(),
 			current.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity,
 			current.Operation.ActivationRevision != 0, current.IdentityOperation != nil, current.Binding != nil:
 			return current, false, nil

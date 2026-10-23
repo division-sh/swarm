@@ -668,6 +668,10 @@ func (o Operation) DeploymentAccount() string {
 	return o.ExpectedAccount
 }
 
+func (o Operation) UsesPairingCheckpoint() bool {
+	return o.Posture == ActivationSessionConnection || o.DeploymentRegistration
+}
+
 const PairingStatusPreparing = "preparing"
 
 // PairingReadback is authenticated control-plane material, never READY or a

@@ -367,7 +367,11 @@ func runDeploymentChannelList(ctx context.Context, out, errOut io.Writer, opts r
 	}
 	return renderCLIOutput(out, errOut, output, map[string]any{"accounts": accounts}, func(w io.Writer) {
 		for _, row := range accounts {
-			fmt.Fprintf(w, "%s %s · registered\n", row.Operation.Provider, row.Operation.AccountReference)
+			state := "pending"
+			if row.Operation.AccountConfirmed && row.Operation.Phase == channelonboarding.PhaseSucceeded {
+				state = "registered"
+			}
+			fmt.Fprintf(w, "%s %s · %s\n", row.Operation.Provider, row.Operation.DeploymentAccount(), state)
 		}
 		if len(accounts) == 0 {
 			fmt.Fprintln(w, "No registered accounts. Run swarm channel connect <provider>.")
@@ -375,7 +379,7 @@ func runDeploymentChannelList(ctx context.Context, out, errOut io.Writer, opts r
 	}, func() ([]string, error) {
 		values := make([]string, 0, len(accounts))
 		for _, row := range accounts {
-			values = append(values, row.Operation.AccountReference)
+			values = append(values, row.Operation.DeploymentAccount())
 		}
 		return values, nil
 	})

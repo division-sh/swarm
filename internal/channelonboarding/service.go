@@ -721,7 +721,7 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if input.CheckpointOnly && (op.Posture != ActivationSessionConnection && !op.DeploymentRegistration || op.Phase != PhaseActivatingProvider ||
+	if input.CheckpointOnly && (!op.UsesPairingCheckpoint() || op.Phase != PhaseActivatingProvider ||
 		input.ProviderCredential != "" || input.ClientLanguage != "" || input.ExpectedLocaleRevision != 0) {
 		return Result{}, ErrInvalidRequest
 	}
@@ -1208,7 +1208,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 				op, resetErr = s.resetRejectedCredentialAdmissions(context.WithoutCancel(ctx), op)
 				return s.blockedResult(readback, op, candidate, errors.Join(err, resetErr))
 			}
-			if op.Posture == ActivationSessionConnection || op.DeploymentRegistration {
+			if op.UsesPairingCheckpoint() {
 				next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID,
 					ExpectedRevision: op.Revision, Phase: PhaseActivatingProvider, Now: s.now().UTC()})
 				if err != nil {
@@ -1243,7 +1243,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			}
 			op = next
 		case PhaseActivatingProvider:
-			if op.Posture == ActivationSessionConnection || op.DeploymentRegistration {
+			if op.UsesPairingCheckpoint() {
 				next, paired, err := s.prepareSessionPairing(caller, op, candidate)
 				if err != nil {
 					return s.blockedResult(readback, op, candidate, err)
@@ -2454,7 +2454,7 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 	result := Result{Operation: op, Candidate: candidate}
 	if reader, ok := s.sessions.(interface {
 		ReadSessionConnection(context.Context, Operation) (SessionConnectionReadback, error)
-	}); ok && (op.Posture == ActivationSessionConnection || op.DeploymentRegistration) {
+	}); ok && op.UsesPairingCheckpoint() {
 		view, err := reader.ReadSessionConnection(ctx, op)
 		if err != nil {
 			return result, err
@@ -2468,7 +2468,7 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 		}
 		result.Logout = logout
 	}
-	if (op.Posture == ActivationSessionConnection || op.DeploymentRegistration) && op.Phase == PhaseActivatingProvider && s.sessions != nil {
+	if op.UsesPairingCheckpoint() && op.Phase == PhaseActivatingProvider && s.sessions != nil {
 		principal, err := s.identities.Principal()
 		if err != nil {
 			return result, err
@@ -2494,20 +2494,21 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 		identityOp = operatorchannel.ProjectOperationReadback(identityOp)
 		result.IdentityOperation = &identityOp
 	}
-	if binding, err := s.identities.RetainedCurrentBinding(ctx, op.Interface); err == nil {
-		if !op.DeploymentRegistration {
-			result.Binding = &binding
-		} else if op.IdentityOperationID != "" {
-			authority, authorityErr := providerIdentityAuthority(op, *candidate)
-			if authorityErr != nil {
-				return result, authorityErr
-			}
-			if binding.PrincipalID == op.PrincipalID && binding.ProviderAuthority.SameProvenance(authority) {
-				result.Binding = &binding
-			}
-		}
-	} else if !errors.Is(err, operatorchannel.ErrNotFound) {
+	binding, err := s.identities.RetainedCurrentBinding(ctx, op.Interface)
+	switch {
+	case errors.Is(err, operatorchannel.ErrNotFound):
+	case err != nil:
 		return result, err
+	case !op.DeploymentRegistration:
+		result.Binding = &binding
+	case op.IdentityOperationID != "":
+		authority, err := providerIdentityAuthority(op, *candidate)
+		if err != nil {
+			return result, err
+		}
+		if binding.PrincipalID == op.PrincipalID && binding.ProviderAuthority.SameProvenance(authority) {
+			result.Binding = &binding
+		}
 	}
 	if op.DeploymentRegistration {
 		result.projectInitialSessionPreparation()
