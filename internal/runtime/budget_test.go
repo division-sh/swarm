@@ -3,7 +3,10 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,7 +21,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -45,32 +50,53 @@ func TestBudgetRecoveryStageClassifierKeepsFlowScopedTerminality(t *testing.T) {
 	}
 }
 
-func TestBudgetRecoveryUsesEachRunsSelectedStageSource(t *testing.T) {
-	artifactA := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# selected-budget-source-a\n"))
-	hashA := artifactA.BundleHash()
-	artifactB := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# selected-budget-source-b\n"))
-	hashB := artifactB.BundleHash()
-	makeSource := func(hash string, terminal string) semanticview.Source {
-		return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-			Semantics: runtimecontracts.WorkflowSemanticView{Version: hash, StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
-				".": runtimecontracts.BuildWorkflowStageTopology(".", "shared", []string{"shared", "fresh"}, []string{terminal}, nil, nil, nil),
-			}},
-			Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
-				"budget_warning_percent": {Value: 50}, "budget_throttle_percent": {Value: 75}, "budget_emergency_percent": {Value: 90},
-			}},
+func TestS1BudgetRecoveryRefusesMalformedRootReferenceBeforeSourceOrSpend(t *testing.T) {
+	root, _ := sourceartifactfixture.Rooted(t, "budget", sourceartifactfixture.Artifact())
+	for _, reference := range []sourceartifact.RootAdmissionReference{
+		{},
+		{BundleHash: root.Artifact().BundleHash()},
+		{BundleHash: root.Artifact().BundleHash(), RootDirectory: "budget "},
+		{BundleHash: "hash7", RootDirectory: "budget"},
+	} {
+		t.Run(reference.BundleHash+"/"+reference.RootDirectory, func(t *testing.T) {
+			store := &budgetSpendStoreCapture{sum: 0.95, targets: []budgetspend.ProjectionTarget{{
+				RunID: "run-budget", EntityID: "entity-budget", RootReference: reference, Stage: "active",
+			}}}
+			eventStore := &bootSelfCheckDescriptorStore{}
+			bus, err := newRuntimeTestEventBus(t, eventStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			loads := 0
+			tracker := NewBudgetTracker(store, bus, &config.Config{Extensions: map[string]any{
+				"budget": map[string]any{"per_entity_monthly_cap": 1},
+			}}, nil, nil, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), executionposture.Live, BudgetRecoveryStageSources{
+				Load: func(context.Context, sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+					loads++
+					return nil, nil
+				},
+			})
+			err = tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background()))
+			if err == nil || !strings.Contains(err.Error(), "requires its exact source root reference") {
+				t.Fatalf("malformed source reference did not refuse at the target boundary: %v", err)
+			}
+			if loads != 0 || len(store.sumQueries) != 0 || len(eventStore.appendedEvents()) != 0 {
+				t.Fatalf("malformed source reference reached loading/spend/publication: loads=%d queries=%+v events=%+v", loads, store.sumQueries, eventStore.appendedEvents())
+			}
 		})
 	}
-	sourceA, sourceB := makeSource(hashA, "fresh"), makeSource(hashB, "shared")
+}
+
+func TestBudgetRecoveryUsesEachRunsSelectedStageSource(t *testing.T) {
+	rootA, sourceA := loadRootedBudgetSource(t, "budget-a", "stages:\n  shared: {}\n  fresh: {final: true}\n")
+	rootB, sourceB := loadRootedBudgetSource(t, "budget-b", "stages:\n  shared: {final: true}\n  fresh: {}\n")
 	bundleA, _ := semanticview.Bundle(sourceA)
-	bundleA.SourceArtifact = artifactA
-	bundleB, _ := semanticview.Bundle(sourceB)
-	bundleB.SourceArtifact = artifactB
 	const entityA, entityB, terminalB = "entity-a", "entity-b", "terminal-b"
 	store := &budgetSpendStoreCapture{sum: 0.95, targets: []budgetspend.ProjectionTarget{
-		{RunID: "run-a", EntityID: entityA, BundleHash: hashA, Stage: "shared"},
-		{RunID: "run-b", EntityID: terminalB, BundleHash: hashB, Stage: "shared"},
-		{RunID: "run-b", EntityID: entityB, BundleHash: hashB, Stage: "fresh"},
-		{RunID: "run-b", EntityID: entityA, BundleHash: hashB, Stage: "fresh"},
+		{RunID: "run-a", EntityID: entityA, RootReference: rootA.Admission().Reference(), Stage: "shared"},
+		{RunID: "run-b", EntityID: terminalB, RootReference: rootB.Admission().Reference(), Stage: "shared"},
+		{RunID: "run-b", EntityID: entityB, RootReference: rootB.Admission().Reference(), Stage: "fresh"},
+		{RunID: "run-b", EntityID: entityA, RootReference: rootB.Admission().Reference(), Stage: "fresh"},
 	}}
 	eventStore := &bootSelfCheckDescriptorStore{}
 	bus, err := newRuntimeTestEventBus(t, eventStore)
@@ -81,11 +107,10 @@ func TestBudgetRecoveryUsesEachRunsSelectedStageSource(t *testing.T) {
 	tracker := NewBudgetTracker(store, bus, &config.Config{Extensions: map[string]any{
 		"budget": map[string]any{"per_entity_monthly_cap": 1},
 	}}, nil, nil, sourceA, executionposture.Live, BudgetRecoveryStageSources{
-		CurrentBundleHash: hashA,
-		Load: func(_ context.Context, hash string) (semanticview.Source, error) {
+		Load: func(_ context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
 			loads++
-			if hash != hashB {
-				t.Fatalf("loaded unexpected bundle %q", hash)
+			if reference != rootB.Admission().Reference() {
+				t.Fatalf("loaded unexpected root %+v", reference)
 			}
 			return sourceB, nil
 		},
@@ -99,13 +124,89 @@ func TestBudgetRecoveryUsesEachRunsSelectedStageSource(t *testing.T) {
 	if len(store.sumQueries) != 2 {
 		t.Fatalf("entity dedup/spend queries = %#v, want exactly two", store.sumQueries)
 	}
-	bundleA.SourceArtifact = artifactB
+	bundleA.SourceArtifact = rootB.Artifact()
 	store.sumQueries = nil
 	if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err == nil {
 		t.Fatal("current runtime source with foreign artifact was accepted")
 	}
 	if len(store.sumQueries) != 0 {
 		t.Fatalf("mismatched current source changed entity budget projection: %#v", store.sumQueries)
+	}
+}
+
+func loadRootedBudgetSource(t *testing.T, directory, schema string) (sourceartifact.RootedSource, semanticview.Source) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), directory)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"schema.yaml": schema,
+		"policy.yaml": "budget_warning_percent: 50\nbudget_throttle_percent: 75\nbudget_emergency_percent: 90\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(canonicalrouting.RepoRoot(t), root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rooted, semanticview.Wrap(bundle)
+}
+
+func TestS1BudgetRecoveryDoesNotReuseSameContentFromAnotherRoot(t *testing.T) {
+	first, sourceA := loadRootedBudgetSource(t, "first", "stages:\n  active: {}\n  done: {final: true}\n")
+	second, _ := sourceartifactfixture.Rooted(t, "second", first.Artifact())
+	bundleB, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), second, "", runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Admission().BundleHash() != second.Admission().BundleHash() {
+		t.Fatal("cache control requires identical content")
+	}
+	store := &budgetSpendStoreCapture{targets: []budgetspend.ProjectionTarget{
+		{RunID: "a", EntityID: "first", RootReference: first.Admission().Reference(), Stage: "active"},
+		{RunID: "b", EntityID: "second", RootReference: second.Admission().Reference(), Stage: "active"},
+		{RunID: "c", EntityID: "another-second", RootReference: second.Admission().Reference(), Stage: "active"},
+	}}
+	bus, err := newRuntimeTestEventBus(t, &bootSelfCheckDescriptorStore{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loads := 0
+	returned := semanticview.Wrap(bundleB)
+	tracker := NewBudgetTracker(store, bus, &config.Config{Extensions: map[string]any{
+		"budget": map[string]any{"per_entity_monthly_cap": 1},
+	}}, nil, nil, sourceA, executionposture.Live, BudgetRecoveryStageSources{
+		Load: func(_ context.Context, ref sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+			loads++
+			if ref != second.Admission().Reference() {
+				t.Fatalf("loader was not given the retained exact pair: %+v", ref)
+			}
+			return returned, nil
+		},
+	})
+	for pass := 1; pass <= 2; pass++ {
+		if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err != nil {
+			t.Fatal(err)
+		}
+		if loads != pass || len(store.sumQueries) != 3*pass {
+			t.Fatalf("root cache crossed a pair or survived a projection: loads=%d queries=%d", loads, len(store.sumQueries))
+		}
+	}
+	store.targets = store.targets[1:]
+	store.sumQueries = nil
+	returned = sourceA
+	if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err == nil {
+		t.Fatal("same-content source from the wrong root was admitted")
+	}
+	if len(store.sumQueries) != 0 {
+		t.Fatal("crossed root reached entity spend projection")
 	}
 }
 
@@ -236,15 +337,14 @@ func TestBudgetTrackerActiveWorkThresholdPreservesInboundLineage(t *testing.T) {
 }
 
 func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext(t *testing.T) {
-	artifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# recovery-scopes\n"))
-	bundleHash := artifact.BundleHash()
+	root, source := loadRootedBudgetSource(t, "budget-scopes", "stages:\n  active: {}\n  done: {final: true}\n")
 	entityA := "10000000-0000-4000-8000-000000000001"
 	entityB := "20000000-0000-4000-8000-000000000002"
 	store := &budgetSpendStoreCapture{
 		sum: 0.95,
 		targets: []budgetspend.ProjectionTarget{
-			{RunID: "10000000-0000-4000-8000-000000000010", EntityID: entityA, BundleHash: bundleHash, Stage: "active"},
-			{RunID: "20000000-0000-4000-8000-000000000020", EntityID: entityB, BundleHash: bundleHash, Stage: "active"},
+			{RunID: "10000000-0000-4000-8000-000000000010", EntityID: entityA, RootReference: root.Admission().Reference(), Stage: "active"},
+			{RunID: "20000000-0000-4000-8000-000000000020", EntityID: entityB, RootReference: root.Admission().Reference(), Stage: "active"},
 		},
 	}
 	eventStore := &bootSelfCheckDescriptorStore{}
@@ -252,24 +352,13 @@ func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		SourceArtifact: artifact,
-		Semantics: runtimecontracts.WorkflowSemanticView{StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
-			".": runtimecontracts.BuildWorkflowStageTopology(".", "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
-		}},
-		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
-			"budget_warning_percent":   {Value: 50},
-			"budget_throttle_percent":  {Value: 75},
-			"budget_emergency_percent": {Value: 90},
-		}},
-	})
 	tracker := NewBudgetTracker(store, bus, &config.Config{Extensions: map[string]any{
 		"budget": map[string]any{
 			"system_monthly_cap":     1,
 			"global_monthly_cap":     1,
 			"per_entity_monthly_cap": 1,
 		},
-	}}, nil, nil, source, executionposture.Live, BudgetRecoveryStageSources{CurrentBundleHash: bundleHash})
+	}}, nil, nil, source, executionposture.Live, BudgetRecoveryStageSources{})
 
 	if err := tracker.ProjectRecoveryBudgetState(testAuthorActivityContext(context.Background())); err != nil {
 		t.Fatalf("ProjectRecoveryBudgetState: %v", err)

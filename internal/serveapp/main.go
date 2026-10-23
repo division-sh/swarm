@@ -21,7 +21,6 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -139,32 +138,31 @@ type serveRuntimeBundleContext struct {
 }
 
 type serveRuntimeBundleContextRequest struct {
-	RepoRoot               string
-	PlatformPackBases      *packartifact.PlatformPackBaseGenerationOwner
-	ExecutionPosture       executionposture.Posture
-	Ctx                    context.Context
-	Stores                 serveRuntimePersistence
-	Config                 *config.Config
-	Loaded                 serveRuntimeBundle
-	StateStoreSummary      string
-	Options                cliapp.ServeOptions
-	MountSources           cliapp.WorkspaceMountSources
-	WorkspaceBackend       cliapp.WorkspaceBackendSelection
-	Credentials            runtimecredentials.Store
-	ManagedCredentials     runtimemanagedcredentials.Store
-	ProviderCredentials    runtimecredentials.Store
-	ProviderTriggerCatalog *providertriggers.CatalogSnapshot
-	ChannelPlans           []packs.SatisfactionPlan
-	ChannelBindings        []packs.OutboundBindingPlan
-	BootStartedAt          time.Time
-	BootProgress           func(runtime.BootProgressEvent)
-	EnableToolGateway      bool
-	ToolGatewayBinding     toolgateway.Binding
-	UseStartupRecovery     bool
-	RuntimeInstanceID      string
-	DataProjectionRoot     string
-	ProcessWorkOwner       *worklifetime.Process
-	NoticePresentation     runtimetools.InformationalNoticePresentationSink
+	RepoRoot            string
+	PlatformPackBases   *packartifact.PlatformPackBaseGenerationOwner
+	ExecutionPosture    executionposture.Posture
+	Ctx                 context.Context
+	Stores              serveRuntimePersistence
+	Config              *config.Config
+	Loaded              serveRuntimeBundle
+	StateStoreSummary   string
+	Options             cliapp.ServeOptions
+	MountSources        cliapp.WorkspaceMountSources
+	WorkspaceBackend    cliapp.WorkspaceBackendSelection
+	Credentials         runtimecredentials.Store
+	ManagedCredentials  runtimemanagedcredentials.Store
+	ProviderCredentials runtimecredentials.Store
+	ChannelPlans        []packs.SatisfactionPlan
+	ChannelBindings     []packs.OutboundBindingPlan
+	BootStartedAt       time.Time
+	BootProgress        func(runtime.BootProgressEvent)
+	EnableToolGateway   bool
+	ToolGatewayBinding  toolgateway.Binding
+	UseStartupRecovery  bool
+	RuntimeInstanceID   string
+	DataProjectionRoot  string
+	ProcessWorkOwner    *worklifetime.Process
+	NoticePresentation  runtimetools.InformationalNoticePresentationSink
 }
 
 func (b serveRuntimeBundle) serveIdentityDetail() string {
@@ -206,7 +204,14 @@ func compileServeSourceSetPlan(contexts []serveRuntimeBundleContext) (runtimeage
 	agents := []runtimeagenttopology.DesiredAgent{}
 	for _, contextDef := range contexts {
 		bundleHash := contextDef.sourceArtifactFact.BundleHash()
-		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
+		rooted, err := contextDef.loaded.bundle.RootedSource()
+		if err != nil {
+			return runtimeagenttopology.SourceSetPlan{}, err
+		}
+		if rooted.Admission().BundleHash() != bundleHash {
+			return runtimeagenttopology.SourceSetPlan{}, fmt.Errorf("source topology differs from its compiled root")
+		}
+		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, RootDirectory: rooted.Admission().RootDirectory()}
 		if contextDef.runtime == nil || contextDef.runtime.Manager == nil {
 			return runtimeagenttopology.SourceSetPlan{}, fmt.Errorf("compile source topology %s: runtime manager is required", bundleHash)
 		}
@@ -269,6 +274,7 @@ func serveConfigLoadDetail(configDetail string, resolvedPaths cliapp.CLISourcePa
 
 type sourceArtifactReader interface {
 	GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
+	GetRootedSource(context.Context, sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error)
 }
 
 func loadServeRuntimeBundles(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
@@ -315,26 +321,28 @@ func materializeRuntimeBundle(module runtimepipeline.WorkflowModule, bundle *run
 	}, nil
 }
 
-func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactReader, repoRoot string, packBases *packartifact.PlatformPackBaseGenerationOwner, bundleHash string) (semanticview.Source, error) {
+func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactReader, repoRoot string, packBases *packartifact.PlatformPackBaseGenerationOwner, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
 	if reader == nil {
 		return nil, fmt.Errorf("budget recovery source artifact reader is required")
 	}
-	record, err := reader.GetSourceArtifact(ctx, bundleHash)
+	if err := reference.Validate(); err != nil {
+		return nil, err
+	}
+	rooted, err := reader.GetRootedSource(ctx, reference)
 	if err != nil {
 		return nil, err
 	}
-	if record.BundleHash != bundleHash {
-		return nil, fmt.Errorf("budget source artifact does not match selected bundle_hash %q", bundleHash)
-	}
-	artifact, err := record.Decode()
-	if err != nil {
+	if err := rooted.Validate(); err != nil {
 		return nil, err
+	}
+	if rooted.Admission().Reference() != reference {
+		return nil, fmt.Errorf("budget source does not match the selected root reference")
 	}
 	specPath, err := cliapp.EmbeddedPlatformSpecPath()
 	if err != nil {
 		return nil, err
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repoRoot, artifact, specPath, runtimecontracts.WorkflowContractLoadOptions{
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repoRoot, rooted, specPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {
@@ -343,29 +351,33 @@ func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactRea
 	return semanticview.Wrap(bundle), nil
 }
 
-func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifacts sourceArtifactReader, bundleHash string, packBases *packartifact.PlatformPackBaseGenerationOwner, materialize func(*sourceartifact.AdmittedSourceArtifact, semanticview.Source) (*sourceartifact.RuntimeProjection, error)) (serveRuntimeBundle, error) {
+func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifacts sourceArtifactReader, reference sourceartifact.RootAdmissionReference, packBases *packartifact.PlatformPackBaseGenerationOwner, materialize func(*sourceartifact.AdmittedSourceArtifact, semanticview.Source) (*sourceartifact.RuntimeProjection, error)) (serveRuntimeBundle, error) {
 	if artifacts == nil {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: exact source reconstruction requires selected source artifact store")
 	}
-	if err := runtimecontracts.ValidateBundleHash(bundleHash); err != nil {
+	if err := reference.Validate(); err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	record, err := artifacts.GetSourceArtifact(ctx, bundleHash)
+	bundleHash := reference.BundleHash
+	rooted, err := artifacts.GetRootedSource(ctx, reference)
 	if errors.Is(err, sourceartifact.ErrNotFound) {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: bundle_hash %s is not present in source_artifacts", bundleHash)
 	}
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	artifact, err := record.Decode()
-	if err != nil {
-		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_DATA_INTEGRITY_ERROR: decode source artifact %s: %w", bundleHash, err)
+	if err := rooted.Validate(); err != nil {
+		return serveRuntimeBundle{}, err
 	}
+	if rooted.Admission().Reference() != reference {
+		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_DATA_INTEGRITY_ERROR: reset source differs from the frozen root reference")
+	}
+	artifact := rooted.Artifact()
 	specPath, err := cliapp.EmbeddedPlatformSpecPath()
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, specPath, runtimecontracts.WorkflowContractLoadOptions{
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, specPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBases:  packBases,
 		AdmitPackInventory: packadmission.AdmitInventory,
 	})
@@ -445,13 +457,28 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	}
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 		WorkflowModule: loaded.module, SourceArtifactFact: sourceArtifactFact,
-		ProviderTriggerCatalog: req.ProviderTriggerCatalog,
-		ChannelPlans:           req.ChannelPlans,
+		ChannelPlans: req.ChannelPlans,
 	})
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("admit effective source projection: %w", err)
 	}
 	loaded.source = projection.Source()
+	rooted, err := loaded.bundle.RootedSource()
+	if err != nil {
+		return serveRuntimeBundleContext{}, err
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, loaded.bundle.Platform)
+	if err != nil {
+		return serveRuntimeBundleContext{}, err
+	}
+	scope, err := providers.Scope(".")
+	if err != nil {
+		return serveRuntimeBundleContext{}, err
+	}
+	providerCatalog, err := scope.TriggerCatalog()
+	if err != nil {
+		return serveRuntimeBundleContext{}, err
+	}
 	bootIdentity := loaded.bootIdentity
 	bootIdentity.BundleHash = sourceArtifactFact.BundleHash()
 	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Config, loaded.sourceProjection, loaded.source, req.MountSources, req.WorkspaceBackend)
@@ -500,7 +527,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	validationOpts.ModelAliases = req.Config.LLM.Models
 	validationOpts.ManagedCredentials = req.ManagedCredentials
 	validationOpts.ProviderCredentials = req.ProviderCredentials
-	validationOpts.ProviderTriggerCatalog = req.ProviderTriggerCatalog
+	validationOpts.ProviderTriggerCatalog = providerCatalog
 	validationOpts.ChannelPlans = req.ChannelPlans
 	declaredChannelPublication, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication(req.ChannelBindings)
 	if err != nil {
@@ -519,8 +546,8 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	runtimeDeps := req.Stores.runtimeDeps()
 	runtimeDeps.Config = req.Config
 	if req.Stores.sourceReader != nil {
-		runtimeDeps.BudgetStageSourceLoader = func(ctx context.Context, bundleHash string) (semanticview.Source, error) {
-			return loadBudgetRecoveryStageSource(ctx, req.Stores.sourceReader, req.RepoRoot, req.PlatformPackBases, bundleHash)
+		runtimeDeps.BudgetStageSourceLoader = func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+			return loadBudgetRecoveryStageSource(ctx, req.Stores.sourceReader, req.RepoRoot, req.PlatformPackBases, reference)
 		}
 	}
 	locatedScenarios, err := scenarioderivation.LoadDeclarations(loaded.bundle.SourceArtifact)
@@ -546,7 +573,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		Credentials:                      req.Credentials,
 		ManagedCredentials:               req.ManagedCredentials,
 		ProviderCredentials:              req.ProviderCredentials,
-		ProviderTriggerCatalog:           req.ProviderTriggerCatalog,
+		ProviderTriggerCatalog:           providerCatalog,
 		NoticePresentation:               req.NoticePresentation,
 		ChannelPlans:                     req.ChannelPlans,
 		DeclaredChannelPublication:       declaredChannelPublication,
@@ -582,7 +609,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("retain admitted runtime source: %w", err)
 	}
-	installedTriggerSubjects, err := req.ProviderTriggerCatalog.InstalledCapabilitySubjects()
+	installedTriggerSubjects, err := providerCatalog.InstalledCapabilitySubjects()
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("derive installed provider trigger subjects: %w", err)
 	}
@@ -599,7 +626,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 		workspaces:                workspaces,
 		validation:                validation,
 		runtime:                   rt,
-		providerTriggerGeneration: req.ProviderTriggerCatalog.Generation(),
+		providerTriggerGeneration: providerCatalog.Generation(),
 		installedTriggerSubjects:  installedTriggerSubjects,
 		packInventoryDigest:       loaded.bundle.PackInventory.Digest(),
 	}, nil
@@ -1258,32 +1285,31 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.recordWorkspace(workspaceLabels[i], workspaceBackend)
 		packLoad := bundlePackLoads[i]
 		request := serveRuntimeBundleContextRequest{
-			RepoRoot:               repo,
-			PlatformPackBases:      platformPackBases,
-			ExecutionPosture:       req.Purpose,
-			DataProjectionRoot:     req.DataProjectionRoot,
-			Ctx:                    ctx,
-			Stores:                 runtimePersistence,
-			Config:                 cfg,
-			Loaded:                 loaded,
-			StateStoreSummary:      serveStateStoreSummaryAt(stateStoreSummaries, i),
-			Options:                opts,
-			MountSources:           mountSources,
-			WorkspaceBackend:       workspaceBackend,
-			Credentials:            credentialStore,
-			ManagedCredentials:     managedCredentialStore,
-			ProviderCredentials:    providerCredentialStore,
-			ProviderTriggerCatalog: packLoad.ProviderTriggers.Catalog,
-			ChannelPlans:           packLoad.Channels.Plans,
-			ChannelBindings:        packLoad.Channels.Bindings,
-			BootStartedAt:          bootStartedAt,
-			BootProgress:           bootProgress,
-			EnableToolGateway:      i == 0,
-			ToolGatewayBinding:     contextToolGatewayBinding,
-			UseStartupRecovery:     len(loadedBundles) == 1,
-			RuntimeInstanceID:      runtimeInstanceID,
-			ProcessWorkOwner:       processWorkOwner,
-			NoticePresentation:     noticePresentation,
+			RepoRoot:            repo,
+			PlatformPackBases:   platformPackBases,
+			ExecutionPosture:    req.Purpose,
+			DataProjectionRoot:  req.DataProjectionRoot,
+			Ctx:                 ctx,
+			Stores:              runtimePersistence,
+			Config:              cfg,
+			Loaded:              loaded,
+			StateStoreSummary:   serveStateStoreSummaryAt(stateStoreSummaries, i),
+			Options:             opts,
+			MountSources:        mountSources,
+			WorkspaceBackend:    workspaceBackend,
+			Credentials:         credentialStore,
+			ManagedCredentials:  managedCredentialStore,
+			ProviderCredentials: providerCredentialStore,
+			ChannelPlans:        packLoad.Channels.Plans,
+			ChannelBindings:     packLoad.Channels.Bindings,
+			BootStartedAt:       bootStartedAt,
+			BootProgress:        bootProgress,
+			EnableToolGateway:   i == 0,
+			ToolGatewayBinding:  contextToolGatewayBinding,
+			UseStartupRecovery:  len(loadedBundles) == 1,
+			RuntimeInstanceID:   runtimeInstanceID,
+			ProcessWorkOwner:    processWorkOwner,
+			NoticePresentation:  noticePresentation,
 		}
 		contextDef, err := buildServeRuntimeBundleContext(request)
 		if err != nil {
@@ -1946,11 +1972,6 @@ func serveLifecyclePackFacts(contexts []serveRuntimeBundleContext) []serveLifecy
 			EffectiveDigest: inventory.Digest(),
 			PackCount:       len(inventory.Entries()),
 		}
-		for _, entry := range inventory.Entries() {
-			if entry.Source() == packartifact.ProvenanceProject {
-				fact.ProjectPacks = append(fact.ProjectPacks, entry.ID())
-			}
-		}
 		facts = append(facts, fact)
 	}
 	return facts
@@ -2224,7 +2245,7 @@ func (c *serveStandingServiceController) mutateStandingService(ctx context.Conte
 	}
 	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: target.ServiceID, FlowPath: target.FlowPath,
-		Source: use.Context.SourceArtifactFact,
+		Source: use.Context.SourceArtifactFact, RootAdmission: use.Context.RootAdmission,
 	}
 	expected, found, err := owner.Pipeline.LoadReconciledStandingService(ctx, candidate)
 	if err != nil || !found {
@@ -2440,8 +2461,14 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 		if err != nil {
 			return nil, err
 		}
+		rooted, err := contextDef.loaded.bundle.RootedSource()
+		if err != nil {
+			return nil, err
+		}
 		planned = append(planned, runtime.BundleContext{
 			SourceArtifactFact:         contextDef.sourceArtifactFact,
+			RootAdmission:              rooted.Admission(),
+			ProviderTriggerCatalog:     contextDef.runtime.Options.ProviderTriggerCatalog,
 			BundleIdentity:             contextDef.bootIdentity,
 			Source:                     contextDef.loaded.source,
 			Runtime:                    contextDef.runtime,
@@ -2665,8 +2692,14 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 					return nil, err
 				}
 			}
+			rooted, err := contextDef.loaded.bundle.RootedSource()
+			if err != nil {
+				return nil, err
+			}
 			definition := runtime.BundleContext{
 				SourceArtifactFact:         contextDef.sourceArtifactFact,
+				RootAdmission:              rooted.Admission(),
+				ProviderTriggerCatalog:     contextDef.runtime.Options.ProviderTriggerCatalog,
 				BundleIdentity:             contextDef.bootIdentity,
 				Source:                     contextDef.loaded.source,
 				Runtime:                    contextDef.runtime,

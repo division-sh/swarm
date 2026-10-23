@@ -37,13 +37,13 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 	fact := testSourceArtifactFact(t, bundle.SourceArtifact.BundleHash())
 	canonical := NewRuntimePayloadAdmitter(nil, source, fact)
 	var failure error
-	bus, err := newInboundTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{
+	bus, _, err := newInboundTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{
 		ContractBundle: source,
-		PayloadAdmitter: func(ctx context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
+		PayloadAdmitter: func(ctx context.Context, event events.Event, producer events.PayloadProducer) (events.PayloadAdmission, error) {
 			if strings.HasPrefix(string(event.Type()), "inbound.") {
 				return events.PayloadAdmission{}, failure
 			}
-			return canonical(ctx, event, flow)
+			return canonical(ctx, event, producer)
 		},
 	})
 	if err != nil {

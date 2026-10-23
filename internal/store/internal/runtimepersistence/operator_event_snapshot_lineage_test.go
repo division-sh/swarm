@@ -94,7 +94,11 @@ func seedOperatorSnapshotInheritedOrdinal(t *testing.T, f operatorSnapshotFixtur
 	}
 	captureFanOutBarrierForkRevision(t, ctx, f.db, runID, postgres)
 	forkOwner := f.store.(runForkSelectedLifecycleStore)
-	child, err := forkOwner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), OriginalLoopCarriage: original})
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := forkOwner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), RootAdmission: rooted.Admission(), OriginalLoopCarriage: original})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +110,14 @@ func seedOperatorSnapshotInheritedOrdinal(t *testing.T, f operatorSnapshotFixtur
 	if err := f.db.QueryRowContext(ctx, `SELECT triggering_delivery_id FROM fan_out_intents WHERE run_id=$1`, child.ForkRunID).Scan(&key.TriggeringDeliveryID); err != nil {
 		t.Fatal(err)
 	}
-	owner, capability, _, _ := grantedFanOutOwnerForTest(t, ctx, f.store.(selectedFanOutOwner), fanOutOwnerFixture{bundleHash: intent.PlanRef.BundleHash, runID: child.ForkRunID, deliveryID: key.TriggeringDeliveryID})
+	childRooted, err := f.store.(rootedRunStore).LoadRunRootedSource(ctx, child.ForkRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !childRooted.Admission().Equal(rooted.Admission()) {
+		t.Fatal("materialized snapshot child changed its explicitly admitted target root")
+	}
+	owner, capability, _, _ := grantedFanOutOwnerForTest(t, ctx, f.store.(selectedFanOutOwner), fanOutOwnerFixture{artifact: rooted.Artifact(), bundleHash: intent.PlanRef.BundleHash, runID: child.ForkRunID, deliveryID: key.TriggeringDeliveryID})
 	copied, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "snapshot-lineage-proof", BundleHash: intent.PlanRef.BundleHash, Candidate: &key, Now: time.Now().UTC(), Lease: time.Minute})
 	if err != nil || !found {
 		t.Fatalf("claim lawful fork ordinal: found=%v err=%v", found, err)

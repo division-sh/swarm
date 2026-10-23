@@ -19,6 +19,31 @@ type workflowJoinOccurrenceResolution struct {
 	Handler runtimecontracts.SystemNodeEventHandler
 }
 
+// ResolveWorkflowJoinOccurrencePayloadAdmission consumes the same declaration
+// admission as delivery planning; internal occurrence names are not catalog rows.
+func ResolveWorkflowJoinOccurrencePayloadAdmission(source semanticview.Source, evt events.Event, bundleHash string) (events.PayloadAdmission, bool, error) {
+	_, found, err := resolveWorkflowJoinOccurrence(source, evt)
+	if err != nil || !found {
+		return events.PayloadAdmission{}, found, err
+	}
+	producer := events.PlatformPayloadProducer(evt)
+	if err := producer.ValidateForEvent(evt); err != nil {
+		return events.PayloadAdmission{}, true, err
+	}
+	digest, err := events.JoinOccurrencePayloadDigest(evt)
+	if err != nil {
+		return events.PayloadAdmission{}, true, err
+	}
+	binding, err := events.NewPlatformPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+		BundleHash: bundleHash, EventKey: string(evt.Type()), SchemaClass: events.PayloadSchemaPlatform, SchemaDigest: digest,
+	}, producer, events.JoinOccurrencePayloadReference)
+	if err != nil {
+		return events.PayloadAdmission{}, true, err
+	}
+	admission, err := events.NewPayloadAdmission(evt.Payload(), binding)
+	return admission, true, err
+}
+
 // ResolveWorkflowJoinOccurrenceDeliveryTarget projects one strict lifecycle
 // handle into the exact authored receiver and selected-run target. Synthetic
 // lifecycle event names never become an alternate handler authority.

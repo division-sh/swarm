@@ -952,7 +952,7 @@ func writeChannelList(out io.Writer, result channelListResult) {
 	footers := []string{}
 	wroteSession := false
 	for _, row := range result.Channels {
-		if row.Identity.Interface.ChannelPackID == "provider.whatsapp.hitl_channel" || row.Operation != nil && row.Operation.Provider == "whatsapp" {
+		if row.Identity.Interface.ChannelPackID == "whatsapp" || row.Operation != nil && row.Operation.Provider == "whatsapp" {
 			writeWhatsAppConnection(out, row.Connection, false)
 			wroteSession = true
 			continue

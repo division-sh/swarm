@@ -34,6 +34,7 @@ type RunForkOperationReader interface {
 }
 
 type RunForkExecutor interface {
+	runtimerunforkexecution.SelectedContractSourceInspector
 	ExecuteRunFork(context.Context, RunForkExecutionRequest) (RunForkExecutionResult, error)
 }
 
@@ -70,6 +71,14 @@ type SelectedContractRunForkExecutor struct {
 	ExecuteSelectedContractRunFork SelectedContractRunForkExecutionFunc
 	SourceLoader                   runtimerunforkexecution.SelectedContractSourceLoader
 	AgentRuntime                   runtimerunforkexecution.SelectedContractAgentRuntimeOptions
+}
+
+func (e SelectedContractRunForkExecutor) InspectRunForkSelectedContractSourceForRequest(ctx context.Context, req runtimerunforkexecution.SelectedContractSourceLoadRequest) (runtimerunforkexecution.LoadedSelectedContractSource, error) {
+	inspector, ok := e.SourceLoader.(runtimerunforkexecution.SelectedContractSourceInspector)
+	if !ok {
+		return runtimerunforkexecution.LoadedSelectedContractSource{}, fmt.Errorf("run.fork requires selected-contract source inspector")
+	}
+	return inspector.InspectRunForkSelectedContractSourceForRequest(ctx, req)
 }
 
 func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req RunForkExecutionRequest) (RunForkExecutionResult, error) {
@@ -219,10 +228,23 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 		if targetBundleHash != sourceBundleHash {
 			selection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: targetBundleHash}
 		}
+		selected, err := opts.Executor.InspectRunForkSelectedContractSourceForRequest(ctx, runtimerunforkexecution.SelectedContractSourceLoadRequest{
+			Responsibility: runtimerunforkexecution.FreshSelectedSource(targetBundleHash), BundleHash: targetBundleHash, Selection: selection,
+		})
+		if err != nil {
+			return nil, runForkError(params.SourceRunID, params.ForkEventID, err)
+		}
+		if err := selected.RootedSource.Validate(); err != nil {
+			return nil, runForkError(params.SourceRunID, params.ForkEventID, fmt.Errorf("%s: selected target root: %w", runbundle.CodeBundleDataIntegrityError, err))
+		}
+		targetRoot := selected.RootedSource.Admission().Reference()
+		if targetRoot.BundleHash != targetBundleHash {
+			return nil, runForkError(params.SourceRunID, params.ForkEventID, fmt.Errorf("%s: selected target root differs from requested content", runbundle.CodeBundleDataIntegrityError))
+		}
 		operation = runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: actorKey, IdempotencyKey: params.IdempotencyKey,
 			TransportHash: req.RequestHash, SourceRunID: params.SourceRunID, ForkEventID: params.ForkEventID,
-			TargetBundleHash: targetBundleHash, AllowSourceFreeze: params.AllowSourceFreeze,
+			TargetBundleHash: targetBundleHash, TargetRootReference: targetRoot, AllowSourceFreeze: params.AllowSourceFreeze,
 			ContractSelection: selection, DataPinOverrides: params.DataPinOverrides,
 		}
 	}

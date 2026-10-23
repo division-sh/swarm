@@ -7,7 +7,7 @@ import "testing"
 func CopyCompleteObserverDependencies(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "manifest.yaml", "name: complete-observer\nversion: '1.0.0'\nplatform_version: '>=0.7.0 <0.8.0'\n")
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: '1.0.0'\nplatform_version: '>=0.7.0 <0.8.0'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
   active: {}
   done: {final: true}
@@ -15,7 +15,7 @@ connect:
   - {event: work.ready, from: producer, to: observer, resolution: select}
   - {event: other.ready, from: other, to: observer, resolution: select}
 `)
-	writeLegacyInstanceFlow(t, root, "producer", `name: producer
+	writeLegacyInstanceFlow(t, root, "producer", `# fixture: producer
 instance: item_id
 stages:
   active: {}
@@ -24,7 +24,7 @@ pins:
   outputs:
     - work.ready
 `, "work.ready:\n  item_id: text\n", "producer_state:\n  item_id: {type: text}\n", "")
-	writeLegacyInstanceFlow(t, root, "other", `name: other
+	writeLegacyInstanceFlow(t, root, "other", `# fixture: other
 instance: item_id
 stages:
   active: {}
@@ -33,7 +33,7 @@ pins:
   outputs:
     - other.ready
 `, "other.ready:\n  item_id: text\n", "other_state:\n  item_id: {type: text}\n", "")
-	writeLegacyInstanceFlow(t, root, "observer", `name: observer
+	writeLegacyInstanceFlow(t, root, "observer", `# fixture: observer
 instance: item_id
 stages:
   active: {}
@@ -84,7 +84,7 @@ observer.create:
 			}
 			outputs = "  outputs: [" + local + "]\n"
 		}
-		schema := "name: " + flow + "\ninstance: item_id\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: " + inputs + "\n" + outputs
+		schema := "# fixture: " + flow + "\ninstance: item_id\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: " + inputs + "\n" + outputs
 		events := ""
 		if local != "" {
 			events += local + ":\n  item_id: text\n"
@@ -160,7 +160,7 @@ observer.stop:
 		} else {
 			local = "publisher:\n  execution_type: system_node\n  subscribes_to: [item.fired]\n  event_handlers:\n    item.fired:\n      emit: {event: " + output + ", fields: {item_id: payload.observer_id, marker: payload.marker}}\n"
 		}
-		schema := "name: " + flow + "\ninstance: item_id\n" + stages + "pins:\n  inputs: " + inputs + "\n  outputs: [" + output + "]\n"
+		schema := "# fixture: " + flow + "\ninstance: item_id\n" + stages + "pins:\n  inputs: " + inputs + "\n  outputs: [" + output + "]\n"
 		events := output + ":\n  item_id: text\n  marker: text\n"
 		writeLegacyInstanceFlow(t, root, flow, schema, events, flow+"_state:\n  item_id: {type: text}\n", nodes+local)
 	}

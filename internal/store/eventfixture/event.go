@@ -148,12 +148,25 @@ func BindPayload(event events.Event) (events.Event, error) {
 	if event.RoutingSource().Kind() == events.RoutingSourceRoot {
 		flowID = "."
 	}
-	binding, err := events.NewPayloadSchemaBinding(events.PayloadSchemaBindingInput{
+	input := events.PayloadSchemaBindingInput{
 		BundleHash: "bundle-v2:sha256:0000000000000000000000000000000000000000000000000000000000000000",
 		FlowID:     flowID, EventKey: string(event.Type()),
 		SchemaDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
 		SchemaClass:  events.PayloadSchemaSchemaLess,
-	})
+	}
+	producer := events.EventPayloadProducer(event, flowID)
+	var binding events.PayloadSchemaBinding
+	var err error
+	if producer.IsPlatform() {
+		input.FlowID, input.SchemaClass = "", events.PayloadSchemaPlatform
+		reference := ""
+		if event.Type() == events.EventTypePlatformRuntimeLog {
+			reference = events.RuntimeLogSchemaReference
+		}
+		binding, err = events.NewPlatformPayloadSchemaBinding(input, producer, reference)
+	} else {
+		binding, err = events.NewPayloadSchemaBinding(input)
+	}
 	if err != nil {
 		return event.Clone(), err
 	}

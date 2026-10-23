@@ -43,7 +43,11 @@ func TestRunForkFanOutTimestampCurrentReadbackBothStores(t *testing.T) {
 			}
 			captureFanOutBarrierForkRevision(t, ctx, db, source.runID, postgres)
 			point := historicalLineageCheckpoint(t, db, source.runID, postgres, at.Add(2*time.Second))
-			request := runfork.RunForkMaterializeRequest{SourceRunID: source.runID, At: point, OriginalLoopCarriage: originalCarriageForRun(t, owner, source.runID)}
+			rooted, err := owner.(rootedRunStore).LoadRunRootedSource(ctx, source.runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := runfork.RunForkMaterializeRequest{SourceRunID: source.runID, At: point, RootAdmission: rooted.Admission(), OriginalLoopCarriage: originalCarriageForRun(t, owner, source.runID)}
 			child, err := store.MaterializeRunFork(ctx, request)
 			if err != nil || child.MaterializedFanOutCount != 1 || child.ForkRunID == source.runID {
 				t.Fatalf("real first materialization: %#v err=%v", child, err)

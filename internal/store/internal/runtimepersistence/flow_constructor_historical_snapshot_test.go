@@ -125,7 +125,11 @@ func TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores(t
 			if again, err := forks.PlanRunFork(f.ctx, cutRequest); err != nil || again.ForkPoint != cut.ForkPoint || !reflect.DeepEqual(again.Entities, cut.Entities) {
 				t.Fatalf("live construction/lifecycle changed the fixed cut: %+v err=%v", again, err)
 			}
-			forkRequest := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID()}
+			rooted, err := f.bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			forkRequest := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID(), RootAdmission: rooted.Admission()}
 			fork, err := forks.MaterializeRunFork(f.ctx, forkRequest)
 			if err != nil {
 				t.Fatal(err)
@@ -188,9 +192,17 @@ func TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores(t
 			if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("exact fixed fork replay changed durable evidence: %v", err)
 			}
-			artifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  newer_source: {}\n"))
-			sourceartifactfixture.RequireArtifact(t, f.ctx, f.store.(sourceartifactfixture.Writer), artifact)
-			if _, err := f.store.(runlifecycle.OperationOwner).ReviseRunSource(f.ctx, runlifecycle.SourceRevisionRequest{RunID: runID, Source: sourceartifactfixture.FactFor(artifact)}); err != nil {
+			newer := loadLifecyclePersistenceFixtureForTest(t, map[string]string{"schema.yaml": "stages:\n  active: {}\n# newer historical directory source\n"})
+			newerRoot, err := newer.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if newer.SourceArtifact.BundleHash() == fact.BundleHash() {
+				t.Fatal("newer source fixture reused the frozen artifact")
+			}
+			newerFact := sourceartifactfixture.FactFor(newer.SourceArtifact)
+			sourceartifactfixture.RequireArtifact(t, f.ctx, f.store.(sourceartifactfixture.Writer), newer.SourceArtifact)
+			if _, err := f.store.(runlifecycle.OperationOwner).ReviseRunSource(f.ctx, runlifecycle.SourceRevisionRequest{RunID: runID, Source: newerFact, RootAdmission: newerRoot.Admission()}); err != nil {
 				t.Fatal(err)
 			}
 			before, err = ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
@@ -200,7 +212,10 @@ func TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores(t
 			if current := readFixed(); !reflect.DeepEqual(current, original) {
 				t.Fatal("current source progress changed the captured observation")
 			}
-			if replayed, err := forks.MaterializeRunFork(f.ctx, forkRequest); err == nil || replayed.ForkRunID != "" || !strings.Contains(err.Error(), "conflicts with persisted lifecycle state") {
+			progressedRequest := forkRequest
+			progressedRequest.RootAdmission = newerRoot.Admission()
+			progressedCtx := correlation.WithRootAdmission(correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(newerFact.BundleHash())), runID), newerRoot.Admission())
+			if replayed, err := forks.MaterializeRunFork(progressedCtx, progressedRequest); err == nil || replayed.ForkRunID != "" || !strings.Contains(err.Error(), "conflicts with persisted lifecycle state") {
 				t.Fatalf("source progress rewrote frozen fork eligibility: %+v err=%v", replayed, err)
 			}
 			if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(before, after) {
@@ -286,7 +301,11 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 	if err != nil || len(history.Entities) != 2 {
 		t.Fatalf("constructed fieldless history: %+v %v", history.Entities, err)
 	}
-	request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID()}
+	rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID(), RootAdmission: rooted.Admission()}
 	fork, err := owner.MaterializeRunFork(f.ctx, request)
 	if err != nil {
 		t.Fatal(err)

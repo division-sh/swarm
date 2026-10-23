@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
@@ -21,6 +22,11 @@ func workflowMutationNativeFixture(t *testing.T, backend, runID string, writes, 
 func workflowMutationNativeFixtureFromSelected(t *testing.T, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore, runID string, writes, mutations uint64) pipeline.WorkflowMutationNativeFixtureForTest {
 	t.Helper()
 	native := workflowActivityNativeFixtureFromSelected(t, selected, reopen)
+	return workflowMutationNativeFixtureFromActivity(t, selected, native, runID, writes, mutations)
+}
+
+func workflowMutationNativeFixtureFromActivity(t *testing.T, selected timerReplaySelectedStore, native pipeline.WorkflowActivityNativeFixtureForTest, runID string, writes, mutations uint64) pipeline.WorkflowMutationNativeFixtureForTest {
+	t.Helper()
 	ctx := withLiveGateExecution(correlation.WithRunID(native.Context, runID))
 	if err := native.RequireRun(ctx, runID); err != nil {
 		t.Fatal(err)
@@ -65,8 +71,11 @@ func TestWorkflowInstanceStoreMutate_RejectsOverlappingStaleSnapshots(t *testing
 func TestUpdateEntityState_RejectsCompetingStaleCallbackSnapshot(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			pipeline.VerifyUpdateEntityState_RejectsCompetingStaleCallbackSnapshotForTest(t, func(t *testing.T, runID string) pipeline.WorkflowMutationNativeFixtureForTest {
-				return workflowMutationNativeFixture(t, backend, runID, 4, 1)
+			pipeline.VerifyUpdateEntityState_RejectsCompetingStaleCallbackSnapshotForTest(t, func(t *testing.T, runID string, source semanticview.Source) pipeline.WorkflowMutationNativeFixtureForTest {
+				selected, _, reopen := openTimerReplayNativeStore(t, backend)
+				bundle, _ := semanticview.Bundle(source)
+				native := workflowActivityNativeFixtureFromSelectedSource(t, selected, reopen, bundle.SourceArtifact)
+				return workflowMutationNativeFixtureFromActivity(t, selected, native, runID, 4, 1)
 			})
 		})
 	}
@@ -85,8 +94,11 @@ func TestWorkflowInstanceStoreMutate_PersistsSingleWriterUpdates(t *testing.T) {
 func TestNativeWorkflowMutationTransitionRefusesMissingOrForeignClaimBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			pipeline.VerifyNativeWorkflowMutationTransitionRefusesMissingOrForeignClaimForTest(t, func(t *testing.T, runID string) pipeline.WorkflowMutationNativeFixtureForTest {
-				return workflowMutationNativeFixture(t, backend, runID, 4, 1)
+			pipeline.VerifyNativeWorkflowMutationTransitionRefusesMissingOrForeignClaimForTest(t, func(t *testing.T, runID string, source semanticview.Source) pipeline.WorkflowMutationNativeFixtureForTest {
+				selected, _, reopen := openTimerReplayNativeStore(t, backend)
+				bundle, _ := semanticview.Bundle(source)
+				native := workflowActivityNativeFixtureFromSelectedSource(t, selected, reopen, bundle.SourceArtifact)
+				return workflowMutationNativeFixtureFromActivity(t, selected, native, runID, 4, 1)
 			})
 		})
 	}

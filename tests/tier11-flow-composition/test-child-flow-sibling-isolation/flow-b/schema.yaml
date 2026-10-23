@@ -1,4 +1,4 @@
-name: flow-b
+# fixture: flow-b
 stages:
   waiting: {}
   finished: {final: true}

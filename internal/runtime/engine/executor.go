@@ -2659,7 +2659,7 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
 	toolID := strings.TrimSpace(activitySpec.Tool)
-	tool, ok := e.deps.Source.ToolEntries()[toolID]
+	tool, ok := e.deps.Source.ActivityToolEntry(site.Node, toolID)
 	if !ok {
 		return fmt.Errorf("%w: activity tool %q is not declared", ErrInvalidConfig, toolID)
 	}

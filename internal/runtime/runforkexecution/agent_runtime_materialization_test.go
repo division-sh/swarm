@@ -371,9 +371,17 @@ func TestSelectedContractAgentRuntimeBindRunProducesForkLocalIdentityWithoutMuta
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash := selectedContractTestDeclarationTopology(t).Authority.Static.BundleHash
-	declarations, err := runtimeagenttopology.NewSelectedDeclarationPlan(hash, []runtimeagenttopology.DesiredAgent{{
-		Identity: declarationPlan, Source: runtimeagenttopology.SourceCoordinate{BundleHash: hash}, ConfigRevision: revision,
+	rooted, _ := sourceartifactfixture.Rooted(t, "selected-contract-target", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	topology, err := runtimeagenttopology.StaticAdmission("selected-contract-test-source-set-v1", coordinate.BundleHash, runtimeagenttopology.LifetimeEphemeral)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declarations, err := runtimeagenttopology.NewSelectedDeclarationPlan(coordinate.BundleHash, []runtimeagenttopology.DesiredAgent{{
+		Identity: declarationPlan, Source: coordinate, ConfigRevision: revision,
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -386,7 +394,7 @@ func TestSelectedContractAgentRuntimeBindRunProducesForkLocalIdentityWithoutMuta
 		},
 		ConfiguredPlans: []agentidentity.Plan{declarationPlan},
 		Blueprints: []runtimemanager.AgentMaterializationBlueprint{{
-			Config: config, Identity: declarationPlan, Topology: selectedContractTestDeclarationTopology(t),
+			Config: config, Identity: declarationPlan, Topology: topology,
 		}},
 	}
 

@@ -1,4 +1,4 @@
-name: support
+# fixture: support
 instance: ticket_id
 stages:
   waiting: {}

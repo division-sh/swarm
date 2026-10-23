@@ -8,11 +8,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -51,13 +53,16 @@ func TestContextualRuntimeProducerLineageReadbackParity(t *testing.T) {
 	for _, backend := range backends {
 		t.Run(backend.name, func(t *testing.T) {
 			selectedStore := backend.open(t)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			source := sourceartifactfixture.RequireArtifact(t, context.Background(), selectedStore.(sourceartifactfixture.Writer), rooted.Artifact())
 			for _, mode := range []executionmode.Mode{executionmode.Live, executionmode.Mock} {
 				for _, manifestation := range manifestations {
 					t.Run(string(mode)+"/"+manifestation.name, func(t *testing.T) {
 						eventID, runID, parentID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 						createdAt := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
 						parent := eventtest.RunCreatingRootIngressWithMode(parentID, "context.started", "context-proof", "task-contextual", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, createdAt.Add(-time.Second), mode)
-						ctx := context.Background()
+						ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), source)
+						ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 						storetest.CommitSemanticEvent(t, ctx, selectedStore, parent)
 						var event events.Event
 						switch manifestation.class {

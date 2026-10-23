@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestCatalogTypeDetachmentRetainedArtifactBothStores(t *testing.T) {
@@ -44,7 +45,8 @@ func TestCatalogTypeDetachmentRetainedArtifactBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := selected.EnsureSourceArtifact(ctx, initial.SourceArtifact); err != nil {
+			captured := sourceartifactfixture.CapturedRoot(t, initial.SourceArtifact)
+			if _, err := selected.EnsureRootedSource(ctx, captured); err != nil {
 				t.Fatal(err)
 			}
 			if err := selected.Close(); err != nil {
@@ -68,9 +70,16 @@ func TestCatalogTypeDetachmentRetainedArtifactBothStores(t *testing.T) {
 			if !bytes.Equal(initial.SourceArtifact.LogicalBlob(), artifact.LogicalBlob()) {
 				t.Fatal("retained source bytes changed")
 			}
+			rooted, err := selected.GetRootedSource(ctx, captured.Admission().Reference())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rooted.Admission().Reference() != captured.Admission().Reference() || !bytes.Equal(rooted.Artifact().LogicalBlob(), artifact.LogicalBlob()) {
+				t.Fatal("retained root differs from exact content or captured selection")
+			}
 			for _, bound := range []string{"length_min", "length_max", "range_min", "range_max"} {
 				t.Run(bound, func(t *testing.T) {
-					rebuilt, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+					rebuilt, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
 					if err != nil {
 						t.Fatal(err)
 					}

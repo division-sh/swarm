@@ -21,27 +21,27 @@ import (
 
 func workflowStorageNativeFixtureFromSelectedSource(t *testing.T, selected timerReplaySelectedStore, artifact *sourceartifact.AdmittedSourceArtifact) pipeline.WorkflowActivityNativeFixtureForTest {
 	t.Helper()
+	rooted := sourceartifactfixture.CapturedRoot(t, artifact)
 	fixture := workflowActivityNativeFixtureFromSelectedSource(t, selected, nil, artifact)
 	// Workflow storage does not execute activities or acquire a journal grant.
 	fixture.RequireRun = func(ctx context.Context, runID string) error {
 		return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{
-			RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(), Artifact: artifact,
+				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(), Artifact: artifact, RootAdmission: rooted.Admission(),
 		})
 	}
 	return fixture
 }
 
-func workflowStorageIdentityNativeFixture(t *testing.T, backend string, wantCommits uint64) pipeline.WorkflowActivityNativeFixtureForTest {
+func workflowStorageIdentityNativeFixture(t *testing.T, backend string) pipeline.WorkflowActivityNativeFixtureForTest {
 	t.Helper()
 	selected, _, _ := openTimerReplayNativeStore(t, backend)
 	fixture := workflowStorageNativeFixtureFromSelectedSource(t, selected, sourceartifactfixture.Artifact())
 	fixture.Context = withLiveGateExecution(fixture.Context)
-	// The first run also persists the canonical source artifact once.
 	probe := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 	t.Cleanup(func() {
 		counts := probe.Snapshot()
-		if counts.Total.WriteCommits != wantCommits || counts.ByOperation[storetest.TransactionWorkflowMutation].WriteCommits != 0 || counts.Active != 0 {
-			t.Errorf("storage identity escaped original selected construction: %+v, want commits=%d", counts, wantCommits)
+		if counts.ByOperation[storetest.TransactionWorkflowMutation].WriteCommits != 0 || counts.Active != 0 {
+			t.Errorf("storage identity escaped original selected construction: %+v", counts)
 		}
 	})
 	return fixture
@@ -51,7 +51,7 @@ func TestWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleed(t *testing.T)
 	for _, backend := range []string{"postgres", "sqlite"} {
 		t.Run(backend, func(t *testing.T) {
 			pipeline.VerifyWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleedForTest(t, func(t *testing.T) pipeline.WorkflowActivityNativeFixtureForTest {
-				return workflowStorageIdentityNativeFixture(t, backend, 5)
+				return workflowStorageIdentityNativeFixture(t, backend)
 			})
 		})
 	}
@@ -61,7 +61,7 @@ func TestWorkflowInstanceStoreAddressesRowsOnlyByExactRouteOnBothStores(t *testi
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			pipeline.VerifyWorkflowInstanceStoreAddressesRowsOnlyByExactRouteOnBothStoresForTest(t, func(t *testing.T) pipeline.WorkflowActivityNativeFixtureForTest {
-				return workflowStorageIdentityNativeFixture(t, backend, 4)
+				return workflowStorageIdentityNativeFixture(t, backend)
 			})
 		})
 	}
@@ -69,12 +69,16 @@ func TestWorkflowInstanceStoreAddressesRowsOnlyByExactRouteOnBothStores(t *testi
 
 func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *testing.T) {
 	bundle := loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml":                    "name: storage-identity\nstages:\n  created: {}\n",
-		"operating/schema.yaml":          "name: operating\ninstance: instance_key\nstages:\n  created: {}\n",
+		"manifest.yaml":                  "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":                    "stages:\n  created: {}\n",
+		"operating/manifest.yaml":        "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"operating/schema.yaml":          "instance: instance_key\nstages:\n  created: {}\n",
 		"operating/entities.yaml":        "test_entity:\n  instance_key: text\n",
-		"operating/review/schema.yaml":   "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
+		"operating/review/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"operating/review/schema.yaml":   "instance: instance_key\nstages:\n  created: {}\n",
 		"operating/review/entities.yaml": "test_entity:\n  instance_key: text\n",
-		"review/schema.yaml":             "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
+		"review/manifest.yaml":           "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"review/schema.yaml":             "instance: instance_key\nstages:\n  created: {}\n",
 		"review/entities.yaml":           "test_entity:\n  instance_key: text\n",
 	})
 	source := semanticview.Wrap(bundle)

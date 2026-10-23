@@ -1,0 +1,7 @@
+version: 0.1.0
+platform_version: '*'
+capabilities:
+  can:
+    emit_events: [raw, text_message]
+    call_provider_actions: [create_message]
+  cannot: [execute code]

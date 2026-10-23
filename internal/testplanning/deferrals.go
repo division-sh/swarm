@@ -5,9 +5,6 @@ import "strings"
 // These are finite non-credit roots, not an inventory of all tests. Any newly
 // selected root defaults to a required PASS unless it has an explicit reason.
 var rootDeferralReasons = map[string]map[string]string{
-	"internal/packartifact": {
-		"TestProjectPackImportSubprocessHelper": "subprocess entry point, not a standalone proof",
-	},
 	"internal/releasee2e": {
 		"TestWorkspaceMCPCompiledDockerConformance":                  "real Docker proof required separately by the workspace-image CI job; no skip credit",
 		"TestWorkspaceMCPCompiledDockerDoctorAndLiveBootRefusal":     "real Docker proof required separately by the workspace-image CI job; no skip credit",

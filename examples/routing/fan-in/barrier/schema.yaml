@@ -1,4 +1,4 @@
-name: fan-in-barrier
+# fixture: fan-in-barrier
 pins:
   inputs:
     - operating.report.triggered

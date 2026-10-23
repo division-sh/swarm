@@ -71,7 +71,6 @@ type sessionPublicationFixture struct {
 	bus       *runtimebus.EventBus
 	manifest  providertriggers.Manifest
 	catalog   *providertriggers.CatalogSnapshot
-	identity  providertriggers.PackIdentity
 	candidate runtimepipeline.StandingServiceCandidate
 	standing  runtimepipeline.StandingServiceReconciliation
 	sequence  int64
@@ -115,15 +114,11 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 	f.ctx = runtimecorrelation.WithSourceArtifactFact(context.Background(), source)
 	f.ctx = runtimeauthoractivity.WithScope(f.ctx, runtimeauthoractivity.BundleScope(runtimeID, source.BundleHash()))
 	f.ctx = worklifetime.WithOccurrence(f.ctx, owner)
-	digest := sha256.Sum256(f.manifest.SourceBytes())
-	f.identity = providertriggers.PackIdentity{ID: "provider.whatsapp.fixture", Version: "1.0.0",
-		ManifestHash: fmt.Sprintf("sha256:%x", digest), Provenance: "platform"}
-	f.catalog, err = providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
-		Identity: f.identity, Manifest: f.manifest, Source: "isolated session publication fixture"})
+	f.catalog, err = providertriggers.NewCatalogSnapshotFromAdmittedBodies(f.manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	descriptors := []runtimeauthoractivity.EventDescriptor{{EventType: "inbound.whatsapp", Disposition: runtimeauthoractivity.StoryAuthored}}
+	descriptors := []runtimeauthoractivity.EventDescriptor{{EventType: "inbound.whatsapp.raw", Disposition: runtimeauthoractivity.StoryAuthored}}
 	for _, kind := range []string{"message", "edit", "revoke"} {
 		descriptors = append(descriptors, runtimeauthoractivity.EventDescriptor{EventType: "inbound.whatsapp." + kind, Disposition: runtimeauthoractivity.StoryAuthored})
 	}
@@ -135,8 +130,8 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 	t.Cleanup(lease.Release)
 	// Payload-to-catalog binding is supplied by the existing event fixture owner;
 	// the pack normalizer and exact output authorization are not replaced.
-	payload := func(_ context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
-		return eventtest.PayloadAdmission(event, flow, string(event.Type()))
+	payload := func(_ context.Context, event events.Event, producer events.PayloadProducer) (events.PayloadAdmission, error) {
+		return eventtest.PayloadAdmission(event, producer.FlowID(), string(event.Type()))
 	}
 	f.selected.SetEventPayloadAdmitter(payload)
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, runtimeID, 1)

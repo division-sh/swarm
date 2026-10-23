@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
@@ -25,10 +26,12 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
@@ -789,6 +792,8 @@ func TestRunTerminalizationAtomicallyFencesGateActivationsAndCardsOnBothStores(t
 			}
 			seedDecisionCardGateEntity(t, db, postgres, runID, entityID, activation, now)
 			if postgres {
+				rooted := decisionCardTestRootedSource(t, ctx, cardStore, runID)
+				ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 				childRunID := uuid.NewString()
 				if err := ensureEphemeralRunForTest(ctx, cardStore, childRunID, now); err != nil {
 					t.Fatal(err)
@@ -1623,6 +1628,17 @@ func storeDecisionSnapshotNestedObject(t *testing.T, root map[string]any, path .
 	return current
 }
 
+func decisionCardTestRootedSource(t *testing.T, ctx context.Context, cards decisioncard.Store, runID string) sourceartifact.RootedSource {
+	t.Helper()
+	rooted, err := cards.(interface {
+		LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+	}).LoadRunRootedSource(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rooted
+}
+
 func decisionCardTestStore(t *testing.T, backend string, probes ...*cardIntentRecheckProbe) (decisioncard.Store, string) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
@@ -1632,6 +1648,8 @@ func decisionCardTestStore(t *testing.T, backend string, probes ...*cardIntentRe
 		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
 	}
 	runID := uuid.NewString()
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	switch backend {
 	case "sqlite":
 		store, err := NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "runtime.db"))
@@ -1650,6 +1668,7 @@ func decisionCardTestStore(t *testing.T, backend string, probes ...*cardIntentRe
 			t.Fatalf("BootstrapSchema sqlite: %v", err)
 		}
 		registerTestAuthorActivityCatalog(t, store)
+		sourceartifactfixture.RequireArtifact(t, ctx, store, rooted.Artifact())
 		if err := ensureEphemeralRunForTest(ctx, store, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 			t.Fatalf("create sqlite run through lifecycle owner: %v", err)
 		}
@@ -1664,6 +1683,7 @@ func decisionCardTestStore(t *testing.T, backend string, probes ...*cardIntentRe
 		}
 		store := newTestPostgresStore(t, db)
 		registerTestAuthorActivityCatalog(t, store)
+		sourceartifactfixture.RequireArtifact(t, ctx, store, rooted.Artifact())
 		if err := ensureEphemeralRunForTest(ctx, store, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 			t.Fatalf("create postgres run through lifecycle owner: %v", err)
 		}

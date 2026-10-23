@@ -364,7 +364,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		t.Fatalf("load proof policy: %v", err)
 	}
 	assertCoreStructuralGuardTimingInventory(t, policy)
-	for _, id := range []string{"codemod-owner-guards", "codemod-pipeline-mutation", "codemod-bus-mutation", "codemod-candidate-overlay"} {
+	for _, id := range []string{"codemod-owner-guards", "codemod-bus-mutation", "codemod-candidate-overlay"} {
 		unit, ok := policy.Units[id]
 		if !ok || !slices.Equal(unit.Packages, []string{"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations"}) || unit.CountMode != "count-1" || unit.BudgetClass != "broad" {
 			t.Fatalf("invalid codemod timing owner %s: %+v", id, unit)
@@ -437,7 +437,7 @@ func TestCommittedPolicyModelAndProjectionConsumersAreCanonical(t *testing.T) {
 		t.Fatalf("runtime-full unit = %#v, want one complete uncached internal/runtime proof", runtimeUnit)
 	}
 	serveappUnits := []string{
-		"serveapp-channel", "serveapp-channel-learned", "serveapp-channel-neutral", "serveapp-channel-delivery", "serveapp-channel-process-temporal", "serveapp-channel-lifecycle", "serveapp-channel-native", "serveapp-runtime", "serveapp-surfaces", "serveapp-publication-text",
+		"serveapp-channel", "serveapp-channel-neutral", "serveapp-channel-delivery", "serveapp-channel-process-temporal", "serveapp-channel-lifecycle", "serveapp-channel-native", "serveapp-runtime", "serveapp-surfaces", "serveapp-publication-text",
 		"serveapp-journeys-first", "serveapp-journeys-a-c", "serveapp-journeys-d-l", "serveapp-journeys-m-z",
 		"serveapp-mailbox", "serveapp-mailbox-p-q",
 		"serveapp-selected", "serveapp-selected-rest", "serveapp-other", "serveapp-i-reporter", "serveapp-i-reporter-all-commit", "serveapp-other-late", "serveapp-delayed-commit-preservation", "serveapp-standing",

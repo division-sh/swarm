@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -26,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	modernsqlite "modernc.org/sqlite"
 )
@@ -561,6 +563,8 @@ func newAgentSnapshotBoundaryFixture(t *testing.T, backend agentSnapshotBackend)
 		requireSQLiteAgentSnapshotFunction(t)
 	}
 	ctx := testAuthorActivityContext(context.Background())
+	rooted, _ := sourceartifactfixture.Rooted(t, "agent-snapshot", authorActivityTestSourceArtifact)
+	ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 	store, db := backend.open(t, ctx)
 	if backend.sqlite {
 		if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL`); err != nil {
@@ -569,7 +573,7 @@ func newAgentSnapshotBoundaryFixture(t *testing.T, backend agentSnapshotBackend)
 	}
 	runID := uuid.NewString()
 	startedAt := time.Now().UTC().Add(-time.Minute)
-	storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: authorActivityTestSourceArtifact, StartedAt: startedAt})
+	storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(), StartedAt: startedAt})
 	identities := make(map[string]agentidentity.Identity, 2)
 	for _, agentID := range []string{"snapshot-agent-a", "snapshot-agent-b"} {
 		identity := sqliteAgentUsageIdentityForRun(t, runID, agentID)

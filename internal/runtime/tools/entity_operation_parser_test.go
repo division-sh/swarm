@@ -152,6 +152,13 @@ func TestEntityToolMutationOwnerCapturesExactRootAndNestedRoutes(t *testing.T) {
 			if err != nil || got != (flowidentity.RunScopedFlowInstance{RunID: runID, Route: tc.want}) {
 				t.Fatalf("exact owner = %#v, err=%v", got, err)
 			}
+			for _, raw := range []string{" " + tc.flow + " ", "\t" + tc.flow + "\n"} {
+				invalid := actor
+				invalid.FlowID = raw
+				if _, err := entityToolMutationOwner(source, invalid, runID, runID, tc.flow, row); err == nil {
+					t.Errorf("padded actor flow %q acquired mutation ownership", raw)
+				}
+			}
 			row["flow_instance"] = tc.want.InstancePath + "/sibling"
 			if _, err := entityToolMutationOwner(source, actor, runID, runID, tc.flow, row); err == nil {
 				t.Fatal("stored sibling route was accepted")

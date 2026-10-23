@@ -1,4 +1,4 @@
-name: tracker
+# fixture: tracker
 stages:
   idle: {}
   recorded: {final: true}

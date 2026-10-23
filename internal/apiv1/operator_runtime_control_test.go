@@ -8,12 +8,14 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestOperatorRuntimeControlHandlersUseIngressOwnerAndIdempotency(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	bus, err := newScopedAPITestEventBus(t, pg)
+	source := semanticview.Wrap(loadAPIAuthoredBundle(t, authorActivityTestSourceArtifact))
+	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: authorActivityTestSourceArtifactFact})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}

@@ -5,6 +5,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -20,6 +23,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -30,10 +34,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -129,15 +135,24 @@ func TestSelectedContractExecutionMaterializationStampsPersistedBundleIdentity(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	targetArtifact := targetBundle.SourceArtifact
+	targetRoot, err := targetBundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetArtifact := targetRoot.Artifact()
 	bundleHash := targetArtifact.BundleHash()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-	seedStoreTestPersistedArtifact(t, db, targetArtifact)
-
+	if bundleHash == mustCanonicalSelectedContractStoreHash(t) {
+		t.Fatal("selected target must differ from the source run artifact")
+	}
+	if _, err := pg.EnsureRootedSource(ctx, targetRoot); err != nil {
+		t.Fatalf("retain selected target root: %v", err)
+	}
 	bundleSource, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
 	if err != nil {
 		t.Fatalf("NewSourceArtifactFact: %v", err)
 	}
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, bundleSource), targetRoot.Admission())
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: bundleHash}, bundleSource))
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
@@ -205,7 +220,7 @@ func TestSelectedContractExecutionMaterializationConsumesPlanSnapshotMetadata(t 
 	work, _ := storeTestWorkFixtures.Load(t)
 	selectedMaterializationProcessForTest(t, work.(*storeTestWorkFixture), pg)
 	before := snapshotForkHistoricalExecutionTables(t, db, true)
-	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, bundle.SourceArtifact.BundleHash())
 	if prepared != nil || err == nil || !strings.Contains(err.Error(), runfork.RunForkMaterializedEntitySnapshotMetadataOwner) {
 		t.Fatalf("imported snapshot acquired selected execution: prepared=%v err=%v", prepared, err)
 	}
@@ -239,13 +254,142 @@ func TestLoadRunForkSelectedContractSourceEventsRestoresPersistedChronology(t *t
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 
-	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{earlierEventID, laterEventID}, originalCarriageForRun(t, pg, sourceRunID))
+	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{earlierEventID, laterEventID}, originalCarriageForRun(t, pg, sourceRunID), originalRootAdmissionForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSourceEvents: %v", err)
 	}
 	if len(loaded) != 2 || loaded[0].SourceEventID != earlierEventID || loaded[1].SourceEventID != laterEventID {
 		t.Fatalf("loaded source chronology = %#v, want [%s %s]", loaded, earlierEventID, laterEventID)
 	}
+	t.Run("original_and_selected_root_authorities", proveSelectedSourceEventRootTransfers)
+}
+
+// Reach: the historical read uses A without weakening selected B's native fence.
+func proveSelectedSourceEventRootTransfers(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			store := fixture.store.(selectedActivityProjectionStore)
+			reader := fixture.store.(runforkexecution.SourceArtifactSelectedContractSourceStore)
+			sourceRun, event := seedSelectedSourceEventTransfer(t, fixture, backend.name == "postgres")
+			a, err := reader.LoadRunRootedSource(context.Background(), sourceRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b := captureSelectedSourceEventTarget(t, a)
+			otherA, _ := sourceartifactfixture.Rooted(t, "other-original", a.Artifact())
+			otherB, _ := sourceartifactfixture.Rooted(t, "other-selected", b.Artifact())
+			foreign, _ := sourceartifactfixture.Rooted(t, "foreign-original", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+			if a.Admission().BundleHash() == b.Admission().BundleHash() || a.Admission().BundleHash() != otherA.Admission().BundleHash() || a.Admission().Equal(otherA.Admission()) || b.Admission().BundleHash() != otherB.Admission().BundleHash() || b.Admission().Equal(otherB.Admission()) || foreign.Admission().BundleHash() == a.Admission().BundleHash() {
+				t.Fatal("root controls require distinct A/B content and same-content foreign directories")
+			}
+			ctxB := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(b.Admission().BundleHash()), mustStoreTestSourceArtifactFact(b.Admission().BundleHash())), b.Admission())
+			for _, rooted := range []sourceartifact.RootedSource{b, otherA, otherB, foreign} {
+				if _, err := fixture.store.(selectedSourceArtifactStore).EnsureRootedSource(ctxB, rooted); err != nil {
+					t.Fatal(err)
+				}
+			}
+			repo := canonicalrouting.RepoRoot(t)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, b, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := selectedSourceMaterializationRequest(t, ctxB, store, sourceRun, event.ID(), semanticview.Wrap(bundle))
+			child, err := store.MaterializeRunForkForSelectedContractExecution(ctxB, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original := originalCarriageForRun(t, store, sourceRun)
+			wrongDeclarations, err := semanticview.CompileOriginalLoopCarriage(semanticview.Wrap(bundle))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctxA := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctxB, mustStoreTestSourceArtifactFact(a.Admission().BundleHash())), a.Admission())
+			for _, cell := range []struct {
+				name         string
+				ctx          context.Context
+				root         sourceartifact.RootAdmission
+				declarations semanticview.OriginalLoopCarriage
+				want         string
+			}{
+				{"missing_or_cleared_A", ctxB, sourceartifact.RootAdmission{}, original, "original source root admission"},
+				{"foreign_A", ctxB, foreign.Admission(), original, "rooted execution context does not match the exact run source root"},
+				{"same_hash_other_A_directory", ctxB, otherA.Admission(), original, "rooted execution context does not match the exact run source root"},
+				{"B_supplied_as_A", ctxB, b.Admission(), original, "rooted execution context does not match the exact run source root"},
+				{"swapped_A_B", ctxA, b.Admission(), original, "admit selected-contract source event preparation fork"},
+				{"invalid_B_valid_A", runtimecorrelation.WithRootAdmission(ctxB, otherB.Admission()), a.Admission(), original, "admit selected-contract source event preparation fork"},
+				{"cleared_B_valid_A", runtimecorrelation.WithRootAdmission(ctxB, sourceartifact.RootAdmission{}), a.Admission(), original, "admit selected-contract source event preparation fork"},
+				{"foreign_declarations", ctxB, a.Admission(), wrongDeclarations, "loop carriage does not belong to the exact original source artifact"},
+			} {
+				t.Run(cell.name, func(t *testing.T) {
+					before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctxB, fixture.store)
+					if err != nil {
+						t.Fatal(err)
+					}
+					out, err := store.LoadRunForkSelectedContractSourceEvents(cell.ctx, sourceRun, child.ForkRunID, []string{event.ID()}, cell.declarations, cell.root)
+					if err == nil || !strings.Contains(err.Error(), cell.want) || len(out) != 0 {
+						t.Fatalf("root refusal missed its intended gate: count=%d err=%v want=%q", len(out), err, cell.want)
+					}
+					after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctxB, fixture.store)
+					if err != nil || !reflect.DeepEqual(before, after) {
+						t.Fatalf("root refusal changed application storage: %v", err)
+					}
+				})
+			}
+			for i := 0; i < 2; i++ {
+				out, err := store.LoadRunForkSelectedContractSourceEvents(ctxB, sourceRun, child.ForkRunID, []string{event.ID()}, original, a.Admission())
+				if err != nil || len(out) != 1 || out[0].SourceEventID != event.ID() {
+					t.Fatalf("exact A read under B authority: iteration=%d events=%+v err=%v", i, out, err)
+				}
+				root, present, err := runtimecorrelation.RootAdmissionFromContext(ctxB)
+				if err != nil || !present || !root.Equal(b.Admission()) {
+					t.Fatalf("A read changed outer B admission: root=%+v present=%t err=%v", root.Reference(), present, err)
+				}
+			}
+		})
+	}
+}
+
+func seedSelectedSourceEventTransfer(t *testing.T, fixture authorActivityReceiptFixture, postgres bool) (string, events.Event) {
+	t.Helper()
+	runID := uuid.NewString()
+	source := selectedActivityProducerSource(t)
+	ctx := seedSelectedActivitySourceRun(t, fixture, runID, source)
+	ctx = runtimecorrelation.WithRunID(ctx, runID)
+	at := time.Unix(1700002410, 0).UTC()
+	parent := eventtest.ExistingRunRootIngress(uuid.NewString(), "activity.seeded", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, at)
+	if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, parent); err != nil {
+		t.Fatal(err)
+	}
+	constructSelectedActivityProducerFixture(t, ctx, fixture.store.(agentFixtureFlowStore), source, parent, ".", at)
+	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "ordinary.ready", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at.Add(time.Second), executionmode.Live)
+	if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, nil); err != nil {
+		t.Fatal(err)
+	}
+	captureFanOutBarrierForkRevision(t, ctx, fixture.db, runID, postgres)
+	return runID, event
+}
+
+func captureSelectedSourceEventTarget(t *testing.T, original sourceartifact.RootedSource) sourceartifact.RootedSource {
+	t.Helper()
+	_, targetPath := sourceartifactfixture.Rooted(t, "selected-target", original.Artifact())
+	schemaPath := filepath.Join(targetPath, "schema.yaml")
+	schema, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(schemaPath, append(schema, []byte("\n# distinct selected capture\n")...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := sourceartifact.AdmitDirectory(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, err := artifact.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rooted
 }
 
 func TestLoadRunForkSelectedContractSourceEventsPreservesExactPayloadBytes(t *testing.T) {
@@ -275,7 +419,7 @@ func TestLoadRunForkSelectedContractSourceEventsPreservesExactPayloadBytes(t *te
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
-	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{eventID}, originalCarriageForRun(t, pg, sourceRunID))
+	loaded, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{eventID}, originalCarriageForRun(t, pg, sourceRunID), originalRootAdmissionForRun(t, pg, sourceRunID))
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSourceEvents: %v", err)
 	}
@@ -686,7 +830,7 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, eventID,
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), at.Add(time.Minute))
 	// Timer ownership is rejected before preparation can authorize materialization.
-	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustCanonicalSelectedContractStoreHash(t))
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) {
 		t.Fatalf("preparation error=%v, want timer blocker", err)
 	}
@@ -743,7 +887,7 @@ func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerH
 			seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, eventID,
 				"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), at.Add(2*time.Minute))
 
-			prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+			prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustCanonicalSelectedContractStoreHash(t))
 			if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) {
 				t.Fatalf("materialization error = %v, want %s", err, runfork.RunForkBlockerTimerHistoryUnproven)
 			}
@@ -791,7 +935,7 @@ func TestSelectedContractTimerBlockerRemainsFixedWhenSourceTimerIsDeletedLater(t
 	if !runForkTestHasPlanBlocker(repeatedPlan, runfork.RunForkBlockerTimerHistoryUnproven) {
 		t.Fatalf("repeated fixed-revision plan lost timer blocker: %#v", repeatedPlan.ReplayResumeAdmission)
 	}
-	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustCanonicalSelectedContractStoreHash(t))
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) || prepared != nil {
 		t.Fatalf("fixed timer blocker preparation=%v error=%v", prepared, err)
 	}
@@ -1528,36 +1672,6 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 	}
 }
 
-func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLogDiagnostic(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
-	sourceRunID := uuid.NewString()
-	entityID := runtimeflowidentity.EntityID("flow-a/1")
-	eventID := uuid.NewString()
-	at := time.Unix(1700003635, 0).UTC()
-	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-
-	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
-	if err != nil {
-		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
-	}
-	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
-	seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, uuid.NewString(), materialized.ForkRunID, "",
-		[]byte(`{"log_level":"info","message":"Tool read_validation_case_business_brief executed successfully","details":{"component":"tool-executor","action":"tool_execution_succeeded","tool_name":"read_validation_case_business_brief"}}`), at.Add(3*time.Second))
-
-	activationRequest.AllowedSourceEventIDs = []string{eventID}
-	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, activationRequest)
-	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") {
-		t.Fatalf("activation error = %v, want fork event lineage blocker", err)
-	}
-	if activation.Activated {
-		t.Fatalf("activation = %#v, want blocked", activation)
-	}
-}
-
 func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
@@ -1714,9 +1828,15 @@ func TestSelectedContractExecutionMaterializationRejectsUnversionedRouteProofRem
 // Missing source declarations are fixture errors, not invented readiness facts.
 func canonicalSelectedContractExecutionStoreRequest(t *testing.T, ctx context.Context, pg *PostgresStore, sourceRunID, at string, selection runfork.RunForkContractSelection, fact runtimecorrelation.SourceArtifactFact) runforkreadiness.MaterializeRequest {
 	t.Helper()
-	request := prepareSelectedStoreMaterializationForTest(t, ctx, pg, sourceRunID, at, selection)
+	request := prepareSelectedStoreMaterializationForTest(t, ctx, pg, sourceRunID, at, selection, fact.BundleHash())
 	if !request.SourceArtifactFact.Matches(fact) {
 		t.Fatalf("prepared source differs from requested fixture artifact: got %s want %s", request.SourceArtifactFact.BundleHash(), fact.BundleHash())
+	}
+	request.ForkOperation = &runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "bearer:selected-store-proof", IdempotencyKey: uuid.NewString(),
+		TransportHash: "sha256:selected-store-proof", SourceRunID: sourceRunID, ForkEventID: at,
+		TargetBundleHash: fact.BundleHash(), TargetRootReference: request.RootAdmission.Reference(),
+		ContractSelection: selection, AllowSourceFreeze: true,
 	}
 	return request
 }
@@ -1728,7 +1848,7 @@ func captureSelectedStoreActivationRequest(t *testing.T, ctx context.Context, pg
 	repo := canonicalrouting.RepoRoot(t)
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: pg}
 	loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
-		SourceRunID: request.SourceRunID, BundleHash: request.SourceArtifactFact.BundleHash(), SourceArtifactFact: request.SourceArtifactFact, Selection: request.ContractSelection,
+		Responsibility: runforkexecution.RetainedForkSource(materialized.ForkRunID), BundleHash: request.SourceArtifactFact.BundleHash(), SourceArtifactFact: request.SourceArtifactFact, Selection: request.ContractSelection,
 	})
 	if err != nil {
 		t.Fatalf("inspect captured selected activation source: %v", err)

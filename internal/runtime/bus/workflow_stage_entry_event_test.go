@@ -7,13 +7,19 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestWorkflowStageEntryEventReadRequiresCanonicalOwner(t *testing.T) {
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "pins:\n  inputs: [test.work]\n",
+		"events.yaml":   "test.work:\n",
+	}))
 	for _, fault := range []string{"none", "missing_reader", "missing_event", "foreign_run", "wrong_event", "read_failure", "invalid_settlement", "blank_identity"} {
 		t.Run(fault, func(t *testing.T) {
 			store := newTargetRouteMemoryStore()
-			bus, err := newScopedTestEventBus(store)
+			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatal(err)
 			}

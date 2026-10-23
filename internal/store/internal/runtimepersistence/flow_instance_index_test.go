@@ -134,7 +134,11 @@ func proveR7ScalarHistoricalIndex(t *testing.T, f receiverConfigActivationFixtur
 	if err != nil {
 		t.Fatal(err)
 	}
-	fork, err := forks.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID()})
+	rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fork, err := forks.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: marker.ID(), RootAdmission: rooted.Admission()})
 	if err != nil {
 		t.Fatal(err)
 	}

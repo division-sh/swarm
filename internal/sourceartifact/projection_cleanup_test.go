@@ -9,6 +9,9 @@ import (
 
 func TestPlannedProjectionAllocatesOnlyAfterExactIntentAdmission(t *testing.T) {
 	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte(manifest2376), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: planned\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -55,6 +58,9 @@ func TestPlannedProjectionAllocatesOnlyAfterExactIntentAdmission(t *testing.T) {
 
 func TestProjectionCleanupIntentSurvivesProcessHandlesWithoutTouchingSuccessor(t *testing.T) {
 	artifactRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(artifactRoot, "manifest.yaml"), []byte(manifest2376), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(artifactRoot, "schema.yaml"), []byte("name: admitted\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +118,9 @@ func TestProjectionCleanupRejectsChangedOrSymlinkedOwnership(t *testing.T) {
 		t.Run(change, func(t *testing.T) {
 			t.Setenv("TMPDIR", t.TempDir())
 			artifactRoot := t.TempDir()
+			if err := os.WriteFile(filepath.Join(artifactRoot, "manifest.yaml"), []byte(manifest2376), 0600); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(filepath.Join(artifactRoot, "schema.yaml"), []byte("source\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -181,6 +190,9 @@ func TestProjectionCleanupResumesEveryFilesystemSettlementWindow(t *testing.T) {
 	for _, phase := range []string{"source-partial", "source-removed", "marker-removed"} {
 		t.Run(phase, func(t *testing.T) {
 			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte(manifest2376), 0600); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: cleanup-window\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -208,6 +220,9 @@ func TestProjectionCleanupResumesEveryFilesystemSettlementWindow(t *testing.T) {
 				t.Fatal(err)
 			}
 			if phase != "source-partial" {
+				if err := os.Remove(filepath.Join(projection.PrivateRoot(), "manifest.yaml")); err != nil {
+					t.Fatal(err)
+				}
 				if err := os.Remove(projection.PrivateRoot()); err != nil {
 					t.Fatal(err)
 				}

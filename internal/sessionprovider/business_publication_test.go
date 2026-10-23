@@ -41,15 +41,15 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 	source, _ := correlation.SourceArtifactFactFromContext(f.ctx)
 	scope, _ := authoractivity.ScopeFromContext(f.ctx)
 	lease, err := selected.RegisterAuthorActivityEventCatalog(scope, []authoractivity.EventDescriptor{
-		{EventType: "inbound.whatsapp", Disposition: authoractivity.StoryAuthored},
+		{EventType: "inbound.whatsapp.raw", Disposition: authoractivity.StoryAuthored},
 		{EventType: "inbound.whatsapp.message", Disposition: authoractivity.StoryAuthored},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(lease.Release)
-	payload := func(_ context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
-		return eventtest.PayloadAdmission(event, flow, string(event.Type()))
+	payload := func(_ context.Context, event events.Event, producer events.PayloadProducer) (events.PayloadAdmission, error) {
+		return eventtest.PayloadAdmission(event, producer.FlowID(), string(event.Type()))
 	}
 	selected.SetEventPayloadAdmitter(payload)
 	authority, err := deliverylifecycle.NewNormalExecutionAuthority(source, f.source.Coordinate.RuntimeInstanceID, 1)
@@ -79,12 +79,13 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 func sessionBusinessSemanticFixture(t *testing.T) semanticview.Source {
 	t.Helper()
 	repo := pipeline.WorkflowRepoRoot()
-	bundle, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, sourceartifactfixture.Artifact(),
+	rooted, _ := sourceartifactfixture.Rooted(t, "session-business", sourceartifactfixture.Artifact())
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted,
 		contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{".": {"inbound.whatsapp", "inbound.whatsapp.message", "inbound.whatsapp.edit", "inbound.whatsapp.revoke"}})
+	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{".": {"inbound.whatsapp.raw", "inbound.whatsapp.message", "inbound.whatsapp.edit", "inbound.whatsapp.revoke"}})
 }
 
 func TestSessionPublicationFixtureUsesItsAdmittedArtifact(t *testing.T) {

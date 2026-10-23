@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-
 	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 

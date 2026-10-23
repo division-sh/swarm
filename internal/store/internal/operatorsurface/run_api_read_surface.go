@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -38,6 +39,11 @@ func (s *RunPostgres) requireRunHeaderAccess() error {
 }
 
 func (s *RunPostgres) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {
+	var root sourceartifact.RootAdmissionReference
+	return s.loadRunHeader(ctx, runID, &root)
+}
+
+func (s *RunPostgres) loadRunHeader(ctx context.Context, runID string, root *sourceartifact.RootAdmissionReference) (operatorread.RunHeader, error) {
 	if s == nil || s.backend == nil {
 		return operatorread.RunHeader{}, fmt.Errorf("postgres store is required")
 	}
@@ -54,7 +60,7 @@ func (s *RunPostgres) LoadRunHeader(ctx context.Context, runID string) (operator
 	row := s.backend.QueryRowContext(ctx, runHeaderSelectSQL()+`
 WHERE r.run_id = $1::uuid
 `, runID)
-	header, err := scanRunHeader(row)
+	header, err := scanRunHeaderWithRoot(row, root)
 	if errors.Is(err, sql.ErrNoRows) {
 		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
@@ -141,6 +147,7 @@ SELECT
 	r.run_id::text,
 	lower(r.status),
 	r.bundle_hash,
+	r.source_root_directory,
 	r.origin_kind,
 	COALESCE(r.trigger_event_id::text, ''),
 	COALESCE(r.trigger_event_type, ''),
@@ -180,17 +187,23 @@ type runHeaderScanner interface {
 }
 
 func scanRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
+	var root sourceartifact.RootAdmissionReference
+	return scanRunHeaderWithRoot(row, &root)
+}
+
+func scanRunHeaderWithRoot(row runHeaderScanner, reference *sourceartifact.RootAdmissionReference) (operatorread.RunHeader, error) {
 	var header operatorread.RunHeader
 	var endedAt sql.NullTime
 	var failureRaw []byte
-	var bundleHash string
+	var root sourceartifact.RootAdmissionReference
 	var originKind, eventID, eventType, serviceID, sourceRunID, forkPointKind, sourceEventID string
 	var generation, forkRevision int64
 	var standingRelationCount, matchingStandingRelationCount int
 	if err := row.Scan(
 		&header.RunID,
 		&header.Status,
-		&bundleHash,
+		&root.BundleHash,
+		&root.RootDirectory,
 		&originKind,
 		&eventID,
 		&eventType,
@@ -237,23 +250,25 @@ func scanRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 		header.EndedAt = &value
 	}
 	header.StartedAt = header.StartedAt.UTC()
-	if err := validateRunHeaderLifecycle(header, bundleHash); err != nil {
+	if err := validateRunHeaderLifecycle(header, root); err != nil {
 		return operatorread.RunHeader{}, err
 	}
-	header.BundleHash = bundleHash
+	header.BundleHash = root.BundleHash
+	*reference = root
 	return header, nil
 }
 
-func validateRunHeaderLifecycle(header operatorread.RunHeader, bundleHash string) error {
+func validateRunHeaderLifecycle(header operatorread.RunHeader, root sourceartifact.RootAdmissionReference) error {
 	state, err := runtimerunlifecycle.ParseState(header.Status)
 	if err != nil {
 		return fmt.Errorf("run %s lifecycle: %w", header.RunID, err)
 	}
 	snapshot := runtimerunlifecycle.Snapshot{
 		RunID: header.RunID, State: state,
-		Origin:     header.Origin,
-		BundleHash: strings.TrimSpace(bundleHash),
-		EventCount: header.EventCount, EntityCount: header.EntityCount,
+		Origin:        header.Origin,
+		BundleHash:    root.BundleHash,
+		RootReference: root,
+		EventCount:    header.EventCount, EntityCount: header.EntityCount,
 		Failure: header.Failure, ContinuedAsRunID: header.ContinuedAsRunID,
 		StartedAt: header.StartedAt, EndedAt: header.EndedAt,
 	}

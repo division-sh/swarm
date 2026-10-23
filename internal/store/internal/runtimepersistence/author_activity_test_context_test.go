@@ -132,7 +132,8 @@ func newStoreTestEventBus(t *testing.T, store storeTestDurableEventBusStore, opt
 	}
 	if opts.ContractBundle == nil && opts.SourceArtifactFact.BundleHash() == sourceartifactfixture.BundleHash {
 		repo := runtimepipeline.WorkflowRepoRoot()
-		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, sourceartifactfixture.Artifact(), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+		rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -232,7 +233,14 @@ func mustStoreTestSourceArtifactFact(bundleHash string) runtimecorrelation.Sourc
 }
 
 func storeTestSourceArtifact(label string) *sourceartifact.AdmittedSourceArtifact {
-	return sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# "+label+"\n"))
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents: {}\n# " + label + "\n"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return artifact
 }
 
 func requireStoreTestPersistedBundle(t *testing.T, db *sql.DB, bundleHash string) {
@@ -351,7 +359,8 @@ func admitTestPostgresStore(t testing.TB, db *sql.DB, inspection ...pq.Config) *
 	return pg
 }
 
-func storeTestPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+func storeTestPayloadAdmitter(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+	flowID := payloadProducer.FlowID()
 	return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 }
 

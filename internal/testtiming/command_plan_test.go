@@ -154,10 +154,10 @@ func TestCommandAdmissionRootCellsPreserveDistinctExecutionScopes(t *testing.T) 
 func TestCommandAdmissionRetainsGovernedDeferralAndUntestedPackages(t *testing.T) {
 	plan, _ := rootEvidenceFixture(t)
 	unit := &plan.Units[0]
-	unit.Packages = []string{"github.com/division-sh/swarm/internal/packartifact", "github.com/division-sh/swarm/no-tests"}
+	unit.Packages = []string{"github.com/division-sh/swarm/internal/runtime/runforkexecution", "github.com/division-sh/swarm/no-tests"}
 	unit.TestBearingPackages = unit.Packages[:1]
 	required := testplanning.TestRoot{Package: unit.Packages[0], Name: "TestRequired"}
-	deferred := testplanning.TestRoot{Package: unit.Packages[0], Name: "TestProjectPackImportSubprocessHelper"}
+	deferred := testplanning.TestRoot{Package: unit.Packages[0], Name: "TestSelectedForkCrashProcessHelper"}
 	unit.SelectedRoots = []testplanning.TestRoot{required, deferred}
 	unit.RequiredTests = []testplanning.RequiredTest{{TestRoot: required}}
 	unit.DeferredTests = []testplanning.DeferredTest{{TestRoot: deferred, Reason: "subprocess entry point, not a standalone proof"}}

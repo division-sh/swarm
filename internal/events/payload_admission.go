@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 )
 
@@ -32,6 +33,8 @@ type PayloadSchemaBinding struct {
 	eventKey     string
 	schemaDigest string
 	schemaClass  PayloadSchemaClass
+	producer     PayloadProducer
+	reference    string
 }
 
 type PayloadSchemaBindingInput struct {
@@ -47,9 +50,54 @@ func NewPayloadSchemaBinding(input PayloadSchemaBindingInput) (PayloadSchemaBind
 		bundleHash: strings.TrimSpace(input.BundleHash),
 		flowID:     strings.TrimSpace(input.FlowID), eventKey: strings.TrimSpace(input.EventKey),
 		schemaDigest: strings.TrimSpace(input.SchemaDigest), schemaClass: PayloadSchemaClass(strings.TrimSpace(string(input.SchemaClass))),
+		producer: AuthoredPayloadProducer(input.FlowID),
 	}
 	if err := binding.Validate(); err != nil {
 		return PayloadSchemaBinding{}, err
+	}
+	return binding, nil
+}
+
+func NewPlatformPayloadSchemaBinding(input PayloadSchemaBindingInput, producer PayloadProducer, reference string) (PayloadSchemaBinding, error) {
+	if input.FlowID != "" {
+		return PayloadSchemaBinding{}, fmt.Errorf("platform payload binding cannot carry authored flow authority")
+	}
+	binding, err := NewPayloadSchemaBinding(input)
+	if err != nil {
+		return PayloadSchemaBinding{}, err
+	}
+	binding.producer, binding.reference = producer, reference
+	if !producer.IsPlatform() {
+		return PayloadSchemaBinding{}, fmt.Errorf("platform payload binding requires explicit producer")
+	}
+	if err := binding.Validate(); err != nil {
+		return PayloadSchemaBinding{}, err
+	}
+	return binding, nil
+}
+
+// RestoreEventPayloadSchemaBinding uses the complete durable producer/class
+// tuple. An empty flow column or platform schema label alone selects nothing.
+func RestoreEventPayloadSchemaBinding(input PayloadSchemaBindingInput, class EventAdmissionClass, eventType EventType, producer ProducerIdentity) (PayloadSchemaBinding, error) {
+	p := PayloadProducer{kind: "platform", producer: producer, class: class, event: eventType}
+	if joinOccurrenceEventType(eventType) && !joinOccurrencePayloadIdentity(p) {
+		return PayloadSchemaBinding{}, fmt.Errorf("join occurrence payload contradicts its persisted producer or class")
+	}
+	binding, err := RestorePayloadSchemaBinding(input)
+	if err != nil {
+		return PayloadSchemaBinding{}, err
+	}
+	if input.SchemaClass == PayloadSchemaPlatform && platformPayloadIdentity(class, eventType, producer) {
+		reference := ""
+		if eventType == EventTypePlatformRuntimeLog {
+			reference = RuntimeLogSchemaReference
+		} else if joinOccurrencePayloadIdentity(p) {
+			reference = JoinOccurrencePayloadReference
+		}
+		return NewPlatformPayloadSchemaBinding(input, p, reference)
+	}
+	if platformPayloadIdentity(class, eventType, producer) || eventType == EventTypePlatformRuntimeLog {
+		return PayloadSchemaBinding{}, fmt.Errorf("platform payload requires persisted producer authority")
 	}
 	return binding, nil
 }
@@ -81,6 +129,28 @@ func (b PayloadSchemaBinding) Validate() error {
 	default:
 		return fmt.Errorf("payload schema class %q is invalid", b.schemaClass)
 	}
+	if b.producer.IsPlatform() {
+		p := b.producer
+		if b.flowID != "" || b.schemaClass != PayloadSchemaPlatform || b.eventKey != string(p.event) || !platformPayloadIdentity(p.class, p.event, p.producer) || p.producer.Type() != EventProducerPlatform {
+			return fmt.Errorf("platform payload binding disagrees with producer, class or event")
+		}
+		if err := p.producer.Validate(); err != nil {
+			return err
+		}
+		if p.event == EventTypePlatformRuntimeLog {
+			if p.class != EventAdmissionDiagnosticDirect || p.producer.ID() != "runtime" || b.reference != RuntimeLogSchemaReference {
+				return fmt.Errorf("runtime-log payload requires exact platform/runtime reference authority")
+			}
+		} else if joinOccurrencePayloadIdentity(p) {
+			if b.reference != JoinOccurrencePayloadReference {
+				return fmt.Errorf("join occurrence payload requires typed declaration authority")
+			}
+		} else if b.reference != "" {
+			return fmt.Errorf("platform payload subtype reference is unsupported")
+		}
+	} else if !b.producer.IsAuthored() || b.producer.FlowID() != b.flowID || b.reference != "" {
+		return fmt.Errorf("payload binding requires an explicit producer variant")
+	}
 	return nil
 }
 
@@ -89,10 +159,13 @@ func (b PayloadSchemaBinding) FlowID() string                  { return b.flowID
 func (b PayloadSchemaBinding) EventKey() string                { return b.eventKey }
 func (b PayloadSchemaBinding) SchemaDigest() string            { return b.schemaDigest }
 func (b PayloadSchemaBinding) SchemaClass() PayloadSchemaClass { return b.schemaClass }
+func (b PayloadSchemaBinding) Reference() string               { return b.reference }
+func (b PayloadSchemaBinding) Producer() PayloadProducer       { return b.producer }
 
 func (b PayloadSchemaBinding) Equal(other PayloadSchemaBinding) bool {
 	return b.bundleHash == other.bundleHash && b.flowID == other.flowID &&
-		b.eventKey == other.eventKey && b.schemaDigest == other.schemaDigest && b.schemaClass == other.schemaClass
+		b.eventKey == other.eventKey && b.schemaDigest == other.schemaDigest && b.schemaClass == other.schemaClass &&
+		b.producer == other.producer && b.reference == other.reference
 }
 
 type PayloadAdmission struct {
@@ -129,11 +202,57 @@ func (a PayloadAdmission) Payload() []byte               { return bytes.Clone(a.
 func (a PayloadAdmission) Binding() PayloadSchemaBinding { return a.binding }
 func (a PayloadAdmission) Valid() bool                   { return json.Valid(a.payload) && a.binding.Validate() == nil }
 
+func joinOccurrencePayloadIdentity(producer PayloadProducer) bool {
+	return producer.IsPlatform() && producer.class == EventAdmissionRuntimeControl &&
+		producer.producer.Type() == EventProducerPlatform && producer.producer.ID() == "runtime.generic_schedule" &&
+		joinOccurrenceEventType(producer.event)
+}
+
+func joinOccurrenceEventType(eventType EventType) bool {
+	return eventType == "platform.join_complete" || eventType == "platform.join_timeout"
+}
+
+// JoinOccurrencePayloadDigest binds the occurrence's exact durable identity and
+// bytes. Declaration authority is supplied only by the workflow join resolver.
+func JoinOccurrencePayloadDigest(event Event) (string, error) {
+	if !joinOccurrencePayloadIdentity(PlatformPayloadProducer(event)) {
+		return "", fmt.Errorf("join payload identity requires its platform occurrence producer")
+	}
+	var payload map[string]any
+	if err := canonicaljson.DecodePreservingNumberLexemes(event.Payload(), &payload); err != nil {
+		return "", err
+	}
+	source := event.RoutingSource()
+	raw, err := canonicaljson.Bytes(map[string]any{
+		"reference": JoinOccurrencePayloadReference, "run_id": event.RunID(), "task_id": event.TaskID(),
+		"event":        string(event.Type()),
+		"routing_kind": string(source.Kind()), "routing_flow": source.Route().FlowID,
+		"routing_instance": source.Route().FlowInstance, "routing_entity": source.Route().EntityID,
+		"payload": payload,
+	})
+	if err != nil {
+		return "", err
+	}
+	return canonicaljson.HashBytes(raw), nil
+}
+
 // ApplyPayloadAdmission replaces the pre-admission payload exactly once.
 // Reapplication is accepted only when both bytes and binding are identical.
 func ApplyPayloadAdmission(event Event, admission PayloadAdmission) (Event, error) {
 	if !admission.Valid() {
 		return Event{}, fmt.Errorf("payload admission is invalid")
+	}
+	if err := admission.binding.producer.ValidateForEvent(event); err != nil {
+		return Event{}, err
+	}
+	if joinOccurrenceEventType(event.Type()) && admission.binding.reference != JoinOccurrencePayloadReference {
+		return Event{}, fmt.Errorf("join occurrence payload requires typed declaration admission")
+	}
+	if admission.binding.reference == JoinOccurrencePayloadReference {
+		digest, err := JoinOccurrencePayloadDigest(event)
+		if err != nil || digest != admission.binding.schemaDigest || !bytes.Equal(event.Payload(), admission.Payload()) {
+			return Event{}, fmt.Errorf("join payload binding contradicts its occurrence identity")
+		}
 	}
 	if current, ok := event.PayloadAdmission(); ok {
 		if !bytes.Equal(current.Payload(), admission.Payload()) || !current.Binding().Equal(admission.Binding()) {

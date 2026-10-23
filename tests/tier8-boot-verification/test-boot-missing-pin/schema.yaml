@@ -1,4 +1,4 @@
-name: test-boot-missing-pin
+# fixture: test-boot-missing-pin
 stages:
   pending: {}
   done: {final: true}

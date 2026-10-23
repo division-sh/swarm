@@ -3,6 +3,7 @@ package manager
 import (
 	"testing"
 
+	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
@@ -32,6 +33,16 @@ func TestUnitManagerConstructionDoesNotInventDeliveryPersistence(t *testing.T) {
 			if _, err := provider.DeliveryAuthority(); err == nil {
 				t.Fatal("unit projection provider returned live authority without an explicit native owner")
 			}
+		}
+	})
+	t.Run("cleared_source_record", func(t *testing.T) {
+		manager := newTestAgentManager(t, nil, nil)
+		manager.semanticSource = nil
+		_, err := managerTestStaticAgentRecord(manager, managerTestAgentConfig(models.AgentConfig{
+			ID: "cleared-source-agent", Model: "regular",
+		}))
+		if err == nil || manager.semanticSource != nil || manager.Count() != 0 {
+			t.Fatalf("cleared source gained fixture repair or admission: error=%v source=%T agents=%d", err, manager.semanticSource, manager.Count())
 		}
 	})
 }

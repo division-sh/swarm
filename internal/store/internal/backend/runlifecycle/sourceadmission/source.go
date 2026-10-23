@@ -11,8 +11,10 @@ import (
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	sourceartifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 )
 
 type RowQueryer interface {
@@ -41,14 +43,14 @@ func requireActiveNonlockingTx(ctx context.Context, tx *sql.Tx, runID string, di
 	if tx == nil {
 		return errors.New("run source admission requires transaction")
 	}
-	fact, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, runID)
+	fact, root, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, runID)
 	if err != nil {
 		return err
 	}
 	if cached {
-		return RequireArtifact(ctx, tx, dialect, fact)
+		return requireRetainedPair(ctx, tx, dialect, fact, root)
 	}
-	_, err = load(ctx, tx, runID, dialect, true, false)
+	_, _, err = load(ctx, tx, runID, dialect, true, false)
 	return err
 }
 
@@ -57,21 +59,21 @@ func loadTx(ctx context.Context, tx *sql.Tx, runID string, dialect privateactivi
 		return runtimecorrelation.SourceArtifactFact{}, errors.New("run source admission requires transaction")
 	}
 	if active && !readOnly {
-		fact, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, runID)
+		fact, root, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, runID)
 		if err != nil {
 			return runtimecorrelation.SourceArtifactFact{}, err
 		}
 		if cached {
 			// runs has no artifact FK: availability is never cached.
-			if err := RequireArtifact(ctx, tx, dialect, fact); err != nil {
+			if err := requireRetainedPair(ctx, tx, dialect, fact, root); err != nil {
 				return runtimecorrelation.SourceArtifactFact{}, err
 			}
 			return fact, nil
 		}
 	}
-	fact, err := load(ctx, tx, runID, dialect, active, !readOnly)
+	fact, root, err := load(ctx, tx, runID, dialect, active, !readOnly)
 	if err == nil && active && !readOnly {
-		err = mutationprotocol.CacheActiveRunSource(ctx, tx, runID, fact)
+		err = mutationprotocol.CacheActiveRunSource(ctx, tx, runID, fact, root)
 	}
 	if err != nil {
 		return runtimecorrelation.SourceArtifactFact{}, err
@@ -81,52 +83,63 @@ func loadTx(ctx context.Context, tx *sql.Tx, runID string, dialect privateactivi
 
 // Query admission is always fresh and nonminting, even if q contains a sql.Tx.
 func RequirePostgresActiveQuery(ctx context.Context, q RowQueryer, runID string) error {
-	_, err := load(ctx, q, runID, privateactivity.DialectPostgres, true, false)
+	_, _, err := load(ctx, q, runID, privateactivity.DialectPostgres, true, false)
 	return err
 }
 
 func RequireSQLiteActiveQuery(ctx context.Context, q RowQueryer, runID string) error {
-	_, err := load(ctx, q, runID, privateactivity.DialectSQLite, true, false)
+	_, _, err := load(ctx, q, runID, privateactivity.DialectSQLite, true, false)
 	return err
 }
 
-func load(ctx context.Context, q RowQueryer, runID string, dialect privateactivity.Dialect, active, lock bool) (runtimecorrelation.SourceArtifactFact, error) {
+func load(ctx context.Context, q RowQueryer, runID string, dialect privateactivity.Dialect, active, lock bool) (runtimecorrelation.SourceArtifactFact, sourceartifact.RootAdmissionReference, error) {
 	if ctx == nil || q == nil {
-		return runtimecorrelation.SourceArtifactFact{}, errors.New("run source admission requires context and query authority")
+		return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, errors.New("run source admission requires context and query authority")
 	}
 	if err := ctx.Err(); err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, err
+		return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, err
 	}
 	runID = strings.TrimSpace(runID)
-	query := `SELECT status, bundle_hash FROM runs WHERE run_id = ?`
+	query := `SELECT status, bundle_hash, source_root_directory FROM runs WHERE run_id = ?`
 	if dialect == privateactivity.DialectPostgres {
-		query = `SELECT status, bundle_hash FROM runs WHERE run_id = $1::uuid`
+		query = `SELECT status, bundle_hash, source_root_directory FROM runs WHERE run_id = $1::uuid`
 		if lock {
 			query += ` FOR UPDATE`
 		}
 	}
-	var status, bundleHash string
-	if err := q.QueryRowContext(ctx, query, runID).Scan(&status, &bundleHash); err != nil {
+	var status string
+	var root sourceartifact.RootAdmissionReference
+	if err := q.QueryRowContext(ctx, query, runID).Scan(&status, &root.BundleHash, &root.RootDirectory); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
+			return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
 		}
-		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("read run lifecycle source: %w", err)
+		return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, fmt.Errorf("read run lifecycle source: %w", err)
 	}
 	state, err := runtimerunlifecycle.ParseState(status)
 	if err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, err
+		return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, err
 	}
 	if active && !state.Active() {
-		return runtimecorrelation.SourceArtifactFact{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: state}
+		return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: state}
 	}
-	fact, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
+	fact, err := runtimecorrelation.DecodeSourceArtifactFact(root.BundleHash)
 	if err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("decode run lifecycle source: %w", err)
+		return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, fmt.Errorf("decode run lifecycle source: %w", err)
 	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, root); err != nil {
+		return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, err
+	}
+	if err := requireRetainedPair(ctx, q, dialect, fact, root); err != nil {
+		return runtimecorrelation.SourceArtifactFact{}, sourceartifact.RootAdmissionReference{}, err
+	}
+	return fact, root, nil
+}
+
+func requireRetainedPair(ctx context.Context, q RowQueryer, dialect privateactivity.Dialect, fact runtimecorrelation.SourceArtifactFact, root sourceartifact.RootAdmissionReference) error {
 	if err := RequireArtifact(ctx, q, dialect, fact); err != nil {
-		return runtimecorrelation.SourceArtifactFact{}, err
+		return err
 	}
-	return fact, nil
+	return sourceartifactstore.RequireRootReference(ctx, q, root, dialect == privateactivity.DialectPostgres)
 }
 
 func RequireArtifact(ctx context.Context, q RowQueryer, dialect privateactivity.Dialect, fact runtimecorrelation.SourceArtifactFact) error {

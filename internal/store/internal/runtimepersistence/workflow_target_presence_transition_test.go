@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
@@ -23,6 +24,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -335,6 +337,7 @@ func TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStore
 		runtimepipeline.WorkflowEngineMutationOwner
 		runtimerunlifecycle.OperationOwner
 		sourceartifactfixture.Writer
+		LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 		SetupScenarioEntities(context.Context, runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupResult, error)
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -353,13 +356,29 @@ func TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStore
 					if !ok || bundle.SourceArtifact == nil {
 						t.Fatal("state-only producer source artifact is required")
 					}
-					sourceartifactfixture.RequireArtifact(t, ctx, store, bundle.SourceArtifact)
-					if _, err := store.ReviseRunSource(ctx, runtimerunlifecycle.SourceRevisionRequest{
-						RunID: runID, Source: sourceartifactfixture.FactFor(bundle.SourceArtifact),
+					rooted, err := bundle.RootedSource()
+					if err != nil {
+						t.Fatal(err)
+					}
+					priorRoot, err := store.LoadRunRootedSource(ctx, runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := runtimecorrelation.CheckRootAdmissionContext(ctx, priorRoot.Admission().Reference()); err != nil {
+						t.Fatal(err)
+					}
+					priorCtx := runtimecorrelation.WithRootAdmission(ctx, priorRoot.Admission())
+					sourceartifactfixture.RequireArtifact(t, priorCtx, store, bundle.SourceArtifact)
+					if _, err := store.ReviseRunSource(priorCtx, runtimerunlifecycle.SourceRevisionRequest{
+						RunID: runID, Source: sourceartifactfixture.FactFor(bundle.SourceArtifact), RootAdmission: rooted.Admission(),
 					}); err != nil {
 						t.Fatalf("bind state-only producer source: %v", err)
 					}
-					ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact))
+					scope, err := authoractivity.BundleScopeForTarget(ctx, bundle.SourceArtifact.BundleHash())
+					if err != nil {
+						t.Fatal(err)
+					}
+					ctx = authoractivity.WithScope(runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact)), rooted.Admission()), scope)
 					entityID := uuid.NewString()
 					createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 					fields := map[string]any{"account_id": "preserved", "instance_key": "receiver"}

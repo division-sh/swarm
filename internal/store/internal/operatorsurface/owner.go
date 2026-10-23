@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
-	"github.com/division-sh/swarm/internal/sourceartifact"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -47,7 +46,7 @@ type RunPostgres struct {
 	pipeline    PipelineObligationSource
 	timers      TimerObligationSource
 	deadLetters DeadLetterProjection
-	sources     sourceartifact.Reader
+	sources     operationalRootedSourceReader
 	sourceMemo  *runOperationalSourceMemo
 }
 
@@ -80,7 +79,7 @@ func requirePostgresBackend(backend *postgresbackend.Backend) error {
 	return nil
 }
 
-func NewRunPostgres(backend *postgresbackend.Backend, schemaGuard func() error, pipeline PipelineObligationSource, timers TimerObligationSource, deadLetters DeadLetterProjection, sources sourceartifact.Reader) (*RunPostgres, error) {
+func NewRunPostgres(backend *postgresbackend.Backend, schemaGuard func() error, pipeline PipelineObligationSource, timers TimerObligationSource, deadLetters DeadLetterProjection, sources operationalRootedSourceReader) (*RunPostgres, error) {
 	if err := requirePostgresBackend(backend); err != nil {
 		return nil, err
 	}
@@ -169,7 +168,7 @@ type RunSQLite struct {
 	pipeline    PipelineObligationSource
 	timers      TimerObligationSource
 	deadLetters DeadLetterProjection
-	sources     sourceartifact.Reader
+	sources     operationalRootedSourceReader
 	sourceMemo  *runOperationalSourceMemo
 }
 
@@ -202,7 +201,7 @@ func requireSQLiteBackend(backend *sqlitebackend.Backend) error {
 	return nil
 }
 
-func NewRunSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, nowFn func() time.Time, pipeline PipelineObligationSource, timers TimerObligationSource, deadLetters DeadLetterProjection, sources sourceartifact.Reader) (*RunSQLite, error) {
+func NewRunSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, nowFn func() time.Time, pipeline PipelineObligationSource, timers TimerObligationSource, deadLetters DeadLetterProjection, sources operationalRootedSourceReader) (*RunSQLite, error) {
 	if err := requireSQLiteBackend(backend); err != nil {
 		return nil, err
 	}

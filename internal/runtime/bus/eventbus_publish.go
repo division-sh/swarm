@@ -2060,6 +2060,11 @@ func (eb *EventBus) admitSourceArtifactFact(ctx context.Context) (context.Contex
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	var rootErr error
+	ctx, rootErr = eb.admitRootedSourceContext(ctx)
+	if rootErr != nil {
+		return ctx, rootErr
+	}
 	eb.mu.RLock()
 	runtimeInstanceID := eb.runtimeInstanceID
 	sourceFact := eb.sourceArtifactFact
@@ -2632,6 +2637,7 @@ func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner workl
 	if fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok {
 		workCtx = runtimecorrelation.WithSourceArtifactFact(workCtx, fact)
 	}
+	workCtx = runtimecorrelation.CarryRootAdmission(workCtx, ctx)
 	if runtimeID, ok := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); ok {
 		workCtx = runtimecorrelation.WithRuntimeInstanceID(workCtx, runtimeID)
 	}
@@ -2695,6 +2701,10 @@ func (eb *EventBus) CheckDirectRoutes(ctx context.Context, evt events.Event, rou
 	if !isValidEventTypeName(string(evt.Type())) {
 		return status, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
+	ctx, err := eb.admitRecipientPreviewContext(ctx)
+	if err != nil {
+		return status, err
+	}
 	if eb.payloadAdmitter != nil {
 		var err error
 		evt, err = eb.admitEventPayload(ctx, evt)
@@ -2756,6 +2766,10 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 	}
 	if !isValidEventTypeName(string(evt.Type())) {
 		return PublishRecipientPlan{}, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
+	}
+	ctx, err := eb.admitRecipientPreviewContext(ctx)
+	if err != nil {
+		return PublishRecipientPlan{}, err
 	}
 	if eb.payloadAdmitter != nil {
 		var err error
@@ -2837,7 +2851,7 @@ func (eb *EventBus) admitEventPayload(ctx context.Context, event events.Event) (
 	} else if flowID == "" {
 		flowID = strings.TrimSpace(event.RoutingSource().Route().FlowID)
 	}
-	admission, err := eb.payloadAdmitter(ctx, event, flowID)
+	admission, err := eb.payloadAdmitter(ctx, event, events.EventPayloadProducer(event, flowID))
 	if err != nil {
 		return event.Clone(), err
 	}

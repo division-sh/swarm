@@ -34,7 +34,7 @@ func TestWorkflowModuleAdmitsProviderBindingsBeforeHandlerMaterialization(t *tes
 		requireProviderBindingsBeforeHandlerMaterialization(t, bundle)
 	})
 	t.Run("retained_artifact", func(t *testing.T) {
-		retained, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(RepoRoot(), bundle.SourceArtifact, runtimecontracts.DefaultPlatformSpecFile(RepoRoot()), runtimecontracts.WorkflowContractLoadOptions{
+		retained, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(RepoRoot(), sourceartifactfixture.CapturedRoot(t, bundle.SourceArtifact), runtimecontracts.DefaultPlatformSpecFile(RepoRoot()), runtimecontracts.WorkflowContractLoadOptions{
 			AdmitPackInventory: packadmission.AdmitInventory,
 		})
 		if err != nil {

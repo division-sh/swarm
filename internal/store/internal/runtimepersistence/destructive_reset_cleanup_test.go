@@ -23,6 +23,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -752,9 +753,14 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 		t.Fatalf("seed preserved predecessor session: %v", err)
 	}
 	captureRunForkTestRevision(t, pg.backend.ConstructionHandle(), runID)
+	rooted, err := pg.LoadRunRootedSource(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	materialized, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
-		SourceRunID: runID,
-		At:          eventID,
+		SourceRunID:   runID,
+		At:            eventID,
+		RootAdmission: rooted.Admission(),
 	})
 	if err != nil {
 		t.Fatalf("materialize dependent fork: %v", err)
@@ -1168,7 +1174,16 @@ type destructiveResetCleanupSeed struct {
 }
 
 var destructiveResetCleanupArtifactA = sourceartifactfixture.Artifact()
-var destructiveResetCleanupArtifactB = sourceartifactfixture.New("agents.yaml", []byte("agents:\n  cleanup_b: {}\n"))
+var destructiveResetCleanupArtifactB = func() *sourceartifact.AdmittedSourceArtifact {
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\n"),
+		"agents.yaml":   []byte("agents:\n  cleanup_b: {}\n"),
+	})
+	if err != nil {
+		panic(err)
+	}
+	return artifact
+}()
 var destructiveResetCleanupBundleHashA = destructiveResetCleanupArtifactA.BundleHash()
 var destructiveResetCleanupBundleHashB = destructiveResetCleanupArtifactB.BundleHash()
 

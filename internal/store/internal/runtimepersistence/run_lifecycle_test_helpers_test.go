@@ -34,14 +34,15 @@ type runLifecycleFixtureMutation interface {
 }
 
 type semanticRunFixture struct {
-	RunID      string
-	State      runtimerunlifecycle.State
-	Origin     runtimerunlifecycle.RunOrigin
-	BundleHash string
-	Artifact   *sourceartifact.AdmittedSourceArtifact
-	StartedAt  time.Time
-	EndedAt    time.Time
-	Failure    *runtimefailures.Envelope
+	RunID         string
+	State         runtimerunlifecycle.State
+	Origin        runtimerunlifecycle.RunOrigin
+	BundleHash    string
+	Artifact      *sourceartifact.AdmittedSourceArtifact
+	RootAdmission sourceartifact.RootAdmission
+	StartedAt     time.Time
+	EndedAt       time.Time
+	Failure       *runtimefailures.Envelope
 }
 
 func semanticScenarioSetupRunOriginForTest() runtimerunlifecycle.RunOrigin {
@@ -92,6 +93,28 @@ func materializeRunFixtureForTest(
 		return err
 	}
 	fixture.BundleHash = source.BundleHash()
+	if captured, present := fixture.Artifact.RootAdmission(); present {
+		if fixture.RootAdmission != (sourceartifact.RootAdmission{}) && !fixture.RootAdmission.Equal(captured) {
+			return errors.New("semantic run fixture has competing rooted inputs")
+		}
+		fixture.RootAdmission = captured
+	}
+	if fixture.RootAdmission == (sourceartifact.RootAdmission{}) {
+		fixture.RootAdmission, _, err = runtimecorrelation.RootAdmissionFromContext(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	if err := fixture.RootAdmission.Validate(); err != nil {
+		return fmt.Errorf("semantic run fixture requires its explicit admitted root: %w", err)
+	}
+	if fixture.RootAdmission.BundleHash() != source.BundleHash() {
+		return errors.New("semantic run fixture root differs from its content fact")
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, fixture.RootAdmission.Reference()); err != nil {
+		return err
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, fixture.RootAdmission)
 	if err := ensureRunFixtureSourceArtifactForTest(ctx, selected, fixture.BundleHash, fixture.Artifact); err != nil {
 		return err
 	}
@@ -225,10 +248,11 @@ func materializeRunFixtureInCurrentMutationForTest(
 		fixture.EndedAt = fixture.StartedAt
 	}
 	if _, err := owner.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
-		RunID:     fixture.RunID,
-		Origin:    fixture.Origin,
-		Source:    source,
-		StartedAt: fixture.StartedAt.UTC(),
+		RunID:         fixture.RunID,
+		Origin:        fixture.Origin,
+		Source:        source,
+		RootAdmission: fixture.RootAdmission,
+		StartedAt:     fixture.StartedAt.UTC(),
 	}); err != nil {
 		return err
 	}
@@ -264,6 +288,22 @@ func requireRunFixtureForTest(
 	fixture semanticRunFixture,
 ) {
 	t.Helper()
+	if fixture.Artifact == nil && fixture.RootAdmission == (sourceartifact.RootAdmission{}) {
+		_, source, err := semanticRunFixtureContext(ctx, fixture.BundleHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if present {
+			fixture.RootAdmission = root
+		} else if source.BundleHash() == sourceartifactfixture.BundleHash {
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			fixture.Artifact, fixture.RootAdmission = rooted.Artifact(), rooted.Admission()
+		}
+	}
 	switch store := selected.(type) {
 	case *PostgresStore:
 		if store.requireCurrentSchema() != nil {

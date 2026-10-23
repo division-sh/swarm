@@ -3,8 +3,8 @@ provider: github
 operation_id: issues/create
 tool_id: github.create_issue
 source_sha256: sha256:a00d391d74dbc940025e6bad601f08014cbdca4ab890606178e42102e436ded9
-profile_sha256: sha256:c7629e728265d18ed8ec186da11213c15617a2951eb5fc3cb4a36b91a72a98ec
-manifest_sha256: sha256:96a5ef923f72d653cce89b6e66112de9c2517f1b278cc37949668467b6ea3f59
+profile_sha256: sha256:5d6510be91b185586bae25bd5e50e6499ea26872ebf71a20a466b99289ed5b2f
+manifest_sha256: sha256:0bb8bb54f2f6e53dfe574665f05bb0dea347c8c05dd3dda3b9aa08154d342135
 fixture_status: passing
 review_status: approved
 input:

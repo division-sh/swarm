@@ -86,7 +86,7 @@ func (o SelectedContractExecutionOwner) ActivateRecoveredSelectedFiniteFeed(ctx 
 	}
 	var owned LoadedSelectedContractSource
 	loaded, err := loadRunForkSelectedContractSource(ctx, admitted.request.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID: operation.SourceRunID, BundleHash: operation.TargetBundleHash,
+		Responsibility: RetainedForkSource(recovered.RunID), BundleHash: operation.TargetBundleHash,
 		SourceArtifactFact: admitted.request.SourceArtifactFact, Selection: selection,
 	}, &owned)
 	defer func() { finalErr = errors.Join(finalErr, cleanupLoadedSelectedContractSource(owned)) }()

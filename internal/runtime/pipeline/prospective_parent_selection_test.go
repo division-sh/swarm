@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -32,6 +33,14 @@ func prospectiveSelectionObservation(t *testing.T) (FlowInstanceLookupRequest, F
 	source, fact := instanceIndexTestSource(t, "text")
 	runID := uuid.NewString()
 	parent, err := flowidentity.StandingForGeneration(source, ".", runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("parent-selection fixture requires its captured bundle")
+	}
+	rooted, err := bundle.RootedSource()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +69,7 @@ func prospectiveSelectionObservation(t *testing.T) (FlowInstanceLookupRequest, F
 		ParentFlowID: parent.TemplateID, ParentFlowInstance: parent.InstancePath, ParentEntityID: parent.EntityID,
 		InstanceKey: "business-key", CurrentState: "open", Revision: 1, CreatedAt: at, UpdatedAt: at,
 	}
-	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), StartedAt: at}
+	run := runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.DeploymentRunOrigin(), BundleHash: fact.BundleHash(), RootReference: rooted.Admission().Reference(), StartedAt: at}
 	receipt := FlowConstructionPublicationEvidence{Identity: child, InstanceKey: instance.InstanceKey, WorkflowVersion: instance.WorkflowVersion, BundleHash: fact.BundleHash()}
 	readiness := DynamicFlowRuntimeReadiness{
 		Plan:            DynamicFlowRuntimeReadinessPlan{Identity: child, RunID: runID, BundleHash: fact.BundleHash(), WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},

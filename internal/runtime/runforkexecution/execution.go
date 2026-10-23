@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type SelectedContractExecutionRequest struct {
@@ -135,6 +136,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
 		OriginalLoopCarriage:  prepared.originalLoopCarriage,
+		OriginalRootAdmission: prepared.originalSource.RootedSource.Admission(),
 		Prepared:              prepared,
 		Operation:             operation,
 		Owner:                 req.Owner,
@@ -185,18 +187,24 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		}
 		return result, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, forkOperation, err)
 	}
-	activation, err := ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-		ForkOperation:         forkOperation,
-		ExecutedEventCount:    len(published),
-		DataPins:              materialization.DataPins,
-		ExecutionSource:       loadedSource.Source,
-		ForkRunID:             materialization.ForkRunID,
-		AllowSourceFreeze:     req.AllowSourceFreeze,
-		AllowedSourceEventIDs: sourceEventIDs,
-		FrontierAdmission:     frontier,
-		RouteTopology:         routeTopology,
-		RecipientPlanning:     *model.RecipientPlanning,
-	})
+	process, err := prepared.agentRuntime.Options.ProcessCapability.Evidence()
+	var activation runfork.RunForkActivation
+	if err == nil {
+		activation, err = ports.fork.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
+			OriginalRootAdmission: prepared.originalSource.RootedSource.Admission(),
+			Process:               process.LeaseStamp(),
+			ForkOperation:         forkOperation,
+			ExecutedEventCount:    len(published),
+			DataPins:              materialization.DataPins,
+			ExecutionSource:       loadedSource.Source,
+			ForkRunID:             materialization.ForkRunID,
+			AllowSourceFreeze:     req.AllowSourceFreeze,
+			AllowedSourceEventIDs: sourceEventIDs,
+			FrontierAdmission:     frontier,
+			RouteTopology:         routeTopology,
+			RecipientPlanning:     *model.RecipientPlanning,
+		})
+	}
 	result.Activation = activation
 	closeErr := container.Close(ctx)
 	err = errors.Join(err, closeErr)
@@ -282,6 +290,7 @@ func (p *PreparedSelectedFork) cleanupExecutionFailure(ctx context.Context, stor
 
 type publishSelectedContractForkEventsRequest struct {
 	OriginalLoopCarriage  semanticview.OriginalLoopCarriage
+	OriginalRootAdmission sourceartifact.RootAdmission
 	Prepared              *PreparedSelectedFork
 	Operation             *selectedContractOperation
 	Owner                 SelectedContractExecutionOwner

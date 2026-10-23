@@ -7,9 +7,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -43,7 +47,7 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, id := range []string{"provider.telegram", "provider.telegram.connector", "provider.telegram.hitl_channel"} {
+			for _, id := range []string{"telegram"} {
 				if changed, err := packartifact.ImportEmbeddedPack(root, id, base); err != nil || !changed {
 					t.Fatalf("import %s: %t %v", id, changed, err)
 				}
@@ -62,14 +66,20 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 				t.Fatal(err)
 			}
 			sourceRun, eventID := uuid.NewString(), uuid.NewString()
-			seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
+			input := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, sourceRun,
+				events.EventEnvelope{}, eventtest.RootRoutingSource(sourceRun), time.Unix(1700002200, 0).UTC(), executionmode.Mock)
+			input, err = eventtest.AdmitPayload(input, ".", "item.received")
+			if err != nil {
+				t.Fatal(err)
+			}
+			seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID, input)
 			if err := os.RemoveAll(root); err != nil {
 				t.Fatal(err)
 			}
 			loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
 			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: loaded.SourceArtifactFact.BundleHash()}
 			for i := 0; i < 2; i++ {
-				retained, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: sourceRun, BundleHash: selection.BundleHash, Selection: selection})
+				retained, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: FreshSelectedSource(selection.BundleHash), BundleHash: selection.BundleHash, Selection: selection})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -86,7 +96,7 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 				}
 				for _, entry := range before.PackInventory.Entries() {
 					other, ok := after.PackInventory.Lookup(entry.ID())
-					if !ok || !bytes.Equal(entry.ManifestBody(), other.ManifestBody()) || !bytes.Equal(entry.EnvelopeBody(), other.EnvelopeBody()) {
+					if !ok || !reflect.DeepEqual(entry.Provider().Members(), other.Provider().Members()) {
 						t.Fatalf("retained pack bytes changed: %s", entry.ID())
 					}
 				}
@@ -94,8 +104,9 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 			}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
-				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-				AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected)},
+				SourceArtifactFact: loaded.SourceArtifactFact,
+				ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+				AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected)},
 			})
 			if err != nil {
 				t.Fatalf("retained selected fork execution: %v", err)

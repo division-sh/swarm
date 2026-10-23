@@ -941,6 +941,17 @@ func (scan *debtAuthorityTypeScan) debtCollectFixtureStoreConstruction(path stri
 			for _, input := range inputs {
 				raw = raw || scan.debtContainsRawSQLType(info.TypeOf(input))
 			}
+			// LEAD 6269781839 admits this one test-support declaration, not
+			// raw-input constructors generally or wrappers around that owner.
+			if raw && strings.HasSuffix(path, "_test.go") {
+				if call, ok := node.(*ast.CallExpr); ok {
+					if name, ok := call.Fun.(*ast.Ident); ok {
+						if constructor, ok := info.Uses[name].(*types.Func); ok && constructor.FullName() == "github.com/division-sh/swarm/internal/store/internal/runtimepersistence.admitTestPostgresStore" && constructor.Parent() == constructor.Pkg().Scope() {
+							return true
+						}
+					}
+				}
+			}
 			if !raw && debtOwnedNativeFixtureConstruction(path, node, info) {
 				return true
 			}

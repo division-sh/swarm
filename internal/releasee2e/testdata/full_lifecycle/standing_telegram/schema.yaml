@@ -1,4 +1,4 @@
-name: telegram-lifecycle
+# fixture: telegram-lifecycle
 connect:
   - event: inbound.telegram.text_message
     from: telegram-ingress

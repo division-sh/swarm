@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/google/uuid"
 )
@@ -101,12 +102,13 @@ func TestNativeWorkflowRevisionConflictRejectsUntypedWrongCodeScopeAndRevision(t
 	}
 }
 
-func VerifyNativeWorkflowMutationTransitionRefusesMissingOrForeignClaimForTest(t *testing.T, open func(*testing.T, string) WorkflowMutationNativeFixtureForTest) {
-	fixture := open(t, testPipelineRunID)
+func VerifyNativeWorkflowMutationTransitionRefusesMissingOrForeignClaimForTest(t *testing.T, open func(*testing.T, string, semanticview.Source) WorkflowMutationNativeFixtureForTest) {
+	source := semanticview.Wrap(lifecycleStateFixtureForTest(t, "mutation-flow", "queued", "done", "workflow.completed"))
+	fixture := open(t, testPipelineRunID, source)
 	entityID := uuid.NewString()
 	seedWorkflowInstanceForMutationTest(t, fixture, entityID)
 	pc := fixture.NewCoordinator(&recordingPipelineBus{}, PipelineCoordinatorOptions{
-		Module: &previewWorkflowModule{bundle: lifecycleStateFixtureForTest(t, "mutation-flow", "queued", "done", "workflow.completed")},
+		Module: staticSemanticWorkflowModule{source: source},
 	})
 	route := testWorkflowInstanceRoute("mutation-flow")
 	ctx, claimed := prepareClaimedWorkflowTransitionForTest(t, fixture, pc, fixture.Context, route, entityID, "queued", "done", "workflow.completed")

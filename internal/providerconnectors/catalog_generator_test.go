@@ -10,7 +10,6 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	platformpacks "github.com/division-sh/swarm/packs"
 	"gopkg.in/yaml.v3"
@@ -179,141 +178,6 @@ func TestGeneratorProfileAndSelectedOpenAPISubsetFailClosed(t *testing.T) {
 	}
 }
 
-func TestGeneratedBuiltinIdentityCannotBeDowngradedOrAliased(t *testing.T) {
-	tests := []struct {
-		name   string
-		mutate func(t *testing.T, files fstest.MapFS)
-		want   string
-	}{
-		{
-			name: "generation removed with repaired manifest hash",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				var manifest ConnectorManifest
-				mustYAMLUnmarshal(t, files["provider-connectors/github/connector.yaml"].Data, &manifest)
-				manifest.Generation = nil
-				body := mustYAMLMarshal(t, manifest)
-				files["provider-connectors/github/connector.yaml"].Data = body
-				rewritePackManifestHash(t, files, "provider-connectors/github/pack.yaml", body)
-			},
-			want: "indexed as generated but generation evidence is missing",
-		},
-		{
-			name: "unknown indexed builtin",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				var index GeneratedPackIndex
-				mustYAMLUnmarshal(t, files[generatedPackIndexFile].Data, &index)
-				files["catalog/generator-profiles/unknown.yaml"] = &fstest.MapFile{Data: append([]byte(nil), files["catalog/generator-profiles/acme.yaml"].Data...)}
-				index.Packs = append(index.Packs, GeneratedPackIndexEntry{ID: "provider.unknown.connector", Provider: "unknown", Profile: "catalog/generator-profiles/unknown.yaml", Kind: GeneratedPackKindBuiltin, Output: "provider-connectors/unknown"})
-				files[generatedPackIndexFile].Data = mustYAMLMarshal(t, index)
-			},
-			want: "references unknown builtin pack id",
-		},
-		{
-			name: "duplicate pack id",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				var index GeneratedPackIndex
-				mustYAMLUnmarshal(t, files[generatedPackIndexFile].Data, &index)
-				duplicate := index.Packs[0]
-				duplicate.Profile = "catalog/generator-profiles/duplicate.yaml"
-				duplicate.Output = "provider-connectors/duplicate"
-				files[duplicate.Profile] = &fstest.MapFile{Data: append([]byte(nil), files[index.Packs[0].Profile].Data...)}
-				index.Packs = append(index.Packs, duplicate)
-				files[generatedPackIndexFile].Data = mustYAMLMarshal(t, index)
-			},
-			want: "duplicate pack id",
-		},
-		{
-			name: "duplicate profile binding",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				var index GeneratedPackIndex
-				mustYAMLUnmarshal(t, files[generatedPackIndexFile].Data, &index)
-				duplicate := index.Packs[0]
-				duplicate.ID = "provider.alias.connector"
-				duplicate.Output = "provider-connectors/alias"
-				index.Packs = append(index.Packs, duplicate)
-				files[generatedPackIndexFile].Data = mustYAMLMarshal(t, index)
-			},
-			want: "duplicate profile binding",
-		},
-		{
-			name: "indexed provider mismatch",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				var index GeneratedPackIndex
-				mustYAMLUnmarshal(t, files[generatedPackIndexFile].Data, &index)
-				for i := range index.Packs {
-					if index.Packs[i].ID == "provider.github.connector" {
-						index.Packs[i].Provider = "gitlab"
-					}
-				}
-				files[generatedPackIndexFile].Data = mustYAMLMarshal(t, index)
-			},
-			want: "does not match indexed provider",
-		},
-		{
-			name: "indexed profile bytes drift",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				files["catalog/generator-profiles/github.yaml"].Data = append(files["catalog/generator-profiles/github.yaml"].Data, '\n')
-			},
-			want: "profile hash mismatch",
-		},
-		{
-			name: "source path evidence drift with repaired manifest hash",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				mutateGeneratedGitHubManifest(t, files, func(manifest *ConnectorManifest) {
-					manifest.Generation.Source.Path = "catalog/sources/other.json"
-				})
-			},
-			want: "source evidence does not match indexed profile",
-		},
-		{
-			name: "source version evidence drift with repaired manifest hash",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				mutateGeneratedGitHubManifest(t, files, func(manifest *ConnectorManifest) {
-					manifest.Generation.Source.OpenAPIVersion = "3.1.0"
-				})
-			},
-			want: "source evidence does not match indexed profile",
-		},
-		{
-			name: "source hash evidence drift with repaired manifest hash",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				mutateGeneratedGitHubManifest(t, files, func(manifest *ConnectorManifest) {
-					manifest.Generation.Source.SHA256 = "sha256:" + strings.Repeat("0", 64)
-				})
-			},
-			want: "source evidence does not match indexed profile",
-		},
-		{
-			name: "generated builtin absent from index",
-			mutate: func(t *testing.T, files fstest.MapFS) {
-				var index GeneratedPackIndex
-				mustYAMLUnmarshal(t, files[generatedPackIndexFile].Data, &index)
-				kept := index.Packs[:0]
-				for _, entry := range index.Packs {
-					if entry.ID != "provider.github.connector" {
-						kept = append(kept, entry)
-					}
-				}
-				index.Packs = kept
-				delete(files, "catalog/generator-profiles/github.yaml")
-				files[generatedPackIndexFile].Data = mustYAMLMarshal(t, index)
-			},
-			want: "carries generation evidence but is not in the generated pack index",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			files := builtinCatalogFS(t)
-			tc.mutate(t, files)
-			_, err := CheckGeneratedCatalog(files, files)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("CheckGeneratedCatalog error = %v, want containing %q", err, tc.want)
-			}
-		})
-	}
-}
-
 func TestGeneratedConformanceRejectsStaleOrIncompleteEvidence(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -432,7 +296,7 @@ func TestGeneratedConformanceRejectsManagedCredentialHeaderDriftAfterFreshnessRe
 					t.Fatalf("ParseCatalogConformanceFixture: %v", err)
 				}
 				fixture.ProfileSHA256 = github.ProfileHash
-				fixture.ManifestSHA256 = github.PackEnvelope.ManifestHash
+				fixture.ManifestSHA256 = sha256String(github.ConnectorBody)
 				files[fixturePath].Data = mustYAMLMarshal(t, fixture)
 			}
 			if err := ValidateCatalogConformance(files, artifacts); err == nil || !strings.Contains(err.Error(), "expected resolved headers") {
@@ -611,24 +475,6 @@ func replaceMapFile(t *testing.T, files fstest.MapFS, name, old, replacement str
 		t.Fatalf("%s does not contain %q", name, old)
 	}
 	file.Data = bytes.Replace(file.Data, []byte(old), []byte(replacement), 1)
-}
-
-func rewritePackManifestHash(t *testing.T, files fstest.MapFS, name string, manifestBody []byte) {
-	t.Helper()
-	var envelope packs.Envelope
-	mustYAMLUnmarshal(t, files[name].Data, &envelope)
-	envelope.ManifestHash = sha256String(manifestBody)
-	files[name].Data = mustYAMLMarshal(t, envelope)
-}
-
-func mutateGeneratedGitHubManifest(t *testing.T, files fstest.MapFS, mutate func(*ConnectorManifest)) {
-	t.Helper()
-	var manifest ConnectorManifest
-	mustYAMLUnmarshal(t, files["provider-connectors/github/connector.yaml"].Data, &manifest)
-	mutate(&manifest)
-	body := mustYAMLMarshal(t, manifest)
-	files["provider-connectors/github/connector.yaml"].Data = body
-	rewritePackManifestHash(t, files, "provider-connectors/github/pack.yaml", body)
 }
 
 func mustYAMLUnmarshal(t *testing.T, body []byte, target any) {

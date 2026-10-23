@@ -15,8 +15,7 @@ import (
 )
 
 func TestServeSessionDiscoveryRetainsDeclarationWithoutAuthority(t *testing.T) {
-	catalog := sessionDiscoveryCatalog(t)
-	plan := packfixture.WhatsAppSessionChannel(t, filepath.Join(repoRootForTest(), defaultPlatformSpecPath), catalog)
+	catalog, plan := sessionDiscoveryProvider(t)
 	for _, flow := range []string{".", "support"} {
 		t.Run(flow, func(t *testing.T) {
 			trigger, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "reception", Provider: "whatsapp"})
@@ -65,17 +64,16 @@ func TestServeSessionBootstrapConstructionDoesNotOpenState(t *testing.T) {
 	}
 }
 
-func sessionDiscoveryCatalog(t *testing.T) *providertriggers.CatalogSnapshot {
+func sessionDiscoveryProvider(t *testing.T) (*providertriggers.CatalogSnapshot, packs.SatisfactionPlan) {
 	t.Helper()
-	manifest, err := providertriggers.ParseManifest([]byte(`provider: whatsapp
-transport: session
+	return packfixture.WhatsAppSessionProvider(t, filepath.Join(repoRootForTest(), defaultPlatformSpecPath), []byte(`transport: session
 ack: {mode: durable_before_dispatch}
 payload_object_required: true
 delivery_id: {json_path: $.provider_message_reference, required: true}
 event_type: {json_path: $.kind, required: true}
-event_name: {literal: inbound.whatsapp}
+event_name: {literal: raw}
 normalized_events:
-  - event: inbound.whatsapp.message
+  - event: message
     when: {equals: {kind: message}}
     author_subject: {type: chat, field: conversation_reference}
     fields:
@@ -96,13 +94,4 @@ normalized_events:
             reference: {type: string, minLength: 1, maxLength: 32}
             address: {type: string, minLength: 5, maxLength: 32}
 `))
-	if err != nil {
-		t.Fatal(err)
-	}
-	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{Manifest: manifest,
-		Identity: providertriggers.PackIdentity{ID: "provider.whatsapp.input", Version: "1.0.0", ManifestHash: packs.ManifestHash(manifest.SourceBytes()), Provenance: "test"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return catalog
 }

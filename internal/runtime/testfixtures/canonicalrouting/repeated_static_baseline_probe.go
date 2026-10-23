@@ -7,7 +7,7 @@ import "testing"
 func CopyRepeatedStaticBaselineProbe(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
-	writeClosedVariantFile(t, root, "schema.yaml", `name: parent-seed-probe
+	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: parent-seed-probe
 stages:
   waiting: {}
   active: {final: true}
@@ -33,7 +33,7 @@ connect:
         fields:
           work_id: payload.work_id
 `)
-	writeClosedVariantFile(t, root, "producer/schema.yaml", `name: producer
+	writeClosedVariantFile(t, root, "producer/schema.yaml", `# fixture: producer
 stages:
   waiting: {}
   active: {final: true}

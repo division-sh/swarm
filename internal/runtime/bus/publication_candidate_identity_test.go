@@ -101,8 +101,10 @@ func TestPublicationDiagnosticDoesNotInventReceiverLocalIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("schema.yaml", "name: publication-diagnostic\n")
-	write("validation/schema.yaml", "name: validation\ninstance: review_id\nstages:\n  active: {}\n")
+	write("manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	write("schema.yaml", "stages: []\n")
+	write("validation/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	write("validation/schema.yaml", "instance: review_id\nstages:\n  active: {}\n")
 	write("validation/entities.yaml", "review:\n  review_id: text\n")
 	write("validation/events.yaml", "thing.reviewed:\n  review_id: text\n")
 	write("validation/nodes.yaml", `entity-writer:

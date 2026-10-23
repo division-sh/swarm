@@ -1,4 +1,4 @@
-name: telegram-chat
+# fixture: telegram-chat
 imports:
   provider_trigger_events:
     - provider: telegram

@@ -97,7 +97,7 @@ func requireSelectedStopTx(ctx context.Context, tx *sql.Tx, req runcontrol.Selec
 		binding.SourceRunID != req.Binding.SourceRunID ||
 		binding.ForkPoint.Kind != req.Binding.ForkPoint.Kind || binding.ForkPoint.Revision != req.Binding.ForkPoint.Revision ||
 		binding.ForkPoint.EventID != req.Binding.ForkPoint.EventID ||
-		binding.ContractSelection != req.Binding.ContractSelection || !binding.CreatedAt.Equal(req.Binding.CreatedAt) {
+		binding.ContractSelection != req.Binding.ContractSelection || binding.TargetRootReference != req.Binding.TargetRootReference || !binding.CreatedAt.Equal(req.Binding.CreatedAt) {
 		return fmt.Errorf("selected stop binding changed")
 	}
 	// Claim and terminalization both lock the run. No execution can enter running

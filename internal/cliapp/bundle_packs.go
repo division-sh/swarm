@@ -36,7 +36,7 @@ func LoadBundlePackRuntime(ctx context.Context, cfgResult RuntimeConfigLoadResul
 		Catalog: projection.ProviderTriggers, Loaded: projection.LoadedProviderPacks, Inventory: bundle.PackInventory,
 	}
 	channels := ChannelPackLoad{
-		Loaded: projection.LoadedChannelPacks, Plans: projection.ChannelPlans, Bindings: bindings,
+		Plans: projection.ChannelPlans, Bindings: bindings,
 		credentialSources: sources,
 	}
 	return BundlePackRuntimeLoad{ProviderTriggers: triggers, Connectors: projection.ProviderConnectors, Channels: channels}, nil

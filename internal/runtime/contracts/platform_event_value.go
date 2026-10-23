@@ -8,7 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-func admitPlatformEventCatalogValue(value yamlsource.Value) (map[string]EventCatalogEntry, error) {
+func admitPlatformEventCatalogValue(value, root yamlsource.Value) (map[string]EventCatalogEntry, error) {
 	f, err := platformValueFields(value)
 	if err != nil {
 		return nil, err
@@ -36,6 +36,10 @@ func admitPlatformEventCatalogValue(value yamlsource.Value) (map[string]EventCat
 		}
 		if _, duplicate := out[key]; duplicate {
 			return nil, nodeValueError(v, fmt.Errorf("duplicate normalized platform event %s", key))
+		}
+		entry.platformAuthority, err = admitPlatformEventAuthority(root, members, key)
+		if err != nil {
+			return nil, nodeValueError(v, err)
 		}
 		out[key] = entry
 	}

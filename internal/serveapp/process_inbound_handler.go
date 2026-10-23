@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
@@ -23,7 +22,7 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 		http.Error(w, "expected /webhooks/{alias}/{provider}", http.StatusBadRequest)
 		return
 	}
-	use, lookup, acquireErr := h.contexts.AcquireIngress(r.Context(), alias, providertriggers.NormalizeProviderName(provider))
+	use, lookup, acquireErr := h.contexts.AcquireIngress(r.Context(), alias, provider)
 	if use != nil {
 		defer func() { _ = use.Done() }()
 	}
@@ -115,7 +114,7 @@ func sameRuntimeRegistrationTarget(registration runtimepublicingress.Registratio
 		strings.TrimSpace(registration.ServiceID) == strings.TrimSpace(target.ServiceID) &&
 		strings.TrimSpace(registration.FlowPath) == strings.TrimSpace(target.FlowPath) &&
 		registration.Alias == target.Alias &&
-		strings.TrimSpace(registration.Provider) == strings.TrimSpace(target.Provider) &&
+		registration.Provider == target.Provider &&
 		registration.Generation == target.Generation &&
 		registration.PublicationSequence == target.PublicationSequence &&
 		registration.AdmissionPlanGeneration.Equal(target.AdmissionPlan.Generation()) &&
@@ -128,6 +127,6 @@ func parseProcessWebhookPath(path string) (string, string, bool) {
 		return "", "", false
 	}
 	alias := parts[1]
-	provider := strings.TrimSpace(parts[2])
+	provider := parts[2]
 	return alias, provider, alias != "" && provider != ""
 }

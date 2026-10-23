@@ -37,7 +37,7 @@ func projectSchemaConnectValue(value yamlsource.Value) ([]FlowConnect, error) {
 			return nil, err
 		}
 		if !eventidentity.IsValidName(row.Event) || row.Rename != "" && !eventidentity.IsValidName(row.Rename) {
-			return nil, nodeValueError(item, fmt.Errorf("connect event/rename must be an exact canonical event identity"))
+			return nil, nodeValueError(item, eventNameAdmissionError(fmt.Errorf("connect event/rename must be an exact canonical event identity"), row.Event, row.Rename))
 		}
 		if row.Rename != "" && eventidentity.Normalize(row.Rename) == eventidentity.Normalize(row.Event) {
 			return nil, nodeValueError(item, fmt.Errorf("connect.rename is redundant with event"))
@@ -90,7 +90,7 @@ func validateAuthoredConnectReply(row FlowConnect) error {
 		return nil
 	}
 	if !eventidentity.IsValidName(row.RepliesTo) || strings.ContainsAny(row.RepliesTo, "/*") {
-		return fmt.Errorf("connect.replies_to must be an exact local event identity")
+		return eventNameAdmissionError(fmt.Errorf("connect.replies_to must be an exact local event identity"), row.RepliesTo)
 	}
 	if row.Resolution != FlowInputResolutionModeNone || row.KeyFrom != "" {
 		return fmt.Errorf("connect.replies_to cannot declare resolution or key_from")
@@ -103,48 +103,6 @@ func validateAuthoredConnectReply(row FlowConnect) error {
 
 func ordinaryInstanceResolution(mode FlowInputResolutionMode) bool {
 	return mode == FlowInputResolutionModeCreate || mode == FlowInputResolutionModeSelect || mode == FlowInputResolutionModeSelectOrCreate
-}
-
-func projectSchemaImportsValue(value yamlsource.Value) (FlowSchemaImports, error) {
-	fields, err := schemaValueFields(value, "imports", map[string]struct{}{"connector_packs": {}, "provider_trigger_events": {}}, true)
-	var out FlowSchemaImports
-	if err != nil {
-		return out, err
-	}
-	for _, family := range sortedContractKeys(fields) {
-		items, err := schemaValueSequence(fields[family], true)
-		if err != nil {
-			return out, err
-		}
-		for _, item := range items {
-			key := "tool"
-			if family == "provider_trigger_events" {
-				key = "event"
-			}
-			row, err := schemaValueFields(item, family+" import", map[string]struct{}{"provider": {}, key: {}}, true)
-			if err != nil {
-				return out, err
-			}
-			var provider, name string
-			if err := schemaValueRequiredTexts(item, row, map[string]*string{"provider": &provider, key: &name}); err != nil {
-				return out, err
-			}
-			if family == "connector_packs" {
-				entry := ConnectorPackImport{Provider: provider, Tool: name}
-				if normalized := entry.normalized(); normalized != entry {
-					return out, nodeValueError(item, fmt.Errorf("connector import must use exact canonical tokens"))
-				}
-				out.ConnectorPacks = append(out.ConnectorPacks, entry)
-			} else {
-				entry := ProviderTriggerEventImport{Provider: provider, Event: name}
-				if normalized := entry.normalized(); normalized != entry {
-					return out, nodeValueError(item, fmt.Errorf("provider trigger import must use exact canonical tokens"))
-				}
-				out.ProviderTriggerEvents = append(out.ProviderTriggerEvents, entry)
-			}
-		}
-	}
-	return out, nil
 }
 
 func projectSchemaPinsValue(value yamlsource.Value) (FlowPins, error) {
@@ -192,7 +150,7 @@ func projectSchemaPinValue(value yamlsource.Value, direction string) (FlowInputE
 		return input, output, nodeValueError(value, err)
 	}
 	if !eventidentity.IsValidName(event) || strings.ContainsAny(event, "/*") {
-		return input, output, nodeValueError(value, fmt.Errorf("pin event %q must be an exact local canonical event identity", event))
+		return input, output, nodeValueError(value, eventNameAdmissionError(fmt.Errorf("pin event %q must be an exact local canonical event identity", event), event))
 	}
 	input.Event, output.Event = event, event
 	if direction == "inputs" {

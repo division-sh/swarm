@@ -17,6 +17,9 @@ func retainedLocationFixture(t testing.TB, name, body string) *WorkflowContractB
 	if err := os.WriteFile(file, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	artifact, err := sourceartifact.AdmitDirectory(root)
 	if err != nil {
 		t.Fatal(err)

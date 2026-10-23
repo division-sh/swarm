@@ -36,6 +36,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
@@ -572,11 +573,10 @@ func TestCompiledResultProjectionHasNoConversionSeam(t *testing.T) {
 	}
 }
 
-func VerifyChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStoresForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+func VerifyChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStoresForTest(t *testing.T, open func(*testing.T, string, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
 	for _, tc := range activityBoringStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := open(t, tc.name)
-			ctx := fixture.Context
+
 			runID := uuid.NewString()
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -586,12 +586,15 @@ func VerifyChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStoresF
 			}))
 			defer server.Close()
 
+			fixture := open(t, tc.name, map[string]runtimecontracts.ToolSchemaEntry{
+				"channel.ops.deliver": testCompiledChannelActivityTool(server.URL),
+			})
+			source := fixture.Source
+			ctx := fixture.Context
 			if err := fixture.RequireRun(ctx, runID); err != nil {
 				t.Fatal(err)
 			}
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
-				"channel.ops.deliver": testCompiledChannelActivityTool(server.URL),
-			}})
+
 			bus := &recordingPipelineBus{}
 			pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}})
 			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
@@ -667,11 +670,10 @@ func VerifyChannelProjectedActivityResultJournalsAndReplaysAcrossSelectedStoresF
 	}
 }
 
-func VerifyChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossSelectedStoresForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+func VerifyChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcrossSelectedStoresForTest(t *testing.T, open func(*testing.T, string, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
 	for _, tc := range activityBoringStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := open(t, tc.name)
-			ctx := fixture.Context
+
 			runID := uuid.NewString()
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -679,13 +681,17 @@ func VerifyChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcros
 				_, _ = io.WriteString(w, `{"ok":true,"result":{"message_id":42}}`)
 			}))
 			defer server.Close()
+
+			fixture := open(t, tc.name, map[string]runtimecontracts.ToolSchemaEntry{
+				"channel.ops.deliver": testCompiledChannelActivityTool(server.URL),
+			})
+			source := fixture.Source
+			ctx := fixture.Context
 			store := fixture.Persistence.store
 			if err := fixture.RequireRun(ctx, runID); err != nil {
 				t.Fatal(err)
 			}
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
-				"channel.ops.deliver": testCompiledChannelActivityTool(server.URL),
-			}})
+
 			bus := &recordingPipelineBus{}
 			pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}})
 			intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
@@ -818,7 +824,7 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 	}))
 	defer server.Close()
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := activityToolFixtureSource(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 				"title": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
@@ -892,7 +898,7 @@ func TestPipelineActivityRequestDoesNotRetryHTTPFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := activityToolFixtureSource(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
 				Method: "GET",
@@ -952,7 +958,7 @@ func TestPipelineActivityRequestRefusesRetiredPolicyBeforeDispatch(t *testing.T)
 	}))
 	defer server.Close()
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := activityToolFixtureSource(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
 				Method: "POST",
@@ -989,9 +995,7 @@ func TestPipelineActivityRequestRefusesRetiredPolicyBeforeDispatch(t *testing.T)
 	}
 }
 
-func VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCredentialsForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
-	fixture := open(t)
-	ctx := fixture.Context
+func VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCredentialsForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest) {
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1004,8 +1008,24 @@ func VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCre
 		_ = json.NewEncoder(w).Encode(map[string]any{"echoed_authorization": r.Header.Get("Authorization")})
 	}))
 	defer server.Close()
-	credentialStore := testActivityCredentialStore(t, "provider_token", "provider-secret")
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL, Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"}, Body: map[string]any{"url": "{{input.url}}"}}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...))}})
+	credentialStore := testActivityCredentialStore(t, "provider.token", "provider-secret")
+	source := semanticview.Wrap(loadWorkflowTempBundle(t, map[string]string{
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":            "stages: []\n",
+		"research/manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"research/schema.yaml":   "stages: []\n",
+		"tools.yaml": fmt.Sprintf(`provider_write:
+  handler_type: http
+  credentials: [provider.token]
+  http:
+    method: POST
+    url: %q
+    headers: {Authorization: 'Bearer {{credentials.provider.token}}'}
+    body: {url: '{{input.url}}'}
+`, server.URL),
+	}))
+	fixture := open(t, source)
+	ctx := fixture.Context
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {
@@ -1060,7 +1080,7 @@ func VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCre
 	}
 }
 
-func VerifyPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournalForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+func VerifyPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournalForTest(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		t.Run(method, func(t *testing.T) {
 			verifyMockHTTPActivityJournal(t, open, method)
@@ -1068,9 +1088,7 @@ func VerifyPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedRes
 	}
 }
 
-func verifyMockHTTPActivityJournal(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest, method string) {
-	fixture := open(t)
-	ctx := fixture.Context
+func verifyMockHTTPActivityJournal(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest, method string) {
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
 	var calls atomic.Int32
@@ -1095,9 +1113,12 @@ func verifyMockHTTPActivityJournal(t *testing.T, open func(*testing.T) WorkflowA
 	}), runtimecontracts.ToolSchemaRequired("ok"))
 	tool, _ = tool.WithSchemas(tool.InputSchema(), output)
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+	fixture := open(t, map[string]runtimecontracts.ToolSchemaEntry{
 		"telegram.send_message": tool,
-	}})
+	})
+	source := fixture.Source
+	ctx := fixture.Context
+
 	plan, err := providerconnectors.CompileMockResponsePlan(source)
 	if err != nil {
 		t.Fatalf("CompileMockResponsePlan: %v", err)
@@ -1153,15 +1174,12 @@ func verifyMockHTTPActivityJournal(t *testing.T, open func(*testing.T) WorkflowA
 	}
 }
 
-func VerifyPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponsePlanForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+func VerifyPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentResponsePlanForTest(t *testing.T, open func(*testing.T, string, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			fixture := open(t, backend)
-			ctx := fixture.Context
+
 			runID := uuid.NewString()
-			if err := fixture.RequireRun(ctx, runID); err != nil {
-				t.Fatal(err)
-			}
+
 			var httpCalls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				httpCalls.Add(1)
@@ -1171,9 +1189,15 @@ func VerifyPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentRespons
 			output := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"ok": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("boolean"))}), runtimecontracts.ToolSchemaRequired("ok"))
 			tool, _ = tool.WithSchemas(tool.InputSchema(), output)
 
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+			fixture := open(t, backend, map[string]runtimecontracts.ToolSchemaEntry{
 				"telegram.send_message": tool,
-			}})
+			})
+			source := fixture.Source
+			ctx := fixture.Context
+			if err := fixture.RequireRun(ctx, runID); err != nil {
+				t.Fatal(err)
+			}
+
 			plan, err := providerconnectors.NewMockResponsePlan(map[string]map[string]any{
 				"telegram.send_message": {"ok": true},
 			})
@@ -1218,11 +1242,10 @@ func VerifyPipelineActivityRequestMockTerminalReplayDoesNotRequireCurrentRespons
 	}
 }
 
-func VerifyPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTTPForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+func VerifyPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndHTTPForTest(t *testing.T, open func(*testing.T, string, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			fixture := open(t, backend)
-			ctx := fixture.Context
+
 			for _, tc := range []struct {
 				name      string
 				tool      runtimecontracts.ToolSchemaEntry
@@ -1235,9 +1258,7 @@ func VerifyPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndH
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					runID := uuid.NewString()
-					if err := fixture.RequireRun(ctx, runID); err != nil {
-						t.Fatal(err)
-					}
+
 					tool, err := tc.tool.WithStaticCredentials("must_not_read")
 					if err != nil {
 						t.Fatalf("derive credential-bearing tool: %v", err)
@@ -1246,7 +1267,13 @@ func VerifyPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndH
 					if err != nil {
 						t.Fatalf("NewMockResponsePlan: %v", err)
 					}
-					source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"telegram.send_message": tool}})
+					fixture := open(t, backend, map[string]runtimecontracts.ToolSchemaEntry{"telegram.send_message": tool})
+					source := fixture.Source
+					ctx := fixture.Context
+					if err := fixture.RequireRun(ctx, runID); err != nil {
+						t.Fatal(err)
+					}
+
 					bus := &recordingPipelineBus{}
 					credentialStore := &countingActivityCredentialStore{}
 					pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{
@@ -1278,13 +1305,10 @@ func VerifyPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndH
 	}
 }
 
-func VerifyMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTPForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
-	fixture := open(t)
-	ctx := fixture.Context
+func VerifyMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTPForTest(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
+
 	runID := uuid.NewString()
-	if err := fixture.RequireRun(ctx, runID); err != nil {
-		t.Fatal(err)
-	}
+
 	var httpCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		httpCalls.Add(1)
@@ -1294,9 +1318,15 @@ func VerifyMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTPForT
 	if err != nil {
 		t.Fatalf("derive credential-bearing tool: %v", err)
 	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
+	fixture := open(t, map[string]runtimecontracts.ToolSchemaEntry{
 		"telegram.send_message": tool,
-	}})
+	})
+	source := fixture.Source
+	ctx := fixture.Context
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+
 	credentials := &countingActivityCredentialStore{}
 	pc := fixture.NewCoordinator(&recordingPipelineBus{}, PipelineCoordinatorOptions{
 		ExecutionPosture: executionposture.MockOnly,
@@ -1319,9 +1349,8 @@ func VerifyMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTPForT
 	}
 }
 
-func VerifyGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplayForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
-	fixture := open(t)
-	ctx := fixture.Context
+func VerifyGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplayForTest(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
+
 	artifacts, err := providerconnectors.GenerateCatalog(os.DirFS("../../providerconnectors"))
 	if err != nil {
 		t.Fatalf("GenerateCatalog: %v", err)
@@ -1366,7 +1395,10 @@ func VerifyGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplayForTes
 	if err != nil {
 		t.Fatalf("replace generated connector HTTP endpoint: %v", err)
 	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"acme.create_widget": tool}})
+	fixture := open(t, map[string]runtimecontracts.ToolSchemaEntry{"acme.create_widget": tool})
+	source := fixture.Source
+	ctx := fixture.Context
+
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1401,24 +1433,20 @@ func VerifyGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplayForTes
 	}
 }
 
-func VerifyPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDeliveryForTest(t *testing.T, open func(*testing.T, string) WorkflowActivityNativeFixtureForTest) {
+func VerifyPipelineActivityRequestTelegramConnectorRoundTripThroughInboundDeliveryForTest(t *testing.T, open func(*testing.T, string, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			runTelegramConnectorRoundTripThroughInboundDelivery(t, open(t, backend))
+			runTelegramConnectorRoundTripThroughInboundDelivery(t, func(t *testing.T, tools map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest {
+				return open(t, backend, tools)
+			})
 		})
 	}
 }
 
-func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, fixture WorkflowActivityNativeFixtureForTest) {
+func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
 	t.Helper()
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(fixture.Context, runID)
-	if err := fixture.RequireRun(ctx, runID); err != nil {
-		t.Fatal(err)
-	}
-	store := fixture.Persistence.store
-
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -1456,11 +1484,15 @@ func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, fixture W
 	delivery, inboundEvent := acceptedTelegramInboundDeliveryEvent(t, entityID, runID)
 	chatID, incomingText := telegramInboundChatAndText(t, delivery.Events[0].Payload)
 	credentialStore := testActivityCredentialStore(t, "telegram_bot_token", "provider-secret")
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"telegram.send_message": testTelegramConnectorTool(server.URL),
-		},
+	fixture := open(t, map[string]runtimecontracts.ToolSchemaEntry{
+		"telegram.send_message": testTelegramConnectorTool(server.URL),
 	})
+	source := fixture.Source
+	ctx := runtimecorrelation.WithRunID(fixture.Context, runID)
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+	store := fixture.Persistence.store
 	bus := &recordingPipelineBus{}
 	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source}, Credentials: credentialStore,
@@ -1529,9 +1561,8 @@ func runTelegramConnectorRoundTripThroughInboundDelivery(t *testing.T, fixture W
 	}
 }
 
-func VerifyPipelineActivityRequestNonIdempotentFailureDoesNotRetryForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
-	fixture := open(t)
-	ctx := fixture.Context
+func VerifyPipelineActivityRequestNonIdempotentFailureDoesNotRetryForTest(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
+
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1541,7 +1572,10 @@ func VerifyPipelineActivityRequestNonIdempotentFailureDoesNotRetryForTest(t *tes
 		http.Error(w, "temporary", http.StatusInternalServerError)
 	}))
 	defer server.Close()
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))}})
+	fixture := open(t, map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))})
+	source := fixture.Source
+	ctx := fixture.Context
+
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {
@@ -1571,14 +1605,16 @@ func VerifyPipelineActivityRequestNonIdempotentFailureDoesNotRetryForTest(t *tes
 	}
 }
 
-func VerifyPipelineActivityRequestNonIdempotentTransportErrorMarksUncertainForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
-	fixture := open(t)
-	ctx := fixture.Context
+func VerifyPipelineActivityRequestNonIdempotentTransportErrorMarksUncertainForTest(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
+
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
 	var calls int
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.test/write"}))}})
+	fixture := open(t, map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.test/write"}))})
+	source := fixture.Source
+	ctx := fixture.Context
+
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {
@@ -1627,9 +1663,8 @@ func VerifyPipelineActivityRequestNonIdempotentTransportErrorMarksUncertainForTe
 	}
 }
 
-func VerifyPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTerminalizingForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
-	fixture := open(t)
-	ctx := fixture.Context
+func VerifyPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutTerminalizingForTest(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
+
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1639,7 +1674,10 @@ func VerifyPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutT
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
 	defer server.Close()
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))}})
+	fixture := open(t, map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))})
+	source := fixture.Source
+	ctx := fixture.Context
+
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {
@@ -1674,24 +1712,27 @@ func VerifyPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutT
 	}
 }
 
-func VerifyLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatchForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
-	fixture := open(t)
+func VerifyLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatchForTest(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
+
 	runID := uuid.NewString()
-	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(fixture.Context, runID), executionmode.Live)
-	if err := fixture.RequireRun(ctx, runID); err != nil {
-		t.Fatal(err)
-	}
-	store := fixture.Persistence.store
-	activation, flowInstance, entityID := seedNativeLoopActivityInstance(t, fixture, ctx, "review")
+
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
 	defer server.Close()
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
-		"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL})),
-	}})
+	fixture := open(t, map[string]runtimecontracts.ToolSchemaEntry{
+		"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL})),
+	})
+	source := fixture.Source
+	ctx := runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(fixture.Context, runID), executionmode.Live)
+	if err := fixture.RequireRun(ctx, runID); err != nil {
+		t.Fatal(err)
+	}
+	store := fixture.Persistence.store
+	activation, flowInstance, entityID := seedNativeLoopActivityInstance(t, fixture, ctx, "review")
+
 	bus := &recordingPipelineBus{}
 	intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), entityID)
 	intent.FlowInstance = flowInstance
@@ -1719,9 +1760,8 @@ func VerifyLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatchFor
 	}
 }
 
-func VerifyPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResultForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
-	fixture := open(t)
-	ctx := fixture.Context
+func VerifyPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalResultForTest(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
+
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1743,7 +1783,10 @@ func VerifyPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalRe
 	}))
 	defer server.Close()
 	defer release()
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))}})
+	fixture := open(t, map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))})
+	source := fixture.Source
+	ctx := fixture.Context
+
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {
@@ -1796,9 +1839,8 @@ func VerifyPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalRe
 	}
 }
 
-func VerifyPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatchForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
-	fixture := open(t)
-	ctx := fixture.Context
+func VerifyPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatchForTest(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
+
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1808,7 +1850,10 @@ func VerifyPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
 	defer server.Close()
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL, Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"}}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...))}})
+	fixture := open(t, map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL, Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"}}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...))})
+	source := fixture.Source
+	ctx := fixture.Context
+
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {
@@ -1841,9 +1886,8 @@ func VerifyPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch
 	}
 }
 
-func VerifyPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBeforeDispatchForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
-	fixture := open(t)
-	ctx := fixture.Context
+func VerifyPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBeforeDispatchForTest(t *testing.T, open func(*testing.T, map[string]runtimecontracts.ToolSchemaEntry) WorkflowActivityNativeFixtureForTest) {
+
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1853,7 +1897,10 @@ func VerifyPipelineActivityRequestTelegramConnectorMissingTokenFailsAfterClaimBe
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
 	defer server.Close()
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"telegram.send_message": testTelegramConnectorTool(server.URL)}})
+	fixture := open(t, map[string]runtimecontracts.ToolSchemaEntry{"telegram.send_message": testTelegramConnectorTool(server.URL)})
+	source := fixture.Source
+	ctx := fixture.Context
+
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {
@@ -1935,6 +1982,15 @@ func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
 		ExecutionMode: executionmode.Live,
 		RoutingSource: routingSource,
 	}.Normalized()
+}
+
+// Direct dispatcher component tests declare the exact research scope used by
+// testActivityIntent. This does not mint a rooted source or native authority.
+func activityToolFixtureSource(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
+	root := &runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Tools: bundle.Tools}
+	root.Children = []runtimecontracts.FlowContractView{{Path: "research", Paths: runtimecontracts.FlowContractPaths{FlowPath: "research"}}}
+	bundle.FlowTree = runtimecontracts.FlowTree{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root, "research": &root.Children[0]}}
+	return semanticviewtest.WrapRootAgents(bundle)
 }
 
 func mustActivityInput(input map[string]any) semanticvalue.Value {
@@ -2026,8 +2082,8 @@ func acceptedTelegramInboundDeliveryEvent(t *testing.T, entityID, runID string) 
 	if err != nil {
 		t.Fatalf("Accept Telegram inbound delivery: %v", err)
 	}
-	if delivery.Events[0].Name != "inbound.telegram" || delivery.ProviderEventID != "123456789" {
-		t.Fatalf("delivery = %+v, want inbound.telegram update", delivery)
+	if delivery.Events[0].Name != "inbound.telegram.raw" || delivery.ProviderEventID != "123456789" {
+		t.Fatalf("delivery = %+v, want inbound.telegram.raw update", delivery)
 	}
 	raw, err := json.Marshal(delivery.Events[0].Payload)
 	if err != nil {

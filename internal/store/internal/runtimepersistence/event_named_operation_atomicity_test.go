@@ -20,6 +20,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -269,6 +270,9 @@ func TestSQLiteCommitSelectedForkEventSerializesWithClaimAbandonment(t *testing.
 func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, persistSource bool) runtimebus.CommitSelectedForkEventRequest {
 	t.Helper()
 	store := fixture.store.(eventRecordContractStore)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	createdAt := time.Date(2026, 7, 18, 19, 0, 0, 0, time.UTC)
 	sourceRunID := uuid.NewString()
 	sourceEventID := uuid.NewString()
@@ -289,18 +293,18 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 		if fixture.dialect == authoractivityfixture.DialectSQLite {
 			if _, err := fixture.db.ExecContext(ctx, `
 				INSERT INTO run_fork_selected_contract_bindings (
-					binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at
-				) VALUES (?,?,?,'event',1,?,'selected_contracts',?)`,
-				bindingID, forkRunID, sourceRunID, sourceEventID, createdAt,
+					binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,target_bundle_hash,source_root_directory,created_at
+				) VALUES (?,?,?,'event',1,?,'selected_contracts',?,?,?)`,
+				bindingID, forkRunID, sourceRunID, sourceEventID, rooted.Admission().BundleHash(), rooted.Admission().RootDirectory(), createdAt,
 			); err != nil {
 				t.Fatalf("seed selected-contract binding: %v", err)
 			}
 		} else {
 			if _, err := fixture.db.ExecContext(ctx, `
 				INSERT INTO run_fork_selected_contract_bindings (
-					binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,created_at
-				) VALUES ($1::uuid,$2::uuid,$3::uuid,'event',1,$4::uuid,'selected_contracts',$5)`,
-				bindingID, forkRunID, sourceRunID, sourceEventID, createdAt,
+					binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id,mode,target_bundle_hash,source_root_directory,created_at
+				) VALUES ($1::uuid,$2::uuid,$3::uuid,'event',1,$4::uuid,'selected_contracts',$5,$6,$7)`,
+				bindingID, forkRunID, sourceRunID, sourceEventID, rooted.Admission().BundleHash(), rooted.Admission().RootDirectory(), createdAt,
 			); err != nil {
 				t.Fatalf("seed selected-contract binding: %v", err)
 			}

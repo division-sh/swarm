@@ -62,11 +62,13 @@ func CopyFiniteInitiation(t testing.TB, finite bool) string {
 		stages, target = "stages: {waiting: {}, done: {final: true}}\n", "done"
 	}
 	return copyFiniteSource(t, map[string]string{
-		"schema.yaml":           "name: initiation\n" + stages + "pins:\n  inputs: [scan.requested]\n  outputs: [scan.requested]\nconnect:\n  - {event: scan.requested, from: ., to: discovery}\n",
-		"events.yaml":           "scan.requested:\n  topic: text\n",
-		"nodes.yaml":            "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: " + target + "\n",
-		"discovery/schema.yaml": "name: discovery\n" + stages + "pins:\n  inputs: [scan.requested]\n",
-		"discovery/nodes.yaml":  "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: " + target + "\n",
+		"discovery/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":             "# fixture: initiation\n" + stages + "pins:\n  inputs: [scan.requested]\n  outputs: [scan.requested]\nconnect:\n  - {event: scan.requested, from: ., to: discovery}\n",
+		"events.yaml":             "scan.requested:\n  topic: text\n",
+		"nodes.yaml":              "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: " + target + "\n",
+		"discovery/schema.yaml":   "# fixture: discovery\n" + stages + "pins:\n  inputs: [scan.requested]\n",
+		"discovery/nodes.yaml":    "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: " + target + "\n",
 	})
 }
 
@@ -75,7 +77,10 @@ func CopyDeploymentRunStart(t testing.TB) string {
 	// Only data-created templates receive work; an empty feed constructs the
 	// ended root, not an eager worker that would strand completion.
 	return copyFiniteSource(t, map[string]string{
-		"schema.yaml":             "name: deployment\nstages: {done: {final: true}}\npins:\n  inputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n  - {event: score.observed, from: ., to: scores, resolution: create}\n",
+		"scores/manifest.yaml":    "version: 1.0.0\nplatform_version: '*'\n",
+		"discovery/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":           "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":             "# fixture: deployment\nstages: {done: {final: true}}\npins:\n  inputs: [scan.requested, score.observed]\n  outputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n  - {event: score.observed, from: ., to: scores, resolution: create}\n",
 		"events.yaml":             "scan.requested:\n  topic: text\nscore.observed:\n  key: label\n  label: text\nportfolio.opened:\n  topic: text\n",
 		"discovery/schema.yaml":   "instance: topic\nstages: {ready: {}, done: {final: true}}\npins:\n  inputs: [scan.requested]\n",
 		"discovery/entities.yaml": "Scan:\n  topic: text\n",
@@ -89,7 +94,7 @@ func CopyDeploymentRunStart(t testing.TB) string {
 func CopyPublicCompletionInitiation(t testing.TB) string {
 	t.Helper()
 	root := CopyPublicCompletionFeedOnly(t)
-	writeClosedVariantFile(t, root, "schema.yaml", "name: deployment\nstages: {ready: {}, done: {final: true}}\npins:\n  inputs: [scan.requested, score.observed]\n  outputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n  - {event: score.observed, from: ., to: scores, resolution: create}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: deployment\nstages: {ready: {}, done: {final: true}}\npins:\n  inputs: [scan.requested, score.observed]\n  outputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n  - {event: score.observed, from: ., to: scores, resolution: create}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "scanner:\n  execution_type: system_node\n  event_handlers:\n    scan.requested:\n      advances_to: done\n")
 	return root
 }
@@ -113,7 +118,7 @@ func CopyPublicCompletionFeedOnlyActivation(t testing.TB) string {
 func CopyPublicCompletionReplacement(t testing.TB) string {
 	t.Helper()
 	root := CopyPublicCompletionFeedOnly(t)
-	writeClosedVariantFile(t, root, "schema.yaml", "name: replacement\nstages: {done: {final: true}}\npins:\n  inputs: [scan.requested, score.observed]\n  outputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n  - {event: score.observed, from: ., to: scores, resolution: create}\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "# fixture: replacement\nstages: {done: {final: true}}\npins:\n  inputs: [scan.requested, score.observed]\n  outputs: [scan.requested, score.observed]\nconnect:\n  - {event: scan.requested, from: ., to: discovery, resolution: create}\n  - {event: score.observed, from: ., to: scores, resolution: create}\n")
 	return root
 }
 
@@ -124,22 +129,28 @@ func CopyFiniteEagerClosure(t testing.TB, childFinal bool) string {
 		child = "stages: {waiting: {}, done: {final: true}}\n"
 	}
 	return copyFiniteSource(t, map[string]string{
-		"schema.yaml":          "stages: {waiting: {}, done: {final: true}}\n",
-		"unrouted/schema.yaml": child,
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"unrouted/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":            "stages: {waiting: {}, done: {final: true}}\n",
+		"unrouted/schema.yaml":   child,
 	})
 }
 
 func CopyFiniteStatelessContainer(t testing.TB) string {
 	t.Helper()
 	return copyFiniteSource(t, map[string]string{
-		"schema.yaml":      "name: container\n",
-		"leaf/schema.yaml": "stages: {done: {final: true}}\n",
+		"leaf/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":        "stages: []\n# fixture: container\n",
+		"leaf/schema.yaml":   "stages: {done: {final: true}}\n",
 	})
 }
 
 func CopyFiniteDormantTemplate(t testing.TB) string {
 	t.Helper()
 	return copyFiniteSource(t, map[string]string{
+		"dormant/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":           "stages: {done: {final: true}}\n",
 		"dormant/schema.yaml":   "instance: item_id\nstages: {waiting: {}}\n",
 		"dormant/entities.yaml": "Item:\n  item_id: {type: text, _unused_reason: dormant constructor}\n",
@@ -150,26 +161,34 @@ func CopyFiniteConnectedClosure(t testing.TB, offender FiniteClosureOffender) st
 	t.Helper()
 	worker, child := finiteClosureStages(t, offender)
 	return copyFiniteSource(t, map[string]string{
-		"schema.yaml":                "stages: {active: {}, done: {final: true}}\npins:\n  inputs: [work.requested]\n  outputs: [work.requested]\nconnect:\n  - {event: work.requested, from: ., to: worker, resolution: create}\n",
-		"events.yaml":                "work.requested:\n  worker_id: text\n",
-		"worker/schema.yaml":         "instance: worker_id\n" + worker + "pins:\n  inputs: [work.requested]\n",
-		"worker/entities.yaml":       "Worker:\n  worker_id: {type: text, _unused_reason: constructor identity}\n",
-		"worker/nodes.yaml":          "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested: {}\n",
-		"worker/support/schema.yaml": child,
+		"manifest.yaml":                "version: 1.0.0\nplatform_version: '*'\n",
+		"worker/manifest.yaml":         "version: 1.0.0\nplatform_version: '*'\n",
+		"worker/support/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":                  "stages: {active: {}, done: {final: true}}\npins:\n  inputs: [work.requested]\n  outputs: [work.requested]\nconnect:\n  - {event: work.requested, from: ., to: worker, resolution: create}\n",
+		"events.yaml":                  "work.requested:\n  worker_id: text\n",
+		"worker/schema.yaml":           "instance: worker_id\n" + worker + "pins:\n  inputs: [work.requested]\n",
+		"worker/entities.yaml":         "Worker:\n  worker_id: {type: text, _unused_reason: constructor identity}\n",
+		"worker/nodes.yaml":            "worker:\n  execution_type: system_node\n  event_handlers:\n    work.requested: {}\n",
+		"worker/support/schema.yaml":   child,
 	})
 }
 
 func CopyFiniteConstructorControl(t testing.TB) string {
 	t.Helper()
 	return copyFiniteSource(t, map[string]string{
-		"schema.yaml":       "stages: {done: {final: true}}\n",
-		"child/schema.yaml": "stages: {done: {final: true}}\n",
+		"child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":         "stages: {done: {final: true}}\n",
+		"child/schema.yaml":   "stages: {done: {final: true}}\n",
 	})
 }
 
 func CopyFiniteNestedServiceFeed(t testing.TB) string {
 	t.Helper()
 	return copyFiniteSource(t, map[string]string{
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"worker/manifest.yaml":   "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            "stages: {done: {final: true}}\nconnect:\n  - {event: work.requested, from: producer, to: worker, resolution: create}\n",
 		"producer/schema.yaml":   "instance: producer_id\nstages: {done: {final: true}}\npins:\n  outputs: [work.requested]\n",
 		"producer/entities.yaml": "Producer:\n  producer_id: {type: text, _unused_reason: dormant identity}\n",
@@ -217,6 +236,10 @@ func finiteClosureStages(t testing.TB, offender FiniteClosureOffender) (worker, 
 
 func finiteSelectedFeedFiles(rootStages, producerStages, workerStages string) map[string]string {
 	return map[string]string{
+		"manifest.yaml":          "version: 1.0.0\nplatform_version: '*'\n",
+		"producer/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"safe/manifest.yaml":     "version: 1.0.0\nplatform_version: '*'\n",
+		"worker/manifest.yaml":   "version: 1.0.0\nplatform_version: '*'\n",
 		"schema.yaml":            rootStages + "connect:\n  - {event: work.requested, from: producer, to: worker, resolution: create}\n  - {event: work.safe, from: producer, to: safe, resolution: create}\n",
 		"producer/schema.yaml":   "instance: producer_id\n" + producerStages + "pins:\n  outputs: [work.requested, work.safe]\n",
 		"producer/entities.yaml": "Producer:\n  producer_id: {type: text, _unused_reason: dormant identity}\n",

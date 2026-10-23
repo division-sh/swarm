@@ -1,4 +1,4 @@
-name: test-multi-gate-pipeline
+# fixture: test-multi-gate-pipeline
 stages:
   pending: {}
   approved: {final: true}

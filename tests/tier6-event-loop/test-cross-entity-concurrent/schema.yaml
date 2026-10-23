@@ -1,4 +1,4 @@
-name: test-cross-entity-concurrent
+# fixture: test-cross-entity-concurrent
 pins:
   inputs:
     - task.submitted

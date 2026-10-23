@@ -10,11 +10,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -156,6 +158,9 @@ func TestRecordDeadLetter_PersistsAndDedupes(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, pg, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 
 	entityID := uuid.NewString()
 	evt := eventtest.RunCreatingRootIngress(
@@ -226,6 +231,9 @@ func TestRecordDeadLetterExactDuplicateAndConflictParity(t *testing.T) {
 				t.Fatalf("fixture store %T does not expose dead-letter delivery operations", fixture.store)
 			}
 			ctx := testAuthorActivityContext()
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			sourceartifactfixture.RequireArtifact(t, ctx, fixture.store.(sourceartifactfixture.Writer), rooted.Artifact())
+			ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 			entityID := uuid.NewString()
 			event := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "deadletter.identity", "runtime", "", []byte(`{"text":"canonical","value":1}`), 2,
@@ -356,6 +364,9 @@ func TestRecordDeadLetter_RejectsNonUUIDEntityIDWithoutRepair(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, pg, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 
 	evt := eventtest.RunCreatingRootIngress(uuid.NewString(),
 		"deadletter.test",
@@ -401,6 +412,9 @@ func TestRecordDeadLetter_PersistsTargetResolutionFailureContext(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, pg, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 
 	evt := eventtest.RunCreatingRootIngress(
 		uuid.NewString(),

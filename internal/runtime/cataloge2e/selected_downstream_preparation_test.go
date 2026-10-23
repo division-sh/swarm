@@ -33,7 +33,7 @@ func TestSelectedDownstreamPreparationFailsBeforeMaterializationBothStores(t *te
 				t.Fatal(err)
 			}
 			var sourceStore interface {
-				storetest.DurableDataCatalogStore
+				storetest.RootedDataCatalogStore
 				forkexecution.SourceArtifactSelectedContractSourceStore
 			} = h.pg
 			var lifecycle forkexecution.SelectedContractForkLifecycle = h.pg

@@ -1,4 +1,4 @@
-name: portfolio
+# fixture: portfolio
 instance: period_id
 pins:
   inputs:

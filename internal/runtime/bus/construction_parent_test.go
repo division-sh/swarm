@@ -100,19 +100,20 @@ func TestA9MissingCreationPlannerCannotBorrowReceiptAuthority(t *testing.T) {
 func TestParentLocalConstructionSelectionUsesRecordedAncestry(t *testing.T) {
 	for _, authoredPin := range []bool{false, true} {
 		t.Run(fmt.Sprintf("authored_input_%t", authoredPin), func(t *testing.T) {
-			parentFlow := connectRoutePlanTestFlow{
-				id: "parent", mode: contracts.FlowModeStatic,
-				nodes: map[string]contracts.SystemNodeContract{
-					"collector": {EventHandlers: map[string]contracts.SystemNodeEventHandler{"work.done": existingOwnerHandlerFixture()}},
-				},
+			files := map[string]string{
+				"manifest.yaml":              "version: 1.0.0\nplatform_version: '*'\n",
+				"schema.yaml":                "stages: []\n",
+				"parent/manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+				"parent/schema.yaml":         "stages: []\nconnect:\n  - event: work.done\n    from: child\n    to: .\n",
+				"parent/nodes.yaml":          "collector:\n  execution_type: system_node\n  event_handlers:\n    work.done:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n",
+				"parent/child/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+				"parent/child/schema.yaml":   "stages: []\npins:\n  outputs: [work.done]\n",
+				"parent/child/events.yaml":   "work.done:\n",
 			}
 			if authoredPin {
-				parentFlow.inputs = []contracts.FlowInputEventPin{{Event: "work.done"}}
+				files["parent/schema.yaml"] += "pins:\n  inputs: [work.done]\n"
 			}
-			source := semanticview.Wrap(connectRoutePlanTestBundle(t, []connectRoutePlanTestFlow{
-				parentFlow,
-				{id: "parent/child", mode: contracts.FlowModeStatic, outputs: []contracts.FlowOutputEventPin{{Event: "work.done"}}},
-			}, []contracts.FlowConnect{{Event: "work.done", From: "parent/child", To: "parent"}}))
+			source := semanticview.Wrap(loadTargetRouteTempBundle(t, files))
 			graph := pinrouting.CompileConnectGraph(source)
 			if issues := graph.Issues(); len(issues) != 0 || len(graph.Plans()) != 1 {
 				t.Fatalf("parent-local graph plans=%+v issues=%+v", graph.Plans(), issues)

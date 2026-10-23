@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -76,7 +77,6 @@ func (t StandingTarget) normalized() StandingTarget {
 	t.ServiceID = strings.TrimSpace(t.ServiceID)
 	t.SourcePath = strings.TrimSpace(t.SourcePath)
 	t.FlowPath = strings.Trim(strings.TrimSpace(t.FlowPath), "/")
-	t.Provider = providertriggers.NormalizeProviderName(t.Provider)
 	t.RunID = strings.TrimSpace(t.RunID)
 	t.SigningSecret = strings.TrimSpace(t.SigningSecret)
 	return t
@@ -89,27 +89,75 @@ func (t StandingTarget) CapabilitySubject() (packs.Subject, error) {
 	})
 }
 
-func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *providertriggers.CatalogSnapshot) ([]StandingTargetDeclaration, error) {
+func ResolveStandingTargetDeclarations(source semanticview.Source, _ *providertriggers.CatalogSnapshot) ([]StandingTargetDeclaration, error) {
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
 		return nil, fmt.Errorf("standing target declarations require a bundle-backed semantic source")
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return nil, err
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		return nil, err
+	}
+	return resolveDirectoryStandingDeclarations(source, bundle, providers)
+}
+
+func resolveDirectoryStandingDeclarations(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, providers packadmission.ProviderSource) ([]StandingTargetDeclaration, error) {
 	declarations := make([]StandingTargetDeclaration, 0)
 	clocks := make(map[string][]semanticview.ClockSchedule)
 	for _, declaration := range semanticview.ClockSchedules(source) {
 		clocks[declaration.FlowID] = append(clocks[declaration.FlowID], declaration)
 	}
 	for _, view := range bundle.FlowViews() {
-		flowID := strings.TrimSpace(view.Paths.FlowPath)
+		flowID := view.Paths.FlowPath
 		location := strings.TrimSpace(view.Paths.SchemaFile)
 		if location == "" {
 			location = "schema.yaml"
 		}
-		if view.Schema.Ingress == nil && len(clocks[flowID]) == 0 {
-			continue
+		scope, err := providers.Scope(flowID)
+		if err != nil {
+			return nil, err
 		}
-		if flowID == "" {
-			return nil, fmt.Errorf("%s standing activation requires non-empty flow id", location)
+		decl := StandingTargetDeclaration{SourcePath: location, FlowPath: flowID, Clocks: clocks[flowID]}
+		catalog, err := scope.TriggerCatalog()
+		if err != nil {
+			return nil, err
+		}
+		inputs := make([]string, 0)
+		for _, pin := range source.FlowInputEventPins(flowID) {
+			inputs = append(inputs, pin.EventType())
+		}
+		for _, definition := range scope.ConsumedTriggerProviders(inputs) {
+			entry, _ := catalog.EntryByProvider(definition.Provider().Key())
+			alias, present := bundle.FlowIngressAlias(flowID)
+			if !present {
+				return nil, fmt.Errorf("%s has no compiled directory webhook alias", location)
+			}
+			decl.Alias = alias
+			secret := ""
+			if required := providertriggers.DerivedRequires(entry.Manifest).Secrets; len(required) > 0 {
+				secret = required[0]
+			}
+			plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+				Alias: alias, Provider: definition.Provider().Key(), SigningSecret: secret,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", location, err)
+			}
+			raw, present := plan.RawOutput()
+			if !present {
+				return nil, fmt.Errorf("%s provider %q compiled no raw output", location, definition.Provider().Key())
+			}
+			decl.Ingress = append(decl.Ingress, StandingIngressBinding{
+				Provider: definition.Provider().Key(), SigningSecret: secret, AdmissionPlan: plan,
+				RawEventLiteral: raw.EventName.Literal, RawEventTemplate: raw.EventName.Template,
+			})
+		}
+		if len(decl.Ingress) == 0 && len(decl.Clocks) == 0 {
+			continue
 		}
 		keyless, err := runtimepipeline.StandingConstructionIsKeyless(source, flowID)
 		if err != nil {
@@ -120,82 +168,12 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 				return nil, fmt.Errorf("%s standing constructor is invalid: %w", location, err)
 			}
 		}
-		decl := StandingTargetDeclaration{
-			SourcePath: location,
-			FlowPath:   strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"),
-			Clocks:     clocks[flowID],
-		}
-		if flowID == "." {
-			decl.FlowPath = "."
-		}
-		if view.Schema.Ingress != nil {
-			alias, present := bundle.FlowIngressAlias(flowID)
-			if !present {
-				return nil, fmt.Errorf("%s has no compiled ingress alias", location)
-			}
-			decl.Alias = alias
-			if len(view.Schema.Ingress.Providers) == 0 {
-				return nil, fmt.Errorf("%s ingress.providers must contain at least one provider binding", location)
-			}
-			seenProviders := map[string]struct{}{}
-			for _, binding := range view.Schema.Ingress.Providers {
-				provider := providertriggers.NormalizeProviderName(binding.Provider)
-				if provider == "" {
-					return nil, fmt.Errorf("%s ingress provider is required", location)
-				}
-				if _, exists := seenProviders[provider]; exists {
-					return nil, fmt.Errorf("%s declares duplicate ingress provider %q; remove one binding", location, provider)
-				}
-				seenProviders[provider] = struct{}{}
-				secret := strings.TrimSpace(binding.SigningSecret)
-				plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
-					Alias: decl.Alias, Provider: provider, SigningSecret: secret,
-					Declaration: providerAdmissionDeclaration(binding.Admission),
-				})
-				if err != nil {
-					return nil, fmt.Errorf("%s: %w", location, err)
-				}
-				rawOutput, ok := plan.RawOutput()
-				if !ok {
-					return nil, fmt.Errorf("%s: ingress provider %q compiled no raw output", location, provider)
-				}
-				literal := strings.TrimSpace(rawOutput.EventName.Literal)
-				template := strings.TrimSpace(rawOutput.EventName.Template)
-				if err := validateStandingIngressRawPin(source, flowID, provider, rawOutput.EventName); err != nil {
-					return nil, fmt.Errorf("%s: %w", location, err)
-				}
-				decl.Ingress = append(decl.Ingress, StandingIngressBinding{
-					Provider: provider, SigningSecret: secret, RawEventLiteral: literal, RawEventTemplate: template, AdmissionPlan: plan,
-				})
-			}
-		}
 		declarations = append(declarations, decl)
 	}
 	sort.Slice(declarations, func(i, j int) bool {
 		return declarations[i].FlowPath < declarations[j].FlowPath
 	})
 	return declarations, nil
-}
-
-func providerAdmissionDeclaration(admission runtimecontracts.ProjectFlowIngressAdmission) providertriggers.AdmissionDeclaration {
-	declaration := providertriggers.AdmissionDeclaration{
-		Kind: admission.Kind, Acknowledge: admission.Acknowledge, Event: admission.Event, Payload: admission.Payload,
-	}
-	if admission.Pack != nil {
-		declaration.PackID = admission.Pack.ID
-	}
-	if admission.Authentication != nil {
-		declaration.Authentication = providertriggers.RawAuthenticationDeclaration{
-			Kind: admission.Authentication.Kind, Header: admission.Authentication.Header,
-			Prefix: admission.Authentication.Prefix, Encoding: admission.Authentication.Encoding,
-		}
-	}
-	if admission.DeliveryID != nil {
-		declaration.DeliveryID = providertriggers.RawDeliveryIDDeclaration{
-			Source: admission.DeliveryID.Source, Header: admission.DeliveryID.Header, JSONPath: admission.DeliveryID.JSONPath,
-		}
-	}
-	return declaration
 }
 
 func baseStandingIngressCapabilitySubjects(source semanticview.Source, catalog *providertriggers.CatalogSnapshot) ([]packs.Subject, error) {
@@ -358,30 +336,6 @@ func ProviderTriggerCapabilitySubjects(ctx context.Context, source semanticview.
 	return packs.NormalizeSubjects(subjects)
 }
 
-func validateStandingIngressRawPin(source semanticview.Source, flowID, provider string, eventNames providertriggers.EventNameManifest) error {
-	literal := strings.TrimSpace(eventNames.Literal)
-	template := strings.TrimSpace(eventNames.Template)
-	if literal != "" {
-		if _, err := resolveStandingInputEndpoint(source, flowID, literal); err == nil {
-			return nil
-		}
-		return fmt.Errorf("ingress provider %q emits %q; add an exact production input pin for %q to flow %s", provider, literal, literal, flowID)
-	}
-	if template == "" {
-		return fmt.Errorf("ingress provider %q has no canonical event-name policy", provider)
-	}
-	census := semanticview.BuildAuthoredEventEndpointCensus(source)
-	for _, endpoint := range census.InputPins() {
-		if strings.TrimSpace(endpoint.FlowID) != strings.TrimSpace(flowID) || !eventNames.Accepts(endpoint.Event.Authored) {
-			continue
-		}
-		if _, err := resolveStandingInputEndpointWithCensus(source, census, flowID, endpoint.Event.Authored); err == nil {
-			return nil
-		}
-	}
-	return fmt.Errorf("ingress provider %q emits template %q; add at least one exact external input pin matching that template to flow %s", provider, template, flowID)
-}
-
 func resolveStandingInputEndpoint(source semanticview.Source, flowID, eventName string) (semanticview.AuthoredEventEndpoint, error) {
 	return resolveStandingInputEndpointWithCensus(source, semanticview.BuildAuthoredEventEndpointCensus(source), flowID, eventName)
 }
@@ -485,12 +439,13 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 		if !initial.IsStatelessPosture() {
 			initialState = initial.ID()
 		}
+		candidate, err := rt.standingServiceCandidate(plan)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		selectedPlans = append(selectedPlans, plan)
 		mutations = append(mutations, runtimepipeline.StandingTargetMutation{
-			Candidate: runtimepipeline.StandingServiceCandidate{BindingEnabled: plan.bindingEnabled, BindingBlockReason: plan.blockReason,
-				ServiceID: plan.serviceID, FlowPath: declaration.FlowPath,
-				Source: fact,
-			},
+			Candidate: candidate,
 			Activation: runtimepipeline.FlowInstanceActivationRequest{
 				ContractBundle: source,
 				InitialState:   initialState,
@@ -603,15 +558,35 @@ func (rt *Runtime) PlanStandingServiceCandidates() ([]runtimepipeline.StandingSe
 	if err != nil {
 		return nil, err
 	}
-	fact := rt.Options.SourceArtifactFact
 	out := make([]runtimepipeline.StandingServiceCandidate, 0, len(plans))
 	for _, plan := range plans {
-		out = append(out, runtimepipeline.StandingServiceCandidate{BindingEnabled: plan.bindingEnabled, BindingBlockReason: plan.blockReason,
-			ServiceID: plan.serviceID, FlowPath: plan.declaration.FlowPath,
-			Source: fact,
-		})
+		candidate, err := rt.standingServiceCandidate(plan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, candidate)
 	}
 	return out, nil
+}
+
+func (rt *Runtime) standingServiceCandidate(plan standingTargetPlan) (runtimepipeline.StandingServiceCandidate, error) {
+	bundle, present := semanticview.Bundle(rt.Options.WorkflowModule.SemanticSource())
+	if !present || bundle == nil {
+		return runtimepipeline.StandingServiceCandidate{}, fmt.Errorf("standing declaration requires its compiled rooted source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return runtimepipeline.StandingServiceCandidate{}, err
+	}
+	candidate := runtimepipeline.StandingServiceCandidate{
+		BindingEnabled: plan.bindingEnabled, BindingBlockReason: plan.blockReason,
+		ServiceID: plan.serviceID, FlowPath: plan.declaration.FlowPath,
+		Source: rt.Options.SourceArtifactFact, RootAdmission: rooted.Admission(),
+	}
+	if err := candidate.Validate(); err != nil {
+		return runtimepipeline.StandingServiceCandidate{}, err
+	}
+	return candidate, nil
 }
 
 func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {

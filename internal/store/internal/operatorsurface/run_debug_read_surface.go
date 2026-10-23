@@ -14,6 +14,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -215,7 +216,8 @@ func (s *RunPostgres) loadRunDebugReport(ctx context.Context, runID string, opts
 		return operatorread.RunDebugReport{}, fmt.Errorf("run_id is required")
 	}
 	opts = defaultRunDebugQueryOptions(opts)
-	header, err := s.LoadRunHeader(ctx, runID)
+	var root sourceartifact.RootAdmissionReference
+	header, err := s.loadRunHeader(ctx, runID, &root)
 	if err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
@@ -438,7 +440,7 @@ func (s *RunPostgres) loadRunDebugReport(ctx context.Context, runID string, opts
 	report.TestQuiescence.FanOutBarriers = report.FanOut.BarrierArmed + report.FanOut.BarrierPending
 	report.TestQuiescence.Ready = runTestQuiescenceReady(report.TestQuiescence)
 
-	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorPostgresDelivery, s.sources, s.sourceMemo, s.pipeline, s.timers, header, report.TestQuiescence, time.Now().UTC())
+	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorPostgresDelivery, s.sources, s.sourceMemo, s.pipeline, s.timers, header, root, report.TestQuiescence, time.Now().UTC())
 	if err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
