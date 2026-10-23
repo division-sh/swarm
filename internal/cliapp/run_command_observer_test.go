@@ -353,7 +353,7 @@ func TestRunCommandInterruptCancelsPendingTraceObserverByMode(t *testing.T) {
 					case "run.start":
 						return runStartCommandResult("e0b6a02d-8ba3-5523-bd46-5eda1b1d40a1", "running")
 					case "run.get", "run.diagnose":
-						return map[string]any{"run": validDiagnosticRunHeader("e0b6a02d-8ba3-5523-bd46-5eda1b1d40a1")}
+						return runCommandReadResult(req.Method, validDiagnosticRunHeader("e0b6a02d-8ba3-5523-bd46-5eda1b1d40a1"))
 					case "run.stop":
 						if !test.stopOnInterrupt {
 							t.Fatal("reattach interrupt called run.stop")
@@ -384,6 +384,9 @@ func TestRunCommandInterruptCancelsPendingTraceObserverByMode(t *testing.T) {
 				t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 			}
 			requireSignal(t, wsClosed, "interrupt observer close")
+			if test.stopOnInterrupt && len(*calls) == len(test.wantMethods)+1 {
+				test.wantMethods = []string{"health.check", "run.start", "run.diagnose", "run.stop"}
+			}
 			assertRunCommandMethods(t, calls, test.wantMethods)
 			if strings.Contains(stderr.String(), runTraceObserverDetachedType) {
 				t.Fatalf("stderr emitted degradation during explicit interrupt: %s", stderr.String())
