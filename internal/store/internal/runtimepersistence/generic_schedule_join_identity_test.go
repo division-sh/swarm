@@ -53,7 +53,7 @@ func TestSystemJoinScheduleAdmissionAndHydrationRejectDeclarationDriftOnBothStor
 			for scope, command := range bases {
 				result, err := store.AdmitGenericScheduleOutcome(ctx, command)
 				if err != nil || !result.Acknowledged {
-					t.Fatalf("admit valid %s join schedule: commit=%+v err=%v", scope, result, err)
+					t.Fatalf("admit valid %s join schedule: err=%v commit=%+v", scope, err, result)
 				}
 				admitted[scope] = result.Result.Activation
 			}
@@ -496,7 +496,7 @@ func TestJoinScheduleRestoreRejectsPoisonedSameLeafIdentityWithoutRegisteringPar
 			poison := selectedStoreJoinScheduleCommand(t, runID, "returns", "returns", "returns/order-1", generation)
 			rootResult, err := store.AdmitGenericScheduleOutcome(ctx, root)
 			if err != nil || !rootResult.Acknowledged {
-				t.Fatalf("admit root fixture: commit=%+v err=%v", rootResult, err)
+				t.Fatalf("admit root fixture: err=%v commit=%+v", err, rootResult)
 			}
 			flowResult, err := store.AdmitGenericScheduleOutcome(ctx, flow)
 			if err != nil || !flowResult.Acknowledged {
@@ -561,7 +561,7 @@ func TestJoinScheduleRestoreRejectsDriftedEventWithoutFailingTypedJoinRow(t *tes
 			root := selectedStoreJoinScheduleCommand(t, runID, ".", "", "", generation)
 			flow := selectedStoreJoinScheduleCommand(t, runID, "orders", "orders", "orders/order-1", generation)
 			if rootResult, err := store.AdmitGenericScheduleOutcome(ctx, root); err != nil || !rootResult.Acknowledged {
-				t.Fatalf("admit root fixture: commit=%+v err=%v", rootResult, err)
+				t.Fatalf("admit root fixture: err=%v commit=%+v", err, rootResult)
 			}
 			flowResult, err := store.AdmitGenericScheduleOutcome(ctx, flow)
 			if err != nil || !flowResult.Acknowledged {
@@ -601,7 +601,7 @@ func selectedStoreJoinScheduleCommand(t *testing.T, runID, declarationFlowPath, 
 	if declarationFlowPath == "." {
 		entityID, instancePath = runID, runID
 	}
-	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.RouteForInstancePath(instancePath))
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(declarationFlowPath, "", instancePath))
 	if err != nil {
 		t.Fatal(err)
 	}
