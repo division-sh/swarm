@@ -10,11 +10,11 @@ const debtSelectedFixtureOldSource = "d47682d5c0bf8c921b4468668cefda60d2ac0cbe"
 const debtSelectedFixtureCurrentSource = "ea11297ceb7a0213f2c113c0c17f93e88be8a529"
 
 // #2788/6375760610: the same five correspondences composed onto the landed source.
-const debtSelectedFixtureComposedOldSource = "a932eb60e4a51f976d4625d42ae4691a28c8c42e"
+const debtSelectedFixtureComposedOldSource = "97305834e727bab34ea5d2faf4e19d9192cad0df"
 const debtSelectedFixtureComposedCurrentSource = "ddb5ee850ceb873f1111cf0584c03ef16205580e"
 const debtSelectedFixtureComposedOldSHA256 = "2abd9424b866dbda517bcd44726bf04179a5a53ca75443588c86742370285681"
 const debtSelectedFixtureComposedCurrentSHA256 = "ec202c20bcad69a7dfcaca23a96660533f11dd144f7e6b97d207b49e787e6f10"
-const debtSelectedFixtureComposedCollectorTo = "28ce3952a28dc38662d7f7e38087dd7ce565efaf153fff1af7c5735618704c75"
+const debtSelectedFixtureComposedCollectorTo = "db0de72a381af1ab7ee26a4e0748565cde6c124a25a02ac3f79e2bbbc3464801"
 
 func debtRunFixtureTransitionStates() (map[string]authorityDebtSite, map[string]authorityDebtSite) {
 	old, current := debtControlSet(), debtControlSet()

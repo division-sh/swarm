@@ -937,7 +937,7 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
-	if base == debtQ1ReopenCollectorTo && trusted.Collector == base &&
+	if base == debtDeploymentRegistrationCollectorTo && trusted.Collector == base &&
 		current == debtSelectedFixtureComposedCollectorTo && reviewedTransition == current && head.Collector == current &&
 		debtSitesEqual(head.Sites, trusted.Sites) {
 		return nil // Exact five source-pinned continuations; source is checked before this transition.
