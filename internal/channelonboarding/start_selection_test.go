@@ -52,6 +52,26 @@ func TestOnboardingSelectionHasNoCredentialOrExecutionEffects(t *testing.T) {
 	if err != nil || !present || old != "old-usable-token" {
 		t.Fatal("replacement overwrote the predecessor", present, err)
 	}
+	// Deployment accounts reuse the operation receipt key, never the shared
+	// credential fallback available to an explicitly selected runtime slot.
+	candidate = Candidate{DeploymentRegistration: true, Provider: candidate.Provider, Interface: candidate.Interface,
+		Posture: ActivationWebhookRegistration, Ceremony: CeremonyAccountLink, ProviderCredentialRole: candidate.ProviderCredentialRole}
+	if err := candidate.ValidateDeclaration(); err != nil {
+		t.Fatal(err)
+	}
+	deployment := Operation{DeploymentRegistration: true, OperationID: uuid.NewString(), CredentialReservations: credentialReservations(candidate)}
+	if err := values.Set(context.Background(), deployment.CredentialReservations[0].StoreKey, "other-account-token"); err != nil {
+		t.Fatal(err)
+	}
+	service.deployment = true
+	var required *CredentialRequiredError
+	if _, err := service.admitCredentials(context.Background(), deployment, candidate, "", true); !errors.As(err, &required) {
+		t.Fatal("deployment registration adopted the shared credential", err)
+	}
+	admissions, err := service.admitCredentials(context.Background(), deployment, candidate, "deployment-token", true)
+	if err != nil || admissions[0].StoreKey != operationCredentialStoreKey(deployment.CredentialReservations[0].StoreKey, deployment.OperationID, candidate.ProviderCredentialRole) {
+		t.Fatal("deployment registration lost its exact operation receipt", admissions, err)
+	}
 }
 
 func TestOnboardingSelectedRequirementRefusesChangesBeforeReservation(t *testing.T) {
