@@ -277,7 +277,7 @@ func (s *EffectSQLiteOwner) RecoverStartupProviderAttemptsSQLiteTx(ctx context.C
 }
 
 func validateStartupProviderRecovery(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult, sqlite bool) error {
-	if req.OperationKind != "process_takeover" || req.Agent != nil ||
+	if req.OperationKind != "process_takeover" ||
 		result.OperationID != req.OperationID || result.Identity != req.Identity ||
 		result.PreviousEpoch != req.ExpectedEpoch || result.PreviousGeneration != req.ExpectedGeneration || result.PreviousPhase != req.ExpectedPhase ||
 		result.RuntimeEpoch != req.TargetEpoch || result.Generation != req.TargetGeneration || result.Phase != req.TargetPhase ||

@@ -12,6 +12,8 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -256,13 +258,15 @@ func (s *fixtureSession) grantForStaticPlan(ctx context.Context, selected Store,
 		if topologyErr != nil {
 			return nil, topologyErr
 		}
+		now := time.Now().UTC()
 		if _, commitErr := grant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
 			DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
 			OperationID:      uuid.NewString(), OperationKind: kind, RequestHash: uuid.NewString(),
 			Identity: identity, AgentID: identity.AgentID(), Trigger: kind,
 			ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
 			TargetEpoch: targetEpoch, TargetGeneration: targetGeneration, TargetPhase: state.Phase,
-			ConfigRevision: state.ConfigRevision, RunMode: state.RunMode, Topology: topology, Now: time.Now().UTC(),
+			ConfigRevision: state.ConfigRevision, RunMode: state.RunMode, Topology: topology, Now: now,
+			StartupRecovery: runtimeeffects.NewRecoveryRequest(now, executionposture.Live),
 		}); commitErr != nil {
 			return nil, commitErr
 		}
@@ -856,6 +860,7 @@ func classifyFixtureTransition(req *runtimemanager.AgentLifecycleTransition, pre
 	req.OperationKind = "process_takeover"
 	req.TargetEpoch = previous.RuntimeEpoch + 1
 	req.TargetGeneration = previous.Generation + 1
+	req.StartupRecovery = runtimeeffects.NewRecoveryRequest(req.Now, executionposture.Live)
 }
 
 func loadState(ctx context.Context, selected Store, identity runtimeagentidentity.Identity) (runtimemanager.AgentLifecycleState, bool, error) {

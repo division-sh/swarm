@@ -109,6 +109,9 @@ func (c *agentLifecycleCoordinator) lifecycleTransitionWithDiagnostic(ctx contex
 		return AgentLifecycleTransition{}, err
 	}
 	req.DiagnosticOrigin = origin
+	if req.OperationKind == "process_takeover" {
+		req.StartupRecovery = runtimeeffects.NewRecoveryRequest(req.Now, c.executionPosture)
+	}
 	return req, nil
 }
 
