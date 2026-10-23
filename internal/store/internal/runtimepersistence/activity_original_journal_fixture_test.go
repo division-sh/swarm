@@ -109,7 +109,7 @@ func captureActivityFixtureJournalWithBinding(t testing.TB, ctx context.Context,
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, process)
 	if err != nil {
 		t.Fatal(err)
 	}
