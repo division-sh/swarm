@@ -61,9 +61,11 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			runID := uuid.NewString()
 			ctx := correlation.WithRunID(testAuthorActivityContextForBundle(context.Background(), rt.sourceArtifactFact), runID)
 			runCtx := effects.WithExecutionMode(managedConformanceExecutionContextForBundle(t, ctx, "b17-mixed-nested", rt.sourceArtifactFact), rt.posture.RootMode())
-			if err := rt.manager.Run(runCtx); err != nil {
+
+			if err := runNotifyAllChildrenManager(runCtx, rt.bus, rt.manager); err != nil {
 				t.Fatal(err)
 			}
+
 			accounts := []string{"sibling-b", "sibling-a"}
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-main"})
 			publishNotifyAllChildrenEvent(t, ctx, rt, source, runID, "portfolio.accounts.register.requested", map[string]any{"portfolio_id": "portfolio-main", "account_ids": accounts})

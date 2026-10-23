@@ -108,7 +108,9 @@ func (f *deploymentResourceFixture) boot(t *testing.T) {
 			return deploymentFanOutDiagnostic{FanOutExecutor: coordinator, t: t}
 		},
 	})
-	if err := f.runtime.manager.Run(managedConformanceExecutionContextForBundle(t, f.ctx, fmt.Sprintf("deployment-resource-%d", time.Now().UnixNano()), f.runtime.sourceArtifactFact)); err != nil {
+
+	if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, f.ctx, fmt.Sprintf("deployment-resource-%d", time.Now().UnixNano()), f.runtime.sourceArtifactFact), f.runtime.bus, f.runtime.manager); err != nil {
 		t.Fatalf("normal deployment resource boot: %v", err)
 	}
+
 }
