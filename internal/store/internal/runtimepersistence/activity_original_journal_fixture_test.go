@@ -21,9 +21,9 @@ type activityFixtureJournal struct {
 
 // Selected preparation must share the seeding owner's possession, rather than
 // acquire a second native process while the original journal is still retained.
-func retainActivityFixtureProcessForMaterialization(t *testing.T, ctx context.Context, selected any) {
+func retainActivityFixtureProcessForMaterialization(t *testing.T, ctx context.Context, selected any, processOwner testing.TB) {
 	t.Helper()
-	process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+	process, err := agentfixture.ProcessCapability(processOwner, ctx, selected.(agentfixture.Store))
 	if err != nil {
 		t.Fatal(err)
 	}

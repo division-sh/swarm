@@ -660,7 +660,7 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 			t.Fatal(err)
 		}
 	} else {
-		retainActivityFixtureProcessForMaterialization(t, ctx, fixture.store)
+		retainActivityFixtureProcessForMaterialization(t, ctx, fixture.store, fixture.activityOwner)
 		child = materializeSelectedActivityFixture(t, ctx, fixture.store.(selectedActivityProjectionStore), runID, event.ID())
 	}
 	wantEntities := 2
