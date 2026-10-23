@@ -1950,26 +1950,6 @@ func seedSelectedContractSourceConversationHistoryWithDelivery(t *testing.T, db 
 	return claimed.Claim
 }
 
-func seedSelectedContractSourceReplayScopeMarker(t *testing.T, db execContextDB, sourceRunID, eventID, reasonCode string, at time.Time) {
-	t.Helper()
-	scope, ok := committedReplayScopeFromReasonCode(reasonCode)
-	if !ok {
-		t.Fatalf("invalid replay scope reason %q", reasonCode)
-	}
-	if _, err := db.ExecContext(testAuthorActivityContext(), `
-		INSERT INTO committed_replay_scopes (event_id, run_id, scope, created_at, updated_at)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $4)
-	`, eventID, sourceRunID, string(scope), at); err != nil {
-		t.Fatalf("seed source committed replay scope: %v", err)
-	}
-}
-
-func seedSelectedContractPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRunID, eventID, entityID string, at time.Time) {
-	t.Helper()
-	seedPostgresSemanticEventRecordFixture(t, testAuthorActivityContext(), db, eventID, sourceRunID, "source.after",
-		events.EventProducerPlatform, "source-runtime", entityID, "flow-a/1", at)
-}
-
 func seedPostTActiveConversationCoupling(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID, sessionID string, at time.Time) {
 	t.Helper()
 	ctx := testAuthorActivityContext()

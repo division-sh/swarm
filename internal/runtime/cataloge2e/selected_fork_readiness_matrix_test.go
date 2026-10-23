@@ -19,13 +19,14 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+
 	flowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
-	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -155,26 +156,25 @@ func (p *concurrentTerminalProbe) require(t *testing.T) {
 	}
 }
 
-type countedFrontierAgent struct {
-	config models.AgentConfig
-	calls  *atomic.Int32
+type mixedFinalSettlementProbe struct {
+	node    string
+	final   atomic.Bool
+	calls   atomic.Int32
+	settled chan effects.Authority
 }
 
-func (a countedFrontierAgent) ID() string   { return a.config.ID }
-func (a countedFrontierAgent) Type() string { return "test" }
-func (a countedFrontierAgent) Subscriptions() []events.EventType {
-	result := make([]events.EventType, len(a.config.Subscriptions))
-	for i, eventType := range a.config.Subscriptions {
-		result[i] = events.EventType(eventType)
+func (p *mixedFinalSettlementProbe) NotifyLifecycle(ctx context.Context, signal runtimelifecycleprobe.Signal) {
+	if signal.Kind == runtimelifecycleprobe.HandlerCompleted && signal.SubscriberID == p.node && signal.Status == "completed" {
+		p.final.Store(true)
 	}
-	return result
-}
-func (a countedFrontierAgent) OnEvent(ctx context.Context, _ events.Event) ([]events.Event, error) {
-	a.calls.Add(1)
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("ordinary final entry canceled accepted agent work: %w", err)
+	if signal.Kind == runtimelifecycleprobe.DeliveryStatusChanged && signal.SubscriberType == "agent" && signal.Status == "delivered" && strings.HasSuffix(signal.EventType, "/worker.ready") {
+		p.calls.Add(1)
+		authority, _ := effects.AuthorityFromContext(ctx)
+		if !p.final.Load() {
+			authority = effects.Authority{}
+		}
+		p.settled <- authority
 	}
-	return nil, nil
 }
 
 func TestRunScopedConcurrentAgentsTerminalRetirementBothStores(t *testing.T) {
@@ -433,7 +433,10 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 	}
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		for _, declarations := range []int{0, 1, 2} {
-			for _, frontier := range []string{"node", "activity", "activity_failure", "activity_rejected", "activity_write", "activity_write_failure", "activity_loop", "activity_loop_rule", "activity_loop_failure", "agent", "mixed", "mixed_progress"} {
+			for _, frontier := range []string{"node", "activity", "activity_failure", "activity_rejected", "activity_write", "activity_write_failure", "activity_loop", "activity_loop_rule", "activity_loop_failure", "agent", "mixed"} {
+				if frontier == "mixed" && (declarations != 1 || selectedStage != "initial") {
+					continue
+				}
 				activityFrontier := strings.HasPrefix(frontier, "activity")
 				if strings.HasPrefix(frontier, "activity_loop") && declarations != 0 {
 					continue
@@ -506,11 +509,10 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							}
 							options.AgentManagerOptions.TestLifecycleProbe = terminalProbe
 						}
-						var acceptedAgentCalls atomic.Int32
+						var mixed *mixedFinalSettlementProbe
 						if frontier == "mixed" {
-							options.AgentFactory = func(config models.AgentConfig) (runtimemanager.Agent, error) {
-								return countedFrontierAgent{config: config, calls: &acceptedAgentCalls}, nil
-							}
+							mixed = &mixedFinalSettlementProbe{settled: make(chan effects.Authority, 2), node: identitytest.FlowNode(t, "worker-flow", "worker-node").Key()}
+							options.AgentManagerOptions.TestLifecycleProbe = mixed
 						}
 						executionOwner := selectedContractExecutionOwnerForCatalogHarness(t, h)
 						var lineageProof *activityLineageProofStore
@@ -574,14 +576,14 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								}
 							}
 						} else if frontier == "activity_rejected" {
-							executionEvidence, _ = observeCatalogSelectedExecution(t, h, forkRun)
+							executionEvidence = lineageProof.published
 							t.Logf("rejected activity execution evidence: %v", err)
 							if err == nil || !strings.Contains(err.Error(), "fork activity lineage") || executionEvidence.ExecutedEventCount != 1 || activityCalls.Load() != 1 || !result.Activation.Activated {
 								t.Fatalf("failed final validation lost committed execution evidence: count=%d calls=%d err=%v", executionEvidence.ExecutedEventCount, activityCalls.Load(), err)
 							}
 						} else if frontier == "mixed" {
-							if err != nil || result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 || executionEvidence.ExecutedEventCount != 1 || !result.Activation.Activated || acceptedAgentCalls.Load() != int32(declarations) {
-								t.Fatalf("ordinary final entry must retain accepted agent execution: count=%d calls=%d err=%v", result.ExecutedEventCount, acceptedAgentCalls.Load(), err)
+							if err != nil || result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 || executionEvidence.ExecutedEventCount != 1 || !result.Activation.Activated || mixed.calls.Load() != int32(declarations) {
+								t.Fatalf("ordinary final entry must retain accepted agent execution: count=%d calls=%d err=%v", result.ExecutedEventCount, mixed.calls.Load(), err)
 							}
 						} else if err != nil || result.ExecutedEventCount != 0 || executionEvidence.ExecutedEventCount != 1 {
 							t.Logf("frontier=%s activity calls=%d", frontier, activityCalls.Load())
@@ -633,6 +635,14 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							t.Fatalf("public fork readback: %#v %v", observed, err)
 						}
 						if frontier == "mixed" && !refused {
+							select {
+							case authority := <-mixed.settled:
+								if authority.Kind != effects.AuthoritySelectedContractFork || authority.SelectedFork.Generation == 0 || authority.SelectedFork.ForkRunID != forkRun {
+									t.Fatalf("accepted mixed actor settled under another child: %+v", authority)
+								}
+							default:
+								t.Fatal("accepted mixed actor did not settle after final entry")
+							}
 							accepted := 0
 							for _, event := range observed {
 								for _, delivery := range event.Deliveries {

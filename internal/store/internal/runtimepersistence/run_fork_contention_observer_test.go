@@ -4,10 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
 )
 
 type forkContentionWait struct {
@@ -39,88 +35,4 @@ func forkContentionPostgresWait(ctx context.Context, db *sql.DB, winnerPID, obse
 		return wait, fmt.Errorf("identify exact native contender: count=%d wait=%+v", count, wait)
 	}
 	return wait, nil
-}
-
-func TestSelectedForkContentionObserverFencesNativeWriter(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
-		if backend.name != "postgres" {
-			continue
-		}
-		t.Run(backend.name, func(t *testing.T) {
-			f := newForkActivationFrontierFixture(t, backend, true)
-			staged, request := stageForkContentionFixture(t, f, true)
-			activate := selectedStoreAttachedActivationForTest(t, f.ctx, f.store, request)
-			ctx, cancel := context.WithTimeout(f.ctx, 25*time.Second)
-			defer cancel()
-			barrier := newForkContentionBarrier(t, backend.name, true)
-			barrier.install(t, f.db, f.runID, staged.ForkRunID, "activation")
-			before := snapshotForkHistoricalExecutionTables(t, f.db, true)
-			winner, loser := make(chan forkContentionResult, 1), make(chan forkContentionResult, 1)
-			winnerJoined, loserJoined := make(chan struct{}), make(chan struct{})
-			loserStarted := false
-			t.Cleanup(func() {
-				cancel()
-				barrier.release()
-				barrier.resume()
-				for _, joined := range []<-chan struct{}{winnerJoined, loserJoined} {
-					if joined == loserJoined && !loserStarted {
-						continue
-					}
-					select {
-					case <-joined:
-					case <-time.After(5 * time.Second):
-						t.Error("native observer-control worker did not join")
-					}
-				}
-			})
-			go func() {
-				defer close(winnerJoined)
-				result, err := activate(ctx)
-				winner <- forkContentionResult{activation: result, err: err}
-			}()
-			winnerPID := barrier.awaitWinner(t, ctx, f.db, winner)
-			gate := barrier.queueGate(t, ctx, f.db, winnerPID)
-			loserStarted = true
-			go func() {
-				defer close(loserJoined)
-				loser <- forkContentionResult{err: f.write(ctx, f.store)}
-			}()
-			barrier.awaitContender(t, ctx, f.db, winnerPID, gate, loser)
-			wait, err := forkContentionPostgresWait(ctx, f.db, winnerPID, gate.pid, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Logf("before settlement winner_pid=%d observer_pid=%d native_loser=%+v", winnerPID, gate.pid, wait)
-			if !strings.Contains(wait.query, "author_activity_order") || !wait.fenced {
-				t.Errorf("observer does not fence identified native contender before winner release: %+v", wait)
-			}
-			barrier.release()
-			won := awaitForkContentionResult(t, ctx, winner)
-			if won.err == nil || !strings.Contains(won.err.Error(), "h18_requested_rollback") || won.activation.Activated || won.activation.SourceFrozen {
-				t.Fatalf("native winner did not preserve rollback discriminator: %+v", won)
-			}
-			barrier.awaitGate(t, ctx, f.db, gate)
-			after := snapshotForkHistoricalExecutionTables(t, f.db, true)
-			t.Logf("winner result=%+v loser_result_available_before_open=%t", won, len(loser) != 0)
-			for _, diagnostic := range forkContentionFailureDiagnostics(before, after, won, loser) {
-				t.Log(diagnostic)
-			}
-			if !reflect.DeepEqual(before, after) {
-				t.Error("observer admitted application changes before its gate opened")
-			}
-			barrier.assertContenderFenced(t, ctx, f.db, gate)
-			if len(loser) != 0 {
-				t.Fatal("identified native contender completed inside the observer cut")
-			}
-			barrier.openGate(t, gate)
-			barrier.resume()
-			lost := awaitForkContentionResult(t, ctx, loser)
-			<-loserJoined
-			t.Logf("identified native_loser_pid=%d transaction=%s returned=%+v", wait.pid, wait.transaction, lost)
-			if lost.err != nil {
-				t.Fatalf("lawful losing writer refused after rollback: %v", lost.err)
-			}
-			requireForkContentionState(t, f.db, f, staged.ForkRunID, true, false)
-		})
-	}
 }

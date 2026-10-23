@@ -170,7 +170,9 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 			if successorExecutionID == predecessorExecutionID || successorGeneration <= 1 || deliveryExecutionID != successorExecutionID || deliveryGeneration != successorGeneration {
 				t.Fatalf("R4 no exact successor claim transfer: predecessor=%s successor=%s/%d delivery=%s/%d", predecessorExecutionID, successorExecutionID, successorGeneration, deliveryExecutionID, deliveryGeneration)
 			}
-			assertSelectedDeploymentRowsWithClosedExecutions(t, f, server, childID, "root", string(changed.VersionID), changedRows, 2)
+			// The fenced predecessor retains its unfinished generation; only the
+			// exact successor closes after settling the transferred claim.
+			assertSelectedDeploymentRowsWithClosedExecutions(t, f, server, childID, "root", string(changed.VersionID), changedRows, 1)
 			var successorDelivered int
 			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1 AND claim_version>$2 AND outcome='delivered'`, predecessor.DeliveryID(), predecessor.Version()).Scan(&successorDelivered); err != nil {
 				t.Fatal(err)

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -32,30 +33,39 @@ type diagnosticForkActivationProbe struct {
 func (p *diagnosticForkActivationProbe) RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority effects.Authority, allowed []string, source semanticview.Source) (err error) {
 	defer func() { p.settled <- err }()
 	forkRunID := authority.SelectedFork.ForkRunID
-	var observations, pending int
-	if err := p.h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE run_id=$1 AND projected_at IS NOT NULL`, forkRunID).Scan(&observations); err != nil {
+	var selected manager.AgentLifecycleDiagnosticPersistence = p.h.pg
+	if p.h.sqlite != nil {
+		selected = p.h.sqlite
+	}
+	storage, err := storetest.ReadSelectedForkLifecycleDiagnosticStorage(ctx, selected, forkRunID)
+	if err != nil {
 		p.t.Fatal(err)
 	}
-	if err := p.h.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_lifecycle_diagnostic_outbox WHERE run_id=$1 AND projected_at IS NULL`, forkRunID).Scan(&pending); err != nil {
-		p.t.Fatal(err)
+	pending, err := selected.ListPendingAgentLifecycleDiagnostics(ctx, 1000)
+	if err != nil || len(pending) == 1000 {
+		p.t.Fatalf("bounded diagnostic observation: pending=%d err=%v", len(pending), err)
 	}
-	if observations == 0 || pending != 0 {
-		p.t.Fatalf("terminal diagnostic projection acknowledged=%d pending=%d", observations, pending)
+	for _, diagnostic := range pending {
+		if diagnostic.Identity.RunID == forkRunID {
+			p.t.Fatal("terminal diagnostic projection retains a pending exact-run observation")
+		}
+	}
+	if len(storage.Receipts) == 0 {
+		p.t.Fatal("terminal diagnostic projection lacks acknowledged observations")
+	}
+	for _, receipt := range storage.Receipts {
+		if len(receipt.Projection) == 0 {
+			p.t.Fatal("terminal diagnostic receipt lacks its projection")
+		}
 	}
 	if p.scenario != "clean" {
-		var id string
-		if err := p.h.db.QueryRowContext(ctx, `SELECT outbox_id FROM agent_lifecycle_diagnostic_outbox WHERE run_id=$1 AND projected_at IS NOT NULL ORDER BY created_at,outbox_id LIMIT 1`, forkRunID).Scan(&id); err != nil {
-			p.t.Fatal(err)
-		}
-		id = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm:lifecycle-diagnostic:"+id)).String()
-		var parent string
-		if err := p.h.db.QueryRowContext(ctx, `SELECT COALESCE(CAST(source_event_id AS TEXT),'') FROM events WHERE event_id=$1`, id).Scan(&parent); err != nil || parent != "" {
-			p.t.Fatalf("expected exact parentless observation: parent=%s err=%v", parent, err)
+		id := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm:lifecycle-diagnostic:"+storage.Receipts[0].OutboxID)).String()
+		observation, found := activityLineageEvents(p.t, ctx, p.h, forkRunID)[id]
+		if !found || observation.SourceEventID != "" {
+			p.t.Fatalf("expected exact parentless observation: found=%t observation=%+v", found, observation)
 		}
 		if p.scenario == "corrupt_ack" {
-			if _, err := p.h.db.ExecContext(ctx, `UPDATE events SET payload='{}',payload_bytes=$2 WHERE event_id=$1`, id, []byte(`{}`)); err != nil {
-				p.t.Fatal(err)
-			}
+			(&activityLineageProofStore{t: p.t, h: p.h}).writePayload(ctx, id, map[string]any{})
 		} else {
 			var selected interface {
 				PersistRuntimeLog(context.Context, runtimepkg.RuntimeLogPersistenceRecord) error

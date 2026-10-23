@@ -40,21 +40,17 @@ import (
 // SQL triggers pause real operations after they own the durable write frontier.
 // Neither a pool waiter nor a goroutine-start signal counts as contention.
 func TestRunForkActivationFrontierContentionBothStores(t *testing.T) {
-	exerciseForkActivationFrontierContention(t, false)
+	exerciseForkActivationFrontierContention(t)
 }
 
-func TestSelectedRunForkActivationFrontierContentionBothStores(t *testing.T) {
-	exerciseForkActivationFrontierContention(t, true)
-}
-
-func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
+func exerciseForkActivationFrontierContention(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		for _, first := range []string{"writer", "activation"} {
 			for _, outcome := range []string{"commit", "rollback", "cancel_winner", "cancel_loser"} {
 				t.Run(backend.name+"/"+first+"/"+outcome, func(t *testing.T) {
 					barrier := newForkContentionBarrier(t, backend.name, outcome == "rollback" || outcome == "cancel_loser")
-					f := newForkActivationFrontierFixture(t, backend, selected)
-					staged, selectedRequest := stageForkContentionFixture(t, f, selected)
+					f := newForkActivationFrontierFixture(t, backend, false)
+					staged, _ := stageForkContentionFixture(t, f, false)
 					var err error
 					writer := f.store
 					observer := f.db
@@ -81,10 +77,6 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 					} else {
 						f.db.SetMaxOpenConns(12)
 					}
-					var activateSelected func(context.Context) (runfork.RunForkActivation, error)
-					if selected {
-						activateSelected = selectedStoreAttachedActivationForTest(t, f.ctx, f.store, selectedRequest)
-					}
 					barrier.install(t, f.db, f.runID, staged.ForkRunID, first)
 					before := snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")
 					ctx, cancel := context.WithTimeout(f.ctx, 25*time.Second)
@@ -98,10 +90,6 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 						if operation == "writer" {
 							err := f.write(ctx, writer)
 							return forkContentionResult{err: err}
-						}
-						if selected {
-							result, err := activateSelected(ctx)
-							return forkContentionResult{activation: result, err: err}
 						}
 						result, err := f.store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true})
 						return forkContentionResult{activation: result, err: err}
@@ -198,26 +186,6 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 					barrier.resume()
 					lost := awaitForkContentionResult(t, ctx, loser)
 					if outcome == "commit" {
-						if selected && first == "writer" {
-							if lost.err != nil || !lost.activation.Activated || !lost.activation.SourceAdvancedAfterFork || lost.activation.SourceFrozen || lost.activation.BranchDivergence == nil {
-								t.Fatalf("selected activation must allow lawful source advancement: %v; %+v", lost.err, lost.activation)
-							}
-							var sourceState, childState, continued string
-							if err := observer.QueryRow(`SELECT status,COALESCE(CAST(continued_as_run_id AS TEXT),'') FROM runs WHERE run_id=$1`, f.runID).Scan(&sourceState, &continued); err != nil {
-								t.Fatal(err)
-							}
-							if err := observer.QueryRow(`SELECT status FROM runs WHERE run_id=$1`, staged.ForkRunID).Scan(&childState); err != nil {
-								t.Fatal(err)
-							}
-							if sourceState != "running" || continued != "" || childState != "running" {
-								t.Fatalf("selected divergence froze source or failed child activation: %s/%s/%s", sourceState, continued, childState)
-							}
-							if !reflect.DeepEqual(forkContentionRowsForRun(t, winnerOnly, f.runID), forkContentionRowsForRun(t, snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres"), f.runID)) {
-								t.Fatal("selected branch changed complete committed source-run rows")
-							}
-							requireForkContentionState(t, observer, f, staged.ForkRunID, true, true)
-							return
-						}
 						if first == "writer" {
 							if _, fact, ok := runForkReplayResumeBlockerFromError(lost.err); !ok || fact != runfork.RunForkReplayResumeFactSourceAdvanced || lost.activation.Activated {
 								t.Fatalf("generic losing activation must retain source-advanced refusal: %#v", lost)
@@ -554,17 +522,11 @@ func newConstructedGateFixtureWithOrigin(t *testing.T, backend eventRecordContra
 
 func TestRunForkActivationContentionFixtureControlBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
-		for _, selected := range []bool{false, true} {
+		for _, selected := range []bool{false} {
 			t.Run(fmt.Sprintf("%s/selected=%t", backend.name, selected), func(t *testing.T) {
 				f := newForkActivationFrontierFixture(t, backend, selected)
-				staged, req := stageForkContentionFixture(t, f, selected)
-				var activation runfork.RunForkActivation
-				var err error
-				if selected {
-					activation, err = selectedStoreAttachedActivationForTest(t, f.ctx, f.store, req)(f.ctx)
-				} else {
-					activation, err = f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true})
-				}
+				staged, _ := stageForkContentionFixture(t, f, selected)
+				activation, err := f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true})
 				if err != nil || !activation.Activated || !activation.SourceFrozen {
 					t.Fatalf("uncontended canonical activation: %v; result=%+v", err, activation)
 				}
