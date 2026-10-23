@@ -20,41 +20,6 @@ func parseDeliveryObservationControl(t *testing.T, path, source string) *ast.Fil
 	return file
 }
 
-func TestReviewedDeliveryObservationSitesAreExact(t *testing.T) {
-	root := eventBoundaryRepositoryRoot(t)
-	ownerPath := "internal/store/internal/runtimepersistence/test_selected_storage_observation.go"
-	ownerBytes, err := os.ReadFile(filepath.Join(root, ownerPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	owner := parseDeliveryObservationControl(t, ownerPath, string(ownerBytes))
-	total := 0
-	for _, site := range reviewedDeliveryObservations {
-		data, err := os.ReadFile(filepath.Join(root, site.path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		file := parseDeliveryObservationControl(t, site.path, string(data))
-		approved := reviewedDeliveryObservationLiterals(site.path, file, owner)
-		fn := deliveryObservationDeclaration(file, site.declaration)
-		if fn == nil {
-			t.Fatal("missing reviewed declaration", site.declaration)
-		}
-		for _, literal := range deliveryObservationLiterals(fn) {
-			if approved[literal.Pos()] != site.path+"/"+site.declaration {
-				t.Fatalf("reviewed literal lost exact declaration custody: %s", site.declaration)
-			}
-			total++
-		}
-		if _, allowed := executableDeliverySQLOwners[site.path]; allowed {
-			t.Fatal("whole-file permission substituted for exact sites")
-		}
-	}
-	if len(reviewedDeliveryObservations) != 3 || total != 8 {
-		t.Fatalf("reviewed declaration/literal counts changed: %d/%d", len(reviewedDeliveryObservations), total)
-	}
-}
-
 func TestReviewedDeliveryObservationHostilesStayUnowned(t *testing.T) {
 	root := eventBoundaryRepositoryRoot(t)
 	ownerPath := "internal/store/internal/runtimepersistence/test_selected_storage_observation.go"

@@ -86,13 +86,20 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 				finished <- forkResult{result: result, rpcErr: rpcErr, err: err}
 			}()
 			var predecessor runtimedelivery.Claim
-			select {
-			case predecessor = <-gate.entered:
-			case result := <-finished:
-				t.Fatalf("R4 fork finished without receiver claim: %+v", result)
-			case <-ctx.Done():
-				_ = owner.FenceSelectedContexts()
-				t.Fatalf("R4 selected receiver claim not reached: %v", ctx.Err())
+			var acknowledged forkResult
+			ackReceived := false
+			for predecessor.DeliveryID() == "" {
+				select {
+				case predecessor = <-gate.entered:
+				case acknowledged = <-finished:
+					ackReceived, finished = true, nil
+					if acknowledged.err != nil || len(acknowledged.rpcErr) != 0 {
+						t.Fatalf("R4 fork failed before its receiver claim: %+v", acknowledged)
+					}
+				case <-ctx.Done():
+					_ = owner.FenceSelectedContexts()
+					t.Fatalf("R4 selected receiver claim not reached: %v", ctx.Err())
+				}
 			}
 			var childID, status, predecessorExecutionID string
 			var claimVersion int64
@@ -109,13 +116,15 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 				t.Fatal(err)
 			}
 			release.Do(func() { close(gate.release) })
-			select {
-			case first := <-finished:
-				if first.err == nil && len(first.rpcErr) == 0 {
-					t.Fatalf("R4 fenced predecessor returned success: %+v", first.result)
+			if !ackReceived {
+				select {
+				case acknowledged = <-finished:
+				case <-ctx.Done():
+					t.Fatalf("R4 lost its committed activation acknowledgment: %v", ctx.Err())
 				}
-			case <-ctx.Done():
-				t.Fatalf("R4 fenced predecessor did not relinquish execution: %v", ctx.Err())
+			}
+			if acknowledged.err != nil || len(acknowledged.rpcErr) != 0 || acknowledged.result.ForkRunID != childID {
+				t.Fatalf("R4 fencing rewrote the committed child acknowledgment: %+v", acknowledged)
 			}
 			if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 				t.Fatal(err)

@@ -22,7 +22,10 @@ func requireNormalRunControl(ctx context.Context, owner SelectedForkControlAdmis
 	if owner == nil {
 		return nil
 	}
-	err := owner.RequireNormalControl(ctx, runID, operation)
+	return selectedForkControlAPIError(owner.RequireNormalControl(ctx, runID, operation))
+}
+
+func selectedForkControlAPIError(err error) error {
 	var unsupported *runfork.SelectedForkControlUnsupported
 	if errors.As(err, &unsupported) {
 		return NewApplicationError("SELECTED_FORK_CONTROL_UNSUPPORTED", false, map[string]any{

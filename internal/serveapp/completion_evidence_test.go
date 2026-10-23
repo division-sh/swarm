@@ -501,6 +501,11 @@ func proveCompletion2270ServedSelected(t *testing.T, rt completion2270ServedProo
 	if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID {
 		t.Fatalf("served-selected launch: %+v, calls=%d", fork, calls.Load())
 	}
+	reader, ok := owner.(receiverProofStateReader)
+	if !ok {
+		t.Fatal("selected completion proof lost its original native workflow reader")
+	}
+	waitServedSelectedForkFrontier(t, reader, selected.RuntimeDeps().DeliveryStore.SummarizeRun, fork.ForkRunID, eventID)
 	var list operatorread.OperatorConversationListResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.list", map[string]any{"run_id": fork.ForkRunID, "agent_id": "same-name"}, &list)
 	if len(list.Conversations) != 1 {

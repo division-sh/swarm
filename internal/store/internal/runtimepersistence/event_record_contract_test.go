@@ -18,7 +18,7 @@ import (
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	"github.com/division-sh/swarm/internal/runtime/runfork"
+
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -80,47 +80,12 @@ func TestEventRecordExactPersistenceParity(t *testing.T) {
 			}
 			assertExactEventRecord(t, ctx, fixture, diagnostic)
 
-			forkRunID := uuid.NewString()
-			forkRoot := eventtest.RunCreatingRootIngress(
-				uuid.NewString(), "contract.fork_root", "fixture", "", []byte(`{}`), 0,
-				forkRunID, "", events.EventEnvelope{}, now.Add(6*time.Microsecond),
-			)
-			if err := commitSemanticEventFixture(ctx, store, forkRoot); err != nil {
-				t.Fatalf("commit selected-fork run root: %v", err)
-			}
-			selectedLineage, err := events.NewSelectedForkLineage(forkRunID, runID, root.ID(), "selection:contract-proof", "fork-task", executionmode.Live)
-			if err != nil {
-				t.Fatal(err)
-			}
-			selected := eventtest.SelectedForkReplay(uuid.NewString(), "contract.selected_fork", eventtest.Producer(events.EventProducerNode, "selected-node"), "fork-task", []byte(`{"fork":true}`), 0, selectedLineage, events.EventEnvelope{}, now.Add(7*time.Microsecond))
-			selected, err = bindSemanticEventFixturePayload(selected)
-			if err != nil {
-				t.Fatal(err)
-			}
-			admitted, err := events.AdmitForPersistence(selected, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-			if err != nil {
-				t.Fatal(err)
-			}
-			owner := pipelineObligationOwnerForFixture(store)
-			claim, err := owner.ClaimPublication(ctx, selected.ID())
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = owner.Release(context.WithoutCancel(ctx), claim) }()
-			outcome, err := commitSelectedForkEventOutcome(ctx, store, runtimebus.CommitSelectedForkEventRequest{
-				Commit: runtimebus.CommitPublishRequest{
-					Event: admitted, RouteSettlement: testRouteSettlement(admitted.Event(), nil), ReplayScope: runtimepipelineobligation.ScopeDirect, PipelineClaim: claim,
-				},
-				Lineage: runfork.RunForkSelectedContractExecutionLineage{
-					ForkRunID: forkRunID, SourceRunID: runID,
-					SourceEventID: root.ID(), ForkEventID: selected.ID(), EventName: string(selected.Type()),
-					SelectionAuthority: selectedLineage.AuthorityStamp(), CreatedAt: selected.CreatedAt(),
-				},
-			})
+			req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
+			outcome, err := commitSelectedForkEventOutcome(ctx, store, req)
 			if err != nil || outcome != runtimebus.EventAppendInserted {
 				t.Fatalf("commit selected-fork event: outcome=%v err=%v", outcome, err)
 			}
-			assertExactEventRecord(t, ctx, fixture, selected)
+			assertExactEventRecord(t, ctx, fixture, req.Commit.Event.Event())
 			assertExactEventRecord(t, ctx, fixture, root)
 		})
 	}

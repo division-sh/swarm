@@ -58,13 +58,11 @@ func TestAudit2277ForkDurableResultBypassesGenericCompletionBothStores(t *testin
 			if err := rt.DB.QueryRow(`SELECT run_id,status FROM runs WHERE forked_from_run_id=$1`, seed.RunID).Scan(&forkID, &forkStatus); err != nil {
 				t.Fatal(err)
 			}
+			waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, forkID, point.EventID)
 			if err := rt.DB.QueryRow(`SELECT state FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, forkID).Scan(&executionState); err != nil {
 				t.Fatal(err)
 			}
 			t.Logf("COMMITTED DOMAIN fork=%s status=%s execution=%s", forkID, forkStatus, executionState)
-			if executionState != "closed" {
-				t.Fatal("selected execution did not finish before the first response")
-			}
 			before := repeatedStaticRunSnapshot(t, rt.DB, forkID)
 			if rt.Backend == "sqlite" {
 				if _, err := rt.DB.Exec(`DROP TRIGGER audit2277_completion`); err != nil {

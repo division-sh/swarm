@@ -15,7 +15,7 @@ import (
 func TestDeploymentSourceSelectedForkBeforeFirstRow(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			f := selectedDeploymentResourceFixture(t, backend, "singleton")
+			f := selectedDeploymentResourceFixtureConfigured(t, backend, "singleton", true, true, nil, nil, nil)
 			f.runtime.fanOutServing.Close()
 			server := f.operatorServer(t)
 			start := func(name string, row []byte) string {

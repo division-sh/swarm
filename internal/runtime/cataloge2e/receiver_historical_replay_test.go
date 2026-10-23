@@ -83,9 +83,9 @@ func requireHistoricalPublicationFreshBusReplay(t *testing.T, ctx context.Contex
 	}
 	for _, original := range []deliverylifecycle.Snapshot{node, agent} {
 		claim, err := selected.ClaimDelivery(ctx, original.Authority, publication.Event.Event(), original.Route)
-		// The selected execution is already closed. Replay cannot reacquire it;
-		// refusal must still observe the identical settled obligation.
-		if err != nil || claim.Disposition != deliverylifecycle.ClaimWrongAuthority || !reflect.DeepEqual(claim.Snapshot, original) {
+		// A settled obligation is observable without reacquiring the closed
+		// execution or granting another delivery attempt.
+		if err != nil || !claim.Acknowledged || claim.Disposition != deliverylifecycle.ClaimTerminal || !reflect.DeepEqual(claim.Snapshot, original) {
 			t.Fatalf("closed historical execution changed a settled claim: %+v %v", claim, err)
 		}
 	}

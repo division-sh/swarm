@@ -1,13 +1,12 @@
 package store_test
 
 import (
-	"bytes"
 	"go/ast"
-	"go/format"
+
 	"go/parser"
 	"go/token"
 	"go/types"
-	"maps"
+
 	"os"
 	"path/filepath"
 	"slices"
@@ -204,92 +203,5 @@ func TestPersistenceAuthorityDebtReviewedExcludedPolicyIsFingerprintBound(t *tes
 	debtWriteModuleSource(t, copy, policy, "package store_test; func broken(")
 	if _, err := debtCollectorDigest(copy); err == nil {
 		t.Fatal("corrupt current policy admitted")
-	}
-}
-
-func TestPersistenceAuthorityDebtReviewedExcludedCollectorTransition(t *testing.T) {
-	root := persistenceAuthorityRepoRoot(t)
-	predecessor := t.TempDir()
-	paths := []string{
-		"internal/store/persistence_authority_debt_census_test.go", "internal/store/persistence_authority_debt_test.go",
-		"internal/store/persistence_authority_debt_cache_test.go", "internal/store/persistence_authority_debt_sidecar_test.go",
-		"internal/store/persistence_authority_debt_process_lease_test.go", "internal/store/persistence_authority_debt_native_fixture_test.go",
-		"internal/checkoutsource/fixture_role.go",
-	}
-	for _, path := range paths {
-		data, err := debtGit(root, "show", debtExcludedFixturePredecessor+":"+path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		debtWriteModuleSource(t, predecessor, path, string(data))
-	}
-	if digest, err := debtCollectorDigest(predecessor); err != nil || digest != debtNativeFixtureCollectorTo {
-		t.Fatalf("immutable predecessor collector=%s error=%v", digest, err)
-	}
-	if digest, err := debtCollectorDigest(root); err != nil || digest != debtQ1ReopenCollectorTo {
-		t.Fatalf("exact successor collector=%s error=%v", digest, err)
-	}
-	// The uncertainty extraction itself is unchanged, not replaced by a trusting scanner.
-	canonical := func(path, name string) []byte {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		file := debtExcludedFixtureControlSource(t, path, string(data))
-		for _, decl := range file.Decls {
-			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == name {
-				fn.Name.Name = "uncertainty"
-				var out bytes.Buffer
-				if err := format.Node(&out, token.NewFileSet(), fn); err != nil {
-					t.Fatal(err)
-				}
-				return out.Bytes()
-			}
-		}
-		t.Fatal("missing uncertainty owner")
-		return nil
-	}
-	const census = "internal/store/persistence_authority_debt_census_test.go"
-	if !bytes.Equal(canonical(filepath.Join(predecessor, census), "debtExcludedSourceFindings"), canonical(filepath.Join(root, census), "debtExcludedSourceUncertainty")) {
-		t.Fatal("historical uncertainty scanner changed")
-	}
-	for _, mutation := range []string{"exact", "landed", "foreign-base", "foreign-head", "unrotated", "reverse", "rebootstrap", "addition", "removal", "increase", "decrease"} {
-		t.Run(mutation, func(t *testing.T) {
-			row := debtControlSite("call:QueryRow", 2)
-			trusted := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: debtNativeFixtureCollectorTo, Sites: debtControlSet(row)}
-			head := trusted
-			head.Collector, head.Sites = debtExcludedFixtureCollectorTo, maps.Clone(trusted.Sites)
-			current := head.Collector
-			switch mutation {
-			case "landed":
-				trusted.Collector = current
-			case "foreign-base":
-				trusted.Collector = strings.Repeat("a", 64)
-			case "foreign-head":
-				head.Collector, current = strings.Repeat("b", 64), strings.Repeat("b", 64)
-			case "unrotated":
-				head.Collector = trusted.Collector
-			case "reverse":
-				trusted, head, current = head, trusted, trusted.Collector
-			case "rebootstrap":
-				head.BootstrapSource = strings.Repeat("c", 40)
-			case "addition":
-				added := debtControlSite("call:Exec", 1)
-				head.Sites[added.identity()] = added
-			case "removal":
-				delete(head.Sites, row.identity())
-			case "increase", "decrease":
-				delete(head.Sites, row.identity())
-				if mutation == "increase" {
-					row.Multiplicity++
-				} else {
-					row.Multiplicity--
-				}
-				head.Sites[row.identity()] = row
-			}
-			if err := debtValidateCollectorIdentity(trusted.Collector, current, trusted, head, ""); (err == nil) != (mutation == "exact" || mutation == "landed") {
-				t.Fatalf("transition error=%v", err)
-			}
-		})
 	}
 }

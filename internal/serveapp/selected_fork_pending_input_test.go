@@ -152,7 +152,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				if err := json.Unmarshal(response.Result, &fork); err != nil {
 					t.Fatal(err)
 				}
-				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
+				waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, point.EventID)
 				requirePendingInputStateCount(t, rt, fork.ForkRunID, "done", wantDone)
 				requirePendingInputStateCount(t, rt, fork.ForkRunID, "ready", 2-wantDone)
 				requirePendingInputPublicStates(t, rt, fork.ForkRunID, wantDone)

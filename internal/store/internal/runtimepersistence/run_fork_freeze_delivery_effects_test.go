@@ -16,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
@@ -199,17 +199,9 @@ func TestForkFreezeActivationDeliveryHistoryBothStores(t *testing.T) {
 						// Ordinary replay needs the existing agent-history admission port;
 						// selected admission uses the real compiled frontier proof below.
 						staged, req := stageForkContentionFixture(t, f, selected)
+						var activateSelected func(context.Context) (runfork.RunForkActivation, error)
 						if selected {
-							for _, sourceID := range req.AllowedSourceEventIDs {
-								lineage, err := events.NewSelectedForkLineage(staged.ForkRunID, f.runID, sourceID, runfork.RunForkSelectedContractExecutionOwner, "", "live")
-								if err != nil {
-									t.Fatal(err)
-								}
-								replayed := eventtest.SelectedForkReplay(uuid.NewString(), "item.received", eventtest.Producer(events.EventProducerPlatform, runfork.RunForkSelectedContractExecutionOwner), "", []byte(`{}`), 0, lineage, events.EventEnvelope{}, time.Now().UTC())
-								if err := commitSelectedForkEventFixture(f.ctx, f.store.(selectedForkEventFixtureStore), replayed, runfork.RunForkSelectedContractExecutionLineage{ForkRunID: staged.ForkRunID, SourceRunID: f.runID, SourceEventID: sourceID, ForkEventID: replayed.ID(), EventName: string(replayed.Type()), SelectionAuthority: runfork.RunForkSelectedContractExecutionOwner, CreatedAt: replayed.CreatedAt()}); err != nil {
-									t.Fatal(err)
-								}
-							}
+							activateSelected = selectedStoreAttachedActivationForTest(t, f.ctx, f.store, req)
 						}
 						if rollback {
 							query := fmt.Sprintf(`CREATE TRIGGER freeze_child_failure BEFORE UPDATE ON runs WHEN OLD.run_id='%s' AND NEW.status='running' BEGIN SELECT RAISE(ABORT, 'freeze_child_failure'); END`, staged.ForkRunID)
@@ -223,7 +215,7 @@ func TestForkFreezeActivationDeliveryHistoryBothStores(t *testing.T) {
 						before := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
 						var result runfork.RunForkActivation
 						if selected {
-							result, err = f.store.(runforkexecution.SelectedContractForkLifecycle).ActivateRunForkForSelectedContractExecution(f.ctx, req)
+							result, err = activateSelected(f.ctx)
 						} else {
 							admitter := &fakeRunForkHistoricalReplayExecutionAdmitter{work: func(r runfork.RunForkHistoricalReplayExecutionRequest) []runfork.RunForkHistoricalReplayExecutableWork {
 								var work []runfork.RunForkHistoricalReplayExecutableWork

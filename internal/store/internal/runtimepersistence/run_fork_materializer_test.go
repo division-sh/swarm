@@ -769,6 +769,7 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	sourceEvent := eventtest.TargetRouted(semanticEventRecordFixture(eventID, sourceRunID, "fork.pending", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), semanticEventRecordFixtureEnvelope(entityID, ""), at), route.Target.Route())
 	native := prepareFixedForkHistoryFixture(t, pg, "unsupported-delivery", sourceRunID, entityID, sourceEvent)
 	ctx = native.ctx
+	initialRevision := captureRunForkTestRevision(t, db, sourceRunID)
 	if err := runSelectedFixtureMutation(ctx, pg, "fixed construction and in-progress delivery cut", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 		if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, pg, attempt, sourceEvent, []events.DeliveryRoute{route}); err != nil {
 			return err
@@ -795,8 +796,8 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if revision := captureRunForkTestRevision(t, db, sourceRunID); revision != 1 {
-		t.Fatalf("construction, event and in-progress delivery split the original cut: revision=%d", revision)
+	if revision := captureRunForkTestRevision(t, db, sourceRunID); revision != initialRevision+1 {
+		t.Fatalf("construction, event and in-progress delivery split the original cut: before=%d after=%d", initialRevision, revision)
 	}
 
 	blocked, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
@@ -1879,10 +1880,23 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 				}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at, OriginEvent: &event}); err != nil {
 					return err
 				}
-				// Isolate the activation guard without reintroducing a frame-less
-				// writer: create a valid source turn, then move only its replay-state
-				// classification coordinate into the fork run.
-				if _, err := db.ExecContext(ctx, `UPDATE agent_turns SET run_id=$1::uuid WHERE turn_id=$2::uuid`, forkRunID, turnID); err != nil {
+				// Retain the original real completion parents while moving the
+				// replay-state coordinate and its coupled live association together.
+				tx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					return err
+				}
+				defer tx.Rollback()
+				if _, err := tx.ExecContext(ctx, `DELETE FROM agent_turn_live_parents WHERE turn_id=$1::uuid`, turnID); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, `UPDATE agent_turns SET run_id=$1::uuid WHERE turn_id=$2::uuid`, forkRunID, turnID); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, `INSERT INTO agent_turn_live_parents (turn_id,run_id,completion_attempt_id,capability_surface_id) SELECT turn_id,run_id,completion_attempt_id,capability_surface_id FROM agent_turns WHERE turn_id=$1::uuid`, turnID); err != nil {
+					return err
+				}
+				if err := tx.Commit(); err != nil {
 					return err
 				}
 				captureRunForkTestRevision(t, db, originRunID, runforkrevision.FamilyAgentTurns)

@@ -17,9 +17,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -71,25 +73,17 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	`, sourceRunID, entityID, string(handlerLoops), requestEventID, at); err != nil {
 		t.Fatal(err)
 	}
-	resultPayload, _ := json.Marshal(map[string]any{
+	resultPayload := map[string]any{
 		"activity_id": "commit", "tool": "provider.write",
 		"result": map[string]any{"ok": true}, "revision_id": sourceGeneration.RevisionID,
-	})
-	resultEventID := activityidentity.ResultEventID(fact, "write.succeeded")
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO activity_attempts (
-			request_event_id, run_id, execution_mode, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
-			activity_id, tool, attempt, status, success_event, failure_event,
-			result_event_id, result_event_type, result_payload, input_hash, loop_generation, loop_stage,
-			started_at, completed_at, updated_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a', $9, 'review.accepted',
-			'commit', 'provider.write', 1, 'succeeded', 'write.succeeded', 'write.failed',
-			$5::uuid, 'write.succeeded', $6::jsonb, 'input-hash', $7::jsonb, 'review', $8, $8, $8
-		)
-	`, requestEventID, sourceRunID, sourceEventID, entityID, resultEventID, string(resultPayload), forkTestJSON(t, sourceGeneration), at, writerOwner.Key()); err != nil {
-		t.Fatal(err)
 	}
+	resultEventID := activityidentity.ResultEventID(fact, "write.succeeded")
+	seedApprovedActivityRecordedEvidence(t, ctx, authorActivityReceiptFixture{db: db, store: pg, dialect: authoractivityfixture.DialectPostgres}, true, pipeline.ActivityAttemptRecord{
+		RequestEventID: requestEventID, RunID: sourceRunID, SourceEventID: sourceEventID, EntityID: entityID, FlowInstance: "flow-a", NodeID: writerOwner.Key(), HandlerEventKey: "review.accepted",
+		ExecutionMode: executionmode.Live, ActivityID: "commit", Tool: "provider.write", Attempt: 1, Status: pipeline.ActivityAttemptStatusSucceeded,
+		SuccessEvent: "write.succeeded", FailureEvent: "write.failed", ResultEventID: resultEventID, ResultEventType: "write.succeeded", ResultPayload: resultPayload,
+		InputHash: "input-hash", Generation: sourceGeneration, LoopStage: "review", StartedAt: at, CompletedAt: &at, UpdatedAt: at,
+	}, at.Format(time.RFC3339Nano), at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
 	events, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint))
@@ -258,30 +252,17 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	if !ok {
 		t.Fatal("construct typed activity failure")
 	}
-	failureJSON, err := json.Marshal(failureEnvelope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	failure := string(failureJSON)
-	resultPayload, _ := json.Marshal(map[string]any{
+	resultPayload := map[string]any{
 		"activity_id": "commit", "tool": "provider.write",
 		"failure": map[string]any{"code": "provider_unavailable"}, "revision_id": generation.RevisionID,
-	})
-	resultEventID := activityidentity.ResultEventID(fact, "write.failed")
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO activity_attempts (
-			request_event_id, run_id, execution_mode, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
-			activity_id, tool, attempt, status, success_event, failure_event,
-			result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
-			started_at, completed_at, updated_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow-a', $10, 'review.accepted',
-			'commit', 'provider.write', 1, 'failed', 'write.succeeded', 'write.failed',
-			$5::uuid, 'write.failed', $6::jsonb, $7::jsonb, 'input-hash', $8::jsonb, 'review', $9, $9, $9
-		)
-	`, requestEventID, sourceRunID, sourceEventID, entityID, resultEventID, string(resultPayload), failure, forkTestJSON(t, generation), at, writerOwner.Key()); err != nil {
-		t.Fatal(err)
 	}
+	resultEventID := activityidentity.ResultEventID(fact, "write.failed")
+	seedApprovedActivityRecordedEvidence(t, ctx, authorActivityReceiptFixture{db: db, store: pg, dialect: authoractivityfixture.DialectPostgres}, true, pipeline.ActivityAttemptRecord{
+		RequestEventID: requestEventID, RunID: sourceRunID, SourceEventID: sourceEventID, EntityID: entityID, FlowInstance: "flow-a", NodeID: writerOwner.Key(), HandlerEventKey: "review.accepted",
+		ExecutionMode: executionmode.Live, ActivityID: "commit", Tool: "provider.write", Attempt: 1, Status: pipeline.ActivityAttemptStatusFailed,
+		SuccessEvent: "write.succeeded", FailureEvent: "write.failed", ResultEventID: resultEventID, ResultEventType: "write.failed", ResultPayload: resultPayload, Failure: &failureEnvelope,
+		InputHash: "input-hash", Generation: generation, LoopStage: "review", StartedAt: at, CompletedAt: &at, UpdatedAt: at,
+	}, at.Format(time.RFC3339Nano), at)
 	captureRunForkTestRevision(t, db, sourceRunID)
 	materialized := materializeSelectedActivityAtCheckpoint(t, ctx, pg, sourceRunID, entityID)
 	prepared, err := pg.LoadRunForkSelectedContractSourceEvents(ctx, sourceRunID, materialized.ForkRunID, []string{requestEventID}, originalActivityCarriageAtPoint(t, pg, sourceRunID, materialized.ForkPoint))

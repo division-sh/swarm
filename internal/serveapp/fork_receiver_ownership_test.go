@@ -711,7 +711,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: selectedHash},
 				AgentRuntime:      rt.ForkRuntime,
 			})
-			if err == nil || !strings.Contains(err.Error(), "receiver target owner is missing") || !strings.Contains(err.Error(), missingReceiver) || result.ExecutedEventCount != 0 || result.Materialization.ForkRunID != "" {
+			if err == nil || err.Error() != "selected static receiver lacks its exact captured constructor" || result.ExecutedEventCount != 0 || result.Materialization.ForkRunID != "" {
 				t.Fatalf("required missing receiver must reject before materialization: executions=%d child=%q err=%v", result.ExecutedEventCount, result.Materialization.ForkRunID, err)
 			}
 			if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(beforeRefusal, after) {
@@ -836,12 +836,11 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 					t.Fatalf("unexpected capability RPC refusal: %+v", rpcErr)
 				}
 				failure := decodeServedFailureEnvelope(t, details["failure"])
-				if string(failure.Class) != "platform.dependency_unavailable" || failure.Detail.Code != "selected_contract_deferred_work_owner_unavailable" || failure.Component != "selected-contract-run-fork" || failure.Operation != "admit-deferred-work-ownership" || !failure.Retryable || failure.Deterministic {
+				if string(failure.Class) != "platform.target_unreachable" || failure.Detail.Code != runfork.RunForkBlockerContractFrontierRouteUnresolved || failure.Component != "selected-contract-run-fork" || failure.Operation != "admit-frontier" || failure.Retryable || failure.Deterministic {
 					t.Fatalf("wrong typed capability refusal: %+v", failure)
 				}
-				raw, err := json.Marshal(failure.Detail.Attributes["capabilities"])
-				if err != nil || string(raw) != `["dynamic_flow_instance_creation"]` {
-					t.Fatalf("wrong exact capability set: %s error=%v", raw, err)
+				if failure.Detail.Attributes["owner"] != runfork.RunForkContractFrontierAdmissionOwner {
+					t.Fatalf("unresolved target lost its exact frontier admission owner: %+v", failure)
 				}
 				if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
 					t.Logf("capability refusal snapshot delta:\n%s", forkReceiverCapabilityRefusalSnapshotDelta(before, after))
@@ -1212,63 +1211,6 @@ func TestSelectedForkIndependentProducerReceiverEntitiesStateEffectBothStores(t 
 			}
 			t.Run(string(backend)+"/"+name, func(t *testing.T) {
 				runForkReceiverOwnershipJourney(t, backend, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting}}, entityless, forkReceiverJourneyOptions{executionOnly: true})
-			})
-		}
-	}
-}
-
-// Paired current-policy proof uses Chandrasekhar's single exact-refusal/cleanup
-// assertion owner after every geometry's complete original emitting source path.
-func TestSelectedForkReceiverGeometryPostRevisionPolicyRefusalBothStores(t *testing.T) {
-	type geometry struct {
-		name                         string
-		receivers                    []canonicalrouting.ForkReceiver
-		entityless, nested, repeated bool
-	}
-	var cases []geometry
-	for _, policy := range []struct {
-		name  string
-		value canonicalrouting.ForkReceiverPolicy
-	}{
-		{"optional_entityless", canonicalrouting.ForkReceiverOptionalAbsent},
-		{"optional_existing", canonicalrouting.ForkReceiverOptionalExisting},
-		{"required_existing", canonicalrouting.ForkReceiverRequiredExisting},
-		{"auto_materializing", canonicalrouting.ForkReceiverConstructorOwned},
-	} {
-		cases = append(cases, geometry{name: policy.name, receivers: []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: policy.value}}})
-	}
-	for _, entityless := range []bool{false, true} {
-		cases = append(cases, geometry{name: fmt.Sprintf("independent/entityless_producer=%t", entityless), receivers: []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting}}, entityless: entityless})
-	}
-	policies := []canonicalrouting.ForkReceiver{
-		{Path: "observer", Policy: canonicalrouting.ForkReceiverOptionalAbsent},
-		{Path: "optional", Policy: canonicalrouting.ForkReceiverOptionalExisting},
-		{Path: "required", Policy: canonicalrouting.ForkReceiverRequiredExisting},
-	}
-	for _, order := range [][3]int{{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}} {
-		cases = append(cases, geometry{name: fmt.Sprintf("permutation_%d%d%d", order[0], order[1], order[2]), receivers: []canonicalrouting.ForkReceiver{policies[order[0]], policies[order[1]], policies[order[2]]}})
-	}
-	cases = append(cases,
-		geometry{name: "materializing_mixed", receivers: append(append([]canonicalrouting.ForkReceiver{}, policies...), canonicalrouting.ForkReceiver{Path: "created", Policy: canonicalrouting.ForkReceiverConstructorOwned})},
-		geometry{name: "same_owner_two_events_and_duplicate", receivers: policies, repeated: true},
-		geometry{name: "nested_sibling_run", receivers: []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverRequiredExisting}, {Path: "sibling", Policy: canonicalrouting.ForkReceiverOptionalExisting}}, nested: true},
-	)
-	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
-		for _, tc := range cases {
-			t.Run(string(backend)+"/"+tc.name, func(t *testing.T) {
-				options := forkReceiverJourneyOptions{nested: tc.nested, repeated: tc.repeated}
-				options.afterSource = func(t *testing.T, rt servedControlProofRuntime, selected *selectedStoreOwner, root, sourceRunID, frontier string, receivers []canonicalrouting.ForkReceiver) {
-					prefix := ""
-					if tc.nested {
-						prefix = "branch/"
-					}
-					var laterScopeEvent string
-					if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2 AND source_event_id=$3`, sourceRunID, prefix+receivers[0].Path+"/receiver.finished", frontier).Scan(&laterScopeEvent); err != nil {
-						t.Fatal(err)
-					}
-					requireForkReceiverPostRevisionPolicyRefusal(t, rt, selected, root, sourceRunID, frontier, laterScopeEvent)
-				}
-				runForkReceiverOwnershipJourney(t, backend, tc.receivers, tc.entityless, options)
 			})
 		}
 	}

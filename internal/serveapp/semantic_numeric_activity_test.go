@@ -181,9 +181,10 @@ collector:
 				if child.ForkRunID == "" || child.ForkRunID == run || child.SourceRunID != run {
 					t.Fatalf("fork identity: %+v", child)
 				}
+				waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, child.ForkRunID, frontier)
 				requireNumericMockForkOutput(t, rt, child.ForkRunID)
 				var attempts int
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1 AND status='succeeded' AND execution_mode='mock'`, child.ForkRunID).Scan(&attempts); err != nil || attempts != 1 {
+				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1 AND status='succeeded' AND execution_mode='mock' AND execution_binding IS NOT NULL`, child.ForkRunID).Scan(&attempts); err != nil || attempts != 1 {
 					t.Fatalf("fork mock attempts=%d err=%v", attempts, err)
 				}
 				rt = restart()
@@ -221,12 +222,12 @@ func requireNumericMockForkOutput(t *testing.T, rt servedControlProofRuntime, ru
 	if entity.Fields["score"] != float64(24) {
 		t.Fatalf("selected mock arithmetic: %+v", entity.Fields)
 	}
-	var count int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1`, run).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("selected attempts=%d err=%v", count, err)
+	var count, retained, current int
+	if err := rt.DB.QueryRow(`SELECT COUNT(*),COUNT(CASE WHEN execution_binding IS NULL THEN 1 END),COUNT(CASE WHEN execution_binding IS NOT NULL THEN 1 END) FROM activity_attempts WHERE run_id=$1`, run).Scan(&count, &retained, &current); err != nil || count != 2 || retained != 1 || current != 1 {
+		t.Fatalf("selected journal rows=%d retained=%d current=%d err=%v", count, retained, current, err)
 	}
 	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(result_payload AS TEXT) FROM activity_attempts WHERE run_id=$1 AND status='succeeded' AND execution_mode='mock'`, run).Scan(&raw); err != nil {
+	if err := rt.DB.QueryRow(`SELECT CAST(result_payload AS TEXT) FROM activity_attempts WHERE run_id=$1 AND status='succeeded' AND execution_mode='mock' AND execution_binding IS NOT NULL`, run).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	var decoded any

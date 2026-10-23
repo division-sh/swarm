@@ -188,6 +188,14 @@ func TestDeploymentSourceSelectedControlOnlyRepeatedStopBothStores(t *testing.T)
 			if err := owner.RetireSelectedContexts(f.ctx); err != nil {
 				t.Fatal(err)
 			}
+			oldRuntime := f.runtime
+			join := beginServingLifetimeJoin(oldRuntime, nil)
+			assertServingJoinComplete(t, join, oldRuntime, nil)
+			if err := f.topology.capability.Release(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
+			f.boot(t)
 			restartedOwner, recovery := deploymentForkOwner(t, f)
 			var terminalOnly bool
 			for _, entry := range recovery {

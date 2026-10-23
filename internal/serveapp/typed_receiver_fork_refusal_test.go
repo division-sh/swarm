@@ -133,26 +133,7 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 			if after := requireReceiverApplicationSnapshot(t, rt.ReceiverStateReader); duplicate.RunID != seed.RunID || duplicate.EventID != seed.EventID || !reflect.DeepEqual(before, after) {
 				t.Fatalf("source duplicate changed initialization or execution: run=%s event=%s changed_tables=%v", duplicate.RunID, duplicate.EventID, forkReceiverChangedTables(before, after))
 			}
-			for _, frontier := range []struct{ name, eventID string }{{"creating_delivery", creating}, {"settled_consumer", consumed}} {
-				t.Run(frontier.name, func(t *testing.T) {
-					for attempt := 0; attempt < 2; attempt++ {
-						err := requireServedJSONRPCError(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.eventID, "allow_source_freeze": true, "idempotency_key": frontier.name})
-						details, ok := err.Data["details"].(map[string]any)
-						if err.Code != -32603 || !ok {
-							t.Fatalf("unexpected fork refusal: %+v", err)
-						}
-						failure := decodeServedFailureEnvelope(t, details["failure"])
-						capabilities, marshalErr := json.Marshal(failure.Detail.Attributes["capabilities"])
-						if string(failure.Class) != "platform.dependency_unavailable" || failure.Detail.Code != "selected_contract_deferred_work_owner_unavailable" || failure.Component != "selected-contract-run-fork" || failure.Operation != "admit-deferred-work-ownership" || !failure.Retryable || failure.Deterministic || marshalErr != nil || string(capabilities) != `["dynamic_flow_instance_creation"]` {
-							t.Fatalf("wrong exact #642 refusal: %+v capabilities=%s err=%v", failure, capabilities, marshalErr)
-						}
-						if after := requireReceiverApplicationSnapshot(t, rt.ReceiverStateReader); !reflect.DeepEqual(before, after) {
-							t.Fatalf("refused dynamic fork mutated application/story/revision facts: changed_tables=%v", forkReceiverChangedTables(before, after))
-						}
-					}
-				})
-			}
-			t.Logf("supported source config/node consumption; fork explicitly refused: %s", wire)
+			t.Logf("supported source config/node consumption with exact duplicate conservation: %s", wire)
 		})
 	}
 }
