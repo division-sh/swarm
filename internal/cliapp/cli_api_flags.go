@@ -16,8 +16,12 @@ func bindCLIAPIConnectionFlagsWithClass(cmd *cobra.Command, opts *rootCommandOpt
 		opts.apiCommandName = strings.TrimSpace(commandName)
 	}
 	cmd.Flags().StringVar(&opts.apiServer, "api-server", "", "Swarm API server base URL")
-	cmd.Flags().StringVar(&opts.apiTokenFile, "api-token-file", "", "Path to file containing the Swarm API bearer token")
+	bindCLIAPITokenFileFlag(cmd, opts)
 	cmd.Flags().StringVar(&opts.contextName, "context", "", "Local Swarm context descriptor name")
+}
+
+func bindCLIAPITokenFileFlag(cmd *cobra.Command, opts *rootCommandOptions) {
+	cmd.Flags().StringVar(&opts.apiTokenFile, "api-token-file", "", "Path to file containing the Swarm API bearer token")
 }
 
 func cliAPIConnectionFlagsChanged(cmd *cobra.Command) bool {
@@ -27,6 +31,9 @@ func cliAPIConnectionFlagsChanged(cmd *cobra.Command) bool {
 func validateCLIAPIConnectionFlagPlacement(args []string) error {
 	stripped := stripRootPersistentFlags(args)
 	index, flag := firstCLIAPIConnectionFlagIndex(stripped)
+	if index >= 0 && flag == "--api-token-file" && argsHaveCommandPrefix(stripped[:index], []string{"run", "start"}) {
+		return nil
+	}
 	if index < 0 || cliAPIConnectionFlagAfterLeafCommand(stripped[:index]) {
 		return nil
 	}

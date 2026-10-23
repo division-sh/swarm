@@ -764,6 +764,10 @@ func textFileTwoBundleOperator2456(t *testing.T, f *deploymentResourceFixture, o
 	if !ok {
 		t.Fatalf("selected store %T lacks observability", f.selected)
 	}
+	runs, ok := f.selected.(apiv1.RunReadStore)
+	if !ok {
+		t.Fatalf("selected store %T lacks canonical run readback", f.selected)
+	}
 	publication := apiv1.EventPublicationOptions{
 		Idempotency: idempotency, Events: f.runtime.bus, Acknowledged: f.runtime.bus,
 		SourceArtifact: f.runtime.bus, RunBundleContext: contextOwner,
@@ -771,6 +775,7 @@ func textFileTwoBundleOperator2456(t *testing.T, f *deploymentResourceFixture, o
 	}
 	methods := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
+		apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: runs}),
 		apiv1.OperatorDataHandlers(apiv1.DataHandlerOptions{Store: dataOwner}),
 		apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: observability}),
 		map[string]apiv1.MethodHandler{"health.check": func(context.Context, apiv1.Request) (any, error) {
