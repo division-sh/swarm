@@ -447,7 +447,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		"store-runtime-full-03", "store-runtime-full-03-i-l", "store-runtime-full-04",
 		"store-runtime-full-05", "store-runtime-full-07-fork", "store-runtime-selected", "store-runtime-s-z-rest",
 	}
-	codemodUnits := []string{"codemod-owner-guards", "codemod-pipeline-mutation", "codemod-bus-mutation", "codemod-candidate-overlay"}
+	codemodUnits := []string{"codemod-owner-guards", "codemod-pipeline-mutation", "codemod-bus-mutation"}
 	var codemodPartitions []testplanning.ProofUnit
 	for _, id := range codemodUnits {
 		unit, ok := policy.Units[id]

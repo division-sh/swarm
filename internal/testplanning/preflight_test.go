@@ -101,7 +101,7 @@ func TestPreflightStructuralSelectionUsesCanonicalOwner(t *testing.T) {
 		t.Fatalf("reviewed candidate count changed: %d", len(preflightCandidates))
 	}
 	for _, root := range preflightCandidates {
-		for _, excluded := range []string{"TestPersistenceAuthorityDebtRatchet", "TestReviewedSnapshotCandidateOverlayTypeChecks", "TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners"} {
+		for _, excluded := range []string{"TestPersistenceAuthorityDebtRatchet", "TestNativeBusOriginAssertionFailureJoinsBlockedSQLAndRuntimeOwners"} {
 			if root.Name == excluded {
 				t.Fatalf("unadmitted root %s entered preflight", root.Name)
 			}

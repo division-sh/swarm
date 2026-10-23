@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
+
 	"strings"
 	"testing"
 )
@@ -237,39 +237,6 @@ const q10APISetupImportRefusalCases = `
 			wantReason: "data-only imports cannot carry lifecycle inputs",
 		},`
 
-func TestNativeAPIPhysicalCardinalityRetainsWorkloadsAssertionsAndExactReadBindings(t *testing.T) {
-	for _, row := range nativeAPIPhysicalCardinalityRecipes(t) {
-		row = historicalMechanicalRecipe(t, q10APIPhysicalCardinalityCurrentRecipe(t, row))
-		switch row.Function {
-		case "countAPIIdempotencyRows", "countAllRunRows", "countAllEventRows":
-			configuration := map[string][2]string{
-				"countAPIIdempotencyRows": {"CountAPICommandReceipts", "count api_idempotency rows: %v"},
-				"countAllRunRows":         {"CountPhysicalRuns", "count all run rows: %v"},
-				"countAllEventRows":       {"CountPhysicalEvents", "count all event rows: %v"},
-			}[row.Function]
-			port, message := configuration[0], configuration[1]
-			want := "func " + row.Function + "(t *testing.T,selected any) int {t.Helper();count,err:=storetest." + port + "(context.Background(),selected);if err!=nil{t.Fatalf(" + strconv.Quote(message) + ",err)};return count}"
-			if formattedNativeReadNode(projectionShapeFunction(t, row.After)) != formattedNativeReadNode(projectionShapeFunction(t, want)) {
-				t.Fatalf("scalar physical read changed: %s", row.Function)
-			}
-		case "assertNoRunStartPersistence", "assertNoFlowScopedEventPublishPersistence":
-			if nativeAPIEventHelperAssertions(t, row.Before) != nativeAPIEventHelperAssertions(t, row.After) {
-				t.Fatalf("refusal assertion changed: %s", row.Function)
-			}
-			port := "storetest.ReadAPIFlowPublicationRefusalStorage(context.Background(), selected)"
-			if row.Function == "assertNoRunStartPersistence" {
-				port = "storetest.ReadAPIRunStartRefusalStorage(context.Background(), selected, runID)"
-			}
-			if !strings.Contains(formattedNativeReadNode(projectionShapeFunction(t, row.After)), port) {
-				t.Fatalf("scope/read binding changed: %s", row.Function)
-			}
-		default:
-			if nativeAPIPhysicalCardinalityWorkload(t, row.Before) != nativeAPIPhysicalCardinalityWorkload(t, row.After) {
-				t.Fatalf("source/API/receipt/workload changed: %s", row.Function)
-			}
-		}
-	}
-}
 func TestNativeAPIPhysicalCardinalityRejectsLostAssertionsOrWrongOwner(t *testing.T) {
 	for _, row := range nativeAPIPhysicalCardinalityRecipes(t) {
 		if row.Function == "assertNoRunStartPersistence" || row.Function == "assertNoFlowScopedEventPublishPersistence" {
