@@ -116,8 +116,8 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			}
 			localID := uuid.NewString()
 			finite := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
-				"run", "start", source, "--config", config, "--event", "start.requested",
-				"--payload", "payload.json", "--run-id", localID, "--mcp-port", fmt.Sprint(freeReleaseTCPPort(t)))
+				"run", "start", "--config", config, "--event", "start.requested",
+				"--payload", "payload.json", "--run-id", localID)
 			if finite.err == nil || !strings.Contains(finite.output, "No serve running") {
 				t.Fatalf("finite clock without serve must refuse: %v\n%s", finite.err, finite.output)
 			}
@@ -171,8 +171,8 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 				t.Fatalf("clock public shutdown: %v\n%s", err, process.output.String())
 			}
 			finiteAgain := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
-				"run", "start", source, "--config", config, "--event", "start.requested",
-				"--payload", "payload.json", "--run-id", uuid.NewString(), "--mcp-port", fmt.Sprint(freeReleaseTCPPort(t)))
+				"run", "start", "--config", config, "--event", "start.requested",
+				"--payload", "payload.json", "--run-id", uuid.NewString())
 			if finiteAgain.err == nil || !strings.Contains(finiteAgain.output, "No serve running") {
 				t.Fatalf("parked deployment without serve must refuse: %v\n%s", finiteAgain.err, finiteAgain.output)
 			}

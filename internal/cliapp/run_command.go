@@ -349,6 +349,8 @@ func (o runCommandOptions) validate() error {
 				return fmt.Errorf("--%s requires local foreground mode and cannot be used with --connect", flag)
 			}
 		}
+	} else if strings.TrimSpace(o.sourceRoot) != "" || o.changedFlags["backend"] || o.changedFlags["mcp-port"] {
+		return fmt.Errorf("local hosting is no longer supported by run start; omit the source directory, --backend and --mcp-port, and use --connect or --api-port to target a running serve")
 	}
 	hasEvent := strings.TrimSpace(o.eventName) != ""
 	hasPayload := strings.TrimSpace(o.payloadPath) != ""
