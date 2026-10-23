@@ -12,6 +12,17 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
+func (g *InboundGateway) prepareInboundDeliveryBatch(ctx context.Context, batch runtimebus.InboundDeliveryBatch) (plan runtimebus.InboundDeliveryPlan, err error) {
+	diagnostic := inboundPayloadDiagnostic{active: true}
+	defer func() {
+		diagnostic.active = false
+		if _, rejected := runtimebus.SubmittedInboundValidationPath(err); !rejected {
+			diagnostic.emit()
+		}
+	}()
+	return g.bus.PrepareInboundDeliveryBatch(context.WithValue(ctx, inboundPayloadDiagnosticKey{}, &diagnostic), batch)
+}
+
 func logInboundPayloadRejection(logger *RuntimeLogger, ctx context.Context, provider, serviceID, providerEventID, path string) {
 	path = inboundValidationDisplayPath(path)
 	message := "invalid webhook payload"

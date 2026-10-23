@@ -144,11 +144,7 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 			decoded = normalized
 		}
 		if err := runtimetools.ValidatePayloadAgainstSchema(schema, payloadForCanonicalEventValidation(decoded, schema)); err != nil {
-			if logger != nil && !runtimebus.IsSubmittedInboundEvent(ctx, event) {
-				handleRuntimeLogPersistenceError("event-bus", "payload_validation_rejected", logger.Warn(ctx, "event-bus", "payload_validation_rejected", map[string]any{
-					"event_type": eventType,
-				}, err))
-			}
+			logPayloadValidationRejection(ctx, logger, event, err)
 			return events.PayloadAdmission{}, err
 		}
 		normalizedBytes := payload
@@ -172,6 +168,37 @@ func NewRuntimePayloadAdmitter(logger *RuntimeLogger, source semanticview.Source
 		}
 		return admission, nil
 	}
+}
+
+type inboundPayloadDiagnosticKey struct{}
+
+type inboundPayloadDiagnostic struct {
+	active    bool
+	ctx       context.Context
+	logger    *RuntimeLogger
+	eventType string
+	cause     error
+}
+
+func (d *inboundPayloadDiagnostic) emit() {
+	if d.logger != nil {
+		handleRuntimeLogPersistenceError("event-bus", "payload_validation_rejected", d.logger.Warn(d.ctx, "event-bus", "payload_validation_rejected", map[string]any{
+			"event_type": d.eventType,
+		}, d.cause))
+	}
+}
+
+func logPayloadValidationRejection(ctx context.Context, logger *RuntimeLogger, event events.Event, err error) {
+	if logger == nil {
+		return
+	}
+	diagnostic := inboundPayloadDiagnostic{ctx: ctx, logger: logger, eventType: strings.TrimSpace(string(event.Type())), cause: err}
+	if pending, ok := ctx.Value(inboundPayloadDiagnosticKey{}).(*inboundPayloadDiagnostic); ok && pending != nil && pending.active && runtimebus.IsSubmittedInboundEvent(ctx, event) {
+		*pending = diagnostic
+		pending.active = true
+		return
+	}
+	diagnostic.emit()
 }
 
 // payloadForCanonicalEventValidation validates only the event payload contract.

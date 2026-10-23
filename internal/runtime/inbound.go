@@ -544,7 +544,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 	var commitResult runtimeinbound.CommitResult
 	reconciled := make(map[string]struct{})
 	for {
-		batchPlan, err = g.bus.PrepareInboundDeliveryBatch(pubCtx, batch)
+		batchPlan, err = g.prepareInboundDeliveryBatch(pubCtx, batch)
 		if err != nil {
 			writeInboundPublicationError(w, g.logger, requestCtx, provider, target.ServiceID, providerEventID, err)
 			return

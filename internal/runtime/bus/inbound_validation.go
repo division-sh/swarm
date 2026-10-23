@@ -8,8 +8,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 )
 
-// IsSubmittedInboundEvent identifies only the exact authenticated batch event,
-// so its rejecting gateway can own the payload diagnostic without duplication.
+// IsSubmittedInboundEvent identifies the exact authenticated batch event, not
+// its transport or diagnostic owner.
 func IsSubmittedInboundEvent(ctx context.Context, event events.Event) bool {
 	_, submitted := authenticatedProviderPublicationForEvent(ctx, event)
 	return submitted
