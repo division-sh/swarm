@@ -582,6 +582,16 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								t.Fatalf("failed final validation lost committed execution evidence: count=%d calls=%d err=%v", executionEvidence.ExecutedEventCount, activityCalls.Load(), err)
 							}
 						} else if frontier == "mixed" {
+							if err == nil {
+								select {
+								case authority := <-mixed.settled:
+									if authority.Kind != effects.AuthoritySelectedContractFork || authority.SelectedFork.Generation == 0 || authority.SelectedFork.ForkRunID != forkRun {
+										t.Fatalf("accepted mixed actor settled under another child or before final entry: %+v", authority)
+									}
+								case <-time.After(catalogRuntimePublishTimeout):
+									t.Fatal("accepted mixed actor did not acknowledge its final-entry settlement")
+								}
+							}
 							if err != nil || result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 || executionEvidence.ExecutedEventCount != 1 || !result.Activation.Activated || mixed.calls.Load() != int32(declarations) {
 								t.Fatalf("ordinary final entry must retain accepted agent execution: count=%d calls=%d err=%v", result.ExecutedEventCount, mixed.calls.Load(), err)
 							}
@@ -615,34 +625,20 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							t.Fatal(err)
 						}
 						forkState, found, err := h.workflow.Load(ctx, forkOwner)
-						fenced := frontier == "activity_rejected" && stage == "initial"
-						if err != nil || (fenced && found) || (!fenced && (!found || forkState.Fields["worker_id"] != "worker-001")) {
+						rejected := frontier == "activity_rejected" && stage == "initial"
+						if err != nil || !found || forkState.Fields["worker_id"] != "worker-001" {
 							logSelectedForkRecoveryFailure(t, ctx, h, forkRun, err)
 							t.Fatalf("fork flow: %#v found=%t err=%v", forkState, found, err)
 						}
 						readiness, found, err := h.rt.Pipeline.LoadDynamicFlowRuntimeReadiness(ctx, forkRun, owner.Route)
-						if err != nil || (fenced && found) || (!fenced && (!found || len(readiness.Plan.Agents) != declarations)) {
+						if err != nil || !found || len(readiness.Plan.Agents) != declarations {
 							t.Fatalf("complete readiness: %#v %t %v", readiness, found, err)
 						}
-						if fenced {
-							terminal, err := selected.LoadRunLifecycleSnapshot(ctx, forkRun)
-							if err != nil || terminal.Status != "cancelled" || terminal.EndedAt == nil {
-								t.Fatalf("fenced frontier lost its terminal tombstone: %+v err=%v", terminal, err)
-							}
-						}
 						observed, err := catalogRunScopedOperatorEvents(h, forkRun)
-						if err != nil || (!refused && !fenced && len(observed) == 0) || ((refused || fenced) && len(observed) != 0) {
+						if err != nil || (!refused && len(observed) == 0) || (refused && len(observed) != 0) {
 							t.Fatalf("public fork readback: %#v %v", observed, err)
 						}
 						if frontier == "mixed" && !refused {
-							select {
-							case authority := <-mixed.settled:
-								if authority.Kind != effects.AuthoritySelectedContractFork || authority.SelectedFork.Generation == 0 || authority.SelectedFork.ForkRunID != forkRun {
-									t.Fatalf("accepted mixed actor settled under another child: %+v", authority)
-								}
-							default:
-								t.Fatal("accepted mixed actor did not settle after final entry")
-							}
 							accepted := 0
 							for _, event := range observed {
 								for _, delivery := range event.Deliveries {
@@ -659,7 +655,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								t.Fatalf("ordinary final entry retired or lost accepted agents: deliveries=%d state=%+v", accepted, forkState)
 							}
 						}
-						if !refused && !fenced && forkState.CurrentState != "complete" {
+						if !refused && forkState.CurrentState != "complete" {
 							t.Fatalf("fork did not execute to terminal state: %#v", forkState)
 						}
 						if activityFrontier {
@@ -670,13 +666,13 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 							if got := activityCalls.Load(); got != wantCalls {
 								t.Fatalf("fork activity calls = %d, want %d", got, wantCalls)
 							}
-							if !refused && !fenced {
+							if !refused && !rejected {
 								assertCatalogActivityLineage(t, activityLineageEvents(t, ctx, h, forkRun), strings.HasSuffix(frontier, "failure"))
 								if strings.HasPrefix(frontier, "activity_write") {
 									assertCatalogActivityJournal(t, ctx, h, forkRun, strings.HasSuffix(frontier, "failure"))
 								}
 							}
-							if !refused {
+							if !refused && !rejected {
 								// Activation hands completion to the enclosing runtime; join its
 								// durable outcome before comparing refused reactivation attempts.
 								h.waitForRunTerminalID(forkRun, catalogRuntimePublishTimeout)
@@ -685,9 +681,6 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 								}
 								terminal, err := selected.LoadRunLifecycleSnapshot(ctx, forkRun)
 								wantStatus := "completed"
-								if fenced {
-									wantStatus = "cancelled"
-								}
 								if err != nil || terminal.Status != wantStatus {
 									t.Fatalf("terminal fork: %+v err=%v; want %s", terminal, err, wantStatus)
 								}

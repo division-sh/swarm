@@ -144,7 +144,11 @@ func startSemanticNumericLiveRuntime(t *testing.T, backend servedparity.Backend,
 func startSemanticNumericRuntime(t *testing.T, backend servedparity.Backend, root string, mock bool) (servedControlProofRuntime, func() servedControlProofRuntime) {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	var receiverReader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
+	})
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	var db *sql.DB
@@ -171,7 +175,7 @@ func startSemanticNumericRuntime(t *testing.T, backend servedparity.Backend, roo
 		}
 		process.waitForReadyLine()
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-		return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: dialect, BundleHash: servedEventPublishFixtureBundleHash(t, root), Runtime: servedTestProcessRuntime(t, process)}
+		return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: db, Backend: dialect, BundleHash: servedEventPublishFixtureBundleHash(t, root), Runtime: servedTestProcessRuntime(t, process)}
 	}
 	process, rt := start()
 	return rt, func() servedControlProofRuntime {
