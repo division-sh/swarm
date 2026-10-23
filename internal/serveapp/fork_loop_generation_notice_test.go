@@ -63,7 +63,7 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 			if fork.SourceRunID != started.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == started.RunID || fork.ExecutedEventCount != 0 {
 				t.Fatalf("fork: %+v", fork)
 			}
-			childEvent := waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, frontier)
+			childEvent := waitServedSelectedForkFrontier(t, rt.ReceiverStateReader, rt.ReadRunDeliveries, fork.ForkRunID, frontier)
 			child := readForkLoopActivation(t, rt, fork.ForkRunID)
 			expected, err := loopruntime.Fork(source, fork.ForkRunID, flowidentity.EntityID("review"))
 			if err != nil {
