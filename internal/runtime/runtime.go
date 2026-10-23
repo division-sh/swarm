@@ -383,6 +383,9 @@ func (rt *Runtime) InstallStartupGrant(grant runtimestartupownership.LiveGenerat
 	if evidence.BundleHash != rt.Options.SourceArtifactFact.BundleHash() || evidence.RuntimeInstanceID != strings.TrimSpace(rt.Options.RuntimeInstanceID) {
 		return fmt.Errorf("runtime generation grant does not match runtime source coordinate")
 	}
+	if err := runtimestartupownership.BindProcessWorkOwner(rt.Options.ProcessWorkOwner, grant); err != nil {
+		return err
+	}
 	plan, err := grant.SourceSetPlan(context.Background())
 	if err != nil {
 		return fmt.Errorf("load generation source-set plan: %w", err)
