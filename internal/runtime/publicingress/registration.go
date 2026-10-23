@@ -206,12 +206,12 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 			return false, channelonboarding.ErrConflict
 		}
 		account := channelonboarding.AccountReference{Provider: target.Provider, Account: strings.TrimPrefix(state.SelectionSlotID, prefix)}
-		var provider map[string]runtimecredentials.AdmittedSnapshot
 		credential := func(admission channelonboarding.CredentialAdmission) bool {
+			provider, _, providerErr := c.admitCredentials(request.Context(), state.Pair)
 			projection := c.opts.CredentialOwner.BeginSecretBindingProjection()
 			value, usable, err := projection.ObserveAdmittedActivationCredential(request.Context(), runtimecredentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal}, admission.Receipt)
 			receiving, exists := provider[admission.Role]
-			return err == nil && usable && exists && projection.ValidateCurrent(request.Context()) == nil && subtle.ConstantTimeCompare([]byte(value.CredentialValue()), []byte(receiving.CredentialValue())) == 1
+			return providerErr == nil && err == nil && usable && exists && projection.ValidateCurrent(request.Context()) == nil && subtle.ConstantTimeCompare([]byte(value.CredentialValue()), []byte(receiving.CredentialValue())) == 1
 		}
 		current := func() bool {
 			credentialsCurrent, err := c.credentialObservationTokensCurrent(request.Context(), state.LastVerified.CredentialObservationTokens)
@@ -222,9 +222,7 @@ func (c *ProviderRegistrationController) ConsumePendingDeploymentClaim(request *
 			if !plan.Valid() || !plan.Generation().Equal(target.AdmissionPlanGeneration) || plan.Provider() != target.Provider {
 				return providertriggers.Delivery{}, channelonboarding.ErrConflict
 			}
-			var signing runtimecredentials.AdmittedSnapshot
-			var err error
-			provider, signing, err = c.admitCredentials(request.Context(), state.Pair)
+			_, signing, err := c.admitCredentials(request.Context(), state.Pair)
 			if err != nil {
 				return providertriggers.Delivery{}, err
 			}

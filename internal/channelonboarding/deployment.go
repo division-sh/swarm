@@ -14,6 +14,13 @@ type DeploymentSessionOwner interface {
 	CloseRegistration(context.Context, Operation) error
 }
 
+// PendingDeploymentClaim selects only the confirmed account's open ceremony.
+func (op Operation) PendingDeploymentClaim(account AccountReference) bool {
+	return op.DeploymentRegistration && op.Provider == account.Provider && op.AccountReference == account.Account &&
+		op.AccountConfirmed && op.IdentityOperationID != "" &&
+		(op.Phase == PhaseAwaitingExternalIdentity || op.Phase == PhaseAwaitingOperatorConfirmation)
+}
+
 func (s *Service) LogoutDeployment(ctx context.Context, id string, revision int64) (Result, error) {
 	if s == nil || !s.deployment {
 		return Result{}, ErrInvalidRequest

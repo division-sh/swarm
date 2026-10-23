@@ -72,7 +72,7 @@ func ConsumeDeploymentWebhookClaim(ctx context.Context, opts DeploymentConnectio
 		if err != nil {
 			return false, err
 		}
-		if !op.DeploymentRegistration || op.Provider != account.Provider || op.AccountReference != account.Account || !op.AccountConfirmed ||
+		if !op.PendingDeploymentClaim(account) ||
 			op.PrincipalID != opts.Principal.ID || identity.OperationID != op.IdentityOperationID || op.Interface.Normalized() != selected.Normalized() || len(op.CredentialAdmissions) != 1 {
 			continue
 		}

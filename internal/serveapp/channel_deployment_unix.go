@@ -105,9 +105,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 			return false, err
 		}
 		if !slices.ContainsFunc(operations, func(op channelonboarding.Operation) bool {
-			return op.DeploymentRegistration && op.Provider == account.Provider && op.AccountReference == account.Account &&
-				op.AccountConfirmed && op.IdentityOperationID != "" &&
-				(op.Phase == channelonboarding.PhaseAwaitingExternalIdentity || op.Phase == channelonboarding.PhaseAwaitingOperatorConfirmation)
+			return op.PendingDeploymentClaim(account)
 		}) {
 			return false, nil
 		}
