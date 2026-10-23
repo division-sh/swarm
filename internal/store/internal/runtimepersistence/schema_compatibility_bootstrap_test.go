@@ -170,7 +170,15 @@ func TestSchemaBootstrapRejectsLegacyPlatformShapesUnchanged(t *testing.T) {
 		{name: "run_error_summary", table: "runs", postgres: []string{`ALTER TABLE runs ADD COLUMN error_summary TEXT`}, sqlite: []string{`ALTER TABLE runs ADD COLUMN error_summary TEXT`}},
 		{name: "directive_flat_error", table: "agent_directive_operations", postgres: []string{`ALTER TABLE agent_directive_operations ADD COLUMN error_code TEXT`}, sqlite: []string{`ALTER TABLE agent_directive_operations ADD COLUMN error_code TEXT`}},
 		{name: "mailbox_without_deferred_until", table: "mailbox", postgres: []string{`ALTER TABLE mailbox DROP COLUMN deferred_until`}, sqlite: []string{`ALTER TABLE mailbox DROP COLUMN deferred_until`}},
-		{name: "reply_without_activity_reference", table: "activity_attempts", postgres: []string{`ALTER TABLE activity_attempts DROP COLUMN reply_context_id`}, sqlite: []string{`ALTER TABLE activity_attempts DROP COLUMN reply_context_id`}},
+		{name: "reply_without_activity_reference", table: "activity_attempts", postgres: []string{
+			`ALTER TABLE activity_attempts RENAME TO retained_activity_attempts`,
+			`CREATE TABLE activity_attempts AS SELECT * FROM retained_activity_attempts`,
+			`ALTER TABLE activity_attempts DROP COLUMN reply_context_id`,
+		}, sqlite: []string{
+			`ALTER TABLE activity_attempts RENAME TO retained_activity_attempts`,
+			`CREATE TABLE activity_attempts AS SELECT * FROM retained_activity_attempts`,
+			`ALTER TABLE activity_attempts DROP COLUMN reply_context_id`,
+		}},
 		{name: "agents_empty", table: "agents", postgres: legacyPostgresAgentsShape(false), sqlite: legacySQLiteAgentsShape(false)},
 		{name: "agents_populated", table: "agents", postgres: legacyPostgresAgentsShape(true), sqlite: legacySQLiteAgentsShape(true), populated: true},
 		{name: "agent_turns_empty", table: "agent_turns", postgres: legacyPostgresAgentTurnsShape(false), sqlite: legacySQLiteAgentTurnsShape(false)},
@@ -210,6 +218,12 @@ func TestSchemaBootstrapRejectsLegacyPlatformShapesUnchanged(t *testing.T) {
 				var incompatible *SchemaCompatibilityError
 				if !errors.As(err, &incompatible) {
 					t.Fatalf("bootstrap error = %v, want SchemaCompatibilityError", err)
+				}
+				if strings.HasPrefix(tc.name, "agent_turns_") && !strings.Contains(strings.Join(incompatible.Drift, "; "), "unexpected column agent_turns.error") {
+					t.Fatalf("legacy turn shape did not reach its column refusal: %v", incompatible.Drift)
+				}
+				if tc.name == "reply_without_activity_reference" && !strings.Contains(strings.Join(incompatible.Drift, "; "), "missing column activity_attempts.reply_context_id") {
+					t.Fatalf("legacy activity shape did not reach its column refusal: %v", incompatible.Drift)
 				}
 				afterColumns := selectedStoreTableColumns(t, backend, db, tc.table)
 				if !reflect.DeepEqual(afterColumns, beforeColumns) {
@@ -368,7 +382,7 @@ func legacySQLiteAgentsShape(populated bool) []string {
 }
 
 func legacyPostgresAgentTurnsShape(populated bool) []string {
-	statements := []string{`DROP TABLE agent_turns`, `CREATE TABLE agent_turns (turn_id UUID PRIMARY KEY, error TEXT)`}
+	statements := []string{`ALTER TABLE agent_turns RENAME TO retained_agent_turns`, `CREATE TABLE agent_turns (turn_id UUID PRIMARY KEY, error TEXT)`}
 	if populated {
 		statements = append(statements, `INSERT INTO agent_turns (turn_id, error) VALUES ('00000000-0000-0000-0000-000000002055'::uuid, 'opaque provider failure')`)
 	}
@@ -376,7 +390,7 @@ func legacyPostgresAgentTurnsShape(populated bool) []string {
 }
 
 func legacySQLiteAgentTurnsShape(populated bool) []string {
-	statements := []string{`DROP TABLE agent_turns`, `CREATE TABLE agent_turns (turn_id TEXT PRIMARY KEY, error TEXT)`}
+	statements := []string{`ALTER TABLE agent_turns RENAME TO retained_agent_turns`, `CREATE TABLE agent_turns (turn_id TEXT PRIMARY KEY, error TEXT)`}
 	if populated {
 		statements = append(statements, `INSERT INTO agent_turns (turn_id, error) VALUES ('00000000-0000-0000-0000-000000002055', 'opaque provider failure')`)
 	}

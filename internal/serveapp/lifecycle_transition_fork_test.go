@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -78,6 +79,10 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 				t.Fatal(err)
 			}
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			var fixedGate gateruntime.Activation
+			if gate {
+				fixedGate = readLifecycleTemplateGate(t, rt, seed.RunID, entityID, ".")
+			}
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "lifecycle-fork"}
 			var fork, duplicate apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
@@ -88,7 +93,7 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			}
 			waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, frontier.EventID)
 			if gate {
-				requireLifecycleFrozenGateControlRefusal(t, rt, seed.RunID, parentCard, fork.ForkRunID)
+				requireLifecycleFrozenGateControlRefusal(t, rt, seed.RunID, parentCard, fixedGate, fork.ForkRunID)
 			} else {
 				requireLifecycleRootLoopForkRevision(t, rt, seed.RunID, entityID, frontier.EventID, fork.ForkRunID)
 			}
@@ -133,7 +138,7 @@ func advanceLifecycleForkSourceHistory(t *testing.T, ctx context.Context, select
 	}
 }
 
-func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProofRuntime, parentRun string, parentParams map[string]any, runID string) {
+func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProofRuntime, parentRun string, parentParams map[string]any, parentGate gateruntime.Activation, runID string) {
 	t.Helper()
 	entity := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, "", "review")
 	childParams := lifecycleGateDecisionParams(t, rt, runID, "approve")
@@ -165,7 +170,9 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 	if !ok || parentEntity == "" {
 		t.Fatal("parent gate has no exact entity anchor")
 	}
-	parentGate := readLifecycleTemplateGate(t, rt, parentRun, parentEntity, ".")
+	if current := readLifecycleTemplateGate(t, rt, parentRun, parentEntity, "."); current.Status != "superseded" || current.SupersededReason != "run_forked" {
+		t.Fatalf("frozen source gate lost its terminal disposition: %+v", current)
+	}
 	childGate := readLifecycleTemplateGate(t, rt, runID, entity, ".")
 	if childGate.ActivationID != ca["stage_activation_id"] || childGate.CardID != child["card_id"] ||
 		childGate.RoutesJSON != parentGate.RoutesJSON || childGate.BundleHash != parentGate.BundleHash ||

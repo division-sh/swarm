@@ -1752,7 +1752,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if err := json.Unmarshal([]byte(stdout), &fork); err != nil {
 		t.Fatalf("decode swarm run fork result: %v\n%s", err, stdout)
 	}
-	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "running" || fork.ExecutedEventCount != 1 {
+	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "running" || fork.ExecutedEventCount != 0 {
 		t.Fatalf("run.fork result = %#v", fork)
 	}
 	var replay apiv1.RunForkExecutionResult
@@ -1768,7 +1768,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if err := rt.DB.QueryRowContext(context.Background(), forkCountQuery, started.RunID, published.EventID).Scan(&forkRows); err != nil || forkRows != 1 {
 		t.Fatalf("%s durable fork rows = %d, err=%v, want 1", rt.Backend, forkRows, err)
 	}
-	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
+	waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, published.EventID)
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for {
 		var candidateSettled bool

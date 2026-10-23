@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
@@ -88,10 +89,28 @@ func waitForkReceiverSourceCompletion(t *testing.T, rt servedControlProofRuntime
 func waitServedSelectedForkFrontier(t *testing.T, rt servedControlProofRuntime, child, frontier string) string {
 	t.Helper()
 	eventID := activityidentity.ForkLineageEventID(child, frontier)
-	if rt.Postgres != nil {
-		waitWorkspaceProofPipelineReceipt(t, rt.Postgres, child, eventID, "success")
-	} else {
-		waitWorkspaceProofPipelineReceipt(t, rt.SQLite, child, eventID, "success")
+	deadline := time.Now().Add(servedProofPollDeadline)
+	for {
+		var outcome string
+		var err error
+		if rt.ReceiverStateReader != nil {
+			err = rt.ReceiverStateReader.InspectSnapshot(t.Context(), func(ctx context.Context) error {
+				var readErr error
+				outcome, _, readErr = storetest.ReadPipelineReceiptOutcomeStorage(ctx, rt.ReceiverStateReader, eventID)
+				return readErr
+			})
+		} else if rt.Postgres != nil {
+			outcome, _, err = storetest.ReadPipelineReceiptOutcomeStorage(t.Context(), rt.Postgres, eventID)
+		} else {
+			outcome, _, err = storetest.ReadPipelineReceiptOutcomeStorage(t.Context(), rt.SQLite, eventID)
+		}
+		if err == nil && outcome == "success" {
+			break
+		}
+		if (err != nil && !errors.Is(err, sql.ErrNoRows)) || time.Now().After(deadline) {
+			t.Fatalf("selected frontier receipt %s: outcome=%s error=%v", eventID, outcome, err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, child)
 	waitForkReceiverSourceCompletion(t, rt, child)

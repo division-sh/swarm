@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/mailbox"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -127,9 +128,10 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 	if err := json.Unmarshal(forkResponse.Result, &fork); err != nil {
 		t.Fatalf("decode run.fork result: %v\n%s", err, forkResponse.Result)
 	}
-	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "completed" || fork.ExecutedEventCount != 1 {
+	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "completed" || fork.ExecutedEventCount != 0 {
 		t.Fatalf("run.fork result = %#v", fork)
 	}
+	waitServedEventPublishedLog(t, endpoint, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, published.EventID))
 	waitServedRunDeliveryQuiescence(t, deliveryReader, fork.ForkRunID)
 	requireServedRunStatus(t, endpoint, fork.ForkRunID, "completed")
 

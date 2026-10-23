@@ -406,36 +406,6 @@ func managedEffectProofPackageFile(rootDir, launchFile string, reference managed
 	return packageFile, nil
 }
 
-func findLegacyInvariantProofShapes(root *yaml.Node) []string {
-	var problems []string
-	var walk func(*yaml.Node, []string)
-	walk = func(node *yaml.Node, path []string) {
-		if node == nil {
-			return
-		}
-		if node.Kind == yaml.MappingNode {
-			for i := 0; i+1 < len(node.Content); i += 2 {
-				key := node.Content[i].Value
-				keyPath := appendPath(path, key)
-				if key == "negative_proof" {
-					problems = append(problems, fmt.Sprintf("legacy invariant proof field survives at %s", joinYAMLPath(keyPath)))
-				}
-				walk(node.Content[i+1], keyPath)
-			}
-		} else {
-			for i, child := range node.Content {
-				walk(child, appendPath(path, strconv.Itoa(i)))
-			}
-		}
-	}
-	walk(root, nil)
-	ppo := mappingValue(root, "durable_pipeline_processing_obligation_authority")
-	if ppo != nil && mappingValue(ppo, "invariants") != nil {
-		problems = append(problems, "durable_pipeline_processing_obligation_authority.invariants uses the retired scalar invariant shape")
-	}
-	return problems
-}
-
 func findUnclassifiedGoTestScalars(root *yaml.Node) []string {
 	var problems []string
 	var walk func(*yaml.Node, []string)

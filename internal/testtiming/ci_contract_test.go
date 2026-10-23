@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
+
 	"slices"
 	"strings"
 	"testing"
@@ -440,56 +440,6 @@ func TestServeappPolicyPartitionRejectsLostProof(t *testing.T) {
 					}
 				})
 			}
-		}
-	}
-}
-
-func assertGoProofPartition(t *testing.T, dir string, patterns []*regexp.Regexp) {
-	t.Helper()
-	runs := make([]string, len(patterns))
-	for i, pattern := range patterns {
-		runs[i] = pattern.String()
-	}
-	if err := testplanning.ValidateGoProofPartition(dir, runs); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func collectProjectionValues(node *yaml.Node, out map[string]bool) {
-	if node == nil {
-		return
-	}
-	if node.Kind == yaml.MappingNode {
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			key, value := node.Content[i], node.Content[i+1]
-			if key.Value == "projection" || strings.HasSuffix(key.Value, "proof_projection") {
-				out[strings.TrimSpace(value.Value)] = true
-			}
-			collectProjectionValues(value, out)
-		}
-		return
-	}
-	for _, child := range node.Content {
-		collectProjectionValues(child, out)
-	}
-}
-
-func assertCoreStructuralGuardTimingInventory(t *testing.T, policy testplanning.Policy) {
-	t.Helper()
-	const id = "core-structural-owner-guards"
-	unit, exists := policy.Units[id]
-	wantPackages := []string{
-		policy.Module + "/internal/releasee2e", policy.Module + "/internal/runtime",
-		policy.Module + "/internal/serveapp", policy.Module + "/internal/store/internal/runtimepersistence",
-	}
-	if !exists || !slices.Equal(unit.Packages, wantPackages) || unit.CountMode != "count-1" ||
-		unit.EnvironmentID != "" || unit.EnvironmentIDs[testplanning.VenueCI] != "ci-postgres-gateway-empty-v1" || unit.EnvironmentIDs[testplanning.VenueLocal] != "local-postgres-gateway-empty-v1" || unit.BudgetClass != "broad" ||
-		unit.Skip != "" || unit.GoTimeout != "" || unit.Packable || len(unit.RequiredChildren) != 0 {
-		t.Fatalf("core structural guard timing envelope changed: %+v", unit)
-	}
-	for _, tier := range []string{testplanning.ProfileCore, testplanning.ProfileLifecycle, testplanning.ProfileFull} {
-		if slices.Contains(policy.Profiles[tier].Units, id) != (tier == testplanning.ProfileCore) {
-			t.Fatalf("%s changed core-only guard scheduling", tier)
 		}
 	}
 }
