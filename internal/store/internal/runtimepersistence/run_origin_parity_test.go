@@ -212,7 +212,7 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, fresh.RunID, serviceID, 1)
 			c4RequireExclusiveStart(t, ctx, selected, fresh.RunID, firstHash, "")
 			c4RequireRevisionCount(t, ctx, selected, fresh.RunID, 1)
-			commitStandingOriginIngress(t, selected, firstHash, fresh.RunID, "fresh")
+			commitStandingOriginIngress(t, ctx, selected, firstHash, fresh.RunID, "fresh")
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, fresh.RunID, serviceID, 1)
 			c4RequireExclusiveStart(t, ctx, selected, fresh.RunID, firstHash, "")
 
@@ -224,7 +224,7 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			}
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, reset.RunID, serviceID, 2)
 			c4RequireExclusiveStart(t, ctx, selected, reset.RunID, firstHash, "")
-			commitStandingOriginIngress(t, selected, firstHash, reset.RunID, "reset")
+			commitStandingOriginIngress(t, ctx, selected, firstHash, reset.RunID, "reset")
 			requireStandingGenerationOrigin(t, ctx, reader, db, backend, reset.RunID, serviceID, 2)
 			c4RequireExclusiveStart(t, ctx, selected, reset.RunID, firstHash, "")
 

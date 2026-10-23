@@ -16,11 +16,12 @@ func TestActivitySettlementKeepsOriginalNativeIdentityBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
-			journal := activityNativeJournalForFixture(t, fixture)
 			for _, operation := range []string{"complete", "uncertain"} {
 				t.Run(operation, func(t *testing.T) {
 					// A retained row is evidence, not permission to assign a new role on a callback.
 					original := seedActivityStoryAttempt(t, fixture, executionmode.Live, "started", false)
+					journal := activityNativeJournalForFixture(t, fixture)
+					ctx := fixture.activityJournal.original
 					status := "succeeded"
 					if operation == "uncertain" {
 						status = "uncertain"
