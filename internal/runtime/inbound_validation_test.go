@@ -37,10 +37,19 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 	fact := testSourceArtifactFact(t, bundle.SourceArtifact.BundleHash())
 	canonical := NewRuntimePayloadAdmitter(nil, source, fact)
 	var failure error
+	var submittedCtx context.Context
+	var submittedEvent events.Event
+	logs := &runtimeLogPersistenceCapture{}
+	logger := NewRuntimeLogger(logs, executionposture.Live, canonical)
 	bus, err := newInboundTestEventBusWithOptions(t, nil, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		PayloadAdmitter: func(ctx context.Context, event events.Event, flow string) (events.PayloadAdmission, error) {
 			if strings.HasPrefix(string(event.Type()), "inbound.") {
+				submittedCtx, submittedEvent = ctx, event
+				var violation *eventschema.Violation
+				if errors.As(failure, &violation) {
+					logPayloadValidationRejection(ctx, logger, event, violation)
+				}
 				return events.PayloadAdmission{}, failure
 			}
 			return canonical(ctx, event, flow)
@@ -49,8 +58,6 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	logs := &runtimeLogPersistenceCapture{}
-	logger := NewRuntimeLogger(logs, executionposture.Live, canonical)
 	store := &recordingInboundStore{}
 	gateway := newTestInboundGateway(t, bus, logger, nil, store)
 	cleanup := errors.New("independent cleanup/store failure")
@@ -84,6 +91,9 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 			response := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodPost, "/webhooks/entity-1/custom", strings.NewReader(`{"id":"`+cell.name+`","type":"push"}`))
 			gateway.Handler().ServeHTTP(response, request)
+			if pending, ok := submittedCtx.Value(inboundPayloadDiagnosticKey{}).(*inboundPayloadDiagnostic); !ok || pending.active {
+				t.Fatal("HTTP diagnostic capture remained active after batch return")
+			}
 			body := response.Body.String()
 			if response.Code != cell.status {
 				t.Fatalf("status=%d want=%d body=%q", response.Code, cell.status, body)
@@ -106,10 +116,21 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 			if store.recorded {
 				t.Fatal("failed preparation reached the publication commit")
 			}
-			if len(logs.records) != beforeLogs+1 {
-				t.Fatalf("internal diagnostics missing: before=%d after=%d", beforeLogs, len(logs.records))
+			wantLogs := 1
+			var violation *eventschema.Violation
+			if cell.status != 400 && errors.As(failure, &violation) {
+				wantLogs++
 			}
-			recorded, err := DecodeCanonicalRuntimeLogPayload(logs.records[beforeLogs].Payload)
+			if len(logs.records) != beforeLogs+wantLogs {
+				t.Fatalf("diagnostics=%d want=%d (cleanup must retain the bus warning)", len(logs.records)-beforeLogs, wantLogs)
+			}
+			if wantLogs == 2 {
+				warning, err := DecodeCanonicalRuntimeLogPayload(logs.records[beforeLogs].Payload)
+				if err != nil || warning.LogLevel != "warn" || warning.Component != "event-bus" || warning.Action != "payload_validation_rejected" {
+					t.Fatalf("cleanup lost the original bus schema warning: %+v %v", warning, err)
+				}
+			}
+			recorded, err := DecodeCanonicalRuntimeLogPayload(logs.records[len(logs.records)-1].Payload)
 			if err != nil || recorded.Failure == nil {
 				t.Fatalf("invalid durable diagnostic: %+v %v", recorded, err)
 			}
@@ -150,6 +171,17 @@ func TestInboundPublicationValidationResponseBoundary(t *testing.T) {
 			}
 		})
 	}
+	t.Run("native_submitted_validation_diagnostic", func(t *testing.T) {
+		if !runtimebus.IsSubmittedInboundEvent(submittedCtx, submittedEvent) {
+			t.Fatal("native diagnostic control requires a real authenticated submitted event")
+		}
+		nativeLogs := &runtimeLogPersistenceCapture{}
+		nativeCtx := context.WithValue(submittedCtx, inboundPayloadDiagnosticKey{}, false)
+		logPayloadValidationRejection(nativeCtx, NewRuntimeLogger(nativeLogs, executionposture.Live, canonical), submittedEvent, &eventschema.Violation{Path: "$.data.user_id", Detail: "required field"})
+		if len(nativeLogs.records) != 1 {
+			t.Fatalf("native/session schema diagnostics=%d want=1", len(nativeLogs.records))
+		}
+	})
 	generated := fmt.Errorf("%w: %w", runtimebus.ErrPayloadValidation, &eventschema.Violation{Path: "$.generated", Detail: "internal generated payload"})
 	_, normalizedNull := eventschema.NormalizeOptionalFieldNulls(
 		map[string]any{"type": "object", "required": []any{"generated"}, "properties": map[string]any{"generated": map[string]any{"type": "string"}}},
