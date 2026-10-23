@@ -99,6 +99,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	}
 	cmd := exec.CommandContext(runCtx, binaryPath,
 		"run", "start",
+		contracts,
 		"--api-port", fmt.Sprint(apiPort),
 		"--event", "task.assigned",
 		"--payload", payloadPath,
