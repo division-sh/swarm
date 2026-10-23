@@ -262,7 +262,7 @@ func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store comple
 
 func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context.Context, store completionSettlementTestStore, rec runtimellm.AgentTurnRecord, options managedAgentTurnFixtureOptions) error {
 	t.Helper()
-	fixtureCtx := testAuthorActivityContext()
+	fixtureCtx := ctx
 	plan := rec.Memory
 	if rec.Identity == (agentmemory.Identity{}) {
 		rec.Identity = testAgentMemoryIdentity(t, rec.RunID, rec.AgentID, rec.FlowInstance)
