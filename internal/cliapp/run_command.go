@@ -964,8 +964,8 @@ func startForegroundRunTraceRenderer(out, errOut io.Writer, rows <-chan diagnost
 	}
 	renderer.workers.Add(2)
 	go func() {
-		defer renderer.workers.Done()
 		defer close(renderer.rowsDone)
+		defer renderer.workers.Done()
 		writer := &runTraceRowLineWriter{}
 		for {
 			select {
