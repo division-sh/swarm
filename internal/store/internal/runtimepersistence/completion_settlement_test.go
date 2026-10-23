@@ -792,7 +792,7 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 					handle = beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "launched-grant")
 				}
 				identity := fixture.authority.Target.AgentIdentity
-				acquireCtx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+				acquireCtx := runtimeeffects.WithDifferentOwner(fixture.context, runtimeeffects.OwnerBuildTestInfrastructure)
 				replacement, err := store.(sessions.Registry).Acquire(acquireCtx, identity, fixture.leaseHolder)
 				if err != nil || replacement == nil || replacement.GrantID == fixture.grantID {
 					t.Fatalf("replace admitted grant: lease=%+v err=%v", replacement, err)
@@ -833,7 +833,7 @@ func TestCompletionOriginalGrantFencesLaunchAndSettlementBothStores(t *testing.T
 				} else {
 					now := time.Now().UTC()
 					setCompletionAttemptLease(t, fixture, handle.Attempt().AttemptID, now.Add(-time.Second))
-					summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now))
+					summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.context, liveExternalEffectRecoveryRequest(now))
 					if err != nil {
 						t.Fatalf("recover replaced-grant attempt: summary=%+v err=%v", summary, err)
 					}
@@ -1303,7 +1303,7 @@ func TestDeliveryClaimRenewalPublishesCompleteRunForkRevisionPostgres(t *testing
 
 func proveDeliveryClaimRenewalPublishesCompleteRunForkRevision(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	ctx := fixture.context
 	setProviderOriginLease(t, fixture, fixture.origin, time.Now().UTC().Add(30*time.Second))
 	before := providerOriginLease(t, fixture, fixture.origin)
 	publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, !fixture.sqlite, fixture.authority.Target.RunID)
@@ -1364,7 +1364,7 @@ func proveCompletionAttemptHeartbeatFencesRecovery(t *testing.T, fixture complet
 	if err := fixture.store.HeartbeatCompletionAttempt(ctx, stale, time.Now().UTC(), 2*time.Minute); err == nil {
 		t.Fatal("stale completion fence renewed the attempt lease")
 	}
-	summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
+	summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.context, liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
 	if err != nil {
 		t.Fatalf("reconcile heartbeating completion: %v", err)
 	}
@@ -1413,7 +1413,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 		t.Fatalf("authorize live completion: %v", err)
 	}
 	now := time.Now().UTC()
-	summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now))
+	summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.context, liveExternalEffectRecoveryRequest(now))
 	if err != nil {
 		t.Fatalf("reconcile live completion: %v", err)
 	}
@@ -1425,7 +1425,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 
 	initialGeneration := int(fixture.authority.Normal.Generation)
 	setCompletionFixtureGeneration(t, fixture, initialGeneration+1)
-	summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(time.Second)))
+	summary, err = fixture.store.ReconcileExternalEffectAttempts(fixture.context, liveExternalEffectRecoveryRequest(now.Add(time.Second)))
 	if err == nil {
 		t.Fatal("reconcile stale prelaunch completion without a lifecycle drain succeeded")
 	}
@@ -1455,7 +1455,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 		t.Fatalf("mark completion launched: %v", err)
 	}
 	setCompletionFixtureGeneration(t, fixture, initialGeneration+1)
-	summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(2*time.Second)))
+	summary, err = fixture.store.ReconcileExternalEffectAttempts(fixture.context, liveExternalEffectRecoveryRequest(now.Add(2*time.Second)))
 	if err == nil {
 		t.Fatal("reconcile stale launched completion without a lifecycle drain succeeded")
 	}
@@ -1591,7 +1591,7 @@ func claimCompletionOriginEventForTest(t testing.TB, ctx context.Context, store 
 }
 
 func (f completionSettlementFixture) contextFor(authority runtimeeffects.Authority) context.Context {
-	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), newCompletionControllerForTest(f.store))
+	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(f.context, authority), newCompletionControllerForTest(f.store))
 	if authority.Target.Memory.Enabled {
 		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{SessionID: f.sessionID, GrantID: f.grantID, LockOwner: f.leaseHolder})
 	}
