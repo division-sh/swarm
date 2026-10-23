@@ -407,8 +407,6 @@ func hasReviewedCodemodPlacement(cell TimingCell, tier string) bool {
 		return false
 	}
 	switch cell.Root {
-	case "TestReviewedSnapshotCandidateOverlayTypeChecks":
-		return tier == testplanning.ProfileFull
 	case "TestNativeTimerSuccessorObserverRejectsRepublicationBothStores",
 		"TestNativeHandlerExecutionWindowRejectsEarlyProductionDispatchBothStores",
 		"TestNativeBusSourceBoundaryRejectsLostProductionClaimAndSettlementFacts",
