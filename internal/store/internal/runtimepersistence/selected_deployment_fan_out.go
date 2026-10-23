@@ -9,14 +9,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
-func (s *PostgresStore) BindSelectedDeploymentFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+func (s *PostgresStore) BindSelectedDeploymentFanOutGrant(grant startupownership.GrantEvidence) (pipeline.SelectedFanOutObligationOwner, error) {
 	if s == nil || s.startupPostgresOwner == nil {
 		return nil, errors.New("selected deployment serving requires assembled PostgreSQL store")
 	}
 	return s.startupPostgresOwner.BindSelectedDeploymentFanOutGrant(grant)
 }
 
-func (s *SQLiteRuntimeStore) BindSelectedDeploymentFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+func (s *SQLiteRuntimeStore) BindSelectedDeploymentFanOutGrant(grant startupownership.GrantEvidence) (pipeline.SelectedFanOutObligationOwner, error) {
 	if s == nil || s.startupSQLiteOwner == nil {
 		return nil, errors.New("selected deployment serving requires assembled SQLite store")
 	}

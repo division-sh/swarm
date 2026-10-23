@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -44,6 +45,7 @@ type selectedCompletionAuthorityStore interface {
 }
 
 type selectedCompletionFixture struct {
+	ctx            context.Context
 	providerSource semanticview.Source
 	providerActor  manager.PersistedAgent
 	process        startupownership.ProcessCapability
@@ -1474,8 +1476,18 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	}
 	registerTestAuthorActivityCatalog(t, registrar)
 	if len(sourceArtifacts) != 0 {
+		ctx = testAuthorActivityContextForBundle(sourceArtifacts[0].BundleHash())
+	}
+	original, err := process.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = generationauthority.MutationContext(ctx, original.LeaseStamp(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sourceArtifacts) != 0 {
 		artifact := sourceArtifacts[0]
-		ctx = testAuthorActivityContextForBundle(artifact.BundleHash())
 		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, StartedAt: now})
 		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: forkRun, Origin: forkOrigin, Artifact: artifact, State: runtimerunlifecycle.StatePaused, StartedAt: now})
 	} else {
@@ -1514,6 +1526,7 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	}
 	declarations := emptySelectedDeclarationForTest(t, db, forkRun)
 	return selectedCompletionFixture{
+		ctx:     ctx,
 		process: process,
 		store:   store, db: db, sqlite: sqlite, sourceRun: sourceRun, forkRun: forkRun, eventID: eventID, admission: admission,
 		request: runfork.SelectedContractRuntimeExecutionIssueRequest{

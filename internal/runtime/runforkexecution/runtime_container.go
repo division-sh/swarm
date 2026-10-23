@@ -433,6 +433,14 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		return nil, err
 	}
 	runCtx = managedexecution.WithAdmission(runCtx, admission)
+	agentRuntimeStopped := false
+	var continuations *runtimedeliverycontinuation.Coordinator
+	defer func() {
+		if agentRuntime != nil && !agentRuntimeStopped {
+			finalErr = errors.Join(finalErr, agentRuntime.Shutdown())
+		}
+		finalErr = errors.Join(finalErr, continuations.Retire(context.WithoutCancel(runCtx)))
+	}()
 	if agentRuntime == nil || agentRuntime.manager == nil {
 		return nil, fmt.Errorf("selected-contract fork-local lifecycle manager was not materialized")
 	}
@@ -441,8 +449,19 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		return nil, err
 	}
 	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(lifecycleManager.FinalizeCommittedAgentReadiness))
+	if agentRuntime.generationGrant == nil {
+		return nil, errors.New("selected barrier recovery requires the admitted runtime generation grant")
+	}
+	grant, err := agentRuntime.generationGrant.Evidence()
+	if err != nil {
+		return nil, fmt.Errorf("load selected runtime generation grant: %w", err)
+	}
+	barriers, err := c.ports.deploymentFanOut.BindSelectedDeploymentFanOutGrant(grant)
+	if err != nil {
+		return nil, fmt.Errorf("bind selected barrier recovery: %w", err)
+	}
 	continuationFailures := make(chan error, 1)
-	continuations, err := runtimedeliverycontinuation.NewSelected(
+	continuations, err = runtimedeliverycontinuation.NewSelected(
 		c.ports.busDurable.DeliveryLifecycle, deliveryAuthority, forkOwner, bus,
 		func(_ context.Context, cause error) {
 			select {
@@ -451,6 +470,7 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 			}
 			cancelRuntime()
 		},
+		func(ctx context.Context) error { return pipeline.ReconcileSelectedFanOutBarriers(ctx, barriers) },
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create selected delivery continuation owner: %w", err)
@@ -461,9 +481,6 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 	if err := continuations.Start(runCtx); err != nil {
 		return nil, fmt.Errorf("start selected delivery continuations: %w", err)
 	}
-	defer func() {
-		finalErr = errors.Join(finalErr, continuations.Retire(context.WithoutCancel(runCtx)))
-	}()
 	if req.Prepared.recoveryFromExecutionID != "" {
 		if err := bus.RecoverSelectedRunPipelineToExhaustion(runCtx, req.ForkRunID); err != nil {
 			return nil, fmt.Errorf("recover selected child event pipeline: %w", err)
@@ -474,14 +491,6 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 		if err := continuations.Synchronize(runCtx); err != nil {
 			return nil, fmt.Errorf("synchronize recovered selected child deliveries: %w", err)
 		}
-	}
-	agentRuntimeStopped := false
-	if agentRuntime != nil {
-		defer func() {
-			if !agentRuntimeStopped {
-				finalErr = errors.Join(finalErr, agentRuntime.Shutdown())
-			}
-		}()
 	}
 	out := make([]SelectedContractExecutionForkEvent, 0, len(sourceEvents))
 	for _, sourceEvent := range sourceEvents {
@@ -575,13 +584,6 @@ func (c selectedContractForkLocalRuntimeContainer) Publish(ctx context.Context) 
 				err,
 			)
 		}
-	}
-	if agentRuntime.generationGrant == nil {
-		return out, errors.New("selected deployment serving requires the admitted runtime generation grant")
-	}
-	grant, err := agentRuntime.generationGrant.Evidence()
-	if err != nil {
-		return out, fmt.Errorf("load selected deployment generation grant: %w", err)
 	}
 	if err := c.serveSelectedDeploymentFeeds(runCtx, pipeline, grant); err != nil {
 		return out, err

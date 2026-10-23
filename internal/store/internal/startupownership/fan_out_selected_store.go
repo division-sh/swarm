@@ -38,7 +38,7 @@ func selectedFanOutAdmission(ctx context.Context, tx *sql.Tx, sqlite bool, grant
 	return &fanOutAdmission{session: selectedFanOutAuthoritySource{authority: authority}, sqlite: sqlite}, nil
 }
 
-func (s *StartupPostgresOwner) BindSelectedDeploymentFanOutGrant(grant runtimeownership.GrantEvidence) (owner pipeline.FanOutObligationOwner, err error) {
+func (s *StartupPostgresOwner) BindSelectedDeploymentFanOutGrant(grant runtimeownership.GrantEvidence) (owner pipeline.SelectedFanOutObligationOwner, err error) {
 	if s == nil || s.fanOutPipeline == nil {
 		return nil, errors.New("selected deployment serving requires assembled PostgreSQL startup owner")
 	}
@@ -64,7 +64,7 @@ func (s *StartupPostgresOwner) BindSelectedDeploymentFanOutGrant(grant runtimeow
 	return owner, err
 }
 
-func (s *StartupSQLiteOwner) BindSelectedDeploymentFanOutGrant(grant runtimeownership.GrantEvidence) (owner pipeline.FanOutObligationOwner, err error) {
+func (s *StartupSQLiteOwner) BindSelectedDeploymentFanOutGrant(grant runtimeownership.GrantEvidence) (owner pipeline.SelectedFanOutObligationOwner, err error) {
 	if s == nil || s.fanOutPipeline == nil {
 		return nil, errors.New("selected deployment serving requires assembled SQLite startup owner")
 	}
