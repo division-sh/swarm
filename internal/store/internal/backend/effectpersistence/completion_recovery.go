@@ -15,6 +15,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
@@ -96,6 +97,20 @@ type completionRecoveryAuthorityEvidence struct {
 type CompletionRecoveryAuthorityEvidence = completionRecoveryAuthorityEvidence
 
 func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
+	attempts, err := loadCompletionRecoveryAttemptsPostgres(ctx, tx, now, selectedExecutionID, nil)
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	attempts = filterCompletionRecoveryAttempts(attempts, allowed)
+	return reconcileCompletionAttempts(ctx, tx, llm, nil, delivery, directives, mutation, true, attempts, now)
+}
+
+func loadCompletionRecoveryAttemptsPostgres(ctx context.Context, tx *sql.Tx, now time.Time, selectedExecutionID string, identity *agentidentity.Identity) ([]completionRecoveryAttempt, error) {
+	predicate, args, err := startupCompletionRecoveryFilter(identity, true)
+	if err != nil {
+		return nil, err
+	}
+	args = append([]any{now, selectedExecutionID}, args...)
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id::text,a.attempt_id::text,o.authority_kind,o.authority_id,a.authority_evidence::text,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
@@ -129,21 +144,30 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		    ))
 		  )
 		  ))
-		ORDER BY a.authorized_at,a.attempt_id
+		`+predicate+` ORDER BY a.authorized_at,a.attempt_id
 		FOR UPDATE OF o,a
-	`, now, selectedExecutionID)
+	`, args...)
 	if err != nil {
-		return runtimeeffects.RecoverySummary{}, fmt.Errorf("list completion attempts for recovery: %w", err)
+		return nil, fmt.Errorf("list completion attempts for recovery: %w", err)
 	}
-	attempts, err := scanCompletionRecoveryAttempts(rows)
+	return scanCompletionRecoveryAttempts(rows)
+}
+
+func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
+	attempts, err := loadCompletionRecoveryAttemptsSQLite(ctx, tx, now, selectedExecutionID, nil)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
 	attempts = filterCompletionRecoveryAttempts(attempts, allowed)
-	return reconcileCompletionAttempts(ctx, tx, llm, nil, delivery, directives, mutation, true, attempts, now)
+	return reconcileCompletionAttempts(ctx, tx, nil, llm, delivery, directives, mutation, false, attempts, now)
 }
 
-func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
+func loadCompletionRecoveryAttemptsSQLite(ctx context.Context, tx *sql.Tx, now time.Time, selectedExecutionID string, identity *agentidentity.Identity) ([]completionRecoveryAttempt, error) {
+	predicate, args, err := startupCompletionRecoveryFilter(identity, false)
+	if err != nil {
+		return nil, err
+	}
+	args = append([]any{selectedExecutionID, selectedExecutionID, now}, args...)
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id,a.attempt_id,o.authority_kind,o.authority_id,a.authority_evidence,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
@@ -177,17 +201,133 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		    ))
 		  )
 		  ))
-		ORDER BY a.authorized_at,a.attempt_id
-	`, selectedExecutionID, selectedExecutionID, now)
+		`+predicate+` ORDER BY a.authorized_at,a.attempt_id
+	`, args...)
 	if err != nil {
-		return runtimeeffects.RecoverySummary{}, fmt.Errorf("list sqlite completion attempts for recovery: %w", err)
+		return nil, fmt.Errorf("list sqlite completion attempts for recovery: %w", err)
 	}
-	attempts, err := scanCompletionRecoveryAttempts(rows)
+	return scanCompletionRecoveryAttempts(rows)
+}
+
+func startupCompletionRecoveryFilter(identity *agentidentity.Identity, postgres bool) (string, []any, error) {
+	if identity == nil {
+		return "", nil, nil
+	}
+	fields, err := agentIdentityFields(*identity)
 	if err != nil {
-		return runtimeeffects.RecoverySummary{}, err
+		return "", nil, err
 	}
-	attempts = filterCompletionRecoveryAttempts(attempts, allowed)
-	return reconcileCompletionAttempts(ctx, tx, nil, llm, delivery, directives, mutation, false, attempts, now)
+	predicate := ` AND o.authority_kind='normal_agent' AND o.agent_run_id=? AND o.agent_id=?
+		AND o.agent_name_owner=? AND o.agent_name_source=? AND o.agent_route_presence=?
+		AND o.flow_scope_key=? AND o.flow_instance_id=? AND o.flow_instance=?`
+	if postgres {
+		predicate = ` AND o.authority_kind='normal_agent' AND o.agent_run_id=$3::uuid AND o.agent_id=$4
+			AND o.agent_name_owner=$5 AND o.agent_name_source=$6 AND o.agent_route_presence=$7
+			AND o.flow_scope_key=$8 AND o.flow_instance_id=$9 AND o.flow_instance=$10`
+	}
+	return predicate, []any{fields.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
+		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath}, nil
+}
+
+// Startup takeover and predecessor settlement share the original mutation. A
+// refused recovery must not leave a successor that invalidates a pending drain.
+func (s *EffectPostgresOwner) RecoverStartupProviderAttemptsPostgresTx(ctx context.Context, mutation *mutationprotocol.Attempt, request runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) error {
+	return mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := validateStartupProviderRecovery(ctx, tx, request, result, false); err != nil {
+			return err
+		}
+		attempts, err := loadCompletionRecoveryAttemptsPostgres(ctx, tx, request.Now, "", &request.Identity)
+		if err != nil {
+			return err
+		}
+		if err := admitStartupProviderRecovery(request, attempts); err != nil {
+			return err
+		}
+		if _, err := reconcileCompletionAttempts(ctx, tx, s.llm, nil, s.delivery, s.directives, mutation, true, attempts, request.Now); err != nil {
+			return err
+		}
+		return finishStartupProviderRecovery(ctx, tx, mutation, s.lifecycle, request, attempts, true)
+	})
+}
+
+func (s *EffectSQLiteOwner) RecoverStartupProviderAttemptsSQLiteTx(ctx context.Context, mutation *mutationprotocol.Attempt, request runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) error {
+	return mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		if err := validateStartupProviderRecovery(ctx, tx, request, result, true); err != nil {
+			return err
+		}
+		attempts, err := loadCompletionRecoveryAttemptsSQLite(ctx, tx, request.Now, "", &request.Identity)
+		if err != nil {
+			return err
+		}
+		if err := admitStartupProviderRecovery(request, attempts); err != nil {
+			return err
+		}
+		if _, err := reconcileCompletionAttempts(ctx, tx, nil, s.llm, s.delivery, s.directives, mutation, false, attempts, request.Now); err != nil {
+			return err
+		}
+		return finishStartupProviderRecovery(ctx, tx, mutation, s.lifecycle, request, attempts, false)
+	})
+}
+
+func validateStartupProviderRecovery(ctx context.Context, tx *sql.Tx, req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult, sqlite bool) error {
+	if req.OperationKind != "process_takeover" || req.Agent != nil ||
+		result.OperationID != req.OperationID || result.Identity != req.Identity ||
+		result.PreviousEpoch != req.ExpectedEpoch || result.PreviousGeneration != req.ExpectedGeneration || result.PreviousPhase != req.ExpectedPhase ||
+		result.RuntimeEpoch != req.TargetEpoch || result.Generation != req.TargetGeneration || result.Phase != req.TargetPhase ||
+		result.ConfigRevision != req.ConfigRevision || result.RunMode != req.RunMode || !result.Topology.Equal(req.Topology) ||
+		!result.ProcessBinding.Equal(req.ProcessBinding) || !req.StartupRecovery.Now().Equal(req.Now) {
+		return fmt.Errorf("startup provider recovery requires the exact native takeover result and recovery request")
+	}
+	if err := req.StartupRecovery.Validate(); err != nil {
+		return err
+	}
+	if err := storeagent.AuthorizeGenerationMutationTx(ctx, tx, req, sqlite); err != nil {
+		return err
+	}
+	observation, err := storeagent.LockAgentExecutionTx(ctx, tx, req.Identity, runtimeeffects.LifecycleToken{
+		Identity: req.Identity, AgentID: req.AgentID, RuntimeEpoch: result.RuntimeEpoch, Generation: result.Generation,
+	}, sqlite)
+	if err != nil {
+		return err
+	}
+	state := observation.State
+	if !observation.Found || state.RuntimeEpoch != result.RuntimeEpoch || state.Generation != result.Generation ||
+		state.Phase != result.Phase || state.LastTransitionID != result.TransitionID ||
+		state.ConfigRevision != result.ConfigRevision || state.RunMode != result.RunMode ||
+		!state.Topology.Equal(result.Topology) || !state.ProcessBinding.Equal(req.ProcessBinding) {
+		return fmt.Errorf("startup provider recovery differs from the transaction's exact lifecycle cell")
+	}
+	return nil
+}
+
+func admitStartupProviderRecovery(request runtimemanager.AgentLifecycleTransition, attempts []completionRecoveryAttempt) error {
+	for _, attempt := range attempts {
+		candidate := externalEffectRecoveryCandidate{
+			AttemptID: attempt.AttemptID, OperationMode: attempt.OperationMode,
+			AttemptMode: attempt.AttemptMode, AuthorityEvidence: attempt.AuthorityEvidence,
+		}
+		if err := candidate.admit(request.StartupRecovery); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func finishStartupProviderRecovery(ctx context.Context, tx *sql.Tx, mutation *mutationprotocol.Attempt, lifecycle mutationprotocol.CandidateWriter, request runtimemanager.AgentLifecycleTransition, attempts []completionRecoveryAttempt, postgres bool) error {
+	for _, attempt := range attempts {
+		if err := recordSettledExternalEffectStory(ctx, mutation, tx, runtimeeffects.Settlement{AttemptID: attempt.AttemptID, OperationID: attempt.OperationID, State: runtimeeffects.StateOutcomeUncertain}, postgres); err != nil {
+			return err
+		}
+	}
+	if len(attempts) == 0 {
+		return nil
+	}
+	terminal, err := externalEffectRunTerminal(ctx, tx, postgres, request.Identity.RunID)
+	if err != nil || terminal {
+		return err
+	}
+	_, err = mutation.RequestCompletion(ctx, lifecycle, request.Identity.RunID, nil)
+	return err
 }
 
 func filterCompletionRecoveryAttempts(attempts []completionRecoveryAttempt, allowed map[string]struct{}) []completionRecoveryAttempt {

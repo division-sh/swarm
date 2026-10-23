@@ -20,6 +20,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -146,6 +147,7 @@ func TestProviderAttemptDrainLifecycleTransitionRollbackParity(t *testing.T) {
 	cases := []struct {
 		name       string
 		observe    bool
+		takeover   bool
 		boundary   providerDrainFailureBoundary
 		wantState  runtimeeffects.State
 		wantDrains int
@@ -158,6 +160,11 @@ func TestProviderAttemptDrainLifecycleTransitionRollbackParity(t *testing.T) {
 		{
 			name: "launched_drain_capture", observe: true, boundary: providerDrainFailureBoundary{
 				name: "drain_capture", table: "runtime_provider_attempt_drains", operation: "INSERT",
+			}, wantState: runtimeeffects.StateResponseObserved,
+		},
+		{
+			name: "takeover_reconciliation", observe: true, takeover: true, boundary: providerDrainFailureBoundary{
+				name: "turn_insert", table: "agent_turns", operation: "INSERT",
 			}, wantState: runtimeeffects.StateResponseObserved,
 		},
 	}
@@ -178,8 +185,19 @@ func TestProviderAttemptDrainLifecycleTransitionRollbackParity(t *testing.T) {
 						t.Fatalf("observe transition rollback completion: %v", err)
 					}
 				}
+				var takeover runtimemanager.AgentLifecyclePersistence
+				var request runtimemanager.AgentLifecycleTransition
+				if candidate.takeover {
+					takeover, request = providerDrainStartupTakeover(t, fixture)
+				}
 				installProviderDrainFailureBoundary(t, fixture, candidate.boundary)
-				if _, err := commitProviderDrainTransition(t, fixture, "teardown", runtimemanager.AgentLifecycleTerminated); err == nil {
+				var commitErr error
+				if candidate.takeover {
+					_, commitErr = takeover.CommitAgentLifecycleTransition(testAuthorActivityContext(), request)
+				} else {
+					_, commitErr = commitProviderDrainTransition(t, fixture, "teardown", runtimemanager.AgentLifecycleTerminated)
+				}
+				if commitErr == nil {
 					t.Fatalf("%s transition did not roll back", candidate.name)
 				}
 				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, candidate.wantState)
@@ -187,9 +205,80 @@ func TestProviderAttemptDrainLifecycleTransitionRollbackParity(t *testing.T) {
 				requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 0, 0, 1)
 				requireDeliveryClaimPending(t, fixture, fixture.origin)
 				requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleRunning, fixture.authority.Normal.Generation)
+				if candidate.takeover {
+					statement := `DROP TRIGGER provider_drain_rollback_proof`
+					if !fixture.sqlite {
+						statement += ` ON agent_turns`
+					}
+					if _, err := fixture.db.Exec(statement); err != nil {
+						t.Fatal(err)
+					}
+					for _, recovery := range []runtimeeffects.RecoveryRequest{
+						{}, runtimeeffects.NewRecoveryRequest(request.Now, executionposture.MockOnly),
+						runtimeeffects.NewRecoveryRequest(request.Now.Add(time.Second), executionposture.Live),
+					} {
+						refused := request
+						refused.StartupRecovery = recovery
+						if _, err := takeover.CommitAgentLifecycleTransition(testAuthorActivityContext(), refused); err == nil {
+							t.Fatal("takeover accepted missing, foreign-time or mock-only recovery for a live attempt")
+						}
+						requireProviderDrainCount(t, fixture, handle.Attempt().AttemptID, 0)
+						requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, candidate.wantState)
+						requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleRunning, fixture.authority.Normal.Generation)
+					}
+					result, err := takeover.CommitAgentLifecycleTransition(testAuthorActivityContext(), request)
+					if err != nil || result.Generation != request.TargetGeneration || result.ProviderDrainCount != 1 {
+						t.Fatalf("takeover after rollback: result=%+v err=%v", result, err)
+					}
+					requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
+					requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
+					requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 1, 1, 0)
+					requireOriginDeliveryOutcome(t, fixture, "dead_letter", "effect_recovery_outcome_unconfirmed")
+					again, err := takeover.CommitAgentLifecycleTransition(testAuthorActivityContext(), request)
+					if err != nil || !again.Replayed || again.TransitionID != result.TransitionID {
+						t.Fatalf("takeover replay changed the committed result: result=%+v err=%v", again, err)
+					}
+					requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 1, 1, 0)
+				}
 			})
 		}
 	})
+}
+
+func providerDrainStartupTakeover(t *testing.T, fixture completionSettlementFixture) (runtimemanager.AgentLifecyclePersistence, runtimemanager.AgentLifecycleTransition) {
+	t.Helper()
+	ctx := testAuthorActivityContext()
+	state := providerDrainFixtureState(t, fixture)
+	capability, err := agentfixture.ProcessCapability(t, ctx, fixture.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, found, err := capability.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("current source set: found=%v err=%v", found, err)
+	}
+	grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: state.ProcessBinding.BundleHash, RuntimeInstanceID: state.ProcessBinding.RuntimeInstanceID,
+		RuntimeGeneration: state.ProcessBinding.RuntimeGeneration + 1, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := grant.Retire(ctx); err != nil {
+			t.Errorf("retire takeover grant: %v", err)
+		}
+	})
+	now := time.Now().UTC()
+	return grant, runtimemanager.AgentLifecycleTransition{
+		DiagnosticOrigin: runtimemanager.LifecycleDiagnosticOrigin{Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation},
+		OperationID:      uuid.NewString(), OperationKind: "process_takeover", RequestHash: "provider-drain-startup",
+		Identity: state.Identity, AgentID: state.AgentID, Trigger: "process_takeover",
+		ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
+		TargetEpoch: state.RuntimeEpoch + 1, TargetGeneration: state.Generation + 1, TargetPhase: state.Phase,
+		ConfigRevision: state.ConfigRevision, RunMode: state.RunMode, Topology: state.Topology,
+		StartupRecovery: runtimeeffects.NewRecoveryRequest(now, executionposture.Live), Now: now,
+	}
 }
 
 func TestProviderAttemptDrainLifecycleSupersessionParity(t *testing.T) {
