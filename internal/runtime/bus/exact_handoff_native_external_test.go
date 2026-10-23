@@ -8,6 +8,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
@@ -15,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"testing"
@@ -38,7 +40,22 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 	}
 	ctx := effects.WithDifferentOwner(context.Background(), effects.OwnerBuildTestInfrastructure)
 	ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.Fact())
-	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
+	runtimeID := uuid.NewString()
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, sourceartifactfixture.BundleHash))
+	ctx = correlation.WithRuntimeInstanceID(ctx, runtimeID)
+	capability, err := agentfixture.ProcessCapability(t, ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := worklifetime.NewProcess()
+	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	ctx = worklifetime.WithProcess(ctx, process)
 	if err := sourceartifactfixture.Ensure(ctx, owner); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +65,7 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 	}
 	fixture := runtimebus.ExactHandoffNativeFixtureForTest{Store: owner, Context: ctx, Authority: authority}
 	if selectedExecution {
-		execution := selectedtest.OpenSelectedDeliveryExecution(t, ctx, owner)
+		execution := selectedtest.OpenSelectedDeliveryExecution(t, ctx, owner, capability)
 		ctx, authority = execution.Context, execution.Authority
 		fixture.Context, fixture.Authority = ctx, authority
 		fixture.SelectedEvent, fixture.SelectedRoute = execution.SelectedEvent, execution.SelectedRoute

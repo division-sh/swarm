@@ -15,6 +15,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -128,6 +129,20 @@ func ProcessCapability(t testing.TB, ctx context.Context, selected Store) (runti
 		return nil, err
 	}
 	return session.capability, nil
+}
+
+// ProcessContext carries this fixture's retained original acquisition, never a
+// replacement read from the selected store's current generation.
+func ProcessContext(t testing.TB, ctx context.Context, selected Store) (context.Context, error) {
+	capability, err := ProcessCapability(t, ctx, selected)
+	if err != nil {
+		return nil, err
+	}
+	original, err := capability.Evidence()
+	if err != nil {
+		return nil, err
+	}
+	return generationauthority.MutationContext(ctx, original.LeaseStamp(), false)
 }
 
 // AdmitGeneration installs the caller's complete source plan before a fixture
@@ -408,6 +423,10 @@ func UpsertStaticForSource(t testing.TB, ctx context.Context, selected Store, re
 	if err != nil {
 		return err
 	}
+	ctx, err = ProcessContext(t, ctx, selected)
+	if err != nil {
+		return err
+	}
 	if err := ensureFixtureRun(ctx, selected, identity.RunID, rec.StartedAt, source); err != nil {
 		return err
 	}
@@ -596,6 +615,10 @@ func CommitStatic(t testing.TB, ctx context.Context, selected Store, req runtime
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
+	ctx, err = ProcessContext(t, ctx, selected)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	if err := ensureFixtureRun(ctx, selected, identity.RunID, req.Now); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -721,6 +744,10 @@ func CommitExact(t testing.TB, ctx context.Context, selected Store, req runtimem
 		ctx = context.Background()
 	}
 	identity, key, kind, err := validateExactDurableTransition(req)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	ctx, err = ProcessContext(t, ctx, selected)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
