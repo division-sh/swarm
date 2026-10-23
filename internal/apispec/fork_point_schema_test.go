@@ -42,36 +42,45 @@ func TestRunForkResultHasClosedTypedPoint(t *testing.T) {
 				t.Errorf("fork result arm omits required %s", field)
 			}
 		}
-		armKind := properties["fork_point_kind"].(map[string]any)["const"]
-		kind, ok := armKind.(string)
-		if !ok || seenKinds[kind] {
-			t.Fatalf("duplicate or malformed fork point arm: %#v", armKind)
+		point := properties["fork_point_kind"].(map[string]any)
+		kinds := []any{point["const"]}
+		if values, ok := point["enum"].([]any); ok {
+			kinds = values
 		}
-		seenKinds[kind] = true
-		if revision := properties["fork_revision"].(map[string]any); revision["minimum"] != float64(1) {
-			t.Errorf("%s fork_revision minimum = %#v, want 1", kind, revision["minimum"])
+		if len(kinds) == 0 {
+			t.Fatal("fork point arm has no closed kinds")
 		}
-		switch armKind {
-		case "event":
-			if !required["fork_event_id"] || properties["fork_event_id"] == nil {
-				t.Error("event fork arm does not require fork_event_id")
+		for _, armKind := range kinds {
+			kind, ok := armKind.(string)
+			if !ok || seenKinds[kind] {
+				t.Fatalf("duplicate or malformed fork point arm: %#v", armKind)
 			}
-		case "deployment_revision":
-			if required["fork_event_id"] || properties["fork_event_id"] != nil {
-				t.Error("deployment fork arm does not forbid fork_event_id")
+			seenKinds[kind] = true
+			if revision := properties["fork_revision"].(map[string]any); revision["minimum"] != float64(1) {
+				t.Errorf("%s fork_revision minimum = %#v, want 1", kind, revision["minimum"])
 			}
-		default:
-			t.Errorf("unexpected fork point arm: %#v", armKind)
-		}
-		label, ok := properties["source_label"].(map[string]any)
-		if !ok || label["type"] != "string" || required["source_label"] {
-			t.Errorf("%s source_label must be optional display text: %#v", kind, properties["source_label"])
-		}
-		if len(properties) != len(required)+1 {
-			t.Errorf("%s fork arm properties=%d required=%d; only source_label may be optional", kind, len(properties), len(required))
+			switch kind {
+			case "event":
+				if !required["fork_event_id"] || properties["fork_event_id"] == nil {
+					t.Error("event fork arm does not require fork_event_id")
+				}
+			case "deployment_revision", "run_start":
+				if required["fork_event_id"] || properties["fork_event_id"] != nil {
+					t.Errorf("%s fork arm does not forbid fork_event_id", kind)
+				}
+			default:
+				t.Errorf("unexpected fork point arm: %#v", armKind)
+			}
+			label, ok := properties["source_label"].(map[string]any)
+			if !ok || label["type"] != "string" || required["source_label"] {
+				t.Errorf("%s source_label must be optional display text: %#v", kind, properties["source_label"])
+			}
+			if len(properties) != len(required)+1 {
+				t.Errorf("%s fork arm properties=%d required=%d; only source_label may be optional", kind, len(properties), len(required))
+			}
 		}
 	}
-	if !seenKinds["event"] || !seenKinds["deployment_revision"] {
+	if !seenKinds["event"] || !seenKinds["deployment_revision"] || !seenKinds["run_start"] {
 		t.Errorf("fork point arms = %#v", seenKinds)
 	}
 }

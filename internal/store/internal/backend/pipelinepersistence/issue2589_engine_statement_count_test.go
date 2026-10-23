@@ -239,8 +239,8 @@ func issue2589ExpectEngineRevision(mock sqlmock.Sqlmock, postgres bool, state pi
 	}
 	mock.ExpectQuery(`(?s)^WITH\s+requested\(family,fact_key\).*run_fork_fact_revisions.*`).WillReturnRows(issue2589Rows("family fact_key fact present"))
 	mock.ExpectQuery(`(?s)^SELECT\s+CAST\(e.entity_id AS TEXT\).*FROM .*flow_instances.*UNION ALL.*WHERE e.run_id = .*`).WillReturnRows(issue2589Rows(
-		"entity_id flow_instance entity_type slug name created_at flow_config construction_kind stage_defined flow_template mode status current_state entered_state_at updated_at terminated_at parent_instance instance_key initial_materialization data_created_at data_updated_at",
-		state.EntityID, state.Identity.Route.InstancePath, state.EntityType, nil, nil, state.CreatedAt, string(state.Config), "constructed", true, state.WorkflowName, state.Mode, state.Status, state.CurrentState, state.EnteredStageAt, state.UpdatedAt, nil, nil, nil, nil, state.CreatedAt, state.CreatedAt,
+		"entity_id flow_instance entity_type slug name created_at flow_config construction_kind stage_defined flow_template mode status current_state entered_state_at updated_at terminated_at parent_instance instance_key initial_projection_version initial_materialization data_created_at data_updated_at",
+		state.EntityID, state.Identity.Route.InstancePath, state.EntityType, nil, nil, state.CreatedAt, string(state.Config), "constructed", true, state.WorkflowName, state.Mode, state.Status, state.CurrentState, state.EnteredStageAt, state.UpdatedAt, nil, nil, nil, nil, nil, state.CreatedAt, state.CreatedAt,
 	))
 	mock.ExpectQuery(`(?s)^SELECT\s+CAST\(m.mutation_id AS TEXT\).*FROM entity_mutations m WHERE m.run_id = .*`).WillReturnRows(mutations)
 	routing, _ := json.Marshal(timer.RoutingSource)
