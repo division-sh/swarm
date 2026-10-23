@@ -1639,6 +1639,8 @@ func (f completionSettlementFixture) contextFor(authority runtimeeffects.Authori
 	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(f.context, authority), newCompletionControllerForTest(f.store))
 	if authority.Target.Memory.Enabled {
 		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{SessionID: f.sessionID, GrantID: f.grantID, LockOwner: f.leaseHolder})
+	} else {
+		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{})
 	}
 	return runtimedelivery.WithClaim(ctx, f.origin)
 }
