@@ -223,7 +223,7 @@ func validatePreflightStructuralCompleteness(plan testplanning.PreflightPlan, st
 			count++
 		}
 	}
-	want := 29 + 11 + len(structural)
+	want := 28 + 11 + len(structural) // Compose both canonical candidate retirements.
 	debtRequired := plan.Comparison != nil && plan.Comparison.DebtRequired
 	for _, name := range []string{"TestPersistenceAuthorityDebtRatchet", "TestNativeFixtureFamiliesDoNotReceiveRawAuthority"} {
 		root := testplanning.TestRoot{Package: "github.com/division-sh/swarm/internal/store", Name: name}
