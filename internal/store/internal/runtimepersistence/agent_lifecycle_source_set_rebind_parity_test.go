@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -207,12 +208,28 @@ func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) 
 					t.Fatalf("read predecessor lifecycle binding: %v", err)
 				}
 
+				predecessor, err := agentfixture.ProcessCapability(t, ctx, store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := predecessor.Release(ctx); err != nil {
+					t.Fatal(err)
+				}
+				ctx = testAuthorActivityContext()
 				request := testStartupAcquireRequest("census-drift-successor")
 				capability, err := store.AcquireProcessCapability(ctx, request)
 				if err != nil {
 					t.Fatalf("acquire census-drift capability: %v", err)
 				}
 				t.Cleanup(func() { _ = capability.Release(context.Background()) })
+				original, err := capability.Evidence()
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx, err = generationauthority.MutationContext(ctx, original.LeaseStamp(), false)
+				if err != nil {
+					t.Fatal(err)
+				}
 				plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{
 					BundleHash: testAgentTopologyBundleHash,
 				}}, nil)
@@ -620,6 +637,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	if err := predecessor.Release(ctx); err != nil {
 		t.Fatalf("release predecessor process capability: %v", err)
 	}
+	ctx = testAuthorActivityContext()
 	acquire := runtimestartupownership.AcquireRequest{
 		OwnerID: "process-binding-successor", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
 	}
@@ -628,6 +646,14 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 		t.Fatalf("acquire successor process capability: %v", err)
 	}
 	t.Cleanup(func() { _ = successor.Release(context.Background()) })
+	original, err := successor.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = generationauthority.MutationContext(ctx, original.LeaseStamp(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	grant, err := successor.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
 		BundleHash:        coordinate.BundleHash,
 		RuntimeInstanceID: acquire.RuntimeInstanceID, RuntimeGeneration: 2, SourceSetRevision: plan.Revision,

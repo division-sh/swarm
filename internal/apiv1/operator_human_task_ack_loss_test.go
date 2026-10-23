@@ -39,6 +39,7 @@ func TestHumanTaskDecisionAcknowledgmentLossReplaysWithoutDuplicateOnBothStores(
 			}
 			now := time.Date(2026, 7, 14, 14, 0, 0, 0, time.UTC)
 			runID := uuid.NewString()
+			ctx = apiTestOriginalProcessContext(t, ctx, cardStore)
 			storetest.RequireRun(t, ctx, cardStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 			card, continuation := newAPIHumanTaskAckLossCard(t, runID, fact.BundleHash(), now)
 			if err := humanStore.CreateHumanTaskCard(ctx, card, continuation); err != nil {

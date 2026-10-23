@@ -90,6 +90,22 @@ func testAuthorActivityRuntimeContext(ctx context.Context) context.Context {
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(authorActivityTestRuntimeInstanceID))
 }
 
+func apiTestOriginalProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	owner, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("API native fixture requires its process owner, got %T", selected)
+	}
+	if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
+	}
+	ctx, err := agentfixture.ProcessContext(t, ctx, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ctx
+}
+
 func testAuthorActivityContext(ctx context.Context) context.Context {
 	return testAuthorActivityContextForSource(ctx, authorActivityTestSourceArtifactFact)
 }

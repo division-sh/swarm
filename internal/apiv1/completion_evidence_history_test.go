@@ -30,6 +30,7 @@ func TestCompletion2270PublicHistorySurvivesReopenBothStores(t *testing.T) {
 				ctx := context.Background()
 				runID, sessionID, turnID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 				identity := sqliteAgentUsageIdentityForRun(t, runID, "completion-history-2270")
+				ctx = apiTestOriginalProcessContext(t, ctx, selected)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 				actor := withAPITestIntent(t, actors.AgentConfig{Identity: identity, ID: identity.AgentID(), Role: "researcher", Type: "managed", Model: "regular",
 					ExecutionMode: "live", ResolvedLLMBackend: "claude_cli", FlowPath: identity.FlowInstance(), Memory: agentmemory.Plan{Enabled: memory}})
@@ -63,6 +64,7 @@ func TestCompletion2270SubNanodollarPublicHistoryBothStores(t *testing.T) {
 			ctx := context.Background()
 			runID, sessionID, turnID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			identity := sqliteAgentUsageIdentityForRun(t, runID, "fractional-price-2270")
+			ctx = apiTestOriginalProcessContext(t, ctx, selected)
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 			seedCompletion2270Agent(t, ctx, selected, identity)
 			want, frameHash := persistCompletion2270History(t, selected, identity, sessionID, turnID, false, 0.0000000004)

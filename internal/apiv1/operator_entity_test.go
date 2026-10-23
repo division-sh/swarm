@@ -140,6 +140,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 	ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForSource(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact)), runID)
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"
+	ctx = apiTestOriginalProcessContext(t, ctx, pg)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact})
 	createOperatorReadbackEntities(t, ctx, pg, source, runID, entityA, entityB, time.Now().UTC())
 	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{Entities: pg})})
@@ -203,6 +204,7 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"
 	now := time.Unix(1700000000, 0).UTC()
+	ctx = apiTestOriginalProcessContext(t, ctx, sqliteStore)
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: now})
 	createOperatorReadbackEntities(t, ctx, sqliteStore, source, runID, entityA, entityB, now)
 	handler := testHandler(t, Options{
