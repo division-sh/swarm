@@ -522,15 +522,19 @@ func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, 
 		t.Fatal(err)
 	}
 	if parentRunID.Valid {
-		if wantClosed == 1 {
-			waitSelectedDeploymentExecutionClosed(t, f.ctx, f, runID)
-		}
 		var closed int
-		if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 AND state='closed'`, runID).Scan(&closed); err != nil {
-			t.Fatal(err)
-		}
-		if closed != wantClosed {
-			t.Fatalf("%s selected child has %d closed executions after settled public result, want %d", route, closed, wantClosed)
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 AND state='closed'`, runID).Scan(&closed); err != nil {
+				t.Fatal(err)
+			}
+			if closed == wantClosed {
+				break
+			}
+			if wantClosed != 1 || time.Now().After(deadline) {
+				t.Fatalf("%s selected child has %d closed executions after settled public result, want %d", route, closed, wantClosed)
+			}
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 	want := make(map[string]map[string]any, len(rows))

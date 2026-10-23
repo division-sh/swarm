@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -69,17 +70,31 @@ func (p *activityLineageProofStore) RequireRunForkSelectedContractExecutionSettl
 		if err := p.SelectedContractRuntimeExecutionLifecycle.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowed, source); err != nil {
 			return err
 		}
-		for _, sourceID := range allowed {
-			id := activityidentity.ForkLineageEventID(req.ForkRunID, sourceID)
-			event, found := observed[id]
-			if !found || event.SourceEventID != sourceID {
+		var selected any = p.h.pg
+		if p.h.sqlite != nil {
+			selected = p.h.sqlite
+		}
+		p.published, err = readCatalogSelectedExecutionObservation(ctx, selected, req.ForkRunID)
+		if err != nil || len(p.published.ForkEvents) != len(allowed) {
+			t.Fatalf("pre-tamper native publication evidence: %+v err=%v", p.published, err)
+		}
+		for _, publication := range p.published.ForkEvents {
+			event, found := observed[publication.ForkEventID]
+			if !found || event.EventName != publication.EventName || !slices.Contains(allowed, publication.SourceEventID) {
 				t.Fatal("pre-tamper settlement lost the exact committed selected publication")
 			}
-			p.published.ForkEvents = append(p.published.ForkEvents, forkexecution.SelectedContractExecutionForkEvent{SourceEventID: sourceID, ForkEventID: id, EventName: event.EventName})
 		}
-		p.published.ExecutedEventCount = len(p.published.ForkEvents)
 		p.writePayload(ctx, request.EventID, map[string]any{})
-		return p.SelectedContractRuntimeExecutionLifecycle.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowed, source)
+		before := activityLineageStateSnapshot(t, ctx, p.h, req.ForkRunID)
+		err = p.SelectedContractRuntimeExecutionLifecycle.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowed, source)
+		retryErr := p.SelectedContractRuntimeExecutionLifecycle.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowed, source)
+		if err == nil || retryErr == nil || !strings.Contains(err.Error(), "fork activity lineage") || !strings.Contains(retryErr.Error(), "fork activity lineage") || p.calls.Load() != 1 {
+			t.Fatalf("corrupt final settlement did not retain its exact refusal without redispatch: first=%v repeated=%v calls=%d", err, retryErr, p.calls.Load())
+		}
+		if after := activityLineageStateSnapshot(t, ctx, p.h, req.ForkRunID); before != after {
+			t.Fatalf("refused final settlement changed committed selected evidence:\nbefore=%s\nafter=%s", before, after)
+		}
+		return err
 	}
 	if p.hostileLoop {
 		requestOwner, err := activityidentity.ParseOwnerKey(request.Payload["node_id"].(string))

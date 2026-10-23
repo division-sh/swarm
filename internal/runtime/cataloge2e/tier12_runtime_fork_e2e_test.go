@@ -217,6 +217,23 @@ func observeCatalogSelectedExecution(t *testing.T, h *runtimeHarness, child stri
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
+	observed, err := readCatalogSelectedExecutionObservation(ctx, selected, child)
+	if err != nil {
+		return observed, err
+	}
+	header, err := selected.(interface {
+		LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+	}).LoadRunHeader(ctx, child)
+	if err != nil {
+		return observed, err
+	}
+	if header.Failure != nil {
+		return observed, failures.FromEnvelope(*header.Failure)
+	}
+	return observed, nil
+}
+
+func readCatalogSelectedExecutionObservation(ctx context.Context, selected any, child string) (catalogSelectedExecutionObservation, error) {
 	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
 	if err != nil {
 		return catalogSelectedExecutionObservation{}, err
@@ -247,15 +264,6 @@ func observeCatalogSelectedExecution(t *testing.T, h *runtimeHarness, child stri
 		return observed.ForkEvents[i].SourceEventID < observed.ForkEvents[j].SourceEventID
 	})
 	observed.ExecutedEventCount = len(observed.ForkEvents)
-	header, err := selected.(interface {
-		LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
-	}).LoadRunHeader(ctx, child)
-	if err != nil {
-		return observed, err
-	}
-	if header.Failure != nil {
-		return observed, failures.FromEnvelope(*header.Failure)
-	}
 	return observed, nil
 }
 
