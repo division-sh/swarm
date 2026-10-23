@@ -58,59 +58,6 @@ func (p *localReadinessEntryProbe) NotifyLifecycle(ctx context.Context, signal l
 	p.once.Do(func() { close(p.done) })
 }
 
-func publishSelectedForkReadinessFrontier(t *testing.T, ctx context.Context, h *runtimeHarness, eventName string) string {
-	t.Helper()
-	p := &localReadinessEntryProbe{
-		pauseReadinessEntry: pauseReadinessEntry{h: h, node: identitytest.FlowNode(t, "worker-flow", strings.ReplaceAll(eventName, ".", "-")+"-entry").Key()},
-		done:                make(chan struct{}),
-	}
-	h.rt.Pipeline.SetTestLifecycleProbe(p)
-	defer h.rt.Pipeline.SetTestLifecycleProbe(nil)
-	event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(eventName), "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, catalogRuntimeRunID,
-		events.EventEnvelope{}, eventtest.RootRoutingSource(catalogRuntimeRunID), time.Now().UTC())
-	if err := h.rt.Bus.PublishAcknowledged(ctx, event); err != nil {
-		t.Fatal(err)
-	}
-	deadline, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	select {
-	case <-p.done:
-	case <-deadline.Done():
-		t.Fatalf("connected entry did not complete: %v", deadline.Err())
-	}
-	if p.err != nil {
-		t.Fatal(p.err)
-	}
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		observed, err := catalogRunScopedOperatorEvents(h, catalogRuntimeRunID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, local := range observed {
-			if local.EventName != "worker-flow/worker-001/"+eventName || local.SourceEventID != event.ID() {
-				continue
-			}
-			snapshot, err := local.EventSnapshot()
-			if err != nil || snapshot.RoutingSource().Route().FlowInstance != "worker-flow/worker-001" || snapshot.ProducerType() != events.EventProducerNode || len(local.Deliveries) == 0 {
-				t.Fatalf("local frontier lacks exact producer and consumer: %+v err=%v", local, err)
-			}
-			for _, delivery := range local.Deliveries {
-				if delivery.Status != "pending" {
-					t.Fatalf("local frontier was not paused: %+v", delivery)
-				}
-			}
-			return local.EventID
-		}
-		select {
-		case <-deadline.Done():
-			t.Fatalf("connected entry did not publish local frontier: %v; events=%+v", deadline.Err(), observed)
-		case <-tick.C:
-		}
-	}
-}
-
 // This source uses real creation and node publication, not a private event
 // mislabeled as root ingress or a completed dynamic-connection ancestor.
 func TestLocalReadinessCreationSourceBothStores(t *testing.T) {

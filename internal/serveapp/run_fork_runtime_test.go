@@ -357,7 +357,6 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal
 
 func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	setPostgresEnvFromDSN(t, dsn)
 	repo := repoRootForTest()
 	sourceRoot := filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")
@@ -376,6 +375,8 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), at.Add(time.Second))
 
 	var buf bytes.Buffer
+	var lineageRows int
+	var forkEventID string
 	code := runForkRuntimeOwnerHarness(context.Background(), repo, []string{
 		"--store", "postgres",
 		"--bundle-hash", bundleHash,
@@ -385,17 +386,24 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 	}, &buf, func(ctx context.Context, result runtimerunforkexecution.SelectedContractExecutionResult) error {
 		ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
+		forkEventID = activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, sourceEventID)
 		for {
-			state, err := storetest.ReadSelectedExecutionStorage(ctx, selected, result.Materialization.ForkRunID)
-			if err != nil {
+			if err := db.QueryRowContext(ctx, `
+				SELECT COUNT(*) FROM run_fork_selected_contract_executions
+				WHERE fork_run_id=$1::uuid AND source_event_id=$2::uuid AND fork_event_id=$3::uuid
+				AND EXISTS (SELECT 1 FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid AND state='closed')
+			`, result.Materialization.ForkRunID, sourceEventID, forkEventID).Scan(&lineageRows); err != nil {
 				return err
 			}
-			if state.State == "closed" && state.Occurrences == 1 {
+			if lineageRows == 1 {
 				return nil
+			}
+			if lineageRows > 1 {
+				return fmt.Errorf("selected execution duplicated its exact lineage: %d", lineageRows)
 			}
 			select {
 			case <-ctx.Done():
-				return fmt.Errorf("real selected business execution did not settle: %+v: %w", state, ctx.Err())
+				return fmt.Errorf("real selected business execution did not settle: lineage=%d: %w", lineageRows, ctx.Err())
 			case <-time.After(10 * time.Millisecond):
 			}
 		}
@@ -417,17 +425,6 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 		result.SelectedContractExecutionAdmission.RecipientPlanning == nil ||
 		result.SelectedContractExecutionAdmission.RecipientPlanning.Owner != runfork.RunForkSelectedContractRecipientPlanningOwner {
 		t.Fatalf("selected execution recipient planning admission = %#v", result.SelectedContractExecutionAdmission)
-	}
-	var lineageRows int
-	forkEventID := activityidentity.ForkLineageEventID(result.Materialization.ForkRunID, sourceEventID)
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT COUNT(*)
-		FROM run_fork_selected_contract_executions
-		WHERE fork_run_id = $1::uuid
-		  AND source_event_id = $2::uuid
-		  AND fork_event_id = $3::uuid
-	`, result.Materialization.ForkRunID, sourceEventID, forkEventID).Scan(&lineageRows); err != nil {
-		t.Fatalf("count selected execution lineage: %v", err)
 	}
 	if lineageRows != 1 {
 		t.Fatalf("selected execution lineage rows = %d, want 1", lineageRows)

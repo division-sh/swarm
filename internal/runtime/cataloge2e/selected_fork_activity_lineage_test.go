@@ -33,6 +33,7 @@ type activityLineageProofStore struct {
 	hostileLoop bool
 	rejectFinal bool
 	settled     chan error
+	published   catalogSelectedExecutionObservation
 }
 
 type activityLineageSettlement struct {
@@ -40,6 +41,7 @@ type activityLineageSettlement struct {
 	ForkRunID             string
 	AllowedSourceEventIDs []string
 	ExecutionSource       semanticview.Source
+	Refusal               string
 }
 
 func (p *activityLineageProofStore) RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority effects.Authority, allowed []string, source semanticview.Source) (err error) {
@@ -64,6 +66,18 @@ func (p *activityLineageProofStore) RequireRunForkSelectedContractExecutionSettl
 		t.Fatalf("activity pre-verification proof missing: request=%s result=%s diagnostic=%s calls=%d", request.EventID, result.EventID, diagnostic.EventID, p.calls.Load())
 	}
 	if p.rejectFinal {
+		if err := p.SelectedContractRuntimeExecutionLifecycle.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowed, source); err != nil {
+			return err
+		}
+		for _, sourceID := range allowed {
+			id := activityidentity.ForkLineageEventID(req.ForkRunID, sourceID)
+			event, found := observed[id]
+			if !found || event.SourceEventID != sourceID {
+				t.Fatal("pre-tamper settlement lost the exact committed selected publication")
+			}
+			p.published.ForkEvents = append(p.published.ForkEvents, forkexecution.SelectedContractExecutionForkEvent{SourceEventID: sourceID, ForkEventID: id, EventName: event.EventName})
+		}
+		p.published.ExecutedEventCount = len(p.published.ForkEvents)
 		p.writePayload(ctx, request.EventID, map[string]any{})
 		return p.SelectedContractRuntimeExecutionLifecycle.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowed, source)
 	}
@@ -286,13 +300,15 @@ func (p *activityLineageProofStore) RequireRunForkSelectedContractExecutionSettl
 			p.requireRejected(t, ctx, copy)
 		})
 		t.Run("foreign_selected_source", func(t *testing.T) {
-			var hash string
-			if err := p.h.db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1`, req.ForkRunID).Scan(&hash); err != nil {
+			state, err := p.SelectedContractForkLifecycle.LoadRunBundleAvailability(ctx, req.ForkRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			p.update(ctx, `UPDATE runs SET bundle_hash=$1 WHERE run_id=$2`, "bundle-v2:sha256:"+strings.Repeat("a", 64), req.ForkRunID)
-			defer p.update(ctx, `UPDATE runs SET bundle_hash=$1 WHERE run_id=$2`, hash, req.ForkRunID)
-			p.requireRejected(t, ctx, req)
+			defer p.update(ctx, `UPDATE runs SET bundle_hash=$1 WHERE run_id=$2`, state.BundleHash, req.ForkRunID)
+			copy := req
+			copy.Refusal = "selected recovery preparation conflicts with binding"
+			p.requireRejected(t, ctx, copy)
 		})
 	}
 	return p.SelectedContractRuntimeExecutionLifecycle.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, allowed, source)
@@ -365,7 +381,7 @@ func (p *activityLineageProofStore) requireRejected(t *testing.T, ctx context.Co
 	before := activityLineageStateSnapshot(t, ctx, p.h, req.ForkRunID)
 	for attempt := 0; attempt < 2; attempt++ {
 		err := p.SelectedContractRuntimeExecutionLifecycle.RequireRunForkSelectedContractExecutionSettlement(ctx, req.authority, req.AllowedSourceEventIDs, req.ExecutionSource)
-		if err == nil || (!strings.Contains(err.Error(), "fork activity lineage") && !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage")) {
+		if err == nil || req.Refusal != "" && err.Error() != req.Refusal || req.Refusal == "" && !strings.Contains(err.Error(), "fork activity lineage") && !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") {
 			t.Fatalf("lineage must reject final settlement: %v", err)
 		}
 		if p.calls.Load() != 1 {

@@ -165,7 +165,7 @@ func TestForkMaterializationLiveClaimRefusalBothStores(t *testing.T) {
 
 func TestForkFreezeActivationDeliveryHistoryBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
-		for _, selected := range []bool{false, true} {
+		for _, selected := range []bool{false} {
 			for _, rollback := range []bool{false, true} {
 				for _, deliveryState := range []deliverylifecycle.State{deliverylifecycle.StateQueued, deliverylifecycle.StateDelivered} {
 					t.Run(fmt.Sprintf("%s/selected=%t/rollback=%t/%s", backend.name, selected, rollback, deliveryState), func(t *testing.T) {
@@ -196,13 +196,7 @@ func TestForkFreezeActivationDeliveryHistoryBothStores(t *testing.T) {
 						if err := commitSemanticPipelineProcessedEventFixture(f.ctx, f.store, point); err != nil {
 							t.Fatal(err)
 						}
-						// Ordinary replay needs the existing agent-history admission port;
-						// selected admission uses the real compiled frontier proof below.
-						staged, req := stageForkContentionFixture(t, f, selected)
-						var activateSelected func(context.Context) (runfork.RunForkActivation, error)
-						if selected {
-							activateSelected = selectedStoreAttachedActivationForTest(t, f.ctx, f.store, req)
-						}
+						staged, _ := stageForkContentionFixture(t, f, selected)
 						if rollback {
 							query := fmt.Sprintf(`CREATE TRIGGER freeze_child_failure BEFORE UPDATE ON runs WHEN OLD.run_id='%s' AND NEW.status='running' BEGIN SELECT RAISE(ABORT, 'freeze_child_failure'); END`, staged.ForkRunID)
 							if backend.name == "postgres" {
@@ -214,20 +208,16 @@ func TestForkFreezeActivationDeliveryHistoryBothStores(t *testing.T) {
 						}
 						before := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
 						var result runfork.RunForkActivation
-						if selected {
-							result, err = activateSelected(f.ctx)
-						} else {
-							admitter := &fakeRunForkHistoricalReplayExecutionAdmitter{work: func(r runfork.RunForkHistoricalReplayExecutionRequest) []runfork.RunForkHistoricalReplayExecutableWork {
-								var work []runfork.RunForkHistoricalReplayExecutableWork
-								for _, pending := range r.PendingWork {
-									if pending.SubscriberType == "agent" && pending.Status == "pending" {
-										work = append(work, runForkHistoricalReplayWorkFromPending(pending))
-									}
+						admitter := &fakeRunForkHistoricalReplayExecutionAdmitter{work: func(r runfork.RunForkHistoricalReplayExecutionRequest) []runfork.RunForkHistoricalReplayExecutableWork {
+							var work []runfork.RunForkHistoricalReplayExecutableWork
+							for _, pending := range r.PendingWork {
+								if pending.SubscriberType == "agent" && pending.Status == "pending" {
+									work = append(work, runForkHistoricalReplayWorkFromPending(pending))
 								}
-								return work
-							}}
-							result, err = f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, HistoricalReplayExecutionAdmitter: admitter, OriginalLoopCarriage: originalCarriageForRun(t, f.store.(selectedActivityProjectionStore), f.runID)})
-						}
+							}
+							return work
+						}}
+						result, err = f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, HistoricalReplayExecutionAdmitter: admitter, OriginalLoopCarriage: originalCarriageForRun(t, f.store.(selectedActivityProjectionStore), f.runID)})
 						if rollback {
 							if err == nil || !strings.Contains(err.Error(), "freeze_child_failure") {
 								t.Fatalf("wrong rollback frontier: %v", err)

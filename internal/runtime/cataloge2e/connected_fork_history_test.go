@@ -1,14 +1,11 @@
 package cataloge2e
 
 import (
-	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
 
 	"testing"
-
-	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestConnectedForkFutureSuccessArtifactsPreserved(t *testing.T) {
@@ -24,19 +21,4 @@ func TestConnectedForkFutureSuccessArtifactsPreserved(t *testing.T) {
 			t.Fatalf("#642 original success oracle %s changed: %s, want %s", name, got, want)
 		}
 	}
-}
-
-// Every application table, column and row participates. Only database-internal
-// objects are excluded; the caller must join background writers first.
-func snapshotCatalogApplication(t *testing.T, h *runtimeHarness) map[string]storetest.SelectedForkStorageTableSnapshot {
-	t.Helper()
-	reader, err := h.catalogOperatorEventLister()
-	if err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(context.Background(), reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return snapshot
 }

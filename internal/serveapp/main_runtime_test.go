@@ -822,28 +822,6 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtim
 	return endpoint, db, bundleHash, rt, pg
 }
 
-func waitServedJoinSourceTimer(t *testing.T, db *sql.DB, runID string) {
-	t.Helper()
-	deadline := time.Now().Add(servedProofPollDeadline)
-	var count int
-	for time.Now().Before(deadline) {
-		if err := db.QueryRowContext(context.Background(), `
-			SELECT COUNT(*)
-			FROM timers
-			WHERE run_id = $1::uuid
-			  AND fire_event = 'platform.join_timeout'
-			  AND status = 'active'
-		`, runID).Scan(&count); err != nil {
-			t.Fatalf("load served join source timer: %v", err)
-		}
-		if count == 1 {
-			return
-		}
-		time.Sleep(25 * time.Millisecond)
-	}
-	t.Fatalf("served join source timers for run %s = %d, want 1\n%s", runID, count, servedEventPublishDebugSummary(t, db, "postgres", runID))
-}
-
 func waitServedRunDeliveryQuiescence(t *testing.T, reader servedRunDeliveryReader, runID string) {
 	t.Helper()
 	if reader == nil {
@@ -4730,34 +4708,6 @@ func servedJoinTarget(t *testing.T, db *sql.DB, runID string) string {
 	}
 	t.Fatalf("served join entity was not created for run %s\n%s", runID, servedEventPublishDebugSummary(t, db, "postgres", runID))
 	return ""
-}
-
-func seedServedJoinForkFrontier(t *testing.T, db *sql.DB, runID, entityID, sourceEventID string) string {
-	t.Helper()
-	ctx := context.Background()
-	var flowInstance string
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(flow_instance, '')
-		FROM entity_state
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-	`, runID, entityID).Scan(&flowInstance); err != nil {
-		t.Fatalf("load served join flow instance: %v", err)
-	}
-	eventID := uuid.NewString()
-	var createdAt time.Time
-	if err := db.QueryRowContext(ctx, `SELECT clock_timestamp()`).Scan(&createdAt); err != nil {
-		t.Fatalf("load served join fork frontier timestamp: %v", err)
-	}
-	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), flowInstance)
-	event := eventtest.PersistedProjectionForProducer(
-		eventID, "fork.probe", eventtest.Producer(events.EventProducerPlatform, "join-proof"), "",
-		json.RawMessage(`{"marker":"replayed"}`), 0, runID, sourceEventID, envelope, createdAt,
-	)
-	storetest.CommitSemanticForkFrontier(t, ctx, storetest.AdmitPostgresRuntimeStore(t, db), event,
-		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("frontier-agent"), AgentIdentity: servedRuntimeRootIdentityForRun(t, runID, "frontier-agent")}},
-		storetest.AcknowledgedPipelineDisposition())
-	return eventID
 }
 
 func writeServedEventPublishTargetRouteFixture(t *testing.T) string {

@@ -268,10 +268,6 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						}
 					}
 				case "fork":
-					storeBackend := "sqlite"
-					if backend == servedparity.BackendExplicitPostgres {
-						storeBackend = "postgres"
-					}
 					waitServedRunDeliveryQuiescence(t, deliveryReader, seed.RunID)
 					requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": uuid.NewString()})
 					frontier := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
@@ -320,21 +316,6 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					if child == card || fork.ForkRunID == seed.RunID {
 						t.Fatal("fork reused parent card/run identity")
 					}
-					rt := servedControlProofRuntime{Endpoint: h.rpcEndpoint(), DB: db, Backend: storeBackend, BundleHash: hash}
-					decision := lifecycleDecisionParamsForCard(t, rt, child, "approve")
-					refusal := requireServedJSONRPCError(t, h.rpcEndpoint(), "mailbox.decide", decision)
-					if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
-						t.Fatalf("fork acquired ordinary card mutation authority: %+v", refusal)
-					}
-					for method, args := range map[string]map[string]any{
-						"mailbox.defer":        {"card_id": child, "until": time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano), "idempotency_key": uuid.NewString()},
-						"mailbox.begin_input":  {"card_id": child, "verdict": "reject", "observed_content_hash": decision["observed_content_hash"], "idempotency_key": uuid.NewString()},
-						"mailbox.cancel_input": {"card_id": child, "input_draft_id": uuid.NewString(), "idempotency_key": uuid.NewString()},
-					} {
-						if err := requireServedJSONRPCError(t, h.rpcEndpoint(), method, args); err.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
-							t.Fatalf("%s did not preserve upstream fork refusal: %+v", method, err)
-						}
-					}
 					childMessage := waitChannelAnchorReceipt(t, db, child)
 					childToken, found := telegramCallbackToken(h.provider.Delivery(childMessage-1), "approve")
 					if !found || childToken == token {
@@ -353,7 +334,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					for {
 						var intentState, disposition string
 						err := db.QueryRow(`SELECT state,COALESCE(disposition,'') FROM operator_channel_action_intents WHERE CAST(fact AS TEXT) LIKE $1`, "%"+childToken+"%").Scan(&intentState, &disposition)
-						if err == nil && intentState == "settled" && disposition == "unsupported" {
+						if err == nil && intentState == "settled" && disposition == "applied" {
 							break
 						}
 						if time.Now().After(deadline) {
@@ -361,13 +342,13 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							cardErr := db.QueryRow(`SELECT status,COALESCE(verdict,'') FROM decision_cards WHERE card_id=$1`, child).Scan(&status, &verdict)
 							var decisions int
 							eventErr := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, fork.ForkRunID).Scan(&decisions)
-							t.Fatalf("selected-fork callback lacks terminal unsupported disposition: state=%s disposition=%s err=%v card_status=%s verdict=%s card_err=%v decisions=%d event_err=%v", intentState, disposition, err, status, verdict, cardErr, decisions, eventErr)
+							t.Fatalf("selected-fork callback lacks exact applied disposition: state=%s disposition=%s err=%v card_status=%s verdict=%s card_err=%v decisions=%d event_err=%v", intentState, disposition, err, status, verdict, cardErr, decisions, eventErr)
 						}
 						time.Sleep(20 * time.Millisecond)
 					}
 					var status string
-					if err := db.QueryRow(`SELECT status FROM decision_cards WHERE card_id=$1`, child).Scan(&status); err != nil || status != "pending" {
-						t.Fatalf("fork callback bypassed selected control refusal: status=%s err=%v", status, err)
+					if err := db.QueryRow(`SELECT status FROM decision_cards WHERE card_id=$1`, child).Scan(&status); err != nil || status != "decided" {
+						t.Fatalf("fork callback did not settle its exact selected card: status=%s err=%v", status, err)
 					}
 					postChannelSourceControl(t, callback, signing, child, childToken, childMessage)
 					ordinary := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
@@ -388,17 +369,17 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					postChannelSourceControl(t, callback, signing, child, childToken, childMessage)
 					var verdict string
 					var events, drafts int
-					if err := db.QueryRow(`SELECT status,COALESCE(verdict,'') FROM decision_cards WHERE card_id=$1`, child).Scan(&status, &verdict); err != nil || status != "pending" || verdict != "" {
+					if err := db.QueryRow(`SELECT status,COALESCE(verdict,'') FROM decision_cards WHERE card_id=$1`, child).Scan(&status, &verdict); err != nil || status != "decided" || verdict != "approve" {
 						t.Fatalf("fork replay/restart changed child: %s/%s %v", status, verdict, err)
 					}
-					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, fork.ForkRunID).Scan(&events); err != nil || events != 0 {
-						t.Fatalf("fork restart emitted a decision: %d %v", events, err)
+					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, fork.ForkRunID).Scan(&events); err != nil || events != 1 {
+						t.Fatalf("fork restart duplicated its selected decision: %d %v", events, err)
 					}
 					if err := db.QueryRow(`SELECT COUNT(*) FROM decision_card_input_drafts WHERE card_id=$1`, child).Scan(&drafts); err != nil || drafts != 0 {
-						t.Fatalf("upstream fork refusal created a draft: %d %v", drafts, err)
+						t.Fatalf("selected callback or replay created a draft: %d %v", drafts, err)
 					}
 					if readParent() != parentBefore {
-						t.Fatal("child refusal or normal-run control mutated the frozen parent card")
+						t.Fatal("child decision or normal-run control mutated the frozen parent card")
 					}
 				}
 				if after := readChannelSourceHistory(t, db, card); after != frozen {

@@ -550,7 +550,7 @@ func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, 
 		t.Fatalf("%s selected route lost document-shaped public readback: %+v want=%+v", route, page, want)
 	}
 	wantSubscriber := conformanceNode(t, "", "root-collector").Key()
-	if route == "singleton" {
+	if route == "singleton" || route == "dynamic" {
 		wantSubscriber = conformanceNode(t, "consumer", "consumer-node").Key()
 	}
 	for _, event := range page.Events {
@@ -814,6 +814,8 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 	}
 }
 
+// Keep the declaration identity, but retire its pre-D1 blanket refusal: this
+// reach proves changed-pin construction through the retained dynamic owner.
 func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -845,9 +847,20 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 					"version_id":  changedVersion,
 				}},
 			}
-			_, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
-			if !bytes.Contains(rpcErr, []byte("selected_contract_deferred_work_owner_unavailable")) || !bytes.Contains(rpcErr, []byte("dynamic_flow_instance_creation")) {
-				t.Fatalf("dynamic receiver selected fork refusal changed: %s", rpcErr)
+			result, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
+			if len(rpcErr) != 0 || result.ForkRunID == "" || result.ForkRunID == sourceRunID || len(result.DataPins) != 1 || string(result.DataPins[0].VersionID) != changedVersion {
+				t.Fatalf("dynamic receiver lost its exact changed-pin child: result=%+v error=%s", result, rpcErr)
+			}
+			rows := []byte("{\"account_id\":\"changed\",\"document\":{\"route\":\"dynamic\"}}\n")
+			assertSelectedDeploymentRowsWithClosedExecutions(t, f, server, result.ForkRunID, "dynamic", changedVersion, rows, 0)
+			closed, err := owner.PublishSelectedFixtureCloseForTest(f.ctx, result.ForkRunID, runforkexecution.SelectedFixtureCloseInputForTest{AccountID: "changed"})
+			if err != nil || closed.RunID != result.ForkRunID {
+				t.Fatalf("dynamic selected child could not consume its authored close: %+v err=%v", closed, err)
+			}
+			assertSelectedDeploymentRows(t, f, server, result.ForkRunID, "dynamic", changedVersion, rows)
+			replayed, rpcErr := deploymentForkRPC(t, f.ctx, forkServer, params)
+			if len(rpcErr) != 0 || !reflect.DeepEqual(result, replayed) {
+				t.Fatalf("dynamic selected child replay changed its immutable acknowledgment: first=%+v replay=%+v error=%s", result, replayed, rpcErr)
 			}
 			var children, selectedExecutions int
 			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, sourceRunID).Scan(&children); err != nil {
@@ -856,15 +869,15 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE source_run_id=$1`, sourceRunID).Scan(&selectedExecutions); err != nil {
 				t.Fatal(err)
 			}
-			if children != 0 || selectedExecutions != 0 {
-				t.Fatalf("unsupported dynamic receiver fork mutated domain: children=%d selected_executions=%d", children, selectedExecutions)
+			if children != 1 || selectedExecutions != 1 {
+				t.Fatalf("dynamic receiver or replay duplicated its selected child: children=%d selected_executions=%d", children, selectedExecutions)
 			}
 			var sourceCursor int
 			if err := f.db.QueryRowContext(f.ctx, `SELECT cursor FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, sourceRunID).Scan(&sourceCursor); err != nil {
 				t.Fatal(err)
 			}
 			if sourceCursor != 0 {
-				t.Fatalf("unsupported dynamic receiver fork advanced source cursor=%d", sourceCursor)
+				t.Fatalf("dynamic receiver fork advanced source cursor=%d", sourceCursor)
 			}
 		})
 	}

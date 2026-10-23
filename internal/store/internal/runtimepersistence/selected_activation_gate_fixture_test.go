@@ -26,60 +26,6 @@ type selectedStoreActivationBoundary struct {
 	call     func(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)
 }
 
-// Keep the real attachment alive while the component test exercises only the
-// native activation transaction, without starting retained business dispatch.
-func selectedStoreAttachedActivationForTest(t *testing.T, ctx context.Context, selected any, original runfork.RunForkSelectedContractExecutionActivateRequest) func(context.Context) (runfork.RunForkActivation, error) {
-	t.Helper()
-	ctx, cancel := context.WithCancel(ctx)
-	gate := selectedStoreActivationGateForTest(t, ctx, selected)
-	binding, err := selected.(runforkexecution.SelectedContractForkLifecycle).RequireRunForkSelectedContractBinding(ctx, original.ForkRunID)
-	if err != nil {
-		cancel()
-		t.Fatal(err)
-	}
-	type attachedCall struct {
-		ctx context.Context
-		req runfork.RunForkSelectedContractExecutionActivateRequest
-	}
-	ready, done := make(chan attachedCall, 1), make(chan error, 1)
-	go func() {
-		_, err := gate(original, binding.ForkPoint, func(actualCtx context.Context, actual runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-			ready <- attachedCall{actualCtx, actual}
-			<-ctx.Done()
-			return runfork.RunForkActivation{}, ctx.Err()
-		})
-		done <- err
-	}()
-	t.Cleanup(func() {
-		cancel()
-		if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
-			t.Error(err)
-		}
-	})
-	var call attachedCall
-	select {
-	case call = <-ready:
-	case err := <-done:
-		done <- err
-		t.Fatalf("native activation attachment: %v", err)
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	return func(caller context.Context) (runfork.RunForkActivation, error) {
-		if err := caller.Err(); err != nil {
-			return runfork.RunForkActivation{}, err
-		}
-		callCtx, cancelCall := context.WithCancel(call.ctx)
-		stop := context.AfterFunc(caller, cancelCall)
-		defer stop()
-		defer cancelCall()
-		if barrier := caller.Value(forkContentionContextKey{}); barrier != nil {
-			callCtx = context.WithValue(callCtx, forkContentionContextKey{}, barrier)
-		}
-		return selected.(runforkexecution.SelectedContractForkLifecycle).ActivateRunForkForSelectedContractExecution(callCtx, call.req)
-	}
-}
-
 func requireSelectedStoreFinalSettlement(t *testing.T, ctx context.Context, selected *PostgresStore, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 	t.Helper()
 	activation, err := selected.ActivateRunForkForSelectedContractExecution(ctx, req)

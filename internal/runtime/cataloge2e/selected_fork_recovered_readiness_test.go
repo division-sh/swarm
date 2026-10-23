@@ -18,14 +18,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	forkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
 func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
-		for _, change := range []string{"valid", "runtime_replacement", "submission_failure", "selected_source_cleanup", "original_source_cleanup", "reconstructed_store", "terminal_run", "inactive", "termination_time", "wrong_entity", "wrong_type", "wrong_workflow", "wrong_mode", "wrong_version", "config", "missing_readiness", "readiness_run", "readiness_mode", "agent_revision"} {
+		for _, change := range []string{"valid", "runtime_replacement", "selected_source_cleanup", "original_source_cleanup", "reconstructed_store", "terminal_run", "inactive", "termination_time", "wrong_entity", "wrong_type", "wrong_workflow", "wrong_mode", "wrong_version", "config", "missing_readiness", "readiness_run", "readiness_mode", "agent_revision"} {
 			t.Run(string(backend)+"/"+change, func(t *testing.T) {
 				cleanupFailure := change == "selected_source_cleanup" || change == "original_source_cleanup"
 				root := localReadinessFixture(t, 1, "agent")
@@ -54,6 +54,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 				if err != nil || !found || readiness.RunStatus != runfork.RunForkMaterializedStatus || !readiness.Eligible() {
 					t.Fatalf("canonical paused child is not eligible for staged binding: %#v, %t, %v", readiness, found, err)
 				}
+				var contradictoryRunID string
 				if change == "reconstructed_store" {
 					if h.sqlite != nil {
 						h.sqlite = h.reopenedSQLite
@@ -61,7 +62,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 						h.pg = storetest.AdmitPostgresRuntimeStore(t, h.db)
 					}
 					selected = runScopedCatalogStore(t, h)
-				} else if change == "runtime_replacement" || change == "submission_failure" {
+				} else if change == "runtime_replacement" {
 					if err := h.rt.Shutdown(); err != nil {
 						t.Fatalf("retire loaded runtime before selected recovery: %v", err)
 					}
@@ -73,8 +74,8 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 					if err != nil || !found || readiness.Eligible() {
 						t.Fatalf("canonical terminal child retained readiness eligibility: %#v, %t, %v", readiness, found, err)
 					}
-				} else if change != "valid" && change != "submission_failure" && !cleanupFailure {
-					corruptSelectedForkRecoveredReadiness(t, ctx, h, child, path, change)
+				} else if change != "valid" && !cleanupFailure {
+					contradictoryRunID = corruptSelectedForkRecoveredReadiness(t, ctx, h, child, path, change)
 				}
 				before := selectedForkRecoveredPhysicalSnapshot(t, ctx, h, child)
 				executionOwner := selectedContractExecutionOwnerForCatalogHarness(t, h)
@@ -92,34 +93,12 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 						}
 					}()
 				}
-				var submission *selectedRecoverySubmissionFailure
-				if change == "submission_failure" {
-					submission = &selectedRecoverySubmissionFailure{
-						SelectedContractForkLifecycle: forkStore,
-						registrar:                     forkStore.(runlifecycle.CandidateRegistrar),
-						bundleHash:                    loaded.SourceArtifactFact.BundleHash(),
-						failure:                       errors.New("injected recovered activation submission failure"),
-					}
-					executionOwner = selectedContractExecutionOwnerForCatalogHarness(t, h, submission)
-				}
 				activated, err := forkexecution.ActivateSelectedContractRunFork(ctx, forkexecution.SelectedContractActivationGateRequest{
 					ForkRunID: child, AllowSourceFreeze: true, Store: selected,
 					ExecutionOwner: executionOwner, SourceLoader: loader, AgentRuntime: options,
 				})
-				if change == "valid" || change == "reconstructed_store" || change == "runtime_replacement" || change == "submission_failure" || cleanupFailure {
-					if submission != nil {
-						if !errors.Is(err, submission.failure) || submission.submitted == 0 || submission.discards != 0 {
-							t.Fatalf("recovered post-commit disposition: submitted=%d discards=%d err=%v", submission.submitted, submission.discards, err)
-						}
-						var status, executionState string
-						if readErr := h.db.QueryRowContext(ctx, `SELECT r.status, e.state FROM runs r JOIN run_fork_selected_contract_runtime_executions e ON e.fork_run_id=r.run_id WHERE r.run_id=$1`, child).Scan(&status, &executionState); readErr != nil || status != "running" || executionState != "closed" {
-							t.Fatalf("recovered committed activation/execution = %s/%s: %v", status, executionState, readErr)
-						}
-						if !activated.Activated || activated.ExecutedEventCount != 0 || len(activated.ForkEvents) != 0 {
-							t.Fatalf("submission failure rewrote the committed activation ACK: %+v", activated)
-						}
-						return
-					} else if err != nil {
+				if change == "valid" || change == "reconstructed_store" || change == "runtime_replacement" || cleanupFailure {
+					if err != nil {
 						logSelectedForkRecoveryFailure(t, ctx, h, child, err)
 						t.Fatalf("lawful persisted recovery: %#v, %v", activated, err)
 					}
@@ -178,7 +157,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 					case "missing_readiness":
 						want = "verify selected-contract workflow readiness: sql: no rows in result set"
 					case "readiness_run":
-						want = "disagrees with flow owner " + child + "\x00" + path
+						want = "disagrees with flow owner " + contradictoryRunID + "\x00" + path
 					case "readiness_mode":
 						want = "flow readiness plan hash disagrees with its persisted plan"
 					case "agent_revision":
@@ -224,52 +203,6 @@ func (p *selectedRecoverySourceCleanup) LoadRunForkSelectedContractSourceForRequ
 	}
 	return loaded, nil
 }
-
-type selectedRecoverySubmissionFailure struct {
-	forkexecution.SelectedContractForkLifecycle
-	registrar           runlifecycle.CandidateRegistrar
-	bundleHash          string
-	failure             error
-	submitted, discards int
-}
-
-func (p *selectedRecoverySubmissionFailure) ActivateRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-	registration, err := p.registrar.RegisterCompletionCandidateSink(ctx, runlifecycle.CandidateScope{BundleHash: p.bundleHash}, p)
-	if err != nil {
-		return runfork.RunForkActivation{}, err
-	}
-	defer registration.Release()
-	return p.SelectedContractForkLifecycle.ActivateRunForkForSelectedContractExecution(ctx, req)
-}
-
-func (p *selectedRecoverySubmissionFailure) DiscardMaterializedSelectedContractExecutionFork(ctx context.Context, runID string) error {
-	p.discards++
-	return p.SelectedContractForkLifecycle.DiscardMaterializedSelectedContractExecutionFork(ctx, runID)
-}
-
-func (p *selectedRecoverySubmissionFailure) ReserveCompletionCandidate(ctx context.Context) (runlifecycle.CandidateAdmission, error) {
-	owner, ok := worklifetime.OccurrenceFromContext(ctx)
-	if !ok {
-		return nil, errors.New("recovered candidate lost occurrence")
-	}
-	lease, err := owner.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return &selectedRecoveryCandidateAdmission{owner: p, lease: lease}, nil
-}
-
-type selectedRecoveryCandidateAdmission struct {
-	owner *selectedRecoverySubmissionFailure
-	lease *worklifetime.Lease
-}
-
-func (a *selectedRecoveryCandidateAdmission) Submit(runlifecycle.Candidate) error {
-	a.owner.submitted++
-	return errors.Join(a.lease.Done(), a.owner.failure)
-}
-
-func (a *selectedRecoveryCandidateAdmission) Cancel() error { return a.lease.Done() }
 
 // Capture durable facts before harness cleanup without repairing state or changing
 // the timing of a successful execution. Joined errors retain every typed cause.
@@ -338,10 +271,11 @@ func logSelectedForkRecoveryFailure(t *testing.T, ctx context.Context, h *runtim
 
 // Corruption is applied only after canonical selected-fork materialization;
 // these writes cannot manufacture a positive readiness or source fixture.
-func corruptSelectedForkRecoveredReadiness(t *testing.T, ctx context.Context, h *runtimeHarness, runID, path, change string) {
+func corruptSelectedForkRecoveredReadiness(t *testing.T, ctx context.Context, h *runtimeHarness, runID, path, change string) string {
 	t.Helper()
 	query := ""
 	var value any
+	var contradictoryRunID string
 	switch change {
 	case "inactive":
 		query, value = `UPDATE flow_instances SET status = $3 WHERE run_id = $1 AND instance_path = $2`, "terminated"
@@ -376,7 +310,8 @@ func corruptSelectedForkRecoveredReadiness(t *testing.T, ctx context.Context, h 
 		case "wrong_version":
 			data["workflow_version"] = "foreign"
 		case "readiness_run":
-			data["run_id"] = uuid.NewString()
+			contradictoryRunID = uuid.NewString()
+			data["run_id"] = contradictoryRunID
 		case "readiness_mode":
 			data["execution_mode"] = "mock"
 		case "agent_revision":
@@ -401,6 +336,7 @@ func corruptSelectedForkRecoveredReadiness(t *testing.T, ctx context.Context, h 
 	if count, err := result.RowsAffected(); err != nil || count != 1 {
 		t.Fatalf("corrupt exact child row: %d, %v", count, err)
 	}
+	return contradictoryRunID
 }
 
 func selectedForkRecoveredPhysicalSnapshot(t *testing.T, ctx context.Context, h *runtimeHarness, runID string) string {

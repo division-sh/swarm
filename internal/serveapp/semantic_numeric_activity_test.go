@@ -222,9 +222,9 @@ func requireNumericMockForkOutput(t *testing.T, rt servedControlProofRuntime, ru
 	if entity.Fields["score"] != float64(24) {
 		t.Fatalf("selected mock arithmetic: %+v", entity.Fields)
 	}
-	var count, retained, current int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*),COUNT(CASE WHEN execution_binding IS NULL THEN 1 END),COUNT(CASE WHEN execution_binding IS NOT NULL THEN 1 END) FROM activity_attempts WHERE run_id=$1`, run).Scan(&count, &retained, &current); err != nil || count != 2 || retained != 1 || current != 1 {
-		t.Fatalf("selected journal rows=%d retained=%d current=%d err=%v", count, retained, current, err)
+	var count int
+	if err := rt.DB.QueryRow(`SELECT CASE WHEN COUNT(*)=2 AND COUNT(CASE WHEN execution_binding IS NULL THEN 1 END)=1 AND COUNT(CASE WHEN execution_binding IS NOT NULL THEN 1 END)=1 THEN 2 ELSE -1 END FROM activity_attempts WHERE run_id=$1`, run).Scan(&count); err != nil || count != 2 {
+		t.Fatalf("selected journal must contain exactly one retained and one current attempt: count=%d err=%v", count, err)
 	}
 	var raw string
 	if err := rt.DB.QueryRow(`SELECT CAST(result_payload AS TEXT) FROM activity_attempts WHERE run_id=$1 AND status='succeeded' AND execution_mode='mock' AND execution_binding IS NOT NULL`, run).Scan(&raw); err != nil {
