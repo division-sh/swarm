@@ -13,6 +13,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -38,6 +39,16 @@ func TestDisplacedActivityRecoveryRefusesAbsentCutBeforeDomainMutation(t *testin
 				}
 				defer db.Close()
 				id := uuid.NewString()
+				original := processbinding.LeaseStamp{Generation: 1, LeaseIdentity: processbinding.LeaseIdentity{
+					LeaseID: uuid.NewString(), OwnerID: "recovery-fixture", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(), Backend: processbinding.PostgresLeaseBackend,
+				}}
+				if sqlite {
+					original.Backend = processbinding.SQLiteLeaseBackend
+				}
+				ctx, err := generationauthority.MutationContext(context.Background(), original, false)
+				if err != nil {
+					t.Fatal(err)
+				}
 				binding := processbinding.ActivityExecutionBinding{Version: processbinding.ActivityExecutionBindingVersion, GrantID: uuid.NewString(), StateVersion: 3}
 				if legacy {
 					binding = processbinding.ActivityExecutionBinding{}
@@ -51,11 +62,11 @@ func TestDisplacedActivityRecoveryRefusesAbsentCutBeforeDomainMutation(t *testin
 					rawBinding = string(encoded)
 				}
 				mock.ExpectBegin()
-				if sqlite {
-					mock.ExpectExec("INSERT OR IGNORE INTO author_activity_order").WillReturnResult(sqlmock.NewResult(0, 0))
-					mock.ExpectExec("UPDATE author_activity_order SET last_sequence = last_sequence").WillReturnResult(sqlmock.NewResult(0, 1))
+				if !sqlite {
+					mock.ExpectExec("SELECT pg_advisory_xact_lock_shared").WillReturnResult(sqlmock.NewResult(0, 1))
 				}
-				mock.ExpectQuery("SELECT last_sequence FROM author_activity_order").WillReturnRows(sqlmock.NewRows([]string{"last_sequence"}).AddRow(5))
+				mock.ExpectQuery("SELECT generation, CAST\\(lease_id AS TEXT\\)").WillReturnRows(sqlmock.NewRows([]string{"generation", "lease_id", "owner_id", "boot_id", "runtime_instance_id", "backend"}).
+					AddRow(1, original.LeaseID, original.OwnerID, original.BootID, original.RuntimeInstanceID, original.Backend))
 				mock.ExpectQuery("SELECT request_event_id FROM activity_attempts WHERE execution_mode = 'live'").WillReturnRows(sqlmock.NewRows([]string{"request_event_id"}).AddRow(id))
 				columns := strings.Fields(`request_event_id run_id source_event_id parent_event_id entity_id flow_instance
 					node_id handler_event_key activity_id tool attempt status success_event failure_event
@@ -76,13 +87,13 @@ func TestDisplacedActivityRecoveryRefusesAbsentCutBeforeDomainMutation(t *testin
 					if err != nil {
 						t.Fatal(err)
 					}
-					result = mutationprotocol.RunSQLite(context.Background(), backend, "missing activity recovery cut", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
+					result = mutationprotocol.RunSQLite(ctx, backend, "missing activity recovery cut", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
 				} else {
 					backend, err := postgresbackend.New(db)
 					if err != nil {
 						t.Fatal(err)
 					}
-					result = mutationprotocol.RunPostgres(context.Background(), backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
+					result = mutationprotocol.RunPostgres(ctx, backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, write)
 				}
 				if result.Err() == nil || result.Acknowledged() {
 					t.Fatalf("absent displacement proof reached a mutation: %v", result.Err())
