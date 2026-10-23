@@ -87,7 +87,7 @@ func (s *fanOutServingStore) BindFanOutGrant(grant startupownership.GrantEvidenc
 	return s.bindFanOutGrant(grant)
 }
 
-func (s *fanOutServingStore) bindFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
+func (s *fanOutServingStore) bindFanOutGrant(grant startupownership.GrantEvidence) (pipeline.SelectedFanOutObligationOwner, error) {
 	if err := grant.Validate(); err != nil {
 		return nil, err
 	}

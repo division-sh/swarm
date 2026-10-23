@@ -2,6 +2,7 @@ package deliverycontinuation
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,15 +33,28 @@ func TestSelectedContinuationUsesExactSelectedScanAndElection(t *testing.T) {
 	if _, err := New(store, coordinatorTestRestarts{}, selected, owner, dispatcher, nil); err == nil {
 		t.Fatal("normal constructor accepted selected authority")
 	}
-	if _, err := NewSelected(store, normal, owner, dispatcher, nil); err == nil {
+	var reconciliations atomic.Int64
+	wakes := make(chan struct{}, 1)
+	reconcile := func(context.Context) error {
+		reconciliations.Add(1)
+		select {
+		case wakes <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+	if _, err := NewSelected(store, normal, owner, dispatcher, nil, reconcile); err == nil {
 		t.Fatal("selected constructor accepted normal authority")
 	}
-	coordinator, err := NewSelected(store, selected, owner, dispatcher, nil)
+	coordinator, err := NewSelected(store, selected, owner, dispatcher, nil, reconcile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := coordinator.Start(context.Background()); err != nil {
 		t.Fatalf("selected startup scan: %v", err)
+	}
+	if reconciliations.Load() == 0 {
+		t.Fatal("selected startup skipped barrier recovery")
 	}
 	defer func() {
 		if err := coordinator.Retire(context.Background()); err != nil {
@@ -57,5 +71,25 @@ func TestSelectedContinuationUsesExactSelectedScanAndElection(t *testing.T) {
 	}
 	if coordinator.Authority() != selected {
 		t.Fatal("selected coordinator lost exact execution authority")
+	}
+	for _, wake := range []func() error{
+		func() error { coordinator.Signal(); return nil },
+		func() error { return coordinator.Release("terminal-barrier-delivery") },
+	} {
+		if err := coordinator.Synchronize(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-wakes:
+		default:
+		}
+		if err := wake(); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-wakes:
+		case <-time.After(time.Second):
+			t.Fatal("selected wake skipped barrier reconciliation")
+		}
 	}
 }
