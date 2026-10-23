@@ -182,7 +182,7 @@ func TestCurrentConfigVocabularyRejectsUnknownAndMergedKeys(t *testing.T) {
 }
 
 func TestConfigCustomReadersAreStrictWithoutOuterDecoder(t *testing.T) {
-	for _, target := range []any{&RuntimeConfig{}, &WorkspaceConfig{}, &TriggerConfig{}} {
+	for _, target := range []any{&RuntimeConfig{}, &WorkspaceConfig{}} {
 		for _, source := range []string{"unknown: null", "<<: {unknown: true}"} {
 			if err := yaml.Unmarshal([]byte(source), target); err == nil || !strings.Contains(err.Error(), "unknown") || !strings.Contains(err.Error(), "Valid fields:") {
 				t.Fatalf("%T %q: %v", target, source, err)

@@ -90,6 +90,10 @@ func (t StandingTarget) CapabilitySubject() (packs.Subject, error) {
 	})
 }
 
+func (c BundleContext) StandingTargetDeclarations() ([]StandingTargetDeclaration, error) {
+	return ResolveStandingTargetDeclarations(c.Source, c.ProviderTriggerCatalog, c.triggerEntries())
+}
+
 func ResolveStandingTargetDeclarations(source semanticview.Source, _ *providertriggers.CatalogSnapshot, triggers map[string]config.TriggerConfig) ([]StandingTargetDeclaration, error) {
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {
