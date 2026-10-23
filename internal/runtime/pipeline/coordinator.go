@@ -978,7 +978,11 @@ func (pc *PipelineCoordinator) finishClaimedNodeAttempt(a claimedNodeAttempt) (h
 	var snapshot runtimedelivery.Snapshot
 	var settleErr error
 	acknowledged := true
-	settlementCtx := runtimecorrelation.WithInboundEvent(guard.Context(), a.event)
+	settlementCtx := a.ctx
+	if committed {
+		settlementCtx = guard.Context()
+	}
+	settlementCtx = runtimecorrelation.WithInboundEvent(settlementCtx, a.event)
 	if committed {
 		var outcome runtimedelivery.ClaimCommit
 		outcome, settleErr = pc.deliveryStore.SettleWorkflowNodeSuccess(settlementCtx, a.claim, []string{"handler_completed"}, time.Since(a.started), selection)

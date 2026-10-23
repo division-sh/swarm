@@ -186,7 +186,7 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 						ParentFlowID: ".", ParentFlowInstance: runID, ParentEntityID: runtimeflowidentity.EntityID(runID),
 						Fields: fields, EnteredStageAt: at, CreatedAt: at,
 					})
-					eventBus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+					eventBus, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
 					if err != nil {
 						t.Fatalf("NewEventBusWithOptions: %v", err)
 					}
@@ -292,16 +292,18 @@ func TestScalarTemplateInstanceResolutionPersistsAndReplaysOnSQLiteAndPostgres(t
 
 func newScalarTemplateInstanceParityStore(t *testing.T, backend string, ctx context.Context) scalarTemplateInstanceParityStore {
 	t.Helper()
+	var selected scalarTemplateInstanceParityStore
 	switch backend {
 	case "sqlite":
-		selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		return &sqliteScalarTemplateInstanceStore{SQLiteRuntimeStore: selected}
+		selected = &sqliteScalarTemplateInstanceStore{SQLiteRuntimeStore: storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)}
 	case "postgres":
-		return &postgresScalarTemplateInstanceStore{PostgresStore: storetest.StartPostgresRuntimeStore(t)}
+		selected = &postgresScalarTemplateInstanceStore{PostgresStore: storetest.StartPostgresRuntimeStore(t)}
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 		return nil
 	}
+	nativeBusProcessContext(t, ctx, selected)
+	return selected
 }
 
 func TestParentLocalReturnPersistsExactNativeReceiverBothStores(t *testing.T) {
@@ -321,6 +323,7 @@ func TestParentLocalReturnPersistsExactNativeReceiverBothStores(t *testing.T) {
 			} else {
 				selected = &sqliteScalarTemplateInstanceStore{SQLiteRuntimeStore: storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)}
 			}
+			ctx = nativeBusProcessContext(t, ctx, selected)
 			at := time.Now().UTC()
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: at.Add(-time.Minute)})
 			for _, flowID := range []string{".", "child", "child/grandchild"} {
@@ -343,7 +346,7 @@ func TestParentLocalReturnPersistsExactNativeReceiverBothStores(t *testing.T) {
 				}
 				seedComponentFlowConstruction(t, ctx, selected, source, instance)
 			}
-			eventBus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+			eventBus, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatal(err)
 			}

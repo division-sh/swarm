@@ -26,6 +26,7 @@ func TestWorkflowFinalInitialTimersRemainUnarmedAcrossRestartBothStores(t *testi
 				runID := uuid.NewString()
 				entityID := flowidentity.EntityID(runID)
 				ctx := testAuthorActivityContext(t, context.Background())
+				ctx = nativeProcessContextFixture(t, ctx, selected)
 				storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
 				ctx = withLiveGateExecution(correlation.WithRunID(ctx, runID))
 				var finals []string
@@ -137,7 +138,10 @@ func TestWorkflowFinalInitialTimersRemainUnarmedAcrossRestartBothStores(t *testi
 						if err := closeStore(); err != nil {
 							t.Fatal(err)
 						}
+						replacePipelineExternalWorkOccurrenceForSource(t, authorActivityTestSourceArtifactFact, pipelineExternalTestWorkOwner(t))
 						selected = reopen()
+						ctx = withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
+						ctx = nativeProcessContextFixture(t, ctx, selected)
 					}
 				}
 			})
