@@ -70,7 +70,28 @@ func TestForkRecordedActivityGenerationEvidenceBothStores(t *testing.T) {
 						value = forkTestJSON(t, generation)
 					}
 					if field != "unchanged" {
-						if _, err := fixture.db.ExecContext(ctx, "UPDATE activity_attempts SET "+column+"=$2 WHERE request_event_id=$1", event.ID(), value); err != nil {
+						if field == "run_id" {
+							tx, err := fixture.db.BeginTx(ctx, nil)
+							if err != nil {
+								t.Fatal(err)
+							}
+							defer tx.Rollback()
+							for _, statement := range []struct {
+								query string
+								args  []any
+							}{
+								{`DELETE FROM activity_attempt_live_parents WHERE request_event_id=$1`, []any{event.ID()}},
+								{`UPDATE activity_attempts SET run_id=$2 WHERE request_event_id=$1`, []any{event.ID(), value}},
+								{`INSERT INTO activity_attempt_live_parents (request_event_id,run_id,reply_context_id,reply_context_present) SELECT request_event_id,run_id,reply_context_id,reply_context_present FROM activity_attempts WHERE request_event_id=$1`, []any{event.ID()}},
+							} {
+								if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
+									t.Fatal(err)
+								}
+							}
+							if err := tx.Commit(); err != nil {
+								t.Fatal(err)
+							}
+						} else if _, err := fixture.db.ExecContext(ctx, "UPDATE activity_attempts SET "+column+"=$2 WHERE request_event_id=$1", event.ID(), value); err != nil {
 							t.Fatalf("probe must reach source journal agreement, not stop at SQL: %v", err)
 						}
 					}

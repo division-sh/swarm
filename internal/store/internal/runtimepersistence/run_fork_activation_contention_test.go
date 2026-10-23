@@ -81,6 +81,10 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 					} else {
 						f.db.SetMaxOpenConns(12)
 					}
+					var activateSelected func(context.Context) (runfork.RunForkActivation, error)
+					if selected {
+						activateSelected = selectedStoreAttachedActivationForTest(t, f.ctx, f.store, selectedRequest)
+					}
 					barrier.install(t, f.db, f.runID, staged.ForkRunID, first)
 					before := snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")
 					ctx, cancel := context.WithTimeout(f.ctx, 25*time.Second)
@@ -96,7 +100,7 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 							return forkContentionResult{err: err}
 						}
 						if selected {
-							result, err := f.store.(runforkexecution.SelectedContractForkLifecycle).ActivateRunForkForSelectedContractExecution(ctx, selectedRequest)
+							result, err := activateSelected(ctx)
 							return forkContentionResult{activation: result, err: err}
 						}
 						result, err := f.store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true})
@@ -557,7 +561,7 @@ func TestRunForkActivationContentionFixtureControlBothStores(t *testing.T) {
 				var activation runfork.RunForkActivation
 				var err error
 				if selected {
-					activation, err = f.store.(runforkexecution.SelectedContractForkLifecycle).ActivateRunForkForSelectedContractExecution(f.ctx, req)
+					activation, err = selectedStoreAttachedActivationForTest(t, f.ctx, f.store, req)(f.ctx)
 				} else {
 					activation, err = f.store.ActivateRunFork(f.ctx, runfork.RunForkActivateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true})
 				}

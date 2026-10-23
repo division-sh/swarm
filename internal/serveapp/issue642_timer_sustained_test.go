@@ -47,13 +47,10 @@ func issue642SustainedTimerSource(t *testing.T) string {
       emit: {event: timer.armed}
     timer.check:
       rules:
-        - id: second_tick
-          when: entity.tick_count == 1
+        - when: entity.tick_count == 1
           advances_to: waiting
           emit: {event: timer.finished}
-        - id: other_tick
-          else: true
-          advances_to: waiting
+        - advances_to: waiting
       data_accumulation:
         writes:
           - target_field: tick_count

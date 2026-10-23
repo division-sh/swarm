@@ -658,6 +658,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	eventID := uuid.NewString()
 	sessionID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	initialRevision := captureRunForkTestRevision(t, db, runID)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin lifecycle source revision: %v", err)
@@ -705,10 +706,10 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&head); err != nil {
 		t.Fatalf("load lifecycle source revision head: %v", err)
 	}
-	if head != 2 {
-		t.Fatalf("lifecycle source revision head = %d, want 2", head)
+	if head != initialRevision+2 {
+		t.Fatalf("lifecycle source revision head = %d, want two revisions after %d", head, initialRevision)
 	}
-	for revision, want := range map[int64]string{1: "active", 2: "terminated"} {
+	for revision, want := range map[int64]string{initialRevision + 1: "active", initialRevision + 2: "terminated"} {
 		var status string
 		if err := db.QueryRowContext(ctx, `
 			SELECT fact->>'status'

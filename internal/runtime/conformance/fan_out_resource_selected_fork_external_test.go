@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -209,8 +210,11 @@ type selectedExternalEffectCut struct {
 	effects.Store
 	effects.CompletionStore
 	effects.CompletionContinuationStore
+	runforkexecution.SelectedContractRuntimeExecutionLifecycle
 	stage   string
 	entered chan effects.Attempt
+	settled chan string
+	release chan struct{}
 	cut     atomic.Bool
 }
 
@@ -220,11 +224,22 @@ func (c *selectedExternalEffectCut) interrupt(stage string, attempt effects.Atte
 	}
 	c.entered <- attempt
 	if stage == "settled" {
-		// A panic here is caught by AgentManager and would falsely dead-letter
-		// the delivery. Interrupt at the API activation boundary instead.
+		// The final settlement boundary also joins the delivery continuation.
 		return
 	}
-	panic("test-only process interruption after durable external-effect " + stage)
+	<-c.release
+}
+
+func (c *selectedExternalEffectCut) RequireRunForkSelectedContractExecutionSettlement(ctx context.Context, authority effects.Authority, sourceEvents []string, source semanticview.Source) error {
+	if err := c.SelectedContractRuntimeExecutionLifecycle.RequireRunForkSelectedContractExecutionSettlement(ctx, authority, sourceEvents, source); err != nil {
+		return err
+	}
+	if c.stage == "settled" && c.cut.Load() {
+		c.settled <- authority.SelectedFork.ForkRunID
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return nil
 }
 
 func (c *selectedExternalEffectCut) AuthorizeExternalAttempt(ctx context.Context, authority effects.Authority, req effects.AuthorizeRequest) (effects.Attempt, error) {
@@ -262,6 +277,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			fork = selected
 		}
 		cut.Store, cut.CompletionStore, cut.CompletionContinuationStore = selected, selected, selected
+		cut.SelectedContractRuntimeExecutionLifecycle = selected
 		durable := bus.DurableDependencies{
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
@@ -278,7 +294,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
-			workflow, fork, selected, selected, selected,
+			workflow, fork, cut, selected, selected,
 			durable, selected.PipelineObligations(), selected, roles,
 			cut, cut, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
@@ -290,6 +306,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			fork = selected
 		}
 		cut.Store, cut.CompletionStore, cut.CompletionContinuationStore = selected, selected, selected
+		cut.SelectedContractRuntimeExecutionLifecycle = selected
 		durable := bus.DurableDependencies{
 			EmitFeedback: selected,
 			ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
@@ -306,7 +323,7 @@ func selectedExternalOwnerWithCut(t *testing.T, f *deploymentResourceFixture, cu
 			StandingRestarts: selected,
 		}
 		owner, err = runforkexecution.NewSelectedContractExecutionOwner(
-			workflow, fork, selected, selected, selected,
+			workflow, fork, cut, selected, selected,
 			durable, selected.PipelineObligations(), selected, roles,
 			cut, cut, selected, selected, selected, selected, selected,
 			selected, selected, selected, selected, selected,
@@ -364,18 +381,10 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 					_, _ = w.Write([]byte(`{"model":"gpt-selected-external-proof","choices":[{"message":{"role":"assistant","content":"complete","tool_calls":[{"id":"emit-1","type":"function","function":{"name":"emit_task_completed","arguments":"{}"}}]}}],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}`))
 				}))
 				t.Cleanup(provider.Close)
-				cut := &selectedExternalEffectCut{stage: stage.name, entered: make(chan effects.Attempt, 1)}
-				var fork runforkexecution.SelectedContractForkLifecycle
-				var activation *selectedDeploymentBeforeActivationCrash
-				if stage.name == "settled" {
-					selected, ok := f.selected.(runforkexecution.SelectedContractForkLifecycle)
-					if !ok {
-						t.Fatalf("selected store lacks fork lifecycle: %T", f.selected)
-					}
-					activation = &selectedDeploymentBeforeActivationCrash{SelectedContractForkLifecycle: selected, entered: make(chan string, 1)}
-					fork = activation
-				}
-				owner := selectedExternalOwnerWithCut(t, f, cut, fork)
+				cut := &selectedExternalEffectCut{stage: stage.name, entered: make(chan effects.Attempt, 1), settled: make(chan string, 1), release: make(chan struct{})}
+				var release sync.Once
+				defer release.Do(func() { close(cut.release) })
+				owner := selectedExternalOwnerWithCut(t, f, cut, nil)
 				forkServer := selectedExternalForkServer(t, f, owner, provider.URL)
 				key := uuid.NewString()
 				params := map[string]any{
@@ -384,21 +393,24 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				}
 				forkCtx, cancel := context.WithTimeout(f.ctx, 15*time.Second)
 				defer cancel()
-				_, rpcErr, transportErr := deploymentForkRPCRequest(forkCtx, forkServer, params)
-				if transportErr == nil && len(rpcErr) == 0 {
-					t.Fatal("R5 interrupted effect returned fork success")
+				ack, rpcErr, transportErr := deploymentForkRPCRequest(forkCtx, forkServer, params)
+				if transportErr != nil || len(rpcErr) != 0 || ack.ForkRunID == "" {
+					t.Fatalf("R5 lost its immutable activation acknowledgment: result=%+v rpc=%s transport=%v", ack, rpcErr, transportErr)
 				}
 				var interrupted effects.Attempt
 				select {
 				case interrupted = <-cut.entered:
-				default:
+				case <-forkCtx.Done():
 					t.Fatalf("R5 did not reach %s effect-owner cut: rpc=%s transport=%v", stage.name, rpcErr, transportErr)
 				}
 				if stage.name == "settled" {
 					select {
-					case <-activation.entered:
-					default:
-						t.Fatal("R5 settled effect did not reach post-quiescence activation interruption")
+					case runID := <-cut.settled:
+						if runID != ack.ForkRunID {
+							t.Fatal("R5 settlement changed the acknowledged child")
+						}
+					case <-forkCtx.Done():
+						t.Fatal("R5 settled effect did not reach native final settlement")
 					}
 				}
 				var childID string
@@ -425,6 +437,10 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				if got := calls.Load(); got != stage.providerCalls {
 					t.Fatalf("R5 %s provider calls at cut=%d want %d", stage.name, got, stage.providerCalls)
 				}
+				if err := owner.FenceSelectedContexts(); err != nil {
+					t.Fatal(err)
+				}
+				release.Do(func() { close(cut.release) })
 				if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 					t.Fatal(err)
 				}

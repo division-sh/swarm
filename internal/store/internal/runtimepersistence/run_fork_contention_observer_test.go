@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 )
 
 type forkContentionWait struct {
@@ -51,6 +49,7 @@ func TestSelectedForkContentionObserverFencesNativeWriter(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			f := newForkActivationFrontierFixture(t, backend, true)
 			staged, request := stageForkContentionFixture(t, f, true)
+			activate := selectedStoreAttachedActivationForTest(t, f.ctx, f.store, request)
 			ctx, cancel := context.WithTimeout(f.ctx, 25*time.Second)
 			defer cancel()
 			barrier := newForkContentionBarrier(t, backend.name, true)
@@ -76,8 +75,7 @@ func TestSelectedForkContentionObserverFencesNativeWriter(t *testing.T) {
 			})
 			go func() {
 				defer close(winnerJoined)
-				result, err := f.store.(runforkexecution.SelectedContractForkLifecycle).
-					ActivateRunForkForSelectedContractExecution(ctx, request)
+				result, err := activate(ctx)
 				winner <- forkContentionResult{activation: result, err: err}
 			}()
 			winnerPID := barrier.awaitWinner(t, ctx, f.db, winner)

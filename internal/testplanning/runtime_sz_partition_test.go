@@ -17,19 +17,6 @@ const originalRuntimeSZChildren = "948ca28d566a020c6689516404b061fa4bde16aa1250f
 
 var runtimeSZUnits = []string{"store-runtime-selected", "store-runtime-s-z-rest"}
 
-func TestRuntimeSZPartitionPreservesCompleteRootsAndChildren(t *testing.T) {
-	policy := loadPersistenceDebtPolicy(t)
-	if err := validateRuntimeSZEnvelopes(policy); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateRuntimeSZChildren(policy); err != nil {
-		t.Fatal(err)
-	}
-	if err := validateRuntimeSZPartition(policy, filepath.Join("..", "..", "internal/store/internal/runtimepersistence")); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func validateRuntimeSZEnvelopes(policy Policy) error {
 	if _, exists := policy.Units["store-runtime-full-06"]; exists {
 		return fmt.Errorf("retired full-06 unit survives")

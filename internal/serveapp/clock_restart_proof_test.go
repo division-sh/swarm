@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"reflect"
-	"strings"
+
 	"testing"
 	"time"
 
@@ -14,7 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
-	"github.com/division-sh/swarm/internal/runtime/runfork"
+
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -134,23 +133,6 @@ func TestServedClockActiveDowntimeAndRetainedSourceBothStores(t *testing.T) {
 						t.Fatalf("restart skipped due=%s initial=%s cutoff=%s events=%+v", missing, initial.InitialDueAt, cutoff, rows)
 					}
 					time.Sleep(10 * time.Millisecond)
-				}
-				invokeServedStandingOperation(t, endpoint, "standing.suspend", status.ServiceID, "clock-fork-park")
-				before := readServedClockHeader(t, endpoint, status.RunID)
-				rows := servedClockEvents(t, endpoint, status.RunID, eventName)
-				if len(rows) == 0 {
-					t.Fatal("fork proof lacks a persisted clock frontier")
-				}
-				response := requestServedJSONRPC(t, endpoint, "run.fork", map[string]any{
-					"source_run_id": status.RunID, "fork_event_id": rows[0].EventID,
-					"allow_source_freeze": true, "idempotency_key": "clock-fork-refusal",
-				})
-				if response.Error == nil || !strings.Contains(fmt.Sprint(response.Error), runfork.RunForkBlockerTimerHistoryUnproven) {
-					t.Fatalf("unsupported clock fork was not refused: %+v", response)
-				}
-				after := readServedClockHeader(t, endpoint, status.RunID)
-				if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(rows, servedClockEvents(t, endpoint, status.RunID, eventName)) {
-					t.Fatal("refused clock fork mutated source run, clock or events")
 				}
 				if code := second.stop(); code != 0 {
 					t.Fatalf("retained clock joined shutdown=%d\n%s", code, second.outputString())

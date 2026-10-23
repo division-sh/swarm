@@ -19,10 +19,10 @@ type selectedDeploymentBeforeActivationCrash struct {
 
 func (p selectedDeploymentBeforeActivationCrash) ActivateRunForkForSelectedContractExecution(_ context.Context, req runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
 	p.entered <- req.ForkRunID
-	panic("test-only crash after selected quiescence and before activation")
+	panic("test-only crash after selected attachment and before activation")
 }
 
-// R6b: interrupt after the real selected runtime has quiesced, but before its
+// R6b: interrupt after the real selected runtime has attached, but before its
 // activation commit. The durable operation must resume without an invented
 // event, a second child, or a false successful activation at the cut.
 func TestDeploymentSourceQuiescedBeforeActivationCrashBothStores(t *testing.T) {
@@ -88,7 +88,7 @@ func TestDeploymentSourceQuiescedBeforeActivationCrashBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if operationState != "materialized" || executionState != "quiesced" || feedStatus != "closed" || cursor != 0 || cardinality != 0 || events != 0 || outcomes != 0 {
+			if operationState != "materialized" || executionState != "running" || feedStatus != "closed" || cursor != 0 || cardinality != 0 || events != 0 || outcomes != 0 {
 				t.Fatalf("R6b exact pre-activation cut: operation=%s execution=%s feed=%s cursor=%d/%d events=%d outcomes=%d", operationState, executionState, feedStatus, cursor, cardinality, events, outcomes)
 			}
 			if err := owner.RetireSelectedContexts(context.Background()); err != nil {

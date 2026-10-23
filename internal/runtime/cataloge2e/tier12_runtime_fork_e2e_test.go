@@ -265,8 +265,12 @@ func selectedContractExecutionOwnerForCatalogTestWithReplay(t testing.TB, select
 		replay = selected
 	}
 	var fork runtimerunforkexecution.SelectedContractForkLifecycle = selected
+	var runtimeExecution runtimerunforkexecution.SelectedContractRuntimeExecutionLifecycle = selected
 	if len(forkOverride) > 0 {
 		fork = forkOverride[0]
+		if settlement, ok := fork.(runtimerunforkexecution.SelectedContractRuntimeExecutionLifecycle); ok {
+			runtimeExecution = settlement
+		}
 	}
 	durable := runtimebus.DurableDependencies{
 		EmitFeedback: selected,
@@ -281,7 +285,7 @@ func selectedContractExecutionOwnerForCatalogTestWithReplay(t testing.TB, select
 		StandingRestarts: selected,
 	}
 	owner, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
-		runtimepipeline.NewWorkflowPersistence(selected), fork, selected, replay,
+		runtimepipeline.NewWorkflowPersistence(selected), fork, runtimeExecution, replay,
 		selected, durable, selected.PipelineObligations(), selected, managerRoles,
 		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
 		selected, selected,
@@ -327,8 +331,12 @@ func constructCatalogSelectedExecutionOwner(t testing.TB, h *runtimeHarness, rep
 		replay = selected
 	}
 	var fork runtimerunforkexecution.SelectedContractForkLifecycle = selected
+	var runtimeExecution runtimerunforkexecution.SelectedContractRuntimeExecutionLifecycle = selected
 	if len(forkOverride) > 0 {
 		fork = forkOverride[0]
+		if settlement, ok := fork.(runtimerunforkexecution.SelectedContractRuntimeExecutionLifecycle); ok {
+			runtimeExecution = settlement
+		}
 	}
 	durable := runtimebus.DurableDependencies{
 		EmitFeedback: selected,
@@ -343,7 +351,7 @@ func constructCatalogSelectedExecutionOwner(t testing.TB, h *runtimeHarness, rep
 		DirectiveTargets: selected, StandingRestarts: selected,
 	}
 	owner, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
-		runtimepipeline.NewWorkflowPersistence(selected), fork, selected, replay,
+		runtimepipeline.NewWorkflowPersistence(selected), fork, runtimeExecution, replay,
 		selected, durable, selected.PipelineObligations(), selected, managerRoles,
 		selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected, selected,
 		selected, selected,

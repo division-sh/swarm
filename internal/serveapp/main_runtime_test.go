@@ -789,76 +789,6 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 	}
 }
 
-func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t *testing.T) {
-	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
-	endpoint, db, bundleHash, _, pg := startServedJoinProofRuntime(t)
-	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name": "order.started", "bundle_hash": bundleHash,
-		"payload":         map[string]any{"expected": []any{"a", "b"}, "dispatch_id": "dispatch-1"},
-		"idempotency_key": "join-fork-run-" + uuid.NewString(),
-	})
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", identitytest.RootNode(t, "starter").Key(), "delivered", 1)
-	entityID := servedJoinTarget(t, db, initial.RunID)
-	dispatched := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name": "order.dispatched", "run_id": initial.RunID, "source_event_id": initial.EventID,
-		"payload": map[string]any{}, "idempotency_key": "join-fork-dispatch-" + uuid.NewString(),
-	})
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, dispatched.EventID, "node", identitytest.RootNode(t, "dispatcher").Key(), "delivered", 1)
-	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", dispatched.EventID, "platform", "pipeline", "success", 1)
-	arrival := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name": "item.completed", "run_id": initial.RunID, "source_event_id": dispatched.EventID,
-		"payload":         map[string]any{"dispatch_id": "dispatch-1", "member_id": "a", "result": map[string]any{"ok": true}},
-		"idempotency_key": "join-fork-arrival-" + uuid.NewString(),
-	})
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", identitytest.RootNode(t, "join-node").Key(), "delivered", 1)
-	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", arrival.EventID, "platform", "pipeline", "success", 1)
-	waitServedJoinSourceTimer(t, db, initial.RunID)
-	waitServedRunDeliveryQuiescence(t, deliveryReader, initial.RunID)
-	forkEventID := seedServedJoinForkFrontier(t, db, initial.RunID, entityID, arrival.EventID)
-	if _, err := pg.PlanRunFork(context.Background(), runfork.RunForkPlanRequest{
-		SourceRunID: initial.RunID,
-		At:          forkEventID,
-	}); err != nil {
-		t.Fatalf("plan served join fork frontier: %v", err)
-	}
-
-	rpcErr := requireServedJSONRPCError(t, endpoint, "run.fork", map[string]any{
-		"source_run_id": initial.RunID, "fork_event_id": forkEventID, "allow_source_freeze": true, "idempotency_key": "join-fork-" + uuid.NewString(),
-	})
-	if rpcErr == nil {
-		t.Fatal("join run.fork succeeded, want timer-history rejection")
-	}
-	details, ok := rpcErr.Data["details"].(map[string]any)
-	if !ok {
-		t.Fatalf("join run.fork error details = %#v", rpcErr.Data["details"])
-	}
-	failure := decodeServedFailureEnvelope(t, details["failure"])
-	if failure.Class != runtimefailures.ClassDependencyUnavailable || failure.Detail.Code != runfork.RunForkBlockerTimerHistoryUnproven {
-		t.Fatalf("join run.fork failure = %#v, want dependency-unavailable/%s", failure, runfork.RunForkBlockerTimerHistoryUnproven)
-	}
-	var forkRuns, forkTimers int
-	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`, initial.RunID).Scan(&forkRuns); err != nil {
-		t.Fatalf("count rejected join fork runs: %v", err)
-	}
-	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM timers WHERE forked_from_run_id = $1::uuid`, initial.RunID).Scan(&forkTimers); err != nil {
-		t.Fatalf("count rejected join fork timers: %v", err)
-	}
-	if forkRuns != 0 || forkTimers != 0 {
-		t.Fatalf("timer-bearing served rejection mutated fork state: runs=%d timers=%d", forkRuns, forkTimers)
-	}
-	var sourceTimers int
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT COUNT(*) FROM timers
-		WHERE run_id = $1::uuid AND fire_event = 'platform.join_timeout' AND status = 'active'
-	`, initial.RunID).Scan(&sourceTimers); err != nil {
-		t.Fatalf("count preserved source join timers: %v", err)
-	}
-	if sourceTimers != 1 {
-		t.Fatalf("source join timers = %d, want one untouched active timer", sourceTimers)
-	}
-}
-
 func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtimepkg.Runtime, *store.PostgresStore) {
 	t.Helper()
 	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
@@ -1633,7 +1563,11 @@ func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) 
 func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparity.Backend, fixture func(*testing.T) string) servedControlProofRuntime {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	var receiverReader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
+	})
 	var contexts *runtimepkg.RuntimeContextManager
 	captureContexts := func(manager *runtimepkg.RuntimeContextManager) { contexts = manager }
 	switch backend {
@@ -1663,7 +1597,7 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for control served parity proof")
 		}
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -1684,7 +1618,7 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 			TestLifecycleProbe:           probe,
 			TestOutboxSweeperConfig:      servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
 	default:
 		t.Fatalf("unknown served control backend %q", backend)
 		return servedControlProofRuntime{}

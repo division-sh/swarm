@@ -436,7 +436,7 @@ func decisionCardAPIError(cardID string, err error) error {
 	if errors.As(err, &conflict) {
 		return NewApplicationError(IdempotencyConflictCode, false, map[string]any{"original_request_hash": conflict.OriginalRequestHash, "conflicting_request_hash": conflict.ConflictingRequestHash})
 	}
-	return err
+	return selectedForkControlAPIError(err)
 }
 
 func optionalSemanticObject(params semanticvalue.Value, name string) (semanticvalue.Value, error) {

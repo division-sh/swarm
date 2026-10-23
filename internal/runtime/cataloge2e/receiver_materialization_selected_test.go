@@ -68,9 +68,10 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 			installCatalogSelectedSourceTopology(t, ctx, h, loaded)
 			cfg := testRuntimeConfig()
 			cfg.LLM.Backend = "anthropic"
+			executionOwner := selectedContractExecutionOwnerForCatalogHarness(t, h, lifecycle)
 			result, err := forkexecution.ExecuteSelectedContractRunFork(ctx, forkexecution.SelectedContractExecutionRequest{
 				SourceRunID: catalogRuntimeRunID, At: inputID, AllowSourceFreeze: true,
-				Owner: selectedContractExecutionOwnerForCatalogHarness(t, h, lifecycle), SourceLoader: loader, ContractSelection: selection,
+				Owner: executionOwner, SourceLoader: loader, ContractSelection: selection,
 				AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, cfg),
 			})
 			if err != nil {
@@ -151,6 +152,9 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 				t.Fatalf("selected exact provider execution count=%d node=%+v agent=%+v calls=%+v", providerCalls, node, agent, calls)
 			}
 			if !publicationFrontier {
+				if err := executionOwner.RetireSelectedContexts(ctx); err != nil {
+					t.Fatal(err)
+				}
 				requireHistoricalPublicationFreshBusReplay(t, ctx, h, publication, node, agent, calls)
 			}
 			var sourceExecutions int

@@ -93,7 +93,7 @@ func TestFanOutClosingSourceHeadRefreshPreservesHealthyProgressBothStores(t *tes
 				}
 				return result.Intents[0].Runtime
 			}
-			if observed := read(); observed.Reason != "registration_pending" || observed.Eligible != nil {
+			if observed := read(); observed.Reason != "runtime_observation_unavailable" || observed.Eligible != nil || observed.ObservedAt != nil {
 				t.Fatalf("missing current B did not block the census: %+v", observed)
 			}
 			starting, err := startupownership.RegisterFanOutServing(ctx, currentB, occurrences[1], &workers)
@@ -101,7 +101,7 @@ func TestFanOutClosingSourceHeadRefreshPreservesHealthyProgressBothStores(t *tes
 				t.Fatal(err)
 			}
 			t.Cleanup(starting.Close)
-			if observed := read(); observed.Reason != "registration_pending" || observed.Eligible != nil {
+			if observed := read(); observed.Reason != "runtime_observation_unavailable" || observed.Eligible != nil || observed.ObservedAt != nil {
 				t.Fatalf("current B without executor completed the census: %+v", observed)
 			}
 			starting.Close()

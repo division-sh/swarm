@@ -25,7 +25,7 @@ func (s *selectedControlRefusalFixture) RequireNormalControl(_ context.Context, 
 
 func TestSelectedForkPublicControlRefusesBeforeLoadedAcquisitionOrMutation(t *testing.T) {
 	runID := uuid.NewString()
-	for _, method := range []string{"run.pause", "run.continue", "agent.restart", "agent.send_directive"} {
+	for _, method := range []string{"run.pause", "run.continue", "agent.restart", "agent.send_directive", "mailbox.decide", "mailbox.defer", "mailbox.begin_input", "mailbox.cancel_input"} {
 		t.Run(method, func(t *testing.T) {
 			owner := &selectedControlRefusalFixture{bindingID: uuid.NewString()}
 			req := Request{Method: method, Params: map[string]any{"run_id": runID, "agent_id": "same-name", "directive": "must not execute"}}
@@ -41,6 +41,8 @@ func TestSelectedForkPublicControlRefusesBeforeLoadedAcquisitionOrMutation(t *te
 				_, err = executeAgentRestart(context.Background(), req, AgentControlHandlerOptions{SelectedForkControls: owner}, time.Now())
 			case "agent.send_directive":
 				_, err = executeAgentSendDirective(context.Background(), req, AgentControlHandlerOptions{SelectedForkControls: owner}, time.Now())
+			case "mailbox.decide", "mailbox.defer", "mailbox.begin_input", "mailbox.cancel_input":
+				err = decisionCardAPIError("card", owner.RequireNormalControl(context.Background(), runID, runfork.SelectedControl(method)))
 			}
 			var application *ApplicationError
 			if !errors.As(err, &application) || application.Code != "SELECTED_FORK_CONTROL_UNSUPPORTED" || application.Retryable || owner.calls != 1 || owner.runID != runID || string(owner.operation) != method {

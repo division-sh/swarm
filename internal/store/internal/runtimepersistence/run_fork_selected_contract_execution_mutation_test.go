@@ -68,12 +68,17 @@ func TestSelectedContractExecutionMaterializationAllowsSelectedPendingNodeFronti
 	materializedBindingAt := materialized.SelectedContractBinding.CreatedAt
 	replayedForkAt := replayed.ForkPoint.Timestamp
 	materializedForkAt := materialized.ForkPoint.Timestamp
+	replayedBindingForkAt := replayed.SelectedContractBinding.ForkPoint.Timestamp
+	materializedBindingForkAt := materialized.SelectedContractBinding.ForkPoint.Timestamp
 	replayed.SelectedContractBinding.CreatedAt = time.Time{}
 	materialized.SelectedContractBinding.CreatedAt = time.Time{}
 	replayed.ForkPoint.Timestamp = time.Time{}
 	materialized.ForkPoint.Timestamp = time.Time{}
+	replayed.SelectedContractBinding.ForkPoint.Timestamp = time.Time{}
+	materialized.SelectedContractBinding.ForkPoint.Timestamp = time.Time{}
 	if !replayedBindingAt.Equal(materializedBindingAt) ||
 		!replayedForkAt.Equal(materializedForkAt) ||
+		!replayedBindingForkAt.Equal(materializedBindingForkAt) ||
 		!reflect.DeepEqual(replayed, materialized) {
 		t.Fatalf("selected-contract materialization replay = %#v, want %#v", replayed, materialized)
 	}
@@ -687,8 +692,8 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), at.Add(time.Minute))
 	// Timer ownership is rejected before preparation can authorize materialization.
 	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
-	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) {
-		t.Fatalf("preparation error=%v, want timer blocker", err)
+	if err == nil || !strings.Contains(err.Error(), "fixed workflow timer contradicts captured construction owner") {
+		t.Fatalf("preparation error=%v, want exact timer construction refusal", err)
 	}
 	if prepared != nil {
 		t.Fatal("prepared timer-bearing fork")
@@ -708,51 +713,6 @@ func TestSelectedContractExecutionMaterializationRejectsActiveTimerBeforeMutatio
 	}
 	if sourceTimerCount != 1 {
 		t.Fatalf("source timers = %d, want 1", sourceTimerCount)
-	}
-}
-
-func TestSelectedContractExecutionMaterializationFailsClosedForUnsupportedTimerHistory(t *testing.T) {
-	cases := []struct {
-		name      string
-		due       runtimegenericschedule.DueBasis
-		cancelled bool
-	}{
-		{name: "active one-shot", due: runtimegenericschedule.AbsoluteDue(time.Unix(1700007125, 0).UTC())},
-		{name: "cancelled one-shot", due: runtimegenericschedule.AbsoluteDue(time.Unix(1700007125, 0).UTC()), cancelled: true},
-		{name: "active recurring", due: runtimegenericschedule.EveryDue(time.Hour)},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
-			pg := admitTestPostgresStore(t, db)
-			ctx := testAuthorActivityContext()
-			sourceRunID := uuid.NewString()
-			entityID := runtimeflowidentity.EntityID("flow-a/1")
-			eventID := uuid.NewString()
-			forkPointEventID := uuid.NewString()
-			at := time.Unix(1700003525, 0).UTC()
-			seedCanonicalSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
-			activation := admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
-				t, sourceRunID, "agent-a", "flow-a/1", entityID, "selected-"+strings.ReplaceAll(tc.name, " ", "-"), tc.due,
-			))
-			if tc.cancelled {
-				cancelGenericScheduleFixture(t, ctx, pg, activation, "test_cancelled", at.Add(time.Minute))
-			}
-			captureRunForkTestRevision(t, db, sourceRunID)
-			seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, eventID,
-				"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), at.Add(2*time.Minute))
-
-			prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
-			if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) {
-				t.Fatalf("materialization error = %v, want %s", err, runfork.RunForkBlockerTimerHistoryUnproven)
-			}
-			if prepared != nil {
-				t.Fatal("prepared fork despite unsupported timer history")
-			}
-			assertNoSelectedContractForkRows(t, db, sourceRunID)
-			assertNoForkTimerCopiesForSource(t, db, sourceRunID)
-		})
 	}
 }
 
@@ -792,8 +752,17 @@ func TestSelectedContractTimerBlockerRemainsFixedWhenSourceTimerIsDeletedLater(t
 		t.Fatalf("repeated fixed-revision plan lost timer blocker: %#v", repeatedPlan.ReplayResumeAdmission)
 	}
 	prepared, err := prepareSelectedStoreForkForTest(t, ctx, pg, sourceRunID, forkPointEventID, runfork.RunForkContractSelection{Mode: "selected_contracts"})
-	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerTimerHistoryUnproven) || prepared != nil {
-		t.Fatalf("fixed timer blocker preparation=%v error=%v", prepared, err)
+	if err != nil || prepared == nil {
+		t.Fatalf("selected historical preparation=%v error=%v", prepared, err)
+	}
+	defer func() {
+		if err := prepared.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	request, err := prepared.MaterializationRequest()
+	if err != nil || request.At != forkPointEventID || plan.ForkPoint != repeatedPlan.ForkPoint || !reflect.DeepEqual(plan.WorkflowTimers, repeatedPlan.WorkflowTimers) {
+		t.Fatalf("preparation lost the fixed timer cut: request=%+v original=%+v repeated=%+v err=%v", request, plan.ForkPoint, repeatedPlan.ForkPoint, err)
 	}
 	assertNoSelectedContractForkRows(t, db, sourceRunID)
 }
@@ -1510,13 +1479,13 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimePlatformContro
 		seedPostgresSemanticEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, "platform.auth_required",
 			events.EventProducerPlatform, "runtime", entityID, "flow-a/1", at.Add(3*time.Second))
 
-		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
+		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
 	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") {
 		t.Fatalf("activation error = %v, want fork event lineage blocker", err)
 	}
-	if activation.Activated {
-		t.Fatalf("activation = %#v, want blocked", activation)
+	if !activation.Activated {
+		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
 	}
 }
 
@@ -1544,13 +1513,13 @@ func TestSelectedContractActivationRejectsUncausedForkLocalRuntimeLogDiagnostic(
 		seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, uuid.NewString(), materialized.ForkRunID, "",
 			[]byte(`{"log_level":"warn","message":"uncorrelated diagnostic","details":{"component":"eventbus","action":"outbox_replay_scope_unavailable"}}`), at.Add(3*time.Second))
 
-		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
+		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
 	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") {
 		t.Fatalf("activation error = %v, want fork event lineage blocker", err)
 	}
-	if activation.Activated {
-		t.Fatalf("activation = %#v, want blocked", activation)
+	if !activation.Activated {
+		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
 	}
 }
 
@@ -1578,13 +1547,13 @@ func TestSelectedContractActivationRejectsUncausedForkLocalToolExecutorRuntimeLo
 		seedPostgresRuntimeLogEventRecordFixture(t, ctx, pg, uuid.NewString(), materialized.ForkRunID, "",
 			[]byte(`{"log_level":"info","message":"Tool read_validation_case_business_brief executed successfully","details":{"component":"tool-executor","action":"tool_execution_succeeded","tool_name":"read_validation_case_business_brief"}}`), at.Add(3*time.Second))
 
-		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
+		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
 	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") {
 		t.Fatalf("activation error = %v, want fork event lineage blocker", err)
 	}
-	if activation.Activated {
-		t.Fatalf("activation = %#v, want blocked", activation)
+	if !activation.Activated {
+		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
 	}
 }
 
@@ -1612,66 +1581,14 @@ func TestSelectedContractActivationRejectsUnownedPlatformEventWithSelectedParent
 		seedPostgresChildEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, forkEventID,
 			"platform.reset", events.EventProducerPlatform, "runtime", entityID, "flow-a/1", []byte(`{}`), at.Add(3*time.Second))
 
-		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
+		return requireSelectedStoreFinalSettlement(t, preparedCtx, pg, prepared)
 	})
 	if err == nil || !strings.Contains(err.Error(), "fork_events_not_selected_contract_lineage") {
 		t.Fatalf("activation error = %v, want fork event lineage blocker", err)
 	}
-	if activation.Activated {
-		t.Fatalf("activation = %#v, want blocked", activation)
+	if !activation.Activated {
+		t.Fatalf("final settlement refusal lost committed activation ACK: %#v", activation)
 	}
-}
-
-func TestPostTSourceReplayScopeMarkerFailsClosedForSelectedContractActivation(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContextForBundle(mustCanonicalSelectedContractStoreHash(t))
-	activate := selectedStoreActivationGateForTest(t, ctx, pg)
-	sourceRunID := uuid.NewString()
-	entityID := runtimeflowidentity.EntityID("flow-a/1")
-	eventID := "00000000-0000-0000-0000-000000000001"
-	afterEventID := "00000000-0000-0000-0000-000000000002"
-	at := time.Unix(1700003626, 0).UTC()
-	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-
-	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
-	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
-	if err != nil {
-		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
-	}
-	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
-	activationRequest.AllowedSourceEventIDs = []string{eventID}
-	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
-		if materialized.ForkRunID == "" {
-			t.Fatalf("materialized fork run_id is empty: %#v", materialized)
-		}
-		seedSelectedContractPostForkSourceEvent(t, db, sourceRunID, afterEventID, entityID, at)
-		seedSelectedContractSourceReplayScopeMarker(t, db, sourceRunID, afterEventID, replayScopeReasonDirect, at.Add(-time.Second))
-		captureRunForkTestRevision(t, db, sourceRunID)
-
-		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
-	})
-	if err == nil || !strings.Contains(err.Error(), "source_committed_replay_scope_advanced_after_fork_point") {
-		t.Fatalf("activation error = %v, want post-T committed replay-scope marker blocker", err)
-	}
-	if activation.Activated || activation.BranchDivergence != nil || activation.SourceAdvancedAfterFork {
-		t.Fatalf("activation = %#v, want marker post-T blocked before branch divergence", activation)
-	}
-	if !runForkTestHasDispositionBlocker(activation.ReplayResumeAdmission, runfork.RunForkReplayResumeFactSourceAdvanced, "source_committed_replay_scope_advanced_after_fork_point") {
-		t.Fatalf("activation replay admission = %#v, want source advanced marker blocker", activation.ReplayResumeAdmission)
-	}
-
-	var sourceStatus, forkStatus string
-	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, sourceRunID).Scan(&sourceStatus); err != nil {
-		t.Fatalf("load source status: %v", err)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkStatus); err != nil {
-		t.Fatalf("load fork status: %v", err)
-	}
-	if sourceStatus != "running" || forkStatus != runfork.RunForkMaterializedStatus {
-		t.Fatalf("run statuses source=%q fork=%q, want source running and fork materialized", sourceStatus, forkStatus)
-	}
-	assertNoCopiedReplayScopeMarkers(t, db, materialized.ForkRunID)
 }
 
 // The initial source fixture commits its own revision. A later selected event

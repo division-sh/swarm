@@ -115,12 +115,19 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 						if readErr := h.db.QueryRowContext(ctx, `SELECT r.status, e.state FROM runs r JOIN run_fork_selected_contract_runtime_executions e ON e.fork_run_id=r.run_id WHERE r.run_id=$1`, child).Scan(&status, &executionState); readErr != nil || status != "running" || executionState != "closed" {
 							t.Fatalf("recovered committed activation/execution = %s/%s: %v", status, executionState, readErr)
 						}
+						if !activated.Activated || activated.ExecutedEventCount != 0 || len(activated.ForkEvents) != 0 {
+							t.Fatalf("submission failure rewrote the committed activation ACK: %+v", activated)
+						}
+						return
 					} else if err != nil {
 						logSelectedForkRecoveryFailure(t, ctx, h, child, err)
 						t.Fatalf("lawful persisted recovery: %#v, %v", activated, err)
 					}
-					if !activated.Activated || activated.ExecutedEventCount != 1 {
-						t.Fatalf("lost recovered commit evidence: %#v", activated)
+					if !activated.Activated || activated.ExecutedEventCount != 0 || len(activated.ForkEvents) != 0 {
+						t.Fatalf("lost immutable recovered activation ACK: %#v", activated)
+					}
+					if observed, observeErr := observeCatalogSelectedExecution(t, h, child); observeErr != nil || observed.ExecutedEventCount != 1 {
+						t.Fatalf("recovered execution lost its real business publication: %+v err=%v", observed, observeErr)
 					}
 					owner, err := flowidentity.NewRunScopedFlowInstance(child, flowidentity.RouteForInstancePath(path))
 					if err != nil {
@@ -161,8 +168,25 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 				if err == nil || activated.Activated || activated.ExecutedEventCount != 0 || activated.ForkLocalRuntimeContainer != nil || len(activated.ForkEvents) != 0 {
 					t.Fatalf("contradictory child reached publication: %#v, %v", activated, err)
 				}
-				if change != "terminal_run" && !strings.Contains(err.Error(), "selected-contract recovered") {
-					t.Fatalf("contradiction escaped the recovered binding owner: %v", err)
+				if change != "terminal_run" {
+					want := "selected-contract workflow instance " + path + " disagrees with exact descriptor"
+					switch change {
+					case "wrong_entity":
+						want = "fork materialization " + child + " has unexpected entity fields/"
+					case "wrong_type":
+						want = "fork materialization " + child + " entity header/" + entity + " has flow_instance/type"
+					case "missing_readiness":
+						want = "verify selected-contract workflow readiness: sql: no rows in result set"
+					case "readiness_run":
+						want = "disagrees with flow owner " + child + "\x00" + path
+					case "readiness_mode":
+						want = "flow readiness plan hash disagrees with its persisted plan"
+					case "agent_revision":
+						want = "has invalid config revision"
+					}
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("contradiction escaped its exact native owner: want=%q err=%v", want, err)
+					}
 				}
 				t.Logf("exact recovery refusal: %v", err)
 				if after := selectedForkRecoveredPhysicalSnapshot(t, ctx, h, child); after != before {
