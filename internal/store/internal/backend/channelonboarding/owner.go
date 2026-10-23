@@ -484,7 +484,7 @@ func validDeploymentTransition(op domain.Operation, req domain.AdvanceRequest) b
 	if req.RebindCoordinate != nil || req.SourceRollover != nil {
 		return false
 	}
-	if req.Phase == op.Phase && op.AccountConfirmed && !op.LogoutCompleted {
+	if req.Phase == op.Phase && op.AccountReference != "" && !op.LogoutCompleted {
 		if next, ok := map[string]string{"": "account_logout_pending", "account_logout_pending": "account_logout_launched", "account_logout_launched": "account_logout_unlinked"}[op.FailureCode]; ok && req.FailureCode == next {
 			return true
 		}

@@ -370,18 +370,18 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	var client channelControlClient
 	var begun channelOnboardingResult
 	if opts.apiOptions.channelRegistration != nil && opts.verb == "connect" {
-		if opts.sourceSet || opts.target != "" || opts.interfaceRef != "" {
-			return returnCLIValidationError(errOut, errors.New("connect registers a deployment account; do not select a flow, target or interface"))
+		if err := opts.requireDeploymentSelection(); err != nil {
+			return returnCLIValidationError(errOut, err)
 		}
 		local, err := openDeploymentChannelClient(ctx, provider, opts.apiOptions)
 		if err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
-		defer func() { resultErr = errors.Join(resultErr, local.close(context.WithoutCancel(ctx))) }()
+		defer func() { resultErr = errors.Join(resultErr, local.Close(context.WithoutCancel(ctx))) }()
 		var proceed bool
 		begun, proceed, err = local.connectAccount(ctx, out, errOut, opts)
 		if err != nil {
-			return returnCLIValidationError(errOut, err)
+			return err
 		}
 		if !proceed {
 			return nil
@@ -419,10 +419,10 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 }
 
 func finishChannelOnboarding(ctx context.Context, client channelControlClient, begun channelOnboardingResult, opts channelConnectOptions, out, errOut io.Writer) error {
-	if opts.verb != "resume" && opts.waitForPairing && opts.apiOptions.input != nil {
+	if opts.waitForPairing && opts.apiOptions.input != nil {
 		opts.apiOptions.input = bufio.NewReader(opts.apiOptions.input)
 	}
-	if opts.verb != "resume" && opts.waitForPairing && begun.Operation.Posture == channelonboarding.ActivationSessionConnection {
+	if opts.waitForPairing && begun.Operation.Posture == channelonboarding.ActivationSessionConnection {
 		fmt.Fprintf(out, "Connecting to %s...\n", begun.Operation.Provider)
 	}
 	progressOut := out
@@ -485,7 +485,15 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 		opts.resumeCredential = credential
 		defer func() { opts.resumeCredential = "" }()
 	}
-	return finishChannelOnboarding(ctx, client, current, opts, out, errOut)
+	progressOut := out
+	if opts.output.asJSON || opts.output.quiet {
+		progressOut = io.Discard
+	}
+	result, err := completeChannelOnboarding(ctx, client, current, opts, progressOut, errOut)
+	if err != nil {
+		return err
+	}
+	return renderChannelOnboardingResult(out, errOut, opts.output, result)
 }
 
 func writeChannelNativeQualification(out io.Writer, result channelOnboardingResult) {

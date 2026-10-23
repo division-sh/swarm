@@ -87,6 +87,10 @@ func openRuntimeConnection(ctx context.Context, opts RuntimeConnectionOptions, b
 	} else if op.SessionAccount.Validate() != nil {
 		return nil, errRuntimeConnection
 	}
+	return openOwnedConnection(ctx, parent, opts, opts.Store, op)
+}
+
+func openOwnedConnection(ctx context.Context, parent sessionWorkParent, opts RuntimeConnectionOptions, operations channelonboarding.OperationStore, op channelonboarding.Operation) (*RuntimeConnection, error) {
 	// This is a non-transient process-control lease, not a standing service or
 	// enabled business binding. Runtime retirement still joins the whole owner.
 	work, err := parent.BeginStanding(ctx)
@@ -100,7 +104,7 @@ func openRuntimeConnection(ctx context.Context, opts RuntimeConnectionOptions, b
 		}
 	}
 	owned, cancel := context.WithCancel(work.Context())
-	c := &RuntimeConnection{parent: parent, work: work, ctx: owned, cancel: cancel, closed: make(chan struct{}), lifecycle: make(chan struct{}, 1), operations: opts.Store,
+	c := &RuntimeConnection{parent: parent, work: work, ctx: owned, cancel: cancel, closed: make(chan struct{}), lifecycle: make(chan struct{}, 1), operations: operations,
 		store: opts.Store, operation: op, plan: opts.Plan, credentials: opts.Credentials, directory: opts.Directory, processBinding: opts.ProcessBinding}
 	c.account.Store(&op.SessionAccount)
 	go c.joinRetirement()

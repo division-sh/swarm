@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	credentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -25,13 +26,12 @@ import (
 	"github.com/division-sh/swarm/internal/store/selected"
 )
 
-// One invocation owns one connect attempt. The durable operation owner holds
+// DeploymentChannelControl owns one attempt. The durable operation owner holds
 // registration; this composition retains only its current SDK possession.
-type deploymentChannelClient struct {
+type DeploymentChannelControl struct {
 	mu              sync.Mutex
 	store           *selected.Owner
 	service         *channelonboarding.Service
-	identities      *operatorchannel.Service
 	process         *worklifetime.Process
 	session         ChannelRegistrationSession
 	expectedAccount string
@@ -46,7 +46,7 @@ type registrationHolder struct {
 	process *worklifetime.Process
 }
 
-func UseDeploymentChannelControl(ctx context.Context, root InvocationRoot, config, directory, provider string, owner *selected.Owner, process *worklifetime.Process, factory ChannelRegistrationFactory) (*deploymentChannelClient, error) {
+func UseDeploymentChannelControl(ctx context.Context, root InvocationRoot, config, directory, provider string, owner *selected.Owner, process *worklifetime.Process, factory ChannelRegistrationFactory) (*DeploymentChannelControl, error) {
 	if owner == nil || process == nil {
 		return nil, channelonboarding.ErrInvalidRequest
 	}
@@ -56,7 +56,7 @@ func UseDeploymentChannelControl(ctx context.Context, root InvocationRoot, confi
 	return openDeploymentChannelClient(ctx, provider, opts, registrationHolder{owner, process})
 }
 
-func openDeploymentChannelClient(ctx context.Context, provider string, opts rootCommandOptions, existing ...registrationHolder) (_ *deploymentChannelClient, err error) {
+func openDeploymentChannelClient(ctx context.Context, provider string, opts rootCommandOptions, existing ...registrationHolder) (_ *DeploymentChannelControl, err error) {
 	root := opts.invocationRoot
 	loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: rootConfigPath(opts)})
 	if err != nil {
@@ -125,26 +125,30 @@ func openDeploymentChannelClient(ctx context.Context, provider string, opts root
 	}
 	defer func() {
 		if err != nil {
-			err = errors.Join(err, c.close(context.WithoutCancel(ctx)))
+			err = errors.Join(err, c.Close(context.WithoutCancel(ctx)))
 		}
 	}()
 	if !c.borrowed {
-		plans, err := store.GeneratePlatformTableDDLs(spec)
-		if err != nil {
-			return nil, err
-		}
-		schema, err := SchemaBootstrapRequest(spec, plans, nil)
-		if err != nil {
-			return nil, err
-		}
-		if err := c.store.Schema().BootstrapSchema(ctx, schema); err != nil {
+		if err := c.bootstrapRegistrationSchema(ctx, spec); err != nil {
 			return nil, err
 		}
 	}
 	return c, c.initializeRegistration(ctx, directory.Path, loaded.Config.Channels.HITL, candidate, projection.ProviderTriggers, opts)
 }
 
-func openDeploymentChannelStore(ctx context.Context, provider string, opts rootCommandOptions, loaded RuntimeConfigLoadResult, existing ...registrationHolder) (*deploymentChannelClient, error) {
+func (c *DeploymentChannelControl) bootstrapRegistrationSchema(ctx context.Context, spec runtimecontracts.PlatformSpecDocument) error {
+	plans, err := store.GeneratePlatformTableDDLs(spec)
+	if err != nil {
+		return err
+	}
+	schema, err := SchemaBootstrapRequest(spec, plans, nil)
+	if err != nil {
+		return err
+	}
+	return c.store.Schema().BootstrapSchema(ctx, schema)
+}
+
+func openDeploymentChannelStore(ctx context.Context, provider string, opts rootCommandOptions, loaded RuntimeConfigLoadResult, existing ...registrationHolder) (*DeploymentChannelControl, error) {
 	root := opts.invocationRoot
 	selection, err := ResolveRuntimeStoreSelection(root.Path(), "", false, loaded)
 	if err != nil {
@@ -159,7 +163,7 @@ func openDeploymentChannelStore(ctx context.Context, provider string, opts rootC
 			return nil, err
 		}
 	}
-	c := &deploymentChannelClient{process: worklifetime.NewProcess(), provider: provider}
+	c := &DeploymentChannelControl{process: worklifetime.NewProcess(), provider: provider}
 	if len(existing) == 1 {
 		c.store, c.process, c.borrowed = existing[0].store, existing[0].process, true
 		return c, nil
@@ -188,14 +192,14 @@ func openDeploymentChannelStore(ctx context.Context, provider string, opts rootC
 			if err != nil {
 				return nil, err
 			}
-			return &deploymentChannelClient{remote: remote, holder: observed.Authority, provider: provider}, nil
+			return &DeploymentChannelControl{remote: remote, holder: observed.Authority, provider: provider}, nil
 		}
 	}
 	c.store, err = selected.OpenRuntime(ctx, selected.RuntimeRequest{Selection: selection, PostgresDSN: request.PostgresDSN})
 	return c, err
 }
 
-func (c *deploymentChannelClient) initializeRegistration(ctx context.Context, directory string, hitl *channelonboarding.AccountReference, candidate channelonboarding.Candidate, triggers *providertriggers.CatalogSnapshot, opts rootCommandOptions) error {
+func (c *DeploymentChannelControl) initializeRegistration(ctx context.Context, directory string, hitl *channelonboarding.AccountReference, candidate channelonboarding.Candidate, triggers *providertriggers.CatalogSnapshot, opts rootCommandOptions) error {
 	owner, provider := c.store, c.provider
 	credentialStore, err := CredentialFileStore()
 	if err != nil {
@@ -232,11 +236,11 @@ func (c *deploymentChannelClient) initializeRegistration(ctx context.Context, di
 	if err != nil {
 		return err
 	}
-	c.identities, err = operatorchannel.NewService(owner.OperatorChannels(), proofs, c.session, []operatorchannel.InterfaceIdentity{candidate.Interface}, principal.ID)
+	identities, err := operatorchannel.NewService(owner.OperatorChannels(), proofs, c.session, []operatorchannel.InterfaceIdentity{candidate.Interface}, principal.ID)
 	if err != nil {
 		return err
 	}
-	if _, err = c.identities.PreparePrincipal(ctx, time.Now().UTC()); err != nil {
+	if _, err = identities.PreparePrincipal(ctx, time.Now().UTC()); err != nil {
 		return err
 	}
 	writer, err := channelonboarding.NewCredentialWriter(credentialStore)
@@ -244,14 +248,14 @@ func (c *deploymentChannelClient) initializeRegistration(ctx context.Context, di
 		return err
 	}
 	c.service, err = channelonboarding.NewService(channelonboarding.ServiceOptions{Deployment: true, OperatorAccount: hitl,
-		Store: owner.ChannelOnboarding(), Operations: owner.DeploymentChannels(), Identities: c.identities, Credentials: writer, Sessions: c.session,
+		Store: owner.ChannelOnboarding(), Operations: owner.DeploymentChannels(), Identities: identities, Credentials: writer, Sessions: c.session,
 		Catalog: func() (*channelonboarding.CandidateCatalog, error) {
 			return channelonboarding.NewCandidateCatalog([]channelonboarding.Candidate{candidate})
 		}})
 	return err
 }
 
-func (c *deploymentChannelClient) call(ctx context.Context, method string, params map[string]any, target any) error {
+func (c *DeploymentChannelControl) call(ctx context.Context, method string, params map[string]any, target any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.remote != nil {
@@ -261,26 +265,25 @@ func (c *deploymentChannelClient) call(ctx context.Context, method string, param
 		}
 		return c.remote.call(ctx, method, params, target)
 	}
-	text := func(key string) string { value, _ := params[key].(string); return value }
 	var result any
 	var err error
 	switch method {
 	case "channel.onboarding_select", "channel.onboarding_start":
 		expected := c.expectedAccount
-		if text("account") != "" {
-			expected = text("account")
+		if channelSelectionParam(params, "account") != "" {
+			expected = channelSelectionParam(params, "account")
 		}
 		save, _ := params["save_proof"].(bool)
-		input := channelonboarding.StartInput{Verb: channelonboarding.Verb(text("verb")), SaveProof: save,
-			Selection: channelonboarding.CandidateSelection{Provider: text("provider")}, ExpectedAccount: expected,
-			IdempotencyKey: text("idempotency_key"), ProviderCredential: text("provider_credential"), ExpectedSelection: text("expected_selection")}
+		input := channelonboarding.StartInput{Verb: channelonboarding.Verb(channelSelectionParam(params, "verb")), SaveProof: save,
+			Selection: channelonboarding.CandidateSelection{Provider: channelSelectionParam(params, "provider")}, ExpectedAccount: expected,
+			IdempotencyKey: channelSelectionParam(params, "idempotency_key"), ProviderCredential: channelSelectionParam(params, "provider_credential"), ExpectedSelection: channelSelectionParam(params, "expected_selection")}
 		if method == "channel.onboarding_select" {
 			result, err = c.service.Select(ctx, input)
 		} else {
 			result, err = c.service.Start(ctx, input)
 		}
 	case "channel.onboarding_get":
-		current, readErr := c.service.Get(ctx, text("operation_id"))
+		current, readErr := c.service.Get(ctx, channelSelectionParam(params, "operation_id"))
 		if readErr != nil {
 			return readErr
 		}
@@ -289,22 +292,22 @@ func (c *deploymentChannelClient) call(ctx context.Context, method string, param
 				return err
 			}
 		}
-		result, err = c.service.Get(ctx, text("operation_id"))
+		result, err = c.service.Get(ctx, channelSelectionParam(params, "operation_id"))
 	case "channel.onboarding_retry":
 		if reverify, _ := params["reverify"].(bool); reverify {
-			result, err = c.service.ReverifyDeployment(ctx, text("operation_id"))
+			result, err = c.service.ReverifyDeployment(ctx, channelSelectionParam(params, "operation_id"))
 			break
 		}
 		checkpoint, _ := params["checkpoint_only"].(bool)
-		result, err = c.service.Retry(ctx, channelonboarding.RetryInput{OperationID: text("operation_id"), CheckpointOnly: checkpoint, ProviderCredential: text("provider_credential")})
+		result, err = c.service.Retry(ctx, channelonboarding.RetryInput{OperationID: channelSelectionParam(params, "operation_id"), CheckpointOnly: checkpoint, ProviderCredential: channelSelectionParam(params, "provider_credential")})
 	case "channel.confirm":
 		revision, _ := params["expected_revision"].(int64)
 		approve, _ := params["approve"].(bool)
-		op, binding, failure := c.service.ConfirmIdentity(ctx, text("operation_id"), revision, approve, time.Now().UTC())
+		op, binding, failure := c.service.ConfirmIdentity(ctx, channelSelectionParam(params, "operation_id"), revision, approve, time.Now().UTC())
 		result, err = channelOperationEnvelope{Operation: op, Binding: &binding}, failure
 	case "channel.logout":
 		revision, _ := params["expected_revision"].(int64)
-		result, err = c.service.LogoutDeployment(ctx, text("operation_id"), revision)
+		result, err = c.service.LogoutDeployment(ctx, channelSelectionParam(params, "operation_id"), revision)
 	case "channel.list":
 		rows, failure := c.service.DeploymentAccounts(ctx, c.provider)
 		result, err = map[string]any{"accounts": rows}, failure
@@ -321,7 +324,7 @@ func (c *deploymentChannelClient) call(ctx context.Context, method string, param
 	return json.Unmarshal(raw, target)
 }
 
-func (c *deploymentChannelClient) close(ctx context.Context) error {
+func (c *DeploymentChannelControl) Close(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.remote != nil {
@@ -342,42 +345,39 @@ func (c *deploymentChannelClient) close(ctx context.Context) error {
 	return errors.Join(err, c.store.CloseUnactivated())
 }
 
-func (c *deploymentChannelClient) Dispatch(ctx context.Context, method string, params map[string]any, target any) error {
+func (c *DeploymentChannelControl) Dispatch(ctx context.Context, method string, params map[string]any, target any) error {
 	return c.call(ctx, method, params, target)
 }
-func (c *deploymentChannelClient) Close(ctx context.Context) error { return c.close(ctx) }
 
-func (c *deploymentChannelClient) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
+func (c *DeploymentChannelControl) ConsumeWebhookClaim(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.session.ConsumeWebhookClaim(ctx, account, credential, admit, current)
 }
 
-func (c *deploymentChannelClient) accounts(ctx context.Context) ([]channelonboarding.Result, error) {
-	var result struct {
-		Accounts []channelonboarding.Result `json:"accounts"`
-	}
+func (c *DeploymentChannelControl) accounts(ctx context.Context) ([]channelonboarding.Result, error) {
+	result := map[string][]channelonboarding.Result{}
 	err := c.call(ctx, "channel.list", map[string]any{}, &result)
-	return result.Accounts, err
+	return result["accounts"], err
 }
 
-func (c *deploymentChannelClient) connectAccount(ctx context.Context, out, errOut io.Writer, opts channelConnectOptions) (begun channelOnboardingResult, proceed bool, err error) {
+func (c *DeploymentChannelControl) connectAccount(ctx context.Context, out, errOut io.Writer, opts channelConnectOptions) (begun channelOnboardingResult, proceed bool, err error) {
 	accounts, err := c.accounts(ctx)
 	if err != nil {
-		return begun, false, err
+		return begun, false, returnCLIValidationError(errOut, err)
 	}
 	if opts.account != "" {
 		ref, err := channelonboarding.CanonicalAccount(c.provider, opts.account)
 		if err != nil {
-			return begun, false, err
+			return begun, false, returnCLIValidationError(errOut, err)
 		}
 		c.expectedAccount = ref.Account
 		operation, err := selectDeploymentAccount(accounts, ref.Account, opts.apiOptions.input, errOut, false)
 		if err != nil {
-			return begun, false, err
+			return begun, false, returnCLIValidationError(errOut, err)
 		}
 		if err := c.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": operation.OperationID, "reverify": true}, &begun); err != nil {
-			return begun, false, err
+			return begun, false, returnCLIValidationError(errOut, err)
 		}
 		if begun.Operation.Phase == channelonboarding.PhaseRetired && begun.Operation.FailureCode == "native_account_revoked" {
 			fmt.Fprintln(out, "Account was logged out from the phone. Link it again:")
@@ -395,6 +395,13 @@ func (c *deploymentChannelClient) connectAccount(ctx context.Context, out, errOu
 	return begun, true, nil
 }
 
+func (opts channelConnectOptions) requireDeploymentSelection() error {
+	if opts.sourceSet || opts.target != "" || opts.interfaceRef != "" {
+		return errors.New("connect registers a deployment account; do not select a flow, target or interface")
+	}
+	return nil
+}
+
 func runDeploymentChannelList(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {
 	accounts := []channelonboarding.Result{}
 	for _, provider := range []string{"telegram", "whatsapp"} {
@@ -403,7 +410,7 @@ func runDeploymentChannelList(ctx context.Context, out, errOut io.Writer, opts r
 			return returnCLIValidationError(errOut, err)
 		}
 		rows, err := client.accounts(ctx)
-		err = errors.Join(err, client.close(context.WithoutCancel(ctx)))
+		err = errors.Join(err, client.Close(context.WithoutCancel(ctx)))
 		if err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
@@ -444,13 +451,13 @@ func runDeploymentChannelLogout(ctx context.Context, out, errOut io.Writer, prov
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	defer func() { resultErr = errors.Join(resultErr, client.close(context.WithoutCancel(ctx))) }()
+	defer func() { resultErr = errors.Join(resultErr, client.Close(context.WithoutCancel(ctx))) }()
 	rows, err := client.accounts(ctx)
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
 	if len(rows) == 0 && provider == "whatsapp" && account == "" {
-		if err := client.close(context.WithoutCancel(ctx)); err != nil {
+		if err := client.Close(context.WithoutCancel(ctx)); err != nil {
 			return returnCLIValidationError(errOut, err)
 		}
 		return runChannelLogout(ctx, out, errOut, provider, "", opts, output)
@@ -474,8 +481,7 @@ func runDeploymentChannelLogout(ctx context.Context, out, errOut io.Writer, prov
 	}, func() ([]string, error) { return []string{selected.AccountReference}, nil })
 }
 
-func selectDeploymentAccount(rows []channelonboarding.Result, account string, input io.Reader, out io.Writer, interactive bool) (channelonboarding.Operation, error) {
-	var selected channelonboarding.Operation
+func selectDeploymentAccount(rows []channelonboarding.Result, account string, input io.Reader, out io.Writer, interactive bool) (selected channelonboarding.Operation, resultErr error) {
 	if account == "" && len(rows) > 1 {
 		if !interactive {
 			return selected, errors.New("more than one account matches; use swarm channel logout <provider> <account>")

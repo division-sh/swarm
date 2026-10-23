@@ -54,8 +54,8 @@ type Candidate struct {
 	SourceLabel            string                            `json:"source_label,omitempty"`
 	Provider               string                            `json:"provider"`
 	Interface              operatorchannel.InterfaceIdentity `json:"interface"`
-	Coordinate             ChannelRuntimeContextCoordinate   `json:"coordinate"`
-	Target                 CandidateTarget                   `json:"target"`
+	Coordinate             ChannelRuntimeContextCoordinate   `json:"coordinate,omitzero"`
+	Target                 CandidateTarget                   `json:"target,omitzero"`
 	Posture                ActivationPosture                 `json:"activation_posture"`
 	Ceremony               IdentityCeremony                  `json:"identity_ceremony"`
 	ProviderCredentialRole string                            `json:"provider_credential_role"`
@@ -69,11 +69,7 @@ type Candidate struct {
 func (c Candidate) MarshalJSON() ([]byte, error) {
 	type readback Candidate
 	if c.DeploymentRegistration {
-		return json.Marshal(struct {
-			readback
-			Coordinate *ChannelRuntimeContextCoordinate `json:"coordinate,omitempty"`
-			Target     *CandidateTarget                 `json:"target,omitempty"`
-		}{readback: readback(c)})
+		return json.Marshal(readback(c))
 	}
 	return json.Marshal(struct {
 		readback

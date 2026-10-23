@@ -37,10 +37,6 @@ func (s *Service) LogoutDeployment(ctx context.Context, id string, revision int6
 	if op.Phase == PhaseRetired {
 		return Result{}, fmt.Errorf("%w: logout outcome is unconfirmed; no unlink was repeated", ErrConflict)
 	}
-	principal, err := s.identities.Principal()
-	if err != nil || principal.ID != op.PrincipalID {
-		return Result{}, errors.Join(ErrConflict, err)
-	}
 	session, ok := s.sessions.(DeploymentSessionOwner)
 	if !ok {
 		return Result{}, ErrInvalidRequest
@@ -115,16 +111,14 @@ func (s *Service) ReverifyDeployment(ctx context.Context, id string) (Result, er
 	if err != nil {
 		return Result{}, err
 	}
-	if op.Phase == PhaseRetired {
-		if op.FailureCode != "native_account_revoked" {
-			return Result{}, ErrConflict
-		}
+	switch {
+	case op.Phase == PhaseRetired && op.FailureCode != "native_account_revoked":
+		return Result{}, ErrConflict
+	case op.Phase == PhaseRetired:
 		return s.result(ctx, op, &candidate)
-	}
-	if op.FailureCode != "" {
+	case op.FailureCode != "":
 		return Result{}, fmt.Errorf("%w: finish logout with swarm channel logout %s %s", ErrConflict, op.Provider, op.DeploymentAccount())
-	}
-	if !op.AccountConfirmed {
+	case !op.AccountConfirmed:
 		return s.driveLocked(ctx, op, candidate, "", false)
 	}
 	if err := s.sessions.ResumeSession(ctx, op, candidate); err != nil && !errors.Is(err, ErrSessionPending) {
@@ -164,7 +158,7 @@ func (s *Service) resumeDeploymentEnrollment(ctx context.Context, op Operation, 
 		}
 		enroll = identity.State.Terminal() && identity.State != operatorchannel.StateBound
 	}
-	if s.operatorAccount != nil && *s.operatorAccount == (AccountReference{Provider: op.Provider, Account: op.AccountReference}) && enroll {
+	if s.operatorAccount == (AccountReference{Provider: op.Provider, Account: op.AccountReference}) && enroll {
 		next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: op.Revision,
 			BeginOperatorEnrollment: true, Phase: PhaseAwaitingExternalIdentity, Now: s.now().UTC()})
 		if err != nil {
@@ -206,11 +200,7 @@ func (s *Service) DeploymentAccounts(ctx context.Context, provider string) ([]Re
 	accounts := make([]Result, 0, len(selected))
 	for _, account := range order {
 		op := selected[account]
-		candidate, err := s.currentCandidate(op)
-		if err != nil {
-			return nil, err
-		}
-		view, err := s.result(ctx, op, &candidate)
+		view, err := s.Get(ctx, op.OperationID)
 		if err != nil {
 			return nil, err
 		}

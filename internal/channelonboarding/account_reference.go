@@ -2,6 +2,7 @@ package channelonboarding
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -13,24 +14,14 @@ type AccountReference struct {
 	Account  string `yaml:"account" json:"account"`
 }
 
+var e164Account = regexp.MustCompile(`^\+[1-9][0-9]{1,14}$`)
+
 func CanonicalAccount(provider, account string) (AccountReference, error) {
 	ref := AccountReference{Provider: provider}
 	switch provider {
 	case "whatsapp":
-		var digits strings.Builder
-		for _, c := range strings.TrimSpace(account) {
-			switch {
-			case c >= '0' && c <= '9':
-				digits.WriteRune(c)
-			case c == '+' && digits.Len() == 0:
-				digits.WriteRune(c)
-			case c == ' ' || c == '-' || c == '(' || c == ')' || c == '.':
-			default:
-				return ref, fmt.Errorf("account must be an international E.164 number beginning with +")
-			}
-		}
-		ref.Account = digits.String()
-		if len(ref.Account) < 3 || len(ref.Account) > 16 || ref.Account[0] != '+' || ref.Account[1] == '0' {
+		ref.Account = strings.NewReplacer(" ", "", "-", "", "(", "", ")", "", ".", "").Replace(strings.TrimSpace(account))
+		if !e164Account.MatchString(ref.Account) {
 			return AccountReference{}, fmt.Errorf("account must be an international E.164 number beginning with +")
 		}
 	case "telegram":
@@ -47,11 +38,8 @@ func CanonicalAccount(provider, account string) (AccountReference, error) {
 
 func (r AccountReference) Validate() error {
 	canonical, err := CanonicalAccount(r.Provider, r.Account)
-	if err != nil {
-		return err
-	}
-	if canonical != r {
+	if err == nil && canonical != r {
 		return fmt.Errorf("account reference must use its canonical provider/account")
 	}
-	return nil
+	return err
 }

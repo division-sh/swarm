@@ -38,12 +38,8 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		opts.CurrentWebhook = webhook
 		return OpenChannelRegistration(ctx, opts)
 	}
-	type control interface {
-		Dispatch(context.Context, string, map[string]any, any) error
-		Close(context.Context) error
-	}
 	var mu sync.Mutex
-	clients := map[string]control{}
+	clients := map[string]*cliapp.DeploymentChannelControl{}
 	handler := func(ctx context.Context, req apiv1.Request) (any, error) {
 		if rootErr != nil {
 			return nil, rootErr
@@ -92,15 +88,7 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 	close := func() error {
 		mu.Lock()
 		defer mu.Unlock()
-		seen := map[control]bool{}
-		var err error
-		for _, client := range clients {
-			if !seen[client] {
-				err = errors.Join(err, client.Close(context.Background()))
-				seen[client] = true
-			}
-		}
-		return err
+		return closeDeploymentControls(clients)
 	}
 	claim := func(ctx context.Context, account channelonboarding.AccountReference, credential func(channelonboarding.CredentialAdmission) bool, admit func() (providertriggers.Delivery, error), current func() bool) (bool, error) {
 		work, err := process.Begin(ctx)
@@ -119,6 +107,18 @@ func deploymentChannelHandlers(repo, config, directory string, stores *selected.
 		return client.ConsumeWebhookClaim(work.Context(), account, credential, admit, current)
 	}
 	return handler, claim, close
+}
+
+func closeDeploymentControls(clients map[string]*cliapp.DeploymentChannelControl) error {
+	seen := map[*cliapp.DeploymentChannelControl]bool{}
+	var err error
+	for _, client := range clients {
+		if !seen[client] {
+			err = errors.Join(err, client.Close(context.Background()))
+			seen[client] = true
+		}
+	}
+	return err
 }
 
 func requireDeploymentHolder(ctx context.Context, capability startupownership.ProcessCapability, supplied any) error {
@@ -178,8 +178,7 @@ func (c *deploymentChannelSession) ResumeSession(ctx context.Context, op channel
 }
 func (c *deploymentChannelSession) AwaitSessionBootstrap(ctx context.Context, op channelonboarding.Operation) error {
 	if op.Provider == "telegram" {
-		_, err := c.telegramRead(ctx, op)
-		return err
+		return nil // The pairing checkpoint performs the authenticated getMe.
 	}
 	return c.connection.CheckBootstrap(ctx)
 }
@@ -189,7 +188,7 @@ func (c *deploymentChannelSession) CheckpointSessionPairing(ctx context.Context,
 		if err != nil {
 			return op, false, err
 		}
-		ref, err := channelonboarding.CanonicalAccount(op.Provider, identity["resource_id"])
+		ref, err := channelonboarding.CanonicalAccount(op.Provider, identity)
 		if err != nil || op.ExpectedAccount != "" && op.ExpectedAccount != ref.Account {
 			return op, false, errors.Join(channelonboarding.ErrConflict, err)
 		}
@@ -200,26 +199,26 @@ func (c *deploymentChannelSession) CheckpointSessionPairing(ctx context.Context,
 	return c.connection.CheckpointPairing(ctx, op.Revision)
 }
 
-func (c *deploymentChannelSession) telegramRead(ctx context.Context, op channelonboarding.Operation) (map[string]string, error) {
+func (c *deploymentChannelSession) telegramRead(ctx context.Context, op channelonboarding.Operation) (string, error) {
 	profile, ok := c.opts.Plan.Registration()
 	if !ok || !op.DeploymentRegistration || op.Provider != "telegram" || op.PrincipalID != c.opts.Principal.ID {
-		return nil, channelonboarding.ErrInvalidRequest
+		return "", channelonboarding.ErrInvalidRequest
 	}
 	plan, err := profile.Operation(packs.RegistrationOperationIdentify)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	values := map[string]any{}
 	for _, admission := range op.CredentialAdmissions {
 		snapshot, current, err := c.opts.Credentials.ObserveValueMatchingSeal(ctx, credentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
 		if err != nil || !current {
-			return nil, errors.Join(operatorchannel.ErrCredentialStale, err)
+			return "", errors.Join(operatorchannel.ErrCredentialStale, err)
 		}
 		values[admission.Role] = snapshot.CredentialValue()
 	}
 	input, err := plan.Prepare(map[string]any{})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	executor := registration.HTTPExecutor{Client: c.opts.HTTP, Preflight: func(ctx context.Context) error {
 		current, err := c.opts.Operations.GetChannelOnboarding(ctx, op.OperationID)
@@ -236,17 +235,13 @@ func (c *deploymentChannelSession) telegramRead(ctx context.Context, op channelo
 	}}
 	output, err := executor.Read(ctx, plan, input, values)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	projected, err := plan.Project(output)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	result := make(map[string]string, len(projected))
-	for key, value := range projected {
-		result[key] = fmt.Sprint(value)
-	}
-	return result, nil
+	return fmt.Sprint(projected["resource_id"]), nil
 }
 func (c *deploymentChannelSession) ReadSessionPairing(ctx context.Context, _ channelonboarding.Operation, principal operatorchannel.Principal) (channelonboarding.PairingReadback, error) {
 	if c.connection == nil {
@@ -295,7 +290,11 @@ func (c *deploymentChannelSession) Close(ctx context.Context) error {
 	if c.connection == nil {
 		return nil
 	}
-	return errors.Join(c.connection.Close(ctx), ctx.Err())
+	if err := errors.Join(c.connection.Close(ctx), ctx.Err()); err != nil {
+		return err
+	}
+	c.connection = nil
+	return nil
 }
 
 func (c *deploymentChannelSession) PollOperatorClaim(ctx context.Context, op channelonboarding.Operation) error {
@@ -319,7 +318,7 @@ func (c *deploymentChannelSession) VerifyRegistration(ctx context.Context, op ch
 		if err != nil {
 			return false, err
 		}
-		if identity["resource_id"] != op.AccountReference {
+		if identity != op.AccountReference {
 			return false, channelonboarding.ErrConflict
 		}
 		return true, nil
@@ -359,20 +358,12 @@ func (c *deploymentChannelSession) LogoutRegistration(ctx context.Context, op ch
 	if err := c.connection.LogoutDeploymentRegistration(ctx, op); err != nil {
 		return err
 	}
-	if err := c.connection.Close(ctx); err != nil {
-		return err
-	}
-	c.connection = nil
-	return nil
+	return c.CloseRegistration(ctx, op)
 }
 
 func (c *deploymentChannelSession) CloseRegistration(ctx context.Context, op channelonboarding.Operation) error {
 	if op.Provider != "whatsapp" || c.connection == nil || op.PrincipalID != c.opts.Principal.ID || c.connection.ConnectionID() != op.SessionConnectionID {
 		return channelonboarding.ErrRevisionConflict
 	}
-	if err := c.connection.Close(ctx); err != nil {
-		return err
-	}
-	c.connection = nil
-	return nil
+	return c.Close(ctx)
 }
