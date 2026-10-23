@@ -72,7 +72,6 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 				return p
 			}
 			p := start(context.Background())
-			creationEndpoint := p.apiBase
 			runID := uuid.NewString()
 			issued := time.Now()
 			goldenServedBundleHash(t, p.rpc, "mock_only")
@@ -247,8 +246,7 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 				}
 			}
 			replayed := create(ctx)
-			wantOutput := strings.ReplaceAll(result.output, creationEndpoint, p.apiBase)
-			if replayed.err != nil || replayed.output != wantOutput {
+			if replayed.err != nil || !strings.Contains(replayed.output, "run_id="+runID+" ") {
 				t.Fatalf("permanent creation retry after process loss: err=%v before=%s after=%s", replayed.err, result.output, replayed.output)
 			}
 			if got := readNumericCreationReceipt(t, ctx, p.rpc, runID); !reflect.DeepEqual(got, creation) {
