@@ -62,12 +62,13 @@ type dispatchJob struct {
 // delivery continuations. It is a bounded selected-store projection, not a
 // durable queue or a second eligibility clock.
 type Coordinator struct {
-	store      runtimedelivery.Store
-	restarts   runtimestanding.StandingRestartDispositionReader
-	authority  runtimedelivery.ExecutionAuthority
-	workOwner  worklifetime.Occurrence
-	dispatcher Dispatcher
-	report     ErrorReporter
+	store             runtimedelivery.Store
+	restarts          runtimestanding.StandingRestartDispositionReader
+	authority         runtimedelivery.ExecutionAuthority
+	workOwner         worklifetime.Occurrence
+	dispatcher        Dispatcher
+	report            ErrorReporter
+	selectedReconcile func(context.Context) error
 
 	mu            sync.Mutex
 	entries       map[string]entry
@@ -113,11 +114,19 @@ func NewSelected(
 	workOwner worklifetime.Occurrence,
 	dispatcher Dispatcher,
 	report ErrorReporter,
+	reconcile func(context.Context) error,
 ) (*Coordinator, error) {
 	if authority.Kind() != runtimedelivery.ExecutionAuthoritySelectedContractFork {
 		return nil, errors.New("selected delivery continuation coordinator requires selected execution authority")
 	}
-	return newCoordinator(store, nil, authority, workOwner, dispatcher, report)
+	if reconcile == nil {
+		return nil, errors.New("selected delivery continuation requires barrier reconciliation")
+	}
+	c, err := newCoordinator(store, nil, authority, workOwner, dispatcher, report)
+	if err == nil {
+		c.selectedReconcile = reconcile
+	}
+	return c, err
 }
 
 func newCoordinator(
@@ -799,6 +808,11 @@ func (c *Coordinator) beginDispatchWork(ctx context.Context) (*worklifetime.Leas
 }
 
 func (c *Coordinator) scan(ctx context.Context, exhaustive bool) (time.Duration, bool, error) {
+	if c.selectedReconcile != nil {
+		if err := c.selectedReconcile(ctx); err != nil {
+			return 0, false, err
+		}
+	}
 	var cursor runtimedelivery.ContinuationCursor
 	var next time.Duration
 	var wake bool

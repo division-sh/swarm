@@ -166,7 +166,7 @@ func testRetirementDispatchOutcome(t *testing.T, selected bool, scenario string,
 	})
 	var err error
 	if selected {
-		c, err = NewSelected(store, authority, occurrence, dispatcher, func(_ context.Context, err error) { reported <- err })
+		c, err = NewSelected(store, authority, occurrence, dispatcher, func(_ context.Context, err error) { reported <- err }, func(context.Context) error { return nil })
 	} else {
 		c, err = New(store, coordinatorTestRestarts{}, authority, occurrence, dispatcher, func(_ context.Context, err error) { reported <- err })
 	}

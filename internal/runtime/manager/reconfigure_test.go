@@ -195,12 +195,11 @@ func ReconfigureMemoryNativeFixture(t testing.TB, enabled bool) PersistedAgent {
 	return rec
 }
 
-func newReconfigureMemoryNativeManager(t *testing.T, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, rec PersistedAgent) *AgentManager {
+func newReconfigureMemoryNativeManager(t *testing.T, ctx context.Context, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, rec PersistedAgent) *AgentManager {
 	t.Helper()
 	am := newTestAgentManagerWithOptions(t, newProjectionTestBus(), func(cfg models.AgentConfig) (Agent, error) {
 		return reconfigureTestAgent{id: cfg.ID}, nil
-	}, AgentManagerOptions{LLMBackend: "anthropic", LifecycleStore: persistence, Sessions: selected, PersistenceRoles: PersistenceRoles{LifecycleState: selected}})
-	ctx := testAuthorActivityContext(context.Background())
+	}, AgentManagerOptions{BaseContext: ctx, LLMBackend: "anthropic", LifecycleStore: persistence, Sessions: selected, PersistenceRoles: PersistenceRoles{LifecycleState: selected}})
 	if err := am.lifecycle.registerExecution(ctx, rec, false, reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config)); err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +211,7 @@ func newReconfigureMemoryNativeManager(t *testing.T, persistence AgentLifecycleP
 
 func acquireNativeReconfigureMemory(t *testing.T, am *AgentManager, selected ReconfigureMemoryNativeTestStore, cfg models.AgentConfig) *sessions.Lease {
 	t.Helper()
-	execution, err := am.lifecycle.acquireExecutionIdentity(testAuthorActivityContext(context.Background()), cfg.Identity, "native-memory-reconfigure-proof", true)
+	execution, err := am.lifecycle.acquireExecutionIdentity(am.runtimeContext(), cfg.Identity, "native-memory-reconfigure-proof", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,8 +235,8 @@ func reconfigureNativeMemoryCandidate(t *testing.T, am *AgentManager, candidate 
 	return am.reconfigureAgentIdentityExactWithTopology(am.runtimeContext(), am.semanticSource, candidate.Identity, candidate, &topology)
 }
 
-func ProveReconfigureMemoryEnabledConfigChange(t *testing.T, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, record PersistedAgent, history func(agentmemory.Identity) []sessions.Record, admit ReconfigureMemoryNativeAdmission) {
-	am := newReconfigureMemoryNativeManager(t, persistence, selected, record)
+func ProveReconfigureMemoryEnabledConfigChange(t *testing.T, ctx context.Context, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, record PersistedAgent, history func(agentmemory.Identity) []sessions.Record, admit ReconfigureMemoryNativeAdmission) {
+	am := newReconfigureMemoryNativeManager(t, ctx, persistence, selected, record)
 	cfg := record.Config
 	lease := acquireNativeReconfigureMemory(t, am, selected, cfg)
 
@@ -264,8 +263,8 @@ func ProveReconfigureMemoryEnabledConfigChange(t *testing.T, persistence AgentLi
 	}
 }
 
-func ProveReconfigureExplicitFalse(t *testing.T, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, record PersistedAgent, history func(agentmemory.Identity) []sessions.Record, admit ReconfigureMemoryNativeAdmission) {
-	am := newReconfigureMemoryNativeManager(t, persistence, selected, record)
+func ProveReconfigureExplicitFalse(t *testing.T, ctx context.Context, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, record PersistedAgent, history func(agentmemory.Identity) []sessions.Record, admit ReconfigureMemoryNativeAdmission) {
+	am := newReconfigureMemoryNativeManager(t, ctx, persistence, selected, record)
 	cfg := record.Config
 	lease := acquireNativeReconfigureMemory(t, am, selected, cfg)
 
@@ -287,8 +286,8 @@ func ProveReconfigureExplicitFalse(t *testing.T, persistence AgentLifecyclePersi
 	}
 }
 
-func ProveReconfigureExplicitTrue(t *testing.T, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, record PersistedAgent, history func(agentmemory.Identity) []sessions.Record, admit ReconfigureMemoryNativeAdmission) {
-	am := newReconfigureMemoryNativeManager(t, persistence, selected, record)
+func ProveReconfigureExplicitTrue(t *testing.T, ctx context.Context, persistence AgentLifecyclePersistence, selected ReconfigureMemoryNativeTestStore, record PersistedAgent, history func(agentmemory.Identity) []sessions.Record, admit ReconfigureMemoryNativeAdmission) {
+	am := newReconfigureMemoryNativeManager(t, ctx, persistence, selected, record)
 	cfg := record.Config
 	candidate := cfg
 	candidate.Memory.Enabled = true

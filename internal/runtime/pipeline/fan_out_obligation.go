@@ -202,6 +202,11 @@ type FanOutObligationOwner interface {
 	CancelRunFanOut(context.Context, string, string, time.Time) error
 }
 
+type SelectedFanOutObligationOwner interface {
+	FanOutObligationOwner
+	ReconcileFanOutBarriers(context.Context) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error)
+}
+
 // Evaluation-load failures retain the pump's blocking disposition independently
 // of publication-group acquisition failures (which can yield or retry).
 type FanOutEvaluationLoadError struct {

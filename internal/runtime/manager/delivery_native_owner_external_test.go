@@ -13,6 +13,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -21,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -52,6 +54,35 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 		t.Fatal(err)
 	}
 	ctx := manager.TerminalPanicFixtureContext()
+	ctx = correlation.WithRuntimeInstanceID(ctx, "11111111-1111-1111-1111-111111111111")
+	capability, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := worklifetime.NewProcess()
+	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	occurrence, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: original.RuntimeInstanceID, BundleHash: source.BundleHash()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = worklifetime.WithOccurrence(worklifetime.WithProcess(ctx, process), occurrence)
+	t.Cleanup(func() {
+		join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := occurrence.RetireAndWait(join); err != nil {
+			t.Error(err)
+		}
+		process.Retire()
+		if _, err := process.Join(join); err != nil {
+			t.Error(err)
+		}
+	})
 	if err := sourceartifactfixture.Ensure(ctx, selected); err != nil {
 		t.Fatal(err)
 	}
@@ -66,12 +97,15 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 		},
 		Publish: func(t *testing.T, ctx context.Context, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {
 			t.Helper()
+			ctx = worklifetime.WithProcess(ctx, process)
 			publishManagerNativeDelivery(t, ctx, selected, event, routes, authority)
 		},
 		ClaimHeartbeat: func(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (deliverylifecycle.ClaimResult, error) {
+			ctx = worklifetime.WithProcess(ctx, process)
 			return storetest.ClaimManagerHeartbeatProof(ctx, selected, authority, event, route)
 		},
 		RenewHeartbeat: func(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.ClaimCommit, error) {
+			ctx = worklifetime.WithProcess(ctx, process)
 			return storetest.RenewManagerHeartbeatProof(ctx, selected, claim)
 		},
 		RetryReady: func(t *testing.T, event events.Event, route events.DeliveryRoute) {
@@ -131,7 +165,7 @@ func TestManagerDeliveryNativeOwnerRequiresExplicitPublicationBothStores(t *test
 		t.Run(backend, func(t *testing.T) {
 			fixture := openManagerNativeDelivery(t, backend)
 			source := sourceartifactfixture.Fact()
-			ctx := correlation.WithSourceArtifactFact(context.Background(), source)
+			ctx := correlation.WithSourceArtifactFact(fixture.Context, source)
 			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("11111111-1111-1111-1111-111111111111", source.BundleHash()))
 			runID := uuid.NewString()
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -170,7 +204,7 @@ func TestManagerDeliveryStorageOnlySourceRefusesSelectedExecutionBothStores(t *t
 			}
 			repo := canonicalrouting.RepoRoot(t)
 			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected}
-			ctx := manager.TerminalPanicFixtureContext()
+			ctx := fixture.Context
 			admitted, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
 				BundleHash: sourceartifactfixture.BundleHash,
 				Selection:  runfork.RunForkContractSelection{Mode: "bundle_hash", BundleHash: sourceartifactfixture.BundleHash},

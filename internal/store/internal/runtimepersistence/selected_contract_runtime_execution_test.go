@@ -46,6 +46,7 @@ type selectedCompletionAuthorityStore interface {
 }
 
 type selectedCompletionFixture struct {
+	ctx            context.Context
 	providerSource semanticview.Source
 	providerActor  manager.PersistedAgent
 	process        startupownership.ProcessCapability
@@ -1492,8 +1493,18 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	}
 	registerTestAuthorActivityCatalog(t, registrar)
 	if len(sourceArtifacts) != 0 {
+		ctx = testAuthorActivityContextForBundle(sourceArtifacts[0].BundleHash())
+	}
+	original, err := process.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err = generationauthority.MutationContext(ctx, original.LeaseStamp(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sourceArtifacts) != 0 {
 		artifact := sourceArtifacts[0]
-		ctx = testAuthorActivityContextForBundle(artifact.BundleHash())
 		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: sourceRun, Origin: semanticScenarioSetupRunOriginForTest(), Artifact: artifact, StartedAt: now})
 	} else {
 		requireRunningRunForTest(t, ctx, store, sourceRun, now)
@@ -1551,6 +1562,7 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	}
 	declarations := emptySelectedDeclarationForTest(t, db, forkRun)
 	return selectedCompletionFixture{
+		ctx:     ctx,
 		process: process,
 		store:   store, db: db, sqlite: sqlite, sourceRun: sourceRun, forkRun: forkRun, eventID: eventID, admission: admission,
 		request: runfork.SelectedContractRuntimeExecutionIssueRequest{

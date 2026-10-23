@@ -44,7 +44,10 @@ func TestAgentRowNativeLostAckCacheAdoptionBothStores(t *testing.T) {
 						return owner
 					}
 				}
-				ctx := manager.TerminalPanicFixtureContext()
+				ctx, err := agentfixture.ProcessContext(t, manager.TerminalPanicFixtureContext(), selected)
+				if err != nil {
+					t.Fatal(err)
+				}
 				record := manager.ReconfigureMemoryNativeFixture(t, false)
 				if cut != "replacement" {
 					storetest.RequireRunningRun(t, ctx, selected.(storetest.RunFixtureStore), record.Config.Identity.RunID, time.Now().UTC())
