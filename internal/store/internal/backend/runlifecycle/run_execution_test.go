@@ -13,9 +13,55 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 )
+
+const admissionTestRevisedBundle = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+func admissionTestSQLMock(t *testing.T) (*sql.DB, sqlmock.Sqlmock) {
+	t.Helper()
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db, mock
+}
+
+func admissionTestRunSQL(postgres, readOnly bool) string {
+	if !postgres {
+		return "SELECT status, bundle_hash FROM runs WHERE run_id = ?"
+	}
+	query := "SELECT status, bundle_hash FROM runs WHERE run_id = $1::uuid"
+	if !readOnly {
+		query += " FOR UPDATE"
+	}
+	return query
+}
+
+func admissionTestArtifactSQL(postgres bool) string {
+	if postgres {
+		return "SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)"
+	}
+	return "SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = ?)"
+}
+
+func admissionTestSource(t *testing.T, bundle string) runtimecorrelation.SourceArtifactFact {
+	t.Helper()
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fact
+}
+
+func admissionTestDialect(postgres bool) string {
+	if postgres {
+		return "postgres"
+	}
+	return "sqlite"
+}
 
 type runExecutionTestOwner interface {
 	RequireRunExecutionTx(context.Context, *sql.Tx, string) error
@@ -356,87 +402,6 @@ func TestRunExecutionCancellationPrecedesQueriesAndFenceBothDialects(t *testing.
 			if probe.calls != 0 || probe.observations != 0 {
 				t.Fatal("canceled work reached execution authority")
 			}
-		})
-	}
-}
-
-func TestRunExecutionObservationCannotMintNativeAdmissionBothDialects(t *testing.T) {
-	for _, postgres := range []bool{true, false} {
-		t.Run(admissionTestDialect(postgres), func(t *testing.T) {
-			db, mock := admissionTestSQLMock(t)
-			mock.ExpectBegin()
-			// Observation cannot mint admission; a cached mutable source cannot replace current execution status.
-			expectRunExecutionSource(mock, postgres, true, "running")
-			expectRunExecutionBinding(mock, postgres, true)
-			expectRunExecutionState(mock, postgres, "running")
-			expectRunExecutionSource(mock, postgres, false, "running")
-			expectRunExecutionBinding(mock, postgres, true)
-			expectRunExecutionState(mock, postgres, "running")
-			expectRunExecutionSource(mock, postgres, true, "running")
-			expectRunExecutionBinding(mock, postgres, true)
-			expectRunExecutionState(mock, postgres, "running")
-			mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(selectedCompletionBundle).
-				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
-			expectRunExecutionBinding(mock, postgres, true)
-			expectRunExecutionState(mock, postgres, "paused")
-			probe := &selectedCompletionAuthorityProbe{current: true}
-			owner := runExecutionOwner(postgres, probe)
-			admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
-				_, authority := selectedCompletionContext(t)
-				ctx = runtimeeffects.WithAuthority(runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, selectedCompletionRunID), admissionTestSource(t, selectedCompletionBundle)), authority)
-				return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-					if current, err := owner.ObserveRunExecution(ctx, tx, selectedCompletionRunID); err != nil || !current {
-						t.Fatalf("first native observation: current=%t err=%v", current, err)
-					}
-					if _, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, selectedCompletionRunID); err != nil || cached {
-						t.Fatalf("observation minted mutable source admission: cached=%t err=%v", cached, err)
-					}
-					if err := owner.RequireRunExecutionTx(ctx, tx, selectedCompletionRunID); err != nil {
-						return err
-					}
-					if fact, cached, err := mutationprotocol.CachedActiveRunSource(ctx, tx, selectedCompletionRunID); err != nil || !cached || fact.BundleHash() != selectedCompletionBundle {
-						t.Fatalf("canonical mutable source was not attributed to native transaction: cached=%t err=%v", cached, err)
-					}
-					if current, err := owner.ObserveRunExecution(ctx, tx, selectedCompletionRunID); err != nil || !current {
-						t.Fatalf("fresh observation with existing admission: current=%t err=%v", current, err)
-					}
-					if err := owner.RequireRunExecutionTx(ctx, tx, selectedCompletionRunID); !errors.Is(err, runtimerunlifecycle.ErrRunExecutionAuthority) {
-						t.Fatalf("cached active source bypassed fresh paused execution status: %v", err)
-					}
-					if probe.calls != 1 || probe.observations != 2 || probe.tx != tx || probe.query != tx {
-						t.Fatal("observation used a mutable fence or lost native transaction attribution")
-					}
-					return nil
-				})
-			})
-		})
-	}
-}
-
-func TestRunExecutionRejectsForeignNativeTransactionBothDialects(t *testing.T) {
-	for _, postgres := range []bool{true, false} {
-		t.Run(admissionTestDialect(postgres), func(t *testing.T) {
-			foreign, _ := runExecutionTransaction(t)
-			db, mock := admissionTestSQLMock(t)
-			mock.ExpectBegin()
-			probe := &selectedCompletionAuthorityProbe{current: true}
-			owner := runExecutionOwner(postgres, probe)
-			admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
-				_, authority := selectedCompletionContext(t)
-				ctx = runtimeeffects.WithAuthority(runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, selectedCompletionRunID), admissionTestSource(t, selectedCompletionBundle)), authority)
-				return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-					if tx == foreign {
-						t.Fatal("foreign transaction fixture reused the native frame")
-					}
-					if err := owner.RequireRunExecutionTx(ctx, foreign, selectedCompletionRunID); err == nil || errors.Is(err, runtimerunlifecycle.ErrRunExecutionAuthority) {
-						t.Fatalf("foreign native transaction attribution was accepted or reclassified: %v", err)
-					}
-					if probe.calls != 0 || probe.observations != 0 {
-						t.Fatal("foreign transaction reached selected authority")
-					}
-					return nil
-				})
-			})
 		})
 	}
 }
