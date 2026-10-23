@@ -10,6 +10,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/google/uuid"
 )
 
@@ -165,6 +166,7 @@ func TestStartupProcessTakeoverRebindsStaticAndReadinessCellsBeforeHydrationAndR
 		lifecycle: newAgentLifecycleCoordinator(store, nil, store, nil),
 		roles:     PersistenceRoles{LifecycleCensus: store, LifecycleState: store},
 	}
+	manager.lifecycle.executionPosture = executionposture.MockOnly
 
 	if err := manager.RebindLifecycleExecutionForStartup(context.Background()); err == nil || !strings.Contains(err.Error(), "injected process takeover interruption") {
 		t.Fatalf("first takeover error = %v, want injected interruption", err)
@@ -182,6 +184,10 @@ func TestStartupProcessTakeoverRebindsStaticAndReadinessCellsBeforeHydrationAndR
 	for _, request := range store.requests {
 		if request.OperationKind != "process_takeover" {
 			t.Fatalf("operation kind = %q, want process_takeover", request.OperationKind)
+		}
+		if err := request.StartupRecovery.Validate(); err != nil || !request.StartupRecovery.Now().Equal(request.Now) ||
+			request.StartupRecovery.Admit("live") == nil || request.StartupRecovery.Admit("mock") != nil {
+			t.Fatalf("takeover lost the exact recovery time/posture: %v", err)
 		}
 	}
 	for i, record := range store.agents {
