@@ -939,6 +939,7 @@ jobs:
           while [ "$SECONDS" -lt "$deadline" ]; do
             check=$((check + 1))
             remaining=$((deadline - SECONDS))
+            if [ "$remaining" -le 0 ]; then break; fi
             request_seconds=$((remaining < 30 ? remaining : 30))
             if timeout --signal=KILL "$request_seconds" gh api --paginate --slurp -H 'Cache-Control: no-cache' "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100&metadata_poll=$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$check" > test-results/jobs.tmp.json 2> test-results/jobs-fetch.log; then
               jq -e 'type == "array" and all(.[]; (.jobs | type) == "array")' test-results/jobs.tmp.json >/dev/null
