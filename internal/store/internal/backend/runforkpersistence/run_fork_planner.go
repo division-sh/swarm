@@ -188,7 +188,7 @@ func planRunForkSnapshotWithActivityOrigins(
 		if err != nil {
 			return runfork.RunForkPlan{}, err
 		}
-	} else {
+	} else if cursor.Kind != runfork.RunForkPointStateRevision {
 		return runfork.RunForkPlan{}, fmt.Errorf("unsupported fork revision point kind %q", cursor.Kind)
 	}
 	historicalEventIDs := make([]string, 0, len(snapshot.Events))
@@ -372,6 +372,13 @@ func resolveFixedRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID str
 			return runForkEventCursor{}, fmt.Errorf("fixed start point is not original creation revision")
 		}
 		return cursor, nil
+	}
+	if point.Kind == runfork.RunForkPointStateRevision {
+		var revision int64
+		if err := tx.QueryRowContext(ctx, `SELECT revision FROM run_fork_revisions WHERE run_id=$1 AND revision=$2`, runID, point.Revision).Scan(&revision); err != nil {
+			return runForkEventCursor{}, fmt.Errorf("fixed state revision is not committed: %w", err)
+		}
+		return runForkEventCursor{Kind: point.Kind, Revision: revision}, nil
 	}
 	var originKind string
 	if err := tx.QueryRowContext(ctx, `SELECT origin_kind FROM runs WHERE run_id=$1`, runID).Scan(&originKind); err != nil {

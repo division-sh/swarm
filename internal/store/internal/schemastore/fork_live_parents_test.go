@@ -36,8 +36,8 @@ func verifyForkLiveParentPairs(t *testing.T, db *sql.DB, sourceEventID, otherEve
 		}
 		readErr := rows.Err()
 		closeErr := rows.Close()
-		if readErr != nil || closeErr != nil || len(facts) != 2 {
-			t.Fatalf("read exact event/deployment canonical pair: rows=%d read=%v close=%v", len(facts), readErr, closeErr)
+		if readErr != nil || closeErr != nil || len(facts) != 3 || facts[0].kind != "deployment_revision" || facts[1].kind != "event" || facts[2].kind != "state_revision" {
+			t.Fatalf("read exact event/deployment/state canonical facts: rows=%d read=%v close=%v", len(facts), readErr, closeErr)
 		}
 		columns := idColumn + "," + bindingColumn + ",fork_run_id,source_run_id,fork_point_kind,fork_revision,fork_event_id"
 		values := "$1,$2,$3,$4,$5,$6,$7"
@@ -73,7 +73,7 @@ func verifyForkLiveParentPairs(t *testing.T, db *sql.DB, sourceEventID, otherEve
 						case "missing_kind":
 							changed[4] = nil
 						case "crossed_binding":
-							changed[1] = facts[1-index].binding
+							changed[1] = facts[(index+1)%len(facts)].binding
 						case "crossed_child":
 							changed[2] = fact.source
 						case "crossed_source":

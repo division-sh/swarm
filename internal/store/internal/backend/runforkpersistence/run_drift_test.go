@@ -24,8 +24,6 @@ func runDriftDatabase(t *testing.T, backend string, constructed bool) (*sql.DB, 
 		entityIDType = "UUID"
 	}
 	for _, query := range []string{
-		`CREATE TABLE run_fork_revision_heads(run_id TEXT PRIMARY KEY,last_revision BIGINT NOT NULL)`,
-		`CREATE TABLE run_fork_revisions(run_id TEXT NOT NULL,revision BIGINT NOT NULL,PRIMARY KEY(run_id,revision))`,
 		fmt.Sprintf(`CREATE TABLE entity_mutations(mutation_id TEXT PRIMARY KEY,run_id TEXT,entity_id TEXT,domain TEXT,path TEXT,new_value %s,created_at TIMESTAMP)`, jsonType),
 		fmt.Sprintf(`CREATE TABLE entity_state(run_id TEXT,entity_id %s,fields %s,flow_instance TEXT,entity_type TEXT,PRIMARY KEY(run_id,entity_id))`, entityIDType, jsonType),
 		fmt.Sprintf(`CREATE TABLE flow_instances(run_id TEXT,entity_id %s,instance_path TEXT,entity_type TEXT,flow_template TEXT,current_state TEXT,revision BIGINT,gates %s,bookkeeping %s,accumulator %s,status TEXT DEFAULT 'active',PRIMARY KEY(run_id,instance_path),UNIQUE(run_id,entity_id))`, entityIDType, jsonType, jsonType, jsonType),
@@ -36,11 +34,6 @@ func runDriftDatabase(t *testing.T, backend string, constructed bool) (*sql.DB, 
 	}
 	run, entity := uuid.NewString(), uuid.NewString()
 	requireHistoricalSnapshotRun(t, db, run)
-	for _, query := range []string{`INSERT INTO run_fork_revision_heads VALUES($1,1)`, `INSERT INTO run_fork_revisions VALUES($1,1)`} {
-		if _, err := db.Exec(query, run); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{"value":"original"}',$3,'company')`, run, entity, entity); err != nil {
 		t.Fatal(err)
 	}
@@ -304,11 +297,6 @@ func TestVerifyRunCrossRunIsolationBothStores(t *testing.T) {
 			db, run, entity := runDriftDatabase(t, backend, true)
 			foreign := uuid.NewString()
 			requireHistoricalSnapshotRun(t, db, foreign)
-			for _, query := range []string{`INSERT INTO run_fork_revision_heads VALUES($1,1)`, `INSERT INTO run_fork_revisions VALUES($1,1)`} {
-				if _, err := db.Exec(query, foreign); err != nil {
-					t.Fatal(err)
-				}
-			}
 			if _, err := db.Exec(`INSERT INTO entity_state VALUES($1,$2,'{"value":"foreign-bypass"}',$3,'company')`, foreign, entity, entity); err != nil {
 				t.Fatal(err)
 			}

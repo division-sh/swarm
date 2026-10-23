@@ -145,7 +145,7 @@ func exactSelectedForkActivation(req RunForkExecutionRequest, result runtimerunf
 		activation.ForkPoint.Kind == materialization.ForkPoint.Kind &&
 		activation.ForkPoint.Revision == materialization.ForkPoint.Revision &&
 		activation.ForkPoint.EventID == materialization.ForkPoint.EventID &&
-		activation.ForkRunStatus == runfork.RunForkActivatedStatus &&
+		(activation.ForkRunStatus == runfork.RunForkActivatedStatus || activation.ForkRunStatus == runfork.RunForkLiveStatus) &&
 		(req.SourceRunID == "" || materialization.SourceRunID == req.SourceRunID) &&
 		(req.ForkEventID == "" || materialization.ForkPoint.EventID == req.ForkEventID)
 }
@@ -336,13 +336,9 @@ func validateRunForkExecutionResult(result RunForkExecutionResult) error {
 		if result.ForkEventID == "" {
 			return fmt.Errorf("event run.fork result has no exact event identity")
 		}
-	case string(runfork.RunForkPointDeploymentRevision):
+	case string(runfork.RunForkPointDeploymentRevision), string(runfork.RunForkPointRunStart), string(runfork.RunForkPointStateRevision):
 		if result.ForkEventID != "" {
-			return fmt.Errorf("deployment revision run.fork result invented an event identity")
-		}
-	case string(runfork.RunForkPointRunStart):
-		if result.ForkEventID != "" {
-			return fmt.Errorf("run start run.fork result invented an event identity")
+			return fmt.Errorf("%s run.fork result invented an event identity", result.ForkPointKind)
 		}
 	default:
 		return fmt.Errorf("run.fork result has invalid point kind %q", result.ForkPointKind)

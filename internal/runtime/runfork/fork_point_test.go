@@ -9,7 +9,8 @@ import (
 func TestRunForkPointClosedArms(t *testing.T) {
 	event := RunForkPoint{Kind: RunForkPointEvent, Revision: 3, EventID: uuid.NewString()}
 	deployment := RunForkPoint{Kind: RunForkPointDeploymentRevision, Revision: 1}
-	for _, point := range []RunForkPoint{event, deployment} {
+	state := RunForkPoint{Kind: RunForkPointStateRevision, Revision: 2}
+	for _, point := range []RunForkPoint{event, deployment, state} {
 		if err := point.Validate(); err != nil {
 			t.Fatal(err)
 		}
@@ -20,6 +21,10 @@ func TestRunForkPointClosedArms(t *testing.T) {
 		{Kind: RunForkPointDeploymentRevision, Revision: 0},
 		{Kind: RunForkPointDeploymentRevision, Revision: 1, EventID: event.EventID},
 		{Kind: RunForkPointDeploymentRevision, Revision: 1, EventName: "items.ready"},
+		{Kind: RunForkPointStateRevision, Revision: 0},
+		{Kind: RunForkPointStateRevision, Revision: 1, EventID: event.EventID},
+		{Kind: RunForkPointStateRevision, Revision: 1, Input: event.EventID},
+		{Kind: RunForkPointStateRevision, Revision: 1, EventName: "items.ready"},
 		{Kind: "unknown", Revision: 1},
 	} {
 		if err := point.Validate(); err == nil {

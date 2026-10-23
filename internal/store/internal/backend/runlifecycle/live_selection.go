@@ -38,7 +38,7 @@ func loadLiveRun(ctx context.Context, q rowQueryer, scope runtimerunlifecycle.Li
 	result := runtimerunlifecycle.LiveRun{Scope: scope}
 	var bundleHash string
 	err := q.QueryRowContext(ctx, `SELECT run_id,bundle_hash FROM runs
-		WHERE deployment=$1 AND flow_path=$2 AND status='live'`, scope.Deployment, scope.FlowPath).Scan(&result.RunID, &bundleHash)
+		WHERE flow_path=$1 AND status='live'`, scope.FlowPath).Scan(&result.RunID, &bundleHash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimerunlifecycle.LiveRun{}, false, nil
 	}
@@ -51,8 +51,7 @@ func loadLiveRun(ctx context.Context, q rowQueryer, scope runtimerunlifecycle.Li
 
 func liveScopeForRun(ctx context.Context, q rowQueryer, runID string) (runtimerunlifecycle.LiveRunScope, error) {
 	var scope runtimerunlifecycle.LiveRunScope
-	err := q.QueryRowContext(ctx, `SELECT COALESCE(deployment,''),COALESCE(flow_path,'') FROM runs WHERE run_id=$1`, runID).
-		Scan(&scope.Deployment, &scope.FlowPath)
+	err := q.QueryRowContext(ctx, `SELECT COALESCE(flow_path,'') FROM runs WHERE run_id=$1`, runID).Scan(&scope.FlowPath)
 	if errors.Is(err, sql.ErrNoRows) {
 		return scope, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
 	}
@@ -68,7 +67,7 @@ func requireCreateScope(ctx context.Context, tx *sql.Tx, request runtimerunlifec
 		return err
 	}
 	if scope != request.LiveScope {
-		return errors.New("run creation conflicts with its original deployment/flow")
+		return errors.New("run creation conflicts with its original flow")
 	}
 	return nil
 }
@@ -86,14 +85,14 @@ func continueTargetState(ctx context.Context, tx *sql.Tx, postgres bool, state r
 
 func rejectLiveRunStop(ctx context.Context, tx *sql.Tx, runID string) (bool, error) {
 	var status string
-	var deployment sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT status,deployment FROM runs WHERE run_id=$1`, runID).Scan(&status, &deployment); err != nil {
+	var flowPath sql.NullString
+	if err := tx.QueryRowContext(ctx, `SELECT status,flow_path FROM runs WHERE run_id=$1`, runID).Scan(&status, &flowPath); err != nil {
 		return false, err
 	}
 	if status == string(runtimerunlifecycle.StateLive) {
 		return true, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrNotPaused, RunID: runID, CurrentStatus: status, Detail: "pause the live run before stopping it"}
 	}
-	return deployment.Valid, nil
+	return flowPath.Valid, nil
 }
 
 func classifyLiveClaimFailure(ctx context.Context, q rowQueryer, runID string, err error) error {

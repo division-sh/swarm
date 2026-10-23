@@ -47,6 +47,24 @@ func TestDeploymentForkPointSelectsExactCommittedRevisionBothStores(t *testing.T
 			if _, err := db.Exec(`INSERT INTO run_fork_revisions VALUES($1,1),($1,2)`, runID); err != nil {
 				t.Fatal(err)
 			}
+			otherRuns := make(map[string]string)
+			for _, origin := range []string{"event", "fork_materialization", "scenario_setup"} {
+				otherID := uuid.NewString()
+				otherRuns[origin] = otherID
+				if _, err := db.Exec(`INSERT INTO runs VALUES($1,$2)`, otherID, origin); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`INSERT INTO run_fork_revision_heads VALUES($1,2)`, otherID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(`INSERT INTO run_fork_revisions VALUES($1,1),($1,2)`, otherID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			dangling := uuid.NewString()
+			if _, err := db.Exec(`INSERT INTO run_fork_revision_heads VALUES($1,2)`, dangling); err != nil {
+				t.Fatal(err)
+			}
 			ctx := context.Background()
 			tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 			if err != nil {
@@ -57,7 +75,7 @@ func TestDeploymentForkPointSelectsExactCommittedRevisionBothStores(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			if point.Kind != runfork.RunForkPointDeploymentRevision || point.Revision != 2 || point.EventID != "" {
+			if point.Kind != runfork.RunForkPointStateRevision || point.Revision != 2 || point.EventID != "" {
 				t.Fatalf("wrong eventless point: %+v", point)
 			}
 			fixed, err := resolveFixedRunForkRevisionPoint(ctx, tx, runID,
@@ -68,6 +86,25 @@ func TestDeploymentForkPointSelectsExactCommittedRevisionBothStores(t *testing.T
 			if _, err := resolveFixedRunForkRevisionPoint(ctx, tx, runID,
 				runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 3}, resolveRunForkRevisionPoint); err == nil {
 				t.Fatal("uncommitted deployment revision was accepted")
+			}
+			for origin, otherID := range otherRuns {
+				latest, err := resolveRunForkRevisionPoint(ctx, tx, otherID, "")
+				if err != nil || latest.Kind != runfork.RunForkPointStateRevision || latest.Revision != 2 || latest.EventID != "" {
+					t.Fatalf("%s latest is not the committed state head: %+v err=%v", origin, latest, err)
+				}
+				fixed, err := resolveFixedRunForkRevisionPoint(ctx, tx, otherID, runfork.RunForkPoint{Kind: runfork.RunForkPointStateRevision, Revision: 1}, resolveRunForkRevisionPoint)
+				if err != nil || fixed.Kind != runfork.RunForkPointStateRevision || fixed.Revision != 1 {
+					t.Fatalf("fixed %s state cut advanced: %+v err=%v", origin, fixed, err)
+				}
+				if _, err := resolveFixedRunForkRevisionPoint(ctx, tx, otherID, runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 1}, resolveRunForkRevisionPoint); err == nil {
+					t.Fatalf("%s source borrowed deployment-only cut", origin)
+				}
+			}
+			if _, err := resolveRunForkRevisionPoint(ctx, tx, dangling, ""); err == nil {
+				t.Fatal("uncommitted head was accepted")
+			}
+			if _, err := resolveFixedRunForkRevisionPoint(ctx, tx, runID, runfork.RunForkPoint{Kind: runfork.RunForkPointStateRevision, Revision: 3}, resolveRunForkRevisionPoint); err == nil {
+				t.Fatal("uncommitted state revision was accepted")
 			}
 		})
 	}
