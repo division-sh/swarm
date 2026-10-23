@@ -44,6 +44,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 						SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
 						PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 						MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+						RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 						InspectRunMutationDrift(context.Context, string) (mutationlog.DriftReport, error)
 						LoadOperatorEntity(context.Context, string, string) (operatorread.OperatorEntityFull, error)
 						ListOperatorEntities(context.Context, operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListResult, error)
@@ -140,7 +141,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 						t.Fatalf("materialize-only import fabricated construction or lost state: headers=%d fields=%d err=%v", headers, fields, err)
 					}
 					before = snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
-					if replay, err := owner.MaterializeRunFork(f.ctx, request); err != nil || replay.ForkRunID != fork.ForkRunID || !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
+					if replay, err := owner.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, request); err != nil || replay.ForkRunID != fork.ForkRunID || !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
 						t.Fatalf("exact imported history replay changed state: %+v err=%v", replay, err)
 					}
 					for _, fault := range []struct {
@@ -189,7 +190,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 								t.Fatal(err)
 							}
 							before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
-							if _, err := owner.MaterializeRunFork(f.ctx, request); err == nil {
+							if _, err := owner.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, request); err == nil {
 								t.Errorf("exact replay accepted changed imported %s", fault.name)
 							}
 							if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
@@ -204,7 +205,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 						original := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
 						seedWorkflowHeaderProjectionFixture(t, f.ctx, f.db, fork.ForkRunID, entityID, ".", ".", "record", "pending", "{}", at)
 						before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
-						if _, err := owner.MaterializeRunFork(f.ctx, request); err == nil || err.Error() != fmt.Sprintf("fork materialization %s has unexpected entity header/%s", fork.ForkRunID, entityID) {
+						if _, err := owner.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, request); err == nil || err.Error() != fmt.Sprintf("fork materialization %s has unexpected entity header/%s", fork.ForkRunID, entityID) {
 							t.Fatalf("import acquired construction or lost exact header refusal: %v", err)
 						}
 						if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
