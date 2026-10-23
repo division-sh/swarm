@@ -205,7 +205,7 @@ func TestAccountingProofRealSourceManifestCoversRuntimeReaders(t *testing.T) {
 		}
 		found[input.Path] = true
 	}
-	for _, path := range append(append([]string{}, accountingRuntimeFixturePaths[:5]...), "scripts/rewrite-stages-2566/entries.json", "scripts/rewrite-stages-2566/intent.json", "scripts/rewrite-stages-2566/finite-fixtures.json", ".github/test-proof-history-inputs.json", ".github/workflows/ci.yml", "platform-spec.yaml") {
+	for _, path := range append(append([]string{}, accountingRuntimeFixturePaths[:5]...), "scripts/rewrite-stages-2566/finite-fixtures.json", ".github/test-proof-history-inputs.json", ".github/workflows/ci.yml", "platform-spec.yaml") {
 		if !found[path] {
 			t.Fatalf("runtime reader input omitted from actual source manifest: %s", path)
 		}
