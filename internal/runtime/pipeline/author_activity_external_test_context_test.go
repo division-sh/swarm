@@ -23,6 +23,8 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -109,11 +111,16 @@ func replacePipelineExternalWorkOccurrenceForSource(t *testing.T, fact runtimeco
 	if fixture.runtimes[identity] != predecessor {
 		t.Fatal("native reopen cannot replace another runtime occurrence")
 	}
+	fixture.process.Retire()
+	if _, err := fixture.process.Join(join); err != nil {
+		t.Fatal(err)
+	}
+	fixture.process = worklifetime.NewProcess()
 	next, err := fixture.process.NewRuntime(context.Background(), identity)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.runtimes[identity] = next
+	fixture.runtimes = map[worklifetime.RuntimeIdentity]*worklifetime.RuntimeOccurrence{identity: next}
 }
 
 func (f *pipelineExternalTestWorkFixture) retireAndWait(ctx context.Context) error {
@@ -141,11 +148,49 @@ func testAuthorActivityContext(t *testing.T, ctx context.Context) context.Contex
 func testAuthorActivityContextForSource(t *testing.T, ctx context.Context, fact runtimecorrelation.SourceArtifactFact) context.Context {
 	t.Helper()
 	ctx = worklifetime.WithOccurrence(ctx, pipelineExternalTestWorkOwnerForSource(t, fact))
+	fixture, _ := pipelineExternalTestWorkFixtures.Load(t)
+	ctx = worklifetime.WithProcess(ctx, fixture.(*pipelineExternalTestWorkFixture).process)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
 		fact.BundleHash(),
 	))
+}
+
+func nativeProcessContextFixture(t *testing.T, ctx context.Context, selected any) context.Context {
+	t.Helper()
+	if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
+		scope, scoped := runtimeauthoractivity.ScopeFromContext(ctx)
+		if !scoped || scope.RuntimeInstanceID == "" {
+			t.Fatal("native fixture requires its original runtime attribution")
+		}
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, scope.RuntimeInstanceID)
+	}
+	store, ok := selected.(agentfixture.Store)
+	if !ok {
+		t.Fatalf("native fixture requires its process acquisition owner, got %T", selected)
+	}
+	capability, err := agentfixture.ProcessCapability(t, ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return nativeOriginalProcessContextFixture(t, ctx, capability)
+}
+
+func nativeOriginalProcessContextFixture(t *testing.T, ctx context.Context, capability startupownership.ProcessCapability) context.Context {
+	t.Helper()
+	original, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, ok := worklifetime.ProcessFromContext(ctx)
+	if !ok {
+		t.Fatal("native fixture requires its original process work owner")
+	}
+	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
+		t.Fatal(err)
+	}
+	return ctx
 }
 
 type testAuthorActivityCatalogRegistrar interface {

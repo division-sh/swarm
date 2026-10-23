@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -21,9 +22,7 @@ func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected a
 		t.Fatal("native timer attachment requires its admitted source")
 	}
 	workflows := selected.(pipeline.DynamicFlowRuntimeReadinessPersistence)
-	process, err := selected.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-		OwnerID: "timer-replay-proof", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-	})
+	process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
 	if err != nil {
 		t.Fatal(err)
 	}
