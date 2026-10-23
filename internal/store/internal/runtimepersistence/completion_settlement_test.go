@@ -1561,6 +1561,7 @@ func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettl
 	}
 	actor.ID, actor.Identity, actor.Role, actor.Type = agentID, identity, "worker", "managed"
 	actor.Model, actor.Memory, actor.FlowID, actor.FlowPath = "regular", memory, "global", flowInstance
+	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, actor),
 		Status: "active", StartedAt: now,
@@ -1571,7 +1572,6 @@ func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettl
 	if err != nil || !found {
 		t.Fatalf("load admitted completion agent lifecycle: found=%v err=%v", found, err)
 	}
-	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 	if sqlite {
 		if memory.Enabled {
 			if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,conversation,turn_count,runtime_state,lease_holder,lease_grant_id,lease_expires_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,'[]',0,?,?,?,?,'active',?,?)`,

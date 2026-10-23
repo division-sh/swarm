@@ -13,7 +13,8 @@ import (
 
 func VerifyNativeNodeContractFirstEventTransitionsFromCanonicalInitialStateOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: first-event-transition\nstages:\n  waiting: {}\n  done: {final: true}\n",
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages:\n  waiting: {}\n  done: {final: true}\n",
 		"entities.yaml": "first_event_entity: {}\n",
 		"events.yaml":   "request.accepted:\n",
 		"nodes.yaml":    "acceptor:\n  execution_type: system_node\n  subscribes_to: [request.accepted]\n  event_handlers:\n    request.accepted:\n      advances_to: done\n",

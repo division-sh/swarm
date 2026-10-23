@@ -18,12 +18,14 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -52,7 +54,12 @@ func admitRegistrationTestGeneration(
 	if err != nil {
 		t.Fatalf("AcquireProcessCapability: %v", err)
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash}
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, store.(sourceartifactfixture.Writer), rooted.Artifact())
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatalf("build registration source coordinate: %v", err)
+	}
 	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatalf("build registration source set: %v", err)
@@ -928,6 +935,9 @@ func admitPredecessorObligations(t *testing.T, ctx context.Context, selected sta
 	if err != nil || !found || outcome.State != runtimeeffects.StateAuthorized || outcome.AttemptState != runtimeeffects.StateAuthorized {
 		t.Fatalf("live predecessor obligation outcome: %+v found=%t err=%v", outcome, found, err)
 	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	eventID := uuid.NewString()
 	event := eventtest.RunCreatingRootIngress(
 		eventID, events.EventType("test.predecessor_obligation"), "takeover-proof", "",
@@ -974,7 +984,12 @@ func runSQLiteForcedDeathChild(t *testing.T) bool {
 		if err != nil {
 			t.Fatalf("read child process authority: %v", err)
 		}
-		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: testCanonicalBundleHash}
+		rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+		sourceartifactfixture.RequireArtifact(t, ctx, selected, rooted.Artifact())
+		coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+		if err != nil {
+			t.Fatalf("build child source coordinate: %v", err)
+		}
 		plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 		if err != nil {
 			t.Fatal(err)

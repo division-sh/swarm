@@ -10,6 +10,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -54,11 +55,17 @@ func (i *interceptorOutcomeRoute) InterceptDeliveryRoute(_ context.Context, deli
 
 func interceptorOutcomeBus(t *testing.T, store *targetRouteMemoryStore, interceptors ...EventInterceptor) (*EventBus, *interceptorOutcomePipelineOwner) {
 	t.Helper()
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "custom.receiver_projection:\ncustom.continuation_parent:\ncustom.sweep_commit:\n",
+		"nodes.yaml":    "workflow-node:\n  execution_type: system_node\n  subscribes_to: [custom.continuation_parent]\n  event_handlers:\n    custom.continuation_parent: {}\n",
+	}))
 	owner := &interceptorOutcomePipelineOwner{
 		terminalReleasePipelineOwner: newTerminalReleasePipelineOwner(),
 		settlements:                  make(map[string]runtimepipelineobligation.Disposition),
 	}
-	bus, err := newScopedTestEventBus(store, EventBusOptions{PipelineObligations: owner, Interceptors: interceptors})
+	bus, err := newScopedTestEventBus(store, EventBusOptions{PipelineObligations: owner, Interceptors: interceptors, ContractBundle: source})
 	if err != nil {
 		t.Fatal(err)
 	}

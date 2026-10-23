@@ -43,8 +43,10 @@ func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBacken
 	t.Helper()
 	opened := backend.open(t)
 	construction := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, map[string]string{
-		"schema.yaml":         "name: snapshot-ownership\n",
-		"owner/schema.yaml":   "name: owner\ninstance: subject_id\nstages:\n  active: {}\n  ready: {}\n  later: {}\npins:\n  inputs:\n    - construct.requested\n",
+		"manifest.yaml":       "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":         "stages: []\n",
+		"owner/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"owner/schema.yaml":   "instance: subject_id\nstages:\n  active: {}\n  ready: {}\n  later: {}\npins:\n  inputs:\n    - construct.requested\n",
 		"owner/entities.yaml": "review_item:\n  subject_id: text\n  entity_type: {type: text, initial: authored-not-owner}\n  value: text?\n",
 		"owner/events.yaml":   "construct.requested:\n",
 	}, nil, ownStoreTestAgentManager, nil)
@@ -180,7 +182,11 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 					if !plan.ExecutionReady || !plan.ReplayResumeAdmission.StateOnlyExecutionReady || len(plan.UnsupportedBlockers) != 0 {
 						t.Fatalf("fixed snapshot acquired authority from unrelated event context: %#v", plan.UnsupportedBlockers)
 					}
-					req := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}
+					rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					req := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()}
 					materialized, err := f.store.MaterializeRunFork(f.ctx, req)
 					if err != nil {
 						t.Fatal(err)
@@ -305,6 +311,10 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type", "native_receipt_missing", "native_receipt_version", "native_birth", "native_contract", "empty_import_missing_birth", "empty_import_forged_kind", "empty_import_duplicate_birth", "empty_import_missing_creation_clock", "empty_import_missing_update_clock", "empty_import_omitted_creation_clock", "empty_import_omitted_update_clock", "empty_import_zero_creation_clock", "empty_import_zero_update_clock", "empty_import_reversed_clocks", "empty_import_lifecycle_history", "empty_import_gate_history", "empty_import_bookkeeping_history", "empty_import_accumulator_history"} {
 						t.Run(invalid, func(t *testing.T) {
 							f := newSnapshotOwnershipFixture(t, backend, false, false)
+							rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+							if err != nil {
+								t.Fatal(err)
+							}
 							emptyImport := strings.HasPrefix(invalid, "empty_import_")
 							duplicateImport := invalid == "empty_import_duplicate_birth"
 							metadataEntityID, wantEntities := f.entityID, 2
@@ -346,7 +356,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 							var forkBefore [5]int
 							var forkEntityBefore snapshotOwnershipEntityRow
 							if phase == "exact_replay" {
-								materialized, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+								materialized, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()})
 								if err != nil {
 									t.Fatal(err)
 								}
@@ -418,7 +428,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								if err != nil || blocked.ExecutionReady || len(blocked.Entities) != wantEntities || !reflect.DeepEqual(blocked.UnsupportedBlockers, wantBlockers) {
 									t.Fatalf("native import history escaped exact fork admission: %+v %v", blocked, err)
 								}
-								refused, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: poisonID})
+								refused, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: poisonID, RootAdmission: rooted.Admission()})
 								if err == nil || err.Error() != "fork materialization requires execution-ready plan; blockers: "+runfork.RunForkBlockerEntitySnapshotMetadataUnproven || refused.ForkRunID != "" || refused.ExecutionReady || !reflect.DeepEqual(refused.UnsupportedBlockers, wantBlockers) {
 									t.Fatalf("native import history materialized or lost exact refusal: %+v %v", refused, err)
 								}
@@ -431,9 +441,9 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								}
 								var valid runfork.RunForkMaterialization
 								if phase == "exact_replay" {
-									valid, err = f.store.RequireMaterializedRunFork(f.ctx, forkRunID, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+									valid, err = f.store.RequireMaterializedRunFork(f.ctx, forkRunID, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()})
 								} else {
-									valid, err = f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+									valid, err = f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()})
 								}
 								if err != nil || (phase == "exact_replay" && valid.ForkRunID != forkRunID) {
 									t.Fatalf("earlier admitted import cut stopped materializing: %+v %v", valid, err)
@@ -596,7 +606,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 							if emptyImport && !duplicateImport && (planErr == nil || planErr.Error() != wantImportRefusal) {
 								t.Fatalf("empty import planning refused for the wrong reason: %v", planErr)
 							}
-							_, materializeErr := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+							_, materializeErr := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()})
 							if materializeErr == nil || (emptyImport && !duplicateImport && materializeErr.Error() != wantImportRefusal) {
 								t.Fatalf("invalid historical metadata materialized or refused for the wrong reason: %v", materializeErr)
 							}

@@ -488,7 +488,7 @@ func runSelectedForkFlowOwnedReadinessBothStores(t *testing.T, selectedStage str
 						}
 						routesBefore := catalogCommittedDeliveryRoutes(t, ctx, selected, frontierID)
 						var sourceStore interface {
-							storetest.DurableDataCatalogStore
+							storetest.RootedDataCatalogStore
 							forkexecution.SourceArtifactSelectedContractSourceStore
 						} = h.pg
 						var forkStore forkexecution.SelectedContractForkLifecycle = h.pg

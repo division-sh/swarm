@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -365,9 +366,9 @@ func newForkActivationFrontierFixture(t *testing.T, backend eventRecordContractB
 		return newForkContentionFixture(t, backend)
 	}
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend.name, false, map[string]string{
-		"schema.yaml":   "name: generic-frontier\nstages:\n  pending: {}\n  done: {}\n",
+		"schema.yaml":   "stages:\n  pending: {}\n  done: {}\n",
 		"entities.yaml": "subject:\n  name: {type: text, initial: 'At R'}\n",
-		"events.yaml":   "item.received:\n",
+		"events.yaml":   "item.received:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil)
 	runID := runtimecorrelation.RunIDFromContext(f.ctx)
 	fixture := forkContentionFixture{snapshotOwnershipFixture: snapshotOwnershipFixture{
@@ -434,6 +435,11 @@ func newConstructedGateFixtureWithOrigin(t *testing.T, backend eventRecordContra
 	runID := uuid.NewString()
 	f := forkContentionFixture{snapshotOwnershipFixture: snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, runID: runID, entityID: runID, eventID: uuid.NewString()}, gateOwned: true, source: semanticview.Wrap(bundle)}
 	f.ctx = runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), f.runID)
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ctx = runtimecorrelation.WithRootAdmission(f.ctx, rooted.Admission())
 	f.ctx, err = eventreceiver.NormalExecution().Bind(f.ctx, executionmode.Live)
 	if err != nil {
 		t.Fatal(err)
@@ -547,8 +553,12 @@ func TestGenericConstructedGateForkUsesFixedSnapshotBothStores(t *testing.T) {
 			if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")) {
 				t.Fatal("fixed gate planning changed source or child state")
 			}
+			rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			var first runfork.RunForkMaterialization
-			request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}
+			request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()}
 			for attempt := 0; attempt < 2; attempt++ {
 				var result runfork.RunForkMaterialization
 				var err error
@@ -580,8 +590,12 @@ func stageForkContentionFixture(t *testing.T, f forkContentionFixture, selected 
 
 func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selected bool, selector string, withOperation bool, pins ...durabledata.ExplicitPin) (runfork.RunForkMaterialization, runfork.RunForkSelectedContractExecutionActivateRequest) {
 	t.Helper()
+	rooted, err := f.store.(rootedRunStore).LoadRunRootedSource(f.ctx, f.runID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !selected {
-		staged, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+		staged, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID, RootAdmission: rooted.Admission()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -595,7 +609,7 @@ func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selecte
 	repo := canonicalrouting.RepoRoot(t)
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: store}
-	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(f.ctx, runforkexecution.SelectedContractSourceLoadRequest{SourceRunID: f.runID, Selection: selection})
+	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(f.ctx, runforkexecution.SelectedContractSourceLoadRequest{Responsibility: runforkexecution.OriginalRunSource(f.runID), Selection: selection})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,13 +621,14 @@ func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selecte
 			}
 		})
 	}
-	request := prepareSelectedStoreMaterializationForTest(t, f.ctx, f.store, f.runID, selector, selection)
+	targetCtx := runtimecorrelation.WithRootAdmission(f.ctx, rooted.Admission())
+	request := prepareSelectedStoreMaterializationForTest(t, targetCtx, f.store, f.runID, selector, selection, rooted.Admission().BundleHash())
 	request.DataPinOverrides = pins
 	if withOperation {
 		request.ForkOperation = &runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: "bearer:branch-point-proof", IdempotencyKey: uuid.NewString(),
 			TransportHash: "sha256:branch-point-proof", SourceRunID: f.runID, ForkEventID: selector,
-			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection, AllowSourceFreeze: true,
+			TargetBundleHash: loaded.SourceArtifactFact.BundleHash(), TargetRootReference: rooted.Admission().Reference(), ContractSelection: selection, AllowSourceFreeze: true,
 			DataPinOverrides: pins,
 		}
 	}
@@ -625,7 +640,12 @@ func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selecte
 	if err != nil {
 		t.Fatal(err)
 	}
-	return staged, runfork.RunForkSelectedContractExecutionActivateRequest{ForkOperation: request.ForkOperation, ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, DataPins: staged.DataPins, ExecutionSource: loaded.Source, AllowedSourceEventIDs: ids,
+	value, _ := storeTestWorkFixtures.Load(t)
+	process, err := selectedMaterializationProcessForTest(t, value.(*storeTestWorkFixture), f.store).Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return staged, runfork.RunForkSelectedContractExecutionActivateRequest{OriginalRootAdmission: rooted.Admission(), Process: process.LeaseStamp(), ForkOperation: request.ForkOperation, ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, DataPins: staged.DataPins, ExecutionSource: loaded.Source, AllowedSourceEventIDs: ids,
 		FrontierAdmission: request.FrontierAdmission, RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning}
 }
 
@@ -662,12 +682,15 @@ type forkContentionBarrier struct {
 	enterOnce, busyOnce, releaseOnce, resumeOnce sync.Once
 	control                                      *sql.Conn
 	key                                          int64
+	loserPID, heldPID                            atomic.Int64
+	armed                                        chan struct{}
 }
 
 func newForkContentionBarrier(t *testing.T, backend string, rollback bool) *forkContentionBarrier {
 	t.Helper()
 	b := &forkContentionBarrier{backend: backend, name: "h18_" + strings.ReplaceAll(uuid.NewString(), "-", ""), rollback: rollback,
 		entered: make(chan struct{}), busy: make(chan struct{}), released: make(chan struct{}), resumed: make(chan struct{})}
+	b.armed = make(chan struct{})
 	t.Cleanup(func() { b.release(); b.resume() })
 	if backend == "sqlite" {
 		if err := modernsqlite.RegisterScalarFunction(b.name, 0, func(*modernsqlite.FunctionContext, []driver.Value) (driver.Value, error) {
@@ -773,6 +796,8 @@ type forkContentionGate struct {
 	acquired        chan error
 	contender       forkContentionWait
 	cancelRequested bool
+	actual          *forkContentionBarrier
+	done            <-chan forkContentionResult
 }
 
 func (b *forkContentionBarrier) queueGate(t *testing.T, ctx context.Context, db *sql.DB, winnerPID int) *forkContentionGate {
@@ -830,6 +855,21 @@ func (b *forkContentionBarrier) awaitContender(t *testing.T, ctx context.Context
 
 func (b *forkContentionBarrier) awaitPostgresContender(t *testing.T, ctx context.Context, db *sql.DB, winnerPID int, gate *forkContentionGate, returned func() bool) {
 	t.Helper()
+	if gate.actual != nil {
+		forkContentionPoll(t, ctx, func() bool {
+			if returned() {
+				t.Fatal("contender returned before its native PostgreSQL lock wait")
+			}
+			gate.pid = int(b.loserPID.Load())
+			var waiting bool
+			if err := db.QueryRowContext(ctx, `SELECT $1=ANY(pg_blocking_pids($2))`, winnerPID, gate.pid).Scan(&waiting); err != nil {
+				t.Fatal(err)
+			}
+			return waiting
+		})
+		close(b.armed)
+		return
+	}
 	forkContentionPoll(t, ctx, func() bool {
 		if returned() {
 			t.Fatal("contender returned before its native PostgreSQL lock wait")
@@ -854,6 +894,27 @@ func (b *forkContentionBarrier) awaitGate(t *testing.T, ctx context.Context, db 
 	if gate == nil {
 		return
 	}
+	if gate.actual != nil {
+		if b.backend == "sqlite" {
+			return
+		}
+		select {
+		case <-b.busy:
+			select {
+			case <-b.resumed:
+				t.Fatal("native transaction hold was released before the winner-only snapshot")
+			default:
+			}
+			if b.heldPID.Load() != int64(gate.pid) || len(gate.done) != 0 {
+				t.Fatal("actual losing transaction is not held before native settlement")
+			}
+		case got := <-gate.done:
+			t.Fatalf("loser completed before the native transaction hold: %v", got.err)
+		case <-ctx.Done():
+			t.Fatal("losing native transaction hold: ", ctx.Err())
+		}
+		return
+	}
 	select {
 	case err := <-gate.acquired:
 		if err != nil {
@@ -872,6 +933,12 @@ func (b *forkContentionBarrier) assertContenderFenced(t *testing.T, ctx context.
 	if gate == nil {
 		return
 	}
+	if gate.actual != nil {
+		if b.heldPID.Load() != int64(gate.pid) || len(gate.done) != 0 {
+			t.Fatal("actual losing transaction is not held before native settlement")
+		}
+		return
+	}
 	if gate.contender.pid == 0 {
 		t.Fatal("observer gate has no identified native contender")
 	}
@@ -884,6 +951,10 @@ func (b *forkContentionBarrier) assertContenderFenced(t *testing.T, ctx context.
 func (b *forkContentionBarrier) openGate(t *testing.T, gate *forkContentionGate) {
 	t.Helper()
 	if gate != nil {
+		if gate.actual != nil {
+			b.resume()
+			return
+		}
 		if err := gate.tx.Rollback(); err != nil {
 			t.Fatal(err)
 		}
@@ -919,6 +990,8 @@ type forkContentionConn struct {
 type forkContentionTx struct {
 	driver.Tx
 	conn *forkContentionConn
+	ctx  context.Context
+	pid  int64
 }
 
 func (b *forkContentionBarrier) observeSQLiteStore(t *testing.T, path string) *SQLiteRuntimeStore {
@@ -955,15 +1028,51 @@ func (c *forkContentionConn) observe(ctx context.Context, err error) {
 		c.contended = true
 	}
 }
+func (c *forkContentionConn) IsValid() bool {
+	validator, ok := c.Conn.(driver.Validator)
+	return !ok || validator.IsValid()
+}
+func (c *forkContentionConn) ResetSession(ctx context.Context) error {
+	if resetter, ok := c.Conn.(driver.SessionResetter); ok {
+		return resetter.ResetSession(ctx)
+	}
+	return nil
+}
+func (c *forkContentionConn) CheckNamedValue(value *driver.NamedValue) error {
+	if checker, ok := c.Conn.(driver.NamedValueChecker); ok {
+		return checker.CheckNamedValue(value)
+	}
+	return driver.ErrSkip
+}
+func (c *forkContentionConn) Ping(ctx context.Context) error {
+	if pinger, ok := c.Conn.(driver.Pinger); ok {
+		return pinger.Ping(ctx)
+	}
+	return nil
+}
 func (c *forkContentionConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	c.contended = false
+	var pid int64
+	if c.barrier.backend == "postgres" && ctx.Value(forkContentionContextKey{}) == c.barrier {
+		rows, err := c.Conn.(driver.QueryerContext).QueryContext(ctx, `SELECT pg_backend_pid()`, nil)
+		if err != nil {
+			return nil, err
+		}
+		value := make([]driver.Value, 1)
+		err = rows.Next(value)
+		if err = errors.Join(err, rows.Close()); err != nil {
+			return nil, err
+		}
+		pid = value[0].(int64)
+		c.barrier.loserPID.Store(pid)
+	}
 	tx, err := c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
 	c.observe(ctx, err)
 	if err != nil {
 		c.pauseAfterRollback()
 		return nil, err
 	}
-	return &forkContentionTx{Tx: tx, conn: c}, nil
+	return &forkContentionTx{Tx: tx, conn: c, ctx: ctx, pid: pid}, nil
 }
 func (c *forkContentionConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
 	result, err := c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
@@ -976,11 +1085,37 @@ func (c *forkContentionConn) QueryContext(ctx context.Context, query string, arg
 	return rows, err
 }
 func (tx *forkContentionTx) Rollback() error {
+	tx.holdBeforeEnd()
 	err := tx.Tx.Rollback()
 	if err == nil {
 		tx.conn.pauseAfterRollback()
 	}
 	return err
+}
+func (tx *forkContentionTx) Commit() error {
+	tx.holdBeforeEnd()
+	return tx.Tx.Commit()
+}
+
+// Arm only after this backend really waits on the winner. Keep its native
+// transaction open, including refusal/rollback paths, until the snapshot ends.
+func (tx *forkContentionTx) holdBeforeEnd() {
+	if tx.pid == 0 || tx.ctx.Err() != nil {
+		return
+	}
+	b := tx.conn.barrier
+	select {
+	case <-b.armed:
+	default:
+		return
+	}
+	b.heldPID.Store(tx.pid)
+	defer b.heldPID.Store(0)
+	b.busyOnce.Do(func() { close(b.busy) })
+	select {
+	case <-b.resumed:
+	case <-tx.ctx.Done():
+	}
 }
 func (c *forkContentionConn) pauseAfterRollback() {
 	if c.contended {

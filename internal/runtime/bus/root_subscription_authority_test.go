@@ -9,10 +9,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/google/uuid"
 )
 
@@ -21,7 +19,7 @@ func TestRootInputSourceLoadedConsumerCardinality(t *testing.T) {
 		for _, connected := range [][]string{nil, {"first"}, {"first", "second"}, {"second"}} {
 			for _, local := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/edges=%s/local=%t", mode, strings.Join(connected, "+"), local), func(t *testing.T) {
-					schema := "name: root\npins:\n  inputs:\n    - thing.created\n  outputs:\n    - thing.created\n"
+					schema := "stages: []\npins:\n  inputs:\n    - thing.created\n  outputs:\n    - thing.created\n"
 					if len(connected) > 0 {
 						schema += "connect:\n"
 						for _, child := range connected {
@@ -29,9 +27,14 @@ func TestRootInputSourceLoadedConsumerCardinality(t *testing.T) {
 						}
 					}
 					node := "observer:\n  execution_type: system_node\n  subscribes_to: [thing.created]\n  event_handlers:\n    thing.created:\n      guard: {id: admit, check: true}\n"
-					files := map[string]string{"schema.yaml": schema, "events.yaml": "thing.created:\n"}
+					files := map[string]string{
+						"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+						"schema.yaml":   schema,
+						"events.yaml":   "thing.created:\n",
+					}
 					for _, child := range []string{"first", "second"} {
-						files[child+"/schema.yaml"] = "name: " + child + "\n"
+						files[child+"/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
+						files[child+"/schema.yaml"] = "stages: []\n"
 						for _, wired := range connected {
 							if wired == child {
 								files[child+"/schema.yaml"] += "pins:\n  inputs:\n    - thing.created\n"
@@ -84,34 +87,6 @@ func TestRootInputSourceLoadedConsumerCardinality(t *testing.T) {
 					}
 				})
 			}
-		}
-	}
-}
-
-func TestProviderLocalConsumptionUsesOnlyExactSameInstanceOwner(t *testing.T) {
-	bundle := routedRootInputFlowNodeBundle()
-	bundle.RootSchema.Pins.Inputs.EventPins = nil
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
-		t.Fatal(err)
-	}
-	source := semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{"validation": {"thing.created"}})
-	routes, err := DeriveRouteTable(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	consumers := routes.PubsubDeclarationDefinitionsFixture(t, "validation", "validation/thing.created")
-	if len(consumers) != 1 || consumers[0].RouteSourceCode() != "subscription" {
-		t.Fatalf("provider has competing subscription authority: %#v", consumers)
-	}
-	for _, origin := range []string{"validation", "other"} {
-		evt := eventtest.RunCreatingRootIngressWithRoutingSource(uuid.NewString(), "validation/thing.created", "provider", "", nil, 0, busInternalTestRunID, "", events.EventEnvelope{}, eventtest.StaticFlowRoutingSource(origin, origin, eventtest.UUID(origin)), time.Now().UTC())
-		intents := routedExactSameInstanceNoTargetNodeDeliveryIntents(source, evt, consumers)
-		want := 0
-		if origin == "validation" {
-			want = 1
-		}
-		if len(intents) != want {
-			t.Fatalf("origin=%s intents=%#v want=%d", origin, intents, want)
 		}
 	}
 }

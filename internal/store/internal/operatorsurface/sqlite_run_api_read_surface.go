@@ -13,6 +13,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -21,6 +22,11 @@ func (s *RunSQLite) requireRunHeaderAccess() error {
 }
 
 func (s *RunSQLite) LoadRunHeader(ctx context.Context, runID string) (operatorread.RunHeader, error) {
+	var root sourceartifact.RootAdmissionReference
+	return s.loadRunHeader(ctx, runID, &root)
+}
+
+func (s *RunSQLite) loadRunHeader(ctx context.Context, runID string, root *sourceartifact.RootAdmissionReference) (operatorread.RunHeader, error) {
 	if err := s.requireRunHeaderAccess(); err != nil {
 		return operatorread.RunHeader{}, err
 	}
@@ -34,7 +40,7 @@ func (s *RunSQLite) LoadRunHeader(ctx context.Context, runID string) (operatorre
 	row := s.backend.QueryRowContext(ctx, sqliteRunHeaderSelectSQL()+`
 WHERE r.run_id = ?
 `, runID)
-	header, err := scanSQLiteRunHeader(row)
+	header, err := scanSQLiteRunHeaderWithRoot(row, root)
 	if errors.Is(err, sql.ErrNoRows) {
 		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
@@ -129,7 +135,8 @@ func (s *RunSQLite) LoadRunDebugReport(ctx context.Context, runID string, opts o
 
 func (s *RunSQLite) loadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
 	opts = defaultRunDebugQueryOptions(opts)
-	header, err := s.LoadRunHeader(ctx, runID)
+	var root sourceartifact.RootAdmissionReference
+	header, err := s.loadRunHeader(ctx, runID, &root)
 	if err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
@@ -201,7 +208,7 @@ func (s *RunSQLite) loadRunDebugReport(ctx context.Context, runID string, opts o
 	report.TestQuiescence.FanOutUnsettled = report.FanOut.Unsettled
 	report.TestQuiescence.FanOutBarriers = report.FanOut.BarrierArmed + report.FanOut.BarrierPending
 	report.TestQuiescence.Ready = runTestQuiescenceReady(report.TestQuiescence)
-	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorSQLiteDelivery, s.sources, s.sourceMemo, s.pipeline, s.timers, header, report.TestQuiescence, s.now())
+	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorSQLiteDelivery, s.sources, s.sourceMemo, s.pipeline, s.timers, header, root, report.TestQuiescence, s.now())
 	if err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
@@ -292,6 +299,7 @@ SELECT
 	r.run_id,
 	lower(COALESCE(r.status, '')),
 	COALESCE(r.bundle_hash, ''),
+	r.source_root_directory,
 	COALESCE(r.origin_kind, ''),
 	COALESCE(r.trigger_event_id, ''),
 	COALESCE(r.trigger_event_type, ''),
@@ -322,17 +330,23 @@ FROM runs r
 }
 
 func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
+	var root sourceartifact.RootAdmissionReference
+	return scanSQLiteRunHeaderWithRoot(row, &root)
+}
+
+func scanSQLiteRunHeaderWithRoot(row runHeaderScanner, reference *sourceartifact.RootAdmissionReference) (operatorread.RunHeader, error) {
 	var header operatorread.RunHeader
 	var startedRaw, endedRaw any
 	var failureRaw any
-	var bundleHash string
+	var root sourceartifact.RootAdmissionReference
 	var originKind, eventID, eventType, serviceID, sourceRunID, forkPointKind, sourceEventID string
 	var generation, forkRevision int64
 	var standingRelationCount, matchingStandingRelationCount int
 	if err := row.Scan(
 		&header.RunID,
 		&header.Status,
-		&bundleHash,
+		&root.BundleHash,
+		&root.RootDirectory,
 		&originKind,
 		&eventID,
 		&eventType,
@@ -385,10 +399,11 @@ func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 		return operatorread.RunHeader{}, err
 	}
 	header.Failure = failure
-	if err := validateRunHeaderLifecycle(header, bundleHash); err != nil {
+	if err := validateRunHeaderLifecycle(header, root); err != nil {
 		return operatorread.RunHeader{}, err
 	}
-	header.BundleHash = bundleHash
+	header.BundleHash = root.BundleHash
+	*reference = root
 	return header, nil
 }
 

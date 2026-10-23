@@ -214,7 +214,18 @@ func installConformanceRuntimeStartupGeneration(
 		t.Fatal("conformance runtime grant requires a constructed runtime and semantic source")
 	}
 	bundleHash := rt.Options.SourceArtifactFact.BundleHash()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
+	bundle, ok := semanticview.Bundle(rt.Options.WorkflowModule.SemanticSource())
+	if !ok || bundle == nil {
+		t.Fatal("conformance source set requires its compiled rooted source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired, err := rt.Manager.CompileStaticTopologyDesiredAgents(rt.Options.WorkflowModule.SemanticSource(), coordinate)
 	if err != nil {
 		t.Fatalf("compile conformance runtime source set: %v", err)
@@ -389,7 +400,8 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 		if opts.ContractBundle != nil {
 			opts.PayloadAdmitter = runtimepkg.NewRuntimePayloadAdmitter(nil, opts.ContractBundle, opts.SourceArtifactFact)
 		} else {
-			opts.PayloadAdmitter = func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+			opts.PayloadAdmitter = func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+				flowID := payloadProducer.FlowID()
 				return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 			}
 		}

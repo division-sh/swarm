@@ -311,7 +311,7 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores() {
 
 func TestPersistenceAuthorityDebtNativeFixtureCollectorTransition(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	if digest, err := debtCollectorDigest(root); err != nil || (digest != debtNativeFixtureCollectorTo && digest != debtExcludedFixtureCollectorTo && digest != debtQ1ReopenCollectorTo) {
+	if digest, err := debtCollectorDigest(root); err != nil || (digest != debtNativeFixtureCollectorTo && digest != debtExcludedFixtureCollectorTo && digest != debtQ1ReopenCollectorTo && digest != debtS1CollectorTo) {
 		t.Fatalf("collector=%q error=%v", digest, err)
 	}
 	debtProveNativeFixtureCollectorTransition(t, debtProcessLeaseCollectorTo, debtNativeFixtureCollectorTo)

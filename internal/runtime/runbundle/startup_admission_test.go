@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type admissionAvailabilityReader func(context.Context) ([]Availability, error)
@@ -52,16 +53,22 @@ func TestAdmitPinnedSourcesRequiresCompleteObservation(t *testing.T) {
 }
 
 func TestAdmitPinnedSourcesUsesExactActiveSourceOwner(t *testing.T) {
-	hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
-	other := "bundle-v2:sha256:" + strings.Repeat("b", 64)
+	first, _ := sourceartifactfixture.Rooted(t, "pinned", sourceartifactfixture.New("schema.yaml", []byte("stages:\n  pending: {}\n")))
+	second, _ := sourceartifactfixture.Rooted(t, "other", sourceartifactfixture.New("schema.yaml", []byte("stages:\n  ready: {}\n")))
+	hash, other := first.Admission().BundleHash(), second.Admission().BundleHash()
+	if hash == other {
+		t.Fatal("pinning fixtures must have different content")
+	}
 	for _, mismatch := range []bool{false, true} {
 		calls := 0
 		reader := admissionAvailabilityReader(func(context.Context) ([]Availability, error) {
 			calls++
-			active := Availability{RunID: "ordinary-run", Status: "paused", BundleHash: hash, SourceArtifactPresent: true}
+			selected := first
 			if mismatch {
-				active.BundleHash = other
+				selected = second
 			}
+			active := Availability{RunID: "ordinary-run", Status: "paused", BundleHash: selected.Admission().BundleHash(),
+				RootReference: selected.Admission().Reference(), RootAdmissionPresent: true, SourceArtifactPresent: true}
 			return []Availability{active, {RunID: "missing-artifact", BundleHash: other}}, nil
 		})
 		err := AdmitPinnedSources(context.Background(), reader, hash, []string{hash, hash})

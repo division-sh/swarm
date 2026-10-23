@@ -14,10 +14,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-type admittedArtifactRoot struct {
-	directory *os.File
-}
-
 type fileAttributeTagInfo struct {
 	attributes uint32
 	reparseTag uint32

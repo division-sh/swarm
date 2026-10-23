@@ -205,7 +205,10 @@ func newHostRelayExecutor(t *testing.T) (*Executor, models.AgentConfig, *workspa
 	ctx := unmanagedToolTestContext()
 	workspaceRoot := filepath.Join(t.TempDir(), "host-workspaces")
 	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(contractsDir, "schema.yaml"), []byte("name: test\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(contractsDir, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+		t.Fatalf("write schema.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(contractsDir, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatalf("write schema.yaml: %v", err)
 	}
 	projection := toolTestRuntimeSourceProjection(t, contractsDir)

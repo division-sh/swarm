@@ -10,8 +10,11 @@ func TestAgentDeclarationRecordsCanonicalizeDeepFilesystemFlowProjection(t *test
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
 	writeAgentDeclarationBaseFiles(t, root, "canonical-agent-records")
+	writeFixtureFile(t, filepath.Join(root, "parent/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "parent/child/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	flowRoot := filepath.Join(root, "parent", "child", "support")
-	writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: support\nstages:\n  active: {}\n")
+	writeFixtureFile(t, filepath.Join(flowRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "# fixture: support\nstages:\n  active: {}\n")
 	writeFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), `
 worker:
   id: public-worker
@@ -64,7 +67,8 @@ func TestAgentDeclarationRecordsPreserveDistinctSameIDPhysicalDeclarations(t *te
 	writeAgentDeclarationBaseFiles(t, root, "distinct-agent-records")
 	for _, side := range []string{"left", "right"} {
 		flowRoot := filepath.Join(root, side)
-		writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: "+side+"\n")
+		writeFixtureFile(t, filepath.Join(flowRoot, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "stages: []\n# fixture: "+side+"\n")
 		writeFixtureFile(t, filepath.Join(flowRoot, "agents.yaml"), "worker:\n  role: "+side+"-worker\n  intent: {inline: Exercise distinct physical identity.}\n  model: regular\n")
 	}
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
@@ -82,5 +86,6 @@ func TestAgentDeclarationRecordsPreserveDistinctSameIDPhysicalDeclarations(t *te
 
 func writeAgentDeclarationBaseFiles(t *testing.T, root, name string) {
 	t.Helper()
-	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: "+name+"\n")
+	writeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n# fixture: "+name+"\n")
 }

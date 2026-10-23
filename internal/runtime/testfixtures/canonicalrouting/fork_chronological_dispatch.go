@@ -11,7 +11,8 @@ func CopyForkChronologicalDispatch(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for path, body := range map[string]string{
-		"schema.yaml": `name: fork-chronological-dispatch
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml": `# fixture: fork-chronological-dispatch
 stages:
   pending: {}
   processed: {}

@@ -187,10 +187,10 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					candidate, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 						ExecutionPosture: executionposture.Live,
 						Ctx:              ctx, Stores: projectServeRuntimePersistence(stores), Config: cfg, Loaded: loaded,
-						WorkspaceBackend:       cliapp.WorkspaceBackendSelection{Backend: "host"},
-						EnableToolGateway:      true,
-						ToolGatewayBinding:     binding,
-						ProviderTriggerCatalog: testProviderTriggerCatalog(t), ProcessWorkOwner: process, RuntimeInstanceID: instance,
+						WorkspaceBackend:   cliapp.WorkspaceBackendSelection{Backend: "host"},
+						EnableToolGateway:  true,
+						ToolGatewayBinding: binding,
+						ProcessWorkOwner:   process, RuntimeInstanceID: instance,
 						Credentials: credentials, ProviderCredentials: credentials,
 						Options: cliapp.ServeOptions{TestLLMRuntime: servedNoopLLMRuntime{}, TestLifecycleProbe: probe, ShutdownGrace: 5 * time.Second},
 					})

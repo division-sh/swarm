@@ -10,7 +10,7 @@ func admitGeneratorProfile(body []byte, file string) (GeneratorProfile, error) {
 	if err != nil {
 		return GeneratorProfile{}, err
 	}
-	fields, err := connectorFields(root, "schema_version", "provider", "source", "pack", "auth", "static_headers", "operations")
+	fields, err := connectorFields(root, "schema_version", "provider", "source", "auth", "static_headers", "operations")
 	if err != nil {
 		return GeneratorProfile{}, err
 	}
@@ -27,24 +27,6 @@ func admitGeneratorProfile(body []byte, file string) (GeneratorProfile, error) {
 		return out, err
 	}
 	if err := connectorTextFields(source, members, map[string]*string{"path": &out.Source.Path, "compression": &out.Source.Compression, "sha256": &out.Source.SHA256, "openapi_version": &out.Source.OpenAPIVersion, "server": &out.Source.Server}); err != nil {
-		return out, err
-	}
-	pack, err := connectorRequired(root, fields, "pack")
-	if err != nil {
-		return out, err
-	}
-	members, err = connectorFields(pack, "id", "version", "platform_version", "provenance", "tests")
-	if err != nil {
-		return out, err
-	}
-	if err := connectorTextFields(pack, members, map[string]*string{"id": &out.Pack.ID, "version": &out.Pack.Version, "platform_version": &out.Pack.PlatformVersion, "provenance": &out.Pack.Provenance}); err != nil {
-		return out, err
-	}
-	tests, err := connectorRequired(pack, members, "tests")
-	if err != nil {
-		return out, err
-	}
-	if out.Pack.Tests, err = connectorTextList(tests); err != nil {
 		return out, err
 	}
 	auth, err := connectorRequired(root, fields, "auth")

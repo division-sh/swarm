@@ -1,4 +1,4 @@
-name: test-atomicity-guard-rollback
+# fixture: test-atomicity-guard-rollback
 stages:
   pending: {}
   processed: {final: true}

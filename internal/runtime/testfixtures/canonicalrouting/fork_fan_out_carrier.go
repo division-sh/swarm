@@ -60,7 +60,7 @@ func CopyForkFanOutConsumer(t testing.TB, loop, barrier bool) string {
 func CopyForkFanOutCarrier(t testing.TB, loop, barrier bool) string {
 	t.Helper()
 	root := t.TempDir()
-	schema := `name: fork-fan-out-carrier
+	schema := `# fixture: fork-fan-out-carrier
 stages:
   pending: {}
   review: {}
@@ -129,7 +129,8 @@ pins:
       advances_to: done
 `
 	}
-	for path, body := range map[string]string{"schema.yaml": schema, "events.yaml": events, "nodes.yaml": nodes, "entities.yaml": "root: {}\n"} {
+	for path, body := range map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "schema.yaml": schema, "events.yaml": events, "nodes.yaml": nodes, "entities.yaml": "root: {}\n"} {
 		writeClosedVariantFile(t, root, path, body)
 	}
 	return root

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -367,7 +368,7 @@ func TestProviderRegistrationRejectedReplacementPreservesVerifiedPredecessor(t *
 	replacement := predecessor
 	replacement.PrebindingOperationID = "replacement-operation"
 	replacement.OnboardingOperationID = replacement.PrebindingOperationID
-	replacement.CredentialKeys = map[string]string{"telegram_bot_token": "replacement-bot"}
+	replacement.CredentialKeys = map[string]string{"telegram.telegram_bot_token": "replacement-bot"}
 	replacement = admitTestRegistrationPairCredentials(t, owner, replacement)
 	if err := controller.Reconcile(ctx, exposure, []RegistrationPair{replacement}); err == nil || !strings.Contains(err.Error(), "rejected replacement token") {
 		t.Fatalf("replacement error = %v", err)
@@ -531,7 +532,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 
 	t.Run("duplicate slot rejects whole set before writes", func(t *testing.T) {
 		other := testRegistrationPair(t, registration, "alerts", "ingress:alerts:telegram", snapshotOwner)
-		other.CredentialKeys = map[string]string{"telegram_bot_token": "bot-other"}
+		other.CredentialKeys = map[string]string{"telegram.telegram_bot_token": "bot-other"}
 		other = admitTestRegistrationPairCredentials(t, snapshotOwner, other)
 		err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair, other})
 		var collision *SlotCollisionError
@@ -546,7 +547,7 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 
 	t.Run("distinct provider resources reconcile independently", func(t *testing.T) {
 		other := testRegistrationPair(t, registration, "alerts", "ingress:alerts:telegram", snapshotOwner)
-		other.CredentialKeys = map[string]string{"telegram_bot_token": "bot-other"}
+		other.CredentialKeys = map[string]string{"telegram.telegram_bot_token": "bot-other"}
 		other = admitTestRegistrationPairCredentials(t, snapshotOwner, other)
 		distinctTransport := &telegramRegistrationTransport{t: t, resourceIDs: map[string]int64{"token-v1": 42, "token-other": 84}}
 		distinctReadiness := NewReadinessOwner(true)
@@ -1214,22 +1215,17 @@ func loadTelegramRegistrationPlan(t *testing.T) packs.CompiledChannelRegistratio
 	if err != nil {
 		t.Fatalf("decode platform spec: %v", err)
 	}
-	registry, err := packs.NewInterfaceRegistry(spec)
-	if err != nil {
-		t.Fatalf("NewInterfaceRegistry: %v", err)
+	entry, ok := packfixture.EmbeddedInventory(t).Lookup("telegram")
+	if !ok {
+		t.Fatal("embedded Telegram provider is missing")
 	}
-	channels := packfixture.ChannelPacks(t)
-	triggers := packfixture.TriggerCatalog(t)
-	var connector packs.ConnectorPackDescriptor
-	for _, candidate := range packfixture.ConnectorRegistry(t).PackDescriptors() {
-		if candidate.Identity.ID() == "provider.telegram.connector" {
-			connector = candidate
-			break
-		}
-	}
-	plan, err := packs.CompileChannel(registry, channels[0], triggers.PackDescriptors(), []packs.ConnectorPackDescriptor{connector})
+	definition, err := packadmission.AdmitProviderDirectory(entry.Provider(), spec)
 	if err != nil {
-		t.Fatalf("CompileChannel: %v", err)
+		t.Fatalf("admit Telegram provider: %v", err)
+	}
+	plan, ok := definition.ChannelPlan()
+	if !ok {
+		t.Fatal("Telegram channel plan is missing")
 	}
 	registration, ok := plan.Registration()
 	if !ok {
@@ -1258,7 +1254,7 @@ func testRegistrationPair(t *testing.T, registration packs.CompiledChannelRegist
 	pair := RegistrationPair{
 		BindingID: bindingID, PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
 		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
-		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
+		CredentialKeys: map[string]string{"telegram.telegram_bot_token": "bot"},
 		Target: RegistrationTarget{
 			Selector: selector, BundleHash: "bundle-v2:sha256:" + strings.Repeat("b", 64), ServiceID: "service-" + bindingID,
 			FlowPath: parsed.FlowPath, Alias: parsed.FlowPath, Provider: parsed.Provider,

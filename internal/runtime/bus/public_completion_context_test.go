@@ -10,8 +10,10 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -19,8 +21,13 @@ func TestPublicCompletionPreparationCancellation(t *testing.T) {
 	for _, variant := range []string{"runtime", "standing", "selected"} {
 		for _, cut := range []string{"retirement", "caller", "fence"} {
 			t.Run(variant+"/"+cut, func(t *testing.T) {
+				source, _ := acknowledgedRootInputEndpoint(t)
+				bundle, ok := semanticview.Bundle(source)
+				if !ok || bundle == nil || bundle.SourceArtifact == nil {
+					t.Fatal("public completion requires its captured source")
+				}
 				process := worklifetime.NewProcess()
-				runtime, err := process.NewRuntime(t.Context(), worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
+				runtime, err := process.NewRuntime(t.Context(), worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: bundle.SourceArtifact.BundleHash()})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -54,12 +61,15 @@ func TestPublicCompletionPreparationCancellation(t *testing.T) {
 						t.Error(err)
 					}
 				})
-				source, _ := acknowledgedRootInputEndpoint(t)
 				bus, err := newScopedTestEventBus(&publicationAcknowledgementProbeStore{}, EventBusOptions{ContractBundle: source, WorkOwner: runtime})
 				if err != nil {
 					t.Fatal(err)
 				}
-				caller, cancel := context.WithCancel(worklifetime.WithOccurrence(testAuthorActivityContext(t.Context()), owner))
+				ctx, err := bus.AdmitSourceArtifactFact(authoractivity.WithScope(t.Context(), authoractivity.BundleScope(bus.runtimeInstanceID, bus.sourceArtifactFact.BundleHash())))
+				if err != nil {
+					t.Fatal(err)
+				}
+				caller, cancel := context.WithCancel(worklifetime.WithOccurrence(ctx, owner))
 				defer cancel()
 				preparing, lease, finishPrecommit, err := bus.beginPublicCompletion(caller)
 				if err != nil {

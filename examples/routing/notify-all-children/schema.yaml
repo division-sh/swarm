@@ -1,4 +1,4 @@
-name: notify-all-children
+# fixture: notify-all-children
 pins:
   inputs:
     - portfolio.opened

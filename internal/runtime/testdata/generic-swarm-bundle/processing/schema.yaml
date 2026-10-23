@@ -1,4 +1,4 @@
-name: processing
+# fixture: processing
 stages:
   ready: {}
   approved: {}

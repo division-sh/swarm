@@ -60,10 +60,14 @@ func (a FlowOwnedAgentSubscriptionAdmission) CarrierOnly() FlowOwnedAgentSubscri
 // flow and its filesystem descendants.
 func AdmitFlowOwnedAgentSubscriptions(source Source, req FlowOwnedAgentSubscriptionRequest) (FlowOwnedAgentSubscriptionAdmission, error) {
 	req.AgentID = strings.TrimSpace(req.AgentID)
-	req.FlowID = strings.TrimSpace(req.FlowID)
 	req.FlowPath = eventidentity.Normalize(req.FlowPath)
 	if req.AgentID == "" {
 		return FlowOwnedAgentSubscriptionAdmission{}, fmt.Errorf("agent subscription admission requires agent id")
+	}
+	if source != nil {
+		if _, found := FlowScopeByID(source, req.FlowID); !found {
+			return FlowOwnedAgentSubscriptionAdmission{}, fmt.Errorf("agent %q flow selector %q must identify an exact admitted flow; use . for the selected root without whitespace", req.AgentID, req.FlowID)
+		}
 	}
 
 	localEvents := cloneSubscriptionEventSet(req.LocalEvents)

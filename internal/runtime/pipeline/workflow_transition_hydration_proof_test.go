@@ -11,8 +11,8 @@ import (
 
 func VerifyNativeCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml": `name: transition-hydration
-stages:
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml": `stages:
   ready: {}
   waiting:
     timers:

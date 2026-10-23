@@ -10,12 +10,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
 // Component proofs consume the original native semantic owner, never a pool
 // or a test transaction runner reconstructed around the selected database.
 type WorkflowActivityNativeFixtureForTest struct {
+	Source                    semanticview.Source
 	Persistence               WorkflowPersistence
 	CaptureActivityJournal    func() ActivityAttemptJournal
 	Context                   context.Context

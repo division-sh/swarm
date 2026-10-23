@@ -61,7 +61,11 @@ func newOrdinaryForkPredecessorFixtureForReceiver(t *testing.T, backend string, 
 		t.Fatal(err)
 	}
 	captureFanOutBarrierForkRevision(t, f.ctx, f.db, runID, backend == "postgres")
-	child, err := f.store.(runForkSelectedLifecycleStore).MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID()})
+	rootAdmission, present, err := correlation.RootAdmissionFromContext(f.ctx)
+	if err != nil || !present {
+		t.Fatalf("ordinary predecessor fixture root admission: present=%t err=%v", present, err)
+	}
+	child, err := f.store.(runForkSelectedLifecycleStore).MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), RootAdmission: rootAdmission})
 	if err != nil {
 		t.Fatal(err)
 	}

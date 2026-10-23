@@ -32,6 +32,9 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		t.Fatalf("unsupported publication topology %q", mode)
 	}
 	root := t.TempDir()
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "sibling/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeClosedVariantFile(t, root, "sink/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	valueType, valueExpr := "integer", `payload.choice`
 	if textValues {
 		valueType, valueExpr = "text", `string(payload.choice)`
@@ -117,16 +120,17 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 		local += "    " + result + ":\n      guard: {id: observed, check: int(payload.value) >= 0}\n"
 	}
 	wildcard := "wildcard:\n  execution_type: system_node\n  subscribes_to: [result.*]\n  event_handlers:\n    result.*:\n      guard: {id: observed, check: int(payload.value) >= 0}\n"
-	sourceSchema := "name: publication-source\npins:\n  inputs:\n" + inputPins + "  outputs:\n" + outputPins
+	sourceSchema := "# fixture: publication-source\npins:\n  inputs:\n" + inputPins + "  outputs:\n" + outputPins
 	if mode == "root" {
 		sourceSchema = strings.Replace(sourceSchema, "  outputs:\n", siblingInputPins+"  outputs:\n"+siblingInputPins, 1)
 		writeClosedVariantFile(t, root, "schema.yaml", sourceSchema+"connect:\n"+connects)
 		writeClosedVariantFile(t, root, "events.yaml", requestSchemas+eventSchemas+siblingRequestSchemas)
 		writeClosedVariantFile(t, root, "nodes.yaml", handlers+local+wildcard)
 	} else {
-		rootSchema := "name: publication-driver\npins:\n  inputs:\n"
+		writeClosedVariantFile(t, root, "source/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		rootSchema := "# fixture: publication-driver\npins:\n  inputs:\n"
 		if mode == "template" {
-			sourceSchema = strings.Replace(sourceSchema, "name: publication-source\n", "name: publication-source\ninstance: case_id\n", 1)
+			sourceSchema = strings.Replace(sourceSchema, "# fixture: publication-source\n", "# fixture: publication-source\ninstance: case_id\n", 1)
 			rootSchema += requestSchemasToPins(families) + "  outputs:\n"
 			driver, driverSchemas := "", ""
 			for _, family := range families {
@@ -156,14 +160,14 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 			writeClosedVariantFile(t, root, "source/entities.yaml", "work:\n  case_id: {type: text, _unused_reason: receiver identity}\n")
 		}
 	}
-	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n"+outputPins)
+	writeClosedVariantFile(t, root, "sink/schema.yaml", "# fixture: sink\npins:\n  inputs:\n"+outputPins)
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", local)
 	// A sibling's local subscriptions are not authority for source publications.
 	siblingEvents := ""
 	for _, result := range results {
 		siblingEvents += result + ":\n  case_id: text\n  value: " + valueType + "\n"
 	}
-	writeClosedVariantFile(t, root, "sibling/schema.yaml", "name: sibling\npins:\n  inputs:\n"+siblingInputPins)
+	writeClosedVariantFile(t, root, "sibling/schema.yaml", "# fixture: sibling\npins:\n  inputs:\n"+siblingInputPins)
 	writeClosedVariantFile(t, root, "sibling/events.yaml", siblingEvents)
 	writeClosedVariantFile(t, root, "sibling/nodes.yaml", siblingProducers+local)
 	return root

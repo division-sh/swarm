@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -85,6 +86,11 @@ func proveExactEntityProducerSpelling(t *testing.T, backend, producer, spelling 
 		})
 	}
 	if producer == "scenario_setup" {
+		rooted, err := selected.(rootedRunStore).LoadRunRootedSource(ctx, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
 		req := pipeline.ScenarioSetupRequest{RunID: runID, CreatedAt: at, Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "receiver", EntityID: input, FlowInstance: instance, EntityType: "review_item", Fields: map[string]any{"account_id": "preserved"}}}}
 		if _, err := owner.SetupScenarioEntities(ctx, req); err != nil {
 			t.Fatalf("actual scenario insertion (%s): %v", spelling, err)
@@ -238,8 +244,10 @@ func TestRunForkExactFactsGeneratedWriterIDsBothStores(t *testing.T) {
 func exactFactEntitySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: exact-fact-source\nstages:\n  active: {}\n  done: {final: true}\n")
-	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "exact-fact/schema.yaml"), "name: exact-fact\nstages:\n  active: {}\n  done: {final: true}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages:\n  active: {}\n  done: {final: true}\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "exact-fact/manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "exact-fact/schema.yaml"), "stages:\n  active: {}\n  done: {final: true}\n")
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "exact-fact/entities.yaml"), "review_item:\n  account_id: {type: text, initial: preserved}\n  handled: {type: boolean, initial: false}\n")
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(pipeline.WorkflowRepoRoot(), root, contracts.DefaultPlatformSpecFile(pipeline.WorkflowRepoRoot()))
 	if err != nil {

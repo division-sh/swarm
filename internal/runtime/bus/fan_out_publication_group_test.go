@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -147,13 +148,22 @@ func TestCommittedRefusalCannotEnterNodeOnlyFanOutGroup(t *testing.T) {
 }
 
 func TestFanOutDispatchConsumesAlreadyCommittedRefusal(t *testing.T) {
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "custom.receiver_projection:\n",
+	}))
 	owner := newTerminalReleasePipelineOwner()
-	bus, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{PipelineObligations: owner})
+	bus, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{ContractBundle: source, PipelineObligations: owner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err := bus.AdmitSourceArtifactFact(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	event := receiverProjectionEvent("fan-out-refusal")
-	claim, err := bus.claimPipelinePublication(context.Background(), event.ID())
+	claim, err := bus.claimPipelinePublication(ctx, event.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +173,7 @@ func TestFanOutDispatchConsumesAlreadyCommittedRefusal(t *testing.T) {
 		publicationClaim: claim, committedDisposition: &refusal,
 	}
 	settlement := &fanOutPublicationSettlement{bus: bus}
-	if err := (engineDispatcher{bus: bus}).dispatchFanOutOperation(context.Background(), operation, RoutePlan{}, settlement, true); err != nil {
+	if err := (engineDispatcher{bus: bus}).dispatchFanOutOperation(ctx, operation, RoutePlan{}, settlement, true); err != nil {
 		t.Fatal(err)
 	}
 	if owner.releaseCalls[event.ID()] != 1 || len(owner.current) != 0 || len(settlement.members) != 0 {
@@ -172,13 +182,22 @@ func TestFanOutDispatchConsumesAlreadyCommittedRefusal(t *testing.T) {
 }
 
 func TestCommittedRefusalDoesNotHideFinalizationFailure(t *testing.T) {
+	source := semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   "custom.receiver_projection:\n",
+	}))
 	owner := newTerminalReleasePipelineOwner()
-	bus, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{PipelineObligations: owner})
+	bus, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{ContractBundle: source, PipelineObligations: owner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, err := bus.AdmitSourceArtifactFact(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	event := receiverProjectionEvent("blocked-refusal")
-	claim, err := bus.claimPipelinePublication(context.Background(), event.ID())
+	claim, err := bus.claimPipelinePublication(ctx, event.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +206,7 @@ func TestCommittedRefusalDoesNotHideFinalizationFailure(t *testing.T) {
 	intent := engine.EmitIntent{Event: event}
 	bus.stageCommittedOutboxOperationWithFinalization(intent, event, EventAppendInserted, claim, nil, false, failure, &refusal)
 	for i := 0; i < 2; i++ {
-		result, err := (engineDispatcher{bus: bus}).dispatchPendingOutboxOperation(context.Background(), intent)
+		result, err := (engineDispatcher{bus: bus}).dispatchPendingOutboxOperation(ctx, intent)
 		if !result.handled || !errors.Is(err, failure) {
 			t.Fatalf("finalization failure became refusal success: handled=%t err=%v", result.handled, err)
 		}

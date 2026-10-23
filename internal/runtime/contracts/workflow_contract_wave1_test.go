@@ -193,7 +193,9 @@ func TestLoadWorkflowContractBundle_LoadsWave1TypeAndEntityDocuments(t *testing.
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/schema.yaml", "name: wave1-bundle\n")
+	writeFixtureFile(t, root+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, root+"/scoring/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, root+"/schema.yaml", "stages: []\n# fixture: wave1-bundle\n")
 	writeFixtureFile(t, root+"/types.yaml", `
 scalars:
   URL: text
@@ -206,7 +208,7 @@ root.ready:
   # root event
   entity_id: uuid
 `)
-	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `# fixture: scoring
 stages:
   discovered: {}
   shortlisted: {final: true}
@@ -598,8 +600,10 @@ func TestLoadWorkflowContractBundle_RejectsMultipleFlowEntityTypes(t *testing.T)
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/schema.yaml", "name: invalid-flow-entities\n")
-	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
+	writeFixtureFile(t, root+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, root+"/scoring/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, root+"/schema.yaml", "stages: []\n# fixture: invalid-flow-entities\n")
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `# fixture: scoring
 stages:
   pending: {}
   done: {final: true}
@@ -621,7 +625,8 @@ func TestLoadWorkflowContractBundle_RejectsMultipleRootEntityTypes(t *testing.T)
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/schema.yaml", `name: invalid-root-entities
+	writeFixtureFile(t, root+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, root+"/schema.yaml", `# fixture: invalid-root-entities
 stages:
   pending: {}
   done: {final: true}
@@ -643,8 +648,10 @@ func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelector(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/schema.yaml", "name: schema-entity-selector\n")
-	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
+	writeFixtureFile(t, root+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, root+"/scoring/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, root+"/schema.yaml", "stages: []\n# fixture: schema-entity-selector\n")
+	writeFixtureFile(t, root+"/scoring/schema.yaml", `# fixture: scoring
 entity: vertical
 stages:
   pending: {}
@@ -665,7 +672,8 @@ func TestLoadWorkflowContractBundle_RejectsRootSchemaEntitySelector(t *testing.T
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, root+"/schema.yaml", `name: root-schema-entity-selector
+	writeFixtureFile(t, root+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+	writeFixtureFile(t, root+"/schema.yaml", `# fixture: root-schema-entity-selector
 entity: vertical
 stages:
   pending: {}
@@ -679,28 +687,6 @@ vertical:
 	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 	if err == nil || !strings.Contains(err.Error(), `schema field "entity" is not supported`) || !strings.Contains(err.Error(), "Valid fields: auto_emit_on_create") {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want root schema.yaml entity selector rejection", err)
-	}
-}
-
-func TestLoadWorkflowContractBundle_RejectsSchemaEntitySelectorForMissingEntity(t *testing.T) {
-	repoRoot := repoRootForContractsTest(t)
-	root := t.TempDir()
-
-	writeFixtureFile(t, root+"/schema.yaml", "name: schema-entity-selector-missing\n")
-	writeFixtureFile(t, root+"/scoring/schema.yaml", `name: scoring
-entity: missing
-stages:
-  pending: {}
-  done: {final: true}
-`)
-	writeFixtureFile(t, root+"/scoring/entities.yaml", `
-vertical:
-  name: text
-`)
-
-	_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
-	if err == nil || !strings.Contains(err.Error(), `schema field "entity" is not supported`) || !strings.Contains(err.Error(), "Valid fields: auto_emit_on_create") {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want schema.yaml entity selector rejection", err)
 	}
 }
 

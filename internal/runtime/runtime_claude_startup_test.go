@@ -857,7 +857,9 @@ func ambiguousScopedClaudeStartupSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	root := t.TempDir()
 
-	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-claude-startup\n")
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
+	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "packages", "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 root-mock:
@@ -877,6 +879,7 @@ root-mock:
 		{name: "project-b", model: "regular"},
 	} {
 		dir := filepath.Join(root, "packages", project.name)
+		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
 
 		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  model: "+project.model+"\n  intent:\n    inline: Exercise the scoped Claude startup census.\n")
 	}

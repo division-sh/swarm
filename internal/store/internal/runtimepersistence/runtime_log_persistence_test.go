@@ -15,12 +15,16 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability(t *testing.T) {
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), runtimeeffects.ExecutionModeLive)
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, store, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
@@ -293,6 +297,9 @@ func TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage(t *testing.T)
 	subjectEventID := uuid.NewString()
 	sourceFact := mustStoreTestSourceArtifactFact(artifact.BundleHash())
 	seedStoreTestPersistedArtifact(t, db, artifact)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", artifact)
+	sourceartifactfixture.RequireArtifact(t, ctx, pg, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 	if err := commitSemanticEventFixture(ctx, pg, eventtest.RunCreatingRootIngress(subjectEventID,
@@ -344,6 +351,9 @@ func TestPostgresRuntimeLogPersistenceUsesClosedNamedCommits(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	defer cleanup()
 	pg := newTestPostgresStore(t, db)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, pg, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	runID := uuid.NewString()
 	subjectEventID := uuid.NewString()
 	ctx = runtimecorrelation.WithRunID(ctx, runID)

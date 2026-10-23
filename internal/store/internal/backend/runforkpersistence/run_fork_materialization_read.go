@@ -65,7 +65,7 @@ func requireMaterializedRunForkSnapshot(ctx context.Context, tx *sql.Tx, postgre
 	source := runForkSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 		return loadSource(ctx, tx, runID, true, true)
 	})
-	identity, err := resolveRunForkBundleInsertIdentity(ctx, source, plan.SourceRunID, req.SourceArtifactFact)
+	identity, err := resolveRunForkBundleInsertIdentity(ctx, source, plan.SourceRunID, req.SourceArtifactFact, req.RootAdmission)
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}

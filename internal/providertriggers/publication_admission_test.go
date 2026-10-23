@@ -19,7 +19,7 @@ import (
 )
 
 func TestA9DeclarationPublicationRequiresAuthenticatedExactOutputs(t *testing.T) {
-	catalog, err := NewCatalogSnapshot()
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,8 +127,7 @@ func TestAuthenticatedPackProjectionRejectsPostAdmissionMutation(t *testing.T) {
 			fixture.Secret.Required = true
 			fixture.Signature = SignatureManifest{Type: signatureTypeHMACSHA256, Header: "X-Signature", SignedPayload: "raw_body"}
 			manifest := fixture.mustAdmit()
-			catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: manifest, Source: "authenticated-mutation-proof",
-				Identity: PackIdentity{ID: "provider.telegram", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "test"}})
+			catalog, err := NewCatalogSnapshotFromAdmittedBodies(manifest)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -203,8 +202,7 @@ func TestAuthenticatedChallengeReadbackCannotMutateAdmission(t *testing.T) {
 	fixture.Signature = SignatureManifest{Type: signatureTypeHMACSHA256, Header: "X-Signature", SignedPayload: "raw_body"}
 	fixture.Challenge = &ChallengeManifest{When: ConditionManifest{JSONPath: "$.challenge", Equals: "original"},
 		Response: ResponseManifest{JSONPath: "$.challenge", Status: http.StatusOK, ContentType: "text/plain"}}
-	catalog, err := NewCatalogSnapshot(CatalogEntry{Manifest: fixture.mustAdmit(), Source: "challenge-copy-proof",
-		Identity: PackIdentity{ID: "provider.telegram", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("d", 64), Provenance: "test"}})
+	catalog, err := NewCatalogSnapshotFromAdmittedBodies(fixture.mustAdmit())
 	if err != nil {
 		t.Fatal(err)
 	}

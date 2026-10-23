@@ -33,6 +33,7 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -111,7 +112,7 @@ func seedSpecMemoryRun(t *testing.T, ctx context.Context, db *sql.DB) {
 
 func seedManagerRun(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
 	t.Helper()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	ctx = requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 }
 
 func specMemoryIdentity(agentID, flowInstance string) agentmemory.Identity {
@@ -720,6 +721,9 @@ func TestPostgresStore_AppendEvent_EntityIDBoundaryContract(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, pg, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 
 	validEntityID := uuid.NewString()
 	validEventID := uuid.NewString()
@@ -850,7 +854,7 @@ func TestPostgresStore_PersistEventWithDeliveries_RejectsInvalidEntityID(t *test
 func TestPostgresStore_AppendEvent_RejectsPayloadAdmissionFailureBeforePersistence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
-	pg.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, _ string) (events.PayloadAdmission, error) {
+	pg.SetEventPayloadAdmitter(func(_ context.Context, event events.Event, _ events.PayloadProducer) (events.PayloadAdmission, error) {
 		if strings.TrimSpace(string(event.Type())) != "task.completed" {
 			t.Fatalf("unexpected event type %q", event.Type())
 		}
@@ -898,7 +902,8 @@ func currentPlatformPayloadAdmitterForStoreTest(t testing.TB) runtimebus.Payload
 	t.Helper()
 	spec := loadPlatformSpecDocumentForStoreTest(t, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	registry := runtimecontracts.EventSchemaRegistryFromBundle(&runtimecontracts.WorkflowContractBundle{Platform: spec})
-	return func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	return func(_ context.Context, event events.Event, payloadProducer events.PayloadProducer) (events.PayloadAdmission, error) {
+		flowID := payloadProducer.FlowID()
 		eventType := strings.TrimSpace(string(event.Type()))
 		schema, ok := registry[eventType]
 		if !ok {
@@ -999,6 +1004,9 @@ func TestPostgresStore_PipelineReceipts_MissingEventsQuery(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, pg, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 
 	runID := uuid.NewString()
 	parentID := uuid.NewString()
@@ -1055,6 +1063,9 @@ func TestPostgresStore_PersistEventWithDeliveries_SuccessAndRollbackOnFailure(t 
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, pg, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 
 	eventID := uuid.NewString()
 	if err := commitSemanticEventFixtureWithAgents(ctx, pg, eventtest.RunCreatingRootIngress(eventID,
@@ -2623,6 +2634,9 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), specEntityStateRunID)
 	ctx = runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	sourceartifactfixture.RequireArtifact(t, ctx, pg, rooted.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	resetAgentSessionsSpecTable(t, ctx, pg)
 
 	entityID := uuid.NewString()

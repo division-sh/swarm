@@ -388,7 +388,8 @@ func scopedAliasMockConnectorFixtureWithNativeTools(t *testing.T, includeLive bo
 func scopedAliasMockConnectorFixtureOptions(t *testing.T, includeLive, includeInvalidNativeTools bool) (semanticview.Source, *providerconnectors.MockResponsePlan) {
 	t.Helper()
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-alias-reachability\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages: []\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
 	writeScopedReachabilityAgentFile(t, filepath.Join(root, "agents.yaml"), "root-mock", "mocks/root-mock.py", false)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "mocks", "root-mock.py"), "def handle(input):\n    return {'text': 'mock'}\n")
@@ -408,7 +409,8 @@ root-node:
 		{name: "flow-live", live: includeLive},
 	} {
 		dir := filepath.Join(root, child.name)
-		writeBootverifyFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+child.name+"\n")
+		writeBootverifyFixtureFile(t, filepath.Join(dir, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+		writeBootverifyFixtureFile(t, filepath.Join(dir, "schema.yaml"), "# fixture: "+child.name+"\n\nstages: []\n")
 		module := "mocks/shared-worker.py"
 		writeScopedReachabilityAgentFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker", module, child.live, scopedReachabilityNativeTools(includeInvalidNativeTools))
 		if !child.live {

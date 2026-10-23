@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 type CLISourcePathOptions struct {
@@ -49,7 +48,6 @@ func ResolveSourceRoot(invocationRootPath, raw string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		raw = invocationRootPath
 	}

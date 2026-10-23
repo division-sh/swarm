@@ -1591,19 +1591,6 @@ seam_families:
       stores. The projection bus observes route installation and cleanup only;
       it neither reconstructs routing permission nor replaces native mutation
       authority. No partial configuration merge or new route owner is present.
-  - id: admission_predicate_reference_census
-    layer: conformance_guardrails
-    classification: separate_semantic_concept
-    paths:
-      - internal/cliapp/testdata/verify_admission_predicate_census.json
-    search_dimensions: [live_agent_subscription_route_authority]
-    notes: >
-      The test-only admission census records function identities and body
-      digests of existing boot/verify owners, including agent construction
-      names. It neither executes those names nor creates, resolves or replaces
-      route authority. TestVerifyBootStartupPredicateCensus and its independent
-      startup/provider/removed-consumer mutation controls prove change
-      detection, not semantic closure or permission to create a recipient.
   - id: delivery_continuation_election_controls
     layer: conformance_guardrails
     classification: separate_semantic_concept

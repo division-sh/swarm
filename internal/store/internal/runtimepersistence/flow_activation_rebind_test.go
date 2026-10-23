@@ -46,7 +46,15 @@ func TestFlowActivationSourceSetRebindBothStores(t *testing.T) {
 					t.Error(err)
 				}
 			})
-			sourceSet, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: hash}}, nil)
+			rooted, err := selected.LoadRunRootedSource(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+			if err != nil || coordinate.BundleHash != hash {
+				t.Fatalf("captured source coordinate: %+v %v", coordinate, err)
+			}
+			sourceSet, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

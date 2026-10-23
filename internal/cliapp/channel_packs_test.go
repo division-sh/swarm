@@ -9,8 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
-	"github.com/division-sh/swarm/internal/packs"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
@@ -37,62 +35,43 @@ func TestChannelPlatformSpecExplicitLoaderRefusesInvalidSources(t *testing.T) {
 	}
 }
 
-func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *testing.T) {
+func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *testing.T) {
 	repo := RepoRoot()
-	cfg := &config.Config{
+	base := &config.Config{
 		Channels: config.ChannelsConfig{
 			Bindings: map[string]config.ChannelBindingConfig{
-				"ops": {Pack: "provider.telegram.hitl_channel", Destination: "-100123"},
+				"hitl": {
+					Pack: "telegram", Destination: "-100123",
+					Credentials: map[string]string{"telegram.telegram_bot_token": "telegram_hitl_bot"},
+					Register:    "ingress:support:telegram",
+				},
 			},
 		},
 	}
-	cfgResult := RuntimeConfigLoadResult{Config: cfg}
-	spec, err := loadChannelPlatformSpecDocument(filepath.Join(repo, defaultPlatformSpecPath))
-	if err != nil {
-		t.Fatalf("loadChannelPlatformSpecDocument: %v", err)
-	}
-	projection, err := packadmission.Admit(packfixture.EmbeddedInventory(t), spec)
-	if err != nil {
-		t.Fatalf("admit embedded packs: %v", err)
-	}
-
-	withoutCredential, err := LoadConfiguredChannelPacks(context.Background(), cfgResult, projection, nil, nil)
-	if err != nil {
-		t.Fatalf("LoadConfiguredChannelPacks without credential: %v", err)
-	}
-	if len(withoutCredential.Plans) != 2 || len(withoutCredential.Bindings) != 1 {
-		t.Fatalf("channel load = %#v, want both installed plans and one configured binding", withoutCredential)
-	}
-	wantPlans := map[string]bool{"provider.telegram.hitl_channel": true, "provider.whatsapp.hitl_channel": true}
-	for _, plan := range withoutCredential.Plans {
-		structural, err := plan.CapabilitySubject()
-		if err != nil || !wantPlans[structural.ID] || structural.Kind != packs.SubjectChannelPack || structural.Status != packs.StatusAvailable {
-			t.Fatalf("structural subject = %#v, err=%v", structural, err)
+	credentials := channelTestCredentialStore{"telegram_hitl_bot": "secret"}
+	load := func(t *testing.T, cfg *config.Config, static runtimecredentials.Store) (ChannelPackLoad, error) {
+		t.Helper()
+		result := RuntimeConfigLoadResult{Config: cfg}
+		spec, err := loadChannelPlatformSpecDocument(filepath.Join(repo, defaultPlatformSpecPath))
+		if err != nil {
+			t.Fatalf("loadChannelPlatformSpecDocument: %v", err)
 		}
-		delete(wantPlans, structural.ID)
-	}
-	if len(wantPlans) != 0 {
-		t.Fatalf("missing installed channel plans: %v", wantPlans)
-	}
-	outbound, err := withoutCredential.Bindings[0].CapabilitySubject()
-	if err != nil || outbound.ID != "ops" || outbound.Provider != "telegram" || outbound.Kind != packs.SubjectChannelOutbound || outbound.Status != packs.StatusNotReady {
-		t.Fatalf("outbound subject without credential = %#v, err=%v", outbound, err)
+		projection, err := packadmission.Admit(packfixture.EmbeddedInventory(t), spec)
+		if err != nil {
+			t.Fatalf("admit embedded packs: %v", err)
+		}
+		return LoadConfiguredChannelPacks(context.Background(), result, projection, static, nil)
 	}
 
-	credentials := channelTestCredentialStore{"telegram_bot_token": "secret"}
-	ready, err := LoadConfiguredChannelPacks(context.Background(), cfgResult, projection, credentials, nil)
+	loaded, err := load(t, base, credentials)
 	if err != nil {
-		t.Fatalf("LoadConfiguredChannelPacks with credential: %v", err)
+		t.Fatalf("LoadConfiguredChannelPacks: %v", err)
 	}
-	outbound, err = ready.Bindings[0].CapabilitySubject()
-	if err != nil || outbound.Status != packs.StatusReady {
-		t.Fatalf("outbound subject with credential = %#v, err=%v", outbound, err)
+	if len(loaded.Bindings) != 1 || loaded.Bindings[0].RegistrationTarget() != "ingress:support:telegram" {
+		t.Fatalf("registration binding = %#v", loaded.Bindings)
 	}
-
-	report := LocalPreflightReport{}
-	appendChannelCapabilitySubjects(&report, ready)
-	if len(report.CapabilitySubjects) != 3 {
-		t.Fatalf("preflight channel subjects = %#v, want both structural plans and one configured outbound", report.CapabilitySubjects)
+	if got := loaded.Bindings[0].CredentialStoreKeys()["telegram.telegram_bot_token"]; got != "telegram_hitl_bot" {
+		t.Fatalf("credential mapping = %q", got)
 	}
 	t.Run("source_projects_the_mapped_native_observation", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "channel-credentials.json")
@@ -103,11 +82,11 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 		if err := file.Set(t.Context(), "exact.channel.key", "private-channel-token"); err != nil {
 			t.Fatal(err)
 		}
-		binding := cfg.Channels.Bindings["ops"]
-		binding.Credentials = map[string]string{"telegram_bot_token": "exact.channel.key"}
-		mappedConfig := *cfg
-		mappedConfig.Channels.Bindings = map[string]config.ChannelBindingConfig{"ops": binding}
-		mapped, err := LoadConfiguredChannelPacks(t.Context(), RuntimeConfigLoadResult{Config: &mappedConfig}, projection, file, nil)
+		binding := base.Channels.Bindings["hitl"]
+		binding.Credentials = map[string]string{"telegram.telegram_bot_token": "exact.channel.key"}
+		mappedConfig := *base
+		mappedConfig.Channels.Bindings = map[string]config.ChannelBindingConfig{"hitl": binding}
+		mapped, err := load(t, &mappedConfig, file)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,71 +101,6 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 		}
 	})
 
-	connectorDescriptors := projection.ProviderConnectors.PackDescriptors()
-	for index := range connectorDescriptors {
-		if connectorDescriptors[index].Identity.ID() != "provider.telegram.connector" {
-			continue
-		}
-		for toolID, scope := range map[string]string{"telegram.send_interactive": "deliver", "telegram.edit_message": "edit"} {
-			tool := connectorDescriptors[index].Tools[toolID]
-			tool, err = tool.WithManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "shared-channel-auth", Scopes: []string{scope}})
-			if err != nil {
-				t.Fatalf("derive conflicting connector tool %q: %v", toolID, err)
-			}
-			connectorDescriptors[index].Tools[toolID] = tool
-		}
-	}
-	registry, err := packs.NewInterfaceRegistry(spec)
-	if err != nil {
-		t.Fatalf("NewInterfaceRegistry: %v", err)
-	}
-	conflicting, err := packs.CompileChannelInventory(registry, ready.Loaded, projection.ProviderTriggers.PackDescriptors(), connectorDescriptors)
-	if err != nil {
-		t.Fatalf("CompileChannelInventory: %v", err)
-	}
-	if _, _, err := compileChannelBindings(context.Background(), cfg, conflicting, nil, nil); err == nil {
-		t.Fatal("incompatible same-key channel credential requirements were accepted")
-	}
-}
-
-func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *testing.T) {
-	repo := RepoRoot()
-	base := &config.Config{
-		Channels: config.ChannelsConfig{
-			Bindings: map[string]config.ChannelBindingConfig{
-				"hitl": {
-					Pack: "provider.telegram.hitl_channel", Destination: "-100123",
-					Credentials: map[string]string{"telegram_bot_token": "telegram_hitl_bot"},
-					Register:    "ingress:support:telegram",
-				},
-			},
-		},
-	}
-	load := func(t *testing.T, cfg *config.Config) (ChannelPackLoad, error) {
-		t.Helper()
-		result := RuntimeConfigLoadResult{Config: cfg}
-		spec, err := loadChannelPlatformSpecDocument(filepath.Join(repo, defaultPlatformSpecPath))
-		if err != nil {
-			t.Fatalf("loadChannelPlatformSpecDocument: %v", err)
-		}
-		projection, err := packadmission.Admit(packfixture.EmbeddedInventory(t), spec)
-		if err != nil {
-			t.Fatalf("admit embedded packs: %v", err)
-		}
-		return LoadConfiguredChannelPacks(context.Background(), result, projection, channelTestCredentialStore{"telegram_hitl_bot": "secret"}, nil)
-	}
-
-	loaded, err := load(t, base)
-	if err != nil {
-		t.Fatalf("LoadConfiguredChannelPacks: %v", err)
-	}
-	if len(loaded.Bindings) != 1 || loaded.Bindings[0].RegistrationTarget() != "ingress:support:telegram" {
-		t.Fatalf("registration binding = %#v", loaded.Bindings)
-	}
-	if got := loaded.Bindings[0].CredentialStoreKeys()["telegram_bot_token"]; got != "telegram_hitl_bot" {
-		t.Fatalf("credential mapping = %q", got)
-	}
-
 	for _, tc := range []struct {
 		name   string
 		mutate func(*config.ChannelBindingConfig)
@@ -198,12 +112,12 @@ func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *test
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			binding := base.Channels.Bindings["hitl"]
-			binding.Credentials = map[string]string{"telegram_bot_token": "telegram_hitl_bot"}
+			binding.Credentials = map[string]string{"telegram.telegram_bot_token": "telegram_hitl_bot"}
 			tc.mutate(&binding)
 			candidate := *base
 			candidate.Channels = base.Channels
 			candidate.Channels.Bindings = map[string]config.ChannelBindingConfig{"hitl": binding}
-			if _, err := load(t, &candidate); err == nil {
+			if _, err := load(t, &candidate, credentials); err == nil {
 				t.Fatal("invalid registration binding was accepted")
 			}
 		})
