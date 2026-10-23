@@ -1,9 +1,11 @@
 package conformance
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
@@ -15,7 +17,7 @@ func TestFanOutServingM06SameBundleGenerationReplacementOnBothBackends(t *testin
 			old := newServingMatrixProbe(servingMatrixCommit, 1)
 			old.commitWithoutCancel = true
 			f := newServingMatrixFixture(t, backend, &workers, old)
-			ctx, runID := f.startRun(t, 0)
+			_, runID := f.startRun(t, 0)
 			trigger := f.submit(t, 0, runID, "same-bundle-successor")
 			turn := waitServingMatrixHeld(t, old)
 			waitServingMatrixTriggerReceipt(t, f.db, trigger)
@@ -49,7 +51,8 @@ func TestFanOutServingM06SameBundleGenerationReplacementOnBothBackends(t *testin
 				t.Fatal("same-bundle replacement left predecessor grant executable")
 			}
 
-			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-same-bundle-successor", replacement.sourceArtifactFact), replacement.bus, replacement.manager); err != nil {
+			successorCtx := correlation.WithRunID(context.Background(), runID)
+			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, successorCtx, "fan-out-same-bundle-successor", replacement.sourceArtifactFact), replacement.bus, replacement.manager); err != nil {
 				t.Fatalf("start exact same-bundle successor manager: %v", err)
 			}
 

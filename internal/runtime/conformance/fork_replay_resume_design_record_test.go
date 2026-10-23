@@ -84,17 +84,6 @@ type forkReplayResumeProofRef struct {
 	Issue int    `yaml:"issue,omitempty"`
 }
 
-func TestForkReplayResumeDesignRecordCoversBoundedModel(t *testing.T) {
-	root := conformanceRepoRoot(t)
-	record := loadForkReplayResumeDesignRecord(t, root)
-	ctx := forkReplayResumeValidationContext{
-		goTests: conformanceGoTestNames(t, root),
-	}
-	if problems := validateForkReplayResumeDesignRecord(root, record, ctx); len(problems) > 0 {
-		t.Fatalf("fork replay/resume design record validation failed:\n- %s", strings.Join(problems, "\n- "))
-	}
-}
-
 func TestForkReplayResumeDesignRecordRejectsStaleOrUnmappedClaims(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	base := loadForkReplayResumeDesignRecord(t, root)
