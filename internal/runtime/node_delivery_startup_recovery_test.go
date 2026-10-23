@@ -721,10 +721,16 @@ func seedStartupRecoverySourceRun(
 	if artifact == nil || artifact.BundleHash() != bundleHash {
 		t.Fatalf("startup recovery artifact = %v, want exact source %s", artifact, bundleHash)
 	}
+	rooted, err := artifact.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	ensureStartupRecoverySourceArtifact(t, ctx, selected, artifact)
 	fixture := storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
 		BundleHash: bundleHash,
+		Artifact:   artifact, RootAdmission: rooted.Admission(),
 	}
 	storetest.RequireRun(t, ctx, selected, fixture)
 }
@@ -734,15 +740,14 @@ func loadEntitylessStartupRecoveryBundle(t *testing.T) *runtimecontracts.Workflo
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
 	files := make(map[string]string)
-	for _, name := range []string{"schema.yaml", "events.yaml", "nodes.yaml"} {
+	for _, name := range []string{"manifest.yaml", "schema.yaml", "events.yaml", "nodes.yaml"} {
 		body, err := os.ReadFile(filepath.Join(fixtureRoot, name))
 		if err != nil {
 			t.Fatalf("read startup recovery fixture %s: %v", name, err)
 		}
 		files[name] = string(body)
 	}
-	files["schema.yaml"] = `name: startup-recovery-stateless
-stages: []
+	files["schema.yaml"] = `stages: []
 pins:
   inputs:
     - task.requested
@@ -763,7 +768,10 @@ func ensureStartupRecoverySourceArtifact(t *testing.T, ctx context.Context, sele
 func startupRecoverySourceArtifact(t *testing.T, name string) *sourceartifact.AdmittedSourceArtifact {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: "+name+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.0.0\nplatform_version: '*'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("# fixture: "+name+"\nstages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)

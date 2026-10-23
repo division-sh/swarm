@@ -447,8 +447,8 @@ func newBranchPointDeploymentFixture(t *testing.T, backend eventRecordContractBa
 	t.Helper()
 	opened := backend.open(t)
 	construction := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, map[string]string{
-		"schema.yaml": "name: branch-revision\nstages:\n  pending: {}\n  later: {final: true}\npins:\n  outputs:\n    - records.ready\n",
-		"events.yaml": "records.ready:\n  body: text\n",
+		"schema.yaml": "stages:\n  pending: {}\n  later: {final: true}\npins:\n  outputs:\n    - records.ready\n",
+		"events.yaml": "records.ready:\n  body: text\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil, ownStoreTestAgentManager, nil)
 	// Preparation must consume the construction process, not acquire a rival.
 	capability, err := agentfixture.ProcessCapability(t, construction.ctx, opened.store.(agentfixture.Store))

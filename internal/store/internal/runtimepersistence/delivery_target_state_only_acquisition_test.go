@@ -435,9 +435,14 @@ func openStateOnlyAcquisitionStoreWithSource(t *testing.T, backend string, sourc
 	if !ok || bundle.SourceArtifact == nil {
 		t.Fatal("state-only acquisition source requires admitted declarations")
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())), runID)
-	fixture := semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact}
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	fixture := semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission()}
 	if backend == "sqlite" {
 		selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		db := selected.backend.ConstructionHandle()
