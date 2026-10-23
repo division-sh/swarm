@@ -30,10 +30,6 @@ func PollDeploymentClaim(ctx context.Context, client *http.Client, operations ch
 	if err != nil || !current {
 		return offset, errors.Join(operatorchannel.ErrCredentialStale, err)
 	}
-	rows, err := identities.ListOperatorChannelOperations(ctx, op.PrincipalID)
-	if err != nil {
-		return offset, err
-	}
 	valid := func() bool {
 		current, err := operations.GetChannelOnboarding(ctx, op.OperationID)
 		matches, credentialErr := currentness.CurrentValueMatchesSeal(ctx, evidence)
@@ -41,6 +37,14 @@ func PollDeploymentClaim(ctx context.Context, client *http.Client, operations ch
 			current.Revision == op.Revision && current.PrincipalID == op.PrincipalID && current.Provider == op.Provider &&
 			current.AccountReference == op.AccountReference && current.IdentityOperationID == op.IdentityOperationID &&
 			current.Interface == op.Interface && current.FailureCode == ""
+	}
+	return pollDeploymentIdentityClaim(ctx, client, identities, channel, trigger, op, snapshot.CredentialValue(), valid, offset)
+}
+
+func pollDeploymentIdentityClaim(ctx context.Context, client *http.Client, identities operatorchannel.Store, channel packs.SatisfactionPlan, trigger providertriggers.InboundAdmissionPlan, op channelonboarding.Operation, token string, valid func() bool, offset int64) (int64, error) {
+	rows, err := identities.ListOperatorChannelOperations(ctx, op.PrincipalID)
+	if err != nil {
+		return offset, err
 	}
 	pollAuthorization := operatorchannel.Hash("authenticated-telegram-poll-v1", trigger.Generation().Diagnostic())
 	confirm := func(identity operatorchannel.Operation, eventID string) (int64, error) {
@@ -53,7 +57,7 @@ func PollDeploymentClaim(ctx context.Context, client *http.Client, operations ch
 		if !valid() {
 			return offset, operatorchannel.ErrCredentialStale
 		}
-		next, err := trigger.ConfirmTelegramClaim(ctx, client, snapshot.CredentialValue(), eventID)
+		next, err := trigger.ConfirmTelegramClaim(ctx, client, token, eventID)
 		if err != nil {
 			return offset, err
 		}
@@ -69,7 +73,7 @@ func PollDeploymentClaim(ctx context.Context, client *http.Client, operations ch
 		if identity.State != operatorchannel.StateAwaitingClaim {
 			continue
 		}
-		claim, next, err := trigger.PollTelegramClaim(ctx, client, snapshot.CredentialValue(), channel, identity.Challenge, offset)
+		claim, next, err := trigger.PollTelegramClaim(ctx, client, token, channel, identity.Challenge, offset)
 		if err != nil || claim.Challenge == "" {
 			return next, err
 		}
