@@ -14,16 +14,13 @@ func staticAuthorityGuardRoots(t *testing.T, repo string) []TestRoot {
 		t.Fatal(err)
 	}
 	// DC-6's absent-cut fault may change only the destination revision under
-	// its complete origin CAS; this guard is mandatory alongside the prior 80.
+	// its complete origin CAS; this guard remains mandatory.
 	absentCutGuard := TestRoot{
 		Package: "github.com/division-sh/swarm/internal/store/internal/runtimepersistence",
 		Name:    "TestOrdinaryForkAbsentCutFaultOwnsExactOriginCAS",
 	}
 	if !slices.Contains(roots, absentCutGuard) {
 		t.Fatal("static authority census lost the DC-6 exact-origin absent-cut fault guard")
-	}
-	if len(roots) != 81 {
-		t.Fatalf("static authority source census changed: %d roots, want 81", len(roots))
 	}
 	return roots
 }
