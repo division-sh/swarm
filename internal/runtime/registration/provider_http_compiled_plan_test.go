@@ -2,7 +2,6 @@ package registration
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -16,7 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func registrationChannelPlanForTest(t testing.TB, overrides map[string]runtimecontracts.ToolSchemaEntry) packs.SatisfactionPlan {
+func registrationChannelPlanForTest(t testing.TB, author func(map[string]any)) packs.SatisfactionPlan {
 	t.Helper()
 	spec, err := runtimecontracts.LoadPlatformSpecDocument(filepath.Join("..", "..", "..", "platform-spec.yaml"))
 	if err != nil {
@@ -47,15 +46,8 @@ func registrationChannelPlanForTest(t testing.TB, overrides map[string]runtimeco
 	if !ok {
 		t.Fatal("captured Telegram connector has no tool declarations")
 	}
-	for toolID, tool := range overrides {
-		if !strings.HasPrefix(toolID, provider.Key()+".") {
-			t.Fatalf("foreign connector override %s", toolID)
-		}
-		name := strings.TrimPrefix(toolID, provider.Key()+".")
-		if _, exists := tools[name]; !exists {
-			t.Fatalf("unknown connector override %s", toolID)
-		}
-		tools[name] = tool
+	if author != nil {
+		author(tools)
 	}
 	members["connector.yaml"], err = yaml.Marshal(connectorDocument)
 	if err != nil {
@@ -98,9 +90,9 @@ func registrationChannelPlanForTest(t testing.TB, overrides map[string]runtimeco
 	return plan
 }
 
-func registrationOperationForTest(t testing.TB, name, toolID string, tool runtimecontracts.ToolSchemaEntry) packs.RegistrationOperationPlan {
+func registrationOperationForTest(t testing.TB, name, toolID string) packs.RegistrationOperationPlan {
 	t.Helper()
-	plan := registrationChannelPlanForTest(t, map[string]runtimecontracts.ToolSchemaEntry{toolID: tool})
+	plan := registrationChannelPlanForTest(t, nil)
 	registration, ok := plan.Registration()
 	if !ok {
 		t.Fatal("missing real compiled registration slots")

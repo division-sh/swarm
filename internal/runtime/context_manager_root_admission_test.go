@@ -37,18 +37,26 @@ func rootedContextForSource(t *testing.T, source semanticview.Source, root sourc
 		t.Fatal("rooted fixture has no compiled bundle")
 	}
 	admitRuntimeTestBundle(t, bundle)
-	projection, err := packadmission.FromBundle(bundle)
+	providers, err := packadmission.AdmitProviderSource(root, bundle.Platform)
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjects, err := projection.ProviderTriggers.InstalledCapabilitySubjects()
+	scope, err := providers.Scope(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjects, err := catalog.InstalledCapabilitySubjects()
 	if err != nil {
 		t.Fatal(err)
 	}
 	return BundleContext{
 		Source: source, SourceArtifactFact: fact, RootAdmission: root.Admission(), WorkOwner: owner,
 		Runtime:             &Runtime{Bus: bus, workOccurrence: owner},
-		PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: projection.ProviderTriggers.Generation(),
+		PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: catalog.Generation(), ProviderTriggerCatalog: catalog,
 		InstalledTriggerSubjects: subjects,
 	}
 }
