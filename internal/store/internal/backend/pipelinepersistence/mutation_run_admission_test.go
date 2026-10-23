@@ -21,8 +21,8 @@ import (
 // Observe before rollback so an accidental write cannot be hidden by cleanup.
 func VerifyMissingMutationRunForTest(t *testing.T, initial bool, prepare StatementProcessFixtureForTest) {
 	t.Helper()
-	db := openFanOutReadbackTestDB(t, "sqlite")
-	_, original := materializeSQLiteStatementRuns(t, db, false, prepare)
+	db, location := openFanOutReadbackTestDB(t, "sqlite")
+	_, original := materializeSQLiteStatementRuns(t, db, location, false, prepare)
 	for _, ddl := range []string{
 		`CREATE TABLE entity_mutations (mutation_id TEXT PRIMARY KEY)`,
 	} {

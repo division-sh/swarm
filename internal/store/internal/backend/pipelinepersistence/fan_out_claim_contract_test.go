@@ -18,15 +18,15 @@ func VerifyFanOutUnacknowledgedCommitCannotBorrowSuccessorForTest(t *testing.T, 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, disposition := range []string{"none", "claimed", "advanced", "canceled"} {
 			t.Run(backend+"/"+disposition, func(t *testing.T) {
-				db := openFanOutReadbackTestDB(t, backend)
+				db, location := openFanOutReadbackTestDB(t, backend)
 				if backend == "sqlite" {
 					db.SetMaxOpenConns(1)
 				}
 				var ctx context.Context
 				if backend == "postgres" {
-					_, ctx = materializePostgresStatementRuns(t, db, false, prepare)
+					_, ctx = materializePostgresStatementRuns(t, db, location, false, prepare)
 				} else {
-					_, ctx = materializeSQLiteStatementRuns(t, db, false, prepare)
+					_, ctx = materializeSQLiteStatementRuns(t, db, location, false, prepare)
 				}
 				initializeFanOutReadbackTestDB(t, db, backend)
 				if backend == "sqlite" {

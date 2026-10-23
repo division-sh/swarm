@@ -104,12 +104,12 @@ func TestScanFanOutIntentPreservesCapsuleNumberLexemesOnBothStores(t *testing.T)
 func VerifyFanOutEntitySourceRevisionWriterPreservesNumberKindsForTest(t *testing.T, prepare StatementProcessFixtureForTest) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			db := openFanOutReadbackTestDB(t, backend)
+			db, location := openFanOutReadbackTestDB(t, backend)
 			var ctx context.Context
 			if backend == "postgres" {
-				_, ctx = materializePostgresStatementRuns(t, db, false, prepare)
+				_, ctx = materializePostgresStatementRuns(t, db, location, false, prepare)
 			} else {
-				_, ctx = materializeSQLiteStatementRuns(t, db, false, prepare)
+				_, ctx = materializeSQLiteStatementRuns(t, db, location, false, prepare)
 			}
 			newValueType := "TEXT"
 			if backend == "postgres" {
@@ -187,25 +187,27 @@ func persistFanOutReadbackChunk(t *testing.T, db *sql.DB, command runtimepipelin
 	}
 }
 
-func openFanOutReadbackTestDB(t *testing.T, backend string) *sql.DB {
+func openFanOutReadbackTestDB(t *testing.T, backend string) (*sql.DB, string) {
 	t.Helper()
 	var db *sql.DB
+	var location string
 	if backend == "postgres" {
-		_, db, _ = testutil.StartEmptyPostgres(t)
+		location, db, _ = testutil.StartEmptyPostgres(t)
 	} else {
 		var err error
-		db, err = sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "fanout-readback.db"))
+		location = filepath.Join(t.TempDir(), "fanout-readback.db")
+		db, err = sql.Open("sqlite", "file:"+location)
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = db.Close() })
 	}
-	return db
+	return db, location
 }
 
 func fanOutReadbackTestDB(t *testing.T, backend string) *sql.DB {
 	t.Helper()
-	db := openFanOutReadbackTestDB(t, backend)
+	db, _ := openFanOutReadbackTestDB(t, backend)
 	initializeFanOutReadbackTestDB(t, db, backend)
 	return db
 }
