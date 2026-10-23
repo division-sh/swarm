@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
@@ -19,12 +20,32 @@ type Delta struct {
 }
 
 func ApplyAll(ctx context.Context, tx *sql.Tx, dialect authoractivity.Dialect, deltas []Delta) error {
-	for _, delta := range deltas {
+	ordered := slices.Clone(deltas)
+	slices.SortFunc(ordered, func(a, b Delta) int {
+		left, _ := PhysicalRunKey(dialect, a.RunID)
+		right, _ := PhysicalRunKey(dialect, b.RunID)
+		return strings.Compare(left, right)
+	})
+	for _, delta := range ordered {
 		if err := Apply(ctx, tx, dialect, delta.RunID, delta.Amount); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func Initialize(ctx context.Context, tx *sql.Tx, dialect authoractivity.Dialect, runID string) error {
+	query := `INSERT INTO run_event_counts (run_id, event_count) VALUES (?, 0)`
+	if dialect == authoractivity.DialectPostgres {
+		query = `INSERT INTO run_event_counts (run_id, event_count) VALUES ($1::uuid, 0)`
+	} else if dialect != authoractivity.DialectSQLite {
+		return errors.New("run event-count projection requires a supported dialect")
+	}
+	if tx == nil || strings.TrimSpace(runID) == "" {
+		return errors.New("run event-count projection requires transaction and run_id")
+	}
+	_, err := tx.ExecContext(ctx, query, runID)
+	return err
 }
 
 func Apply(ctx context.Context, tx *sql.Tx, dialect authoractivity.Dialect, runID string, delta int64) error {
@@ -34,11 +55,11 @@ func Apply(ctx context.Context, tx *sql.Tx, dialect authoractivity.Dialect, runI
 	if delta == 0 {
 		return nil
 	}
-	query := `UPDATE runs SET event_count = event_count + ? WHERE run_id = ? AND event_count + ? >= 0`
+	query := `UPDATE run_event_counts SET event_count = event_count + ? WHERE run_id = ? AND event_count + ? >= 0`
 	args := []any{delta, runID, delta}
 	switch dialect {
 	case authoractivity.DialectPostgres:
-		query = `UPDATE runs SET event_count = event_count + $1 WHERE run_id = $2::uuid AND event_count + $1 >= 0`
+		query = `UPDATE run_event_counts SET event_count = event_count + $1 WHERE run_id = $2::uuid AND event_count + $1 >= 0`
 		args = args[:2]
 	case authoractivity.DialectSQLite:
 	default:
