@@ -22,9 +22,9 @@ func TestQ10H2HubWitnessUsesCanonicalHeaderBothStores(t *testing.T) {
 			ctx := context.Background()
 			run, entity := uuid.NewString(), uuid.NewString()
 			if postgres {
-				materializePostgresStatementRuns(t, db, false, run)
+				_, ctx = materializePostgresStatementRuns(t, db, false, run)
 			} else {
-				materializeSQLiteStatementRuns(t, db, false, run)
+				_, ctx = materializeSQLiteStatementRuns(t, db, false, run)
 			}
 			at := time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
 			record := pipeline.WorkflowEngineStateRecord{
