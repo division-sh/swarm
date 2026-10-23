@@ -27,10 +27,11 @@ func TestEventBusTerminalRefusalObservationSeesPresentEvidenceBothStores(t *test
 			} else {
 				selected = storetest.StartPostgresRuntimeStore(t)
 			}
-			if _, err := newScopedTestEventBus(selected); err != nil {
+			if _, err := newNativeScopedTestEventBus(t, selected); err != nil {
 				t.Fatal(err)
 			}
 			ctx, runID := testAuthorActivityContext(context.Background()), uuid.NewString()
+			ctx = nativeBusProcessContext(t, ctx, selected)
 			if err := storetest.EnsureEphemeralRun(ctx, selected, runID, time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}

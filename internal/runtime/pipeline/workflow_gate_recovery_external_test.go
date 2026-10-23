@@ -44,7 +44,6 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
-	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
 
@@ -1403,29 +1402,12 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 		t.Fatal(err)
 	}
 	assertGateRecoveryActivation(t, matching, ctx, entityID, "completed", gateruntime.StatusRouted)
-	completion, err := storetest.ExecuteRunCompletionCandidate(
-		ctx,
-		tc.lifecycle,
-		bundleHash,
-		runID,
-		stagecatalogfixture.NewFinalCatalog(
-			bundle.FlowFinalStages("."),
-			map[string][]string{".": bundle.FlowFinalStages(".")},
-		),
-	)
-	if err != nil {
-		t.Fatalf("execute durable completion candidate: %v", err)
-	}
-	if completion.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible {
-		t.Fatalf("durable completion outcome = %#v, want terminally eligible", completion)
-	}
-	var status string
-	query := `SELECT status FROM runs WHERE run_id = ?`
-	if tc.postgres {
-		query = `SELECT status FROM runs WHERE run_id = $1::uuid`
-	}
-	if err := tc.db.QueryRowContext(ctx, query, runID).Scan(&status); err != nil || status != "completed" {
-		t.Fatalf("terminal no-emit recovered run status = %q, %v", status, err)
+	// S2 observes drained work; reaching a final stage does not complete a live run.
+	report, err := tc.events.(interface {
+		LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
+	}).LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
+	if err != nil || !report.TestQuiescence.Ready || report.RunTableStatus != "running" {
+		t.Fatalf("terminal no-emit recovery is not quiescent in its live run: report=%+v err=%v", report, err)
 	}
 	assertGateRecoveryProcessedReceipt(t, tc.events, eventID)
 }
@@ -1801,7 +1783,8 @@ stages:
 
 func insertGateRecoveryRun(t *testing.T, tc gateRecoverySelectedStore, runID string) {
 	t.Helper()
-	storetest.RequireRun(t, testAuthorActivityContext(t, context.Background()), tc.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
+	ctx := nativeProcessContextFixture(t, testAuthorActivityContext(t, context.Background()), tc)
+	storetest.RequireRun(t, ctx, tc.(storetest.RunFixtureStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 }
 
 func assertGateRecoveryActivation(t *testing.T, workflowStore *runtimepipeline.PipelineCoordinator, ctx context.Context, entityID, stage string, status gateruntime.Status) {

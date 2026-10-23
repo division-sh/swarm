@@ -36,6 +36,7 @@ func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, selec
 		t.Fatal("source constructor requires its admitted artifact")
 	}
 	ctx = effects.WithExecutionMode(correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), loaded.SourceArtifactFact), mode)
+	ctx = nativeRunForkTestContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact,

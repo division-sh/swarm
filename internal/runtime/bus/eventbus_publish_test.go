@@ -143,7 +143,7 @@ func TestCommittedPublishDispatchDoesNotExposePublicationClaimConnection(t *test
 	ctx := eventBusTestRunContextForSource(t, pg, source)
 	ctx = context.WithValue(ctx, publisherDispatchValueKey{}, "publisher-value")
 	observer := &dispatchContextObserver{t: t}
-	bus, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source, TestLifecycleProbe: observer})
+	bus, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source, TestLifecycleProbe: observer})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,8 @@ func eventBusTestRunContext(t *testing.T, selected eventBusRunFixtureStore) cont
 func eventBusTestRunContextForSource(t *testing.T, selected eventBusRunFixtureStore, source semanticview.Source) context.Context {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), eventBusTestRunID)
-	if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source)); err != nil {
+	ctx = nativeBusProcessContext(t, ctx, selected)
+	if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source), ctx); err != nil {
 		t.Fatalf("persist exact event bus test source artifact: %v", err)
 	}
 	if err := storetest.EnsureEphemeralRun(
@@ -297,7 +298,7 @@ func readEventBusExactDuplicateState(ctx context.Context, selected any, runID, e
 
 func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
-	if _, err := newScopedTestEventBus(pg); err != nil {
+	if _, err := newNativeScopedTestEventBus(t, pg); err != nil {
 		t.Fatalf("register author activity catalog: %v", err)
 	}
 	ctx := testAuthorActivityContext(context.Background())
@@ -327,7 +328,7 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 
 func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-	if _, err := newScopedTestEventBus(sqliteStore); err != nil {
+	if _, err := newNativeScopedTestEventBus(t, sqliteStore); err != nil {
 		t.Fatalf("register author activity catalog: %v", err)
 	}
 	ctx := testAuthorActivityContext(context.Background())
@@ -653,7 +654,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	}
 
 	var pc *runtimepipeline.PipelineCoordinator
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
@@ -983,14 +984,15 @@ func TestEventBusPendingPostCommitFaultRetainsDurablePublicationOnBothStores(t *
 				}
 				source := busPublicationFailureSource(t)
 				ctx := testAuthorActivityContextForSource(context.Background(), source)
+				ctx = nativeBusProcessContext(t, ctx, selected)
 				runID, eventID := uuid.NewString(), uuid.NewString()
-				if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source)); err != nil {
+				if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source), ctx); err != nil {
 					t.Fatalf("persist selected source artifact: %v", err)
 				}
 				if err := storetest.EnsureEphemeralRun(ctx, selected, runID, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
 					t.Fatalf("create run through lifecycle owner: %v", err)
 				}
-				eb, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{
+				eb, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
 					ContractBundle: source,
 					Interceptors:   []runtimebus.EventInterceptor{pendingPostCommitInterceptor{err: fault.err}},
 				})
@@ -1026,7 +1028,7 @@ func TestEventBusPendingPostCommitFaultRetainsDurablePublicationOnBothStores(t *
 				if err := selected.PipelineObligations().Release(ctx, claim); err != nil {
 					t.Fatalf("release recovery claim: %v", err)
 				}
-				recovered, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+				recovered, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -2079,7 +2081,7 @@ func TestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes(t *
 	agentIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, eventBusTestRunID, agentID, testSourceArtifactFact(source))
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Interceptors:   []runtimebus.EventInterceptor{waitInterceptor{started: started, release: release}},
 	})
@@ -2183,13 +2185,14 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			source := busPublicationClaimsSource(t)
 			runID, eventID, entityID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
-			if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source)); err != nil {
+			ctx = nativeBusProcessContext(t, ctx, selected)
+			if err := ensureTestEventBusSourceArtifact(selected, source, testSourceArtifactFact(source), ctx); err != nil {
 				t.Fatal(err)
 			}
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: testSourceArtifactFact(source).BundleHash()})
 			started := make(chan struct{}, 1)
 			release := make(chan struct{})
-			foreground, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{
+			foreground, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
 				ContractBundle: source,
 				Interceptors:   []runtimebus.EventInterceptor{waitInterceptor{started: started, release: release}},
 			})
@@ -2198,7 +2201,7 @@ func TestEventBusForegroundPublicationClaimBlocksSiblingReplayOnSQLiteAndPostgre
 			}
 			root := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runID)
 			seedCompleteEventDispatchRoot(t, ctx, selected, foreground, source, root, time.Now().UTC())
-			sibling, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+			sibling, err := newNativeScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2301,7 +2304,7 @@ func TestEventBusPostgresPublicationClaimsDoNotExhaustPersistencePool(t *testing
 				t.Fatal(err)
 			}
 
-			bus, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
+			bus, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -2565,7 +2568,7 @@ func TestEventBusPublishTransactional_RunsInterceptorsAfterCommit(t *testing.T) 
 		t: t, store: pg, eventID: eventID, called: called,
 		wantRecipients: []string{agentID}, wantScope: runtimepipelineobligation.ScopeSubscribed,
 	}
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Interceptors:   []runtimebus.EventInterceptor{interceptor},
 	})
@@ -2608,7 +2611,7 @@ func TestSelectedForkCommitFailurePreventsDispatchAndProviderReachability(t *tes
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
 	forkRunID := uuid.NewString()
 	providerReached := make(chan struct{}, 1)
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Durable:        runtimebus.DurableDependencies{Instances: runtimebus.FlowInstanceIndexFixture()},
 		Interceptors:   []runtimebus.EventInterceptor{providerReachabilityInterceptor{reached: providerReached}},
@@ -2683,7 +2686,7 @@ func TestEventBusPublishTransactional_ReturnsPostCommitInterceptorErrorAndRecord
 	eventID := "11111111-1111-1111-1111-111111111112"
 	wantErr := errors.New("post-commit interceptor failure")
 	interceptor := &postCommitErrorInterceptor{t: t, store: pg, eventID: eventID, err: wantErr}
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		Interceptors:   []runtimebus.EventInterceptor{interceptor},
 	})
@@ -3023,7 +3026,7 @@ func TestEventBusPublish_ClassifiesCanonicalRunSourceArtifactThroughRunLifecycle
 	if err != nil {
 		t.Fatal(err)
 	}
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		SourceArtifactFact: sourceFact,
 	})
 	if err != nil {
@@ -3050,7 +3053,7 @@ func TestEventBusPublishDirect_RequiresExactSourceArtifactFactOnRunRow(t *testin
 	source := busRuntimeControlSource(t)
 	sourceFact := testSourceArtifactFact(source)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle:     source,
 		SourceArtifactFact: sourceFact,
 	})
@@ -3120,7 +3123,7 @@ func TestEventBusPublishDeferred_RunsInterceptorsAfterDeferredEventCommit(t *tes
 	pg := storetest.StartPostgresRuntimeStore(t)
 	eventID := "22222222-2222-2222-2222-222222222222"
 	interceptor := &deferredEventVisibleInterceptor{t: t, store: pg, eventID: eventID, checkFor: events.EventType("custom.middle")}
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		Interceptors: []runtimebus.EventInterceptor{interceptor},
 	})
 	if err != nil {
@@ -3210,7 +3213,7 @@ func TestEventBusPublish_RuntimeControlBypassesContradictionRouting(t *testing.T
 func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeWithoutPersistedDeliveries(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := testAuthorActivityContext(context.Background())
-	eb, err := newScopedTestEventBus(pg)
+	eb, err := newNativeScopedTestEventBus(t, pg)
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -3275,7 +3278,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 	pg := storetest.StartPostgresRuntimeStore(t)
 	source := busRuntimeControlSource(t)
 	ctx := testAuthorActivityContextForSource(context.Background(), source)
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -3424,7 +3427,7 @@ func TestEventBusRuntimeIngressPauseQueuesAndResumeReleases(t *testing.T) {
 	pg := storetest.StartPostgresRuntimeStore(t)
 	source := busRuntimeControlSource(t)
 	ctx := eventBusTestRunContextForSource(t, pg, source)
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{ContractBundle: source})
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
@@ -3667,7 +3670,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	var pc *runtimepipeline.PipelineCoordinator
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
@@ -3898,7 +3901,7 @@ func TestEventBusPublish_MixedEmptyAndTargetedNodeRoutesExecuteAndSettle(t *test
 	}
 
 	var pc *runtimepipeline.PipelineCoordinator
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,
 		RecipientPlanMaterializer: func(context.Context, events.Event, runtimebus.PublishRecipientPlan) ([]runtimebus.DeliveryRouteBlueprint, error) {
 			return []runtimebus.DeliveryRouteBlueprint{
@@ -4167,7 +4170,7 @@ func TestEventBusPublish_NestedThreeLevelConnectChainExecutesEndToEnd(t *testing
 	module := newFixtureWorkflowModule(t, bundle)
 	pg := storetest.StartPostgresRuntimeStore(t)
 	var pc *runtimepipeline.PipelineCoordinator
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
@@ -4495,7 +4498,7 @@ func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutat
 
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	var pc *runtimepipeline.PipelineCoordinator
-	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
+	eb, err := newNativeScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
