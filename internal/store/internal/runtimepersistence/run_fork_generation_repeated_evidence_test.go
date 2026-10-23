@@ -25,7 +25,7 @@ func TestForkGenerationRepeatedActivityEvidenceBothStores(t *testing.T) {
 					"started_at", "completed_at", "updated_at",
 				} {
 					t.Run(status+"/"+field, func(t *testing.T) {
-						ctx := testAuthorActivityContext()
+						ctx := fixture.originalContext(testAuthorActivityContext())
 						child, event, source := seedActivityTimestampReuse(t, fixture, backend.name == "postgres", false, status)
 						store := fixture.store.(selectedActivityProjectionStore)
 						first, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint))

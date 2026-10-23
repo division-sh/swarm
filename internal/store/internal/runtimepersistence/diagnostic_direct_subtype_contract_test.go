@@ -20,7 +20,7 @@ func TestDiagnosticDirectNamedCommitSubtypeIsolationParity(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 			for _, positive := range []struct {
 				name      string

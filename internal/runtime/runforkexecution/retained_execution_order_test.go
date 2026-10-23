@@ -156,10 +156,6 @@ func TestSelectedForkAcknowledgmentPrecedesBusinessDrainBothStores(t *testing.T)
 	proveRetainedAcknowledgment(t, "")
 }
 
-func TestSelectedCompletionActualScopeBothStores(t *testing.T) {
-	proveRetainedAcknowledgment(t, "completion-scope")
-}
-
 func TestReviewerSelectedAsyncFailureDisposesResources(t *testing.T) {
 	for _, fault := range []string{"publication", "execution-scope", "panic", "cancellation", "startup", "continuation", "settlement-retry", "settlement-cleanup", "stale-settlement", "cleanup-retry", "cleanup-panic", "operator-stop", "staged-publication"} {
 		t.Run(fault, func(t *testing.T) { proveRetainedAcknowledgment(t, fault) })
@@ -218,7 +214,7 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 				SelectedContractForkLifecycle: owner.ports.fork, SelectedContractReplayPersistence: owner.ports.replay,
 				started: make(chan struct{}), release: make(chan struct{}), cleanup: errors.New("activation cleanup diagnostic"),
 			}
-			if fault == "publication" || fault == "execution-scope" || fault == "completion-scope" || strings.HasPrefix(fault, "settlement-") || strings.HasPrefix(fault, "cleanup-") || fault == "stale-settlement" {
+			if fault == "publication" || fault == "execution-scope" || strings.HasPrefix(fault, "settlement-") || strings.HasPrefix(fault, "cleanup-") || fault == "stale-settlement" {
 				probe.publicationError = errors.New("reviewer injected publication failure")
 			} else if fault == "cancellation" {
 				probe.publicationError = context.Canceled
@@ -310,12 +306,6 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			}
 			if fault == "" {
 				return
-			}
-			if fault == "completion-scope" {
-				probe.mu.Lock()
-				executionCtx := probe.publicationContext
-				probe.mu.Unlock()
-				proveSelectedCompletionScope(t, ctx, executionCtx, selected, owner.ports.candidates, loaded.Source, result.Materialization.ForkRunID)
 			}
 			sourceBefore, err := storetest.ReadSelectedForkSourceDomain(context.Background(), selected, sourceID)
 			if err != nil {

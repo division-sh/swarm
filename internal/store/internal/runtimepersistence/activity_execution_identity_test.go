@@ -49,9 +49,9 @@ func TestActivitySettlementKeepsOriginalNativeIdentityBothStores(t *testing.T) {
 							var committed bool
 							var err error
 							if operation == "complete" {
-								got, committed, err = journal.CompleteActivityAttempt(testAuthorActivityContext(), candidate)
+								got, committed, err = journal.CompleteActivityAttempt(fixture.originalContext(testAuthorActivityContext()), candidate)
 							} else {
-								got, committed, err = journal.MarkActivityAttemptUncertain(testAuthorActivityContext(), candidate)
+								got, committed, err = journal.MarkActivityAttemptUncertain(fixture.originalContext(testAuthorActivityContext()), candidate)
 							}
 							if err == nil || committed || got.RequestEventID != "" {
 								t.Fatalf("changed callback committed: record=%+v committed=%t err=%v", got, committed, err)
@@ -63,7 +63,7 @@ func TestActivitySettlementKeepsOriginalNativeIdentityBothStores(t *testing.T) {
 							} else if failure, ok := runtimefailures.EnvelopeFromError(err); !ok || failure.Class != runtimefailures.ClassConflictingDuplicate {
 								t.Fatalf("wrong identity refusal: %v", err)
 							}
-							loaded, found, err := journal.LoadActivityAttempt(testAuthorActivityContext(), original.RequestEventID)
+							loaded, found, err := journal.LoadActivityAttempt(fixture.originalContext(testAuthorActivityContext()), original.RequestEventID)
 							if err != nil || !found || !reflect.DeepEqual(loaded, original) {
 								t.Fatalf("refused callback changed original receipt: %+v found=%t err=%v", loaded, found, err)
 							}

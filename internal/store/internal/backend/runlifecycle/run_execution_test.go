@@ -22,6 +22,8 @@ type runExecutionTestOwner interface {
 	ObserveRunExecution(context.Context, sourceadmission.ExecutionQuery, string) (bool, error)
 }
 
+const admissionTestRevisedBundle = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
 func runExecutionOwner(postgres bool, authority runAuthorityOwner) runExecutionTestOwner {
 	if postgres {
 		return &RunLifecyclePostgresOwner{runAuthority: authority}
@@ -31,7 +33,11 @@ func runExecutionOwner(postgres bool, authority runAuthorityOwner) runExecutionT
 
 func runExecutionTransaction(t *testing.T) (*sql.Tx, sqlmock.Sqlmock) {
 	t.Helper()
-	db, mock := admissionTestSQLMock(t)
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
 	mock.ExpectBegin()
 	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
@@ -363,8 +369,9 @@ func TestRunExecutionCancellationPrecedesQueriesAndFenceBothDialects(t *testing.
 func TestRunExecutionObservationCannotMintNativeAdmissionBothDialects(t *testing.T) {
 	for _, postgres := range []bool{true, false} {
 		t.Run(admissionTestDialect(postgres), func(t *testing.T) {
-			db, mock := admissionTestSQLMock(t)
+			db, mock, original := admissionTestSQLMock(t, postgres)
 			mock.ExpectBegin()
+			expectAdmissionTestGeneration(mock, postgres, false)
 			// Observation cannot mint admission; a cached mutable source cannot replace current execution status.
 			expectRunExecutionSource(mock, postgres, true, "running")
 			expectRunExecutionBinding(mock, postgres, true)
@@ -381,7 +388,7 @@ func TestRunExecutionObservationCannotMintNativeAdmissionBothDialects(t *testing
 			expectRunExecutionState(mock, postgres, "paused")
 			probe := &selectedCompletionAuthorityProbe{current: true}
 			owner := runExecutionOwner(postgres, probe)
-			admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+			admissionTestNativeAttempt(t, db, mock, postgres, original, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 				_, authority := selectedCompletionContext(t)
 				ctx = runtimeeffects.WithAuthority(runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, selectedCompletionRunID), admissionTestSource(t, selectedCompletionBundle)), authority)
 				return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -417,11 +424,12 @@ func TestRunExecutionRejectsForeignNativeTransactionBothDialects(t *testing.T) {
 	for _, postgres := range []bool{true, false} {
 		t.Run(admissionTestDialect(postgres), func(t *testing.T) {
 			foreign, _ := runExecutionTransaction(t)
-			db, mock := admissionTestSQLMock(t)
+			db, mock, original := admissionTestSQLMock(t, postgres)
 			mock.ExpectBegin()
+			expectAdmissionTestGeneration(mock, postgres, false)
 			probe := &selectedCompletionAuthorityProbe{current: true}
 			owner := runExecutionOwner(postgres, probe)
-			admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+			admissionTestNativeAttempt(t, db, mock, postgres, original, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 				_, authority := selectedCompletionContext(t)
 				ctx = runtimeeffects.WithAuthority(runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, selectedCompletionRunID), admissionTestSource(t, selectedCompletionBundle)), authority)
 				return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {

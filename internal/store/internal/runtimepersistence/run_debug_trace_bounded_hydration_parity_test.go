@@ -30,7 +30,7 @@ func TestRunDebugTracePageBoundsCanonicalHydrationParity(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			base := time.Date(2026, 7, 23, 3, 30, 0, 0, time.UTC)
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 			filteredEvent, filteredDelivery := seedRunDebugTraceBoundedDelivery(t, ctx, selected, runID, "trace.filtered", "filtered-agent", base)
 			filteredClaim, err := claimDeliveryFixture(ctx, selected, filteredEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("filtered-agent")})
@@ -86,7 +86,7 @@ func TestRunDebugTraceProjectsPersistedHandlerRuleSelectionWithoutContractLookup
 			selected := fixture.store.(boundedRunDebugTraceStore)
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			event := eventtest.PersistedProjection(
 				uuid.NewString(), "trace.rule_selected", "runtime", "", json.RawMessage(`{"proof":true}`), 0,
 				runID, "", events.EventEnvelope{}, time.Date(2026, 8, 23, 15, 0, 0, 0, time.UTC),

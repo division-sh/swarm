@@ -22,6 +22,7 @@ func TestWorkflowSchedulerObservationKeepsPhysicalHistoryAndExactScopeBothStores
 			run, otherRun, entity, path := uuid.NewString(), uuid.NewString(), uuid.NewString(), "mutation-flow"
 			ctx := selectedScheduleTestContext(t, run)
 			for _, id := range []string{run, otherRun} {
+				ctx = storeTestOriginalProcessContext(t, ctx, f.store)
 				requireRunningRunForTest(t, ctx, f.store, id, time.Now().UTC())
 			}
 			selected := f.store.(runtimegenericschedule.Store)

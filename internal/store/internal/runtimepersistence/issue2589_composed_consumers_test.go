@@ -133,6 +133,7 @@ func TestIssue2589NativeAdmissionFrameIsolationBothStores(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			runs := []string{uuid.NewString(), uuid.NewString()}
 			for _, runID := range runs {
+				ctx = storeTestOriginalProcessContext(t, ctx, opened.store)
 				requireRunningRunForTest(t, ctx, opened.store, runID, time.Now().UTC())
 			}
 			active := func(ctx context.Context, tx *sql.Tx, runID string) error {

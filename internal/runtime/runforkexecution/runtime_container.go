@@ -439,13 +439,11 @@ func (c *selectedContractForkLocalRuntimeContainer) PrepareAttachment(ctx contex
 	agentRuntime.executionLease, agentRuntime.cancelExecution = lease, cancelRuntime
 	agentRuntime.scheduler, agentRuntime.timerLifecycle = scheduler, pipeline
 	agentRuntime.genericSchedules = schedules
+	agentRuntime.diagnostics = c.diagnostics
 	if err := pipeline.BindTurnCancellationDispatcher(lifecycleManager); err != nil {
 		return errors.Join(err, agentRuntime.Shutdown())
 	}
 	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(lifecycleManager.FinalizeCommittedAgentReadiness))
-	if err := c.prepareCompletionOwner(runCtx, forkOwner, agentRuntime); err != nil {
-		return errors.Join(err, agentRuntime.Shutdown())
-	}
 	c.attachment = &selectedContractRuntimeAttachment{
 		runtime: agentRuntime, pipeline: pipeline, scheduler: scheduler, ctx: runCtx, cancel: cancelRuntime, sourceEvents: sourceEvents, guard: guard,
 		deliveryAuthority: deliveryAuthority, payloadAdmitter: payloadAdmitter,
@@ -618,13 +616,22 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	if _, err := c.ports.busDurable.RunLifecycle.RequireActiveRunSource(runCtx, req.ForkRunID); err != nil {
 		return fmt.Errorf("admit activated selected execution: %w", err)
 	}
-	if agentRuntime.completionExecutor == nil {
-		return errors.New("selected serving requires its exact completion owner")
-	}
 	if err := agentRuntime.startExecution(runCtx, attachment.pipeline, c.diagnostics, req.Prepared.recoveryFromExecutionID != ""); err != nil {
 		return fmt.Errorf("start activated selected execution: %w", err)
 	}
 	bus, pipeline := agentRuntime.bus, attachment.pipeline
+	grant, err := agentRuntime.generationGrant.Evidence()
+	if err != nil {
+		return fmt.Errorf("load selected barrier recovery grant: %w", err)
+	}
+	owner, err := c.ports.deploymentFanOut.BindSelectedFanOutGrant(grant)
+	if err != nil {
+		return fmt.Errorf("bind selected barrier recovery: %w", err)
+	}
+	barriers, ok := owner.(runtimepipeline.SelectedFanOutObligationOwner)
+	if !ok {
+		return errors.New("selected fan-out owner lacks barrier reconciliation")
+	}
 	continuationFailures := make(chan error, 1)
 	continuations, err := runtimedeliverycontinuation.NewSelected(
 		c.ports.busDurable.DeliveryLifecycle, attachment.deliveryAuthority, req.Operation.selected, bus,
@@ -683,9 +690,6 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 	pipeline.InstallFanOutWorkNotifier(agentRuntime.fanOutServing)
 	if err := attachment.scheduler.ReleaseStartup(runCtx); err != nil {
 		return fmt.Errorf("release selected child wakeups: %w", err)
-	}
-	if err := agentRuntime.completionExecutor.Start(runCtx); err != nil {
-		return fmt.Errorf("start activated selected completion owner: %w", err)
 	}
 	if err := continuations.Synchronize(runCtx); err != nil {
 		return fmt.Errorf("synchronize selected delivery continuations: %w", err)
@@ -924,7 +928,6 @@ func (c selectedContractForkLocalRuntimeContainer) awaitTerminalSettlement(ctx c
 			return nil
 		case cause := <-failures:
 			return fmt.Errorf("selected delivery continuation: %w", cause)
-		case <-c.attachment.runtime.completionExecutor.CompletionWakeups():
 		case <-ticker.C:
 		}
 	}
