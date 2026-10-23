@@ -783,7 +783,7 @@ func newFanInBarrierRuntimeForSource(t *testing.T, backend fanInBarrierConforman
 	var (
 		coordinator *runtimepipeline.PipelineCoordinator
 		manager     *runtimemanager.AgentManager
-		grant       runtimestartupownership.GenerationGrant
+		grant       runtimestartupownership.LiveGenerationGrant
 	)
 	workOwner := conformanceTestRuntimeOccurrence(t, fact.BundleHash())
 	var joinEvents []string
