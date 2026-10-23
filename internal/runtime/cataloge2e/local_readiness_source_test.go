@@ -190,8 +190,12 @@ func activateLocalReadinessFrontier(t *testing.T, ctx context.Context, h *runtim
 	if err := h.rt.Bus.PublishAndWait(ctx, recorded); err != nil {
 		t.Fatal(err)
 	}
-	trigger := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), "source.prepare", "cataloge2e", "", []byte(`{"worker_id":"worker-001"}`), 0, catalogRuntimeRunID,
-		events.EventEnvelope{}, eventtest.RootRoutingSource(catalogRuntimeRunID), time.Now().UTC())
+	rootSource, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: catalogRuntimeRunID, EntityID: catalogRuntimeRunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "source.prepare", eventtest.Producer(events.EventProducerNode, identitytest.FlowNode(t, ".", "prepare").Key()), "", []byte(`{"worker_id":"worker-001"}`), 0,
+		events.EventLineage{RunID: catalogRuntimeRunID, ParentEventID: recorded.ID(), ExecutionMode: executionmode.Live}, events.EventEnvelope{}, rootSource, time.Now().UTC())
 	admit := runtimepkg.NewRuntimePayloadAdmitter(nil, semanticview.Wrap(h.bundle), catalogSourceArtifactFact(t, h.bundle))
 	admission, err := admit(ctx, trigger, "")
 	if err != nil {
