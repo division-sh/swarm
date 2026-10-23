@@ -243,7 +243,8 @@ func observeFanOutCandidateTx(ctx context.Context, tx *sql.Tx, postgres bool, no
 		// Both the shared selector and global-work projection consume this
 		// exact current-grant/run join and the same temporary readiness facts.
 		query := `SELECT g.grant_id, ` + fanOutObservationHeaderColumns() +
-			fanOutObservationFrom(grants, &args) + ` WHERE (` + fanOutReadinessReasonSQL + `)='eligible'`
+			fanOutObservationFrom(grants, &args) + ` WHERE ((` + fanOutReadinessReasonSQL + `)='eligible'
+			OR ((` + fanOutExecutionReasonSQL + `)='eligible' AND ` + fanOutBarrierRecoverySQL + `))`
 		for _, key := range exclude {
 			if err := key.Validate(); err != nil {
 				return err
@@ -270,7 +271,7 @@ func observeFanOutCandidateTx(ctx context.Context, tx *sql.Tx, postgres bool, no
 		if err != nil {
 			return err
 		}
-		if state != fanoutobligation.ServingEligible {
+		if state != fanoutobligation.ServingEligible && state != fanoutobligation.ServingClosed && state != fanoutobligation.ServingCanceled && state != fanoutobligation.ServingBlocked {
 			return errors.New("fan-out candidate SQL prefilter disagrees with canonical serving state")
 		}
 		candidate.Key = intent.Request.Key
@@ -305,6 +306,15 @@ const fanOutReadinessReasonSQL = `CASE
 	WHEN i.claim_owner IS NOT NULL AND (i.lease_expires_at IS NULL OR i.lease_expires_at>$1) THEN 'claim_in_flight'
 	WHEN i.retry_ready_at>$1 THEN 'retry_wait'
 	ELSE 'eligible' END`
+
+// Closed intents still own armed barriers. Retain their existing serving key
+// until the canonical fold admits the schedule or records terminal disposition.
+const fanOutBarrierRecoverySQL = `i.status IN ('closed','canceled','blocked') AND EXISTS (
+	SELECT 1 FROM fan_out_obligation_barriers barrier
+	WHERE barrier.run_id=i.run_id
+	AND barrier.triggering_delivery_id=i.triggering_delivery_id AND barrier.flow_path=i.flow_path
+	AND barrier.declaration_family=i.declaration_family AND barrier.semantic_path=i.semantic_path
+	AND barrier.status IN ('armed','closed_pending'))`
 
 func fanOutObservationHeaderColumns() string {
 	columns := strings.Split(fanOutIntentColumns, ",")
