@@ -257,6 +257,8 @@ func occurrencePayloadDigest(event Event, reference string) (string, error) {
 	}
 	if reference == StageTimerPayloadReference {
 		identity["event_id"] = event.ID()
+		identity["entity_id"] = event.EntityID()
+		identity["flow_instance"] = event.FlowInstance()
 	}
 	raw, err := canonicaljson.Bytes(identity)
 	if err != nil {
