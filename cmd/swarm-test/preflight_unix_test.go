@@ -221,7 +221,6 @@ func validatePreflightStructuralCompleteness(plan testplanning.PreflightPlan, st
 			selected[root.TestRoot]++
 		}
 	}
-	want := 29 + 11 + len(structural)
 	debtRequired := plan.Comparison != nil && plan.Comparison.DebtRequired
 	for _, name := range []string{"TestPersistenceAuthorityDebtRatchet", "TestNativeFixtureFamiliesDoNotReceiveRawAuthority"} {
 		root := testplanning.TestRoot{Package: "github.com/division-sh/swarm/internal/store", Name: name}
