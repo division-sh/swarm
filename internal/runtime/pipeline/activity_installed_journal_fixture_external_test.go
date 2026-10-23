@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -65,9 +66,7 @@ func captureActivityReplayJournal(t *testing.T, ctx context.Context, selected st
 	if len(originals) != 0 {
 		process = originals[0]
 	} else {
-		process, err = selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
-			OwnerID: "activity-journal-proof", BootID: uuid.NewString(), RuntimeInstanceID: scope.RuntimeInstanceID,
-		})
+		process, err = agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
 	}
 	if err != nil {
 		t.Fatal(err)
