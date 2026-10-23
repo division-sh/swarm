@@ -570,7 +570,7 @@ func loadSelectedForkGrantExecutionModeTx(ctx context.Context, tx *sql.Tx, bindi
 	} else {
 		query += ` AND execution.lease_expires_at > CURRENT_TIMESTAMP`
 		if lock {
-			query += ` FOR UPDATE OF execution, binding, run`
+			query += ` FOR SHARE OF execution, binding, run`
 		}
 	}
 	row := selectedForkGrantExecutionRow{Binding: startupownership.SelectedForkGrantBinding{ExecutionID: binding.ExecutionID}}
