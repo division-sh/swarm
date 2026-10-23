@@ -129,6 +129,13 @@ func TestIssue642RetainedReturnRequiresExactTerminalScope(t *testing.T) {
 				if scope.allowsRegistration(pinrouting.ConnectRoutePlan{}, registration) || (selectedForkRecipientPlan{}).allowsRegistration(plan, registration) {
 					t.Fatal("root registration borrowed a foreign or settled recipient")
 				}
+				foreign, err := graph.BindReceiverInstance(definition, flowidentity.Instance{TemplateID: ".", InstancePath: uuid.NewString(), EntityID: event.RunID()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if scope.allowsRegistration(plan, foreign) {
+					t.Fatal("root registration borrowed a foreign physical run")
+				}
 				matched++
 			}
 			if matched != 1 {

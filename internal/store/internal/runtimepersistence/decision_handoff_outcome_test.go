@@ -52,7 +52,7 @@ func TestDecisionCompletionPreservesCommittedHandoffOutcome(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					parentID, eventID, eventName = continuation.SourceEventID, continuation.RequestEventID, "platform.activity_requested"
+					parentID, eventID, eventName = decisionID, continuation.RequestEventID, "platform.activity_requested"
 				}
 				at := now.Add(2 * time.Minute)
 				if err := commitSemanticParentFixture(ctx, cards, runID, parentID, at.Add(-time.Microsecond)); err != nil {

@@ -193,9 +193,6 @@ func materializeRunForkProposedEffectCards(ctx context.Context, decisions runFor
 	if attempt == nil {
 		return fmt.Errorf("fork proposed-effect materialization requires private story ownership")
 	}
-	if err := correspondence.RequireDestination(forkRunID, projection.Fork.EntityID); err != nil {
-		return err
-	}
 	cutoff, err := runForkProposedEffectCutoff(plan)
 	if err != nil {
 		return err
