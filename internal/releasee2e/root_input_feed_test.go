@@ -32,7 +32,7 @@ func TestRootInputFeedLocalAndConnectedCLIExecuteBothStores(t *testing.T) {
 			assertFullLifecycleVerifySuccess(t, verify)
 			localID := uuid.NewString()
 			local := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binary,
-				"run", "start", source, "--config", config, "--data", "company.registered=rows.jsonl", "--run-id", localID, "--mcp-port", fmt.Sprint(freeReleaseTCPPort(t)))
+				"run", "start", "--config", config, "--data", "company.registered=rows.jsonl", "--run-id", localID)
 			if local.err == nil || !strings.Contains(local.output, "No serve running") {
 				t.Fatalf("input-only feed without serve must refuse: %v\n%s", local.err, local.output)
 			}
