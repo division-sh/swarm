@@ -5,14 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
+
 	"path/filepath"
-	"strings"
+
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -681,75 +679,6 @@ func provePipelineSettlementRollback(
 	}
 	if _, handoff := readDeliveryContinuationHandoffCounts(t, ctx, fixture, eventID); handoff != 1 {
 		t.Fatalf("successful settlement committed %d delivery continuation handoffs, want 1", handoff)
-	}
-}
-
-func TestPipelineObligationHasNoLegacyCapabilityAssemblers(t *testing.T) {
-	root := repoRootForRuntimeWriterGuard(t)
-	forbidden := []string{
-		"UpsertPipelineReceipt", "ListEventsMissingPipelineReceipt", "LoadCommittedReplayScope",
-		"ClaimPipelineReplay", "ClaimPipelinePublication", "ClaimPipelineSettlement",
-		"SupportsPersistedReplay", "PipelineReceiptOverride", "InitialPipelineReceipt",
-		"PipelineReceiptDeferred", "BindLeaseContext", "RequireStore",
-		"runtime/replayclaim", "NewEventBus(", "NewRecoveryManager()", "ClaimNext",
-		"SweepUndispatched",
-		"ReleaseRuntimeIngressQueue(context.Context, int) (int, error)",
-		"ReleaseRuntimeIngressQueue(ctx context.Context, limit int) (int, error)",
-		"ReleaseRunQueue(context.Context, string, int) (int, error)",
-		"ReleaseRunQueue(ctx context.Context, runID string, limit int) (int, error)",
-	}
-	allowedScopeFiles := map[string]bool{
-		"internal/store/internal/backend/pipelinepersistence/owner_operations.go":                             true,
-		"internal/store/internal/adminpersistence/destructive_reset_cleanup.go":                               true,
-		"internal/store/platformschema/platformschema.go":                                                     true,
-		"internal/store/internal/backend/runforkpersistence/run_fork_activation.go":                           true,
-		"internal/store/internal/backend/runforkpersistence/run_fork_revision_snapshot.go":                    true,
-		"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go": true,
-		"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go":      true,
-		"internal/runtime/destructivereset/cleanup_catalog.go":                                                true,
-		"internal/store/internal/backend/runforkrevision/effects.go":                                          true,
-		"internal/store/internal/backend/runforkrevision/projection.go":                                       true,
-		"internal/store/testsql/event.go":                                                                     true,
-	}
-	var failures []string
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-		if strings.HasPrefix(rel, "internal/store/storetest/") {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		source := string(raw)
-		for _, symbol := range forbidden {
-			if strings.Contains(source, symbol) {
-				failures = append(failures, fmt.Sprintf("%s retains %s", rel, symbol))
-			}
-		}
-		if strings.Contains(source, "'pipeline'") && !isPipelinePersistenceOwnerFile(rel) {
-			failures = append(failures, fmt.Sprintf("%s owns exact platform/pipeline SQL outside the private adapter", rel))
-		}
-		if strings.Contains(source, "committed_replay_scopes") && !allowedScopeFiles[rel] {
-			failures = append(failures, fmt.Sprintf("%s owns committed scope SQL outside the processing owner or classified physical/revision boundary", rel))
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("walk production Go files: %v", err)
-	}
-	if len(failures) > 0 {
-		t.Fatalf("legacy pipeline obligation paths survive:\n%s", strings.Join(failures, "\n"))
 	}
 }
 

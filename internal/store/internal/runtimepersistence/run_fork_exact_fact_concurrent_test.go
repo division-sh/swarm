@@ -151,7 +151,7 @@ func TestRunForkExactFactsConcurrentBothStores(t *testing.T) {
 					seen := map[int64]bool{}
 					for _, result := range results {
 						capture := result.result[f.runID]
-						if !capture.Changed || (capture.Revision != 2 && capture.Revision != 3) || seen[capture.Revision] {
+						if !capture.Changed || (capture.Revision != f.initialRevision+2 && capture.Revision != f.initialRevision+3) || seen[capture.Revision] {
 							t.Fatalf("concurrent revisions lost/duplicated: %#v", results)
 						}
 						seen[capture.Revision] = true
@@ -176,7 +176,7 @@ func TestRunForkExactFactsConcurrentBothStores(t *testing.T) {
 						if len(want) != 0 {
 							t.Fatalf("missing concurrent facts=%v", want)
 						}
-						compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, refs[0][i], refs[1][i]), 3, false)
+						compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, refs[0][i], refs[1][i]), f.initialRevision+3, false)
 					}
 				})
 			})

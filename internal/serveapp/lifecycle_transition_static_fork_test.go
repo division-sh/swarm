@@ -36,12 +36,16 @@ func TestServedCompiledTransitionStaticForkEvidenceOnBothStores(t *testing.T) {
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "static-fork"}
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
-			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
+			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
 				t.Fatalf("invalid static fork result: %+v", fork)
 			}
-			var childEvent string
-			if err := rt.DB.QueryRow(`SELECT fork_event_id FROM run_fork_selected_contract_executions WHERE fork_run_id=$1 AND source_event_id=$2`, fork.ForkRunID, frontier.EventID).Scan(&childEvent); err != nil {
+			childEvent := waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, frontier.EventID)
+			var storedChildEvent string
+			if err := rt.DB.QueryRow(`SELECT fork_event_id FROM run_fork_selected_contract_executions WHERE fork_run_id=$1 AND source_event_id=$2`, fork.ForkRunID, frontier.EventID).Scan(&storedChildEvent); err != nil {
 				t.Fatal(err)
+			}
+			if storedChildEvent != childEvent {
+				t.Fatalf("stored child frontier=%q want %q", storedChildEvent, childEvent)
 			}
 			for _, scope := range scopes {
 				entityID := requireLifecycleFlowEntity(t, rt, fork.ForkRunID, scope, "done")

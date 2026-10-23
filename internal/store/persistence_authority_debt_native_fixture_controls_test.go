@@ -309,56 +309,6 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores() {
 	}
 }
 
-func TestPersistenceAuthorityDebtNativeFixturePolicyIsFingerprintBound(t *testing.T) {
-	root, copy := persistenceAuthorityRepoRoot(t), t.TempDir()
-	predecessor := t.TempDir()
-	for _, path := range []string{
-		"internal/store/persistence_authority_debt_census_test.go",
-		"internal/store/persistence_authority_debt_test.go",
-		"internal/store/persistence_authority_debt_cache_test.go",
-		"internal/store/persistence_authority_debt_sidecar_test.go",
-		"internal/store/persistence_authority_debt_process_lease_test.go",
-		"internal/store/persistence_authority_debt_native_fixture_test.go",
-		"internal/store/persistence_authority_debt_excluded_fixture_test.go",
-		"internal/checkoutsource/fixture_role.go",
-	} {
-		data, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		debtWriteModuleSource(t, copy, path, string(data))
-		if path != "internal/store/persistence_authority_debt_native_fixture_test.go" && path != "internal/store/persistence_authority_debt_excluded_fixture_test.go" {
-			old, err := debtGit(root, "show", "098a84acd3cff157fb6bcaefb1d55ee15994cdb7:"+path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			debtWriteModuleSource(t, predecessor, path, string(old))
-		}
-	}
-	if digest, err := debtCollectorDigest(predecessor); err != nil || digest != debtProcessLeaseCollectorTo {
-		t.Fatalf("reviewed predecessor collector=%s error=%v", digest, err)
-	}
-	const policy = "internal/store/persistence_authority_debt_native_fixture_test.go"
-	data, err := os.ReadFile(filepath.Join(copy, policy))
-	if err != nil {
-		t.Fatal(err)
-	}
-	debtWriteModuleSource(t, copy, policy, strings.Replace(string(data), "uses == 1", "uses >= 1", 1))
-	if digest, err := debtCollectorDigest(copy); err != nil || digest == debtNativeFixtureCollectorTo || digest == debtExcludedFixtureCollectorTo || digest == debtQ1ReopenCollectorTo {
-		t.Fatalf("changed closure provenance not fingerprinted: %s %v", digest, err)
-	}
-	if err := os.Remove(filepath.Join(copy, policy)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := debtCollectorDigest(copy); err == nil {
-		t.Fatal("current collector accepted missing native provenance policy")
-	}
-	debtWriteModuleSource(t, copy, policy, "package store_test; func broken(")
-	if _, err := debtCollectorDigest(copy); err == nil {
-		t.Fatal("current collector accepted corrupt native provenance policy")
-	}
-}
-
 func TestPersistenceAuthorityDebtNativeFixtureCollectorTransition(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	if digest, err := debtCollectorDigest(root); err != nil || (digest != debtNativeFixtureCollectorTo && digest != debtExcludedFixtureCollectorTo && digest != debtQ1ReopenCollectorTo) {

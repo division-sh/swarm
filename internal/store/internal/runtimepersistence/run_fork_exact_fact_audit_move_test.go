@@ -61,7 +61,7 @@ func TestRunForkExactFactsAdmittedAuditMoveBothStores(t *testing.T) {
 				return nil, err
 			}
 			ledgers, results, err := capture(ctx, attempt, old.runID)
-			if err != nil || results[old.runID] != (runforkrevision.Result{Revision: 1, Changed: true}) {
+			if err != nil || results[old.runID] != (runforkrevision.Result{Revision: old.initialRevision + 1, Changed: true}) {
 				return nil, fmt.Errorf("initial audit oracle=%#v err=%v", results, err)
 			}
 			return ledgers[old.runID], nil
@@ -110,7 +110,7 @@ func TestRunForkExactFactsAdmittedAuditMoveBothStores(t *testing.T) {
 			if !acknowledged || result.Err() != nil {
 				t.Fatalf("actual audit move: acknowledged=%v err=%v", acknowledged, result.Err())
 			}
-			if want.results[old.runID] != (runforkrevision.Result{Revision: 2, Changed: true}) || want.results[next.runID] != (runforkrevision.Result{Revision: 1, Changed: true}) {
+			if want.results[old.runID] != (runforkrevision.Result{Revision: old.initialRevision + 2, Changed: true}) || want.results[next.runID] != (runforkrevision.Result{Revision: next.initialRevision + 1, Changed: true}) {
 				t.Fatalf("audit move oracle revisions=%#v", want.results)
 			}
 			assertExactAuditLedger(t, s, old.runID, want.ledgers[old.runID])

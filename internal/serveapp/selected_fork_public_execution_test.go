@@ -13,7 +13,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -201,9 +203,14 @@ func proveSelectedForkPublicChangedTargetExecutionBothStores(t *testing.T, optio
 				return
 			}
 			fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
-			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 {
+			if fork.SourceRunID != seed.RunID || fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 0 {
 				t.Fatalf("public fork lost execution/source evidence: %+v", fork)
 			}
+			waitWorkspaceProofPipelineReceipt(t, rt.Events, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), "success")
+			waitServedRunDeliveryQuiescence(t, func(ctx context.Context, runID string) (deliverylifecycle.RunSummary, error) {
+				return storetest.ReadServedRunDeliverySummary(ctx, rt.Events, runID)
+			}, fork.ForkRunID)
+			waitWorkspaceProofPipelineHandoff(t, rt, fork.ForkRunID)
 			childEvent := requireWorkspaceProofWorkReadyEvent(t, rt.Endpoint, selected.RuntimeDeps().EventStore, fork.ForkRunID)
 			childHash, err := storetest.ReadSelectedForkRunBundleHash(context.Background(), selected.RuntimeDeps().EventStore, fork.ForkRunID)
 			if err != nil || childHash != fact.BundleHash() {

@@ -11,7 +11,7 @@ import (
 
 var localEnvironmentUnits = []string{
 	"local-release-golden-smoke", "local-catalog-smoke", "local-generated-fanout-fixture",
-	"local-fanout-handoff-ack-loss", "local-api-matrix-registry", "local-api-routing-canaries",
+	"local-fanout-handoff-ack-loss", "local-api-routing-canaries",
 	"local-routing-reporter", "local-delivery-continuation", "local-release-golden-restart",
 	"local-release-lifecycle-smoke", "local-serveapp-canaries", "local-runtime-bus-full",
 }

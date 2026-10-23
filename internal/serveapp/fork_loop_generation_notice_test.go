@@ -8,7 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -61,10 +60,10 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "loop-notice-fork"}
 			var fork apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
-			if fork.SourceRunID != started.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == started.RunID || fork.ExecutedEventCount != 1 {
+			if fork.SourceRunID != started.RunID || fork.ForkEventID != frontier || fork.ForkRunID == "" || fork.ForkRunID == started.RunID || fork.ExecutedEventCount != 0 {
 				t.Fatalf("fork: %+v", fork)
 			}
-			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
+			childEvent := waitServedSelectedForkFrontier(t, rt, fork.ForkRunID, frontier)
 			child := readForkLoopActivation(t, rt, fork.ForkRunID)
 			expected, err := loopruntime.Fork(source, fork.ForkRunID, flowidentity.EntityID("review"))
 			if err != nil {
@@ -73,7 +72,6 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 			if child.Generation() != expected.Generation() || child.MaxAttempts != source.MaxAttempts || child.CurrentStage != "reviewing" {
 				t.Fatalf("child generation or executed stage: %+v, expected %+v", child, expected)
 			}
-			childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
 			childRoute := requireForkLoopStateEffect(t, rt, fork.ForkRunID, childEvent, expected.RevisionID)
 			if !reflect.DeepEqual(sourceRoute, childRoute) {
 				t.Fatalf("loop fork changed exact recipient/target/connect identity: source=%+v child=%+v", sourceRoute, childRoute)

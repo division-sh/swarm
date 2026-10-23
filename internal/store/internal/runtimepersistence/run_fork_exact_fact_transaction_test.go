@@ -54,7 +54,7 @@ func TestRunForkExactFactsTransactionBothStores(t *testing.T) {
 					t.Fatalf("multi-run exact=%#v whole=%#v err=%v", got, want, err)
 				}
 				for _, f := range fixtures {
-					if got[f.runID] != (runforkrevision.Result{Revision: 1, Changed: true}) || !reflect.DeepEqual(ledgers[f.runID], exactLedger(t, ctx, tx, f.runID)) {
+					if got[f.runID] != (runforkrevision.Result{Revision: f.initialRevision + 1, Changed: true}) || !reflect.DeepEqual(ledgers[f.runID], exactLedger(t, ctx, tx, f.runID)) {
 						t.Fatalf("multi-run result mismatch for %s", f.runID)
 					}
 					if err := validateRunForkRevisionMatrix(ctx, tx, s.postgres, f.runID); err != nil {
@@ -84,7 +84,7 @@ func TestRunForkExactFactsTransactionBothStores(t *testing.T) {
 						if err == nil || !strings.Contains(err.Error(), "exact_after_domain") {
 							t.Fatalf("native finalizer fault=%v", err)
 						}
-					} else if err != nil || result[f.runID] != (runforkrevision.Result{Revision: 1, Changed: true}) {
+					} else if err != nil || result[f.runID] != (runforkrevision.Result{Revision: f.initialRevision + 1, Changed: true}) {
 						t.Fatalf("pre-rollback finalizer result=%#v err=%v", result, err)
 					}
 				})
@@ -101,6 +101,15 @@ func TestRunForkExactFactsFixedEventMaterializationBothStores(t *testing.T) {
 		f := newRunForkRevisionMatrixFixture()
 		event := eventtest.ExistingRunRootIngress(f.eventID, "matrix.event", "revision-matrix", "", []byte(`{"matrix":true,"items":["matrix"]}`), 0, f.runID, events.EventEnvelope{Scope: events.EventScopeGlobal}, f.at)
 		native := prepareFixedForkHistoryFixture(t, s.selected.(agentFixtureFlowStore), "exact-facts", f.runID, f.entityID, event)
+		if err := s.db.QueryRowContext(native.ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1`, f.runID).Scan(&f.initialRevision); err != nil {
+			t.Fatalf("read native constructor revision: %v", err)
+		}
+		initialEvents := map[string]bool{}
+		for _, fact := range loadRunForkRevisionMatrixFacts(t, native.ctx, s.db, f.runID, f.initialRevision) {
+			if fact.Family == runforkrevision.FamilyEvents {
+				initialEvents[fact.Key] = true
+			}
+		}
 		if err := runSelectedFixtureMutation(native.ctx, s.selected, "exact fixed construction and first event", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 			if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, s.selected.(eventCommitTxStore), attempt, event, nil); err != nil {
 				return err
@@ -136,7 +145,7 @@ func TestRunForkExactFactsFixedEventMaterializationBothStores(t *testing.T) {
 				if births < 3 {
 					t.Fatalf("native constructor omitted parent/child/name birth evidence: %d", births)
 				}
-				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, refs...), 1, true)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, refs...), f.initialRevision+1, true)
 				return nil
 			})
 		}); err != nil {
@@ -149,13 +158,13 @@ func TestRunForkExactFactsFixedEventMaterializationBothStores(t *testing.T) {
 			mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE flow_instances SET name='Later Entity',revision=revision+1,updated_at=$3 WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID, f.at.Add(time.Second))
 			mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_mutations (mutation_id,run_id,entity_id,domain,path,new_value,caused_by_event,writer_type,writer_id,created_at) VALUES ($1,$2,$3,'authored_field','name',$4,$5,'platform','exact-fork',$6)`, laterMutation, f.runID, f.entityID, `"Later Entity"`, laterEvent, f.at.Add(time.Second))
 			compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID,
-				exactFactRef(t, runforkrevision.FamilyEvents, laterEvent), exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID), exactFactRef(t, runforkrevision.FamilyEntityMutations, laterMutation)), 2, true)
+				exactFactRef(t, runforkrevision.FamilyEvents, laterEvent), exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID), exactFactRef(t, runforkrevision.FamilyEntityMutations, laterMutation)), f.initialRevision+2, true)
 		})
 		ctx := native.ctx
 		for _, point := range []struct {
 			event, name string
 			revision    int64
-		}{{f.eventID, "Snapshot Entity", 1}, {laterEvent, "Later Entity", 2}} {
+		}{{f.eventID, "Snapshot Entity", f.initialRevision + 1}, {laterEvent, "Later Entity", f.initialRevision + 2}} {
 			plan, err := s.selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: f.runID, At: point.event})
 			if err != nil || plan.ForkPoint.Revision != point.revision {
 				t.Fatalf("fixed event plan=%#v err=%v", plan.ForkPoint, err)
@@ -165,11 +174,15 @@ func TestRunForkExactFactsFixedEventMaterializationBothStores(t *testing.T) {
 				t.Fatalf("fixed cut lost exact business name: %+v", business)
 			}
 			ids, ok := plan.HistoricalEventIDs(point.revision)
-			if !ok || len(ids) != int(point.revision) {
+			expectedEvents := len(initialEvents) + 1
+			if point.event == laterEvent {
+				expectedEvents++
+			}
+			if !ok || len(ids) != expectedEvents {
 				t.Fatalf("inclusive history=%v admitted=%v", ids, ok)
 			}
 			for _, id := range ids {
-				if id != f.eventID && (point.revision == 1 || id != laterEvent) {
+				if !initialEvents[id] && id != f.eventID && (point.event != laterEvent || id != laterEvent) {
 					t.Fatalf("wrong historical event %s", id)
 				}
 			}

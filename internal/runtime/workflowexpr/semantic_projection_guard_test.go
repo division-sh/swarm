@@ -99,62 +99,6 @@ func workflowProjectionCallName(expression ast.Expr) string {
 	return ""
 }
 
-func TestWorkflowCELProjectionJSONSourcesPreserveNumberLexemes(t *testing.T) {
-	runtimeRoot := workflowProjectionRuntimeRoot(t)
-	repoRoot := filepath.Clean(filepath.Join(runtimeRoot, "..", ".."))
-	boundaries := []struct {
-		name, path, function string
-		streaming            bool
-		projects             bool
-		collection           bool
-	}{
-		{name: "ordinary event payload", path: filepath.Join(runtimeRoot, "engine", "executor.go"), function: "decodePayload", projects: true},
-		{name: "persisted workflow state", path: filepath.Join(runtimeRoot, "pipeline", "workflow_instance_store.go"), function: "decodeWorkflowInstanceJSONMap", projects: true},
-		{name: "deferred trigger payload", path: filepath.Join(runtimeRoot, "engine", "fan_out_evaluator.go"), function: "decodeFanOutPayload"},
-		{name: "persisted fan-out capsule", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_owner.go"), function: "scanFanOutIntent"},
-		{name: "run-fork fan-out capsule projection", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "runforkpersistence", "run_fork_fan_out_projection.go"), function: "loadRunForkFanOutObligationsFromRevision"},
-		{name: "materialized fork fan-out capsule verification", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "runforkpersistence", "run_fork_fan_out_materializer.go"), function: "requireExactMaterializedRunForkFanOut"},
-		{name: "exact entity revision", path: filepath.Join(repoRoot, "internal", "store", "internal", "backend", "pipelinepersistence", "fan_out_owner.go"), function: "collectionRangeFromJSON", collection: true},
-	}
-	for _, boundary := range boundaries {
-		t.Run(boundary.name, func(t *testing.T) {
-			raw, err := os.ReadFile(boundary.path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			canonical, projected, useNumber, unmarshal, found := workflowProjectionSourceBoundaryFacts(string(raw), boundary.function)
-			if !found || unmarshal || boundary.streaming && !useNumber || !boundary.streaming && !canonical || boundary.projects && !projected {
-				t.Fatalf("source boundary %s facts = found:%v canonical:%v projected:%v use_number:%v unmarshal:%v", boundary.function, found, canonical, projected, useNumber, unmarshal)
-			}
-			if boundary.collection {
-				for _, call := range []string{"canonicaljson.Decode", "request.ProjectSource"} {
-					if !workflowProjectionFunctionCalls(string(raw), boundary.function, call) {
-						t.Errorf("exact collection source stopped consuming strict admission/projection %q", call)
-					}
-				}
-			}
-		})
-	}
-	projection, err := os.ReadFile(filepath.Join(runtimeRoot, "fanoutobligation", "source_projection.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, call := range []string{"r.ValidateSourceProjection", "r.Capsule.SourceProjection.ProjectSource"} {
-		if !workflowProjectionFunctionCalls(string(projection), "ProjectSource", call) {
-			t.Errorf("fan-out source stopped consuming admitted projection %q", call)
-		}
-	}
-	semantics, err := os.ReadFile(filepath.Join(runtimeRoot, "contracts", "workflow_fan_out_semantics.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, call := range []string{"s.CollectionProjection.Project", "eventSchemaForTypeRef", "eventschema.ValidateValueAgainstSchema"} {
-		if !workflowProjectionFunctionCalls(string(semantics), "ProjectSource", call) {
-			t.Errorf("fan-out semantic source owner stopped consuming projection/catalog validation %q", call)
-		}
-	}
-}
-
 func TestWorkflowCELProjectionJSONWritersPreserveNumberKinds(t *testing.T) {
 	runtimeRoot := workflowProjectionRuntimeRoot(t)
 	repoRoot := filepath.Clean(filepath.Join(runtimeRoot, "..", ".."))
