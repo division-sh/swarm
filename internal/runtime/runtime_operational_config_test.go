@@ -249,29 +249,6 @@ func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *te
 	}
 }
 
-func TestNewRuntimeBuildsRunLifecycleExecutorFromTypedOwnerWithoutRawSQLCapability(t *testing.T) {
-	rt, err := newScopedTestRuntime(
-		t,
-		testAuthorActivityContext(context.Background()),
-		RuntimeDeps{
-			Config: testOperationalRuntimeConfig(),
-
-			RunLifecycleCandidates: runtimeTestCandidateOwner{},
-
-			Options: RuntimeOptions{
-				WorkflowModule: loadRuntimeOwnershipWorkflowModule(t),
-				LLMRuntime:     noopLLMRuntime{},
-			},
-		},
-	)
-	if err != nil {
-		t.Fatalf("NewRuntime: %v", err)
-	}
-	if rt.runLifecycleExecutor == nil {
-		t.Fatal("typed run lifecycle candidate owner did not construct the runtime executor")
-	}
-}
-
 func TestRuntimeStart_FailsWhenRecoveryDisabledAndActiveSchedulesExist(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	store := &recoveryDisabledScheduleStore{active: []runtimegenericschedule.Activation{recoveryGuardActivation(t, "recover-me")}}

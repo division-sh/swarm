@@ -88,7 +88,7 @@ func TestOriginSQLLockObserverPostgres(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newCompleteEventDispatchFixtureWithOrigin(t, "postgres", false, runlifecycle.ScenarioSetupRunOrigin(), nil)
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(f.ctx)
 			defer cancel()
 			lock, err := storetest.HoldPostgresRunTableReadBarrier(ctx, f.store)
 			if err != nil {
@@ -251,7 +251,7 @@ func TestContinuationOriginReadPostgresCancellationCausality(t *testing.T) {
 				t.Fatal("origin not entered")
 			}
 			var err error
-			barrier, err = storetest.HoldPostgresRunTableReadBarrier(context.Background(), f.store)
+			barrier, err = storetest.HoldPostgresRunTableReadBarrier(f.ctx, f.store)
 			if err != nil {
 				t.Fatal(err)
 			}

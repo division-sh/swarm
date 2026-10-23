@@ -191,6 +191,14 @@ func ensureTestEventBusSourceArtifact(store runtimebus.EventStore, source semant
 
 func nativeBusProcessContext(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
+	if _, found := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); !found {
+		ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
+	}
+	if process, found := worklifetime.ProcessFromContext(ctx); found {
+		if _, bound := process.OriginalProcess(); bound {
+			return ctx
+		}
+	}
 	store, ok := selected.(agentfixture.Store)
 	if !ok {
 		t.Fatalf("native bus fixture requires its original process acquisition owner, got %T", selected)
@@ -207,19 +215,43 @@ func nativeBusProcessContext(t testing.TB, ctx context.Context, selected any) co
 	if !found {
 		process = worklifetime.NewProcess()
 		ctx = worklifetime.WithProcess(ctx, process)
-		t.Cleanup(func() {
-			join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			process.Retire()
-			if _, err := process.Join(join); err != nil {
-				t.Error(err)
-			}
-		})
 	}
 	if err := process.BindOriginalProcess(original.LeaseStamp()); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		process.Retire()
+		if _, err := process.Join(join); err != nil {
+			t.Error(err)
+		}
+	})
 	return ctx
+}
+
+func nativeBusWorkOwner(t testing.TB, ctx context.Context) *worklifetime.RuntimeOccurrence {
+	t.Helper()
+	process, found := worklifetime.ProcessFromContext(ctx)
+	scope, scoped := runtimeauthoractivity.ScopeFromContext(ctx)
+	if !found || !scoped {
+		t.Fatal("native bus work requires its original scoped process")
+	}
+	if _, bound := process.OriginalProcess(); !bound {
+		t.Fatal("native bus work cannot create original process attribution")
+	}
+	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: scope.RuntimeInstanceID, BundleHash: scope.BundleHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := owner.RetireAndWait(join); err != nil {
+			t.Error(err)
+		}
+	})
+	return owner
 }
 
 func newNativeScopedTestEventBus(t testing.TB, selected runtimebus.EventStore, options ...runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
@@ -229,25 +261,20 @@ func newNativeScopedTestEventBus(t testing.TB, selected runtimebus.EventStore, o
 		opts = options[0]
 	}
 	if opts.WorkOwner == nil {
-		ctx := nativeBusProcessContext(t, testAuthorActivityContextForSource(context.Background(), opts.ContractBundle), selected)
-		process, _ := worklifetime.ProcessFromContext(ctx)
-		fact := testSourceArtifactFact(opts.ContractBundle)
-		owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: fact.BundleHash()})
-		if err != nil {
-			return nil, err
+		fact := opts.SourceArtifactFact
+		if fact.Validate() != nil {
+			fact = testSourceArtifactFact(opts.ContractBundle)
 		}
-		opts.WorkOwner = owner
-		t.Cleanup(func() {
-			join, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if _, err := owner.RetireAndWait(join); err != nil {
-				t.Error(err)
-			}
-			process.Retire()
-			if _, err := process.Join(join); err != nil {
-				t.Error(err)
-			}
-		})
+		ctx := testAuthorActivityContextForSource(context.Background(), opts.ContractBundle)
+		ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+		ctx = nativeBusProcessContext(t, ctx, selected)
+		runtimeID := opts.RuntimeInstanceID
+		if runtimeID == "" {
+			runtimeID = authorActivityTestRuntimeInstanceID
+		}
+		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeID, fact.BundleHash()))
+		opts.WorkOwner = nativeBusWorkOwner(t, ctx)
 	}
 	return newScopedTestEventBus(selected, opts)
 }
