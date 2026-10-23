@@ -58,12 +58,16 @@ func TestSelectedForkPendingRootAgentInputBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !result.Activation.Activated || result.ExecutedEventCount != 1 || len(result.ForkEvents) != 1 {
+			if !result.Activation.Activated || result.ExecutedEventCount != 0 || len(result.ForkEvents) != 0 {
 				t.Fatalf("root agent input execution: %+v", result)
 			}
 			child := result.Materialization.ForkRunID
 			if child == "" || child == catalogRuntimeRunID {
 				t.Fatal("missing exact selected child")
+			}
+			observed, err := observeCatalogSelectedExecution(t, h, child)
+			if err != nil || observed.ExecutedEventCount != 1 {
+				t.Fatalf("retained input execution=%+v error=%v", observed, err)
 			}
 			var count int
 			if err := h.db.QueryRowContext(ctx, `SELECT count(*) FROM event_deliveries WHERE run_id=$1 AND subscriber_type='agent' AND subscriber_id='test-agent' AND status=$2`, child, string(deliverylifecycle.StatusDelivered)).Scan(&count); err != nil {
@@ -72,7 +76,7 @@ func TestSelectedForkPendingRootAgentInputBothStores(t *testing.T) {
 			if count != 1 {
 				t.Fatalf("selected root agent deliveries=%d want=1", count)
 			}
-			if err := h.db.QueryRowContext(ctx, `SELECT count(*) FROM run_fork_selected_contract_executions WHERE source_run_id=$1 AND fork_run_id=$2 AND source_event_id=$3 AND fork_event_id=$4`, catalogRuntimeRunID, child, point, result.ForkEvents[0].ForkEventID).Scan(&count); err != nil {
+			if err := h.db.QueryRowContext(ctx, `SELECT count(*) FROM run_fork_selected_contract_executions WHERE source_run_id=$1 AND fork_run_id=$2 AND source_event_id=$3 AND fork_event_id=$4`, catalogRuntimeRunID, child, point, observed.ForkEvents[0].ForkEventID).Scan(&count); err != nil {
 				t.Fatal(err)
 			}
 			if count != 1 {

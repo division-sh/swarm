@@ -610,8 +610,15 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 	if err != nil {
 		t.Fatal(err)
 	}
+	publicationParent := parentID
+	if approved {
+		if err := commitSemanticParentFixture(ctx, fixture.store, runID, decisionID, at.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		publicationParent = decisionID
+	}
 	event := eventtest.ChildForProducerWithRoutingSource(requestID, "platform.activity_requested", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", payload, 1,
-		events.EventLineage{RunID: runID, ParentEventID: parentID, ExecutionMode: executionmode.Live}, events.EventEnvelope{}, source, at.Add(2*time.Minute))
+		events.EventLineage{RunID: runID, ParentEventID: publicationParent, ExecutionMode: executionmode.Live}, events.EventEnvelope{}, source, at.Add(2*time.Minute))
 	var routes []events.DeliveryRoute
 	if ordinaryReplay {
 		agent := bustest.IdentityForRun(t, runID, "activity-replay", "")
@@ -619,7 +626,12 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 	}
 	admitted := admitOriginalActivityRequestFixture(t, ctx, declarations, event, flow)
 	event = admitted.Event()
-	if _, err := commitAdmittedSemanticEventFixtureOutcome(ctx, fixture.store, admitted, canonicalDeliveryFixtureRoutes(runID, routes), pipelineobligation.ScopeSubscribed); err != nil {
+	var disposition *pipelineobligation.Disposition
+	if ordinaryReplay {
+		processed := pipelineobligation.Acknowledged("pipeline_persisted")
+		disposition = &processed
+	}
+	if _, err := commitAdmittedSemanticEventFixtureOutcomeWithDisposition(ctx, fixture.store, admitted, canonicalDeliveryFixtureRoutes(runID, routes), pipelineobligation.ScopeSubscribed, disposition); err != nil {
 		t.Fatal(err)
 	}
 	if approved {

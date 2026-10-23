@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -14,12 +16,14 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
@@ -128,8 +132,8 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	if result.Owner != runfork.RunForkSelectedContractExecutionOwner ||
 		result.Materialization.ForkRunID == "" ||
 		!result.Activation.Activated ||
-		result.ExecutedEventCount != 1 ||
-		len(result.ForkEvents) != 1 {
+		result.ExecutedEventCount != 0 ||
+		len(result.ForkEvents) != 0 {
 		t.Fatalf("selected execution result = %#v", result)
 	}
 	if result.AgentRuntimeMaterialization == nil ||
@@ -148,9 +152,13 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	}
 
 	forkRunID := result.Materialization.ForkRunID
-	forkEventID := result.ForkEvents[0].ForkEventID
-	if result.ForkEvents[0].SourceEventID != sourceEventID || forkEventID == "" || forkEventID == sourceEventID {
-		t.Fatalf("fork event lineage = %#v, source event %s", result.ForkEvents[0], sourceEventID)
+	observed, err := observeCatalogSelectedExecution(t, h, forkRunID)
+	if err != nil || observed.ExecutedEventCount != 1 {
+		t.Fatalf("retained fork execution = %+v, error=%v", observed, err)
+	}
+	forkEventID := observed.ForkEvents[0].ForkEventID
+	if observed.ForkEvents[0].SourceEventID != sourceEventID || forkEventID == "" || forkEventID == sourceEventID {
+		t.Fatalf("fork event lineage = %#v, source event %s", observed.ForkEvents[0], sourceEventID)
 	}
 	assertSelectedContractForkExecutionRows(t, h.db, sourceRunID, forkRunID, sourceEventID, forkEventID)
 	assertSelectedContractForkRuntimeRows(t, h.db, forkRunID, forkEventID)
@@ -164,6 +172,75 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	assertSourceRunLifecycle(t, h.pg, sourceRunID, "paused", false)
 	negativeFixtureRoot := catalogRuntimeFixture(t, "catalog.runtime.selected_contract_fork", "test-non-agent-replay-fail-closed").Root
 	assertUnsupportedHistoricalReplayFailsClosed(t, negativeFixtureRoot)
+}
+
+type catalogSelectedExecutionObservation struct {
+	ExecutedEventCount int
+	ForkEvents         []runtimerunforkexecution.SelectedContractExecutionForkEvent
+}
+
+func observeCatalogSelectedExecution(t *testing.T, h *runtimeHarness, child string) (catalogSelectedExecutionObservation, error) {
+	t.Helper()
+	var selected any = h.pg
+	if h.sqlite != nil {
+		selected = h.sqlite
+	}
+	ctx, cancel := context.WithTimeout(h.ctx, 10*time.Second)
+	defer cancel()
+	for {
+		state, err := storetest.ReadSelectedExecutionStorage(ctx, selected, child)
+		if err != nil {
+			return catalogSelectedExecutionObservation{}, err
+		}
+		if state.State == "closed" && state.Occurrences == 1 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return catalogSelectedExecutionObservation{}, fmt.Errorf("selected execution did not close: %+v: %w", state, ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+	if err != nil {
+		return catalogSelectedExecutionObservation{}, err
+	}
+	rows, err := storetest.DecodeSelectedForkSnapshotRows(snapshot["run_fork_selected_contract_executions"])
+	if err != nil {
+		return catalogSelectedExecutionObservation{}, err
+	}
+	var observed catalogSelectedExecutionObservation
+	for _, row := range rows {
+		id, err := row["fork_run_id"].Text()
+		if err != nil {
+			return observed, err
+		}
+		if id != child {
+			continue
+		}
+		var event runtimerunforkexecution.SelectedContractExecutionForkEvent
+		for name, destination := range map[string]*string{"source_event_id": &event.SourceEventID, "fork_event_id": &event.ForkEventID, "event_name": &event.EventName} {
+			*destination, err = row[name].Text()
+			if err != nil {
+				return observed, err
+			}
+		}
+		observed.ForkEvents = append(observed.ForkEvents, event)
+	}
+	sort.Slice(observed.ForkEvents, func(i, j int) bool {
+		return observed.ForkEvents[i].SourceEventID < observed.ForkEvents[j].SourceEventID
+	})
+	observed.ExecutedEventCount = len(observed.ForkEvents)
+	header, err := selected.(interface {
+		LoadRunHeader(context.Context, string) (operatorread.RunHeader, error)
+	}).LoadRunHeader(ctx, child)
+	if err != nil {
+		return observed, err
+	}
+	if header.Failure != nil {
+		return observed, failures.FromEnvelope(*header.Failure)
+	}
+	return observed, nil
 }
 
 func selectedContractExecutionOwnerForCatalogTestWithReplay(t testing.TB, selected *store.PostgresStore, replay runtimerunforkexecution.SelectedContractReplayPersistence, forkOverride ...runtimerunforkexecution.SelectedContractForkLifecycle) runtimerunforkexecution.SelectedContractExecutionOwner {

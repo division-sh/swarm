@@ -197,41 +197,6 @@ func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
 	}
 }
 
-func assertSpecEntryGolden(t *testing.T, expected entryGolden) {
-	t.Helper()
-	body, err := os.ReadFile(filepath.Join("../..", expected.File))
-	if err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := yamlsource.Load(body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	value := snapshot.Document(expected.File).Root()
-	for _, key := range expected.EmbeddedPath {
-		field, err := value.Lookup(key)
-		if err != nil || field.Presence == yamlsource.PresenceMissing {
-			t.Fatalf("missing embedded source field %s: %v", key, err)
-		}
-		value = field.Value
-	}
-	scalar, err := value.Scalar()
-	if err != nil {
-		t.Fatal(err)
-	}
-	embedded, err := yamlsource.Load([]byte(scalar.Value))
-	if err != nil {
-		t.Fatal(err)
-	}
-	schema, err := contracts.AdmitFlowSchemaValue(embedded.Document(expected.Flow).Root())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := assertEntryGolden(expected, schema); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func assertEmbeddedEntryGolden(t *testing.T, expected entryGolden) {
 	t.Helper()
 	if err := validateCurrentEntrySelector(expected); err != nil {

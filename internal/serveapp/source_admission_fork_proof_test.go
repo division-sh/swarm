@@ -366,12 +366,13 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 					if err := servedB.DB.QueryRow("SELECT bundle_hash FROM runs WHERE run_id=$1", fork.ForkRunID).Scan(&durableHash); err != nil {
 						t.Fatal(err)
 					}
-					if fork.BundleHash != want || durableHash != want || fork.ExecutedEventCount != 1 {
+					if fork.BundleHash != want || durableHash != want || fork.ExecutedEventCount != 0 {
 						t.Fatalf("source selection was not exact: %+v / %s want %s", fork, durableHash, want)
 					}
 					if name == "explicit" && (!fork.SourceFrozen || fork.SourceRunStatus != "forked") {
 						t.Fatalf("explicit target source avoided the source-card freeze: %+v", fork)
 					}
+					waitServedSelectedForkFrontier(t, servedB, fork.ForkRunID, p.frontierID)
 					var cardHash, cardVersion string
 					if err := servedB.DB.QueryRow("SELECT bundle_hash,workflow_version FROM decision_cards WHERE run_id=$1 AND anchor_kind='stage_gate'", fork.ForkRunID).Scan(&cardHash, &cardVersion); err != nil || cardHash != want || cardVersion != want {
 						t.Fatalf("child decision source=%s version=%s want=%s: %v", cardHash, cardVersion, want, err)

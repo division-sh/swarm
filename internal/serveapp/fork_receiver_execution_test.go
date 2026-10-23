@@ -130,6 +130,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, requested.EventID); err != nil {
 					t.Fatal(err)
 				}
+				requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "source-fixture-stop"})
 				sourceBefore := readWorkspaceProofSourceDomain(t, selected.RuntimeDeps().EventStore, seed.RunID)
 				family, ok := selected.RunFork()
 				if !ok {
@@ -319,6 +320,27 @@ func writeSelectedForkAgentProofFixture(t *testing.T, root, role, subscriptions,
 
 func requireSelectedForkPublicControlBoundary(t *testing.T, endpoint string, owner runtimebus.EventStore, loadedBundleHash, runID, eventID string, declaredAgent bool, completionCount int) {
 	t.Helper()
+	logs := owner.(interface {
+		ListOperatorRuntimeLogs(context.Context, operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
+	})
+	dispatchDeadline := time.Now().Add(servedProofPollDeadline)
+	for {
+		page, err := logs.ListOperatorRuntimeLogs(t.Context(), operatorread.OperatorRuntimeLogListOptions{RunID: runID,
+			Component: "run_fork", ActionOrEventType: "selected_contract_event_dispatched", Limit: 2})
+		if err != nil || page.NextCursor != "" || len(page.Logs) > 1 {
+			t.Fatalf("selected dispatch observation: %+v error=%v", page, err)
+		}
+		if len(page.Logs) == 1 {
+			if page.Logs[0].EventID != eventID {
+				t.Fatalf("selected dispatch changed its exact event: %+v", page.Logs[0])
+			}
+			break
+		}
+		if time.Now().After(dispatchDeadline) {
+			t.Fatal("selected initial dispatch did not finish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	// Delivery completion precedes the completion worker's await-mutation
 	// projection. Observe that durable handoff before measuring API mutations;
 	// the full snapshots below must still include the candidate columns.
