@@ -86,7 +86,7 @@ func TestStandingChannelAdmissionRefusesBeforeDurableMutation(t *testing.T) {
 				if !present {
 					t.Fatal("captured Telegram channel plan is unavailable")
 				}
-				declarations, err := ResolveStandingTargetDeclarations(source, catalog)
+				declarations, err := ResolveStandingTargetDeclarations(source, catalog, nil)
 				if err != nil || len(declarations) != 1 {
 					t.Fatalf("captured standing declarations: %+v, %v", declarations, err)
 				}

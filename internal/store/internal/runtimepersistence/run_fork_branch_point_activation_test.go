@@ -359,8 +359,11 @@ func TestSelectedBranchPointCleanupIsolationBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					selected := f.store.(runforkexecution.SelectedContractForkLifecycle)
-					for _, req := range []runfork.RunForkSelectedContractExecutionActivateRequest{firstReq, secondReq} {
-						result, err := selected.ActivateRunForkForSelectedContractExecution(f.ctx, req)
+					for _, candidate := range []struct {
+						ctx context.Context
+						req runfork.RunForkSelectedContractExecutionActivateRequest
+					}{{f.ctx, firstReq}, {other.ctx, secondReq}} {
+						result, err := selected.ActivateRunForkForSelectedContractExecution(candidate.ctx, candidate.req)
 						if err != nil || !result.Activated || result.BranchDivergence == nil ||
 							result.BranchDivergence.ForkPoint.Kind != result.ForkPoint.Kind || result.BranchDivergence.ForkPoint.Revision != result.ForkPoint.Revision || result.BranchDivergence.ForkPoint.EventID != result.ForkPoint.EventID {
 							t.Fatalf("sibling branch fixture did not activate: %+v err=%v", result, err)

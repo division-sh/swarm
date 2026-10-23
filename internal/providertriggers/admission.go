@@ -215,7 +215,7 @@ func (s *CatalogSnapshot) compilePackAdmission(alias, provider, signingSecret st
 	if err != nil {
 		return InboundAdmissionPlan{}, err
 	}
-	ack := strings.TrimSpace(declaration.Acknowledge)
+	ack := declaration.Acknowledge
 	if auth == RequestAuthenticationSession {
 		if signingSecret != "" || ack != "" {
 			return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q session transport forbids signing_secret and webhook acknowledgement", alias, provider)
@@ -256,7 +256,7 @@ func (s *CatalogSnapshot) compileRawAdmission(alias, provider, signingSecret str
 	if err != nil {
 		return InboundAdmissionPlan{}, err
 	}
-	ack := strings.TrimSpace(declaration.Acknowledge)
+	ack := declaration.Acknowledge
 	if err := validateAcknowledgement(alias, provider, auth, ack); err != nil {
 		return InboundAdmissionPlan{}, err
 	}
@@ -309,11 +309,14 @@ func manifestRequestAuthentication(manifest Manifest) (RequestAuthentication, er
 }
 
 func validateAcknowledgement(alias, provider string, auth RequestAuthentication, acknowledge string) error {
+	if auth == RequestAuthenticationNone && acknowledge == "" {
+		return fmt.Errorf("trigger %q provider %q accepts unsigned webhooks; set acknowledge: %s under its exact deployment-config triggers entry", alias, provider, UnsignedWebhookAcknowledgement)
+	}
 	if acknowledge != "" && acknowledge != UnsignedWebhookAcknowledgement {
-		return fmt.Errorf("ingress alias %q provider %q admission.acknowledge must be %q when present; remove it or use the canonical token", alias, provider, UnsignedWebhookAcknowledgement)
+		return fmt.Errorf("trigger %q provider %q deployment acknowledge must be %q when present; remove it or use the canonical token", alias, provider, UnsignedWebhookAcknowledgement)
 	}
 	if auth != RequestAuthenticationNone && acknowledge != "" {
-		return fmt.Errorf("ingress alias %q provider %q acknowledges unsigned_webhook, but the compiled admission uses %s; remove admission.acknowledge", alias, provider, auth)
+		return fmt.Errorf("trigger %q provider %q acknowledges unsigned_webhook, but the compiled admission uses %s; remove deployment acknowledge", alias, provider, auth)
 	}
 	return nil
 }

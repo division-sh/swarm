@@ -21,7 +21,10 @@ func DecodeSource(value yamlsource.Value, target *Config) error {
 	if value.Presence() == yamlsource.PresenceMissing {
 		return nil
 	}
-	return value.Project(target)
+	if err := value.Project(target); err != nil {
+		return err
+	}
+	return target.validateTriggerEntries()
 }
 
 // CLISourceConfig is the CLI-owned portion of the same swarm.yaml document.
@@ -60,6 +63,11 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 	}
 	if err := validateConfigContainerShape(value, shape, owner); err != nil {
 		return err
+	}
+	if shape == reflect.TypeFor[TriggerConfig]() {
+		if err := validateTriggerConfigSource(value); err != nil {
+			return err
+		}
 	}
 	switch shape.Kind() {
 	case reflect.Struct:
@@ -106,6 +114,11 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 				return err
 			}
 			for _, field := range fields {
+				if owner == "config.triggers" {
+					if err := validateTriggerMember(field.Name); err != nil {
+						return err
+					}
+				}
 				if err := validateConfigValue(field.Value, shape.Elem(), owner+"."+field.Name); err != nil {
 					return err
 				}

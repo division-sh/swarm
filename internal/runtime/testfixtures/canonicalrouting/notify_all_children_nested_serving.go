@@ -22,6 +22,7 @@ func CopyNotifyAllChildrenNestedServing(t testing.TB) string {
 	// LLM agent that would terminate an account before its nested tasks settle.
 	removeClosedVariantFiles(t, root, "account/agents.yaml")
 	writeClosedVariantFile(t, root, "account/entities.yaml", "account_state:\n  account_id: text\n")
+	writeClosedVariantFile(t, root, "account/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "account/schema.yaml", `# fixture: account
 stages:
   active: {}
@@ -92,6 +93,7 @@ account.tasks.completed:
               semantic_rejected: join.dispositions.semantic_rejected
               canceled: join.dispositions.canceled
 `)
+	writeClosedVariantFile(t, root, "account/task/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "account/task/schema.yaml", `# fixture: account-task
 instance: task_key
 stages:

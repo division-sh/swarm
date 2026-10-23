@@ -234,8 +234,19 @@ func newProposedEffectMailboxHandler(
 
 func installProposedEffectAPIJournal(t *testing.T, selected agentfixture.Store, bus *runtimebus.EventBus, coordinator *runtimepipeline.PipelineCoordinator, fact runtimecorrelation.SourceArtifactFact) {
 	t.Helper()
-	ctx := testAuthorActivityContextForSource(context.Background(), fact)
-	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	ctx := admittedAPITestBusContext(t, context.Background(), bus)
+	root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if err != nil || !present {
+		t.Fatalf("proposed-effect journal root admission: present=%t err=%v", present, err)
+	}
+	admittedFact, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !present || !admittedFact.Matches(fact) {
+		t.Fatal("proposed-effect journal source does not match its bus admission")
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
 	if err != nil {
 		t.Fatal(err)

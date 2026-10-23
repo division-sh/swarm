@@ -326,6 +326,9 @@ func CopyForkReceiverOwnership(t testing.TB, receivers []ForkReceiver, entityles
           token: payload.token
 `, receiver.Path)
 		writeClosedVariantFile(t, root, receiver.Path+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, receiver.Path+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, receiver.Path+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
+		writeClosedVariantFile(t, root, receiver.Path+"/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 		writeClosedVariantFile(t, root, receiver.Path+"/schema.yaml", fmt.Sprintf(`# fixture: %s
 %spins:
   inputs:

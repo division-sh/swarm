@@ -10,12 +10,14 @@ func CopyAncestorEventWithoutReceiverMembership(t testing.TB) string {
 	removeInheritedScenarios(t, root)
 	removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
 
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: root
 pins:
   inputs:
     - root.started
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "root.started:\n")
+	writeClosedVariantFile(t, root, "child/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "child/schema.yaml", `# fixture: child
 stages:
   idle: {}

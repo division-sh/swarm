@@ -61,11 +61,15 @@ func TestCompileAdmissionProjectsExactPackAuthentication(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "acme", SigningSecret: secret})
+			acknowledge := ""
+			if !requiresSecret {
+				acknowledge = UnsignedWebhookAcknowledgement
+			}
+			plan, err := catalog.CompileAdmission(CompileAdmissionRequest{Alias: "chat", Provider: "acme", SigningSecret: secret, Declaration: AdmissionDeclaration{Acknowledge: acknowledge}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if plan.RequestAuthentication() != tc.want || plan.RequiresSecret() != requiresSecret || plan.AcknowledgedUnsigned() {
+			if plan.RequestAuthentication() != tc.want || plan.RequiresSecret() != requiresSecret || plan.AcknowledgedUnsigned() != !requiresSecret {
 				t.Fatalf("authentication = %s requires=%t", plan.RequestAuthentication(), plan.RequiresSecret())
 			}
 			subject, err := plan.EffectiveCapabilitySubject(EffectiveSubjectRequest{BundleHash: strings.Repeat("a", 64), FlowPath: ".", Alias: "chat", SigningSecret: secret})

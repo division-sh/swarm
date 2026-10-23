@@ -83,7 +83,19 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 		if err != nil {
 			return SelectedContractActivationGateResult{}, err
 		}
+		if req.AgentRuntime.ProcessCapability == nil {
+			return SelectedContractActivationGateResult{}, errors.New("selected-contract activation requires process capability before state-only mutation")
+		}
+		if err := req.AgentRuntime.ProcessCapability.ProveCurrent(ctx); err != nil {
+			return SelectedContractActivationGateResult{}, fmt.Errorf("prove selected-contract state-only process: %w", err)
+		}
+		process, err := req.AgentRuntime.ProcessCapability.Evidence()
+		if err != nil {
+			return SelectedContractActivationGateResult{}, err
+		}
 		activation, err := req.Store.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
+			OriginalRootAdmission:             resources.originalSource.RootedSource.Admission(),
+			Process:                           process.LeaseStamp(),
 			OriginalLoopCarriage:              original,
 			ForkRunID:                         forkRunID,
 			AllowSourceFreeze:                 req.AllowSourceFreeze,

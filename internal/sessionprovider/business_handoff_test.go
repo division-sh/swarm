@@ -67,7 +67,7 @@ func (f *activeInputFixture) republishBusinessStanding(t *testing.T) {
 func (f *activeInputFixture) installBusinessOccurrence(t *testing.T) {
 	t.Helper()
 	source, _ := correlation.SourceArtifactFactFromContext(f.ctx)
-	f.ctx = authoractivity.WithScope(correlation.WithSourceArtifactFact(f.peer.ctx, source),
+	f.ctx = authoractivity.WithScope(correlation.WithRootAdmission(correlation.WithSourceArtifactFact(f.peer.ctx, source), f.rooted.Admission()),
 		authoractivity.BundleScope(f.operation.Coordinate.RuntimeInstanceID, source.BundleHash()))
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(f.ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: f.operation.Coordinate.RuntimeInstanceID, BundleHash: source.BundleHash()})

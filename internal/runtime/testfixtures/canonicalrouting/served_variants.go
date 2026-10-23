@@ -110,6 +110,7 @@ func CopyRootIngressServedConversationFork(t testing.TB) string {
 	t.Helper()
 	root := CopyRootIngressServedExternalEvent(t)
 
+	writeClosedVariantFile(t, root, "fork-source/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "fork-source/schema.yaml", `# fixture: fork-source
 stages:
   waiting: {}
@@ -157,6 +158,7 @@ func CopyRootIngressServedSessionCleanup(t testing.TB) string {
 	t.Helper()
 	root := CopyRootIngressServedFollowUp(t)
 
+	writeClosedVariantFile(t, root, "hold/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "hold/schema.yaml", `# fixture: hold
 stages:
   waiting: {}
@@ -210,6 +212,7 @@ func CopyRootIngressLegacyTemplateTargetRoute(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	addLegacyTemplateRoot(t, root)
+	writeClosedVariantFile(t, root, "operating/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "operating/schema.yaml", `# fixture: operating
 instance: instance_id
 stages:
@@ -283,6 +286,7 @@ func CopyRootIngressLegacyTemplateAutoEmit(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	addLegacyTemplateRoot(t, root)
+	writeClosedVariantFile(t, root, "operating/manifest.yaml", "version: 1.0.0\nplatform_version: '*'\n")
 	writeClosedVariantFile(t, root, "operating/schema.yaml", `# fixture: operating
 instance: instance_id
 stages:

@@ -120,34 +120,6 @@ pins:
 	return root
 }
 
-// CopyRecurringTimerCancellation owns the root controller route used by the
-// recurring timer cancellation proof. Timer scheduling remains test-owned.
-func CopyRecurringTimerCancellation(t testing.TB) string {
-	t.Helper()
-	root := CopyExample(t, RootIngress)
-
-	writeClosedVariantFile(t, root, "schema.yaml", `# fixture: timer-proof
-stages:
-  waiting: {}
-  done:
-    final: true
-pins:
-  inputs:
-    - timer.cancel
-`)
-	writeClosedVariantFile(t, root, "events.yaml", `timer.cancel:
-`)
-	writeClosedVariantFile(t, root, "entities.yaml", "timer_state: {}\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
-  execution_type: system_node
-  subscribes_to: [timer.cancel]
-  event_handlers:
-    timer.cancel:
-      advances_to: done
-`)
-	return root
-}
-
 // CopyTemplateOutputRootConnect owns the concrete template-output-to-root
 // route used by the emit-tool supported-surface proof.
 func CopyTemplateOutputRootConnect(t testing.TB) string {

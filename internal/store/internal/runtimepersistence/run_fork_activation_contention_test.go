@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -71,6 +72,12 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 							return authorActivityReceiptFixture{store: store, db: db, dialect: authoractivityfixture.DialectPostgres}
 						}
 					}
+					if selected && backend.name == "sqlite" && first == "writer" {
+						backend.open = func(t *testing.T) authorActivityReceiptFixture {
+							store := barrier.observeSQLiteStore(t, filepath.Join(t.TempDir(), "contention.db"))
+							return authorActivityReceiptFixture{store: store, db: store.backend.ConstructionHandle(), dialect: authoractivityfixture.DialectSQLite}
+						}
+					}
 					f := newForkActivationFrontierFixture(t, backend, selected)
 					staged, selectedRequest := stageForkContentionFixture(t, f, selected)
 					var err error
@@ -87,7 +94,9 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 						other := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
 						writer = other
 						if first == "writer" {
-							f.store = barrier.observeSQLiteStore(t, path)
+							if !selected {
+								f.store = barrier.observeSQLiteStore(t, path)
+							}
 						} else {
 							writer = barrier.observeSQLiteStore(t, path)
 						}

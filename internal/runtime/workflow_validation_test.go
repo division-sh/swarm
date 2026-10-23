@@ -46,7 +46,7 @@ func TestUnconnectedPrivateInputCreatesNoStandingTargetOrRoute(t *testing.T) {
 	if _, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, opts); err == nil || !strings.Contains(err.Error(), "input_pin_wiring") {
 		t.Fatalf("unconnected private input validation = %v, want missing producer rejection", err)
 	}
-	declarations, err := ResolveStandingTargetDeclarations(source, nil)
+	declarations, err := ResolveStandingTargetDeclarations(source, nil, nil)
 	if err != nil {
 		t.Fatalf("ResolveStandingTargetDeclarations: %v", err)
 	}

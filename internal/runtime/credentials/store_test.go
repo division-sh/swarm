@@ -149,7 +149,7 @@ func TestBuildRequirementIndex_IndexesDirectFilesystemFlowCredentialBindings(t *
 	for _, flowID := range []string{"alpha", "beta"} {
 
 		writeCredentialsFixtureFile(t, filepath.Join(root, flowID, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-		writeCredentialsFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "name: "+flowID+"\n")
+		writeCredentialsFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "# fixture: "+flowID+"\n\nstages: []\n")
 		writeCredentialsFixtureFile(t, filepath.Join(root, flowID, "tools.yaml"), `
 call_provider:
   handler_type: http

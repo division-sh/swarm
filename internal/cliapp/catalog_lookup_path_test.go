@@ -22,14 +22,15 @@ func TestRunVerifyCommand_PolicyLookupExecutablePathBoundary(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: lookup-path-boundary
-stages:
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `stages:
   active: {}
   done: {final: true}
 pins:
   inputs: [requested]
   outputs: [completed]
-`)
+`,
+			)
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "case: {}\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "requested:\n  selector: "+tc.fieldType+"\ncompleted:\n  choice: text\n")
 			// The lookup has one value, chosen, and fails on a missing key; its

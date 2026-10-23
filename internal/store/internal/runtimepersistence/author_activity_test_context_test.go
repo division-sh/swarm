@@ -193,13 +193,18 @@ func testAuthorActivityContext() context.Context {
 	return testAuthorActivityContextForBundle(authorActivityTestBundleHash)
 }
 
-func requireDefaultSourceArtifactForTest(t testing.TB, ctx context.Context, selected any) {
+func requireDefaultSourceArtifactForTest(t testing.TB, ctx context.Context, selected any) context.Context {
 	t.Helper()
-	writer, ok := selected.(sourceartifactfixture.Writer)
+	writer, ok := selected.(sourceartifactfixture.RootedWriter)
 	if !ok {
-		t.Fatalf("default source artifact fixture requires source writer, got %T", selected)
+		t.Fatalf("default source artifact fixture requires rooted source writer, got %T", selected)
 	}
-	sourceartifactfixture.Require(t, ctx, writer)
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
+	if _, err := writer.EnsureRootedSource(ctx, rooted); err != nil {
+		t.Fatal(err)
+	}
+	return ctx
 }
 
 func testAuthorActivityRuntimeContext() context.Context {

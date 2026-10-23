@@ -1,0 +1,162 @@
+transport: webhook
+capabilities:
+  card_render: true
+  reply_to_reference: true
+  actions_as_buttons: true
+  actions_as_text: true
+  edit: true
+  acknowledgment: true
+  inbox_listing: true
+native_inbox:
+  kind: scoped_commands_v1
+  client_languages: [en, fr]
+  direct_launcher_read: read_inbox_launcher
+  default_launcher_read: read_default_inbox_launcher
+  commands_launcher: commands
+  inherited_launcher: default
+onboarding:
+  ceremony: authenticated_text_challenge
+  provider_credential: telegram_bot_token
+  signing_credential: webhook_signing_secret
+  confirmation: deliver
+  learned_destination:
+    destination: conversation_reference
+registration:
+  slot:
+    namespace: bot_webhook
+    identify:
+      tool: identify_bot
+      output:
+        resource_id: result.bot_id
+  credentials:
+    provider: [telegram_bot_token]
+    signing: webhook_signing_secret
+  apply:
+    tool: apply_webhook
+    input:
+      callback_url: context.callback_url
+  readback:
+    tool: read_webhook
+    output:
+      callback_url: result.callback_url
+opaque_types:
+  destination:
+    type: string
+    pattern: '^-?[0-9]+$'
+    minLength: 1
+    maxLength: 17
+  delivery_reference:
+    type: object
+    additionalProperties: false
+    required: [id]
+    properties:
+      id: {type: integer, minimum: 1, maximum: 2147483647}
+  delivery_receipt:
+    type: object
+    additionalProperties: false
+    required: [id]
+    properties:
+      id: {type: integer, minimum: 1, maximum: 2147483647}
+  interaction_reference:
+    type: string
+    minLength: 1
+  external_account_reference:
+    type: string
+    pattern: '^[0-9]+$'
+    minLength: 1
+    maxLength: 17
+  conversation_reference:
+    type: string
+    pattern: '^-?[0-9]+$'
+    minLength: 1
+    maxLength: 17
+operations:
+  deliver:
+    tool: send_interactive
+    input:
+      chat_id: context.destination
+      text: input.presentation.text
+      reply_markup.inline_keyboard:
+        each: input.actions
+        item:
+          - text: item.label
+            callback_data: item.token
+    output:
+      delivery_reference.id: result.message_id
+  edit:
+    tool: edit_message
+    input:
+      chat_id: context.destination
+      message_id: input.delivery_reference.id
+      text: input.presentation.text
+      reply_markup.inline_keyboard:
+        each: input.actions
+        item:
+          - text: item.label
+            callback_data: item.token
+    output:
+      delivery_receipt.id: result.message_id
+  acknowledge_interaction:
+    tool: answer_callback
+    input:
+      callback_query_id: input.interaction_reference
+  install_inbox_entry:
+    tool: install_inbox_commands
+    input:
+      chat_id: context.destination
+      commands: input.commands
+  read_inbox_entry:
+    tool: read_inbox_commands
+    input:
+      chat_id: context.destination
+      language_code: input.language_code
+    output:
+      commands: result.commands
+  install_shared_inbox_entry:
+    tool: install_shared_inbox_commands
+    input:
+      chat_id: context.destination
+      user_id: input.member_reference
+      commands: input.commands
+  read_shared_inbox_entry:
+    tool: read_shared_inbox_commands
+    input:
+      chat_id: context.destination
+      user_id: input.member_reference
+      language_code: input.language_code
+    output:
+      commands: result.commands
+  identify_inbox_address:
+    tool: read_bot_address
+    output:
+      address_reference: result.address
+  read_inbox_launcher:
+    tool: read_chat_menu_button
+    input:
+      chat_id: context.destination
+    output:
+      launcher: result.launcher
+  read_default_inbox_launcher:
+    tool: read_default_menu_button
+    output:
+      launcher: result.launcher
+events:
+  action:
+    event: callback_action
+    fields:
+      token: event.token
+      interaction_reference: event.interaction_reference
+      external_account_reference: event.external_account_reference
+      conversation_reference: event.conversation_reference
+      conversation_scope: event.conversation_scope
+      provider_message_reference.id: event.provider_message_reference
+  text:
+    event: text_message
+    fields:
+      text: event.text
+      external_account_reference: event.external_account_reference
+      conversation_reference: event.conversation_reference
+      conversation_scope: event.conversation_scope
+      provider_message_reference.id: event.provider_message_reference
+      reply_to_message_reference.id: event.reply_to_message_reference
+      entry_invocation: event.command_invocation
