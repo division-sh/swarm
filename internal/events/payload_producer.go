@@ -1,6 +1,9 @@
 package events
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const RuntimeLogSchemaReference = "platform-spec.yaml#platform_tables.diagnostics_encoding"
 
@@ -35,6 +38,14 @@ func (p PayloadProducer) ValidateForEvent(event Event) error {
 		if platformPayloadIdentity(event.AdmissionClass(), event.Type(), event.Producer()) {
 			return fmt.Errorf("platform event requires explicit platform payload producer")
 		}
+		if authoredTimerPayloadIdentity(event.AdmissionClass(), event.Type(), event.Producer()) {
+			source := event.RoutingSource()
+			if !(source.Kind() == RoutingSourceRoot && p.flowID == ".") &&
+				!(source.Kind() == RoutingSourceFlowOwnedControl && p.flowID != "" && p.flowID != "." && p.flowID == source.Route().FlowID) {
+				return fmt.Errorf("workflow timer payload requires its exact authored flow routing source")
+			}
+			return ValidateEventContract(event)
+		}
 	case "platform":
 		if p.flowID != "" || p.class != event.AdmissionClass() || p.event != event.Type() || !p.producer.Equal(event.Producer()) {
 			return fmt.Errorf("platform payload producer disagrees with event identity")
@@ -60,6 +71,12 @@ func EventPayloadProducer(event Event, authoredFlowID string) PayloadProducer {
 }
 
 func platformPayloadIdentity(class EventAdmissionClass, event EventType, producer ProducerIdentity) bool {
-	return class == EventAdmissionRuntimeControl || class == EventAdmissionRuntimeDiagnostic || class == EventAdmissionDiagnosticDirect ||
+	return (class == EventAdmissionRuntimeControl && !authoredTimerPayloadIdentity(class, event, producer)) || class == EventAdmissionRuntimeDiagnostic || class == EventAdmissionDiagnosticDirect ||
 		(class == EventAdmissionReplay && event == "event.replayed" && producer.Type() == EventProducerPlatform)
+}
+
+func authoredTimerPayloadIdentity(class EventAdmissionClass, event EventType, producer ProducerIdentity) bool {
+	// The reserved platform namespace remains catalog-owned, including stage timers.
+	return class == EventAdmissionRuntimeControl && producer.Type() == EventProducerPlatform && producer.ID() == "runtime.workflow_timer" &&
+		event != "" && !strings.HasPrefix(string(event), "platform.")
 }

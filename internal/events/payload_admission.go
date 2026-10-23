@@ -198,12 +198,8 @@ func ApplyPayloadAdmission(event Event, admission PayloadAdmission) (Event, erro
 	if !admission.Valid() {
 		return Event{}, fmt.Errorf("payload admission is invalid")
 	}
-	if admission.binding.producer.IsPlatform() {
-		if err := admission.binding.producer.ValidateForEvent(event); err != nil {
-			return Event{}, err
-		}
-	} else if platformPayloadIdentity(event.AdmissionClass(), event.Type(), event.Producer()) {
-		return Event{}, fmt.Errorf("platform payload requires explicit producer binding")
+	if err := admission.binding.producer.ValidateForEvent(event); err != nil {
+		return Event{}, err
 	}
 	if current, ok := event.PayloadAdmission(); ok {
 		if !bytes.Equal(current.Payload(), admission.Payload()) || !current.Binding().Equal(admission.Binding()) {

@@ -240,6 +240,63 @@ func TestRunScopedRuntimeControlPreservesExactRootRoutingSource(t *testing.T) {
 	if _, err := NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: facts, RunID: testRunID}); err == nil || !strings.Contains(err.Error(), "does not match typed routing source") {
 		t.Fatalf("mismatched root source error = %v, want exact-source rejection", err)
 	}
+
+	facts.Envelope.Source = RouteIdentity{}
+	facts.Producer.ID = "runtime.workflow_timer"
+	timer, err := NewRunScopedRuntimeControlEvent(RunScopedRuntimeEventInput{Facts: facts, RunID: testRunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	producer := EventPayloadProducer(timer, ".")
+	if !producer.IsAuthored() || producer.ValidateForEvent(timer) != nil {
+		t.Fatal("authored timer lost its exact root payload coordinate")
+	}
+	input := PayloadSchemaBindingInput{
+		BundleHash: "bundle-v2:sha256:" + strings.Repeat("0", 64), FlowID: ".", EventKey: string(timer.Type()),
+		SchemaDigest: "sha256:" + strings.Repeat("0", 64), SchemaClass: PayloadSchemaAuthored,
+	}
+	binding, err := NewPayloadSchemaBinding(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := RestoreEventPayloadSchemaBinding(input, timer.AdmissionClass(), timer.Type(), timer.Producer())
+	if err != nil || !restored.Equal(binding) {
+		t.Fatalf("authored timer binding restore: %v", err)
+	}
+	admission, err := NewPayloadAdmission([]byte(`{}`), restored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyPayloadAdmission(timer, admission); err != nil {
+		t.Fatalf("apply authored timer binding: %v", err)
+	}
+	for _, flow := range []string{"", "foreign", " . "} {
+		if err := EventPayloadProducer(timer, flow).ValidateForEvent(timer); err == nil {
+			t.Fatalf("timer admitted foreign flow %q", flow)
+		}
+	}
+	flowTimer := timer.Clone()
+	flowTimer.routingSource, err = NewFlowOwnedControlRoutingSource(RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: "entity-root"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flowTimer.envelope.Source = flowTimer.routingSource.Route()
+	if err := EventPayloadProducer(flowTimer, "producer").ValidateForEvent(flowTimer); err != nil {
+		t.Fatalf("flow-owned timer payload coordinate: %v", err)
+	}
+	if _, err := ApplyPayloadAdmission(flowTimer, admission); err == nil {
+		t.Fatal("root timer binding admitted a child flow timer")
+	}
+	foreign := timer.Clone()
+	foreign.producer, _ = NewProducerIdentity(EventProducerPlatform, "runtime.other")
+	if _, err := ApplyPayloadAdmission(foreign, admission); err == nil {
+		t.Fatal("timer binding admitted a different runtime emitter")
+	}
+	stage := timer.Clone()
+	stage.eventType = "platform.stage_timer"
+	if !EventPayloadProducer(stage, ".").IsPlatform() {
+		t.Fatal("platform stage timer lost its catalog producer")
+	}
 }
 
 func TestAdmitRuntimeControlEventTypeBindsFlowOwnedSourceExactly(t *testing.T) {

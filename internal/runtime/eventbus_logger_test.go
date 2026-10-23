@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,9 +53,10 @@ func loadRootPayloadBundle(t *testing.T, eventsYAML, typesYAML string) *runtimec
 	t.Helper()
 	root := t.TempDir()
 	for name, contents := range map[string]string{
-		"schema.yaml": "name: payload-admission-proof\n",
-		"events.yaml": eventsYAML,
-		"types.yaml":  typesYAML,
+		"manifest.yaml": "version: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
+		"schema.yaml":   "stages: []\n",
+		"events.yaml":   eventsYAML,
+		"types.yaml":    typesYAML,
 	} {
 		if contents == "" {
 			continue
@@ -113,6 +115,42 @@ func TestRuntimePayloadAdmitter_AllowsValidSchemaPayload(t *testing.T) {
 	}
 	if admission, found := schemaLess.PayloadAdmission(); !found || admission.Binding().SchemaClass() != events.PayloadSchemaSchemaLess {
 		t.Fatal("valid schema-less root event lost its admission")
+	}
+
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, filepath.Join(repo, "tests/tier5-flow-lifecycle/test-timer-fire"), runtimecontracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	timerAdmitter := testRuntimePayloadAdmitter(t, bundle)
+	source, err := events.NewRootRoutingSource("timer-entity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, eventType := range []events.EventType{"timer.check", "timer.undeclared"} {
+		timer, err := events.NewRunScopedRuntimeControlEvent(events.RunScopedRuntimeEventInput{
+			Facts: events.EventFacts{
+				ID: uuid.NewString(), Type: eventType, Payload: []byte(`{}`), RoutingSource: source,
+				Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "runtime.workflow_timer"},
+				Envelope: events.EventEnvelope{EntityID: "timer-entity"},
+			}, RunID: uuid.NewString(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof, err := timerAdmitter(context.Background(), timer, events.EventPayloadProducer(timer, "."))
+		if eventType == "timer.undeclared" {
+			if err == nil || !strings.Contains(err.Error(), "not declared by flow") || proof.Valid() {
+				t.Fatalf("undeclared timer payload admission: %v", err)
+			}
+			continue
+		}
+		if err != nil || !proof.Binding().Producer().IsAuthored() || proof.Binding().FlowID() != "." {
+			t.Fatalf("authored timer payload admission: %v", err)
+		}
+		if _, err := events.ApplyPayloadAdmission(timer, proof); err != nil {
+			t.Fatalf("apply authored timer payload: %v", err)
+		}
 	}
 }
 

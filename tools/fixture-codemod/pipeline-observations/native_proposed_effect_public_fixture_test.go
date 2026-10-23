@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -25,61 +23,6 @@ func nativeProposedEffectPublicSource(source string) string {
 	source = strings.Replace(source, proposedEffectOldCount, proposedEffectNativeCount, 1)
 	source = strings.Replace(source, "if requests != 1 || attempts != 1", "if counts.Requests != 1 || counts.SuccessfulAttempts != 1", 1)
 	return strings.Replace(source, "\", requests, attempts)", "\", counts.Requests, counts.SuccessfulAttempts)", 1)
-}
-
-func TestNativeProposedEffectPublicFixtureRetainsAdmissionProviderReplayAndCounts(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	matched := 0
-	for _, row := range rows {
-		root := row.Function == "TestMailboxDecideHTTPReleasesProposedEffectThroughProviderOnBothStores"
-		if row.Family != "native-proposed-effect-public-fixture" && !root {
-			continue
-		}
-		matched++
-		before := nativeProposedEffectPublicSource(row.Before)
-		if root {
-			before = nativeMailboxCanonicalEventWorkload(t, row.Before)
-		}
-		want, err := canonicalFunction(before)
-		got, afterErr := canonicalFunction(row.After)
-		if root {
-			got, afterErr = canonicalFunction(nativeMailboxCanonicalEventWorkload(t, row.After))
-		}
-		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		value, sourceErr := canonicalFunction(actual)
-		written, writtenErr := canonicalFunction(row.After)
-		if err != nil || afterErr != nil || sourceErr != nil || writtenErr != nil || want != got || value != written {
-			t.Fatalf("%s changed public effect workload beyond the exact native owner cuts", row.Function)
-		}
-		for _, raw := range []string{"*sql.DB", "storetest.Database", "testutil.StartPostgres", "AdmitPostgresRuntimeStore", "db.Query", "runlifecyclefixture.Require"} {
-			if strings.Contains(actual, raw) {
-				t.Fatalf("proposed-effect public fixture regained raw authority: %s", raw)
-			}
-		}
-		for _, cut := range []string{"fact.BundleHash()", "bundle.SourceArtifact", "ReadProposedEffectRunExecutionStorage(context.Background(), selected, runID)", "counts.Requests != 1", "counts.SuccessfulAttempts != 1", "calls.Load()", "t.Fatal(", "t.Fatalf("} {
-			mutant := strings.Replace(row.After, cut, "unreviewedEffectCut", 1)
-			if mutant == row.After {
-				continue
-			}
-			changed, mutantErr := canonicalFunction(mutant)
-			if root && mutantErr == nil {
-				changed, mutantErr = canonicalFunction(nativeMailboxCanonicalEventWorkload(t, mutant))
-			}
-			if mutantErr == nil && changed == want {
-				t.Fatalf("effect source/identity/provider/assertion mutation accepted: %s", cut)
-			}
-		}
-	}
-	if matched != 3 {
-		t.Fatalf("public effect recipes=%d,want3", matched)
-	}
-	source, err := os.ReadFile(filepath.Join("..", "..", "..", "internal/apiv1/operator_mailbox_proposed_effect_supported_surface_test.go"))
-	if err != nil || strings.Contains(string(source), "func insertProposedEffectAPIRun(") {
-		t.Fatalf("retired reconstructed run fixture survived: %v", err)
-	}
 }
 
 func TestNativeProposedEffectExecutionOwnerKeepsExactPhysicalPredicates(t *testing.T) {

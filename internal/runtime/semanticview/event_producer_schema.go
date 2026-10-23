@@ -25,6 +25,18 @@ func ResolveProducerEventSchema(source Source, producer events.PayloadProducer, 
 		if scope, found := source.FlowScopeByID(flowID); !found || scope.ID != flowID {
 			return EventSchemaResolution{}, fmt.Errorf("event producer flow %q is not declared in the semantic source", flowID)
 		}
+		if event.AdmissionClass() == events.EventAdmissionRuntimeControl {
+			declared := false
+			for _, timer := range source.WorkflowTimers() {
+				if timer.OwningFlowID() == flowID && source.ResolveFlowEventReference(flowID, timer.Event) == string(event.Type()) {
+					declared = true
+					break
+				}
+			}
+			if !declared {
+				return EventSchemaResolution{}, fmt.Errorf("workflow timer event %q is not declared by flow %q", event.Type(), flowID)
+			}
+		}
 		return ResolveEventSchema(source, flowID, string(event.Type())), nil
 	}
 	entry, authority, err := runtimecontracts.ResolvePlatformEventAuthority(source.PlatformSpec(), event)
