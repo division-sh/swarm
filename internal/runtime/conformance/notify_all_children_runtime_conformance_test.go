@@ -2504,7 +2504,7 @@ func newNotifyAllChildrenRuntime(
 	if opts.maintenanceInterval > 0 {
 		coordinator.SetTestMaintenanceInterval(opts.maintenanceInterval)
 	}
-	maintenanceCtx, stopMaintenance := context.WithCancel(testAuthorActivityContextForBundle(context.Background(), sourceArtifactFact))
+	maintenanceCtx, stopMaintenance := context.WithCancel(continuationCtx)
 	maintenanceCtx = runtimeeffects.WithExecutionMode(maintenanceCtx, posture.RootMode())
 	maintenanceDone := make(chan struct{})
 	go func() {

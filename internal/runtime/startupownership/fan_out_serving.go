@@ -307,7 +307,7 @@ func (s *fanOutServingService) refill() {
 		s.turns.Add(1)
 		go func() {
 			defer s.turns.Done()
-			observedOwner := &fanOutObservedClaimOwner{FanOutObligationOwner: owner, service: s, candidate: candidate}
+			observedOwner := &fanOutObservedClaimOwner{FanOutObligationOwner: owner, service: s, candidate: candidate, cleanupGrant: r.grant}
 			turnCtx := correlation.WithRunID(permit.Context(), candidate.Key.RunID)
 			result, err := r.executor.ServeFanOutCandidate(turnCtx, observedOwner, candidate.Key)
 			completedAt := time.Now()
