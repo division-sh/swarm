@@ -2100,7 +2100,7 @@ func agentDeliveryExecutionContext(
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(deliveryCtx)
 	sourceArtifactFact, _ := runtimecorrelation.SourceArtifactFactFromContext(deliveryCtx)
 	ctx, cleanup := eventreceiver.NewContext(deliveryCtx)
-	if process, found := worklifetime.ProcessFromContext(deliveryCtx); found {
+	if process, found := worklifetime.ProcessFromContext(loopCtx); found {
 		ctx = worklifetime.WithProcess(ctx, process)
 	}
 	fail := func(err error) (context.Context, func(), error) {
