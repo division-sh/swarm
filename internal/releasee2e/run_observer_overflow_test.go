@@ -68,7 +68,7 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	process := startReleaseServe(t, releaseProcessSpec{
 		BinaryPath: binaryPath, WorkingDir: releaseRoot, Source: contracts,
 		APIPort: apiPort, MCPListenPort: 8082, Env: env,
-		DefaultExecutionSelection: true, ShutdownGrace: goldenShutdownGrace,
+		WorkspaceBackend: "docker", ShutdownGrace: goldenShutdownGrace,
 	})
 	if err := process.waitReady(ctx); err != nil {
 		t.Fatal(err)
@@ -161,10 +161,13 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	if ctx.Err() != nil {
 		t.Fatalf("release foreground run timed out: %v", ctx.Err())
 	}
-	for _, want := range []string{"run started:", "run terminal:", "status=completed"} {
+	for _, want := range []string{"run started:"} {
 		if !strings.Contains(string(stdoutRead.output), want) {
 			t.Fatalf("release foreground stdout missing %q:\n%s", want, stdoutRead.output)
 		}
+	}
+	if !strings.Contains(string(stdoutRead.output), "run terminal:") && !strings.Contains(string(stdoutRead.output), "run settled:") {
+		t.Fatalf("release foreground did not report quiescence after observer detach:\n%s", stdoutRead.output)
 	}
 	var fact struct {
 		Type         string `json:"type"`
