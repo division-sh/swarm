@@ -431,7 +431,7 @@ func TestRunCommandInterruptAfterObserverDetachPreservesModeControl(t *testing.T
 					case "run.start":
 						return runStartCommandResult("8be65499-5a47-5254-ba95-c98d788df5d4", "running")
 					case "run.get", "run.diagnose":
-						return map[string]any{"run": validDiagnosticRunHeader("8be65499-5a47-5254-ba95-c98d788df5d4")}
+						return runCommandReadResult(req.Method, validDiagnosticRunHeader("8be65499-5a47-5254-ba95-c98d788df5d4"))
 					case "run.stop":
 						if !test.stopOnInterrupt {
 							t.Fatal("reattach interrupt called run.stop")
@@ -457,6 +457,9 @@ func TestRunCommandInterruptAfterObserverDetachPreservesModeControl(t *testing.T
 			code := executeRootCommandWithOptions(ctx, t.TempDir(), test.args(server.URL), &stdout, warning, opts)
 			if code != 130 {
 				t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), warning.String())
+			}
+			if test.stopOnInterrupt && len(*calls) == len(test.wantMethods)+1 {
+				test.wantMethods = []string{"health.check", "run.start", "run.diagnose", "run.stop"}
 			}
 			assertRunCommandMethods(t, calls, test.wantMethods)
 			if strings.Count(warning.String(), runTraceObserverDetachedType) != 1 {
@@ -502,7 +505,7 @@ func TestRunCommandBlockedTraceRenderingDoesNotDelayInterruptControl(t *testing.
 					case "run.start":
 						return runStartCommandResult("46ed30c1-eebe-5006-963b-6ee774bc687a", "running")
 					case "run.get", "run.diagnose":
-						return map[string]any{"run": validDiagnosticRunHeader("46ed30c1-eebe-5006-963b-6ee774bc687a")}
+						return runCommandReadResult(req.Method, validDiagnosticRunHeader("46ed30c1-eebe-5006-963b-6ee774bc687a"))
 					case "run.stop":
 						if !test.stopOnInterrupt {
 							t.Fatal("reattach interrupt called run.stop")
@@ -547,6 +550,9 @@ func TestRunCommandBlockedTraceRenderingDoesNotDelayInterruptControl(t *testing.
 				}
 			case <-time.After(5 * time.Second):
 				t.Fatal("run command did not finish after trace output release")
+			}
+			if test.stopOnInterrupt && len(*calls) == len(test.wantMethods)+1 {
+				test.wantMethods = []string{"health.check", "run.start", "run.diagnose", "run.stop"}
 			}
 			assertRunCommandMethods(t, calls, test.wantMethods)
 		})

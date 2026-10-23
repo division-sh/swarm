@@ -142,7 +142,7 @@ rows:
       - kind: go_test
         name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore
       - kind: go_test
-        name: TestRunCommandLocalForegroundConsumesServeOwnerAndV1API
+        name: TestRunCommandConnectedForegroundReturnsOnRunQuiescence
     notes: >
       Default SQLite proof stays fast and representative. It must not duplicate
       every public surface across both backends.
