@@ -173,12 +173,14 @@ func (r *FanOutServingRegistration) joinRetirement(standing *worklifetime.Lease,
 	if budget.registrations[grantID] == r && (r.executor == nil || p.requireLive() != nil || grantRetired(g)) {
 		delete(budget.registrations, grantID)
 	}
-	idleService := p.retireIdleFanOutServiceLocked()
 	p.mu.Unlock()
 	r.Wake()
 	// Cancellation precedes the locked removal, so no BeginTurn can Add
 	// after this point. Join only this registration's admitted finite work.
 	r.turns.Wait()
+	p.mu.Lock()
+	idleService := p.retireIdleFanOutServiceLocked()
+	p.mu.Unlock()
 	if idleService != nil {
 		<-idleService.done
 		p.mu.Lock()
