@@ -144,6 +144,9 @@ func TestNativeGenerationAdmissionSerializesAdvancementBothStores(t *testing.T) 
 					if current, err := generationauthority.ProcessGenerationCurrent(txctx, tx, original, sqlite); err != nil || !current {
 						return fmt.Errorf("admitted original: current=%v err=%w", current, err)
 					}
+					if current, err := generationauthority.ReadProcessGeneration(txctx, tx, sqlite); err != nil || current != original {
+						return fmt.Errorf("shared admitted read: got=%+v err=%w", current, err)
+					}
 					close(entered)
 					select {
 					case <-release:
@@ -242,6 +245,9 @@ func TestNativeGenerationAdmissionSerializesAdvancementBothStores(t *testing.T) 
 			}
 			if err := generationauthority.FenceMutation(endedCtx, endedTx, sqlite); !errors.Is(err, sql.ErrTxDone) {
 				t.Fatalf("settled transaction retained admission: %v", err)
+			}
+			if _, err := generationauthority.ReadProcessGeneration(endedCtx, endedTx, sqlite); !errors.Is(err, sql.ErrTxDone) {
+				t.Fatalf("settled transaction retained admitted read: %v", err)
 			}
 			if err := fixture.read(freshCtx, func(txctx context.Context, tx *sql.Tx) error {
 				if err := generationauthority.FenceMutation(txctx, tx, sqlite); err == nil {
