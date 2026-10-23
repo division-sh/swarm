@@ -234,7 +234,7 @@ func (c *deploymentChannelSession) telegramRead(ctx context.Context, op channelo
 		}
 		return nil
 	}}
-	output, err := executor.Read(ctx, plan.ToolID(), plan.Tool(), input, values)
+	output, err := executor.Read(ctx, plan, input, values)
 	if err != nil {
 		return nil, err
 	}
