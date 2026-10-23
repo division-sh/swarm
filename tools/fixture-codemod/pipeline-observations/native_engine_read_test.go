@@ -3,9 +3,9 @@ package main
 import (
 	"encoding/json"
 	"go/ast"
+	"golang.org/x/tools/go/ast/astutil"
 	"strings"
 	"testing"
-	"golang.org/x/tools/go/ast/astutil"
 )
 
 func nativeEngineReadRecipes(t *testing.T) []recipe {
