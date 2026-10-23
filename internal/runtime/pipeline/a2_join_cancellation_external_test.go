@@ -38,11 +38,20 @@ type a2CancellationClaim struct {
 // returns to the coordinator; no delivery, settlement or claim is fabricated.
 type a2CancellationClaimGate struct {
 	gateRecoverySelectedStore
+	t        *testing.T
 	ids      map[string]bool
 	typeName events.EventType
 	entered  chan a2CancellationClaim
 	release  chan struct{}
 	once     sync.Once
+}
+
+func (g *a2CancellationClaimGate) SettleFailure(ctx context.Context, claim deliverylifecycle.Claim, settlement deliverylifecycle.Settlement) (deliverylifecycle.Snapshot, error) {
+	snapshot, err := g.gateRecoverySelectedStore.SettleFailure(ctx, claim, settlement)
+	if err != nil {
+		g.t.Logf("exact claimed cancellation settlement: delivery=%s ctx=%v status=%s err=%v", claim.DeliveryID(), ctx.Err(), snapshot.Status, err)
+	}
+	return snapshot, err
 }
 
 func (g *a2CancellationClaimGate) resume() { g.once.Do(func() { close(g.release) }) }
@@ -90,7 +99,7 @@ func TestA2JoinCancellationSettlesAlreadyBoundWorkOnBothStores(t *testing.T) {
 					}
 					module := proposedEffectProofModule{source: source, nodes: nodes}
 					probe, logger := lifecycleprobe.New(), &exactJoinRuntimeLogger{}
-					gate := &a2CancellationClaimGate{gateRecoverySelectedStore: selected.events,
+					gate := &a2CancellationClaimGate{gateRecoverySelectedStore: selected.events, t: t,
 						ids: map[string]bool{}, entered: make(chan a2CancellationClaim, 2), release: make(chan struct{})}
 					if phase == "bound_arrival_until" {
 						gate.ids[lastID], gate.ids[untilID] = true, true
