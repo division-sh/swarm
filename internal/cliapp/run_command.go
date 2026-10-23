@@ -851,41 +851,7 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 		case det := <-detached:
 			reportDetach(det)
 		case <-ticker.C:
-			if opts.reattachRunID == "" {
-				diagnosis, err := readRunDiagnosis(ctx, client, runID)
-				if err != nil {
-					if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-						return timeout()
-					}
-					settleObservation()
-					writeCLIAPIError(errOut, err)
-					return commandExitError{code: runCommandErrorExitCode(err)}
-				}
-				lastDiagnosis = &diagnosis
-				if BoolPointerValue(diagnosis.TestQuiescence.Ready) {
-					settleObservation()
-					rejected, err := readRunDeploymentOutcomes(ctx, client, out, runID, feeds)
-					if err != nil {
-						if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-							return timeout()
-						}
-						writeCLIAPIError(errOut, err)
-						return commandExitError{code: runCommandErrorExitCode(err)}
-					}
-					if runCommandTerminalStatus(diagnosis.Run.Status) {
-						writeRunCommandTerminalSummary(out, diagnosis.Run)
-					} else {
-						fmt.Fprintf(out, "run settled: run_id=%s\n", runID)
-					}
-					writeDiagnosticRunDiagnosis(out, diagnosis)
-					if rejected {
-						return commandExitError{code: cliExitConflict}
-					}
-					return runCommandTerminalExit(diagnosis.Run.Status)
-				}
-				continue
-			}
-			run, err := runCommandGet(ctx, client, runID)
+			run, diagnosis, ready, err := readRunCommandFollowState(ctx, client, opts, runID)
 			if err != nil {
 				settleObservation()
 				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -894,13 +860,52 @@ func followRunCommand(ctx context.Context, out, errOut io.Writer, client *cliAPI
 				writeCLIAPIError(errOut, err)
 				return commandExitError{code: runCommandErrorExitCode(err)}
 			}
-			if runCommandTerminalStatus(run.Status) {
-				settleObservation()
-				writeRunCommandTerminalSummary(out, run)
-				return runCommandTerminalExit(run.Status)
+			lastDiagnosis = diagnosis
+			if !ready {
+				continue
 			}
+			settleObservation()
+			err = writeRunCommandFollowResult(ctx, out, errOut, client, run, diagnosis, feeds)
+			if errors.Is(err, context.DeadlineExceeded) {
+				return timeout()
+			}
+			return err
 		}
 	}
+}
+
+func readRunCommandFollowState(ctx context.Context, client *cliAPIClient, opts runCommandOptions, runID string) (diagnosticRunHeader, *DiagnosticRunDiagnosisResult, bool, error) {
+	if opts.reattachRunID != "" {
+		run, err := runCommandGet(ctx, client, runID)
+		return run, nil, runCommandTerminalStatus(run.Status), err
+	}
+	diagnosis, err := readRunDiagnosis(ctx, client, runID)
+	return diagnosis.Run, &diagnosis, BoolPointerValue(diagnosis.TestQuiescence.Ready), err
+}
+
+func writeRunCommandFollowResult(ctx context.Context, out, errOut io.Writer, client *cliAPIClient, run diagnosticRunHeader, diagnosis *DiagnosticRunDiagnosisResult, feeds []string) error {
+	if diagnosis == nil {
+		writeRunCommandTerminalSummary(out, run)
+		return runCommandTerminalExit(run.Status)
+	}
+	rejected, err := readRunDeploymentOutcomes(ctx, client, out, run.RunID, feeds)
+	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return context.DeadlineExceeded
+		}
+		writeCLIAPIError(errOut, err)
+		return commandExitError{code: runCommandErrorExitCode(err)}
+	}
+	if runCommandTerminalStatus(run.Status) {
+		writeRunCommandTerminalSummary(out, run)
+	} else {
+		fmt.Fprintf(out, "run settled: run_id=%s\n", run.RunID)
+	}
+	writeDiagnosticRunDiagnosis(out, *diagnosis)
+	if rejected {
+		return commandExitError{code: cliExitConflict}
+	}
+	return runCommandTerminalExit(run.Status)
 }
 
 func startForegroundRunTraceRenderer(out, errOut io.Writer, rows <-chan diagnosticRunTraceRow) *foregroundRunTraceRenderer {
@@ -1339,27 +1344,37 @@ func readRunDeploymentOutcomes(ctx context.Context, client *cliAPIClient, out io
 			if err := page.Validate(query); err != nil {
 				return rejected, err
 			}
-			for _, row := range page.Outcomes {
-				switch row.Kind {
-				case fanoutobligation.OutcomeCommitted:
-					if row.EventID != "" {
-						fmt.Fprintf(out, "feed %s row %d committed: event_id=%s\n", feedID, row.Ordinal, row.EventID)
-					} else {
-						fmt.Fprintf(out, "feed %s row %d committed: source_event_id=%s\n", feedID, row.Ordinal, row.SourceEventID)
-					}
-				case fanoutobligation.OutcomeSemanticRejected:
-					failure, err := failures.UnmarshalEnvelope(row.Failure)
-					if err != nil {
-						return rejected, err
-					}
-					fmt.Fprintf(out, "feed %s row %d semantic_rejected: %s %s\n", feedID, row.Ordinal, failure.Message, failure.Remediation)
-					rejected = true
-				}
+			pageRejected, err := writeRunDeploymentOutcomes(out, feedID, page.Outcomes)
+			rejected = rejected || pageRejected
+			if err != nil {
+				return rejected, err
 			}
 			next = page.NextOrdinal
 			if !*page.More {
 				break
 			}
+		}
+	}
+	return rejected, nil
+}
+
+func writeRunDeploymentOutcomes(out io.Writer, feedID string, rows []fanoutobligation.Outcome) (bool, error) {
+	rejected := false
+	for _, row := range rows {
+		switch row.Kind {
+		case fanoutobligation.OutcomeCommitted:
+			if row.EventID != "" {
+				fmt.Fprintf(out, "feed %s row %d committed: event_id=%s\n", feedID, row.Ordinal, row.EventID)
+			} else {
+				fmt.Fprintf(out, "feed %s row %d committed: source_event_id=%s\n", feedID, row.Ordinal, row.SourceEventID)
+			}
+		case fanoutobligation.OutcomeSemanticRejected:
+			failure, err := failures.UnmarshalEnvelope(row.Failure)
+			if err != nil {
+				return rejected, err
+			}
+			fmt.Fprintf(out, "feed %s row %d semantic_rejected: %s %s\n", feedID, row.Ordinal, failure.Message, failure.Remediation)
+			rejected = true
 		}
 	}
 	return rejected, nil
