@@ -65,6 +65,9 @@ func AdmitEffectiveSourceProjection(request EffectiveSourceProjectionRequest) (A
 	}
 	source, err = providerconnectors.SourceWithConnectorPackImports(source, connectorRegistry)
 	if err != nil {
+		if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok && diagnostic.Code == "contract_loader.duplicate_activity_id" {
+			return AdmittedEffectiveSourceProjection{}, diagnostic
+		}
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("provider connector pack import failed: %w", err)
 	}
 	source, err = SourceWithProviderTriggerEvents(source, triggerCatalog)

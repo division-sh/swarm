@@ -3096,6 +3096,7 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 	tests := []struct {
 		name     string
 		schema   string
+		files    map[string]string
 		wants    []string
 		notWants []string
 	}{
@@ -3111,11 +3112,24 @@ func TestRunVerifyCommandFormatsSchemaLoaderDiagnostics(t *testing.T) {
 			wants:    []string{"ERROR: schema field \"bogus\" is not supported.", "Valid options:", "stages", "Remediation:"},
 			notWants: []string{"UNDEFINED-FIELD", "not in platform spec", "load Swarm contracts", "resolve contracts", "terminal_states"},
 		},
+		{
+			name:   "duplicate activity after connector import",
+			schema: "name: duplicate-activity\nimports:\n  connector_packs: [{provider: telegram, tool: telegram.send_message}]\nstages: []\npins: {inputs: [z.request, a.request]}\n",
+			files: map[string]string{
+				"events.yaml": "z.request: {chat_id: text, text: text}\na.request: {chat_id: text, text: text}\n",
+				"nodes.yaml":  "sender:\n  execution_type: system_node\n  subscribes_to: [z.request, a.request]\n  event_handlers:\n    z.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n    a.request: {activity: {id: send_reply, tool: telegram.send_message, input: {chat_id: payload.chat_id, text: payload.text}}}\n",
+			},
+			wants:    []string{`duplicate activity id "send_reply"`, "nodes.yaml:6:", `handlers "sender/z.request" and "sender/a.request"`, "give each activity in this flow a unique id"},
+			notWants: []string{"provider connector pack import failed", "multiple declaration owners"},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), test.schema)
+			for name, body := range test.files {
+				writeWorkflowValidationFixtureFile(t, filepath.Join(root, name), body)
+			}
 			var output bytes.Buffer
 			code := runVerifyCommandWithContractsForTest(t, context.Background(), RepoRoot(), root, &output)
 			if code != CLIExitValidation {
