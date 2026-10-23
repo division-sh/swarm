@@ -6,18 +6,22 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-func selectedFiniteFeedRecoveryEvidence() (runfork.SelectedForkRecoveryResult, runfork.SelectedForkRecoveryEntry) {
+func selectedFiniteFeedRecoveryEvidence(t *testing.T) (runfork.SelectedForkRecoveryResult, runfork.SelectedForkRecoveryEntry) {
+	t.Helper()
+	rooted, _ := sourceartifactfixture.Rooted(t, "finite-feed", sourceartifactfixture.Artifact())
 	point := runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 3}
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
-	bundle := "bundle-v2:sha256:" + strings.Repeat("a", 64)
+	bundle := rooted.Artifact().BundleHash()
 	entry := runfork.SelectedForkRecoveryEntry{
 		BundleHash: bundle,
 		Binding: runfork.RunForkSelectedContractBinding{
 			ForkRunID: uuid.NewString(), SourceRunID: uuid.NewString(),
 			ForkPoint: point, ContractSelection: selection,
+			TargetRootReference: rooted.Admission().Reference(),
 		},
 	}
 	return runfork.SelectedForkRecoveryResult{
@@ -30,13 +34,13 @@ func selectedFiniteFeedRecoveryEvidence() (runfork.SelectedForkRecoveryResult, r
 		}}, Operation: runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: "operator", TransportHash: "transport-hash",
 			SourceRunID: entry.Binding.SourceRunID, ResolvedPoint: &point,
-			TargetBundleHash: bundle, ContractSelection: selection,
+			TargetBundleHash: bundle, TargetRootReference: rooted.Admission().Reference(), ContractSelection: selection,
 		}},
 	}, entry
 }
 
 func TestSelectedRecoveryBootActionsAreClosed(t *testing.T) {
-	_, entry := selectedFiniteFeedRecoveryEvidence()
+	_, entry := selectedFiniteFeedRecoveryEvidence(t)
 	for _, tc := range []struct {
 		name        string
 		disposition runfork.SelectedForkRecoveryDisposition
@@ -63,7 +67,7 @@ func TestSelectedRecoveryBootActionsAreClosed(t *testing.T) {
 }
 
 func TestSelectedFiniteFeedRecoveryRequiresExactTypedOperation(t *testing.T) {
-	valid, entry := selectedFiniteFeedRecoveryEvidence()
+	valid, entry := selectedFiniteFeedRecoveryEvidence(t)
 	for _, tc := range []struct {
 		disposition runfork.SelectedForkRecoveryDisposition
 		want        selectedRecoveryAction

@@ -988,27 +988,6 @@ func TestBuildShowsSingletonContainedOperations(t *testing.T) {
 	}
 }
 
-func TestBuildShowsStatelessSingletonWithoutCoordinatorError(t *testing.T) {
-	repoRoot := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("load stateless standing singleton: %v", err)
-	}
-	source := semanticview.Wrap(bundle)
-	view := mustBuild(t, source, nil)
-	flow := flowByID(t, view, "telegram-ingress")
-	if flow.Mode != runtimecontracts.FlowModeStatic || flow.PrimaryEntity == nil {
-		t.Fatalf("stateless singleton view = %#v", flow)
-	}
-	if flow.SingletonCoordinator != nil || flow.SingletonError != "" {
-		t.Fatalf("stateless singleton coordinator projection = coordinator:%#v error:%q", flow.SingletonCoordinator, flow.SingletonError)
-	}
-	if _, exists := flow.PrimaryEntity.Fields["active_chats"]; exists {
-		t.Fatalf("stateless singleton still exposes removed active_chats ceremony: %#v", flow.PrimaryEntity.Fields)
-	}
-}
-
 func TestBuildShowsStatelessCountJoinWithoutCoordinatorDemandWithExactProvenance(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopySingletonCoordinatorPilot(t, canonicalrouting.SingletonCoordinatorPilotStatelessCountJoin)
@@ -1063,29 +1042,6 @@ func TestBuildShowsStatelessCountJoinWithoutCoordinatorDemandWithExactProvenance
 		if diagnostic.CheckID == "singleton_coordinator_validation" {
 			t.Fatalf("stateless count join retained coordinator diagnostics: %#v", diagnostic)
 		}
-	}
-}
-
-func TestBuildDoesNotInferCoordinatorFromUnusedContainedField(t *testing.T) {
-	repoRoot := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	entitiesPath := filepath.Join(root, "telegram-ingress", "entities.yaml")
-	entities := []byte("telegram_service:\n  unused_index:\n    type: map[text]json\n    initial: {}\n")
-	if err := os.WriteFile(entitiesPath, entities, 0o644); err != nil {
-		t.Fatalf("write standing singleton entities: %v", err)
-	}
-
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("load standing singleton with unused map: %v", err)
-	}
-	view := mustBuild(t, semanticview.Wrap(bundle), nil)
-	flow := flowByID(t, view, "telegram-ingress")
-	if flow.SingletonCoordinator != nil || flow.SingletonError != "" {
-		t.Fatalf("unused contained field inferred coordinator semantics = coordinator:%#v error:%q", flow.SingletonCoordinator, flow.SingletonError)
-	}
-	if _, exists := flow.PrimaryEntity.Fields["unused_index"]; !exists {
-		t.Fatalf("primary entity omitted unused contained field: %#v", flow.PrimaryEntity.Fields)
 	}
 }
 

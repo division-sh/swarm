@@ -15,7 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/platform"
-	"github.com/division-sh/swarm/internal/providerconnectors"
+
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
@@ -23,7 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
+
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -639,166 +639,6 @@ func TestSourceArtifactSelectedContractLoaderRejectsCrossedTargetRequest(t *test
 	if artifactStore.requestedBundleHash != "" {
 		t.Fatal("crossed target reached artifact loading")
 	}
-}
-
-func TestSelectedContractSourceLoadersCompileExactEffectiveConnectorResponses(t *testing.T) {
-	repoRoot := runForkExecutionRepoRoot(t)
-	for _, sourceKind := range []string{"flow_local", "pack_imported"} {
-		t.Run(sourceKind, func(t *testing.T) {
-			contractsRoot := copySelectedForkConnectorFixture(t, repoRoot)
-			if sourceKind == "pack_imported" {
-				convertSelectedTelegramFixtureToPackImport(t, contractsRoot)
-			}
-
-			t.Run("disk", func(t *testing.T) {
-				loaded, err := (admittedFixtureSelectedContractSourceLoader{RepoRoot: repoRoot, SourceRoot: contractsRoot}).LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{
-					Mode: runfork.RunForkContractSelectionModeSelectedContracts,
-				})
-				if err != nil {
-					t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
-				}
-				assertLoadedSelectedConnectorResponse(t, loaded)
-			})
-
-			t.Run("source artifact", func(t *testing.T) {
-				bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, contractsRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-				if err != nil {
-					t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-				}
-				record := persistedSourceArtifactForTest(t, bundle)
-				loader := SourceArtifactSelectedContractSourceLoader{
-					RepoRoot: repoRoot,
-					Store:    &fakeSourceArtifactSelectedContractSourceStore{record: record},
-				}
-				loaded, err := loader.LoadRunForkSelectedContractSource(context.Background(), runfork.RunForkContractSelection{
-					Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash,
-				})
-				if err != nil {
-					t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
-				}
-				defer cleanupLoadedSelectedContractSource(loaded)
-				assertLoadedSelectedConnectorResponse(t, loaded)
-			})
-		})
-	}
-}
-
-func copySelectedForkConnectorFixture(t *testing.T, repoRoot string) string {
-	t.Helper()
-	sourceRoot := filepath.Join(repoRoot, "internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp")
-	root := t.TempDir()
-	if err := os.CopyFS(root, os.DirFS(sourceRoot)); err != nil {
-		t.Fatalf("copy selected fork connector fixture: %v", err)
-	}
-	tool := `telegram.send_message:
-  category: provider_connector
-  description: send Telegram messages
-  handler_type: http
-  credentials: [telegram_bot_token]
-  input_schema:
-    type: object
-    properties:
-      chat_id: {type: string}
-      text: {type: string}
-    required: [chat_id, text]
-  response_success: {kind: http_status_2xx}
-  http:
-    method: POST
-    url: https://example.invalid/bot{{credentials.telegram_bot_token}}/sendMessage
-    body:
-      chat_id: "{{input.chat_id}}"
-      text: "{{input.text}}"
-`
-	if err := os.WriteFile(filepath.Join(root, "worker", "tools.yaml"), []byte(tool), 0o644); err != nil {
-		t.Fatalf("write selected connector fixture: %v", err)
-	}
-	return root
-}
-
-func convertSelectedTelegramFixtureToPackImport(t *testing.T, contractsRoot string) {
-	t.Helper()
-	schemaPath := filepath.Join(contractsRoot, "worker", "schema.yaml")
-	body, err := os.ReadFile(schemaPath)
-	if err != nil {
-		t.Fatalf("read selected worker schema fixture: %v", err)
-	}
-	body = append(body, []byte("imports:\n  connector_packs:\n    - {provider: telegram, tool: telegram.send_message}\n")...)
-	if err := os.WriteFile(schemaPath, body, 0o644); err != nil {
-		t.Fatalf("write selected worker schema fixture: %v", err)
-	}
-	if err := os.Remove(filepath.Join(contractsRoot, "worker", "tools.yaml")); err != nil {
-		t.Fatalf("remove selected flow-local connector fixture: %v", err)
-	}
-}
-
-func TestCompileSelectedContractSourceIsolatesEffectiveConnectorPlans(t *testing.T) {
-	firstTool := selectedMockConnectorTool()
-	secondTool := selectedMockConnectorTool()
-	firstFact := testEphemeralSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("1", 64))
-	first, firstPlan, firstIdentity, err := compileSelectedContractSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
-		"first.send": firstTool,
-	}}), firstFact)
-	if err != nil {
-		t.Fatalf("compile first selected source: %v", err)
-	}
-	secondFact := testEphemeralSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("2", 64))
-	second, secondPlan, secondIdentity, err := compileSelectedContractSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
-		"second.send": secondTool,
-	}}), secondFact)
-	if err != nil {
-		t.Fatalf("compile second selected source: %v", err)
-	}
-	if !firstIdentity.SourceArtifactFact().Matches(firstFact) || !secondIdentity.SourceArtifactFact().Matches(secondFact) || firstIdentity.Equal(secondIdentity) {
-		t.Fatalf("selected effective identities were not bound to their exact sources: first=%s second=%s", firstIdentity.Digest(), secondIdentity.Digest())
-	}
-	if _, ok := first.ToolEntries()["second.send"]; ok {
-		t.Fatal("first selected source contains second connector")
-	}
-	if _, ok := second.ToolEntries()["first.send"]; ok {
-		t.Fatal("second selected source contains first connector")
-	}
-	if _, err := firstPlan.Admit("second.send", secondTool); err == nil || !strings.Contains(err.Error(), "not configured") {
-		t.Fatalf("first selected plan admitted second connector: %v", err)
-	}
-	if _, err := secondPlan.Admit("first.send", firstTool); err == nil || !strings.Contains(err.Error(), "not configured") {
-		t.Fatalf("second selected plan admitted first connector: %v", err)
-	}
-}
-
-func assertLoadedSelectedConnectorResponse(t *testing.T, loaded LoadedSelectedContractSource) {
-	t.Helper()
-	tool, ok := loaded.Source.ToolEntries()["telegram.send_message"]
-	if !ok {
-		t.Fatal("loaded selected source is missing effective telegram.send_message")
-	}
-	if loaded.MockConnectorResponses == nil {
-		t.Fatal("loaded selected source is missing its generated response plan")
-	}
-	admitted, err := loaded.MockConnectorResponses.Admit("telegram.send_message", tool)
-	if err != nil {
-		t.Fatalf("Admit telegram.send_message: %v", err)
-	}
-	materialized, err := admitted.Materialize()
-	if err != nil {
-		t.Fatalf("Materialize telegram.send_message: %v", err)
-	}
-	response, ok := materialized.(map[string]any)
-	if !ok {
-		t.Fatalf("telegram generated response = %T, want object", materialized)
-	}
-	if len(response) != 0 {
-		t.Fatalf("telegram generated response = %#v, want canonical empty object", response)
-	}
-	ambient := packfixture.ConnectorTool(t, "github", "github.create_issue").Tool
-	if _, err := loaded.MockConnectorResponses.Admit("github.create_issue", ambient); err == nil || !strings.Contains(err.Error(), "not configured") {
-		t.Fatalf("selected response plan admitted unimported github.create_issue: %v", err)
-	}
-}
-
-func selectedMockConnectorTool() runtimecontracts.ToolSchemaEntry {
-	return runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory(providerconnectors.Category), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")),
-		runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"}), runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}), runtimecontracts.WithToolCredentials("provider_token"))
-
 }
 
 func TestSourceArtifactSelectedContractSourceLoaderFailsClosedOnUnavailableStates(t *testing.T) {

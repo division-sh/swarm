@@ -258,7 +258,8 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 
 func TestBindSelectedContractWorkspaceProjectionUsesSelectedArtifact(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: selected\n"), 0o644); err != nil {
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)
@@ -305,7 +306,8 @@ func TestBindSelectedContractWorkspaceProjectionUsesSelectedArtifact(t *testing.
 
 func TestPrepareSelectedContractAgentRuntimeReleasesReboundProjectionOnPlanningError(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: selected\n"), 0o644); err != nil {
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)
@@ -354,7 +356,8 @@ func TestPrepareSelectedContractAgentRuntimeReleasesReboundProjectionOnPlanningE
 
 func TestSelectedContractAgentRuntimeShutdownReleasesReboundProjection(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: selected\n"), 0o644); err != nil {
+	writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
+	if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("stages: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	artifact, err := sourceartifact.AdmitDirectory(root)
@@ -5696,10 +5699,11 @@ func prepareSelectedExecutionSourceAgent(t *testing.T, ctx context.Context, sele
 		t.Fatal("native source actor requires its actual admitted artifact")
 	}
 	ctx = runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, identity.RunID), loaded.SourceArtifactFact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, loaded.RootedSource.Admission())
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: identity.RunID, StartedAt: at.Add(-time.Minute),
-		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact,
+		BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: bundle.SourceArtifact, RootAdmission: loaded.RootedSource.Admission(),
 	})
 	live, err := llmselection.ResolveLiveBackend(llmselection.BackendAnthropic)
 	if err != nil {
@@ -5722,7 +5726,11 @@ func prepareSelectedExecutionSourceAgent(t *testing.T, ctx context.Context, sele
 	if err != nil || !found {
 		t.Fatalf("native source actor lost its exact plan: found=%t err=%v", found, err)
 	}
-	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, runtimeagenttopology.SourceCoordinate{BundleHash: loaded.SourceArtifactFact.BundleHash()})
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(loaded.RootedSource.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate)
 	if err != nil {
 		t.Fatal(err)
 	}

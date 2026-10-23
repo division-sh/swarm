@@ -4,14 +4,16 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestSelectedFiniteFeedResumeRequiresExactPermanentRequest(t *testing.T) {
+	rooted, _ := sourceartifactfixture.Rooted(t, "finite-feed", sourceartifactfixture.Artifact())
 	point := runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 1}
 	op := runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "test-actor", TransportHash: "sha256:request",
-		SourceRunID: uuid.NewString(), TargetBundleHash: "bundle-test", ResolvedPoint: &point,
+		SourceRunID: uuid.NewString(), TargetBundleHash: rooted.Artifact().BundleHash(), TargetRootReference: rooted.Admission().Reference(), ResolvedPoint: &point,
 		ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 	}
 	result := runfork.SelectedForkRecoveryResult{

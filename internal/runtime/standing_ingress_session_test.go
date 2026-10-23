@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -37,7 +39,33 @@ func (s *standingSessionBindingProbe) SessionStandingBindingCurrent(ctx context.
 func standingSessionRuntimeFixture(t *testing.T) (*Runtime, *standingSessionBindingProbe) {
 	t.Helper()
 	repo := filepath.Join("..", "..")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, filepath.Join(repo, "internal/serveapp/testdata/whatsapp-session"),
+	root := t.TempDir()
+	if err := os.CopyFS(root, os.DirFS(filepath.Join(repo, "internal/serveapp/testdata/whatsapp-session"))); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"manifest.yaml": "version: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n",
+		"schema.yaml":   "stages:\n  active:\n    gate:\n      decision: retire_service\n      outcomes:\n        retire:\n          advances_to: done\n  done:\n    final: true\npins:\n  inputs: [inbound.whatsapp.message]\n  outputs: [inbound.whatsapp.message]\n",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, entry := range packfixture.EmbeddedInventory(t).Entries() {
+		if entry.Provider().Key() != "whatsapp" {
+			continue
+		}
+		directory := filepath.Join(root, "whatsapp")
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for name, body := range entry.Provider().Members() {
+			if err := os.WriteFile(filepath.Join(directory, name), body, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, root,
 		runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +74,24 @@ func standingSessionRuntimeFixture(t *testing.T) (*Runtime, *standingSessionBind
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan := packfixture.ChannelPlanByID(t, projection.ChannelPlans, "provider.whatsapp.hitl_channel")
+	plan := packfixture.ChannelPlanByID(t, projection.ChannelPlans, "whatsapp")
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact := sourceartifactfixture.FactFor(rooted.Artifact())
 	identity, err := plan.InterfaceIdentity()
 	if err != nil {
 		t.Fatal(err)
@@ -58,13 +103,13 @@ func standingSessionRuntimeFixture(t *testing.T) (*Runtime, *standingSessionBind
 	op := channelonboarding.Operation{OperationID: uuid.NewString(), Revision: 2, BindingRevision: 1,
 		Posture: channelonboarding.ActivationSessionConnection, Phase: channelonboarding.PhaseAwaitingOperatorConfirmation,
 		Provider: "whatsapp", Interface: identity, TargetSelector: "ingress:.:whatsapp",
-		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: runtimeContextTestHashA,
+		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{BundleHash: fact.BundleHash(),
 			PackInventoryGeneration: bundle.PackInventory.Digest(), PlanGeneration: generation}}
 	store := &standingSessionBindingProbe{standingLearnedCredentialStore: standingLearnedCredentialStore{operations: []channelonboarding.Operation{op}},
 		current: map[string]bool{op.OperationID: true}}
 	rt := &Runtime{Options: RuntimeOptions{WorkflowModule: semanticOnlyWorkflowRuntime{source: semanticview.Wrap(bundle)},
-		ProviderTriggerCatalog: projection.ProviderTriggers, ChannelPlans: []packs.SatisfactionPlan{plan}, ChannelOnboardingStore: store,
-		SourceArtifactFact: testSourceArtifactFact(t, runtimeContextTestHashA)}}
+		ProviderTriggerCatalog: catalog, ChannelPlans: []packs.SatisfactionPlan{plan}, ChannelOnboardingStore: store,
+		SourceArtifactFact: fact}}
 	return rt, store
 }
 

@@ -639,7 +639,7 @@ func selectedActivityProducerSourceOptions(t *testing.T, ordinaryRootLoop, activ
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"schema.yaml":   "name: activity-projection\nstages:\n  pending: {}\n",
+		"schema.yaml":   "stages:\n  pending: {}\n",
 		"entities.yaml": "default:\n  name: text\n",
 		"events.yaml":   "ordinary.ready:\nreview.inspect:\nsupport.drafted:\n",
 		"nodes.yaml": `reader:
@@ -655,7 +655,7 @@ support:
     support.drafted:
       activity: {id: send_support_reply, tool: telegram.send_message, approval: {decision: support_reply}}
 `,
-		"flow-a/schema.yaml":   "name: flow-a\nstages:\n  pending: {}\n",
+		"flow-a/schema.yaml":   "stages:\n  pending: {}\n",
 		"flow-a/entities.yaml": "default:\n  name: text\n",
 		"flow-a/events.yaml":   "review.accepted:\nreview.inspect:\n",
 		"flow-a/nodes.yaml": `writer:
@@ -680,7 +680,7 @@ provider.write:
 telegram.send_message:
   handler_type: http
   http: {method: POST, url: "http://127.0.0.1:1/send"}
-`,
+`, "flow-a/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}
 	if !rootFields {
 		delete(files, "entities.yaml")

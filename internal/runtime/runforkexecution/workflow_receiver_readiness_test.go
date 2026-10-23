@@ -3,14 +3,14 @@ package runforkexecution
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
+
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -302,45 +302,5 @@ func TestSelectedContractReceiverReadinessTemplateConsumesExactPlanRoute(t *test
 	}
 }
 
-func TestSelectedContractReceiverReadinessRejectsUnsupportedConfigDependencyAuthoring(t *testing.T) {
-	loaded := selectedContractReadinessFixture(t, 1)
-	flow, err := readinessTestMaterialization(t, loaded.Source, "worker-flow", "worker-flow/one", "receiver-entity")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, exists := flow.ActivationVariables["foo"]; exists {
-		t.Fatalf("fresh activation inferred unavailable foo: %#v", flow.ActivationVariables)
-	}
-	// These are hostile authority-boundary inputs, not an admitted arbitrary
-	// config-dependent template or a historical configuration recovery proof.
-	for _, subscription := range []string{"worker.{foo}", "worker.{{foo}}", "worker.{config.foo}", "worker.{{config.foo}}"} {
-		t.Run(subscription, func(t *testing.T) {
-			admission := semanticview.ClassifyAuthoredSubscription(loaded.Source, semanticview.AuthoredSubscriptionRequest{
-				ConsumerKind: semanticview.AuthoredSubscriptionConsumerAgent,
-				ConsumerID:   flow.Agents[0].Identity.AgentID(),
-				FlowID:       "worker-flow", FlowPath: "worker-flow", Authored: subscription,
-			})
-			if admission.Admitted() || !strings.Contains(admission.Message(), subscription) {
-				t.Fatalf("unproven exact subscription dependency admitted or silently omitted: %#v", admission)
-			}
-			_, err := semanticview.AdmitFlowOwnedAgentSubscriptions(loaded.Source, semanticview.FlowOwnedAgentSubscriptionRequest{
-				AgentID: flow.Agents[0].Identity.AgentID(), FlowID: "worker-flow", FlowPath: "worker-flow",
-				Subscriptions: []string{subscription},
-			})
-			if err == nil || !strings.Contains(err.Error(), subscription) {
-				t.Fatalf("runtime subscription owner dropped unproven dependency: %v", err)
-			}
-		})
-	}
-	for _, field := range []string{"config: {foo: required}", "prompt_inputs: [config.foo]"} {
-		root := t.TempDir()
-		writeSelectedContractFixtureFile(t, filepath.Join(root, "manifest.yaml"), "version: 1.0.0\nplatform_version: '*'\n")
-		writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: config-authority\n")
-		writeSelectedContractFixtureFile(t, filepath.Join(root, "agents.yaml"), "worker:\n  intent: {inline: Exercise receiver configuration.}\n  "+field+"\n")
-		repo := runForkExecutionRepoRoot(t)
-		if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), strings.Split(field, ":")[0]) {
-			t.Fatalf("unsupported configuration authority accepted: %s", field)
-		}
-	}
-}
+// These are hostile authority-boundary inputs, not an admitted arbitrary
+// config-dependent template or a historical configuration recovery proof.

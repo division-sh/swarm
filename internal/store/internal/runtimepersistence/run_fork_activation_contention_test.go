@@ -429,9 +429,9 @@ func newForkActivationFrontierFixture(t *testing.T, backend eventRecordContractB
 		return newForkContentionFixture(t, backend)
 	}
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend.name, false, map[string]string{
-		"schema.yaml":   "name: generic-frontier\nstages:\n  pending: {}\n  done: {}\n",
+		"schema.yaml":   "stages:\n  pending: {}\n  done: {}\n",
 		"entities.yaml": "subject:\n  name: {type: text, initial: 'At R'}\n",
-		"events.yaml":   "item.received:\n",
+		"events.yaml":   "item.received:\n", "manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
 	}, nil)
 	runID := runtimecorrelation.RunIDFromContext(f.ctx)
 	fixture := forkContentionFixture{snapshotOwnershipFixture: snapshotOwnershipFixture{

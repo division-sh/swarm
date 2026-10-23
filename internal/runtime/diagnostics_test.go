@@ -462,6 +462,10 @@ func VerifyRuntimeLogger_Log_StampsSourceArtifactFactOnRunRowForTest(t *testing.
 
 func VerifyRuntimeLogSetupRejectsDeletedPersistedSourceArtifactFactForTest(t *testing.T, open RuntimeLogNativeOpenerForTest) {
 	artifact := admittedRuntimeLogSourceArtifactForTest(t)
+	rooted, rootErr := artifact.RootedSource()
+	if rootErr != nil {
+		t.Fatal(rootErr)
+	}
 	fixture := open(t, artifact)
 	runID := uuid.NewString()
 	sourceFact := testPersistedSourceArtifactFact(t, artifact.BundleHash())
@@ -472,7 +476,7 @@ func VerifyRuntimeLogSetupRejectsDeletedPersistedSourceArtifactFactForTest(t *te
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 
 	before := fixture.Physical(ctx)
-	_, err := fixture.Runs.CreateRun(ctx, storerunlifecycle.CreateRequest{RunID: runID, Source: sourceFact, Origin: storerunlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC()})
+	_, err := fixture.Runs.CreateRun(ctx, storerunlifecycle.CreateRequest{RunID: runID, Source: sourceFact, RootAdmission: rooted.Admission(), Origin: storerunlifecycle.ScenarioSetupRunOrigin(), StartedAt: time.Now().UTC()})
 	if !errors.Is(err, storerunlifecycle.ErrSourceArtifactUnavailable) {
 		t.Fatalf("run setup error = %v, want ErrSourceArtifactUnavailable", err)
 	}

@@ -27,7 +27,7 @@ func (s *selectedFiniteFeedBindingReader) RequireRunForkSelectedContractBinding(
 }
 
 func TestSelectedFiniteFeedRecoveryAdmitsOnlyExactDurableOperation(t *testing.T) {
-	recovered, entry := selectedFiniteFeedRecoveryEvidence()
+	recovered, entry := selectedFiniteFeedRecoveryEvidence(t)
 	recovered.Resume.ForkRunStatus = runfork.RunForkMaterializedStatus
 	store := &selectedFiniteFeedBindingReader{binding: entry.Binding}
 	owner := SelectedContractExecutionOwner{ports: &selectedContractExecutionPorts{fork: store}}
