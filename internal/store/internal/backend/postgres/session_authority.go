@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -882,6 +883,8 @@ func runAuthorityTransactionWithProof(
 	probe.Begun()
 	orderingCtx, releaseOrdering := authoractivity.BindTransaction(ctx, ctx, tx, authoractivity.DialectPostgres)
 	defer releaseOrdering()
+	orderingCtx, releaseGeneration := generationauthority.BindTransaction(ctx, orderingCtx, tx, false, opts != nil && opts.ReadOnly)
+	defer releaseGeneration()
 	serializationConflict := false
 	defer func() {
 		if tx != nil {
