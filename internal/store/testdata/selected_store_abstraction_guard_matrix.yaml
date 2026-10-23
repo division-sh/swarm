@@ -21,12 +21,9 @@ rows:
       - default SQLite and explicit Postgres row classification
     owners:
       - internal/apiv1/testdata/public_surface_backend_matrix.yaml
-      - internal/apiv1 TestPublicSurfaceBackendMatrixCoversSelectedBackendRows
     proof_refs:
       - kind: artifact
         path: internal/apiv1/testdata/public_surface_backend_matrix.yaml
-      - kind: go_test
-        name: TestPublicSurfaceBackendMatrixCoversSelectedBackendRows
       - kind: go_test
         name: TestPublicSurfaceBackendMatrixRejectsStaleReferences
     guard_proof_refs:
