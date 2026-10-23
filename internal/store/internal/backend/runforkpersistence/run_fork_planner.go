@@ -286,6 +286,14 @@ func planRunForkSnapshotWithActivityOrigins(
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
+	// Accepted returns narrow to their captured unfinished audience too. The
+	// selected contract must not invent an ordinary observer at that old cut.
+	for _, captured := range snapshot.Deliveries {
+		delivery := captured.Snapshot
+		if _, returned := returns[delivery.EventID]; returned && !delivery.Terminal() {
+			requests[delivery.EventID] = append(requests[delivery.EventID], delivery.DeliveryID)
+		}
+	}
 	plan, err = plan.WithHistoricalRequestPublications(snapshot.Revision, requests)
 	if err != nil {
 		return runfork.RunForkPlan{}, err

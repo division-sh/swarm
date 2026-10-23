@@ -7,8 +7,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// The native cut supplies this derived partition from existing reply contexts
-// and delivery history. It narrows planning; it is not execution authority.
+// The native cut supplies request and accepted-return partitions from existing
+// reply contexts and delivery history. They narrow planning, not authority.
 func (p RunForkPlan) WithHistoricalRequestPublications(revision int64, partitions map[string][]string) (RunForkPlan, error) {
 	ids, ok := p.HistoricalEventIDs(revision)
 	if !ok {

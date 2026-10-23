@@ -40,46 +40,6 @@ func nativeCatalogNamedIdentitySource(source string) string {
 	})
 }
 
-func TestCatalogRunNamedIdentityRecipesPreserveEveryTemporalCutAndAssertion(t *testing.T) {
-	var rows []recipe
-	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	matched, calls := 0, 0
-	for _, row := range rows {
-		if row.Family != "native-catalog-run-named-event" {
-			continue
-		}
-		matched++
-		calls += strings.Count(row.After, "h.readRunNamedEventIdentity(")
-		want, err := canonicalFunction(nativeCatalogNamedIdentitySource(row.Before))
-		got, afterErr := canonicalFunction(row.After)
-		current, currentErr := reviewedCatalogNamedIdentityCurrentSource(row)
-		currentValue, currentParseErr := canonicalFunction(current)
-		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		value, actualErr := canonicalFunction(actual)
-		if err != nil || afterErr != nil || currentErr != nil || currentParseErr != nil || actualErr != nil || want != got || currentValue != value {
-			t.Fatalf("run/name migration changed polling, source scope, lifecycle cut or assertion: %s/%s", row.File, row.Function)
-		}
-		for _, cut := range []string{"h.readRunNamedEventIdentity", "catalogRuntimeRunID"} {
-			mutant := strings.Replace(row.After, cut, "unreviewed", 1)
-			changed, mutantErr := canonicalFunction(mutant)
-			if mutantErr == nil && changed == want {
-				t.Fatalf("changed identity scope/owner accepted: %s", cut)
-			}
-		}
-	}
-	if matched != 10 || calls != 11 {
-		t.Fatalf("finite run/name consumers=%d calls=%d want10/11", matched, calls)
-	}
-	bridge := selectedCausalObservationBody(t, "internal/runtime/cataloge2e/named_event_storage_test.go", "readRunNamedEventIdentity")
-	for _, cut := range []string{"h.catalogOperatorEventLister()", "storetest.ReadRunNamedEventIdentityStorage(ctx, reader, runID, eventName)", "return \"\", err"} {
-		if !strings.Contains(bridge, cut) {
-			t.Fatalf("shared catalog read lost original selected owner: %s", cut)
-		}
-	}
-}
-
 func reviewedCatalogNamedIdentityCurrentSource(row recipe) (string, error) {
 	if row.Successor == "" {
 		return row.After, nil

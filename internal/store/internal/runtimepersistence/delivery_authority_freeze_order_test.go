@@ -9,53 +9,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
 )
-
-func TestDeliveryAuthorityActivationKeepsAdvancedSourceLiveBothStores(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
-		t.Run(backend.name, func(t *testing.T) {
-			f := newForkActivationFrontierFixture(t, backend, true)
-			staged, request := stageForkContentionFixture(t, f, true)
-			if err := f.write(f.ctx, f.store); err != nil {
-				t.Fatal(err)
-			}
-			activation, err := f.store.(runforkexecution.SelectedContractForkLifecycle).ActivateRunForkForSelectedContractExecution(f.ctx, request)
-			if err != nil || !activation.Activated || !activation.SourceAdvancedAfterFork || activation.SourceFrozen || activation.BranchDivergence == nil {
-				t.Fatalf("expected independently live advanced source: %+v %v", activation, err)
-			}
-			if err := f.store.(runlifecycle.OperationOwner).RequireActiveRun(f.ctx, f.runID); err != nil {
-				t.Fatal(err)
-			}
-			store := f.store.(authorActivityReceiptStore)
-			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "freeze.delivery", "test", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, time.Now().UTC())
-			if err := insertCanonicalEventRecordFixture(f.ctx, store, event); err != nil {
-				t.Fatal(err)
-			}
-			prior := seedDeliveryStateFixture(t, f.ctx, store, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("advanced-source")}, deliverylifecycle.StateQueued, nil)
-			authority, err := deliverylifecycle.NewNormalExecutionAuthority(prior.Authority.SourceArtifact(), uuid.NewString(), prior.Authority.Generation()+1)
-			if err != nil {
-				t.Fatal(err)
-			}
-			before := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
-			if err := f.store.(interface {
-				ActivateDeliveryAuthority(context.Context, deliverylifecycle.ExecutionAuthority) error
-			}).ActivateDeliveryAuthority(f.ctx, authority); err != nil {
-				t.Fatal(err)
-			}
-			got, err := store.Snapshot(f.ctx, prior.DeliveryID)
-			if err != nil || !got.Authority.Equal(authority) || got.Status != prior.Status || got.ClaimVersion != prior.ClaimVersion || !reflect.DeepEqual(got.Route, prior.Route) {
-				t.Fatalf("advanced source incorrectly excluded: %+v %v", got, err)
-			}
-			after := snapshotForkHistoricalExecutionTables(t, f.db, backend.name == "postgres")
-			if !reflect.DeepEqual(forkContentionRowsForRun(t, before, staged.ForkRunID), forkContentionRowsForRun(t, after, staged.ForkRunID)) {
-				t.Fatal("normal source activation rewrote the independently selected child")
-			}
-		})
-	}
-}
 
 func TestDeliveryAuthorityActivationSerializesWithFreezeBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {

@@ -56,11 +56,11 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 	for _, backend := range []catalogRuntimeBackend{catalogBackendSQLite, catalogBackendPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			root := canonicalrouting.CopyMixedReplyRequest(t)
-			if returnedRequester {
+			if settledProvider {
 				root = canonicalrouting.CopyHandedOffMixedReplyRequest(t)
 			}
 			if responseObserver {
-				root = canonicalrouting.CopyMixedReplyResponse(t)
+				root = canonicalrouting.CopyMixedReplyResponse(t, settledProvider)
 			}
 			h := newRuntimeHarnessForBackend(t, root, backend, true)
 			var selected unclaimedFanOutReplyStore = h.pg
@@ -69,7 +69,7 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 			}
 			step := catalogTriggerStep{Event: "request.started", Payload: map[string]any{"account_id": "same-account", "request_id": "mixed-key"},
 				eventID: uuid.NewString(), createdAt: time.Now().UTC(), sourceAgent: "cataloge2e", inputKind: catalogReplayInputRootIngress}
-			if returnedRequester {
+			if settledProvider {
 				step.Payload["items"] = []any{step.Payload["request_id"]}
 			}
 			cut := ""
@@ -301,7 +301,7 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 func proveMixedResponseOrdinaryRecipient(t *testing.T, ctx context.Context, h *runtimeHarness, selected unclaimedFanOutReplyStore, sourceEventID, child string) {
 	t.Helper()
 	source, found, err := selected.LoadPreparedPublishEvent(ctx, sourceEventID)
-	if err != nil || !found || len(source.DeliveryRoutes) != 2 {
+	if err != nil || !found || len(source.DeliveryRoutes) == 0 {
 		t.Fatalf("source mixed response: %+v found=%t error=%v", source, found, err)
 	}
 	node, err := identity.AdmitExecutableNodeDeclaration(".", "response-observer")
@@ -314,7 +314,25 @@ func proveMixedResponseOrdinaryRecipient(t *testing.T, ctx context.Context, h *r
 			original = route
 		}
 	}
-	if original.Recipient.Empty() || original.Context.ReplyContextID() != "" {
+	if original.Recipient.Empty() {
+		// Ordinary source replies intentionally target only the paired return.
+		// A selected replay cannot invent the authored but uncaptured observer.
+		publication, found, err := selected.LoadPreparedPublishEvent(ctx, activityidentity.ForkLineageEventID(child, sourceEventID))
+		if err != nil || !found || len(source.DeliveryRoutes) != 1 || len(publication.DeliveryRoutes) != 1 {
+			t.Fatalf("return changed its captured partition: source=%+v child=%+v found=%t error=%v", source, publication, found, err)
+		}
+		for _, route := range publication.DeliveryRoutes {
+			if route.Recipient == events.MustNodeDeliveryRecipient(node) {
+				t.Fatal("selected return invented an uncaptured ordinary observer")
+			}
+		}
+		count, err := storetest.ReadLifecycleEventCardinality(ctx, selected, child, "reply.observed")
+		if err != nil || count != 0 {
+			t.Fatalf("uncaptured observer executed: count=%d error=%v", count, err)
+		}
+		return
+	}
+	if original.Context.ReplyContextID() != "" {
 		t.Fatal("source ordinary response observer borrowed reply authority")
 	}
 	inputID := activityidentity.ForkLineageEventID(child, sourceEventID)
