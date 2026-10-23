@@ -12,6 +12,7 @@ import (
 	runtimeactivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimelifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	privatefork "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
@@ -388,6 +389,10 @@ func (a *Attempt) finalize(ctx context.Context, phase *Phase) error {
 		*phase = ActivityFinalize
 		return a.story.Finalize(ctx)
 	}
+	if a.evidence == AuthorityFence {
+		*phase = ActivityFinalize
+		return privateactivity.FenceMutationOrder(ctx, a.tx, a.dialect)
+	}
 	return nil
 }
 
@@ -566,11 +571,6 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 					return err
 				}
 				attempt.story = story
-			case AuthorityFence:
-				if err := privateactivity.FenceMutationOrder(txctx, tx, dialect); err != nil {
-					fenceSpan.End()
-					return err
-				}
 			}
 			fenceSpan.End()
 			phase = DomainWrite
@@ -591,6 +591,10 @@ func run[T any](ctx context.Context, dialect privateactivity.Dialect, evidence E
 			phase = CommitAdmission
 			return nil
 		})
+		var admissionFailure *generationauthority.AdmissionFailure
+		if phase == BeforeAttempt && errors.As(nativeErr, &admissionFailure) {
+			phase = AcquireFence
+		}
 		// The native outcome boolean is not rollback proof. Only a sealed,
 		// clean pre-COMMIT abort at the fence permits a fresh transaction.
 		if acknowledged || dialect != privateactivity.DialectPostgres || phase != AcquireFence || domainEntered || !postgresbackend.IsRolledBackSerializationConflict(nativeErr) {
