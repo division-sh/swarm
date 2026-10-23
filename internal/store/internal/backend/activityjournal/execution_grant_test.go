@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"

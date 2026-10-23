@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -198,11 +199,6 @@ func TestOrderingNativeCancelledAcquisition(t *testing.T) {
 		})
 	}
 }
-
-type orderingBusyError struct{}
-
-func (orderingBusyError) Error() string { return "database is busy (SQLITE_BUSY)" }
-func (orderingBusyError) Code() int     { return 5 }
 
 func TestOrderingNativeRollbackAndPanicOutcomes(t *testing.T) {
 	for _, surface := range []string{"pooled_postgres", "retained_postgres", "sqlite"} {

@@ -5,7 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
-	"os/exec"
+
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -65,45 +65,6 @@ func assertDiagnosticNativeConsumerCall(t *testing.T, function *ast.FuncDecl) {
 	fixture, ok := call.Args[1].(*ast.Ident)
 	if !ok || fixture.Name != "pipelineDeliveryNativeFixture" {
 		t.Fatal("native store fixture changed")
-	}
-}
-
-func reviewedEntryLiteralForCurrent(t *testing.T, root string, entry entryGolden) goLiteralSite {
-	t.Helper()
-	// This master ancestor predates the fixture migration and stays reachable
-	// after compaction. It supplies proof evidence, never a reader fallback.
-	body, err := exec.Command("git", "-C", root, "show", "055bbbaba13e8d604ed80b73af98ca97c3b7acfb:"+entry.File).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	sites, err := goLiteralSites(entry.File, body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var found []goLiteralSite
-	for _, site := range sites {
-		if site.Function == entry.Function && site.Ordinal == entry.Literal {
-			found = append(found, site)
-		}
-	}
-	if len(found) != 1 {
-		t.Fatal("missing or ambiguous independently reviewed original source")
-	}
-	return found[0]
-}
-
-func assertEntryLiteralStageGolden(t *testing.T, entry entryGolden, site goLiteralSite) {
-	t.Helper()
-	snapshot, err := yamlsource.Load([]byte(site.Body))
-	if err != nil {
-		t.Fatal(err)
-	}
-	schema, err := contracts.AdmitFlowSchemaValue(snapshot.Document(entry.File).Root())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := assertEntryGolden(entry, schema); err != nil {
-		t.Fatal(err)
 	}
 }
 

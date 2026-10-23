@@ -252,46 +252,6 @@ func TestVerifyBootStartupPredicateCensus(t *testing.T) {
 	}
 }
 
-func proveNativeCancellationPredicateCensus(t *testing.T) {
-	surface := admissionPredicateSurface{"internal/store/internal/backend/postgres/transaction_cancellation.go", "A19,A28", "P18,P24"}
-	for _, target := range []string{"Error", "Unwrap", "CleanCancellationBeforeCommit", "onlyCallerCancellation"} {
-		t.Run(target, func(t *testing.T) {
-			file, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", surface.File), nil, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			expected, err := admissionPredicateFileBodies(surface, file)
-			if err != nil || len(expected) != 4 {
-				t.Fatalf("exact native cancellation owners: count=%d err=%v", len(expected), err)
-			}
-			guard, err := parser.ParseExpr(`func() { if true { panic("unreviewed native cancellation predicate") } }`)
-			if err != nil {
-				t.Fatal(err)
-			}
-			changed := 0
-			for _, declaration := range file.Decls {
-				if function, ok := declaration.(*ast.FuncDecl); ok && function.Name.Name == target {
-					function.Body.List = append(guard.(*ast.FuncLit).Body.List, function.Body.List...)
-					changed++
-				}
-			}
-			if changed != 1 {
-				t.Fatalf("exact native owner %s changed %d declarations", target, changed)
-			}
-			measured, err := admissionPredicateFileBodies(surface, file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := compareAdmissionPredicateBodies(expected, measured); err == nil || !strings.Contains(err.Error(), target) || !strings.Contains(err.Error(), "A19,A28") || !strings.Contains(err.Error(), "P18,P24") {
-				t.Fatalf("native owner %s escaped startup accounting: %v", target, err)
-			}
-			if err := compareAdmissionPredicateBodies(expected, measured[:len(measured)-1]); err == nil {
-				t.Fatal("native owner deletion escaped startup accounting")
-			}
-		})
-	}
-}
-
 func TestAdmissionPredicateRatchetRejectsRemovedVerifyConsumer(t *testing.T) {
 	surface := admissionPredicateSurface{"internal/cliapp/verify_deployment.go", "A11,A25", "P09,P15,P21"}
 	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", "internal", "cliapp", "verify_deployment.go"), nil, 0)

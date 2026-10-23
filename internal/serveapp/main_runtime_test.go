@@ -43,7 +43,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -64,7 +64,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
-	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -84,8 +84,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
+
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -140,27 +139,6 @@ func servedRuntimeRootIdentityForRun(t testing.TB, runID, agentID string) runtim
 	return agentidentitytest.RootRuntimeForRun(t, runID, agentID, "serveapp-test")
 }
 
-func requireServeTestAgentFixtureForSource(t testing.TB, selected storetest.AgentFixtureStore, cfg runtimeactors.AgentConfig, source runtimecorrelation.SourceArtifactFact) {
-	t.Helper()
-	cfg = serveTestAgentConfig(cfg)
-	cfg.FlowPath = cfg.Identity.FlowInstance()
-	if cfg.ExecutionMode == "" {
-		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
-	}
-	identity, err := cfg.ConcreteIdentity()
-	if err != nil {
-		t.Fatalf("resolve serve test agent identity: %v", err)
-	}
-	ctx := runtimecorrelation.WithRunID(context.Background(), identity.RunID)
-	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, source)
-	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", source.BundleHash()))
-	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, selected, runtimemanager.PersistedAgent{
-		Config: cfg, Status: "active", HiredBy: "serve-test-fixture",
-	}, source); err != nil {
-		t.Fatalf("admit agent fixture %s: %v", cfg.ID, err)
-	}
-}
-
 func releaseServeTestAgentFixtureCapability(t testing.TB, selected storetest.AgentFixtureStore) {
 	t.Helper()
 	capability, err := agentfixture.ProcessCapability(t, context.Background(), selected)
@@ -190,28 +168,6 @@ func serveFixtureProcessContext(t testing.TB, ctx context.Context, selected any)
 		t.Fatal(err)
 	}
 	return ctx
-}
-
-func servedRuntimeFlowIdentityForRun(t testing.TB, runID, agentID, scopeKey, instanceID string) runtimeagentidentity.Identity {
-	t.Helper()
-	return agentidentitytest.RuntimeForRun(
-		t,
-		runID,
-		agentID,
-		"serveapp-test",
-		scopeKey,
-		instanceID,
-		scopeKey+"/"+instanceID,
-	)
-}
-
-func servedRuntimeFlowIdentityFieldsForRun(t testing.TB, runID, agentID, scopeKey, instanceID string) runtimeagentidentity.StorageFields {
-	t.Helper()
-	fields, err := servedRuntimeFlowIdentityForRun(t, runID, agentID, scopeKey, instanceID).StorageFields()
-	if err != nil {
-		t.Fatalf("project served runtime flow agent identity: %v", err)
-	}
-	return fields
 }
 
 type delayedRunStatusAgent struct {
@@ -7401,84 +7357,6 @@ func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory f
 	return installServeRuntimePostgresTestStoresForDatabase(t, configured, false)
 }
 
-func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *runtimecontracts.WorkflowContractBundle) (string, string) {
-	t.Helper()
-	spec, err := loadServePlatformSpecDocument()
-	if err != nil {
-		t.Fatalf("load platform spec: %v", err)
-	}
-	plans, err := store.GeneratePlatformTableDDLs(spec)
-	if err != nil {
-		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
-	}
-	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
-	if err != nil {
-		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
-	}
-	bootstrapSQLiteSchemaForTest(t, context.Background(), sqliteStore, plans)
-	ctx := context.Background()
-	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
-	if err != nil {
-		_ = sqliteStore.Close()
-		t.Fatalf("build sqlite abandon source catalog: %v", err)
-	}
-	if _, err := sqliteStore.EnsureSourceArtifactWithData(ctx, bundle.SourceArtifact, catalog); err != nil {
-		_ = sqliteStore.Close()
-		t.Fatalf("persist sqlite abandon source artifact: %v", err)
-	}
-	priorSource := sourceartifactfixture.Require(t, ctx, sqliteStore)
-	bundleHash := priorSource.BundleHash()
-	now := time.Date(2026, 5, 18, 4, 30, 0, 0, time.UTC)
-	runID := uuid.NewString()
-	eventID := uuid.NewString()
-	activeSessionID := uuid.NewString()
-	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash})
-	identity := servedRuntimeFlowIdentityFieldsForRun(t, runID, "agent-a", "serve-abandon", "agent-a")
-	requireServeTestAgentFixtureForSource(t, sqliteStore, runtimeactors.AgentConfig{
-		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
-		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
-		Memory: runtimeagentmemory.Plan{Enabled: true},
-	}, mustServeTestPersistedSourceArtifactFact(bundleHash))
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite,
-		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
-		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a")}
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, sqliteStore, event, []events.DeliveryRoute{route})
-	claimCtx := serveDeliveryLifecycleFixtureContext()
-	claimed, err := storetest.ClaimDelivery(claimCtx, sqliteStore, event, route)
-	if err != nil {
-		_ = sqliteStore.Close()
-		t.Fatalf("claim sqlite active delivery: %v", err)
-	}
-	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance,
-			memory_enabled, status
-		)
-		VALUES (?,?,?,?,?,?,?,?,?,TRUE,'active')
-	`, activeSessionID, runID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath); err != nil {
-		_ = sqliteStore.Close()
-		t.Fatalf("seed sqlite delivery session: %v", err)
-	}
-	if _, err := sqliteStore.BindAgentSession(claimCtx, claimed.Claim, activeSessionID); err != nil {
-		_ = sqliteStore.Close()
-		t.Fatalf("bind sqlite active delivery session: %v", err)
-	}
-	releaseServeTestAgentFixtureCapability(t, sqliteStore)
-	if err := sqliteStore.Close(); err != nil {
-		t.Fatalf("close seeded sqlite store: %v", err)
-	}
-	return runID, eventID
-}
-
-func serveDeliveryLifecycleFixtureContext() context.Context {
-	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
-		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-		"bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-	))
-}
-
 func stubServeRuntimeWorkspaceLifecycle(t *testing.T) {
 	stubServeRuntimeWorkspaceLifecycleWithBundleScopes(t, nil)
 }
@@ -7673,49 +7551,6 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 			t.Fatalf("%s status = %d, want 404", path, rec.Code)
 		}
 	}
-}
-
-func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash, eventName, subscriberID string, at time.Time) {
-	t.Helper()
-	ctx := context.Background()
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
-		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
-		BundleHash: bundleHash,
-	})
-	if entityID != runID {
-		t.Fatal("selected root fixture must use the constructed run entity")
-	}
-	seedRunForkCLIConstruction(t, selected, runID, bundleHash, at)
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
-		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "test"),
-		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
-		events.EventEnvelope{EntityID: entityID, FlowInstance: runID, Scope: events.EventScopeEntity}, at)
-	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, selected, event,
-		[]events.DeliveryRoute{{
-			Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, subscriberID)),
-			Target: events.MustExistingEntityTarget(events.RouteIdentity{
-				FlowID: ".", FlowInstance: runID, EntityID: runID,
-			}),
-		}})
-	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
-}
-
-func captureRunForkCLIRevision(t *testing.T, db *sql.DB, runID string, families ...runforkrevision.Family) int64 {
-	t.Helper()
-	tx, err := db.BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("begin run-fork revision fixture: %v", err)
-	}
-	revision, err := runforkrevision.Capture(context.Background(), tx, runID, families...)
-	if err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("capture run-fork revision fixture: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit run-fork revision fixture: %v", err)
-	}
-	return revision
 }
 
 func TestServeBootRegistryDetail_UsesRuntimeToolInventoryCount(t *testing.T) {
