@@ -40,11 +40,11 @@ func (p PayloadProducer) ValidateForEvent(event Event) error {
 		if platformPayloadIdentity(event.AdmissionClass(), event.Type(), event.Producer()) {
 			return fmt.Errorf("platform event requires explicit platform payload producer")
 		}
-		if authoredTimerPayloadIdentity(event.AdmissionClass(), event.Type(), event.Producer()) {
+		if authoredSchedulePayloadIdentity(event.AdmissionClass(), event.Type(), event.Producer()) {
 			source := event.RoutingSource()
 			if !(source.Kind() == RoutingSourceRoot && p.flowID == ".") &&
 				!(source.Kind() == RoutingSourceFlowOwnedControl && p.flowID != "" && p.flowID != "." && p.flowID == source.Route().FlowID) {
-				return fmt.Errorf("workflow timer payload requires its exact authored flow routing source")
+				return fmt.Errorf("schedule payload requires its exact authored flow routing source")
 			}
 			return ValidateEventContract(event)
 		}
@@ -73,12 +73,15 @@ func EventPayloadProducer(event Event, authoredFlowID string) PayloadProducer {
 }
 
 func platformPayloadIdentity(class EventAdmissionClass, event EventType, producer ProducerIdentity) bool {
-	return (class == EventAdmissionRuntimeControl && !authoredTimerPayloadIdentity(class, event, producer)) || class == EventAdmissionRuntimeDiagnostic || class == EventAdmissionDiagnosticDirect ||
+	return (class == EventAdmissionRuntimeControl && !authoredSchedulePayloadIdentity(class, event, producer)) || class == EventAdmissionRuntimeDiagnostic || class == EventAdmissionDiagnosticDirect ||
 		(class == EventAdmissionReplay && event == "event.replayed" && producer.Type() == EventProducerPlatform)
 }
 
-func authoredTimerPayloadIdentity(class EventAdmissionClass, event EventType, producer ProducerIdentity) bool {
-	// The reserved platform namespace remains catalog-owned, including stage timers.
-	return class == EventAdmissionRuntimeControl && producer.Type() == EventProducerPlatform && producer.ID() == "runtime.workflow_timer" &&
-		event != "" && !strings.HasPrefix(string(event), "platform.")
+func authoredSchedulePayloadIdentity(class EventAdmissionClass, event EventType, producer ProducerIdentity) bool {
+	// Reserved platform events and typed joins retain their separate owners.
+	if class != EventAdmissionRuntimeControl || producer.Type() != EventProducerPlatform ||
+		event == "" || strings.HasPrefix(string(event), "platform.") || joinOccurrenceEventType(event) {
+		return false
+	}
+	return producer.ID() == "runtime.workflow_timer" || producer.ID() == "runtime.generic_schedule"
 }

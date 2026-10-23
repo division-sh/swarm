@@ -764,10 +764,17 @@ func seedSelectedActivitySourceRun(t *testing.T, fixture authorActivityReceiptFi
 	if !ok || bundle.SourceArtifact == nil {
 		t.Fatal("activity source run requires its actual admitted declarations")
 	}
-	ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := correlation.WithRootAdmission(correlation.WithRunID(testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash()), runID), rooted.Admission())
 	requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{
-		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact,
+		Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, Artifact: bundle.SourceArtifact, RootAdmission: rooted.Admission(),
 		StartedAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
+	})
+	fixture.activityJournal.once.Do(func() {
+		fixture.activityJournal.owner, fixture.activityJournal.binding = captureActivityFixtureJournalWithBinding(fixture.activityOwner, ctx, fixture.store)
 	})
 	return ctx
 }

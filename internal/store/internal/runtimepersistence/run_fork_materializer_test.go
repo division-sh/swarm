@@ -26,11 +26,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -632,8 +634,13 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 		t.Fatalf("loaded selected binding = %#v", loaded)
 	}
 
-	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, AllowSourceFreeze: true})
+	process, err := agentfixture.ProcessCapability(t, ctx, pg)
 	if err != nil {
+		t.Fatal(err)
+	}
+	var activated runfork.RunForkActivation
+	operation := startupownership.PreparedForkActivateOperation(pg, runfork.RunForkActivateRequest{ForkRunID: materialized.ForkRunID, OriginalRootAdmission: rooted.Admission(), AllowSourceFreeze: true}, &activated)
+	if err := process.RunPreparedOperation(ctx, operation); err != nil {
 		t.Fatalf("ActivateRunFork: %v", err)
 	}
 	if activated.SelectedContractBinding == nil ||

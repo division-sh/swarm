@@ -155,11 +155,17 @@ func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence ru
 	if !ok || !found || bundle.SourceArtifact == nil || bundleHash != bundle.SourceArtifact.BundleHash() {
 		t.Fatal("bounded component binding requires its exact admitted fixture artifact writer")
 	}
-	sourceartifactfixture.RequireArtifact(t, ctx, writer, bundle.SourceArtifact)
+	captured, captureErr := bundle.RootedSource()
+	if captureErr != nil {
+		t.Fatal(captureErr)
+	}
 	root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
-	if err != nil || !present || root.BundleHash() != source.BundleHash() {
+	if err != nil || (present && !root.Equal(captured.Admission())) {
 		t.Fatalf("bounded provider requires its matching constructor root: present=%v err=%v", present, err)
 	}
+	root = captured.Admission()
+	ctx = runtimecorrelation.WithRootAdmission(ctx, root)
+	sourceartifactfixture.RequireArtifact(t, ctx, writer, captured.Artifact())
 
 	owner, ok := persistence.(runtimepipeline.StandingServicePersistence)
 	if !ok {

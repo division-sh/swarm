@@ -56,7 +56,7 @@ func seedSelectedConstructedRootHistory(t *testing.T, ctx context.Context, selec
 	}
 	source := events.NoRoutingSource()
 	if len(inputs) == 0 {
-		source = events.RootRoutingSource(runID)
+		source = eventtest.RootRoutingSource(runID)
 	}
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, events.EventType(eventName), "source-runtime", "", payload, 0, runID,
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, runID), runID), source, at, mode)

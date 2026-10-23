@@ -139,7 +139,7 @@ func proveRuntimeConstructedActorCensusBothStores(t *testing.T, journey string) 
 				rt, close := start()
 				owned := effects.WithExecutionMode(worklifetime.WithOccurrence(ctx, rt.WorkOccurrence()), effects.ExecutionModeLive)
 				parent := flowidentity.Stored(source, ".", runID, runID, runID, "")
-				if err := rt.Manager.ActivateFlowInstance(owned, pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: parent, OccurredAt: time.Now().UTC()}); err != nil {
+				if err := rt.Manager.ActivateFlowInstance(owned, pipeline.FlowInstanceActivationRequest{ContractBundle: rt.Options.WorkflowModule.SemanticSource(), Instance: parent, OccurredAt: time.Now().UTC()}); err != nil {
 					t.Fatalf("canonical root construction: %v", err)
 				}
 				var children []flowidentity.Instance
@@ -149,7 +149,7 @@ func proveRuntimeConstructedActorCensusBothStores(t *testing.T, journey string) 
 					instance.ParentEntityID = runID
 					trigger := eventtest.OperatorInjectedWithRoutingSource(uuid.NewString(), "task.assigned", "operator", "", []byte(fmt.Sprintf(`{"work_id":%q}`, key)), 0, runID, nil, events.EventEnvelope{}, eventtest.RootRoutingSource(runID), time.Now().UTC())
 					if err := rt.Manager.ActivateFlowInstance(owned, pipeline.FlowInstanceActivationRequest{
-						ContractBundle: source, Instance: instance, TriggerEvent: trigger, ConstructorInput: "task.assigned", ResolvedKey: key,
+						ContractBundle: rt.Options.WorkflowModule.SemanticSource(), Instance: instance, TriggerEvent: trigger, ConstructorInput: "task.assigned", ResolvedKey: key,
 						OccurredAt: trigger.CreatedAt(),
 					}); err != nil {
 						t.Fatalf("canonical keyed tree construction: %v", err)
@@ -266,18 +266,31 @@ func proveRuntimeConstructedActorCensusBothStores(t *testing.T, journey string) 
 
 func nativeConstructedActorRuntimeContexts(t *testing.T, rt *runtimepkg.Runtime, source semanticview.Source, fact correlation.SourceArtifactFact) *runtimepkg.RuntimeContextManager {
 	t.Helper()
+	source = rt.Options.WorkflowModule.SemanticSource()
 	bundle, _ := semanticview.Bundle(source)
-	projection, err := packadmission.FromBundle(bundle)
+	rooted, err := bundle.RootedSource()
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjects, err := projection.ProviderTriggers.InstalledCapabilitySubjects()
+	providers, err := packadmission.AdmitProviderSource(rooted, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := providers.Scope(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := scope.TriggerCatalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjects, err := catalog.InstalledCapabilitySubjects()
 	if err != nil {
 		t.Fatal(err)
 	}
 	contexts, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-		SourceArtifactFact: fact, Source: source, Runtime: rt, WorkOwner: rt.WorkOccurrence(),
-		PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: projection.ProviderTriggers.Generation(), InstalledTriggerSubjects: subjects,
+		SourceArtifactFact: fact, Source: source, RootAdmission: rooted.Admission(), Runtime: rt, WorkOwner: rt.WorkOccurrence(),
+		PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: catalog.Generation(), ProviderTriggerCatalog: catalog, InstalledTriggerSubjects: subjects,
 	})
 	if err != nil {
 		t.Fatal(err)

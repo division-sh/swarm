@@ -17,13 +17,12 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
-	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 type operatorChannelInboundSelectedStore interface {
@@ -57,7 +56,7 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 	source := capturedTelegramOperatorSource(t)
 	ctx, inboundTarget := seedCapturedProviderTarget(t, ctx, selected, source, runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer")
 
-	plan := compileEmbeddedTelegramOperatorChannelPlan(t)
+	plan := compileCapturedTelegramOperatorChannelPlan(t, source)
 	identity, err := plan.InterfaceIdentity()
 	if err != nil {
 		t.Fatal(err)
@@ -287,29 +286,15 @@ func requireOperatorChannelOperationState(t *testing.T, selected operatorchannel
 	return operatorchannel.Operation{}
 }
 
-func compileEmbeddedTelegramOperatorChannelPlan(t *testing.T) packs.SatisfactionPlan {
+func compileCapturedTelegramOperatorChannelPlan(t *testing.T, source semanticview.Source) packs.SatisfactionPlan {
 	t.Helper()
-	repoRoot := filepath.Join("..", "..")
-	snapshot, err := yamlsource.LoadFile(filepath.Join(repoRoot, "platform-spec.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var spec runtimecontracts.PlatformSpecDocument
-	spec, err = runtimecontracts.AdmitPlatformSpecValue(snapshot.Document(filepath.Join(repoRoot, "platform-spec.yaml")).Root())
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry, ok := packfixture.EmbeddedInventory(t).Lookup("telegram")
+	bundle, ok := semanticview.Bundle(source)
 	if !ok {
-		t.Fatal("embedded Telegram provider is missing")
+		t.Fatal("operator channel requires its captured source")
 	}
-	definition, err := packadmission.AdmitProviderDirectory(entry.Provider(), spec)
+	projection, err := packadmission.FromBundle(bundle)
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, ok := definition.ChannelPlan()
-	if !ok {
-		t.Fatal("embedded Telegram channel plan is missing")
-	}
-	return plan
+	return packfixture.ChannelPlanByID(t, projection.ChannelPlans, "telegram")
 }

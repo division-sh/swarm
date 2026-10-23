@@ -95,6 +95,7 @@ func artifactActionResultStaticDeliveryFixtureFiles() map[string]string {
 }
 
 func addArtifactActionResultChildRequest(files map[string]string) {
+	files["repo-scaffold/child-1/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\n"
 	files["schema.yaml"] += "pins:\n  inputs:\n    - start.requested\n  outputs:\n    - start.requested\nconnect:\n  - {event: start.requested, from: ., to: repo-scaffold/child-1}\n"
 	files["events.yaml"] = "start.requested:\n  request_id: text\n  mvp_yaml: text\n"
 	files["repo-scaffold/events.yaml"] = strings.TrimPrefix(files["repo-scaffold/events.yaml"], "repo_scaffold.repo_commit_requested:\n  request_id: string\n  mvp_yaml: string\n")

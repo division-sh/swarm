@@ -39,6 +39,9 @@ type selectedForkEventFixtureStore interface {
 }
 
 func bindSemanticEventFixturePayload(event events.Event) (events.Event, error) {
+	if _, admitted := event.PayloadAdmission(); admitted {
+		return event, nil
+	}
 	flowID := event.RoutingSource().Route().FlowID
 	if event.RoutingSource().Kind() == events.RoutingSourceRoot {
 		flowID = "."

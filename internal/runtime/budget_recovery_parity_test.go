@@ -14,7 +14,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -67,19 +67,38 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 	for _, tc := range backends {
 		t.Run(tc.name, func(t *testing.T) {
 			selected, db, postgres := tc.start(t)
-			ctx := testAuthorActivityContext(context.Background())
-			now := time.Now().UTC().Truncate(time.Second)
-			runA, runB := uuid.NewString(), uuid.NewString()
-			entityA, entityB, terminalEntity, crossSourceEntity := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-			otherArtifact, err := sourceartifact.AdmitMembers(map[string][]byte{
-				"manifest.yaml": []byte("version: 1.0.1\nplatform_version: '*'\n"),
-				"schema.yaml":   []byte("stages: []\n# budget-stage-second-source\n"),
+			firstBundle := loadRuntimeTempBundle(t, map[string]string{
+				"manifest.yaml":      "version: 1.0.0\nplatform_version: '*'\n",
+				"schema.yaml":        "stages:\n  active: {}\n  done: {final: true}\n",
+				"flow/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+				"flow/schema.yaml":   "stages:\n  active: {}\n  done: {final: true}\n",
+				"policy.yaml":        "budget_warning_percent: 50\nbudget_throttle_percent: 75\nbudget_emergency_percent: 90\n",
 			})
+			secondBundle := loadRuntimeTempBundle(t, map[string]string{
+				"manifest.yaml":      "version: 1.0.1\nplatform_version: '*'\n",
+				"schema.yaml":        "stages:\n  active: {}\n  done: {final: true}\n",
+				"flow/manifest.yaml": "version: 1.0.0\nplatform_version: '*'\n",
+				"flow/schema.yaml":   "stages:\n  active: {}\n  done: {}\n  closed: {final: true}\n",
+			})
+			firstRoot, err := firstBundle.RootedSource()
 			if err != nil {
 				t.Fatal(err)
 			}
-			seedBudgetRecoveryRun(t, ctx, selected, runA, now)
-			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runB, Artifact: otherArtifact, StartedAt: now.Add(time.Second)})
+			secondRoot, err := secondBundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstFact := sourceartifactfixture.FactFor(firstRoot.Artifact())
+			ctx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(context.Background(), firstFact), firstRoot.Admission())
+			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, firstFact.BundleHash()))
+			now := time.Now().UTC().Truncate(time.Second)
+			runA, runB := uuid.NewString(), uuid.NewString()
+			entityA, entityB, terminalEntity, crossSourceEntity := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+			otherArtifact := secondRoot.Artifact()
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runA, Artifact: firstRoot.Artifact(), RootAdmission: firstRoot.Admission(), StartedAt: now})
+			secondCtx := runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(otherArtifact)), secondRoot.Admission())
+			secondCtx = runtimeauthoractivity.WithScope(secondCtx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, otherArtifact.BundleHash()))
+			storetest.RequireRun(t, secondCtx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runB, Artifact: otherArtifact, RootAdmission: secondRoot.Admission(), StartedAt: now.Add(time.Second)})
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runA, entityA, "active", now)
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runB, entityB, "active", now.Add(time.Second))
 			seedBudgetRecoveryEntity(t, ctx, db, postgres, runA, terminalEntity, "done", now.Add(2*time.Second))
@@ -100,6 +119,7 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 					spendCtx = runtimecorrelation.WithRunID(spendCtx, seed.runID)
 					if seed.runID == runB {
 						spendCtx = runtimecorrelation.WithSourceArtifactFact(spendCtx, sourceartifactfixture.FactFor(otherArtifact))
+						spendCtx = runtimecorrelation.WithRootAdmission(spendCtx, secondRoot.Admission())
 						spendCtx = runtimeauthoractivity.WithScope(spendCtx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, otherArtifact.BundleHash()))
 					}
 				}
@@ -108,36 +128,12 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 				}
 			}
 
-			bus, err := newRuntimeTestEventBus(t, selected)
+			source := semanticview.Wrap(firstBundle)
+			otherSource := semanticview.Wrap(secondBundle)
+			bus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: firstFact})
 			if err != nil {
 				t.Fatalf("NewEventBus: %v", err)
 			}
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-				SourceArtifact: authorActivityTestSourceArtifact,
-				RootSchema: &runtimecontracts.FlowSchemaDocument{
-					StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{
-						{ID: "active"}, {ID: "done", Final: true},
-					}},
-				},
-				FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"flow": {}},
-				Semantics: runtimecontracts.WorkflowSemanticView{StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
-					".":    runtimecontracts.BuildWorkflowStageTopology(".", "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
-					"flow": runtimecontracts.BuildWorkflowStageTopology("flow", "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
-				}},
-				Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
-					"budget_warning_percent":   {Value: 50},
-					"budget_throttle_percent":  {Value: 75},
-					"budget_emergency_percent": {Value: 90},
-				}},
-			})
-			otherSource := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-				SourceArtifact: otherArtifact,
-				FlowSchemas:    map[string]runtimecontracts.FlowSchemaDocument{"flow": {}},
-				Semantics: runtimecontracts.WorkflowSemanticView{Version: otherArtifact.BundleHash(), StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
-					".":    runtimecontracts.BuildWorkflowStageTopology(".", "active", []string{"active", "done"}, []string{"done"}, nil, nil, nil),
-					"flow": runtimecontracts.BuildWorkflowStageTopology("flow", "active", []string{"active", "done", "closed"}, []string{"closed"}, nil, nil, nil),
-				}},
-			})
 			loads := 0
 			tracker := runtimepkg.NewBudgetTracker(selected, bus, &config.Config{Extensions: map[string]any{
 				"budget": map[string]any{
@@ -159,7 +155,10 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 					return otherSource, nil
 				},
 			})
-			coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}
+			coordinate, err := runtimeagenttopology.NewSourceCoordinate(firstRoot.Admission())
+			if err != nil {
+				t.Fatal(err)
+			}
 			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
 			if err != nil {
 				t.Fatalf("construct budget recovery topology plan: %v", err)
@@ -254,11 +253,6 @@ func budgetRecoverySpend(t *testing.T, entityID, flowInstance string, cost float
 		UsageAccounting: "exact",
 		RecordedAt:      at,
 	}
-}
-
-func seedBudgetRecoveryRun(t *testing.T, ctx context.Context, selected storetest.RunFixtureStore, runID string, at time.Time) {
-	t.Helper()
-	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at})
 }
 
 func seedBudgetRecoveryEntity(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, runID, entityID, state string, at time.Time) {
