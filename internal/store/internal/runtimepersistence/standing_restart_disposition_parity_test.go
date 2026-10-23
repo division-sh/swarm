@@ -32,6 +32,7 @@ func TestStandingRestartDispositionSelectedStoreParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			for _, runID := range []string{"", "not-a-run-id"} {
 				if _, err := fixture.workflow.StandingRunRestartDisposition(ctx, runID); err == nil || !strings.Contains(err.Error(), "standing restart run_id") {
 					t.Fatalf("invalid %s run identity %q error = %v", backend, runID, err)
@@ -99,6 +100,7 @@ func TestStandingReconciliationNormalizesRunPauseForActiveDeclarationParity(t *t
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			candidate := fixture.candidate("operator-paused")
 			created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
@@ -147,6 +149,7 @@ func TestTerminalStandingMembersDoNotAbortCompleteSetParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			terminalCandidate := fixture.candidate("terminal-member")
 			healthyCandidate := fixture.candidate("healthy-member")
 			terminal, err := fixture.workflow.ReconcileStandingService(ctx, terminalCandidate)
@@ -207,6 +210,7 @@ func TestInvalidStandingMemberDoesNotAbortOrMutateCompleteSetParity(t *testing.T
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			invalidCandidate := fixture.candidate("invalid-member")
 			healthyCandidate := fixture.candidate("invalid-member-healthy-sibling")
 			invalid, err := fixture.workflow.ReconcileStandingService(ctx, invalidCandidate)
@@ -241,6 +245,7 @@ func TestStandingRestartDispositionRejectsBrokenGenerationRelationParity(t *test
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			created := fixture.create(t, ctx, "broken-generation-relation")
 			query := `UPDATE standing_service_generations SET retired_at=? WHERE service_id=? AND generation=?`
 			args := []any{time.Now().UTC(), created.ServiceID, created.Generation}
@@ -263,6 +268,7 @@ func TestStandingRestartDispositionRejectsBrokenServiceIdentityParity(t *testing
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			created := fixture.create(t, ctx, "broken-service-identity")
 			query := `UPDATE standing_services SET flow_path=? WHERE service_id=?`
 			args := []any{"corrupt-flow", created.ServiceID}
@@ -285,6 +291,7 @@ func TestTerminalDeclaredStandingResetUsesLatestDeclarationSourceParity(t *testi
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			candidate := fixture.candidate("terminal-declared-source-revision")
 			created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
@@ -331,6 +338,7 @@ func TestTerminalOrphanStandingRestoreAndResetUsesLatestDeclarationSourceParity(
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			candidate := fixture.candidate("terminal-orphan-source-revision")
 			created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
@@ -363,6 +371,7 @@ func TestInvalidStandingResetUsesLatestDeclarationSourceParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			candidate := fixture.candidate("invalid-declared-source-revision")
 			created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
@@ -396,6 +405,7 @@ func TestInvalidOrphanStandingRestoreThenResetParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			candidate := fixture.candidate("invalid-orphan-restore-reset")
 			created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
 			if err != nil {
@@ -432,6 +442,7 @@ func TestInvalidOrphanStandingSameSourceRestoreThenResetParity(t *testing.T) {
 			t.Run(backend+"/"+override, func(t *testing.T) {
 				fixture := openStandingDispositionParityFixture(t, backend)
 				ctx := testAuthorActivityRuntimeContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 				candidate := fixture.candidate("invalid-orphan-same-source-" + override)
 				created, err := fixture.workflow.ReconcileStandingService(ctx, candidate)
 				if err != nil {
@@ -476,6 +487,7 @@ func TestSuspendedStandingResetInstallsSuccessorBeforePauseParity(t *testing.T) 
 		t.Run(backend, func(t *testing.T) {
 			fixture := openStandingDispositionParityFixture(t, backend)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 			created := fixture.create(t, ctx, "direct-suspended-reset")
 			if _, err := fixture.workflow.SuspendStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: created.ServiceID, Actor: "test"}); err != nil {
 				t.Fatalf("suspend standing service: %v", err)

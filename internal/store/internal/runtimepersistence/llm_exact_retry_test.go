@@ -143,14 +143,15 @@ func TestLLMSQLiteResetBusyRetryPreservesExactSummary(t *testing.T) {
 			terminal := llmTerminalSnapshot(t, s, f.terminal)
 			var submitted []runlifecycle.Candidate
 			registerLLMResetSink(t, s, f.runs[0], &submitted)
-			blocker := llmSQLiteBusyBlocker(t, s.db, path, phase, 0)
+			blocker := llmSQLiteBusyBlocker(t, s.db, path, phase, 1)
 			owner, calls := newLLMRetryOwner(t, store, blocker, phase, 2, nil)
 			probe, restore, err := store.backend.InstallTransactionProbeForTest(transactiontest.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer restore()
-			summary, err := owner.ResetAll(sessions.ResetMetadata{Source: "exact-reset"})
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
+			summary, err := owner.ResetAll(ctx, sessions.ResetMetadata{Source: "exact-reset"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -194,14 +195,14 @@ func TestLLMSQLiteGeneratedSessionBusyRetry(t *testing.T) {
 						}
 					})
 					var acquireErr error
-					predecessor, acquireErr = store.Acquire(runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure), identity, "retry-worker")
+					predecessor, acquireErr = store.Acquire(originalStoreFixtureContext(t, runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure), store), identity, "retry-worker")
 					if acquireErr != nil {
 						t.Fatal(acquireErr)
 					}
 				}
 				var submitted []runlifecycle.Candidate
 				registerLLMResetSink(t, s, f.runID, &submitted)
-				blocker := llmSQLiteBusyBlocker(t, s.db, path, phase, 0)
+				blocker := llmSQLiteBusyBlocker(t, s.db, path, phase, 1)
 				var generated []string
 				owner, calls := newLLMRetryOwner(t, store, blocker, phase, 1, func(ctx context.Context, tx *sql.Tx) error {
 					var id string
@@ -217,6 +218,7 @@ func TestLLMSQLiteGeneratedSessionBusyRetry(t *testing.T) {
 				}
 				defer restore()
 				ctx, cancel := context.WithTimeout(runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure), 10*time.Second)
+				ctx = originalStoreFixtureContext(t, ctx, store)
 				defer cancel()
 				var lease *sessions.Lease
 				if operation == "rotate" {

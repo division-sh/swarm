@@ -18,6 +18,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -49,7 +50,7 @@ func TestExternalEffectRecoveryPostureAdmissionGenericSQLiteAndPostgres(t *testi
 
 			mock := beginGenericRecoveryPostureMatrix(t, fixture, executionmode.Mock)
 			summary, err := fixture.store.ReconcileExternalEffectAttempts(
-				testAuthorActivityContext(),
+				fixture.ctx,
 				runtimeeffects.NewRecoveryRequest(now, executionposture.MockOnly),
 			)
 			if err != nil {
@@ -63,7 +64,7 @@ func TestExternalEffectRecoveryPostureAdmissionGenericSQLiteAndPostgres(t *testi
 			live := beginGenericRecoveryPostureMatrix(t, fixture, executionmode.Live)
 			before := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, live)
 			_, err = fixture.store.ReconcileExternalEffectAttempts(
-				testAuthorActivityContext(),
+				fixture.ctx,
 				runtimeeffects.NewRecoveryRequest(now.Add(time.Minute), executionposture.MockOnly),
 			)
 			if err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
@@ -113,7 +114,7 @@ func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostg
 
 					Source: mustStoreTestSourceArtifactFact(runLifecycleCandidateParityBundleHash),
 				}
-				standing, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate)
+				standing, err := workflow.ReconcileStandingService(originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), fixture.store), candidate)
 				if err != nil {
 					t.Fatalf("create standing recovery owner: %v", err)
 				}
@@ -123,14 +124,14 @@ func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostg
 					setStandingRecoveryOwnerDesiredState(t, fixture.db, fixture.sqlite, standing.ServiceID, "suspended", "suspended")
 				} else {
 					candidate.BindingEnabled, candidate.BindingBlockReason = false, reason
-					if _, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate); err != nil {
+					if _, err := workflow.ReconcileStandingService(originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), fixture.store), candidate); err != nil {
 						t.Fatal(err)
 					}
 				}
 				attempts := []recoveryPostureAttempt{{AttemptID: handle.Attempt().AttemptID, RunID: standing.RunID, Initial: runtimeeffects.StateAuthorized, Expected: runtimeeffects.StateAuthorized}}
 				before := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, attempts)
 
-				summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
+				summary, err := fixture.store.ReconcileExternalEffectAttempts(fixture.ctx, liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)))
 				if err != nil {
 					t.Fatalf("reconcile invalid standing external effect: %v", err)
 				}
@@ -145,11 +146,11 @@ func TestExternalEffectRecoveryParksInvalidExactCurrentStandingRunSQLiteAndPostg
 					setStandingRecoveryOwnerDesiredState(t, fixture.db, fixture.sqlite, standing.ServiceID, "none", "active")
 				} else {
 					candidate.BindingEnabled, candidate.BindingBlockReason = true, ""
-					if _, err := workflow.ReconcileStandingService(testAuthorActivityRuntimeContext(), candidate); err != nil {
+					if _, err := workflow.ReconcileStandingService(originalStoreFixtureContext(t, testAuthorActivityRuntimeContext(), fixture.store), candidate); err != nil {
 						t.Fatal(err)
 					}
 				}
-				summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(2*time.Minute)))
+				summary, err = fixture.store.ReconcileExternalEffectAttempts(fixture.ctx, liveExternalEffectRecoveryRequest(time.Now().UTC().Add(2*time.Minute)))
 				if err != nil {
 					t.Fatalf("reconcile active standing external effect: %v", err)
 				}
@@ -194,12 +195,12 @@ func TestExternalEffectRecoveryRejectsPersistedAgentRunConflictWithoutMutationSQ
 			if !fixture.sqlite {
 				query = `UPDATE runtime_external_effect_operations SET agent_run_id=$1::uuid WHERE operation_id=$2::uuid`
 			}
-			if _, err := fixture.db.ExecContext(testAuthorActivityContext(), query, args...); err != nil {
+			if _, err := fixture.db.ExecContext(fixture.original, query, args...); err != nil {
 				t.Fatalf("install persisted agent run conflict: %v", err)
 			}
 
 			_, err := fixture.store.ReconcileExternalEffectAttempts(
-				testAuthorActivityContext(),
+				fixture.original,
 				liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute)),
 			)
 			if err == nil || !strings.Contains(err.Error(), "external_effect_run_identity_conflict") {
@@ -220,7 +221,7 @@ func bindNeutralEffectFixtureToRun(t *testing.T, fixture neutralEffectParityFixt
 		fixture.authority.Normal.Identity.AgentID(),
 		fixture.authority.Normal.Identity.FlowInstance(),
 	)
-	seedTestAgentRow(t, testAuthorActivityContext(), fixture.db, !fixture.sqlite, identity, "active")
+	seedTestAgentRow(t, fixture.ctx, fixture.db, !fixture.sqlite, identity, "active")
 	token := runtimeeffects.LifecycleToken{
 		RuntimeEpoch: 1,
 		Identity:     identity,
@@ -233,7 +234,7 @@ func bindNeutralEffectFixtureToRun(t *testing.T, fixture neutralEffectParityFixt
 		fixture.authority.LeaseExpiresAt,
 	)
 	fixture.ctx = runtimeeffects.WithController(
-		runtimeeffects.WithLifecycleToken(testAuthorActivityContext(), token),
+		runtimeeffects.WithLifecycleToken(startupownership.CarryMutationAuthority(testAuthorActivityContext(), fixture.ctx), token),
 		liveTestEffectController(fixture.store),
 	)
 	fixture.ctx = managedNormalEffectStoreTestContext(t, fixture.ctx, fixture.authority)
@@ -294,7 +295,7 @@ func TestExternalEffectRecoveryPostureAdmissionProviderTurnSQLiteAndPostgres(t *
 
 			mock := beginProviderRecoveryPostureMatrix(t, fixture, executionmode.Mock, now)
 			summary, err := fixture.store.ReconcileExternalEffectAttempts(
-				testAuthorActivityContext(),
+				fixture.original,
 				runtimeeffects.NewRecoveryRequest(now, executionposture.MockOnly),
 			)
 			if err != nil {
@@ -309,7 +310,7 @@ func TestExternalEffectRecoveryPostureAdmissionProviderTurnSQLiteAndPostgres(t *
 			live := beginProviderRecoveryPostureMatrix(t, fixture, executionmode.Live, now.Add(time.Minute))
 			before := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, live)
 			_, err = fixture.store.ReconcileExternalEffectAttempts(
-				testAuthorActivityContext(),
+				fixture.original,
 				runtimeeffects.NewRecoveryRequest(now.Add(2*time.Minute), executionposture.MockOnly),
 			)
 			if err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
@@ -356,7 +357,7 @@ func TestExternalEffectRecoveryPostureAdmissionTerminalRunProviderSQLiteAndPostg
 			if !ok {
 				t.Fatalf("completion store %T does not expose run quiescence", fixture.store)
 			}
-			quiesced, err := selected.ApplyActiveRunQuiescence(testAuthorActivityContext(), runtimerunquiescence.Request{
+			quiesced, err := selected.ApplyActiveRunQuiescence(fixture.original, runtimerunquiescence.Request{
 				OperationName: "provider_attempt_terminal_run_posture", RequestedAt: time.Now().UTC(),
 				RunIDs: []string{fixture.authority.Target.RunID}, ReasonCode: runtimerunquiescence.ServeAbandonReasonCode,
 				ControlledBy: "external-effect-recovery-posture-test", DeliveryNote: "terminal provider posture admission proof",
@@ -373,7 +374,7 @@ func TestExternalEffectRecoveryPostureAdmissionTerminalRunProviderSQLiteAndPostg
 			}}
 			before := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, attempts)
 			_, err = fixture.store.ReconcileExternalEffectAttempts(
-				testAuthorActivityContext(),
+				fixture.original,
 				runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly),
 			)
 			if err == nil || !strings.Contains(err.Error(), "command-selected mock execution") {
@@ -424,7 +425,7 @@ func beginGenericRecoveryPostureMatrix(t *testing.T, fixture neutralEffectParity
 		authority := fixture.authority
 		authority.ExecutionMode = mode
 		operationID := uuid.NewString()
-		attempt, err := fixture.store.AuthorizeExternalAttempt(testAuthorActivityContext(), authority, runtimeeffects.AuthorizeRequest{
+		attempt, err := fixture.store.AuthorizeExternalAttempt(fixture.ctx, authority, runtimeeffects.AuthorizeRequest{
 			OperationID: operationID, AttemptID: uuid.NewString(), Kind: registration.Kind, Class: registration.Class,
 			Adapter: registration.Adapter, Transport: registration.Transport,
 			RequestFingerprint: runtimeeffects.Fingerprint([]byte(tc.name)),
@@ -436,12 +437,12 @@ func beginGenericRecoveryPostureMatrix(t *testing.T, fixture neutralEffectParity
 			t.Fatalf("authorize %s generic %s: %v", mode, tc.name, err)
 		}
 		if tc.launch {
-			if _, err := fixture.store.MarkExternalAttemptLaunched(testAuthorActivityContext(), attempt, time.Now().UTC()); err != nil {
+			if _, err := fixture.store.MarkExternalAttemptLaunched(fixture.ctx, attempt, time.Now().UTC()); err != nil {
 				t.Fatalf("launch %s generic %s: %v", mode, tc.name, err)
 			}
 		}
 		if tc.observe {
-			if err := fixture.store.MarkExternalAttemptResponseObserved(testAuthorActivityContext(), attempt, map[string]any{"posture": mode}, time.Now().UTC()); err != nil {
+			if err := fixture.store.MarkExternalAttemptResponseObserved(fixture.ctx, attempt, map[string]any{"posture": mode}, time.Now().UTC()); err != nil {
 				t.Fatalf("observe %s generic %s: %v", mode, tc.name, err)
 			}
 		}
@@ -474,12 +475,12 @@ func beginProviderRecoveryPostureMatrix(t *testing.T, fixture completionSettleme
 		authority.ExecutionMode = mode
 		authority.Target.ID = uuid.NewString()
 		authority.BudgetScopes = nil
-		origin := claimCompletionOriginForTest(t, testAuthorActivityContext(), fixture.store, authority, time.Now().UTC())
+		origin := claimCompletionOriginForTest(t, fixture.original, fixture.store, authority, time.Now().UTC())
 		adapter := "anthropic_api"
 		if mode == executionmode.Mock {
 			adapter = "mock_python"
 		}
-		ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), newCompletionControllerForTest(fixture.store))
+		ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(fixture.original, authority), newCompletionControllerForTest(fixture.store))
 		ctx = runtimedelivery.WithClaim(ctx, origin)
 		ctx = runtimeeffects.WithExecutionMode(ctx, mode)
 		ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "posture-provider:"+string(mode)+":"+tc.name+":"+uuid.NewString())

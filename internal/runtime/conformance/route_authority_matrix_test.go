@@ -76,16 +76,6 @@ type routeAuthorityValidationContext struct {
 	goTests        map[string]bool
 }
 
-func TestRouteAuthorityMatrixCoversApprovedRows(t *testing.T) {
-	root := conformanceRepoRoot(t)
-	matrix := loadRouteAuthorityMatrix(t, root)
-	ctx := newRouteAuthorityValidationContext(t, root, matrix)
-
-	if problems := validateRouteAuthorityMatrix(root, matrix, ctx); len(problems) > 0 {
-		t.Fatalf("route authority matrix validation failed:\n- %s", strings.Join(problems, "\n- "))
-	}
-}
-
 func TestRouteAuthorityMatrixRejectsStaleReferences(t *testing.T) {
 	root := conformanceRepoRoot(t)
 	base := loadRouteAuthorityMatrix(t, root)

@@ -82,9 +82,11 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			rt.bus.SetRunDispatchGate(controller)
 			runID := uuid.NewString()
 			ctx := correlation.WithRunID(testAuthorActivityContextForBundle(context.Background(), rt.sourceArtifactFact), runID)
-			if err := rt.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "nested-held-child-stop", rt.sourceArtifactFact)); err != nil {
+
+			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "nested-held-child-stop", rt.sourceArtifactFact), rt.bus, rt.manager); err != nil {
 				t.Fatal(err)
 			}
+
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-main"})
 			accounts := []string{"sibling-c", "sibling-a", "sibling-b"}
 			publishNotifyAllChildrenEvent(t, ctx, rt, source, runID, "portfolio.accounts.register.requested", map[string]any{"portfolio_id": "portfolio-main", "account_ids": accounts})
@@ -213,6 +215,10 @@ func TestIssue2394NestedHeldChildCancellationBothStores(t *testing.T) {
 			handlers.assertOnlyHeld(t, held.EventID, secondHeld.EventID)
 			stopCtx, cancelStop := context.WithTimeout(ctx, 5*time.Second)
 			defer cancelStop()
+			stopCtx, err = rt.bus.AdmitSourceArtifactFact(stopCtx)
+			if err != nil {
+				t.Fatal(err)
+			}
 			result, err := controller.Stop(stopCtx, runcontrol.TransitionRequest{RunID: runID, Reason: "nested-held-child-proof", ControlledBy: "conformance"})
 			if err != nil || result.Status != runcontrol.StatusCancelled || result.Recovery.Err != nil {
 				t.Fatalf("production run-control cancellation=%+v err=%v", result, err)

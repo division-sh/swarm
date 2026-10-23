@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
+
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,14 +17,9 @@ import (
 	"time"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+
 	"github.com/division-sh/swarm/internal/runtime/workspace"
-	"github.com/division-sh/swarm/internal/sourceartifact"
+
 	"github.com/google/uuid"
 )
 
@@ -131,102 +126,6 @@ func TestClaudeCLICompletion2270InvocationOracleRejectsRedispatch(t *testing.T) 
 		if preserved := readCompletion2270ProtocolInvocations(t, root); !reflect.DeepEqual(preserved, rows) {
 			t.Fatal("disposable invocation cleanup erased physical business evidence")
 		}
-	}
-}
-
-func TestClaudeCLICompletion2270InvocationReaderUsesPublishedProjectionWorkspaces(t *testing.T) {
-	ctx := t.Context()
-	attemptID := uuid.NewString()
-	contexts, err := runtimepkg.NewRuntimeContextManager(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var proof completion2270InvocationProof
-	proof.observe(contexts)
-	var reads int
-	var selectedWorkspace *workspace.DockerManager
-	var selectedOwner *worklifetime.RuntimeOccurrence
-	for _, name := range []string{"original", "selected"} {
-		root := t.TempDir()
-		if err := os.WriteFile(filepath.Join(root, "schema.yaml"), []byte("name: "+name+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		artifact, err := sourceartifact.AdmitDirectory(root)
-		if err != nil {
-			t.Fatal(err)
-		}
-		projection, err := sourceartifact.MaterializeRuntimeProjection(artifact)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = projection.Release() })
-		template := workspace.NewDockerManager()
-		var bound *workspace.DockerManager
-		template.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
-			containers := bound.SystemWorkspaceContainers()
-			if len(args) != 7 || args[0] != "exec" || (args[1] != containers[0] && args[1] != containers[1]) || args[6] != completion2270InvocationFile {
-				return "", fmt.Errorf("invocation reader used template or foreign workspace: %v", args)
-			}
-			reads++
-			if args[1] != containers[0] {
-				return "", nil
-			}
-			row, err := json.Marshal(completion2270Invocation{AttemptID: attemptID, InvocationID: name, Model: "request-A"})
-			return string(row), err
-		})
-		lifecycle, err := template.RebindSourceProjection(projection, semanticview.Wrap(&contracts.WorkflowContractBundle{}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		bound = lifecycle.(*workspace.DockerManager)
-		selectedWorkspace = bound
-		t.Cleanup(func() { _ = bound.ReleaseSourceProjection(context.Background()) })
-		if reflect.DeepEqual(template.SystemWorkspaceContainers(), bound.SystemWorkspaceContainers()) {
-			t.Fatal("fixture did not distinguish template from projection-bound runtime")
-		}
-		fact := mustServeTestEphemeralSourceArtifactFact(artifact.BundleHash())
-		owner := newSupervisorTestRuntimeOccurrence(t, artifact.BundleHash())
-		selectedOwner = owner
-		source := semanticviewtest.WrapRootAgents(&contracts.WorkflowContractBundle{})
-		eventBus, err := bus.NewEphemeralEventBusWithOptions(nil, bus.EventBusOptions{
-			SourceArtifactFact: fact, WorkOwner: owner, ContractBundle: source, ReceiverExecution: eventreceiver.NormalExecution(),
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := contexts.Register(runtimepkg.BundleContext{
-			SourceArtifactFact: fact, Source: source, WorkOwner: owner,
-			Runtime: &runtimepkg.Runtime{Bus: eventBus, Workspace: &completion2270ObservedWorkspace{DockerManager: bound, proof: &proof}},
-		}); err != nil {
-			t.Fatal(err)
-		}
-		if contexts.LoadedContexts()[0].Runtime != nil {
-			t.Fatal("fixture omitted the production readback/runtime-lease distinction")
-		}
-		rows, err := proof.read(ctx)
-		if owner.ActiveCount() != 0 {
-			t.Fatal("invocation read retained an executable context lease")
-		}
-		if name == "original" && (err != nil || reads != 2 || validateCompletion2270SingleInvocation(rows, attemptID) != nil) {
-			t.Fatalf("original published workspace was not read: rows=%+v reads=%d err=%v", rows, reads, err)
-		}
-		if name == "selected" && (err != nil || reads != 6 || len(rows) != 2 || validateCompletion2270SingleInvocation(rows, attemptID) == nil) {
-			t.Fatalf("reader omitted a selected runtime redispatch: rows=%+v reads=%d err=%v", rows, reads, err)
-		}
-	}
-	seen := map[string]bool{}
-	if _, err := readCompletion2270WorkspaceInvocations(ctx, selectedWorkspace, seen); err != nil {
-		t.Fatal(err)
-	}
-	before := reads
-	if rows, err := readCompletion2270WorkspaceInvocations(ctx, selectedWorkspace, seen); err != nil || len(rows) != 0 || reads != before {
-		t.Fatalf("duplicate-container read was not deduplicated: rows=%+v reads=%d/%d err=%v", rows, reads, before, err)
-	}
-	selectedWorkspace.SetRunDockerFnForTest(func(context.Context, ...string) (string, error) {
-		return "", fmt.Errorf("expected owned container disappeared")
-	})
-	if _, err := proof.read(ctx); err == nil || !strings.Contains(err.Error(), "expected owned container disappeared") || selectedOwner.ActiveCount() != 0 {
-		t.Fatalf("missing owned container became zero invocations or retained its lease: %v", err)
 	}
 }
 

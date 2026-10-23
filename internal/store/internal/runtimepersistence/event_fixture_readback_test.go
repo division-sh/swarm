@@ -25,6 +25,7 @@ func TestCanonicalEventFixtureReadbackUsesOriginalReadOwnerParity(t *testing.T) 
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "fixture.readback", "gateway", "read-task", []byte("{\n  \"value\": 1.0\n}"), 2, uuid.NewString(), "", events.EventEnvelope{}, time.Date(2026, 10, 2, 12, 0, 0, 123456000, time.UTC))
 			if err := commitSemanticEventFixture(ctx, fixture.store.(semanticEventFixtureStore), event); err != nil {
 				t.Fatal(err)
@@ -176,6 +177,7 @@ func TestCanonicalEventFixtureReadbackBypassesSQLiteWriterAdmission(t *testing.T
 	fixture := openSQLiteAuthorActivityReceiptFixture(t)
 	owner := fixture.store.(*SQLiteRuntimeStore)
 	ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 10*time.Second)
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	defer cancel()
 	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "fixture.readback", "gateway", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 	if err := commitSemanticEventFixture(ctx, owner, event); err != nil {
@@ -227,6 +229,7 @@ func TestSemanticEventPublicationEvidencePreservesExactCutsBothStores(t *testing
 			t.Run(backend+"/"+phase, func(t *testing.T) {
 				selected, runID := decisionCardTestStore(t, backend)
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, selected)
 				eventID := uuid.NewString()
 				before, err := ReadSemanticEventFixtureEvidenceForTest(ctx, selected, runID, eventID)
 				if err != nil || before.RecordFound || before.RunStatus != "running" || before.CommittedScopeFound || before.PipelineReceiptCount != 0 || before.SettledDeliveryAttemptCount != 0 {

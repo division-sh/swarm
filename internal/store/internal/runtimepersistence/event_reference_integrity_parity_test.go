@@ -62,7 +62,7 @@ func TestEventOwnedReferencesRequireExistingSameRunEventParity(t *testing.T) {
 			t.Run(backend.name+"/"+test.name, func(t *testing.T) {
 				t.Run("same_run", func(t *testing.T) {
 					fixture := backend.open(t)
-					ctx := testAuthorActivityContext()
+					ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 					at := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
 					runID := uuid.NewString()
 					referenceID := uuid.NewString()
@@ -89,7 +89,7 @@ func TestEventOwnedReferencesRequireExistingSameRunEventParity(t *testing.T) {
 				for _, hostile := range []string{"missing", "cross_run"} {
 					t.Run(hostile, func(t *testing.T) {
 						fixture := backend.open(t)
-						ctx := testAuthorActivityContext()
+						ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 						at := time.Date(2026, 7, 19, 18, 0, 0, 0, time.UTC)
 						targetRunID := uuid.NewString()
 						seedAuthorActivityReceiptRun(t, fixture, ctx, targetRunID)

@@ -26,6 +26,7 @@ func TestPostgresWriterMigrationCancellationAndCommitCuts(t *testing.T) {
 			t.Run(owner+"/"+phase, func(t *testing.T) {
 				fixture, store, probe := openPipelineGracefulFixture(t)
 				base := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+				base = originalStoreFixtureContext(t, base, store)
 				now := time.Now().UTC().Truncate(time.Microsecond)
 				var invoke func(context.Context) error
 				var changed func() bool
@@ -72,7 +73,7 @@ func TestPostgresWriterMigrationCancellationAndCommitCuts(t *testing.T) {
 						return count == 1
 					}
 				case "directive_renew", "directive_expiry":
-					seedDirectiveOperationRun(t, fixture.db, true)
+					seedDirectiveOperationRun(t, base, fixture.db, true)
 					req := directiveOperationReservationForTest(t, uuid.NewString(), uuid.NewString(), "writer-cut-key", "writer-cut-hash", now)
 					reserved, err := store.ReserveDirectiveOperation(base, req)
 					if err != nil {

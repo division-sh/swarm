@@ -238,6 +238,10 @@ func proveSelectedWorkspacePreparation(t *testing.T, backend, mode string, real 
 	defer cancel()
 	process, _ := worklifetime.ProcessFromContext(ctx)
 	capability := selectedContractTestProcessCapability(t, ctx, selected)
+	ctx, bindErr := startupownership.WithProcessMutationAuthority(ctx, capability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	repo := runForkExecutionRepoRoot(t)
 	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp")}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})

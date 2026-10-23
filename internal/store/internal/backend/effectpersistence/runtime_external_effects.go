@@ -2069,7 +2069,7 @@ func (s *EffectPostgresOwner) MarkExternalAttemptResponseObserved(ctx context.Co
 	if err := s.requireCurrent(); err != nil {
 		return err
 	}
-	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
+	result := mutationprotocol.RunPostgresExternalEffectResult(ctx, s.backend, runtimeeffects.Settlement{OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, Authority: attempt.Authority}, mutationprotocol.RevisionOnly, nil, func(ctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 			if _, err := resolveCompletionSettlementPermitPostgres(ctx, tx, attempt); err != nil {
 				return err
@@ -2094,7 +2094,7 @@ func (s *EffectSQLiteOwner) MarkExternalAttemptResponseObserved(ctx context.Cont
 	if err := s.requireCurrent(); err != nil {
 		return err
 	}
-	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite mark external attempt response observed", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
+	result := mutationprotocol.RunSQLiteExternalEffectResult(ctx, s.backend, "sqlite mark external attempt response observed", runtimeeffects.Settlement{OperationID: attempt.OperationID, AttemptID: attempt.AttemptID, Authority: attempt.Authority}, mutationprotocol.RevisionOnly, nil, func(txctx context.Context, mutation *mutationprotocol.Attempt) (struct{}, error) {
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if _, err := resolveCompletionSettlementPermitSQLite(txctx, tx, attempt); err != nil {
 				return err
@@ -2140,13 +2140,13 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 	if err := s.requireCurrent(); err != nil {
 		return err
 	}
-	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (bool, error) {
+	result := mutationprotocol.RunPostgresExternalEffectResult(ctx, s.backend, settlement, mutationprotocol.Story, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (bool, error) {
 		var channelChanged bool
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := requireChannelSourceSettlementTx(txctx, tx, settlement, true); err != nil {
 				return err
 			}
-			if settlement.Authority.Kind != runtimeeffects.AuthorityChannelDelivery && settlement.Authority.Kind != runtimeeffects.AuthorityChannelNativeSetting && settlement.Authority.Kind != runtimeeffects.AuthorityChannelLogout && settlement.Authority.Valid() {
+			if settlement.Authority.Kind != runtimeeffects.AuthorityChannelDelivery && settlement.Authority.Kind != runtimeeffects.AuthorityChannelNativeSetting && settlement.Authority.Kind != runtimeeffects.AuthorityChannelLogout && settlement.Authority.Valid() && !mutationprotocol.ExternalEffectResultAccepted(txctx, tx, settlement) {
 				if err := requireExternalEffectAuthorityPostgres(txctx, tx, settlement.Authority, false); err != nil {
 					return err
 				}
@@ -2194,13 +2194,13 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 	if err := s.requireCurrent(); err != nil {
 		return err
 	}
-	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite settle external attempt", mutationprotocol.Story, mutationprotocol.Ordinary, nil, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (bool, error) {
+	result := mutationprotocol.RunSQLiteExternalEffectResult(ctx, s.backend, "sqlite settle external attempt", settlement, mutationprotocol.Story, s.candidates, func(txctx context.Context, mutation *mutationprotocol.Attempt) (bool, error) {
 		var channelChanged bool
 		err := mutation.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			if err := requireChannelSourceSettlementTx(txctx, tx, settlement, false); err != nil {
 				return err
 			}
-			if settlement.Authority.Kind != runtimeeffects.AuthorityChannelDelivery && settlement.Authority.Kind != runtimeeffects.AuthorityChannelNativeSetting && settlement.Authority.Kind != runtimeeffects.AuthorityChannelLogout && settlement.Authority.Valid() {
+			if settlement.Authority.Kind != runtimeeffects.AuthorityChannelDelivery && settlement.Authority.Kind != runtimeeffects.AuthorityChannelNativeSetting && settlement.Authority.Kind != runtimeeffects.AuthorityChannelLogout && settlement.Authority.Valid() && !mutationprotocol.ExternalEffectResultAccepted(txctx, tx, settlement) {
 				if err := requireExternalEffectAuthoritySQLite(txctx, tx, settlement.Authority, false); err != nil {
 					return err
 				}

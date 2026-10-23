@@ -16,20 +16,22 @@ import (
 // is the original selected owner; setup and fixed fault cuts are explicit.
 type ManagerDeliveryNativeFixture struct {
 	runtimedelivery.Store
-	Authority         runtimedelivery.ExecutionAuthority
-	Context           context.Context
-	SelectedEvent     events.Event
-	SelectedAdmission managedexecution.Admission
-	SelectedRoute     events.DeliveryRoute
-	SemanticSource    semanticview.Source
-	RequireRun        func(*testing.T, string)
-	NormalAuthority   runtimedelivery.ExecutionAuthority
-	Publish           func(*testing.T, context.Context, events.Event, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority)
-	ClaimHeartbeat    func(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error)
-	RenewHeartbeat    func(context.Context, runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error)
-	RetryReady        func(*testing.T, events.Event, events.DeliveryRoute)
-	AgeClaim          func(*testing.T, runtimedelivery.Claim, time.Time)
-	Transitions       func(*testing.T) []string
+	Authority            runtimedelivery.ExecutionAuthority
+	Context              context.Context
+	MutationContext      func(context.Context) (context.Context, error)
+	CarryMutationContext func(context.Context, context.Context) context.Context
+	SelectedEvent        events.Event
+	SelectedAdmission    managedexecution.Admission
+	SelectedRoute        events.DeliveryRoute
+	SemanticSource       semanticview.Source
+	RequireRun           func(*testing.T, string)
+	NormalAuthority      runtimedelivery.ExecutionAuthority
+	Publish              func(*testing.T, context.Context, events.Event, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority)
+	ClaimHeartbeat       func(context.Context, runtimedelivery.ExecutionAuthority, events.Event, events.DeliveryRoute) (runtimedelivery.ClaimResult, error)
+	RenewHeartbeat       func(context.Context, runtimedelivery.Claim) (runtimedelivery.ClaimCommit, error)
+	RetryReady           func(*testing.T, events.Event, events.DeliveryRoute)
+	AgeClaim             func(*testing.T, runtimedelivery.Claim, time.Time)
+	Transitions          func(*testing.T) []string
 }
 
 type managerDeliveryNativeFactory func(*testing.T) *ManagerDeliveryNativeFixture
@@ -47,6 +49,13 @@ func (s *ManagerDeliveryNativeFixture) seedAgentDeliveries(t *testing.T, agentID
 
 func (s *ManagerDeliveryNativeFixture) seedClaim(t *testing.T, ctx context.Context, event events.Event, agentID string) {
 	t.Helper()
+	if s.MutationContext != nil {
+		var err error
+		ctx, err = s.MutationContext(ctx)
+		if err != nil {
+			t.Fatalf("bind native delivery seed owner: %v", err)
+		}
+	}
 	authority := s.Authority
 	if admission, present := managedexecution.FromContext(ctx); present {
 		var err error
@@ -59,6 +68,13 @@ func (s *ManagerDeliveryNativeFixture) seedClaim(t *testing.T, ctx context.Conte
 }
 
 func (s *ManagerDeliveryNativeFixture) claimExact(ctx context.Context, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimedObligation, error) {
+	if s.MutationContext != nil {
+		var err error
+		ctx, err = s.MutationContext(ctx)
+		if err != nil {
+			return runtimedelivery.ClaimedObligation{}, err
+		}
+	}
 	result, err := s.Store.ClaimDelivery(ctx, s.Authority, event, route)
 	if err != nil {
 		return runtimedelivery.ClaimedObligation{}, err

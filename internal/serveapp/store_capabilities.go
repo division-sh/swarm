@@ -146,10 +146,23 @@ func buildSelectedResetCoordinator(owner *storeselected.Owner, capability runtim
 		Planner: runtimedestructivereset.InventoryPlanner{Reader: runtimedestructivereset.CompositeInventoryReader{
 			Reader: family.Inventory(), Containers: supervisor,
 		}},
-		Locks: family.Locks(), Quiescer: runtimedestructivereset.Quiescer{Store: family.Quiescence()},
+		Locks: family.Locks(), Quiescer: runtimedestructivereset.Quiescer{Store: processOwnedResetQuiescence{capability, family.Quiescence()}},
 		Cleaner:    runtimedestructivereset.Cleaner{Store: cleanup},
 		Containers: runtimedestructivereset.ManagedContainerStopper{Runtime: supervisor}, RuntimeContexts: supervisor,
 	}
+}
+
+type processOwnedResetQuiescence struct {
+	capability runtimestartupownership.ProcessCapability
+	store      runtimedestructivereset.QuiescenceStore
+}
+
+func (s processOwnedResetQuiescence) ApplyDestructiveResetQuiescence(ctx context.Context, req runtimedestructivereset.QuiescenceRequest) (runtimedestructivereset.QuiescenceResult, error) {
+	ctx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, s.capability)
+	if err != nil {
+		return runtimedestructivereset.QuiescenceResult{}, err
+	}
+	return s.store.ApplyDestructiveResetQuiescence(ctx, req)
 }
 
 type selectedForkProcessOwner interface {

@@ -13,6 +13,7 @@ func TestFanOutFoldJoinRollbackAndFreshSiblingBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
 			owner, restarted, db, postgres := newFanOutOwnerPairForTest(t, backend)
+			ctx = originalStoreFixtureContext(t, ctx, owner)
 			selected := restarted.(storeTestDurableEventBusStore)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			first := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 0, base)

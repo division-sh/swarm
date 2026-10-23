@@ -17,6 +17,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -58,7 +59,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openRunLifecycleCandidateParityFixture(t, backend)
 			reader := fixture.store.(runOriginReadStore)
-			ctx := testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash)
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(runLifecycleCandidateParityBundleHash), fixture.store)
 			at := time.Date(2026, 7, 29, 16, 0, 0, 0, time.UTC)
 
 			t.Run("event_origin_survives_later_event", func(t *testing.T) {
@@ -132,7 +133,7 @@ func TestEventAndScenarioRunOriginLifecycleParity(t *testing.T) {
 					disposition != runtimerunlifecycle.MutationApplied {
 					t.Fatalf("revise scenario source = %s/%v", disposition, err)
 				}
-				ctx = testAuthorActivityContextForBundle(runLifecycleCandidateParityReplacementHash)
+				ctx = startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(runLifecycleCandidateParityReplacementHash), ctx)
 				requireRunOriginHeader(t, ctx, reader, runID, want, 1)
 				c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, "")
 				for _, state := range []runtimerunlifecycle.State{
@@ -182,6 +183,7 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 			}
 			reader := selected.(runOriginReadStore)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			flowPath := "origin-parity/" + backend
 			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 			firstArtifact := storeTestSourceArtifact("standing-origin-first-" + backend)
@@ -269,6 +271,7 @@ func TestTerminalStandingGenerationDoesNotSeedCompletionCandidateParity(t *testi
 			candidateStore := selected.(runLifecycleCandidateParityStore)
 			registrar := selected.(runtimerunlifecycle.CandidateRegistrar)
 			ctx := testAuthorActivityRuntimeContext()
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			flowPath := "repair-candidate/standing"
 			serviceID := runtimeflowidentity.StandingServiceID(flowPath)
 			firstArtifact := storeTestSourceArtifact("standing-repair-first-" + backend)
@@ -602,9 +605,9 @@ func requireStandingGenerationOrigin(
 	}
 }
 
-func commitStandingOriginIngress(t *testing.T, selected any, bundleHash, runID, suffix string) {
+func commitStandingOriginIngress(t *testing.T, original context.Context, selected any, bundleHash, runID, suffix string) {
 	t.Helper()
-	ctx := testAuthorActivityContextForBundle(bundleHash)
+	ctx := startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(bundleHash), original)
 	event := eventtest.ExistingRunRootIngress(
 		uuid.NewString(), events.EventType("standing.origin."+suffix), "ingress", "", json.RawMessage(`{}`), 0,
 		runID, events.EventEnvelope{}, time.Now().UTC(),

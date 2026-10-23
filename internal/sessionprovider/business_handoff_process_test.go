@@ -69,6 +69,7 @@ func reopenNativeBusinessProcessFixture(t *testing.T, config nativeBusinessProce
 	}
 	source := sourceartifactfixture.Require(t, context.Background(), f.selected)
 	f.ctx = correlation.WithSourceArtifactFact(context.Background(), source)
+	acquireLogoutProcessFixture(t, f, f.operation.Coordinate.RuntimeInstanceID)
 	var found bool
 	f.standing, found, err = f.selected.LoadReconciledStandingService(f.ctx, pipeline.StandingServiceCandidate{
 		ServiceID: flowidentity.StandingServiceID("."), FlowPath: ".", BindingEnabled: true, Source: source})
@@ -178,6 +179,9 @@ func TestWhatsAppNativeBusinessHandoffProcessDeathBothStores(t *testing.T) {
 				if err := f.state.close(context.Background()); err != nil {
 					t.Fatal(err)
 				}
+				if err := f.nativeProcess.Release(f.ctx); err != nil {
+					t.Fatal(err)
+				}
 				runNativeBusinessDeathChild(t, phase, nativeBusinessProcessFixture{Backend: backend, Location: f.location, BasePath: f.basePath, OperationID: f.operation.OperationID})
 				var err error
 				f.operation, err = f.selected.GetChannelOnboarding(context.Background(), f.operation.OperationID)
@@ -185,6 +189,7 @@ func TestWhatsAppNativeBusinessHandoffProcessDeathBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				f.source.Coordinate = f.operation.Coordinate
+				acquireLogoutProcessFixture(t, f, f.operation.Coordinate.RuntimeInstanceID)
 				f.state = sessionStateFixture(t, f.basePath, f.operation.SessionAccount.ConnectionID, f.operation.SessionAccount.AccountRef)
 				f.spool, err = newCaptureStore(f.ctx, f.state.database, event.Scope.Session.ConnectionID)
 				if err != nil {

@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"context"
 	"testing"
 
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -21,7 +20,7 @@ func TestDeliveryAuthorityActivationOutcomeAcknowledgesOnlyCommittedAttemptBothS
 				t.Cleanup(cleanup)
 				store = admitTestPostgresStore(t, db)
 			}
-			ctx := testAuthorActivityContext()
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 			commit, err := store.ActivateDeliveryAuthorityOutcome(ctx, runtimedelivery.ExecutionAuthority{})
 			if commit.Acknowledged || err == nil {
 				t.Fatalf("invalid authority activation = %+v, %v", commit, err)
@@ -30,7 +29,7 @@ func TestDeliveryAuthorityActivationOutcomeAcknowledgesOnlyCommittedAttemptBothS
 			if err != nil {
 				t.Fatal(err)
 			}
-			commit, err = store.ActivateDeliveryAuthorityOutcome(context.Background(), authority)
+			commit, err = store.ActivateDeliveryAuthorityOutcome(ctx, authority)
 			if !commit.Acknowledged || err != nil {
 				t.Fatalf("valid authority activation = %+v, %v", commit, err)
 			}

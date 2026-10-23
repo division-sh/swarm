@@ -30,6 +30,7 @@ func TestRuntimeLogForkHistoryExclusionBothStores(t *testing.T) {
 					ListOperatorRuntimeLogs(context.Context, operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
 				})
 				ctx := testAuthorActivityContext()
+				ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 				root := runForkSnapshotFixtureEvent(t, ctx, fixture.store)
 				if err := CaptureRunForkSnapshotForTest(ctx, fixture.store, root.RunID()); err != nil {
 					t.Fatal(err)

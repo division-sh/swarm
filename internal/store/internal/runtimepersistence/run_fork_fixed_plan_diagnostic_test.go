@@ -14,6 +14,7 @@ func TestSelectedForkFixedPlanRefusalClassifiesComparisonsBothStores(t *testing.
 			fixture := backend.open(t)
 			postgres := backend.name == "postgres"
 			ctx, request := forkWorkflowOwnershipRequest(t, fixture, postgres)
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			store := fixture.store.(forkWorkflowOwnershipStore)
 			before := snapshotForkHistoricalExecutionTables(t, fixture.db, postgres)
 			for _, cut := range []struct {

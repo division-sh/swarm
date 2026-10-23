@@ -14,7 +14,9 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -52,6 +54,14 @@ func TestClaimHeartbeatRealStoreAcknowledgedCleanupParity(t *testing.T) {
 			source := sourceartifactfixture.Fact()
 			ctx := runtimecorrelation.WithSourceArtifactFact(context.Background(), source)
 			ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(uuid.NewString(), source.BundleHash()))
+			processCapability, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err = startupownership.WithProcessMutationAuthority(ctx, processCapability)
+			if err != nil {
+				t.Fatal(err)
+			}
 			runID := uuid.NewString()
 			event := eventtest.RunCreatingRootIngress(
 				uuid.NewString(), "delivery.claim.commit", "fixture", "", []byte(`{"ok":true}`), 0,

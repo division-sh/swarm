@@ -27,6 +27,7 @@ func TestCatalogPublishedEntityRefreshUsesCanonicalHeaderBothStores(t *testing.T
 				setup, selected = h.sqlite, h.sqlite
 				registerTestAuthorActivityCatalog(t, h.sqlite, "fixture.identity")
 			}
+			ctx = originalCatalogFixtureContext(t, ctx, selected)
 			storetest.RequireRun(t, ctx, setup, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
 			entityID := uuid.NewString()
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "fixture.identity", "", "",

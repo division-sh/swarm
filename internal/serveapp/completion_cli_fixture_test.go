@@ -238,16 +238,16 @@ func validateCompletion2270SingleInvocation(rows []completion2270Invocation, att
 	return nil
 }
 
-func requireCompletion2270NoBusinessStartup(t *testing.T, selected effects.Store, proof *completion2270InvocationProof) {
+func requireCompletion2270NoBusinessStartup(t *testing.T, ctx context.Context, selected effects.Store, proof *completion2270InvocationProof) {
 	t.Helper()
-	evidence, err := proof.read(context.Background())
+	evidence, err := proof.read(ctx)
 	attempts, readErr := storetest.ReadCompletionAttemptStorage(context.Background(), selected, "claude_cli", "")
 	if err != nil || readErr != nil || len(evidence) != 0 || len(attempts) != 0 {
 		t.Fatalf("startup probe gained business completion evidence: invocations=%+v attempts=%+v err=%v read_err=%v", evidence, attempts, err, readErr)
 	}
 }
 
-func requireCompletion2270BusinessInvocation(t *testing.T, selected effects.Store, profile string, calls *atomic.Int32, proof *completion2270InvocationProof, expectedAttempt string) string {
+func requireCompletion2270BusinessInvocation(t *testing.T, ctx context.Context, selected effects.Store, profile string, calls *atomic.Int32, proof *completion2270InvocationProof, expectedAttempt string) string {
 	t.Helper()
 	if profile != llmselection.BackendClaudeCLI {
 		if calls.Load() != 1 {
@@ -262,7 +262,7 @@ func requireCompletion2270BusinessInvocation(t *testing.T, selected effects.Stor
 	if len(attempts) != 1 || attempts[0].State != string(effects.StateSettled) || attempts[0].Kind != string(effects.KindProviderTurn) || (expectedAttempt != "" && attempts[0].AttemptID != expectedAttempt) {
 		t.Fatalf("CLI native business attempts=%+v, expected=%s", attempts, expectedAttempt)
 	}
-	evidence, err := proof.read(context.Background())
+	evidence, err := proof.read(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

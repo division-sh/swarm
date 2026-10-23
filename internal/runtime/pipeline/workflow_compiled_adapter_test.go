@@ -233,15 +233,6 @@ func (f *compiledAdapterFixture) load() (WorkflowInstance, bool) {
 	return instance, found
 }
 
-func (f *compiledAdapterFixture) persistedTimers(active bool) []WorkflowTimerActivation {
-	f.t.Helper()
-	rows, err := f.store.listPersistedWorkflowTimerActivations(f.ctx, correlation.RunIDFromContext(f.ctx), f.entityID, active)
-	if err != nil {
-		f.t.Fatal(err)
-	}
-	return rows
-}
-
 func (f *compiledAdapterFixture) event(event string) events.Event {
 	return f.eventPayload(event, []byte("{}"))
 }

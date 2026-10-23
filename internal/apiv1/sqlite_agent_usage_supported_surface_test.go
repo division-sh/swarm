@@ -24,6 +24,7 @@ import (
 func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
+	ctx = originalAPIFixtureContext(t, ctx, sqliteStore)
 	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, "agent-1")
 	seedSQLiteAgentUsageAgent(t, ctx, sqliteStore, "agent-2")
 	agent1 := sqliteAgentUsageIdentity(t, "agent-1")
@@ -85,6 +86,7 @@ func TestSQLiteAgentUsageOwnerBacksSupportedAPISurface(t *testing.T) {
 func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
 	sqliteStore := newSQLiteAgentUsageStoreFixture(t, ctx)
+	ctx = originalAPIFixtureContext(t, ctx, sqliteStore)
 	now := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
@@ -147,6 +149,7 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 func newSQLiteAgentUsageStoreFixture(t *testing.T, ctx context.Context) *storepkg.SQLiteRuntimeStore {
 	t.Helper()
 	selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+	ctx = originalAPIFixtureContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: agentidentitytest.DefaultRunID,
 	})

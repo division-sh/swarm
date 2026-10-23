@@ -14,6 +14,7 @@ func TestForkActivationInventoriesConstructedHeadersBothStores(t *testing.T) {
 				t.Run(shape, func(t *testing.T) {
 					fixture := backend.open(t)
 					_, child, _ := seedSelectedOrdinaryRootProjectionFixture(t, fixture, backend.name == "postgres", shape)
+					ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 					var headers, fields int
 					if err := fixture.db.QueryRowContext(testAuthorActivityContext(), `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, child.ForkRunID).Scan(&headers); err != nil {
 						t.Fatal(err)
@@ -27,7 +28,7 @@ func TestForkActivationInventoriesConstructedHeadersBothStores(t *testing.T) {
 					owner := fixture.store.(interface {
 						ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
 					})
-					result, err := owner.ActivateRunFork(testAuthorActivityContext(), runfork.RunForkActivateRequest{ForkRunID: child.ForkRunID})
+					result, err := owner.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: child.ForkRunID})
 					if result.MaterializedEntityCount != headers {
 						t.Fatalf("constructed inventory=%d headers=%d fields=%d later admission=%v", result.MaterializedEntityCount, headers, fields, err)
 					}
@@ -37,7 +38,7 @@ func TestForkActivationInventoriesConstructedHeadersBothStores(t *testing.T) {
 					selected := fixture.store.(interface {
 						ActivateRunForkForSelectedContractExecution(context.Context, runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error)
 					})
-					selectedResult, selectedErr := selected.ActivateRunForkForSelectedContractExecution(testAuthorActivityContext(), runfork.RunForkSelectedContractExecutionActivateRequest{ForkRunID: child.ForkRunID})
+					selectedResult, selectedErr := selected.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{ForkRunID: child.ForkRunID})
 					if selectedResult.MaterializedEntityCount != headers || selectedErr == nil || selectedResult.Activated {
 						t.Fatalf("selected constructed inventory=%d headers=%d fields=%d later admission=%v", selectedResult.MaterializedEntityCount, headers, fields, selectedErr)
 					}

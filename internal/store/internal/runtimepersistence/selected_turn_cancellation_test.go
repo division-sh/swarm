@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
@@ -34,7 +35,11 @@ func TestSelectedProviderTurnRetainsActualBusinessOriginBothStores(t *testing.T)
 			fork := evidence.SelectedFork
 			fact := mustStoreTestSourceArtifactFact(evidence.BundleHash)
 			ctx = correlation.WithRunID(correlation.WithSourceArtifactFact(ctx, fact), actor.RunID)
-			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
+			ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(evidence.RuntimeInstanceID, fact.BundleHash()))
+			ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
+			if err != nil {
+				t.Fatal(err)
+			}
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.grant_receiver", "operator", "", []byte(`{}`), 0, actor.RunID, events.EventEnvelope{}, time.Now().UTC())
 			req := sqliteFlowActivationRequest(bundle, "global", "global", "", actor.FlowInstance())
 			root := flowidentity.Stored(source, ".", actor.RunID, actor.RunID, actor.RunID, "")

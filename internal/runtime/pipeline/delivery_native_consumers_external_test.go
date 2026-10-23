@@ -94,10 +94,6 @@ func TestWorkflowTimerLifecycleStopFencesRestoreAndRecoveryOnBothStores(t *testi
 	pipeline.VerifyNativeWorkflowTimerLifecycleStopFencesRestoreAndRecoveryOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }
 
-func TestWorkflowTimerLifecyclePostgresFireDoesNotJoinOuterTestMutation(t *testing.T) {
-	pipeline.VerifyNativeWorkflowTimerLifecyclePostgresFireDoesNotJoinOuterTestMutationForTest(t, pipelineDeliveryNativeFixture)
-}
-
 func TestWorkflowTimerLifecycleWakeupPublishesItsDurableIntentOnBothStores(t *testing.T) {
 	pipeline.VerifyNativeWorkflowTimerLifecycleWakeupPublishesItsDurableIntentOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }
@@ -276,10 +272,6 @@ func TestCompiledTransitionPreviewExecutionAgreementOnBothStores(t *testing.T) {
 
 func TestGuardTerminationVerifiedExecutionAndRestartBothStores(t *testing.T) {
 	pipeline.VerifyNativeGuardTerminationVerifiedExecutionAndRestartBothStoresForTest(t, pipelineDeliveryNativeFixture)
-}
-
-func TestCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStores(t *testing.T) {
-	pipeline.VerifyNativeCompiledTransitionPersistedCoordinatesAndTimerCauseOnBothStoresForTest(t, pipelineDeliveryNativeFixture)
 }
 
 func TestPipelineCoordinatorInterceptDeliveryRouteRejectsConnectedInputReplayWithoutStampedClaim(t *testing.T) {

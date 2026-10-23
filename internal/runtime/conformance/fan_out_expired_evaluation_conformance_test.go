@@ -203,9 +203,11 @@ func TestFanOutProductionCallerM35ExpiredEvaluationOnBothBackends(t *testing.T) 
 			runtime.bus.SetLoggerHook(logger)
 			ctx, cancel := context.WithTimeout(correlation.WithRunID(testAuthorActivityContextForBundle(context.Background(), runtime.sourceArtifactFact), runID), 15*time.Second)
 			defer cancel()
-			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-m35", runtime.sourceArtifactFact)); err != nil {
+
+			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-m35", runtime.sourceArtifactFact), runtime.bus, runtime.manager); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
+
 			openedID := publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "m35", "threshold": 75})
 			triggerID := publishNotifyAllChildrenEventAsync(t, ctx, runtime, source, runID, "portfolio.accounts.register.requested", map[string]any{
 				"portfolio_id": "m35", "account_ids": []map[string]any{{"account_id": "expired-then-fresh", "eng_roles": 7, "gem_score": 7.25}},

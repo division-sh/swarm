@@ -17,6 +17,7 @@ import (
 func TestSQLiteScenarioSetupEntitiesIdempotentExistingRows(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 	requireDefaultSourceArtifactForTest(t, ctx, sqliteStore)
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -66,6 +67,7 @@ func TestSQLiteScenarioSetupPersistsExactExecutionProfileAtomically(t *testing.T
 		t.Fatal(err)
 	}
 	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	requireDefaultSourceArtifactForTest(t, ctx, store)
 	runID := uuid.NewString()
 	req := pipeline.ScenarioSetupRequest{
@@ -107,6 +109,7 @@ func TestPostgresScenarioSetupPersistsExactExecutionProfileAtomically(t *testing
 	_, db, _ := testutil.StartPostgres(t)
 	store := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, store)
 	requireDefaultSourceArtifactForTest(t, ctx, store)
 	sourceFact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok {

@@ -22,6 +22,7 @@ import (
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
 	storeownership "github.com/division-sh/swarm/internal/store/internal/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
@@ -209,7 +210,7 @@ func TestPipelineProcessSIGKILLRecovery(t *testing.T) {
 					location, _, _ = testutil.StartPostgres(t)
 				}
 				fixture, _ := openPipelineCrashStore(t, backend, location)
-				ctx := testAuthorActivityContext()
+				ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 				runID := uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				eventID := commitPipelineParityEvent(t, ctx, fixture.store.(pipelineObligationParityStore), runID, time.Now().UTC())
@@ -224,6 +225,13 @@ func TestPipelineProcessSIGKILLRecovery(t *testing.T) {
 				}
 				if pending := pipelineCrashCandidate(t, ctx, candidates, runID); pending.RunID != "" {
 					t.Fatal("setup left a candidate masking lost settlement handoff")
+				}
+				setup, err := agentfixture.ProcessCapability(t, ctx, fixture.store.(agentfixture.Store))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := setup.Release(ctx); err != nil {
+					t.Fatal(err)
 				}
 				env := []string{"SWARM_PIPELINE_CRASH_BACKEND=" + backend, "SWARM_PIPELINE_CRASH_LOCATION=" + location,
 					"SWARM_PIPELINE_CRASH_CUT=" + cut, "SWARM_PIPELINE_CRASH_EVENT=" + eventID, "SWARM_PIPELINE_CRASH_RUN=" + runID}
@@ -382,6 +390,10 @@ func runPipelineCrashChild(t *testing.T, mode string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
+	if err != nil {
+		t.Fatal(err)
+	}
 	report := os.NewFile(3, "pipeline-crash-evidence")
 	defer report.Close()
 	cut, eventID, runID := os.Getenv("SWARM_PIPELINE_CRASH_CUT"), os.Getenv("SWARM_PIPELINE_CRASH_EVENT"), os.Getenv("SWARM_PIPELINE_CRASH_RUN")
@@ -435,7 +447,7 @@ func runPipelineCrashChild(t *testing.T, mode string) {
 	if (before.RunID != "") != (wantBefore == 1) {
 		t.Fatalf("candidate at restart=%#v, committed settlement=%v", before, wantBefore == 1)
 	}
-	bus, err := newRunConvergenceEventBus(t, fixture.store)
+	bus, err := newRunConvergenceEventBus(t, ctx, fixture.store)
 	if err != nil {
 		t.Fatal(err)
 	}

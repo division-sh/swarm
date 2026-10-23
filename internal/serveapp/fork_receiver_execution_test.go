@@ -144,7 +144,7 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 				resumeSettlement := func() { barrier.releaseSettlement.Do(func() { close(barrier.resumeSettlement) }) }
 				t.Cleanup(resumeClaim)
 				t.Cleanup(resumeSettlement)
-				ctx, cancel := context.WithTimeout(servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash), 30*time.Second)
+				ctx, cancel := context.WithTimeout(servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash, rt.ForkRuntime.ProcessCapability), 30*time.Second)
 				defer cancel()
 				forkOptions := rt.ForkRuntime
 				if declaredAgent {

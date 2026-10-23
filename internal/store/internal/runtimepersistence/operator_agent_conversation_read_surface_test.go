@@ -5,13 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
@@ -24,6 +23,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -160,6 +160,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	now := time.Now().UTC()
 	runID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -354,6 +355,7 @@ func TestOperatorAgentReadSurfaceLoadAgentUsageSplitsExactAndEstimated(t *testin
 func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-1", "active")
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-2", "active")
 
@@ -403,6 +405,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageSplitsExactAndEstimated(t *testing.T) {
 func TestSQLiteRuntimeStoreLoadAgentUsageEmptyAndAgentExistence(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-empty", "active")
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-terminated", "terminated")
 
@@ -427,6 +430,7 @@ func TestSQLiteRuntimeStoreLoadAgentUsageEmptyAndAgentExistence(t *testing.T) {
 func TestSQLiteRuntimeStoreLoadAgentUsageFailsClosedOnMalformedRows(t *testing.T) {
 	ctx := testAuthorActivityContext()
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 	seedOperatorAgentUsageAgent(t, ctx, sqliteStore, "agent-1", "active")
 	fields, err := testOperatorAgentIdentity("agent-1").StorageFields()
 	if err != nil {
@@ -504,6 +508,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	base := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
 	runID := uuid.NewString()
 	otherRunID := uuid.NewString()
@@ -662,6 +667,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, sqliteStore)
 	base := time.Date(2026, 5, 21, 10, 0, 0, 0, time.UTC)
 	runID := uuid.NewString()
 	otherRunID := uuid.NewString()
@@ -886,6 +892,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesCanonicalLifecy
 	pg := newTestPostgresStore(t, db)
 
 	ctx := testAuthorActivityContext()
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})

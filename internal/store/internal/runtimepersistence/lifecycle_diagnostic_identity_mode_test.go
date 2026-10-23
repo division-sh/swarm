@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"context"
 	"testing"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -25,10 +24,11 @@ func TestLifecycleDiagnosticSettlementIdentityAndModeOnBothStores(t *testing.T) 
 				}
 				t.Run(mode, func(t *testing.T) {
 					store, db := newLifecycleDiagnosticTestStore(t, sqlite)
+					ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), store)
 					item := enqueueDiagnosticTestIdentity(t, store, testAgentIdentity(t, "mode-worker", "global"), runtimemanager.LifecycleDiagnosticOrigin{
 						Owner: runtimemanager.LifecycleDiagnosticNormal, Causality: runtimemanager.LifecycleDiagnosticObservation,
 					}, origin)
-					if err := runtimepkg.NewRuntimeLogger(store, first, nil).ProjectLifecycleDiagnostic(context.Background(), item); err != nil {
+					if err := runtimepkg.NewRuntimeLogger(store, first, nil).ProjectLifecycleDiagnostic(ctx, item); err != nil {
 						t.Fatal(err)
 					}
 					wantID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm:lifecycle-diagnostic:"+item.OutboxID)).String()
@@ -42,7 +42,7 @@ func TestLifecycleDiagnosticSettlementIdentityAndModeOnBothStores(t *testing.T) 
 					if originMode == mode || eventMode != mode || eventID == item.OutboxID {
 						t.Fatalf("origin=%s event=%s eventID=%s outboxID=%s", originMode, eventMode, eventID, item.OutboxID)
 					}
-					if err := runtimepkg.NewRuntimeLogger(store, retry, nil).ProjectLifecycleDiagnostic(context.Background(), item); err != nil {
+					if err := runtimepkg.NewRuntimeLogger(store, retry, nil).ProjectLifecycleDiagnostic(ctx, item); err != nil {
 						t.Fatal(err)
 					}
 					var count int

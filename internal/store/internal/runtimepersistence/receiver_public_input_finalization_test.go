@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
@@ -49,6 +50,7 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 				correlation.WithRunID(storeTestWorkContext(t, testAuthorActivityContextForBundle(fact.BundleHash())), runID),
 				authorActivityTestRuntimeInstanceID,
 			)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			if err := ensureRunFixtureSourceArtifactForTest(ctx, selected, fact.BundleHash(), bundle.SourceArtifact); err != nil {
 				t.Fatal(err)
 			}
@@ -68,6 +70,9 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 			probe := lifecycleprobe.New()
 			publisher, err := newStoreTestEventBus(t, selected.(storeTestDurableEventBusStore), bus.EventBusOptions{
 				ContractBundle: source, SourceArtifactFact: fact,
+				MutationContext: func(work context.Context) (context.Context, error) {
+					return startupownership.FreezeMutationAuthority(startupownership.CarryMutationAuthority(work, ctx))
+				},
 				TestLifecycleProbe: probe,
 				TemplateInstancePlanner: pipeline.FlowInstanceActivationPlannerFunc(func(ctx context.Context, req pipeline.FlowInstanceActivationRequest) (pipeline.FlowInstanceActivationPlan, error) {
 					return am.PrepareFlowInstanceActivation(ctx, req)
@@ -95,6 +100,10 @@ func TestReceiverPublicInputFinalizesCreationWithoutRecoveryBothStores(t *testin
 				t.Fatal(err)
 			}
 			grant, err := agentfixture.AdmitGeneration(t, ctx, selected, set, coordinate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
 			if err != nil {
 				t.Fatal(err)
 			}

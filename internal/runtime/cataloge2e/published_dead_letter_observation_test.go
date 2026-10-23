@@ -34,6 +34,7 @@ func TestCatalogPublishedDeadLetterCountUsesExactOriginalEventBothStores(t *test
 				selected, setup, deadLetters, closeOwner = h.sqlite, h.sqlite, h.sqlite, h.sqlite.Close
 				registerTestAuthorActivityCatalog(t, h.sqlite, "fixture.deadletter")
 			}
+			ctx = originalCatalogFixtureContext(t, ctx, selected)
 			storetest.RequireRun(t, ctx, setup, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID})
 			entityID := uuid.NewString()
 			first := eventtest.ExistingRunRootIngress(uuid.NewString(), "fixture.deadletter", "", "", []byte(`{}`), 0,

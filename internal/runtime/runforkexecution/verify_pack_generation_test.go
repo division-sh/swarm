@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
@@ -83,8 +84,12 @@ func TestPublicVerifyRetainedForkUsesConfiguredPackGeneration(t *testing.T) {
 	s := storetest.StartSQLiteRuntimeStore(t)
 	db := storetest.Database(s)
 	sourceID, eventID := uuid.NewString(), uuid.NewString()
-	seedSelectedOperationSource(t, ctx, "sqlite", db, s, loaded, sourceID, eventID)
 	capability := selectedContractTestProcessCapability(t, ctx, s)
+	ctx, bindErr := startupownership.WithProcessMutationAuthority(ctx, capability)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
+	seedSelectedOperationSource(t, ctx, "sqlite", db, s, loaded, sourceID, eventID)
 	owner := selectedContractSQLiteExecutionOwnerForTest(t, s)
 	fork, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 		SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,

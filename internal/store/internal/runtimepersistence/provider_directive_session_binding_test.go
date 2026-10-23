@@ -26,12 +26,12 @@ func TestProviderDirectiveSessionBindingStaleOriginParity(t *testing.T) {
 						t.Fatal(err)
 					}
 					// Expiry is recovery evidence; reconciliation withdraws the exact executing origin.
-					reconciled, ok, err := store.ReconcileDirectiveOperation(testAuthorActivityContext(), operation.OperationID, time.Now().UTC(), time.Hour)
+					reconciled, ok, err := store.ReconcileDirectiveOperation(fixture.original, operation.OperationID, time.Now().UTC(), time.Hour)
 					if err != nil || !ok || reconciled.State != runtimeagentcontrol.DirectiveOperationIndeterminate {
 						t.Fatalf("reconcile expired directive: state=%q found=%v err=%v", reconciled.State, ok, err)
 					}
 				case "executed":
-					if _, err := store.RecordDirectiveExecuted(testAuthorActivityContext(), operation.OperationID, origin.ExecutionOwnerID, directiveOperationResponseForTest(operation), time.Now().UTC()); err != nil {
+					if _, err := store.RecordDirectiveExecuted(fixture.original, operation.OperationID, origin.ExecutionOwnerID, directiveOperationResponseForTest(operation), time.Now().UTC()); err != nil {
 						t.Fatal(err)
 					}
 				case "foreign_operation":

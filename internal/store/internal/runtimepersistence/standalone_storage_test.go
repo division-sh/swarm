@@ -18,6 +18,7 @@ func TestStandaloneStoragePreservesJoinedRunDeliveryAndCandidateBothStores(t *te
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "standalone.storage", "runtime", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 			if err := commitSemanticEventFixtureWithAgents(ctx, fixture.store, event, []string{"worker"}); err != nil {
 				t.Fatal(err)

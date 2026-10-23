@@ -115,6 +115,10 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				ctx, err = startupownership.WithProcessMutationAuthority(ctx, capability)
+				if err != nil {
+					t.Fatal(err)
+				}
 				barrier := &startupCreationPublicationBarrier{entered: make(chan lifecycleprobe.Signal, 1), completed: make(chan lifecycleprobe.Signal, 1), release: make(chan struct{})}
 				diagnostics := &startupCreationDiagnostics{}
 				previousLogger := slog.Default()

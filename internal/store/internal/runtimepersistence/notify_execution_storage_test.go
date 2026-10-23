@@ -19,6 +19,7 @@ func TestNotifyExecutionStorageKeepsExactScopeAndOriginalReadOwnerBothStores(t *
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			run, _ := seedWorkflowProjectionFaultCut(t, fixture, ctx)
 			if err := commitSemanticParentFixture(ctx, fixture.store, run, uuid.NewString(), time.Now().UTC()); err != nil {
 				t.Fatal(err)
@@ -165,6 +166,7 @@ func TestNotifyAgentDeliveryStatusKeepsExactScopeAndOriginalReadOwnerBothStores(
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			first := seedDeliveryRecoveryClaim(t, fixture, ctx)
 			later := eventtest.ExistingRunRootIngress(uuid.NewString(), "notify.later", "gateway", "", nil, 0, first.Snapshot.RunID, events.EventEnvelope{}, time.Now().UTC().Add(time.Second))
 			if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, later, []events.DeliveryRoute{first.Snapshot.Route}); err != nil {

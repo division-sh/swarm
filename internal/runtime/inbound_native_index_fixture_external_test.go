@@ -34,6 +34,7 @@ func nativeInboundTransportIndex(t testing.TB, source semanticview.Source, targe
 		ctx := runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(context.Background(), fact), target.RunID)
 		ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 		ctx = effects.WithExecutionMode(ctx, executionmode.Live)
+		ctx = originalRuntimeFixtureContext(t, ctx, selected)
 		if !seen[target.RunID] {
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 				RunID: target.RunID, BundleHash: fact.BundleHash(), Artifact: bundle.SourceArtifact})

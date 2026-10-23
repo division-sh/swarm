@@ -33,7 +33,7 @@ func TestP16DirectiveFinalizationRetainsPipelineClaimFence(t *testing.T) {
 			forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 				store := requireProviderDirectiveStore(t, fixture)
 				origin, operation, event := admitProviderDirectiveOrigin(t, fixture, store, "p16-"+name)
-				ctx, cancel := context.WithTimeout(testAuthorActivityContext(), 5*time.Second)
+				ctx, cancel := context.WithTimeout(originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store), 5*time.Second)
 				defer cancel()
 				failure := agentcontrol.DirectiveExecutionLeaseExpiredFailure()
 				if !success {

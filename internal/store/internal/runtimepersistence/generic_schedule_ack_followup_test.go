@@ -58,7 +58,7 @@ func TestGenericScheduleAcknowledgedCleanupFaultPreservesFollowUpBothStores(t *t
 	for _, backend := range selectedScheduleStoreCases() {
 		t.Run(backend.name, func(t *testing.T) {
 			selected, _, seedCtx := backend.open(t)
-			ctx := authorGenericScheduleConsumerContext(runtimecorrelation.RunIDFromContext(seedCtx))
+			ctx := originalStoreFixtureContext(t, authorGenericScheduleConsumerContext(runtimecorrelation.RunIDFromContext(seedCtx)), selected)
 			fault := errors.New("injected after acknowledged schedule COMMIT")
 			store := &postCommitScheduleFaultStore{Store: selected, fault: fault}
 			scheduler := &selectedStoreLifecycleScheduler{}
@@ -92,7 +92,7 @@ func TestGenericScheduleAcknowledgedCommitReconcilesAfterCallerCancellationBothS
 	for _, backend := range selectedScheduleStoreCases() {
 		t.Run(backend.name, func(t *testing.T) {
 			selected, _, seedCtx := backend.open(t)
-			ctx := authorGenericScheduleConsumerContext(runtimecorrelation.RunIDFromContext(seedCtx))
+			ctx := originalStoreFixtureContext(t, authorGenericScheduleConsumerContext(runtimecorrelation.RunIDFromContext(seedCtx)), selected)
 			fault := errors.New("post-commit handoff failed")
 			store := &postCommitScheduleFaultStore{Store: selected, fault: fault, loadErrs: make(chan error, 2)}
 			scheduler := &selectedStoreLifecycleScheduler{}

@@ -22,6 +22,7 @@ func TestOperatorEventBatchPaginationBoundaryBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			store := fixture.store.(routeSettlementOperatorStore)
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
@@ -112,6 +113,7 @@ func TestOperatorEventBatchConsumedPrefixBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			store := fixture.store.(routeSettlementOperatorStore)
 			runID, foreignRun := uuid.NewString(), uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
@@ -202,6 +204,7 @@ func TestOperatorEventBatchEvidenceMembershipAndFreshnessBothStores(t *testing.T
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
 			ctx := testAuthorActivityContext()
+			ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 			store := fixture.store.(routeSettlementOperatorStore)
 			runID, foreignRun := uuid.NewString(), uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)

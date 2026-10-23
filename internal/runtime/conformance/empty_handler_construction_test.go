@@ -42,9 +42,11 @@ func TestEmptyReporterSettlesWithoutConstructedHeaderMutationBothStores(t *testi
 			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now)
 			runID := uuid.NewString()
 			ctx := correlation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "empty-reporter-header", runtime.sourceArtifactFact)); err != nil {
+
+			if err := runNotifyAllChildrenManager(managedConformanceExecutionContextForBundle(t, ctx, "empty-reporter-header", runtime.sourceArtifactFact), runtime.bus, runtime.manager); err != nil {
 				t.Fatal(err)
 			}
+
 			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
 				"portfolio_id": "empty-reporter", "threshold": 75,
 			})

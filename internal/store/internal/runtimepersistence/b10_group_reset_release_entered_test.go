@@ -51,10 +51,13 @@ func TestB10GroupRetirementJoinsResetReleaseAlreadyEntered(t *testing.T) {
 					releases.fault = errors.New("b10 exact release cleanup failure")
 				}
 				_, bundle := fanOutMixedRouteSource(t)
-				var err error
+				evidence, err := f.grant.Evidence()
+				if err != nil {
+					t.Fatal(err)
+				}
 				f.bus, err = newStoreTestEventBus(t, f.raw.(storeTestDurableEventBusStore), bus.EventBusOptions{
 					ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: mustStoreTestSourceArtifactFact(f.seed.bundleHash),
-					RuntimeInstanceID: authorActivityTestRuntimeInstanceID, PipelineObligations: releases,
+					RuntimeInstanceID: evidence.RuntimeInstanceID, PipelineObligations: releases,
 				})
 				if err != nil {
 					t.Fatal(err)

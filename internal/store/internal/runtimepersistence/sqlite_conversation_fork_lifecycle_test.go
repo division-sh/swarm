@@ -22,6 +22,7 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	bundle := conversationForkConstructionBundle(t)
 	ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
 	s := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	ctx = originalStoreFixtureContext(t, ctx, s)
 	if _, err := s.backend.ExecContext(ctx, `PRAGMA journal_mode = WAL`); err != nil {
 		t.Fatalf("enable production SQLite journal mode: %v", err)
 	}
@@ -247,7 +248,7 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 		source.bundleHash = run.Artifact.BundleHash()
 		run.BundleHash = source.bundleHash
 	}
-	ctx := testAuthorActivityContextForBundle(source.bundleHash)
+	ctx := originalStoreFixtureContext(t, testAuthorActivityContextForBundle(source.bundleHash), s)
 	requireRunFixtureForTest(t, ctx, s, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()

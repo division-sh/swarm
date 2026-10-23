@@ -11,14 +11,14 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 )
 
-func proveChannelFirstSendEligibility(t *testing.T, mode string, selected selectedChannelDeliveryTestStore,
+func proveChannelFirstSendEligibility(t *testing.T, ctx context.Context, mode string, selected selectedChannelDeliveryTestStore,
 	runTx func(func(context.Context, *sql.Tx) error) error, current func(runtimeeffects.Authority) bool,
 	authority runtimeeffects.Authority, postgres bool) {
 	t.Helper()
-	ctx := context.Background()
 	id := authority.ChannelDelivery.DeliveryID
 	var original channeldelivery.StoredRender
 	if err := runTx(func(ctx context.Context, tx *sql.Tx) error {
@@ -68,7 +68,7 @@ func proveChannelFirstSendEligibility(t *testing.T, mode string, selected select
 	responsibility(true, false)
 	recover := func(want string) {
 		t.Helper()
-		if _, err := selected.(runtimeeffects.RecoveryStore).ReconcileExternalEffectAttempts(testAuthorActivityContext(),
+		if _, err := selected.(runtimeeffects.RecoveryStore).ReconcileExternalEffectAttempts(ctx,
 			liveExternalEffectRecoveryRequest(time.Now().Add(time.Hour))); err != nil {
 			t.Fatal(err)
 		}
@@ -94,12 +94,13 @@ func proveChannelFirstSendEligibility(t *testing.T, mode string, selected select
 		}
 		effectCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContextForBundle(authority.ChannelDelivery.BundleHash), authority),
 			runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
+		effectCtx = startupownership.CarryMutationAuthority(effectCtx, ctx)
 		if _, err := runtimeeffects.BeginChannelDelivery(effectCtx, []byte(authority.ID), nil); err == nil {
 			t.Fatal("completed notice authorized")
 		}
 		return
 	}
-	effectCtx, handle := authorizeResponseTestEffect(t, selected, authority)
+	effectCtx, handle := authorizeResponseTestEffect(t, ctx, selected, authority)
 	responsibility(true, true)
 	if mode == "eligibility_recover_authorized" {
 		complete()
@@ -170,7 +171,7 @@ func proveChannelFirstSendEligibility(t *testing.T, mode string, selected select
 		if !current(authority) {
 			t.Fatal("exact SENT predecessor lost terminal edit authority")
 		}
-		editCtx, edit := authorizeResponseTestEffect(t, selected, authority)
+		editCtx, edit := authorizeResponseTestEffect(t, ctx, selected, authority)
 		if err := edit.MarkLaunched(editCtx); err != nil {
 			t.Fatal(err)
 		}

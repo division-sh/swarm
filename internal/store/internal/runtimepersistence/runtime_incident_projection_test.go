@@ -29,6 +29,7 @@ func TestRuntimeIncidentFiltersAndGroupingOnBothStores(t *testing.T) {
 			} else {
 				selected = newBootstrappedSQLiteRuntimeStoreForTest(t)
 			}
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			base := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
 			artifactA := storeTestSourceArtifact("reviewer-2394-a")
 			artifactB := storeTestSourceArtifact("reviewer-2394-b")

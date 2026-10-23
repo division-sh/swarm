@@ -2331,7 +2331,7 @@
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.bindRuntimeOperationContext",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "7fe39909c34f39755d1472e66084c82877a32d0ca4d278c34575f830920bcaaa"
+    "body_sha256": "1fcd8d6df47595fde4a969b2d80b0859f93f5c055daf60c59515df900473b309"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.buildAgent",
@@ -2445,7 +2445,7 @@
     "owner": "internal/runtime/manager/agent_manager.go::NewAgentManagerWithOptions",
     "audit_rows": "A11,A23,A24",
     "proof_families": "P09,P20,P21",
-    "body_sha256": "2510823a6615331108f16496a868769b795934f42b39cd306dde77b0e66cef71"
+    "body_sha256": "f1c19f080321756b67d075db660e95408893f591151bd6525cabb63d171602ee"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::ValidateAgentBuildConfiguration",
@@ -3006,16 +3006,22 @@
     "body_sha256": "9abfda8178662d07078966b6dbb7b56c80aa2dc40ee428bc95454339e210fb62"
   },
   {
+    "owner": "internal/runtime/runtime.go::*Runtime.mutationContext",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "e68e090d4b5bf0df24fe42d881900e3aa70c7ff143ded9d7674da39537c716d4"
+  },
+  {
     "owner": "internal/runtime/runtime.go::*Runtime.prepareStartLocked",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "f362a17356975c5d074ee1499bdbe2e01b51900edefd9b71ab594a961516dc15"
+    "body_sha256": "3e7bdff0d9d94216fe5ce139a819ce6da458bc0d3f1f6733950d95f677d0ace4"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.prepareStartupLifecycleLocked",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "ce6434771062b7b35be3efec39809e6687de0250787fe9c08aa3345c4797b95f"
+    "body_sha256": "c0c215c90bebaeb12d359f664e12c8b8f7b503294a09298d6e3e06e9d4302173"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.publishBootCompleted",
@@ -3064,6 +3070,12 @@
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
     "body_sha256": "da00f7d8993d4a3f1d11ff0a7e131714d86d9df0b3af57fa087c7b09e905662a"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::*Runtime.stopWithGraceLocked",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "67601fca619436c475cf0137f4b166f2258f3a69f4ca55381266d42496947e3c"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.stopWithOptions",
@@ -3234,6 +3246,12 @@
     "body_sha256": "a7c9131cbafa1c72e7ed904af4e35ddd17a88b03a4bdd4de4b9001845e946b90"
   },
   {
+    "owner": "internal/runtime/runtime_claude_startup.go::ManagedProviderPreflightAuthority.saveSurface",
+    "audit_rows": "A11,A12,A18,A25",
+    "proof_families": "P09,P10,P15,P21",
+    "body_sha256": "f76630b6b405de7d53215d33628014ac60234fa2a355c4c8f4ffa94d4c5d9916"
+  },
+  {
     "owner": "internal/runtime/runtime_claude_startup.go::ManagedProviderPreflightAuthority.validate",
     "audit_rows": "A11,A12,A18,A25",
     "proof_families": "P09,P10,P15,P21",
@@ -3369,7 +3387,7 @@
     "owner": "internal/runtime/runtime_claude_startup.go::validateManagedProviderPreflightConfigs",
     "audit_rows": "A11,A12,A18,A25",
     "proof_families": "P09,P10,P15,P21",
-    "body_sha256": "0401042b3c609d3c4b455d2eeede70e4367a72deadc079c0a65c8559380e890d"
+    "body_sha256": "01f77dc452085edcf9b8fb21175e473949b1626e9c77dd0d28ed99416386fe2b"
   },
   {
     "owner": "internal/runtime/runtime_claude_startup.go::validateSelectedBackendCredential",
@@ -4611,7 +4629,7 @@
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.closeAndDrain",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "6bf62dd2d06247e4f863249ee77807620b1417f383fc0f0f4fa7112e4223e68d"
+    "body_sha256": "5f07ce304707454fb2dd66057e5f9a322a8021ae2e3d7e5fd4b5db7c9393cf38"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.failClosedAfterReopen",
@@ -4623,7 +4641,7 @@
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.mutateStandingService",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "721f34edf98413502485db2b8b574cbbea2a9be4a18e2f85ed5347c0a3d81cf3"
+    "body_sha256": "97317b8f8ae220022b58b9a6323be4c0f9b66ac80931153193f6e5baf4f77aa1"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.publishActiveService",
@@ -4635,7 +4653,7 @@
     "owner": "internal/serveapp/main.go::*serveStandingServiceController.restoreAdmission",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "49bc0bfae9c6cfeeb5f6312f5903eb49b06b8a990ecd7102cca42152ad6d7d41"
+    "body_sha256": "ec105a30004f78dbd74036cd9c89e0d1f55bc3f9d7fd044d93e995e53e040c4b"
   },
   {
     "owner": "internal/serveapp/main.go::*serveStandingServiceTransition.Restore",
@@ -4672,6 +4690,12 @@
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
     "body_sha256": "4a931937f9481804f6465554909ba349d755d9d073dcf50e0ba9b6b34977762f"
+  },
+  {
+    "owner": "internal/serveapp/main.go::bindCompositionProcessCapability",
+    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
+    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
+    "body_sha256": "7188d10fcc2f0d05546f3d57b523cc854448b4be5d1b912114353b19589bd07a"
   },
   {
     "owner": "internal/serveapp/main.go::buildForkChatSandboxLLMRuntimes",
@@ -4857,7 +4881,7 @@
     "owner": "internal/serveapp/main.go::processOwnedHTTPHandler",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22,2577-native-retirement,2577-native-boot,2577-native-publication",
-    "body_sha256": "fd2b3703b587ca2bf9d4b6483709e58ce0a92343f7b65fd0b3fa70dfef185164"
+    "body_sha256": "eddf3b5bc679189384cdd9044328e5fa767c040fe6bacacdb52177dbdd4a16b4"
   },
   {
     "owner": "internal/serveapp/main.go::reconcileServeRuntimeStandingTargets",
@@ -5421,7 +5445,7 @@
     "owner": "internal/sessionprovider/runtime_logout_unix.go::*RuntimeConnection.beginLogoutSettlement",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-logout-original-stamp,2577-logout-successor,2577-logout-native-process-death",
-    "body_sha256": "83dbad2523e2e9d8fe81291c66ba2886f3920173f9ac3c0fbbf3181c42ba1725"
+    "body_sha256": "d3350d09bfcdeae9fc1b930ff429e8b3b11df4531cd55239e4321316828531ea"
   },
   {
     "owner": "internal/sessionprovider/runtime_logout_unix.go::*RuntimeConnection.requireCurrentLogoutDispatch",
@@ -5850,6 +5874,24 @@
     "body_sha256": "cc43f947a6538fe8fb3d357a347deaaab28cb9f326e2db08db33511510366360"
   },
   {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.RunAdmittedTransaction",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "71e2c000e2b374343f5ccb0bafc3ca3a3210b598b5a2fb2775800f0a61a9f6b2"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.RunAdmittedTransactionOutcome",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "dddf0ebc7bf03cc3b682a9ac2bf40243825b936f109cd513f0142cc4b77b13be"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.RunAdmittedTransactionWithOptionsOutcome",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "f68364cd74f10b8ff1718d0c5374ae36ef6aa34f2d86d3c712b271d64289ba00"
+  },
+  {
     "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.RunReadTransaction",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
@@ -5883,7 +5925,7 @@
     "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.runTransactionOutcome",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
-    "body_sha256": "e452024e0019e4cb9eba29756b5ca758d6413ef5fac623c90a08efa13b6fd532"
+    "body_sha256": "ee67904895d73d9f6f0a17973ad34f492f3c7fd35c725b16a13aee8fb9ef24b3"
   },
   {
     "owner": "internal/store/internal/backend/postgres/transaction.go::*rolledBackSerializationConflict.Error",
@@ -5904,6 +5946,12 @@
     "body_sha256": "79e1e66c3f167c6692dee5a2bc53db0c75749bccf66cce0119560504d949607e"
   },
   {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::admitOptionalMutationTx",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "c68734ea8821b9502ab84e11193375b59de45bd03337eec4c35d7bec2a4bc273"
+  },
+  {
     "owner": "internal/store/internal/backend/postgres/transaction.go::exactSerializationConflict",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
@@ -5914,6 +5962,12 @@
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
     "body_sha256": "353dcd9e2d2e69e8d3070f8cd28acd3dd4de74364c5e1ce1bb0093c1a15381e1"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction.go::prepareOptionalMutationAdmission",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "dcc8cd6f0f9815433e1f6cf913e271904273e12978c71e12a13cc4c13ab4ac42"
   },
   {
     "owner": "internal/store/internal/backend/postgres/transaction_cancellation.go::*cleanTransactionCancellation.Error",
@@ -5932,6 +5986,12 @@
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
     "body_sha256": "2bde049d74f07fb2c5938a65f66d431013f4792b5e48ca79548a34f67e0972da"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/transaction_cancellation.go::cancellationBeforeMutationAdmission",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "01bb23ecaf0ec89af66e182555c82205067d3c6cf43d49acef19b43edf25514b"
   },
   {
     "owner": "internal/store/internal/backend/postgres/transaction_cancellation.go::onlyCallerCancellation",

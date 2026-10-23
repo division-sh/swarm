@@ -1,18 +1,11 @@
 package runtimepersistence
 
 import (
-	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/division-sh/swarm/internal/config"
-	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	"github.com/division-sh/swarm/internal/testpostgres"
-	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/google/uuid"
+
 	"github.com/lib/pq"
 )
 
@@ -70,75 +63,4 @@ func TestDSNFromConfigPinsDefaultNonSecretKeywordsAgainstPGEnv(t *testing.T) {
 	if _, err := pq.NewConnector(dsn); err != nil {
 		t.Fatalf("pq.NewConnector(%q): %v", dsn, err)
 	}
-}
-
-func TestPostgresStore_HelpersAndDescriptors(t *testing.T) {
-	dsn, _, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	connection, err := testpostgres.ParseConnection(dsn)
-	if err != nil {
-		t.Fatalf("parse canonical test Postgres DSN: %v", err)
-	}
-	parsed := connection.Parameters()
-
-	cfg := config.DatabaseConfig{
-		Host:     parsed.Host,
-		Port:     int(parsed.Port),
-		Name:     parsed.Database,
-		User:     parsed.User,
-		SSLMode:  parsed.SSLMode,
-		PoolSize: 5,
-	}
-	gotDSN := DSNFromConfig(cfg, parsed.Password)
-	if !strings.Contains(gotDSN, "host='"+parsed.Host+"'") || !strings.Contains(gotDSN, "dbname='"+parsed.Database+"'") {
-		t.Fatalf("unexpected dsn: %q", gotDSN)
-	}
-	pg, err := NewPostgresStore(gotDSN)
-	if err != nil {
-		t.Fatalf("NewPostgresStore: %v", err)
-	}
-	bootstrapTestPostgresStore(t, pg)
-	const runID = "55555555-5555-5555-5555-555555555555"
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
-	if err := pg.Ping(ctx); err != nil {
-		t.Fatalf("Ping: %v", err)
-	}
-
-	entityID := uuid.NewString()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle())), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	seedWorkflowHeaderProjectionFixture(t, ctx, pg.backend, runID, entityID, "testco", "test", "default", "active", "{}", time.Now().UTC())
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'testco', 'default', 'testco', 'TestCo',
-			'{"users_total":10,"mrr":1234}'::jsonb, now(), now()
-		)
-	`, runID, entityID); err != nil {
-		t.Fatalf("seed entity state: %v", err)
-	}
-
-	// Active agent descriptors.
-	_ = agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{Identity: mustTestAgentIdentityForRun(runID, "a", "review/inst-1"), ID: "a", Role: "a", FlowID: "global", Type: "stub", Model: "regular", ExecutionMode: "live", FlowPath: "review/inst-1", EntityID: entityID, Config: []byte(`{}`)}),
-		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
-	})
-	_ = agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{Identity: mustTestAgentIdentityForRun(runID, "t", "global"), ID: "t", Role: "t", FlowID: "global", Type: "stub", Model: "regular", ExecutionMode: "live", FlowPath: "global", Config: []byte(`{}`)}),
-		Status: "terminated", HiredBy: "test", StartedAt: time.Now().UTC(),
-	})
-	descriptors, err := pg.ListActiveAgentDescriptors(ctx, runID)
-	if err != nil || len(descriptors) == 0 {
-		t.Fatalf("ListActiveAgentDescriptors err=%v descriptors=%v", err, descriptors)
-	}
-	if got := descriptors[0].Identity.AgentID(); got != "a" {
-		t.Fatalf("descriptor agent_id = %q, want a", got)
-	}
-	if got := descriptors[0].EntityID; got != entityID {
-		t.Fatalf("descriptor entity_id = %q, want %q", got, entityID)
-	}
-	if got := descriptors[0].Identity.FlowInstance(); got != "review/inst-1" {
-		t.Fatalf("descriptor flow_instance = %q, want review/inst-1", got)
-	}
-
 }

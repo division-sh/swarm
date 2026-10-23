@@ -50,7 +50,7 @@ func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
 				sourceartifactfixture.RequireArtifact(t, testAuthorActivityContext(), selected, artifactB)
 			}
 			if tc.seedRun {
-				requireRunFixtureForTest(t, testAuthorActivityContextForBundle(bundleA), selected, semanticRunFixture{
+				requireRunFixtureForTest(t, originalStoreFixtureContext(t, testAuthorActivityContextForBundle(bundleA), selected), selected, semanticRunFixture{
 					Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID,
 					State: runtimerunlifecycle.StateRunning, BundleHash: bundleA,
 					StartedAt: time.Date(2026, 8, 2, 14, 0, 0, 0, time.UTC),
@@ -67,6 +67,7 @@ func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
 				t.Fatal(err)
 			}
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(tc.contextHash), runID)
+			ctx = originalStoreFixtureContext(t, ctx, selected)
 			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 			err = insertMutationLogPrivateAdapter(ctx, selected, runtimemutationlog.Record{
 				EntityID: uuid.NewString(), Domain: runtimemutationlog.DomainLifecycleState, NewValue: "active",

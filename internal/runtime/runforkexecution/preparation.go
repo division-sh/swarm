@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
 
@@ -64,6 +65,7 @@ type PreparedSelectedFork struct {
 	coordinates             managedcapabilities.SelectedForkPreparationCoordinates
 	preparationID           string
 	processGeneration       uint64
+	processOwner            startupownership.ProcessCapability
 	sourceRunID             string
 	forkPoint               runfork.RunForkPoint
 	declarationRevision     string
@@ -469,7 +471,7 @@ func (p *PreparedSelectedFork) Close() (finalErr error) {
 	}
 	p.loadedSource.Cleanup = nil
 	if p.pendingDiscard != nil {
-		if err := p.pendingDiscard.store.DiscardMaterializedSelectedContractExecutionFork(context.WithoutCancel(p.operation.Context()), p.pendingDiscard.runID); err != nil {
+		if err := p.settleConstructionFailure(context.WithoutCancel(p.operation.Context()), p.pendingDiscard.store, p.pendingDiscard.runID, runfork.ForkOperationFailure{}, true); err != nil {
 			p.closeErr = fmt.Errorf("cleanup selected-contract fork %s: %w", p.pendingDiscard.runID, err)
 			return p.closeErr
 		}
@@ -498,6 +500,10 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 	if err != nil {
 		return nil, err
 	}
+	processOwner, err := selectedPreparationProcessOwner(ports, process)
+	if err != nil {
+		return nil, err
+	}
 	sourceFingerprint, err := runfork.SelectedPreparationSourceFingerprint(loaded.EffectiveSourceIdentity)
 	if err != nil {
 		return nil, err
@@ -511,6 +517,7 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 		return nil, err
 	}
 	p := &PreparedSelectedFork{
+		processOwner:        processOwner,
 		declarationRevision: agentPlan.Declarations.Revision,
 		operation:           operation, preparationID: uuid.NewString(), processGeneration: process.AuthorityGeneration, sourceRunID: plan.SourceRunID, forkPoint: plan.ForkPoint,
 		coordinates: managedcapabilities.SelectedForkPreparationCoordinates{
@@ -591,7 +598,7 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 	if err != nil {
 		return nil, err
 	}
-	gateway, cleanup, err := startSelectedContractAgentRuntimeGateway(executor, turns, work, nil, nil)
+	gateway, cleanup, err := startSelectedContractAgentRuntimeGateway(executor, turns, work, nil, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -663,6 +670,37 @@ func prepareSelectedFork(ctx context.Context, operation *selectedContractOperati
 		return nil, errors.New("selected preparation returned receipts outside its actor census")
 	}
 	return p, nil
+}
+
+func selectedPreparationProcessOwner(ports *selectedContractExecutionPorts, supplied startupownership.Authority) (startupownership.ProcessCapability, error) {
+	if ports == nil || ports.contexts == nil {
+		return nil, errors.New("selected preparation requires its retained process owner")
+	}
+	ports.contexts.mu.Lock()
+	owner := ports.contexts.capability
+	ports.contexts.mu.Unlock()
+	if owner == nil {
+		return nil, errors.New("selected preparation has no retained process owner")
+	}
+	actual, err := owner.Evidence()
+	if err != nil {
+		return nil, err
+	}
+	if actual != supplied {
+		return nil, errors.New("selected preparation has contradictory retained process custody")
+	}
+	return owner, nil
+}
+
+func (p *PreparedSelectedFork) settleConstructionFailure(ctx context.Context, store SelectedContractForkLifecycle, runID string, failure runfork.ForkOperationFailure, discard bool) error {
+	if p == nil || p.processOwner == nil {
+		return errors.New("selected construction cleanup requires its retained preparation")
+	}
+	operation, err := startupownership.PreparedForkConstructionFailureOperation(ctx, p.processOwner, store, runfork.SelectedForkPreparationBinding{SelectedForkPreparation: p.evidence(), ForkRunID: runID}, failure, discard)
+	if err != nil {
+		return err
+	}
+	return p.processOwner.RunPreparedOperation(ctx, operation)
 }
 
 func (p *PreparedSelectedFork) bind(ctx context.Context, forkRunID string, loaded LoadedSelectedContractSource, agents selectedContractAgentRuntimePlan) (runfork.SelectedForkPreparationBinding, error) {

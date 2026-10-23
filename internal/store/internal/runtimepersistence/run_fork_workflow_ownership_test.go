@@ -272,6 +272,7 @@ func forkWorkflowOwnershipRequest(t *testing.T, fixture authorActivityReceiptFix
 func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorActivityReceiptFixture, postgres, seedDelivery bool) (context.Context, runforkreadiness.MaterializeRequest) {
 	t.Helper()
 	ctx := managedExecutionStoreTestContext(t, testAuthorActivityContext())
+	ctx = originalStoreFixtureContext(t, ctx, fixture.store)
 	repo := canonicalrouting.RepoRoot(t)
 	root := t.TempDir()
 	for file, body := range map[string]string{

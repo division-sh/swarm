@@ -395,6 +395,7 @@ func seedEntityToolSourceRun(t *testing.T, selected any, bundle *contracts.Workf
 	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 	ctx = effects.WithDifferentOwner(ctx, effects.OwnerBuildTestInfrastructure)
 	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, entityToolTestRunID), fact)
+	ctx = toolFixtureProcessContext(t, ctx, selected)
 	runner, ok := selected.(storetest.RunFixtureStore)
 	if !ok {
 		t.Fatalf("entity test store %T has no selected run lifecycle owner", selected)
@@ -461,6 +462,7 @@ writer:
 			ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 			ctx = effects.WithDifferentOwner(ctx, effects.OwnerBuildTestInfrastructure)
 			ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), fact)
+			ctx = toolFixtureProcessContext(t, ctx, persistence)
 			if _, err := persistence.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
 				t.Fatal(err)
 			}

@@ -28,7 +28,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonboarding.Service, serveSessionBootstrapOwner) {
+func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonboarding.Service, serveSessionBootstrapOwner, context.Context) {
 	t.Helper()
 	var selected serveBootstrapTestStore
 	if backend == "sqlite" {
@@ -114,6 +114,10 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 		t.Fatal(err)
 	}
 	effects := selected.(channelConfirmationEffectStore)
+	ctx, err = startupownership.WithRuntimeMutationAuthority(ctx, grant)
+	if err != nil {
+		t.Fatal(err)
+	}
 	confirmation, err := newServeChannelConfirmationDispatcher(effects, current, executionposture.Live, owner.Identity().RuntimeInstanceID, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -126,14 +130,13 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 	if err != nil {
 		t.Fatal(err)
 	}
-	return service, sessions
+	return service, sessions, ctx
 }
 
 func TestServeInstalledWhatsAppArtifactSelectsBootstrapWithoutExecutionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx := context.Background()
-			service, sessions := installedSessionBootstrapFixture(t, backend)
+			service, sessions, ctx := installedSessionBootstrapFixture(t, backend)
 			started, err := service.Start(ctx, channelonboarding.StartInput{Verb: channelonboarding.VerbConnect,
 				Selection: channelonboarding.CandidateSelection{Provider: "whatsapp"}, IdempotencyKey: "installed-artifact-bootstrap"})
 			if err != nil || started.Operation.Phase != channelonboarding.PhaseActivatingProvider || started.Operation.SessionConnectionID == "" ||

@@ -1,7 +1,6 @@
 package runtimepersistence
 
 import (
-	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -14,10 +13,11 @@ func TestForkRecordedActivityGenerationEvidenceBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := backend.open(t)
+			fixtureTest := t
+			ctx := originalStoreFixtureContext(t, testAuthorActivityContext(), fixture.store)
 			for _, field := range []string{"unchanged", "run_id", "entity_id", "source_event_id", "parent_event_id", "flow_instance", "node_id", "handler_event_key", "activity_id", "tool", "loop_flow", "loop_id", "loop_activation", "loop_revision", "loop_attempt", "loop_field", "loop_unknown", "result_event_id"} {
 				t.Run(field, func(t *testing.T) {
-					ctx := context.Background()
-					child, event, record := seedActivityEvidenceReuse(t, fixture, backend.name == "postgres", false, "succeeded", 2)
+					child, event, record := seedActivityEvidenceReuse(fixtureTest, fixture, backend.name == "postgres", false, "succeeded", 2)
 					store := fixture.store.(selectedActivityProjectionStore)
 					original := originalActivityCarriageAtPoint(t, store, event.RunID(), child.ForkPoint)
 					column, value := field, any("")
@@ -96,7 +96,7 @@ func TestForkRecordedActivityGenerationEvidenceBothStores(t *testing.T) {
 						}
 					}
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-					loaded, err := store.LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), event.RunID(), child.ForkRunID, []string{event.ID()}, original)
+					loaded, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, original)
 					if field != "unchanged" {
 						if err == nil {
 							t.Fatalf("source %s corruption authorized copied activity evidence", field)
@@ -129,7 +129,7 @@ func TestForkRecordedActivityGenerationEvidenceBothStores(t *testing.T) {
 						t.Fatalf("copied result did not consume exact correspondence: %#v found=%v err=%v", copied, found, err)
 					}
 					before = snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-					again, err := store.LoadRunForkSelectedContractSourceEvents(testAuthorActivityContext(), event.RunID(), child.ForkRunID, []string{event.ID()}, original)
+					again, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, original)
 					if err != nil || !reflect.DeepEqual(loaded, again) || !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
 						t.Fatalf("repeated generation copy was not stable: %v", err)
 					}

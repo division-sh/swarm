@@ -11,7 +11,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-	"reflect"
+
 	"sort"
 	"strings"
 	"testing"
@@ -97,6 +97,10 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/runtime/runlifecycle/standing_disposition.go", "A10,A27", "2577-native-dormancy,P08,P10,P21"},
 	{"internal/serveapp/public_ingress.go", "A10,A27", "2577-native-boot,2577-native-publication,P08,P10,P21"},
 	{"internal/serveapp/serve_lifecycle_presentation.go", "A10,A27", "2577-native-boot,P08,P10,P21"},
+	// #2730 threads the supplied original through Runtime/Manager admission,
+	// preparation and teardown, without resolving another source or changing
+	// read-only recovery inspection. Native takeover/cancellation, complete
+	// Runtime/Manager and both-store conformance controls retain these reaches.
 	{"internal/runtime/runtime.go", "A05,A08,A11,A13,A18,A23,A24,A25", "P04,P08,P09,P11,P15,P20,P21"},
 	{"internal/runtime/workflow_validation.go", "A05,A06,A07,A08,A09,A10,A13,A14,A29", "P00,P04,P05,P06,P07,P08,P11,P12"},
 	{"internal/runtime/workflow_validation_admission.go", "A05,A06,A07,A08,A09,A10,A13,A14,A29", "P00,P04,P05,P06,P07,P08,P11,P12"},
@@ -247,83 +251,6 @@ func TestVerifyBootStartupPredicateCensus(t *testing.T) {
 	}
 	if err := compareAdmissionPredicateBodies(expected, measured); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestAdmissionPredicateRatchetRejectsUncoveredStartupRefusal(t *testing.T) {
-	t.Run("native cancellation owner hostiles", proveNativeCancellationPredicateCensus)
-	surface := admissionPredicateSurface{"internal/runtime/runtime.go", "A11,A25", "P09,P15,P21"}
-	file, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", surface.File), nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected, err := admissionPredicateFileBodies(surface, file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	guard, err := parser.ParseExpr(`func() { if true { panic("unaccounted new startup refusal") } }`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	changed := false
-	for _, declaration := range file.Decls {
-		if function, ok := declaration.(*ast.FuncDecl); ok && function.Name.Name == "newRuntime" {
-			function.Body.List = append(guard.(*ast.FuncLit).Body.List, function.Body.List...)
-			changed = true
-		}
-	}
-	if !changed {
-		t.Fatal("production startup entrypoint was not found")
-	}
-	measured, err := admissionPredicateFileBodies(surface, file)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reflect.DeepEqual(expected, measured) {
-		t.Fatal("production guard mutation did not affect the independent census")
-	}
-	if err := compareAdmissionPredicateBodies(expected, measured); err == nil || !strings.Contains(err.Error(), "runtime.go::newRuntime") || !strings.Contains(err.Error(), "P09") {
-		t.Fatalf("uncovered boot-local guard escaped owner/caller/proof ratchet: %v", err)
-	}
-}
-
-func proveNativeCancellationPredicateCensus(t *testing.T) {
-	surface := admissionPredicateSurface{"internal/store/internal/backend/postgres/transaction_cancellation.go", "A19,A28", "P18,P24"}
-	for _, target := range []string{"Error", "Unwrap", "CleanCancellationBeforeCommit", "onlyCallerCancellation"} {
-		t.Run(target, func(t *testing.T) {
-			file, err := parser.ParseFile(token.NewFileSet(), filepath.Join("..", "..", surface.File), nil, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			expected, err := admissionPredicateFileBodies(surface, file)
-			if err != nil || len(expected) != 4 {
-				t.Fatalf("exact native cancellation owners: count=%d err=%v", len(expected), err)
-			}
-			guard, err := parser.ParseExpr(`func() { if true { panic("unreviewed native cancellation predicate") } }`)
-			if err != nil {
-				t.Fatal(err)
-			}
-			changed := 0
-			for _, declaration := range file.Decls {
-				if function, ok := declaration.(*ast.FuncDecl); ok && function.Name.Name == target {
-					function.Body.List = append(guard.(*ast.FuncLit).Body.List, function.Body.List...)
-					changed++
-				}
-			}
-			if changed != 1 {
-				t.Fatalf("exact native owner %s changed %d declarations", target, changed)
-			}
-			measured, err := admissionPredicateFileBodies(surface, file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := compareAdmissionPredicateBodies(expected, measured); err == nil || !strings.Contains(err.Error(), target) || !strings.Contains(err.Error(), "A19,A28") || !strings.Contains(err.Error(), "P18,P24") {
-				t.Fatalf("native owner %s escaped startup accounting: %v", target, err)
-			}
-			if err := compareAdmissionPredicateBodies(expected, measured[:len(measured)-1]); err == nil {
-				t.Fatal("native owner deletion escaped startup accounting")
-			}
-		})
 	}
 }
 

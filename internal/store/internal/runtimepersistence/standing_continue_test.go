@@ -19,6 +19,7 @@ func TestStandingOwnedPauseRejectsGenericContinueBothStores(t *testing.T) {
 				t.Run(posture, func(t *testing.T) {
 					fixture := openStandingDispositionParityFixture(t, backend)
 					ctx := testAuthorActivityRuntimeContext()
+					ctx = originalStoreFixtureContext(t, ctx, fixture.selected)
 					current := fixture.create(t, ctx, "audit-"+posture)
 					operation := runtimepipeline.StandingServiceOperation{ServiceID: current.ServiceID, Actor: "audit"}
 					if _, err := fixture.workflow.SuspendStandingService(ctx, operation); err != nil {

@@ -567,6 +567,7 @@ func newAgentSnapshotBoundaryFixture(t *testing.T, backend agentSnapshotBackend)
 			t.Fatalf("enable sqlite WAL: %v", err)
 		}
 	}
+	ctx = originalAPIFixtureContext(t, ctx, store)
 	runID := uuid.NewString()
 	startedAt := time.Now().UTC().Add(-time.Minute)
 	storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: authorActivityTestSourceArtifact, StartedAt: startedAt})

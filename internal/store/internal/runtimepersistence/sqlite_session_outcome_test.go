@@ -16,6 +16,7 @@ func TestSQLiteSessionMutationRetainsAcknowledgedHandoffOutcome(t *testing.T) {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				fixture := newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true)
 				ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+				ctx = originalStoreFixtureContext(t, ctx, store)
 				identity := fixture.authority.Target.AgentIdentity
 				var predecessor *runtimesessions.Lease
 				var err error
@@ -64,7 +65,7 @@ func TestSQLiteSessionMutationRetainsAcknowledgedHandoffOutcome(t *testing.T) {
 				case "renew":
 					lease, err = store.Renew(ctx, predecessor)
 				case "reset":
-					summary, err = store.ResetAll(runtimesessions.ResetMetadata{Source: "outcome-proof"})
+					summary, err = store.ResetAll(ctx, runtimesessions.ResetMetadata{Source: "outcome-proof"})
 				}
 				if phase == "handoff_failure" && !errors.Is(err, injected) || phase == "healthy" && err != nil {
 					t.Fatalf("unexpected handoff error: %v", err)

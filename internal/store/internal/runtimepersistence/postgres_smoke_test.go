@@ -22,6 +22,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	pg := newTestPostgresStore(t, db)
 	const runID = "66666666-6666-6666-6666-666666666666"
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
+	ctx = originalStoreFixtureContext(t, ctx, pg)
 
 	// Seed entity.
 	entityID := uuid.NewString()

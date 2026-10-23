@@ -416,6 +416,10 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 				}
 				ctx, cancel := context.WithCancel(runForkTestContext(t))
 				defer cancel()
+				ctx, err := runtimestartupownership.WithProcessMutationAuthority(ctx, owner.ports.contexts.capability)
+				if err != nil {
+					t.Fatal(err)
+				}
 				repo := runForkExecutionRepoRoot(t)
 				loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")}
 				loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
@@ -648,8 +652,10 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 							t.Error(err)
 						}
 					})
-					capability := selectedContractTestProcessCapability(t, ctx, selected.(runtimestartupownership.Store))
-					if err := restarted.BindSelectedProcess(ctx, process, capability); err != nil {
+					recoveryCtx := worklifetime.WithProcess(runForkTestContext(t), process)
+					capability := selectedContractTestProcessCapability(t, recoveryCtx, selected.(runtimestartupownership.Store))
+					recoveryCtx, err = runtimestartupownership.WithProcessMutationAuthority(recoveryCtx, capability)
+					if err != nil {
 						t.Fatal(err)
 					}
 					recovered, err := restarted.RecoverSelectedForkContexts(ctx, runtimeeffects.NewRecoveryRequest(time.Now().UTC(), executionposture.MockOnly), SelectedForkRecoveryEnvironment{})

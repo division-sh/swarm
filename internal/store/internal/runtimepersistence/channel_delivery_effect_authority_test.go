@@ -17,6 +17,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
@@ -78,6 +79,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 						return sqlite.backend.RunTransaction(ctx, "channel delivery authority test", fn)
 					}
 				}
+				ctx = originalStoreFixtureContext(t, testAuthorActivityContext(), selected)
 				current := func(authority runtimeeffects.Authority) bool {
 					t.Helper()
 					var ok bool
@@ -221,7 +223,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					t.Fatal("activation before successful onboarding admitted delivery")
 				}
 				effectCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(
-					testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), authority),
+					startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), ctx), authority),
 					runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
 				if _, err := runtimeeffects.BeginChannelDelivery(effectCtx, []byte("message"), nil); err == nil {
 					t.Fatal("effect authorization before successful onboarding was admitted")
@@ -409,7 +411,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					t.Fatal("exact physical native setting authority is not current")
 				}
 				if strings.HasPrefix(mode, "recovery_") {
-					proveChannelRecoveryProjection(t, mode, selected, db, runTx, authority, nativeAuthority, textFact, postgres)
+					proveChannelRecoveryProjection(t, ctx, mode, selected, db, runTx, authority, nativeAuthority, textFact, postgres)
 					return
 				}
 				foreignNative := nativeAuthority
@@ -423,7 +425,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					t.Fatal("foreign native setting contract was admitted")
 				}
 				nativeCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(
-					testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), nativeAuthority),
+					startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), ctx), nativeAuthority),
 					runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
 				nativeHandle, err := runtimeeffects.BeginChannelNativeSetting(nativeCtx, []byte("install inbox"), nil)
 				if err != nil {
@@ -474,7 +476,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 						entry.ActivationID != activation.ActivationID || entry.EntryReference != setting.EntryCommand {
 						t.Fatalf("installed native entry = %#v, found=%t err=%v", entry, found, err)
 					}
-					proveNativeQualificationFences(t, selected, native, admission, setting, onboarding.OperationID, now)
+					proveNativeQualificationFences(t, ctx, selected, native, admission, setting, onboarding.OperationID, now)
 				}
 				if strings.HasPrefix(mode, "native_reset_") {
 					proveNativeResetTransaction(t, selected, runTx, admission, setting, late, postgres, now)
@@ -484,11 +486,11 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 					t.Fatal("succeeded channel activation rejected exact delivery")
 				}
 				if strings.HasPrefix(mode, "eligibility_") {
-					proveChannelFirstSendEligibility(t, mode, selected, runTx, current, authority, postgres)
+					proveChannelFirstSendEligibility(t, ctx, mode, selected, runTx, current, authority, postgres)
 					return
 				}
 				if mode == "response_matrix" {
-					proveChannelResponseReceiptMatrix(t, selected, runTx, current, authority, textFact, postgres)
+					proveChannelResponseReceiptMatrix(t, ctx, selected, runTx, current, authority, textFact, postgres)
 					return
 				}
 				foreignRender := authority
@@ -632,7 +634,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 						t.Fatal("foreign edit predecessor was admitted")
 					}
 					editCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(
-						testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), editAuthority),
+						startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), ctx), editAuthority),
 						runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
 					editHandle, err := runtimeeffects.BeginChannelDelivery(editCtx, []byte("edit"), nil)
 					if err != nil {
@@ -696,7 +698,7 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 						uncertainAuthority.ChannelDelivery.RenderHash = latest.Frozen.Hash
 						uncertainAuthority.ChannelDelivery.PreviousReceiptOperationID = editID
 						uncertainCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(
-							testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), uncertainAuthority),
+							startupownership.CarryMutationAuthority(testAuthorActivityContextForBundle(activation.Coordinate.BundleHash), ctx), uncertainAuthority),
 							runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
 						uncertainHandle, err := runtimeeffects.BeginChannelDelivery(uncertainCtx, []byte("uncertain edit"), nil)
 						if err != nil {
@@ -770,10 +772,9 @@ func TestChannelDeliveryEffectCurrentnessSelectedStoreParity(t *testing.T) {
 	}
 }
 
-func proveNativeQualificationFences(t *testing.T, selected selectedChannelDeliveryTestStore, native channelnative.Store,
+func proveNativeQualificationFences(t *testing.T, ctx context.Context, selected selectedChannelDeliveryTestStore, native channelnative.Store,
 	admission channelnative.Admission, setting channelnative.Setting, operationID string, now time.Time) {
 	t.Helper()
-	ctx := context.Background()
 	hints := observeChannelHints(t, selected)
 	localeOwner := selected.(channelonboarding.Store)
 	declared, err := localeOwner.SetChannelClientLocale(ctx, channelonboarding.SetClientLocaleRequest{
