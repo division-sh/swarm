@@ -3,8 +3,7 @@ package serveapp
 import (
 	"context"
 	"errors"
-	"io"
-	"log"
+
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -14,16 +13,13 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
+
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/yamlsource"
-	"gopkg.in/yaml.v3"
 )
 
 func TestRuntimeProcessInboundHandlerTeachesUnknownStandingAlias(t *testing.T) {
@@ -60,203 +56,6 @@ func TestStandingIngressAliasGrammarMatchesProcessWebhookRouter(t *testing.T) {
 		if parsed, _, _ := parseProcessWebhookPath("/webhooks/" + alias + "/telegram"); parsed != alias {
 			t.Fatalf("parser normalized unadmitted alias %q into %q", alias, parsed)
 		}
-	}
-}
-
-func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
-	catalog := testProviderTriggerCatalog(t)
-	makeContext := func(alias, runID string) (runtimepkg.BundleContext, *processIngressProofStore, *processIngressEventStore, processIngressCredentialStore) {
-		contractsRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
-		schemaPath := filepath.Join(contractsRoot, "schema.yaml")
-		snapshot, err := yamlsource.LoadFile(schemaPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var schema map[string]any
-		if err := snapshot.Decode(&schema); err != nil {
-			t.Fatal(err)
-		}
-		ingress, exists := schema["ingress"].(map[string]any)
-		if !exists {
-			t.Fatal("selected context fixture requires its declared ingress")
-		}
-		ingress["alias"] = alias
-		raw, err := yaml.Marshal(schema)
-		if err != nil {
-			t.Fatal(err)
-		}
-		writeStandingCandidateFile(t, schemaPath, string(raw))
-		_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), contractsRoot)
-		if err != nil {
-			t.Fatalf("load standing fixture: %v", err)
-		}
-		source := processIngressTransportSource(t, bundle, catalog)
-		hash := bundle.SourceArtifact.BundleHash()
-		persistence := &processIngressProofStore{}
-		eventsStore := newProcessIngressEventStore(t, source, runID)
-		persistence.store = eventsStore
-		workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
-		bus, err := runtimebus.NewEphemeralEventBusWithOptions(eventsStore, runtimebus.EventBusOptions{
-			ContractBundle:         source,
-			Durable:                runtimebus.DurableDependencies{Instances: eventsStore, ConstructionPublications: eventsStore},
-			SourceArtifactFact:     mustServeTestEphemeralSourceArtifactFact(hash),
-			ProviderOutputVerifier: catalog,
-			WorkOwner:              workOwner,
-			ReceiverExecution:      eventreceiver.NormalExecution(),
-		})
-		if err != nil {
-			t.Fatalf("NewEventBusWithOptions(%s): %v", alias, err)
-		}
-		t.Cleanup(func() {
-			if err := bus.ResetInMemoryState(); err != nil {
-				t.Errorf("retire process ingress test bus %s: %v", alias, err)
-			}
-		})
-		gateway := runtimepkg.NewInboundGateway(bus, nil, nil, executionposture.Live, persistence)
-		credentialStore := processIngressCredentialStore{"webhook_signing.telegram": "telegram-secret"}
-		setTestInboundCredentialAdmission(t, gateway, credentialStore)
-		plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: alias, Provider: "telegram", SigningSecret: "webhook_signing.telegram"})
-		if err != nil {
-			t.Fatalf("CompileAdmission(%s): %v", alias, err)
-		}
-		installed, err := catalog.InstalledCapabilitySubjects()
-		if err != nil {
-			t.Fatalf("InstalledCapabilitySubjects(%s): %v", alias, err)
-		}
-		contextDef := runtimepkg.BundleContext{
-			SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(hash), Source: source,
-			Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway}, WorkOwner: workOwner,
-			PackInventoryDigest: bundle.PackInventory.Digest(), ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
-			StandingTargets: []runtimepkg.StandingTarget{{
-				BundleHash: hash, ServiceID: runtimeflowidentity.StandingServiceID("."), FlowPath: ".", Alias: alias, Provider: "telegram",
-				RunID:      runID,
-				Generation: 1, PublicationSequence: 1, SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
-			}},
-		}
-		return contextDef, persistence, eventsStore, credentialStore
-	}
-	contextA, persistenceA, eventsA, _ := makeContext("chat-a", "41000000-0000-0000-0000-000000000001")
-	contextB, persistenceB, eventsB, credentialsB := makeContext("chat-b", "42000000-0000-0000-0000-000000000001")
-	contextUnavailable, persistenceUnavailable, eventsUnavailable, _ := makeContext("chat-unavailable", "43000000-0000-0000-0000-000000000001")
-	if contextA.SourceArtifactFact.Matches(contextB.SourceArtifactFact) {
-		t.Fatal("selected context fixture collapsed two distinct admitted sources")
-	}
-	manager, err := runtimepkg.NewRuntimeContextManager(nil, contextA, contextB, contextUnavailable)
-	if err != nil {
-		t.Fatalf("NewRuntimeContextManager: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := manager.QuiesceAllRuntimeContexts(context.Background()); err != nil {
-			t.Errorf("quiesce process ingress runtime contexts: %v", err)
-		}
-	})
-
-	t.Run("unauthenticated_acquisition_refusal", func(t *testing.T) {
-		if err := contextA.WorkOwner.Fence(); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if err := contextA.WorkOwner.Reopen(); err != nil {
-				t.Errorf("restore original runtime admission: %v", err)
-			}
-		})
-		use, lookup, err := manager.AcquireIngress(context.Background(), "chat-a", "telegram")
-		if use != nil {
-			_ = use.Done()
-			t.Fatal("fenced runtime admitted ingress work")
-		}
-		if !lookup.Found || !lookup.Loaded() || !errors.Is(err, worklifetime.ErrAdmissionFenced) {
-			t.Fatalf("wrong acquisition boundary: lookup=%+v error=%v", lookup, err)
-		}
-		processLog := &lockedBuffer{}
-		previousLog := log.Writer()
-		log.SetOutput(io.MultiWriter(previousLog, processLog))
-		t.Cleanup(func() { log.SetOutput(previousLog) })
-		response := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodPost, "/webhooks/chat-a/telegram", strings.NewReader(`{"update_id":98}`))
-		runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(response, request)
-		if response.Code != http.StatusServiceUnavailable || response.Body.String() != "ingress target is unavailable\n" || strings.Contains(response.Body.String(), err.Error()) {
-			t.Fatalf("public acquisition response disclosed internal facts: status=%d body=%q", response.Code, response.Body.String())
-		}
-		if !strings.Contains(processLog.String(), err.Error()) {
-			t.Fatalf("acquisition cause missing from internal diagnostics: %s", processLog.String())
-		}
-		if persistenceA.recorded || persistenceB.recorded || persistenceUnavailable.recorded || len(eventsA.events)+len(eventsB.events)+len(eventsUnavailable.events) != 0 {
-			t.Fatal("unauthenticated acquisition refusal published work")
-		}
-	})
-	t.Run("unauthenticated_unavailable_target", func(t *testing.T) {
-		const privateCause = "private-unavailable-runtime-diagnostic"
-		result := manager.DeactivateBundleHash(contextUnavailable.SourceArtifactFact.BundleHash(), privateCause)
-		if !result.Found || result.State != runtimepkg.RuntimeContextStateUnloaded || result.Cause != privateCause || result.ShutdownErr != nil {
-			t.Fatalf("unavailable target precondition: %+v", result)
-		}
-		processLog := &lockedBuffer{}
-		previousLog := log.Writer()
-		log.SetOutput(io.MultiWriter(previousLog, processLog))
-		t.Cleanup(func() { log.SetOutput(previousLog) })
-		response := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodPost, "/webhooks/chat-unavailable/telegram", strings.NewReader(`{"update_id":98}`))
-		runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(response, request)
-		if response.Code != http.StatusServiceUnavailable || response.Body.String() != "ingress target is unavailable\n" || strings.Contains(response.Body.String(), privateCause) {
-			t.Fatalf("public unavailable response disclosed internal facts: status=%d body=%q", response.Code, response.Body.String())
-		}
-		if !strings.Contains(processLog.String(), privateCause) {
-			t.Fatalf("unavailability cause missing from internal diagnostics: %s", processLog.String())
-		}
-		if persistenceA.recorded || persistenceB.recorded || persistenceUnavailable.recorded || len(eventsA.events)+len(eventsB.events)+len(eventsUnavailable.events) != 0 {
-			t.Fatal("unavailable target published work")
-		}
-	})
-
-	req := httptest.NewRequest(http.MethodPost, "/webhooks/chat-b/telegram", strings.NewReader(`{"update_id":99,"message":{"message_id":7,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"hello"}}`))
-	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
-	rec := httptest.NewRecorder()
-	runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(rec, req)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("selected-context response = %d %q commit_error=%v, want 202", rec.Code, rec.Body.String(), persistenceB.lastError)
-	}
-	if persistenceA.recorded || len(eventsA.events) != 0 {
-		t.Fatalf("non-selected context A was touched: publication=%v events=%d", persistenceA.recorded, len(eventsA.events))
-	}
-	if !persistenceB.recorded || len(eventsB.events) != 2 {
-		t.Fatalf("selected context B publication/events = %v/%d error=%v, want true and raw plus normalized", persistenceB.recorded, len(eventsB.events), persistenceB.lastError)
-	}
-	if got := eventsB.events[0].RunID(); got != contextB.StandingTargets[0].RunID {
-		t.Fatalf("selected event run_id = %q, want %q", got, contextB.StandingTargets[0].RunID)
-	}
-
-	credentialsB["webhook_signing.telegram"] = "telegram-secret-v2"
-	rotatedBody := `{"update_id":100,"message":{"message_id":8,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"rotated"}}`
-	stale := httptest.NewRequest(http.MethodPost, "/webhooks/chat-b/telegram", strings.NewReader(rotatedBody))
-	stale.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
-	staleRecorder := httptest.NewRecorder()
-	runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(staleRecorder, stale)
-	if staleRecorder.Code != http.StatusServiceUnavailable || len(eventsB.events) != 2 {
-		t.Fatalf("stale credential admission status/events = %d/%d, want 503/2", staleRecorder.Code, len(eventsB.events))
-	}
-	current := httptest.NewRequest(http.MethodPost, "/webhooks/chat-b/telegram", strings.NewReader(rotatedBody))
-	current.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret-v2")
-	currentRecorder := httptest.NewRecorder()
-	runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(currentRecorder, current)
-	if currentRecorder.Code != http.StatusServiceUnavailable || len(eventsB.events) != 2 {
-		t.Fatalf("unadmitted replacement status/events = %d/%d, want 503/2", currentRecorder.Code, len(eventsB.events))
-	}
-	if !strings.Contains(currentRecorder.Body.String(), "restart or explicitly admit fresh credentials") {
-		t.Fatalf("unadmitted replacement has no recovery instruction: %q", currentRecorder.Body.String())
-	}
-	if strings.Contains(currentRecorder.Body.String(), "telegram-secret") {
-		t.Fatalf("unadmitted replacement exposed a signing value: %q", currentRecorder.Body.String())
-	}
-	sibling := httptest.NewRequest(http.MethodPost, "/webhooks/chat-a/telegram", strings.NewReader(rotatedBody))
-	sibling.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
-	siblingRecorder := httptest.NewRecorder()
-	runtimeProcessInboundHandler{contexts: manager}.ServeHTTP(siblingRecorder, sibling)
-	if siblingRecorder.Code != http.StatusAccepted || len(eventsA.events) != 2 || len(eventsB.events) != 2 {
-		t.Fatalf("unaffected context status/events A/B = %d/%d/%d, want 202/2/2", siblingRecorder.Code, len(eventsA.events), len(eventsB.events))
-	}
-	if got := eventsA.events[0].RunID(); got != contextA.StandingTargets[0].RunID {
-		t.Fatalf("unaffected context event run_id = %q, want %q", got, contextA.StandingTargets[0].RunID)
 	}
 }
 

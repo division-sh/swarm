@@ -642,7 +642,7 @@ func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
 func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismatch(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ctx := context.Background()
+	ctx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runStatusTestRuntimeInstanceID)
 	ctx = serveFixtureProcessContext(t, ctx, pg)
 	pinnedArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# pinned-source\n"))
 	otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# other-source\n"))
@@ -4414,7 +4414,7 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 	t.Helper()
 	db := rt.DB
 	backend := rt.Backend
-	ctx := context.Background()
+	ctx := servedControlProofAuthorActivityContext(t, rt)
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	now := time.Now().UTC()

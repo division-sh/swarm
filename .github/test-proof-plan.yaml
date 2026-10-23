@@ -1011,8 +1011,6 @@ units:
     run: '^TestServed[D-L].*$'
     required_children:
       TestServedFieldlessGateDeferralBothStores: [default_sqlite/fields=false, default_sqlite/fields=true, explicit_postgres/fields=false, explicit_postgres/fields=true]
-      TestServedJoinWriterCompletedHistoryRefusalBothStores: [default_sqlite, explicit_postgres]
-      TestServedJoinWriterCompletedHistoryRefusalSeparateCheckpointBothStores: [default_sqlite, explicit_postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full

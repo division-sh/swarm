@@ -194,6 +194,7 @@ func (a *claudeAttemptProofAgent) OnEvent(ctx context.Context, evt events.Event)
 
 type claudeAttemptProofBackend struct {
 	original context.Context
+	process  startupownership.ProcessCapability
 	name     string
 	store    claudeAttemptProofStore
 	db       *sql.DB
@@ -621,6 +622,11 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 	}
 	backend.source = requireServeTestSourceArtifactFact(t, backend.store)
 	backend.original = serveFixtureProcessContext(t, backend.context(), backend.store)
+	process, err := agentfixture.ProcessCapability(t, backend.original, backend.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend.process = process
 	return backend
 }
 
@@ -742,9 +748,9 @@ func newClaudeAttemptProofEventBus(
 ) (*runtimebus.EventBus, *worklifetime.RuntimeOccurrence, *runtimedeliverycontinuation.Coordinator) {
 	t.Helper()
 	workOwner := newSupervisorTestRuntimeOccurrence(t, backend.source.BundleHash())
-	process, err := agentfixture.ProcessCapability(t, backend.context(), backend.store)
-	if err != nil {
-		t.Fatal(err)
+	process := backend.process
+	if process == nil {
+		t.Fatal("Claude fixture has no retained native process")
 	}
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(
 		backend.source,
