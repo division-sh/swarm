@@ -19,6 +19,26 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+var errRegistrationCompletion = errors.New("controlled logout checkpoint failure")
+
+type registrationCompletionFailure struct {
+	channelonboarding.OperationStore
+	fail       bool
+	failUnlink bool
+}
+
+func (s *registrationCompletionFailure) AdvanceChannelOnboarding(ctx context.Context, req channelonboarding.AdvanceRequest) (channelonboarding.Operation, error) {
+	if req.CompleteDeploymentLogout && s.fail {
+		s.fail = false
+		return channelonboarding.Operation{}, errRegistrationCompletion
+	}
+	if req.FailureCode == "account_logout_unlinked" && s.failUnlink {
+		s.failUnlink = false
+		return channelonboarding.Operation{}, errRegistrationCompletion
+	}
+	return s.OperationStore.AdvanceChannelOnboarding(ctx, req)
+}
+
 // Only the SDK's persisted paired device and authenticated transport are fixture
 // inputs. Onboarding and native account admission use the actual selected owners.
 func pairedBootstrapStateFixture(t *testing.T, f *runtimeBootstrapFixture, op channelonboarding.Operation, expected ...types.JID) string {
@@ -98,6 +118,8 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 				operations := f.store.(interface {
 					DeploymentChannelOperations() channelonboarding.OperationStore
 				}).DeploymentChannelOperations()
+				completion := &registrationCompletionFailure{OperationStore: operations}
+				operations = completion
 				op, err := operations.ReserveChannelOnboarding(ctx, channelonboarding.StartRequest{
 					DeploymentRegistration: true, OperationID: uuid.NewString(), PrincipalID: f.principal.ID,
 					RequestKeyHash: "deployment-checkpoint-key", RequestHash: "deployment-checkpoint-request",
@@ -199,6 +221,11 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 				registered, err := service.Retry(ctx, channelonboarding.RetryInput{OperationID: checkpoint.OperationID})
 				logout := func(op channelonboarding.Operation) channelonboarding.Result {
 					t.Helper()
+					reconcile := completion.fail || completion.failUnlink
+					retainedCode := "account_logout_unlinked"
+					if completion.failUnlink {
+						retainedCode = "account_logout_launched"
+					}
 					type outcome struct {
 						result channelonboarding.Result
 						err    error
@@ -215,6 +242,20 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 					f.peer.acknowledge(t, unlink)
 					select {
 					case result := <-done:
+						if reconcile {
+							if !errors.Is(result.err, errRegistrationCompletion) {
+								t.Fatal("logout missed the exact controlled completion failure", result.err)
+							}
+							retained, readErr := operations.GetChannelOnboarding(ctx, op.OperationID)
+							if readErr != nil || retained.FailureCode != retainedCode || retained.LogoutCompleted {
+								t.Fatal("unlink was not retained for exact local reconciliation", retained, readErr)
+							}
+							accounts, readErr := service.DeploymentAccounts(ctx, "whatsapp")
+							if readErr != nil || len(accounts) != 1 || accounts[0].Operation.OperationID != retained.OperationID {
+								t.Fatal("incomplete logout disappeared from public account selection", readErr)
+							}
+							result.result, result.err = service.LogoutDeployment(ctx, retained.OperationID, retained.Revision)
+						}
 						if result.err != nil {
 							t.Fatal("deployment logout failed", result.err)
 						}
@@ -230,6 +271,20 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 						registered.IdentityOperation.ProviderAuthority.Scope != authority.DeploymentParent ||
 						registered.Operation.ActivationRevision != 0 || registered.Readiness != nil || registered.Binding != nil {
 						t.Fatal("deployment operator ceremony required runtime authority or admitted an unverified operator", err)
+					}
+					resumed, resumeErr := service.ReverifyDeployment(ctx, registered.Operation.OperationID)
+					if resumeErr != nil || resumed.IdentityOperation == nil || resumed.IdentityOperation.OperationID != registered.IdentityOperation.OperationID ||
+						resumed.Operation.SessionAccount != registered.Operation.SessionAccount || !resumed.Operation.AccountConfirmed {
+						t.Fatal("pending operator enrollment could not resume its exact retained account", resumeErr)
+					}
+					expired, expireErr := f.channels.ExpireOperation(ctx, resumed.IdentityOperation.OperationID, resumed.IdentityOperation.Revision, resumed.IdentityOperation.ExpiresAt)
+					if expireErr != nil || expired.State != operatorchannel.StateExpired {
+						t.Fatal("genuine operator expiry did not settle", expireErr)
+					}
+					registered, err = service.ReverifyDeployment(ctx, resumed.Operation.OperationID)
+					if err != nil || registered.IdentityOperation == nil || registered.IdentityOperation.OperationID == expired.OperationID ||
+						registered.IdentityOperation.State != operatorchannel.StateAwaitingClaim || registered.Operation.SessionAccount != resumed.Operation.SessionAccount || !registered.Operation.AccountConfirmed {
+						t.Fatal("terminal operator enrollment stranded or replaced its approved account", err)
 					}
 					current, err := channelonboarding.AdmissionResponsibilityCurrent(ctx, f.store,
 						channelonboarding.AdmissionResponsibility{DeploymentRegistration: true, OperationID: registered.Operation.OperationID,
@@ -280,6 +335,7 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 						finished.Operation.ActivationRevision != 0 || finished.Readiness != nil {
 						t.Fatal("verified deployment ceremony required runtime activation", err)
 					}
+					completion.fail = true
 					loggedOut := logout(finished.Operation)
 					if !loggedOut.Operation.LogoutCompleted || loggedOut.Operation.Phase != channelonboarding.PhaseRetired {
 						t.Fatal("deployment HITL logout required runtime authority or failed unlink")
@@ -303,6 +359,7 @@ func TestWhatsAppReservedPairingCheckpointBothStores(t *testing.T) {
 				if _, _, err := wrongScope.AdmitExecution(ctx, f.connection); err == nil {
 					t.Fatal("deployment possession granted runtime authority")
 				}
+				completion.failUnlink = true
 				loggedOut := logout(registered.Operation)
 				if !loggedOut.Operation.LogoutCompleted || loggedOut.Operation.Phase != channelonboarding.PhaseRetired {
 					t.Fatal("deployment account logout required an operator or runtime authority")

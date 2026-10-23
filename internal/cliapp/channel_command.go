@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -122,7 +123,7 @@ func newChannelLogoutCommand(opts rootCommandOptions) *cobra.Command {
 		Short: "Unlink one exact paired connection and delete its local pairing state.",
 		Args:  argcount.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if commandOpts.channelRegistration != nil {
+			if commandOpts.channelRegistration != nil && uuid.Validate(args[0]) != nil {
 				account := ""
 				if len(args) == 2 {
 					account = args[1]
@@ -387,19 +388,11 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 			if err != nil {
 				return returnCLIValidationError(errOut, err)
 			}
-			operation := ""
-			for _, account := range accounts {
-				if account.Operation.AccountReference == ref.Account {
-					if operation != "" {
-						return returnCLIValidationError(errOut, errors.New("account registration is ambiguous"))
-					}
-					operation = account.Operation.OperationID
-				}
+			operation, err := selectDeploymentAccount(accounts, ref.Account, opts.apiOptions.input, errOut, false)
+			if err != nil {
+				return returnCLIValidationError(errOut, err)
 			}
-			if operation == "" {
-				return returnCLIValidationError(errOut, errors.New("account is not registered; run swarm channel connect <provider> to link it"))
-			}
-			err = local.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": operation, "reverify": true}, &begun)
+			err = local.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": operation.OperationID, "reverify": true}, &begun)
 			if err != nil {
 				return returnCLIValidationError(errOut, err)
 			}

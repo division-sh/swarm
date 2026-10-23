@@ -16,8 +16,10 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
+	identityowner "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/google/uuid"
@@ -378,7 +380,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 			op.AccountConfirmed = true
 		}
 		if req.CompleteDeploymentLogout {
-			if !op.DeploymentRegistration || op.Phase != domain.PhaseRetired || op.FailureCode != "account_logout_pending" {
+			if !op.DeploymentRegistration || op.FailureCode != "account_logout_unlinked" {
 				return domain.ErrInvalidRequest
 			}
 			op.LogoutCompleted, op.FailureCode, op.FailureMessage = true, "", ""
@@ -405,6 +407,17 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		}
 		wasTerminal := op.Phase.Terminal()
 		if req.BeginOperatorEnrollment {
+			if op.DeploymentRegistration && op.IdentityOperationID != "" {
+				check := identityowner.StaleOnboardingChildRequest{ParentID: op.OperationID, PrincipalID: op.PrincipalID,
+					Interface: op.Interface, ChildID: op.IdentityOperationID, TerminalDeployment: true, SessionAccount: op.SessionAccount}
+				for _, admission := range op.CredentialAdmissions {
+					check.AdmittedCredentials = append(check.AdmittedCredentials, credentials.ValueEvidence{Key: admission.StoreKey, Seal: admission.ValueSeal})
+				}
+				if err := identityowner.RequireStaleOnboardingChild(txctx, tx, r.dialect() == dialectPostgres, check); err != nil {
+					return err
+				}
+				op.IdentityOperationID = ""
+			}
 			op.CompletedAt = time.Time{}
 		}
 		completed := op.Phase != domain.PhaseSucceeded && req.Phase == domain.PhaseSucceeded
@@ -451,14 +464,18 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 
 func validTransition(op domain.Operation, req domain.AdvanceRequest) bool {
 	if op.DeploymentRegistration {
+		if req.Phase == op.Phase && op.AccountConfirmed && !op.LogoutCompleted {
+			if next, ok := map[string]string{"": "account_logout_pending", "account_logout_pending": "account_logout_launched", "account_logout_launched": "account_logout_unlinked"}[op.FailureCode]; ok && req.FailureCode == next {
+				return true
+			}
+		}
 		if req.Phase == domain.PhaseRetired {
 			return !req.BeginOperatorEnrollment && req.RebindCoordinate == nil && req.SourceRollover == nil &&
-				(req.CompleteDeploymentLogout && op.Phase == domain.PhaseRetired && !op.LogoutCompleted && op.FailureCode == "account_logout_pending" ||
-					op.Phase != domain.PhaseRetired && req.FailureCode == "account_logout_pending" ||
-					op.Phase == domain.PhaseSucceeded && op.AccountConfirmed && req.FailureCode == "native_account_revoked")
+				(req.CompleteDeploymentLogout && !op.LogoutCompleted && op.FailureCode == "account_logout_unlinked" ||
+					op.Phase != domain.PhaseRetired && op.AccountConfirmed && req.FailureCode == "native_account_revoked")
 		}
 		if req.BeginOperatorEnrollment {
-			return op.Phase == domain.PhaseSucceeded && op.AccountConfirmed && op.IdentityOperationID == "" &&
+			return slices.Contains([]domain.Phase{domain.PhaseSucceeded, domain.PhaseAwaitingExternalIdentity, domain.PhaseAwaitingOperatorConfirmation}, op.Phase) && op.AccountConfirmed &&
 				req.Phase == domain.PhaseAwaitingExternalIdentity && req.RebindCoordinate == nil && req.SourceRollover == nil
 		}
 		if req.RebindCoordinate != nil || req.SourceRollover != nil || req.Phase == domain.PhasePublishingActivation ||

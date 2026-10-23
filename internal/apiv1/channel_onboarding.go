@@ -120,35 +120,36 @@ func ChannelOnboardingHandlers(opts ChannelOnboardingHandlerOptions) map[string]
 func scopedChannelHandlers(handlers map[string]MethodHandler, channels *operatorchannel.Service, deployment MethodHandler) map[string]MethodHandler {
 	for name, handler := range handlers {
 		handlers[name] = func(ctx context.Context, req Request) (any, error) {
-			if scope, exists := req.Params["scope"]; exists {
-				if scope != "deployment" || deployment == nil {
-					return nil, NewInvalidParamsError(map[string]any{"field": "scope", "reason": "deployment registration is unavailable"})
+			scope, exists := req.Params["scope"]
+			if !exists {
+				if _, exists := req.Params["holder"]; exists {
+					return nil, NewInvalidParamsError(map[string]any{"field": "holder", "reason": "requires deployment scope"})
 				}
-				if err := requireOperatorPrincipal(req, channels); err != nil {
+				return handler(ctx, req)
+			}
+			if scope != "deployment" || deployment == nil {
+				return nil, NewInvalidParamsError(map[string]any{"field": "scope", "reason": "deployment registration is unavailable"})
+			}
+			if err := requireOperatorPrincipal(req, channels); err != nil {
+				return nil, err
+			}
+			for _, field := range []string{"bundle", "interface", "target"} {
+				if _, exists := req.Params[field]; exists {
+					return nil, NewInvalidParamsError(map[string]any{"field": field, "reason": "deployment registration has no flow target"})
+				}
+			}
+			if _, exists := req.Params["expected_revision"]; exists {
+				revision, err := channelRevisionParam(req.Params, "expected_revision", false)
+				if err != nil {
 					return nil, err
 				}
-				for _, field := range []string{"bundle", "interface", "target"} {
-					if _, exists := req.Params[field]; exists {
-						return nil, NewInvalidParamsError(map[string]any{"field": field, "reason": "deployment registration has no flow target"})
-					}
-				}
-				if _, exists := req.Params["expected_revision"]; exists {
-					revision, err := channelRevisionParam(req.Params, "expected_revision", false)
-					if err != nil {
-						return nil, err
-					}
-					req.Params["expected_revision"] = revision
-				}
-				result, err := deployment(ctx, req)
-				if err != nil {
-					return nil, channelOnboardingError(err)
-				}
-				return result, nil
+				req.Params["expected_revision"] = revision
 			}
-			if _, exists := req.Params["holder"]; exists {
-				return nil, NewInvalidParamsError(map[string]any{"field": "holder", "reason": "requires deployment scope"})
+			result, err := deployment(ctx, req)
+			if err != nil {
+				return nil, channelOnboardingError(err)
 			}
-			return handler(ctx, req)
+			return result, nil
 		}
 	}
 	return handlers

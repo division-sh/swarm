@@ -96,8 +96,8 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 		return returnCLIValidationError(errOut, err)
 	}
 	if result.Operation.DeploymentRegistration && result.Operation.Phase == channelonboarding.PhaseSucceeded {
-		if _, err := result.ProviderCredentialRequirement(); err != nil || result.Operation.ValidateSessionAccount() != nil ||
-			result.Operation.AccountReference == "" || !result.Operation.AccountConfirmed || result.Operation.ActivationRevision != 0 || result.Readiness != nil {
+		if _, err := result.ProviderCredentialRequirement(); err != nil || result.Operation.ValidateDeploymentRegistration() != nil ||
+			!result.Operation.AccountConfirmed || result.Operation.ActivationRevision != 0 || result.Operation.FailureCode != "" || result.Readiness != nil {
 			return returnCLIValidationError(errOut, errors.New("deployment registration readback is incomplete or carries runtime authority"))
 		}
 		return renderCLIOutput(out, errOut, output, result, func(w io.Writer) {

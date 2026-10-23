@@ -1169,6 +1169,9 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 		return Result{}, fmt.Errorf("%w: onboarding operation changed before execution", ErrRevisionConflict)
 	}
 	op = current
+	if op.DeploymentRegistration && strings.HasPrefix(op.FailureCode, "account_logout_") {
+		return s.result(readback, op, &candidate)
+	}
 	if op.DeploymentRegistration != candidate.DeploymentRegistration || !op.DeploymentRegistration &&
 		(!op.Coordinate.MatchesDeclaration(candidate.Coordinate) || op.Phase.RequiresExecutableTarget(op.Posture) && candidate.Validate() != nil) {
 		return Result{Operation: op, Candidate: &candidate}, fmt.Errorf("%w: onboarding operation is not fenced to the exact current runtime occurrence", ErrRevisionConflict)
