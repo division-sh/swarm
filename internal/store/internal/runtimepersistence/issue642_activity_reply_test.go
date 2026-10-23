@@ -39,7 +39,7 @@ func TestIssue642RecordedActivityRetainsChildReplyBothStores(t *testing.T) {
 						if inherited[0].ID == sourceReply.ID || inherited[0].RunID != child.ForkRunID || inherited[0].State != replycontext.StateOpen || inherited[0].SourceRunID != sourceReply.SourceRunID || inherited[0].SourceRequestEventID != sourceReply.SourceRequestEventID {
 							t.Fatalf("child context lost original evidence or cut ownership: %+v", inherited[0])
 						}
-						loaded, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, owner, event.RunID()))
+						loaded, err := owner.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalActivityCarriageAtPoint(t, owner, event.RunID(), child.ForkPoint))
 						if err != nil || len(loaded) != 1 {
 							t.Fatalf("project activity source: count=%d error=%v", len(loaded), err)
 						}
@@ -92,16 +92,16 @@ func TestIssue642OrdinaryActivityReplayRetainsChildReplyBothStores(t *testing.T)
 				t.Fatalf("ordinary materialization lost exact own context: %+v error=%v", rows, err)
 			}
 			owner := fixture.store.(interface {
-				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+				RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 				ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
 			})
-			repeat, err := owner.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: event.RunID(), At: event.ID()})
+			repeat, err := owner.RequireMaterializedRunFork(ctx, child.ForkRunID, runfork.RunForkMaterializeRequest{SourceRunID: event.RunID(), At: event.ID()})
 			if err != nil || repeat.ForkRunID != child.ForkRunID {
 				t.Fatalf("ordinary exact repeated materialization: %+v error=%v", repeat, err)
 			}
 			activation, err := owner.ActivateRunFork(ctx, runfork.RunForkActivateRequest{
 				ForkRunID: child.ForkRunID, AllowSourceFreeze: true,
-				OriginalLoopCarriage:              originalCarriageForRun(t, fixture.store, event.RunID()),
+				OriginalLoopCarriage:              originalActivityCarriageAtPoint(t, fixture.store.(selectedActivityProjectionStore), event.RunID(), child.ForkPoint),
 				HistoricalReplayExecutionAdmitter: runforkexecution.HistoricalReplayExecutionAdmitter{},
 			})
 			if err != nil || !activation.Activated || activation.DeliveryEventReplay == nil || activation.DeliveryEventReplay.ReplayedDeliveryCount != 1 {

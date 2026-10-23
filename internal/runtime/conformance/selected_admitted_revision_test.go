@@ -105,6 +105,7 @@ func TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores(t *testing.T) 
 			if err != nil || binding.ForkPoint != probe.point || binding.BindingID != record.BindingID {
 				t.Fatalf("binding lost the admitted point: %+v err=%v", binding, err)
 			}
+			waitSelectedDeploymentExecutionClosed(t, ctx, f, result.ForkRunID)
 			assertIssue2655ChildCutContents(t, f.ctx, f, sourceRun, result.ForkRunID, probe.point, postCutEvent, atCutVersion)
 			if calls.Load() != 1 {
 				t.Fatalf("provider calls=%d want one", calls.Load())

@@ -341,6 +341,29 @@ func requireSelectedForkPublicControlBoundary(t *testing.T, endpoint string, own
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	if declaredAgent {
+		deadline := time.Now().Add(servedProofPollDeadline)
+		for {
+			page, err := logs.ListOperatorRuntimeLogs(t.Context(), operatorread.OperatorRuntimeLogListOptions{RunID: runID,
+				Component: "agent-manager", ActionOrEventType: "delivery_lifecycle_transition", Limit: 100})
+			if err != nil || page.NextCursor != "" {
+				t.Fatalf("selected agent settlement observation: %+v error=%v", page, err)
+			}
+			settled := false
+			for _, entry := range page.Logs {
+				if entry.EventID == eventID && entry.AgentID == "same-name" && entry.DeliveryState == "delivered" && entry.Reason == "agent_processed" {
+					settled = true
+				}
+			}
+			if settled {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("selected agent did not finish its delivery lifecycle diagnostic")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 	// Delivery completion precedes the completion worker's await-mutation
 	// projection. Observe that durable handoff before measuring API mutations;
 	// the full snapshots below must still include the candidate columns.
@@ -456,7 +479,13 @@ func requireSelectedForkDeclaredAgentReads(t *testing.T, endpoint string, owner 
 		t.Fatalf("selected agent usage lost its exact mock turn: %+v", usage)
 	}
 	requireSelectedForkDurablePublicReads(t, endpoint, owner, loadedBundleHash, runID, completionCount)
-	if !reflect.DeepEqual(before, readWorkspaceProofApplication(t, owner)) {
+	after := readWorkspaceProofApplication(t, owner)
+	if !reflect.DeepEqual(before, after) {
+		for table, rows := range before {
+			if !reflect.DeepEqual(rows, after[table]) {
+				t.Errorf("selected agent read changed %s: before=%v after=%v", table, rows, after[table])
+			}
+		}
 		t.Fatal("selected agent reads changed durable state")
 	}
 }

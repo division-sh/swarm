@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -89,6 +91,51 @@ func TestIssue642RetainedReturnRequiresExactTerminalScope(t *testing.T) {
 	if !reflect.DeepEqual(retainedRoutes, []events.DeliveryRoute{ordinaryRoute, responseRoute}) {
 		t.Fatal("context restoration rewrote retained input")
 	}
+	t.Run("physical_root_registration", func(t *testing.T) {
+		table, err := DeriveRouteTable(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		graph := pinrouting.CompileConnectGraph(source)
+		for _, plan := range []pinrouting.ConnectRoutePlan{ordinary, response} {
+			matched := 0
+			for _, definition := range table.ConnectDeclarationDefinitions(".") {
+				recipient, ok := definition.RecipientForPlan(plan)
+				if !ok {
+					continue
+				}
+				node := recipient.Handler().Node()
+				identity, err := pinrouting.ConnectPlanIdentity(plan)
+				if err != nil {
+					t.Fatal(err)
+				}
+				expected, err := forkrecipient.NewConnect(forkrecipient.Input{Recipient: events.MustNodeDeliveryRecipient(node), Path: ".",
+					HandlerNode: node, HandlerEvent: recipient.HandlerEvent()}, identity, definition.ReceiverIdentity())
+				if err != nil {
+					t.Fatal(err)
+				}
+				registration, err := graph.BindReceiverInstance(definition, flowidentity.Instance{TemplateID: ".", InstancePath: event.RunID(), EntityID: event.RunID()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				scope, present := selectedForkRecipientPlanFromContext(bound, event)
+				if !present {
+					t.Fatal("physical root registration lost its exact publication scope")
+				}
+				scope.recipients = []forkrecipient.Evidence{expected}
+				if !scope.allowsRegistration(plan, registration) {
+					t.Fatal("physical root registration lost its exact semantic recipient")
+				}
+				if scope.allowsRegistration(pinrouting.ConnectRoutePlan{}, registration) || (selectedForkRecipientPlan{}).allowsRegistration(plan, registration) {
+					t.Fatal("root registration borrowed a foreign or settled recipient")
+				}
+				matched++
+			}
+			if matched != 1 {
+				t.Fatalf("root fixture has %d exact receiver definitions, want one", matched)
+			}
+		}
+	})
 	resolver := connectRoutePlanResolver{replyStore: retainedReturnReplyStore{record: record}}
 	matched, loaded, err := resolver.resolveReplyPlans(bound, event, []pinrouting.ConnectRoutePlan{ordinary, response})
 	if err != nil || len(matched) != 2 || !reflect.DeepEqual(loaded, record) {
