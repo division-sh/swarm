@@ -679,6 +679,7 @@ func selectedRuntimeOutcomeSQLiteOwner(t *testing.T, selected *store.SQLiteRunti
 
 func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend string, selected SelectedContractForkLifecycle, loaded LoadedSelectedContractSource, runID, eventID string, route events.DeliveryRoute, at time.Time) {
 	t.Helper()
+	ctx = nativeRunForkTestContext(t, ctx, selected)
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
 		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
 		Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),

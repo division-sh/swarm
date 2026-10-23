@@ -332,6 +332,7 @@ func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContr
 	t.Helper()
 	envelope := events.EnvelopeForSourceRoute(events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow_a"), source.Route())
 	ctx := runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), loaded.SourceArtifactFact)
+	ctx = runForkOriginalContextForTest(t, ctx, f.owner.ports.contexts.capability)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, loaded.SourceArtifactFact.BundleHash()))
 	artifact := selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash())
 	storetest.RequireRun(t, ctx, f.owner.ports.fork.(storetest.RunFixtureStore), storetest.RunFixture{
@@ -662,7 +663,7 @@ func seedSelectedContractActivityAttempt(t *testing.T, selected any, fact activi
 	requestEventID := activityidentity.RequestEventID(fact)
 	resultEventID := activityidentity.ResultEventID(fact, resultEventType)
 	inputHash := sha256.Sum256([]byte(`{"value":"x"}`))
-	if err := storetest.SeedHistoricalActivityForkAttempt(context.Background(), selected, pipeline.ActivityAttemptRecord{
+	if err := storetest.SeedHistoricalActivityForkAttempt(runForkTestContext(t), selected, pipeline.ActivityAttemptRecord{
 		RequestEventID: requestEventID, RunID: fact.RunID, ExecutionMode: executionmode.Live,
 		SourceEventID: fact.SourceEventID, EntityID: fact.EntityID, FlowInstance: "flow_a", NodeID: fact.Owner.Key(), HandlerEventKey: "review.requested",
 		ActivityID: "connector", Tool: "provider.connector", Attempt: 1, Status: status,
