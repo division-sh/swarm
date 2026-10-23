@@ -29,7 +29,7 @@ func TestSessionTurnIncrementAcknowledgesPostcommitHandoffAndSurvivesRestartBoth
 				store, db, postgresDSN = admitTestPostgresStore(t, postgresDB), postgresDB, dsn
 			}
 			fixture := newCompletionSettlementFixture(t, store, db, sqlite)
-			ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+			ctx := runtimeeffects.WithDifferentOwner(fixture.context, runtimeeffects.OwnerBuildTestInfrastructure)
 			identity := fixture.authority.Target.AgentIdentity
 			result, err := store.IncrementTurnOutcome(ctx, &sessions.Lease{SessionID: fixture.sessionID, Identity: identity, LockOwner: fixture.leaseHolder, GrantID: fixture.grantID})
 			if !result.Acknowledged || err != nil {

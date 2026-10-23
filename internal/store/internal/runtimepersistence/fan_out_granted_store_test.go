@@ -50,10 +50,13 @@ func (e *captureFanOutExecutor) ReportFanOutServingError(_ context.Context, err 
 // grant binding and all mutations below use the production selected-store path.
 func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected selectedFanOutOwner, fixtures []fanOutOwnerFixture) (startupownership.ProcessCapability, []startupownership.LiveGenerationGrant, []*worklifetime.RuntimeOccurrence, agenttopology.SourceSetPlan) {
 	t.Helper()
-	request := testStartupAcquireRequest("fan-out-granted-store")
 	ctx = storeTestOriginalProcessContext(t, ctx, selected)
 	value, _ := storeTestWorkFixtures.Load(t)
 	capability := selectedMaterializationProcessForTest(t, value.(*storeTestWorkFixture), selected)
+	original, err := capability.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
 	sources := make([]agenttopology.SourceCoordinate, len(fixtures))
 	for i, fixture := range fixtures {
 		sources[i] = agenttopology.SourceCoordinate{BundleHash: fixture.bundleHash}
@@ -66,10 +69,6 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 		t.Fatal(err)
 	}
 	work := worklifetime.NewProcess()
-	original, err := capability.Evidence()
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := work.BindOriginalProcess(original.LeaseStamp()); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +83,7 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 	var grants []startupownership.LiveGenerationGrant
 	var occurrences []*worklifetime.RuntimeOccurrence
 	for _, fixture := range fixtures {
-		grant, err := capability.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: fixture.bundleHash, RuntimeInstanceID: request.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
+		grant, err := capability.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: fixture.bundleHash, RuntimeInstanceID: original.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -94,7 +93,7 @@ func newGrantedFanOutProcessForTest(t *testing.T, ctx context.Context, selected 
 		if _, err := grant.AdmitExecution(ctx); err != nil {
 			t.Fatal(err)
 		}
-		occurrence, err := work.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: request.RuntimeInstanceID, BundleHash: fixture.bundleHash})
+		occurrence, err := work.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: original.RuntimeInstanceID, BundleHash: fixture.bundleHash})
 		if err != nil {
 			t.Fatal(err)
 		}

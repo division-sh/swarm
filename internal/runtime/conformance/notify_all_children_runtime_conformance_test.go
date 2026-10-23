@@ -225,6 +225,7 @@ func (p *notifyAllChildrenProcessTopology) install(
 	if p == nil || p.capability == nil {
 		t.Fatal("notify-all-children process topology capability is required")
 	}
+	ctx = worklifetime.WithProcess(ctx, conformanceTestProcessOwner(t))
 	bundleHash := sourceArtifactFact.BundleHash()
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)

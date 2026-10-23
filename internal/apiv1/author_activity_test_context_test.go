@@ -249,7 +249,7 @@ func newScopedAPITestEventBusWithDataCatalog(t *testing.T, eventStore runtimebus
 			return nil, err
 		}
 		if err := deliveryStore.ActivateDeliveryAuthority(
-			testAuthorActivityContextForRuntime(context.Background(), opts.RuntimeInstanceID, opts.SourceArtifactFact),
+			setupCtx,
 			authority,
 		); err != nil {
 			return nil, err

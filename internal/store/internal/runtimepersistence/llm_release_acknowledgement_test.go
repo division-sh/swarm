@@ -31,7 +31,7 @@ func TestSessionReleaseOutcomeAcknowledgesPostcommitHandoffErrorBothStores(t *te
 				store, db = admitTestPostgresStore(t, postgresDB), postgresDB
 			}
 			fixture := newCompletionSettlementFixture(t, store, db, sqlite)
-			ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
+			ctx := runtimeeffects.WithDifferentOwner(fixture.context, runtimeeffects.OwnerBuildTestInfrastructure)
 			identity := fixture.authority.Target.AgentIdentity
 			lease := &runtimesessions.Lease{SessionID: fixture.sessionID, GrantID: fixture.grantID, Identity: identity, LockOwner: fixture.leaseHolder}
 			result, err := store.ReleaseOutcome(ctx, lease)
@@ -47,19 +47,6 @@ func TestSessionReleaseOutcomeAcknowledgesPostcommitHandoffErrorBothStores(t *te
 			}
 		})
 	}
-}
-
-func releaseTestBundleHash(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, runID string) string {
-	t.Helper()
-	query := `SELECT bundle_hash FROM runs WHERE run_id=?`
-	if !sqlite {
-		query = `SELECT bundle_hash FROM runs WHERE run_id=$1::uuid`
-	}
-	var bundleHash string
-	if err := db.QueryRowContext(ctx, query, runID).Scan(&bundleHash); err != nil {
-		t.Fatal(err)
-	}
-	return bundleHash
 }
 
 func releaseTestLeaseHolder(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, sessionID string) string {

@@ -110,7 +110,6 @@ func fixtureSessionFor(t testing.TB, ctx context.Context, selected Store) (*fixt
 			fixtureSessions.Store(key, session)
 			fixtureSessions.Store(callerKey, session)
 			t.Cleanup(func() {
-				fixtureSessions.Delete(key)
 				fixtureSessions.Delete(callerKey)
 			})
 		}
@@ -135,8 +134,12 @@ func fixtureSessionFor(t testing.TB, ctx context.Context, selected Store) (*fixt
 		fixtureSessions.Store(callerKey, created)
 	}
 	t.Cleanup(func() {
-		fixtureSessions.Delete(key)
-		fixtureSessions.Delete(callerKey)
+		fixtureSessions.Range(func(key, value any) bool {
+			if value == created {
+				fixtureSessions.Delete(key)
+			}
+			return true
+		})
 		_ = capability.Release(context.Background())
 	})
 	return created, nil

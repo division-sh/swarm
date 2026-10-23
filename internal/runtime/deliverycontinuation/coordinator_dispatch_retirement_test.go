@@ -213,7 +213,11 @@ func testRetirementDispatchOutcome(t *testing.T, selected bool, scenario string,
 	if got := occurrence.worker.Context().Err() != nil; got != canceled {
 		t.Fatalf("dispatch cancellation visible=%t, want %t", got, canceled)
 	}
-	if owner.ActiveCount() != 2 {
+	wantActive := 2
+	if selected {
+		wantActive++ // The selected scan retains its finite reconciliation lease.
+	}
+	if owner.ActiveCount() != wantActive {
 		t.Fatalf("admitted scan/worker lost exact lifetime: %d", owner.ActiveCount())
 	}
 	releaseDispatch()
